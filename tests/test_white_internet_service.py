@@ -28,30 +28,25 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
         cdn_domain = "cdn.just1k.online"
 
         links = WhiteInternetService.generate_vless_links(sub, cdn_domain)
-        self.assertEqual(len(links), 2)
+        self.assertEqual(len(links), 1)
 
-        link_de, link_nl = links
+        link_wl = links[0]
 
-        # Verify DE link
-        self.assertTrue(link_de.startswith(f"vless://{sub.uuid}@{cdn_domain}:443"))
-        self.assertIn("type=xhttp", link_de)
-        self.assertIn("path=%2Fstream%2Fv1%2Fde", link_de)
-        self.assertIn("mode=packet-up", link_de)
-        self.assertIn("security=tls", link_de)
-        self.assertIn("sni=cdn.just1k.online", link_de)
-        self.assertIn("Германия", urllib.parse.unquote(link_de))
-
-        # Verify NL link
-        self.assertTrue(link_nl.startswith(f"vless://{sub.uuid}@{cdn_domain}:443"))
-        self.assertIn("path=%2Fstream%2Fv1%2Fnl", link_nl)
-        self.assertIn("Нидерланды", urllib.parse.unquote(link_nl))
+        # Verify link structure
+        self.assertTrue(link_wl.startswith(f"vless://{sub.uuid}@{cdn_domain}:443"))
+        self.assertIn("type=xhttp", link_wl)
+        self.assertIn("path=%2Fstream%2Fv1", link_wl)
+        self.assertIn("mode=packet-up", link_wl)
+        self.assertIn("security=tls", link_wl)
+        self.assertIn("sni=cdn.just1k.online", link_wl)
+        self.assertIn("Белый Интернет", urllib.parse.unquote(link_wl))
 
         # Decode and verify 'extra' parameters JSON
-        parsed_de = urllib.parse.urlparse(link_de)
-        qs_de = urllib.parse.parse_qs(parsed_de.query)
-        self.assertIn("extra", qs_de)
+        parsed = urllib.parse.urlparse(link_wl)
+        qs = urllib.parse.parse_qs(parsed.query)
+        self.assertIn("extra", qs)
 
-        extra_json = qs_de["extra"][0]
+        extra_json = qs["extra"][0]
         extra = json.loads(extra_json)
 
         # Invariants from SSOT:

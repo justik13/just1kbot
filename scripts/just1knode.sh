@@ -489,8 +489,7 @@ render_nginx_modular_config() {
     local include_amnezia="${4:-false}"
     local include_xray="${5:-false}"
     local xray_api_port="${6:-8444}"
-    local path_de="${7:-/stream/v1/de}"
-    local path_nl="${8:-/stream/v1/nl}"
+    local path_xhttp="${7:-/stream/v1}"
 
     mkdir -p /etc/nginx/just1k.d /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d
 
@@ -523,27 +522,9 @@ EOF
         return 204;
     }
 
-    location ${path_de} {
+    location ${path_xhttp} {
         access_log off;
         proxy_pass http://127.0.0.1:8003;
-        proxy_method \$just1k_xhttp_proxy_method;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_pass_request_headers on;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-
-    location ${path_nl} {
-        access_log off;
-        proxy_pass http://127.0.0.1:8004;
         proxy_method \$just1k_xhttp_proxy_method;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -839,85 +820,59 @@ cmd_install_amnezia() {
 # 2. КОМАНДА: install xray-origin
 # =============================================================================
 cmd_install_xray_origin() {
-    title "УСТАНОВКА XRAY ORIGIN УЗЛА"
+    title "УСТАНОВКА XRAY ORIGIN УЗЛА (XHTTP)"
     check_root
     pre_install_safety_audit "xray-origin"
     install_common_deps
 
     local domain=""
     local bot_ip=""
-    local exit_de_conn=""
-    local exit_de_host=""
-    local exit_de_port="10443"
-    local exit_de_uuid=""
-    local exit_de_pubkey=""
-    local exit_de_shortid=""
-    local exit_de_sni="dl.google.com"
-
-    local exit_nl_conn=""
-    local exit_nl_host=""
-    local exit_nl_port="10443"
-    local exit_nl_uuid=""
-    local exit_nl_pubkey=""
-    local exit_nl_shortid=""
-    local exit_nl_sni="dl.google.com"
+    local exit_conn=""
+    local exit_host=""
+    local exit_port="10443"
+    local exit_uuid=""
+    local exit_pubkey=""
+    local exit_shortid=""
+    local exit_sni="dl.google.com"
 
     local email=""
     local api_key=""
-    local path_de=""
-    local path_nl=""
+    local path_xhttp=""
 
     # Разбор параметров CLI
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --domain) domain="$2"; shift 2 ;;
             --bot-ip) bot_ip="$2"; shift 2 ;;
-            --exit-de|--exit-de-conn) exit_de_conn="$2"; shift 2 ;;
-            --exit-de-host) exit_de_host="$2"; shift 2 ;;
-            --exit-de-uuid) exit_de_uuid="$2"; shift 2 ;;
-            --exit-de-pubkey) exit_de_pubkey="$2"; shift 2 ;;
-            --exit-de-shortid) exit_de_shortid="$2"; shift 2 ;;
-            --exit-de-sni) exit_de_sni="$2"; shift 2 ;;
-            --exit-nl|--exit-nl-conn) exit_nl_conn="$2"; shift 2 ;;
-            --exit-nl-host) exit_nl_host="$2"; shift 2 ;;
-            --exit-nl-uuid) exit_nl_uuid="$2"; shift 2 ;;
-            --exit-nl-pubkey) exit_nl_pubkey="$2"; shift 2 ;;
-            --exit-nl-shortid) exit_nl_shortid="$2"; shift 2 ;;
-            --exit-nl-sni) exit_nl_sni="$2"; shift 2 ;;
+            --exit|--exit-conn|--exit-de|--exit-de-conn) exit_conn="$2"; shift 2 ;;
+            --exit-host|--exit-de-host) exit_host="$2"; shift 2 ;;
+            --exit-port|--exit-de-port) exit_port="$2"; shift 2 ;;
+            --exit-uuid|--exit-de-uuid) exit_uuid="$2"; shift 2 ;;
+            --exit-pubkey|--exit-de-pubkey) exit_pubkey="$2"; shift 2 ;;
+            --exit-shortid|--exit-de-shortid) exit_shortid="$2"; shift 2 ;;
+            --exit-sni|--exit-de-sni) exit_sni="$2"; shift 2 ;;
             --email) email="$2"; shift 2 ;;
             --api-key) api_key="$2"; shift 2 ;;
-            --path-de) path_de="$2"; shift 2 ;;
-            --path-nl) path_nl="$2"; shift 2 ;;
+            --path|--path-xhttp|--path-de) path_xhttp="$2"; shift 2 ;;
             *)
                 if [[ -z "$domain" ]]; then domain="$1"
                 elif [[ -z "$bot_ip" ]]; then bot_ip="$1"
-                elif [[ -z "$exit_de_conn" ]]; then exit_de_conn="$1"
+                elif [[ -z "$exit_conn" ]]; then exit_conn="$1"
                 fi
                 shift
                 ;;
         esac
     done
 
-    # Парсинг строки подключения Exit DE, если передана в формате IP:PORT:UUID:PUBKEY:SHORTID:SNI
-    if [[ -n "$exit_de_conn" ]]; then
-        IFS=':' read -r p_host p_port p_uuid p_pubkey p_shortid p_sni <<< "$exit_de_conn"
-        exit_de_host="${p_host:-$exit_de_host}"
-        exit_de_port="${p_port:-$exit_de_port}"
-        exit_de_uuid="${p_uuid:-$exit_de_uuid}"
-        exit_de_pubkey="${p_pubkey:-$exit_de_pubkey}"
-        exit_de_shortid="${p_shortid:-$exit_de_shortid}"
-        exit_de_sni="${p_sni:-$exit_de_sni}"
-    fi
-
-    # Парсинг строки подключения Exit NL, если передана
-    if [[ -n "$exit_nl_conn" ]]; then
-        IFS=':' read -r p_host p_port p_uuid p_pubkey p_shortid p_sni <<< "$exit_nl_conn"
-        exit_nl_host="${p_host:-$exit_nl_host}"
-        exit_nl_port="${p_port:-$exit_nl_port}"
-        exit_nl_uuid="${p_uuid:-$exit_nl_uuid}"
-        exit_nl_pubkey="${p_pubkey:-$exit_nl_pubkey}"
-        exit_nl_shortid="${p_shortid:-$exit_nl_shortid}"
-        exit_nl_sni="${p_sni:-$exit_nl_sni}"
+    # Парсинг строки подключения Exit, если передана в формате IP:PORT:UUID:PUBKEY:SHORTID:SNI
+    if [[ -n "$exit_conn" ]]; then
+        IFS=':' read -r p_host p_port p_uuid p_pubkey p_shortid p_sni <<< "$exit_conn"
+        exit_host="${p_host:-$exit_host}"
+        exit_port="${p_port:-$exit_port}"
+        exit_uuid="${p_uuid:-$exit_uuid}"
+        exit_pubkey="${p_pubkey:-$exit_pubkey}"
+        exit_shortid="${p_shortid:-$exit_shortid}"
+        exit_sni="${p_sni:-$exit_sni}"
     fi
 
     # Интерактивный запрос только обязательных параметров
@@ -926,33 +881,33 @@ cmd_install_xray_origin() {
         echo -e "   ${YELLOW}💡 Где взять:${NC} Поддомен в вашей DNS-панели (напр. origin.example.com), направленный A-записью на IP этого сервера ($(get_public_ip))."
         read -r -p "Введите Origin-домен: " domain
     fi
-    if [[ -z "$exit_de_host" ]]; then
-        echo -e "${CYAN}📌 Шаг 2/3: Подключение к Exit-серверу Германии (DE)${NC}"
+    if [[ -z "$exit_host" ]]; then
+        echo -e "${CYAN}📌 Шаг 2/3: Подключение к Exit-серверу${NC}"
         echo -e "   ${YELLOW}💡 Подсказка:${NC} Вставьте строку быстрого импорта из шага установки Exit (IP:PORT:UUID:PUBKEY:SHORTID:SNI):"
-        read -r -p "Введите строку импорта Exit DE: " input_exit_de
-        if [[ "$input_exit_de" == *":"*":"*":"* ]]; then
-            IFS=':' read -r p_host p_port p_uuid p_pubkey p_shortid p_sni <<< "$input_exit_de"
-            exit_de_host="$p_host"
-            exit_de_port="${p_port:-10443}"
-            exit_de_uuid="$p_uuid"
-            exit_de_pubkey="$p_pubkey"
-            exit_de_shortid="$p_shortid"
-            exit_de_sni="${p_sni:-dl.google.com}"
+        read -r -p "Введите строку импорта Exit: " input_exit
+        if [[ "$input_exit" == *":"*":"*":"* ]]; then
+            IFS=':' read -r p_host p_port p_uuid p_pubkey p_shortid p_sni <<< "$input_exit"
+            exit_host="$p_host"
+            exit_port="${p_port:-10443}"
+            exit_uuid="$p_uuid"
+            exit_pubkey="$p_pubkey"
+            exit_shortid="$p_shortid"
+            exit_sni="${p_sni:-dl.google.com}"
         else
-            exit_de_host="$input_exit_de"
+            exit_host="$input_exit"
         fi
     fi
-    if [[ -z "$exit_de_uuid" ]]; then
-        read -r -p "Введите VLESS UUID Exit DE: " exit_de_uuid
+    if [[ -z "$exit_uuid" ]]; then
+        read -r -p "Введите VLESS UUID Exit: " exit_uuid
     fi
-    if [[ -z "$exit_de_pubkey" ]]; then
-        read -r -p "Введите Reality Public Key Exit DE: " exit_de_pubkey
+    if [[ -z "$exit_pubkey" ]]; then
+        read -r -p "Введите Reality Public Key Exit: " exit_pubkey
     fi
-    if [[ -z "$exit_de_shortid" ]]; then
-        exit_de_shortid=""
+    if [[ -z "$exit_shortid" ]]; then
+        exit_shortid=""
     fi
-    if [[ -z "$exit_de_sni" ]]; then
-        exit_de_sni="dl.google.com"
+    if [[ -z "$exit_sni" ]]; then
+        exit_sni="dl.google.com"
     fi
 
     if [[ -z "$bot_ip" ]]; then
@@ -963,18 +918,8 @@ cmd_install_xray_origin() {
     fi
 
     # Автогенерация и безопасные дефолты
-    exit_nl_host="${exit_nl_host:-$exit_de_host}"
-    exit_nl_port="${exit_nl_port:-$exit_de_port}"
-    exit_nl_uuid="${exit_nl_uuid:-$exit_de_uuid}"
-    exit_nl_pubkey="${exit_nl_pubkey:-$exit_de_pubkey}"
-    exit_nl_shortid="${exit_nl_shortid:-$exit_de_shortid}"
-    exit_nl_sni="${exit_nl_sni:-$exit_de_sni}"
-
-    if [[ -z "$path_de" ]]; then
-        path_de="/xhttp-$(openssl rand -hex 6 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(6))')"
-    fi
-    if [[ -z "$path_nl" ]]; then
-        path_nl="/xhttp-$(openssl rand -hex 6 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(6))')"
+    if [[ -z "$path_xhttp" ]]; then
+        path_xhttp="/xhttp-$(openssl rand -hex 6 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(6))')"
     fi
     if [[ -z "$email" ]]; then
         email="admin@${domain}"
@@ -988,11 +933,11 @@ cmd_install_xray_origin() {
     if [[ -n "$bot_ip" ]]; then
         bot_ip="$(sanitize_host "$bot_ip")"
     fi
-    exit_de_host="$(sanitize_host "$exit_de_host")"
-    exit_de_uuid="$(echo "$exit_de_uuid" | tr -d '[:space:]')"
-    exit_de_pubkey="$(echo "$exit_de_pubkey" | tr -d '[:space:]')"
-    exit_de_shortid="$(echo "$exit_de_shortid" | tr -d '[:space:]')"
-    exit_de_sni="$(sanitize_host "$exit_de_sni")"
+    exit_host="$(sanitize_host "$exit_host")"
+    exit_uuid="$(echo "$exit_uuid" | tr -d '[:space:]')"
+    exit_pubkey="$(echo "$exit_pubkey" | tr -d '[:space:]')"
+    exit_shortid="$(echo "$exit_shortid" | tr -d '[:space:]')"
+    exit_sni="$(sanitize_host "$exit_sni")"
     email="$(echo "$email" | tr -d '[:space:]')"
 
     # Валидация
@@ -1001,13 +946,13 @@ cmd_install_xray_origin() {
     if [[ -n "$bot_ip" ]]; then
         validate_host_or_ip "$bot_ip" || error "Некорректный IP-адрес бота: ${bot_ip}"
     fi
-    [[ -n "$exit_de_host" ]] || error "Хост Exit DE обязателен."
-    validate_host_or_ip "$exit_de_host" || error "Некорректный хост/IP Exit DE: ${exit_de_host}"
-    [[ -n "$exit_de_uuid" ]] || error "UUID Exit DE обязателен."
-    validate_uuid "$exit_de_uuid" || error "Некорректный формат UUID для Exit DE: ${exit_de_uuid}"
-    [[ -n "$exit_de_pubkey" ]] || error "Reality Public Key для Exit DE обязателен."
+    [[ -n "$exit_host" ]] || error "Хост Exit обязателен."
+    validate_host_or_ip "$exit_host" || error "Некорректный хост/IP Exit: ${exit_host}"
+    [[ -n "$exit_uuid" ]] || error "UUID Exit обязателен."
+    validate_uuid "$exit_uuid" || error "Некорректный формат UUID для Exit: ${exit_uuid}"
+    [[ -n "$exit_pubkey" ]] || error "Reality Public Key для Exit обязателен."
 
-    check_exit_port_reachable "$exit_de_host" "$exit_de_port"
+    check_exit_port_reachable "$exit_host" "$exit_port"
 
     backup_file_if_exists "$XRAY_CONFIG" "конфигурации Xray"
     backup_file_if_exists "/etc/nginx/sites-available/xhttp-origin.conf" "старой конфигурации Nginx (xhttp-origin)"
@@ -1046,25 +991,11 @@ cmd_install_xray_origin() {
     },
     "system": {
       "statsInboundUplink": true,
-      "statsInboundDownlink": true,
-      "statsOutboundUplink": true,
-      "statsOutboundDownlink": true
+      "statsInboundDownlink": true
     }
   },
   "dns": {
     "servers": [
-      {
-        "address": "77.88.8.8",
-        "port": 53,
-        "domains": [
-          "domain:ru",
-          "geosite:category-ru",
-          "geosite:category-gov-ru"
-        ],
-        "expectIPs": [
-          "geoip:ru"
-        ]
-      },
       {
         "address": "https://1.1.1.1/dns-query",
         "domains": [
@@ -1081,7 +1012,7 @@ cmd_install_xray_origin() {
   },
   "inbounds": [
     {
-      "tag": "inbound-de",
+      "tag": "inbound-xhttp",
       "listen": "127.0.0.1",
       "port": 8003,
       "protocol": "vless",
@@ -1092,34 +1023,7 @@ cmd_install_xray_origin() {
       "streamSettings": {
         "network": "xhttp",
         "xhttpSettings": {
-          "path": "${path_de}",
-          "mode": "packet-up",
-          "uplinkHTTPMethod": "POST",
-          "xPaddingObfsMode": true,
-          "xPaddingKey": "dc",
-          "xPaddingHeader": "X-Cache",
-          "xPaddingMethod": "tokenish",
-          "xPaddingPlacement": "header"
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": ["http", "tls", "quic"]
-      }
-    },
-    {
-      "tag": "inbound-nl",
-      "listen": "127.0.0.1",
-      "port": 8004,
-      "protocol": "vless",
-      "settings": {
-        "clients": [],
-        "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "xhttp",
-        "xhttpSettings": {
-          "path": "${path_nl}",
+          "path": "${path_xhttp}",
           "mode": "packet-up",
           "uplinkHTTPMethod": "POST",
           "xPaddingObfsMode": true,
@@ -1146,16 +1050,16 @@ cmd_install_xray_origin() {
   ],
   "outbounds": [
     {
-      "tag": "to-exit-de",
+      "tag": "to-exit",
       "protocol": "vless",
       "settings": {
         "vnext": [
           {
-            "address": "${exit_de_host}",
-            "port": ${exit_de_port},
+            "address": "${exit_host}",
+            "port": ${exit_port},
             "users": [
               {
-                "id": "${exit_de_uuid}",
+                "id": "${exit_uuid}",
                 "flow": "xtls-rprx-vision",
                 "encryption": "none"
               }
@@ -1167,42 +1071,11 @@ cmd_install_xray_origin() {
         "network": "tcp",
         "security": "reality",
         "realitySettings": {
-          "serverName": "${exit_de_sni}",
+          "serverName": "${exit_sni}",
           "fingerprint": "chrome",
           "show": false,
-          "publicKey": "${exit_de_pubkey}",
-          "shortId": "${exit_de_shortid}",
-          "spiderX": ""
-        }
-      }
-    },
-    {
-      "tag": "to-exit-nl",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [
-          {
-            "address": "${exit_nl_host}",
-            "port": ${exit_nl_port},
-            "users": [
-              {
-                "id": "${exit_nl_uuid}",
-                "flow": "xtls-rprx-vision",
-                "encryption": "none"
-              }
-            ]
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "${exit_nl_sni}",
-          "fingerprint": "chrome",
-          "show": false,
-          "publicKey": "${exit_nl_pubkey}",
-          "shortId": "${exit_nl_shortid}",
+          "publicKey": "${exit_pubkey}",
+          "shortId": "${exit_shortid}",
           "spiderX": ""
         }
       }
@@ -1243,13 +1116,8 @@ cmd_install_xray_origin() {
       },
       {
         "type": "field",
-        "inboundTag": ["inbound-de"],
-        "outboundTag": "to-exit-de"
-      },
-      {
-        "type": "field",
-        "inboundTag": ["inbound-nl"],
-        "outboundTag": "to-exit-nl"
+        "inboundTag": ["inbound-xhttp"],
+        "outboundTag": "to-exit"
       }
     ]
   }
@@ -1274,7 +1142,7 @@ EOF
         include_amn="true"
     fi
 
-    render_nginx_modular_config "$domain" "$cert_file" "$key_file" "$include_amn" "true" "8444" "$path_de" "$path_nl"
+    render_nginx_modular_config "$domain" "$cert_file" "$key_file" "$include_amn" "true" "8444" "$path_xhttp"
 
     info "Установка сервиса xray-api в ${XRAY_API_DIR}..."
     mkdir -p "$XRAY_API_DIR"
@@ -1300,7 +1168,7 @@ EOF
 XRAY_API_KEY=${api_key}
 XRAY_GRPC_HOST=127.0.0.1
 XRAY_GRPC_PORT=10085
-XRAY_INBOUND_TAGS=inbound-de,inbound-nl
+XRAY_INBOUND_TAGS=inbound-xhttp
 EPOCH_FILE_PATH=/var/lib/xray-api/epoch.json
 EOF
     chmod 600 /etc/xray-api/config.env
@@ -1338,12 +1206,13 @@ EOF
 
     set_state_val "domain" "$domain"
     set_state_val "bot_ip" "$bot_ip"
-    set_state_val "exit_de_host" "$exit_de_host"
-    set_state_val "exit_de_uuid" "$exit_de_uuid"
-    set_state_val "exit_de_pubkey" "$exit_de_pubkey"
-    set_state_val "exit_de_shortid" "$exit_de_shortid"
-    set_state_val "path_de" "$path_de"
-    set_state_val "path_nl" "$path_nl"
+    set_state_val "domain" "$domain"
+    set_state_val "bot_ip" "$bot_ip"
+    set_state_val "exit_host" "$exit_host"
+    set_state_val "exit_uuid" "$exit_uuid"
+    set_state_val "exit_pubkey" "$exit_pubkey"
+    set_state_val "exit_shortid" "$exit_shortid"
+    set_state_val "path_xhttp" "$path_xhttp"
     set_state_val "api_key" "$api_key"
     set_state_val "xray_version" "$XRAY_VERSION_PINNED"
 
@@ -1367,9 +1236,8 @@ EOF
     echo -e " • Домен:             ${CYAN}${domain}${NC} (IP: ${pub_ip})"
     echo -e " • Публичный порт:    ${CYAN}443/tcp (HTTPS / XHTTP)${NC}"
     echo -e " • Порт управления:   ${CYAN}8444/tcp (Xray-API, доступен для ${bot_ip:-любого IP по API Key})${NC}"
-    echo -e " • Путь XHTTP DE:     ${CYAN}${path_de}${NC}"
-    echo -e " • Путь XHTTP NL:     ${CYAN}${path_nl}${NC}"
-    echo -e " • Туннель к Exit:    ${CYAN}${exit_de_host}:${exit_de_port} (VLESS Reality + Vision)${NC}"
+    echo -e " • Путь XHTTP:        ${CYAN}${path_xhttp}${NC}"
+    echo -e " • Туннель к Exit:    ${CYAN}${exit_host}:${exit_port} (VLESS Reality + Vision)${NC}"
     echo -e " • XRAY_API_KEY:      ${YELLOW}${api_key}${NC}"
     echo -e "${BOLD}${GREEN}=================================================================${NC}"
     echo ""

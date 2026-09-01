@@ -109,8 +109,9 @@ WL_WEB_UNSYNCED = "Шлюз синхронизируется, повторите
 WL_WEB_CDN_UNCONFIGURED = "Сетевой шлюз временно недоступен. Обратитесь к администратору."
 
 
-WL_VLESS_TAG_DE = "⚪️ Белый Интернет — Германия 🇩🇪"
-WL_VLESS_TAG_NL = "⚪️ Белый Интернет — Нидерланды 🇳🇱"
+WL_VLESS_TAG = "⚪️ Белый Интернет (XHTTP)"
+WL_VLESS_TAG_DE = "⚪️ Белый Интернет (XHTTP)"
+WL_VLESS_TAG_NL = "⚪️ Белый Интернет (XHTTP)"
 WL_DEFAULT_TARIFF_NAME = "Белый Интернет 50 ГБ"
 WL_PROFILE_NAME = "Just1k Белый Интернет"
 WL_DOMAIN_UNCONFIGURED = "Ошибка: домен бота не настроен в конфигурации."

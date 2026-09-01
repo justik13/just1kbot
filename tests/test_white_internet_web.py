@@ -248,15 +248,12 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
 
                         body_b64 = await resp.text()
                         decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
-                        self.assertEqual(len(decoded_lines), 2)
+                        self.assertEqual(len(decoded_lines), 1)
 
-                        de_url = decoded_lines[0]
-                        nl_url = decoded_lines[1]
-                        self.assertTrue(de_url.startswith("vless://"))
-                        self.assertTrue(nl_url.startswith("vless://"))
-                        self.assertIn("/stream/v1/de", unquote(de_url))
-                        self.assertIn("/stream/v1/nl", unquote(nl_url))
-                        self.assertIn("OPTIONS", unquote(de_url))
+                        wl_url = decoded_lines[0]
+                        self.assertTrue(wl_url.startswith("vless://"))
+                        self.assertIn("/stream/v1", unquote(wl_url))
+                        self.assertIn("OPTIONS", unquote(wl_url))
 
 
     @unittest_run_loop

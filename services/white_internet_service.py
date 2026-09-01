@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from config.constants import (
     DEFAULT_WHITE_INTERNET_PADDING_KEY,
+    DEFAULT_WHITE_INTERNET_PATH,
     DEFAULT_WHITE_INTERNET_PATH_DE,
     DEFAULT_WHITE_INTERNET_PATH_NL,
     WHITE_INTERNET_BASE_DURATION_DAYS,
@@ -247,7 +248,7 @@ class WhiteInternetService:
 
 
     @staticmethod
-    def generate_vless_links(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443) -> list[str]:
+    def generate_vless_links(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443, path: str = DEFAULT_WHITE_INTERNET_PATH) -> list[str]:
         extra_dict = {
             "mode": "packet-up",
             "uplinkHTTPMethod": "OPTIONS",
@@ -258,14 +259,12 @@ class WhiteInternetService:
             "xPaddingPlacement": "header",
         }
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
-        tag_de = urllib.parse.quote(texts.WL_VLESS_TAG_DE)
-        tag_nl = urllib.parse.quote(texts.WL_VLESS_TAG_NL)
-        def build(path: str, tag: str) -> str:
-            return f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
-        return [build(DEFAULT_WHITE_INTERNET_PATH_DE, tag_de), build(DEFAULT_WHITE_INTERNET_PATH_NL, tag_nl)]
+        tag = urllib.parse.quote(texts.WL_VLESS_TAG)
+        link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
+        return [link]
 
     @staticmethod
-    def generate_full_xray_config(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443) -> dict:
+    def generate_full_xray_config(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443, path: str = DEFAULT_WHITE_INTERNET_PATH) -> dict:
         """Generate complete Xray client JSON config for INCY / Happ / v2rayN."""
         return {
             "log": {"loglevel": "warning"},
@@ -281,7 +280,7 @@ class WhiteInternetService:
             ],
             "outbounds": [
                 {
-                    "tag": "proxy-de",
+                    "tag": "proxy-white-internet",
                     "protocol": "vless",
                     "settings": {
                         "vnext": [
@@ -306,7 +305,7 @@ class WhiteInternetService:
                             "fingerprint": "chrome",
                         },
                         "xhttpSettings": {
-                            "path": DEFAULT_WHITE_INTERNET_PATH_DE,
+                            "path": path,
                             "mode": "packet-up",
                             "uplinkHTTPMethod": "OPTIONS",
                             "xPaddingObfsMode": True,
