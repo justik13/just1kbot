@@ -86,7 +86,7 @@ def get_target_inbounds() -> List[str]:
         except Exception as e:
             logger.warning("Could not load inbounds from %s: %s", XRAY_CONFIG_PATH, e)
 
-    return ["inbound-de", "inbound-nl"]
+    return []
 
 
 def get_active_relays() -> List[Dict[str, Any]]:
@@ -108,10 +108,11 @@ epoch_manager = EpochManager()
 
 # --- Thread/Process Safe Local Client Storage ---
 class ClientStore:
-    """Manages persistent active client UUIDs in a local JSON file (Zero-Loss State)."""
+    """Manages persistent active client UUIDs in a local JSON file (Zero-Loss State) with file locking."""
 
     def __init__(self, file_path: Path):
         self.file_path = file_path
+        self.lock_path = file_path.with_suffix(".lock")
 
     def _ensure_dir(self) -> None:
         try:
@@ -120,7 +121,7 @@ class ClientStore:
             logger.warning("Could not create directory %s: %s", self.file_path.parent, e)
 
     def load_clients(self) -> set[str]:
-        if not self.file_path.exists():
+        if not self.file_path.exists() or self.file_path.stat().st_size == 0:
             return set()
         try:
             with open(self.file_path, "r", encoding="utf-8") as f:
@@ -153,15 +154,47 @@ class ClientStore:
             return False
 
     def add_client(self, client_uuid: str) -> None:
-        clients = self.load_clients()
-        clients.add(client_uuid)
-        self.save_clients(clients)
+        self._ensure_dir()
+        lock_fd = None
+        if fcntl is not None:
+            try:
+                lock_fd = open(self.lock_path, "w")
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            except Exception as e:
+                logger.debug("Could not acquire client store lock: %s", e)
+        try:
+            clients = self.load_clients()
+            clients.add(client_uuid)
+            self.save_clients(clients)
+        finally:
+            if fcntl is not None and lock_fd is not None:
+                try:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                    lock_fd.close()
+                except Exception:
+                    pass
 
     def remove_client(self, client_uuid: str) -> None:
-        clients = self.load_clients()
-        if client_uuid in clients:
-            clients.remove(client_uuid)
-            self.save_clients(clients)
+        self._ensure_dir()
+        lock_fd = None
+        if fcntl is not None:
+            try:
+                lock_fd = open(self.lock_path, "w")
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            except Exception as e:
+                logger.debug("Could not acquire client store lock: %s", e)
+        try:
+            clients = self.load_clients()
+            if client_uuid in clients:
+                clients.remove(client_uuid)
+                self.save_clients(clients)
+        finally:
+            if fcntl is not None and lock_fd is not None:
+                try:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                    lock_fd.close()
+                except Exception:
+                    pass
 
 
 client_store = ClientStore(CLIENTS_FILE_PATH)

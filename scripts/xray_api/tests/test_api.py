@@ -8,6 +8,7 @@ tmp_clients_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
 tmp_clients_file.close()
 os.environ["XRAY_API_KEY"] = "test-secret-key-12345"
 os.environ["CLIENTS_FILE_PATH"] = tmp_clients_file.name
+os.environ["XRAY_INBOUND_TAGS"] = "inbound-de,inbound-nl"
 
 from app import app, client_store, grpc_client  # noqa: E402
 

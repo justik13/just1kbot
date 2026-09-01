@@ -2,10 +2,10 @@
 
 ## 1. Обзор архитектуры
 
-«Белый Интернет» — это система обхода жестких белых списков (White Lists) и блокировок ТСПУ/РКН на базе протокола **XHTTP (SplitHTTP) over CDN** и трансграничных туннелей **VLESS Vision**.
+«Белый Интернет» — это система обхода жестких белых списков (White Lists) и блокировок ТСПУ/РКН на базе протокола **VLESS XHTTP (SplitHTTP) over CDN** и трансграничных туннелей **VLESS Vision REALITY**.
 
 ```
-[ Клиент в РФ (Happ / INCY / v2rayN / Amnezia) ]
+[ Клиент в РФ (INCY / Happ / v2rayN / NekoBox) ]
        │  (1) HTTPS запрос к CDN (SNI: cdn.just1k.best)
        │      Методы: GET (downlink), OPTIONS (uplink)
        │      Обфускация: X-Cache tokenish padding
@@ -14,12 +14,12 @@
        │  (2) Доверенный внутрироссийский CDN-трафик
        ▼
 [ Origin Сервер (РФ / Москва) ]
-       │  (3) Nginx переводит OPTIONS -> POST
-       │      Xray Inbound (127.0.0.1:8003/8004)
-       │      Российские ресурсы (.ru / банки) -> напрямую через Яндекс DNS
-       │  (4) Зарубежный трафик -> VLESS Vision over TLS (порт 10443)
+       │  (3) Nginx переводит OPTIONS -> POST с Zero-Buffering
+       │      Xray Inbound (127.0.0.1:8003/8004...)
+       │      Российские ресурсы (.ru / банки) -> напрямую через прямой выход
+       │  (4) Зарубежный трафик -> VLESS Vision over REALITY TCP (порт 10443)
        ▼
-[ Exit Сервер (Германия 🇩🇪 / Нидерланды 🇳🇱) ]
+[ Relay Сервер (Зарубежье: Германия 🇩🇪 / Нидерланды 🇳🇱 / etc.) ]
        │  (5) Прямой выход в открытый интернет
        ▼
 [ Свободный интернет (YouTube, Instagram, etc.) ]
@@ -33,57 +33,75 @@
 * **Проблема CDN:** Российские CDN (Yandex Cloud CDN) разрешают клиентам только методы `GET, HEAD, OPTIONS`. Метод `POST` режется или блокируется.
 * **Решение:** Клиент отправляет аплоад-пакеты методом `OPTIONS` с заголовками `X-Cache`. Nginx на Origin-сервере транслирует метод на лету:
   ```nginx
-  map $request_method $just1k_xhttp_proxy_method {
-      default $request_method;
+  map $request_method $xhttp_proxy_method {
       OPTIONS POST;
+      default $request_method;
   }
-  location /stream/v1/de {
-      proxy_method $just1k_xhttp_proxy_method;
-      proxy_pass http://127.0.0.1:8003;
+  location /w_secret/de {
+      proxy_method $xhttp_proxy_method;
+      proxy_pass http://127.0.0.1:8004;
       proxy_buffering off;
       proxy_request_buffering off;
+      proxy_read_timeout 3600s;
+      proxy_send_timeout 3600s;
   }
   ```
 
-### 2.2. Учет квот и биллинг (Grant Ledger)
-* Каждый пользователь имеет подписку `WhiteInternetSubscription` и цепочку грантов `WhiteInternetQuotaGrant`.
+### 2.2. Защита межсерверного туннеля: VLESS REALITY
+* Межсерверный туннель Origin (РФ) ➔ Relay (Зарубежье) защищен протоколом **VLESS REALITY** с маскировкой под популярные TLS-ресурсы (например, `www.google.com`).
+* Поддерживается алгоритм оптимизации потока `xtls-rprx-vision`.
+* Порт туннеля (по умолчанию 10443) защищен UFW-фаерволом и открыт строго для IP-адреса Origin-сервера.
+
+### 2.3. Учет квот и биллинг (Grant Ledger)
+* Каждый пользователь имеет подписку `WhiteInternetSubscription` и цепочку грантов `WhiteInternetQuotaGrant` (Base 50 ГБ + накопительные пакеты продления).
 * Воркер `white_internet_traffic` опрашивает агент `xray-api` по безопасному TLS-каналу (порт `8444`).
-* Семантика **Anomaly Guard** и **Generation CAS** предотвращает ложные списания при перезапусках ядра Xray на нодах.
+* Семантика **Anomaly Guard**, **Generation CAS** и **Stats Reset Rebase** предотвращает ложные списания при перезапусках ядра Xray и сбросе счетчиков.
 
 ---
 
 ## 3. Управление узлами через `just1knode`
 
-### 3.1. Установка Exit-узла (Германия / Нидерланды)
+### 3.1. Установка Relay-узла (Зарубежный выход)
 ```bash
-just1knode install xray-exit \
-  --origin-ip "<IP_ОРИДЖИНА_МОСКВА>" \
-  --domain "exit-de.yourdomain.com" \
-  --uuid "<UUID_VLESS>" \
-  --email "admin@yourdomain.com"
+# Интерактивная установка Relay
+sudo just1knode install relay
+
+# Или с аргументами:
+sudo just1knode install relay 10443 "<IP_ORIGIN_В_РФ>" "www.google.com"
 ```
+После завершения скрипт выдаст готовую команду для добавления реле на Origin-сервере.
 
 ### 3.2. Установка Origin-узла (РФ / Москва)
 ```bash
-just1knode install xray-origin \
-  --domain "origin.yourdomain.com" \
-  --bot-ip "<IP_БОТА>" \
-  --exit-de-host "exit-de.yourdomain.com" \
-  --exit-de-uuid "<UUID_EXIT_DE>" \
-  --exit-nl-host "exit-nl.yourdomain.com" \
-  --exit-nl-uuid "<UUID_EXIT_NL>" \
-  --path-de "/stream/v1/de" \
-  --path-nl "/stream/v1/nl" \
-  --email "admin@yourdomain.com"
+# Интерактивная установка Origin
+sudo just1knode install origin
+
+# Или с аргументами:
+sudo just1knode install origin "origin.yourdomain.com" "admin@yourdomain.com" "<API_KEY>" "/w_secret"
 ```
 
-### 3.3. Диагностика и статус
+### 3.3. Управление Relay-узлами на Origin
 ```bash
-# Проверка статуса служб и конфигурации
-just1knode doctor
+# Добавление Relay на Origin
+sudo just1knode relay add "Германия" "<RELAY_IP>" 10443 "<UUID>" "de" "<REALITY_PUBKEY>" "<SHORT_ID>" "www.google.com"
 
-# Быстрое тестирование локального API
-curl -H "X-API-Key: $(grep XRAY_API_KEY /etc/xray-api/config.env | cut -d= -f2)" http://127.0.0.1:8444/v1/health
+# Просмотр списка активных релеев
+sudo just1knode relay list
+
+# Удаление Relay
+sudo just1knode relay remove de
+```
+
+### 3.4. Диагностика и статус
+```bash
+# Комплексная самодиагностика узла (DNS, SSL, Xray, gRPC, Nginx, UFW)
+sudo just1knode doctor
+
+# Статус служб и количество активных клиентов
+sudo just1knode status
+
+# Безопасное тестирование API агента
+curl -k -H "X-API-Key: $(grep XRAY_API_KEY /etc/xray-api/config.env | cut -d= -f2)" https://127.0.0.1:8444/v1/health
 ```
 
 ---
@@ -94,7 +112,6 @@ curl -H "X-API-Key: $(grep XRAY_API_KEY /etc/xray-api/config.env | cut -d= -f2)"
 # Публичный CDN домен
 WHITE_INTERNET_CDN_DOMAIN=cdn.just1k.best
 
-# URL-пути XHTTP (должны совпадать с установкой на Origin-ноде)
-WHITE_INTERNET_XHTTP_PATH_DE=/stream/v1/de
-WHITE_INTERNET_XHTTP_PATH_NL=/stream/v1/nl
+# Префикс пути для HTTP подписки (по умолчанию: /sub/wl)
+WHITE_INTERNET_SUB_PATH_PREFIX=/sub/wl
 ```

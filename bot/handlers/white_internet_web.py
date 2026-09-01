@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 
@@ -115,7 +116,20 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             )
 
         # Generate multi-relay configs if available
-        vless_links = WhiteInternetService.generate_vless_links(sub, cdn_domain=cdn_domain)
+        relays = None
+        if getattr(server, "extra_data", None) and isinstance(server.extra_data, dict) and "relays" in server.extra_data:
+            relays = server.extra_data["relays"]
+        elif os.getenv("WHITE_INTERNET_RELAYS"):
+            try:
+                relays = json.loads(os.environ["WHITE_INTERNET_RELAYS"])
+            except Exception:
+                pass
+
+        vless_links = WhiteInternetService.generate_vless_links(
+            sub,
+            cdn_domain=cdn_domain,
+            relays=relays,
+        )
         payload = "\n".join(vless_links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
 

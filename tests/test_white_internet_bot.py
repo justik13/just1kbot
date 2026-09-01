@@ -251,9 +251,11 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
 
         mock_session = AsyncMock()
 
-        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=user):
-            with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub):
-                await show_subscription_link(mock_query, mock_session)
+        mock_settings = MagicMock(DOMAIN="bot.example.com")
+        with patch("bot.handlers.white_internet.get_settings", return_value=mock_settings):
+            with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=user):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub):
+                    await show_subscription_link(mock_query, mock_session)
 
                 mock_query.message.edit_text.assert_awaited_once()
                 call_args = mock_query.message.edit_text.call_args
