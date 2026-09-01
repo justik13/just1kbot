@@ -33,6 +33,8 @@ class TestJust1kNodeScript(unittest.TestCase):
         self.xray_share_dir.mkdir(parents=True, exist_ok=True)
         self.xray_api_etc = Path(self.temp_dir) / "etc" / "xray-api"
         self.xray_api_etc.mkdir(parents=True, exist_ok=True)
+        self.xray_api_dir = Path(self.temp_dir) / "opt" / "xray-api"
+        self.xray_api_dir.mkdir(parents=True, exist_ok=True)
         self.systemd_dir = Path(self.temp_dir) / "etc" / "systemd" / "system"
         self.systemd_dir.mkdir(parents=True, exist_ok=True)
         self.certbot_dir = Path(self.temp_dir) / "var" / "www" / "certbot"
@@ -118,6 +120,8 @@ exit 0
         env["BACKUP_DIR"] = str(Path(self.temp_dir) / "backups")
         env["NGINX_CONF_DIR"] = str(self.nginx_conf_dir)
         env["NGINX_RELAYS_DIR"] = str(self.nginx_relays_d)
+        env["XRAY_API_DIR"] = str(self.xray_api_dir)
+        env["XRAY_API_ETC"] = str(self.xray_api_etc)
         env["XRAY_API_CONFIG_ENV"] = str(self.xray_api_etc / "config.env")
         env["SYSTEMD_SYSTEM_DIR"] = str(self.systemd_dir)
         env["CERTBOT_DIR"] = str(self.certbot_dir)
@@ -138,6 +142,8 @@ export XRAY_BIN='{self.bin_dir / "xray"}'
 export BACKUP_DIR='{Path(self.temp_dir) / "backups"}'
 export NGINX_CONF_DIR='{self.nginx_conf_dir}'
 export NGINX_RELAYS_DIR='{self.nginx_relays_d}'
+export XRAY_API_DIR='{self.xray_api_dir}'
+export XRAY_API_ETC='{self.xray_api_etc}'
 export XRAY_API_CONFIG_ENV='{self.xray_api_etc / "config.env"}'
 export SYSTEMD_SYSTEM_DIR='{self.systemd_dir}'
 export CERTBOT_DIR='{self.certbot_dir}'
