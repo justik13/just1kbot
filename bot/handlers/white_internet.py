@@ -305,13 +305,28 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
     sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
     sub_url = f"https://{bot_domain}{sub_prefix}/{sub.token}"
 
+    incy_deep_link = None
+    try:
+        from services.incy_crypto import encrypt_link
+        incy_deep_link = encrypt_link(sub_url, name="Just1k Белый Интернет")
+    except Exception as exc:
+        logger.warning("Failed to generate INCY deep link: %s", exc)
+
     kb = InlineKeyboardBuilder()
     kb.button(
         text=texts.BTN_WL_COPY_LINK,
         copy_text=CopyTextButton(text=sub_url),
     )
+    if incy_deep_link:
+        kb.button(
+            text="📱 Скопировать ключ INCY (crypt1)",
+            copy_text=CopyTextButton(text=incy_deep_link),
+        )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
-    kb.adjust(1, 1)
+    if incy_deep_link:
+        kb.adjust(1, 1, 1)
+    else:
+        kb.adjust(1, 1)
 
     await query.message.edit_text(
         texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url)),

@@ -266,15 +266,15 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("sub-secret-token", text)
 
                 # Check keyboard buttons
-                copy_btn = None
+                copy_btns = []
                 back_btn = None
                 for row in reply_markup.inline_keyboard:
                     for btn in row:
                         if btn.copy_text:
-                            copy_btn = btn
+                            copy_btns.append(btn)
                         if btn.callback_data == "white_internet":
                             back_btn = btn
 
-                self.assertIsNotNone(copy_btn, "Copy subscription link button must be present")
-                self.assertIn("sub-secret-token", copy_btn.copy_text.text)
+                self.assertTrue(len(copy_btns) >= 1, "Copy subscription link button must be present")
+                self.assertTrue(any("sub-secret-token" in b.copy_text.text for b in copy_btns))
                 self.assertIsNotNone(back_btn, "Back button must be present")
