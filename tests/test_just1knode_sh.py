@@ -27,6 +27,8 @@ class TestJust1kNodeScript(unittest.TestCase):
         self.nginx_relays_d.mkdir(parents=True, exist_ok=True)
         self.xray_config_dir = Path(self.temp_dir) / "usr" / "local" / "etc" / "xray"
         self.xray_config_dir.mkdir(parents=True, exist_ok=True)
+        self.xray_share_dir = Path(self.temp_dir) / "usr" / "local" / "share" / "xray"
+        self.xray_share_dir.mkdir(parents=True, exist_ok=True)
         self.xray_api_etc = Path(self.temp_dir) / "etc" / "xray-api"
         self.xray_api_etc.mkdir(parents=True, exist_ok=True)
         self.bin_dir = Path(self.temp_dir) / "bin"
@@ -103,6 +105,7 @@ exit 0
         env["RELAYS_FILE"] = str(self.state_dir / "relays.json")
         env["XRAY_CONFIG_DIR"] = str(self.xray_config_dir)
         env["XRAY_CONFIG"] = str(self.xray_config_dir / "config.json")
+        env["XRAY_SHARE_DIR"] = str(self.xray_share_dir)
         env["XRAY_BIN"] = str(self.bin_dir / "xray")
         env["BACKUP_DIR"] = str(Path(self.temp_dir) / "backups")
         env["NGINX_RELAYS_DIR"] = str(self.nginx_relays_d)
@@ -118,6 +121,7 @@ export CLIENTS_FILE='{self.state_dir / "clients.json"}'
 export RELAYS_FILE='{self.state_dir / "relays.json"}'
 export XRAY_CONFIG_DIR='{self.xray_config_dir}'
 export XRAY_CONFIG='{self.xray_config_dir / "config.json"}'
+export XRAY_SHARE_DIR='{self.xray_share_dir}'
 export XRAY_BIN='{self.bin_dir / "xray"}'
 export BACKUP_DIR='{Path(self.temp_dir) / "backups"}'
 export NGINX_RELAYS_DIR='{self.nginx_relays_d}'

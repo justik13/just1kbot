@@ -506,7 +506,7 @@ install_xray_origin_node() {
     download_and_verify_xray "$tmp_zip"
 
     mkdir -p "$XRAY_CONFIG_DIR" "$XRAY_SHARE_DIR"
-    unzip -q -o "$tmp_zip" xray -d /usr/local/bin/
+    unzip -q -o "$tmp_zip" xray -d "$(dirname "$XRAY_BIN")"
     unzip -q -o "$tmp_zip" geoip.dat geosite.dat -d "$XRAY_SHARE_DIR/" || true
     rm -f "$tmp_zip"
     chmod +x "$XRAY_BIN"
@@ -824,7 +824,7 @@ install_xray_relay_node() {
     download_and_verify_xray "$tmp_zip"
 
     mkdir -p "$XRAY_CONFIG_DIR" "$XRAY_SHARE_DIR"
-    unzip -q -o "$tmp_zip" xray -d /usr/local/bin/
+    unzip -q -o "$tmp_zip" xray -d "$(dirname "$XRAY_BIN")"
     unzip -q -o "$tmp_zip" geoip.dat geosite.dat -d "$XRAY_SHARE_DIR/" || true
     rm -f "$tmp_zip"
     chmod +x "$XRAY_BIN"
