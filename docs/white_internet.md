@@ -2,22 +2,22 @@
 
 ## 1. Обзор архитектуры
 
-«Белый Интернет» — это система обхода жестких белых списков (White Lists) и блокировок ТСПУ/РКН на базе протокола **VLESS XHTTP (SplitHTTP) over CDN** и трансграничных туннелей **VLESS Vision REALITY**.
+«Белый Интернет» — это высокоустойчивая система обхода жестких белых списков (White Lists) и блокировок ТСПУ/РКН на базе протокола **VLESS XHTTP (SplitHTTP) over CDN** и трансграничных туннелей **VLESS Vision (TLS или REALITY)**.
 
 ```
 [ Клиент в РФ (INCY / Happ / v2rayN / NekoBox) ]
        │  (1) HTTPS запрос к CDN (SNI: cdn.just1k.best)
        │      Методы: GET (downlink), OPTIONS (uplink)
-       │      Обфускация: X-Cache tokenish padding
+       │      Обфускация: X-Cache tokenish padding (queryInHeader)
        ▼
 [ Yandex Cloud CDN (Edge в РФ) ]
        │  (2) Доверенный внутрироссийский CDN-трафик
        ▼
 [ Origin Сервер (РФ / Москва) ]
-       │  (3) Nginx переводит OPTIONS -> POST с Zero-Buffering
+       │  (3) Nginx переводит OPTIONS -> POST с Zero-Buffering (^~ location)
        │      Xray Inbound (127.0.0.1:8003/8004...)
-       │      Российские ресурсы (.ru / банки) -> напрямую через прямой выход
-       │  (4) Зарубежный трафик -> VLESS Vision over REALITY TCP (порт 10443)
+       │      Локальный fallback / Российские ресурсы
+       │  (4) Зарубежный трафик -> VLESS Vision (TLS к relay.just1k.best или REALITY TCP)
        ▼
 [ Relay Сервер (Зарубежье: Германия 🇩🇪 / Нидерланды 🇳🇱 / etc.) ]
        │  (5) Прямой выход в открытый интернет
@@ -31,13 +31,13 @@
 
 ### 2.1. XHTTP (SplitHTTP) и трансляция методов
 * **Проблема CDN:** Российские CDN (Yandex Cloud CDN) разрешают клиентам только методы `GET, HEAD, OPTIONS`. Метод `POST` режется или блокируется.
-* **Решение:** Клиент отправляет аплоад-пакеты методом `OPTIONS` с заголовками `X-Cache`. Nginx на Origin-сервере транслирует метод на лету:
+* **Решение:** Клиент отправляет аплоад-пакеты методом `OPTIONS` с заголовками `X-Cache`. Nginx на Origin-сервере транслирует метод на лету с модификатором `^~`:
   ```nginx
   map $request_method $xhttp_proxy_method {
       OPTIONS POST;
       default $request_method;
   }
-  location /w_secret/de {
+  location ^~ /w_secret/de {
       proxy_method $xhttp_proxy_method;
       proxy_pass http://127.0.0.1:8004;
       proxy_buffering off;
@@ -47,8 +47,9 @@
   }
   ```
 
-### 2.2. Защита межсерверного туннеля: VLESS REALITY
-* Межсерверный туннель Origin (РФ) ➔ Relay (Зарубежье) защищен протоколом **VLESS REALITY** с маскировкой под популярные TLS-ресурсы (например, `www.google.com`).
+### 2.2. Защита межсерверного туннеля (Двойной транспорт: TLS / REALITY)
+* **Доменный TLS (Let's Encrypt):** Используется для релеев с выделенным доменным именем (например, `relay.just1k.best` на сервере `justik`).
+* **VLESS REALITY:** Используется для бессертификатных нод на прямых IP с маскировкой под TLS (например, `www.google.com`).
 * Поддерживается алгоритм оптимизации потока `xtls-rprx-vision`.
 * Порт туннеля (по умолчанию 10443) защищен UFW-фаерволом и открыт строго для IP-адреса Origin-сервера.
 
@@ -59,7 +60,7 @@
 
 ---
 
-## 3. Управление узлами через `just1knode`
+## 3. Управление узлами через `just1knode` (Zero-Collateral-Damage)
 
 ### 3.1. Установка Relay-узла (Зарубежный выход)
 ```bash
@@ -82,8 +83,11 @@ sudo just1knode install origin "origin.yourdomain.com" "admin@yourdomain.com" "<
 
 ### 3.3. Управление Relay-узлами на Origin
 ```bash
-# Добавление Relay на Origin
-sudo just1knode relay add "Германия" "<RELAY_IP>" 10443 "<UUID>" "de" "<REALITY_PUBKEY>" "<SHORT_ID>" "www.google.com"
+# Добавление Relay с доменным TLS (например, нода justik):
+sudo just1knode relay add "Германия" "94.249.239.236" 10443 "<UUID>" "de" "tls" "" "" "relay.just1k.best"
+
+# Добавление Relay с REALITY:
+sudo just1knode relay add "Швеция" "<RELAY_IP>" 10443 "<UUID>" "se" "reality" "<PUBKEY>" "<SHORT_ID>" "www.google.com"
 
 # Просмотр списка активных релеев
 sudo just1knode relay list
@@ -94,7 +98,7 @@ sudo just1knode relay remove de
 
 ### 3.4. Диагностика и статус
 ```bash
-# Комплексная самодиагностика узла (DNS, SSL, Xray, gRPC, Nginx, UFW)
+# Комплексная самодиагностика узла (DNS, SSL, Xray, gRPC/Relay, Nginx, UFW)
 sudo just1knode doctor
 
 # Статус служб и количество активных клиентов
