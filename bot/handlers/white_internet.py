@@ -308,7 +308,7 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
     incy_deep_link = None
     try:
         from services.incy_crypto import encrypt_link
-        incy_deep_link = encrypt_link(sub_url, name="Just1k Белый Интернет")
+        incy_deep_link = encrypt_link(sub_url, name=texts.WL_PROFILE_NAME)
     except Exception as exc:
         logger.warning("Failed to generate INCY deep link: %s", exc)
 
@@ -319,7 +319,7 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
     )
     if incy_deep_link:
         kb.button(
-            text="📱 Скопировать ключ INCY (crypt1)",
+            text=texts.BTN_WL_COPY_INCY_LINK,
             copy_text=CopyTextButton(text=incy_deep_link),
         )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")

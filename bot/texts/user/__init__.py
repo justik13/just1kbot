@@ -51,6 +51,7 @@ from bot.texts.user.support import (
 from bot.texts.user.white_internet import (
     BTN_WL_BUY_ACCESS,
     BTN_WL_CONNECT_CLIENT,
+    BTN_WL_COPY_INCY_LINK,
     BTN_WL_COPY_LINK,
     BTN_WL_AMNEZIA_KEY,
     BTN_WL_INSTRUCTIONS,
@@ -141,6 +142,7 @@ __all__ = [
     "WELCOME_TEXT",
     "BTN_WL_BUY_ACCESS",
     "BTN_WL_CONNECT_CLIENT",
+    "BTN_WL_COPY_INCY_LINK",
     "BTN_WL_COPY_LINK",
     "BTN_WL_AMNEZIA_KEY",
     "BTN_WL_INSTRUCTIONS",
