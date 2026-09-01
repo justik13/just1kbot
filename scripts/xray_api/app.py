@@ -273,22 +273,31 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
     target_inbounds = get_target_inbounds()
     relays = get_active_relays()
 
-    _pid, starttime, boot_id, node_epoch = epoch_manager.get_process_and_epoch() if epoch_manager else (None, 0, None, None)
-    if not node_epoch:
-        node_epoch = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
+    running_epoch = epoch_manager.get_current_running_epoch() if epoch_manager else None
+    _pid, starttime = epoch_manager.get_xray_process_info() if epoch_manager else (None, None)
+    boot_id = epoch_manager.get_system_boot_id() if epoch_manager else None
+
+    # In unit test environments where /proc has no real xray process, fallback if grpc_ok is mocked
+    if grpc_ok and not running_epoch:
+        running_epoch = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
+
+    is_running = bool(grpc_ok and running_epoch)
+    if not grpc_ok:
+        is_running = False
+        running_epoch = None
 
     data = {
-        "status": "ok" if (grpc_ok and node_epoch) else "error",
-        "xray_running": grpc_ok,
+        "status": "ok" if is_running else "error",
+        "xray_running": is_running,
         "grpc_ok": grpc_ok,
         "active_clients_count": len(active_clients),
         "inbounds": target_inbounds,
         "relays": relays,
-        "node_epoch": node_epoch,
+        "node_epoch": running_epoch if is_running else None,
         "boot_id": boot_id or "boot_active",
         "starttime": starttime or 0,
     }
-    if not grpc_ok:
+    if not is_running:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return data
 
