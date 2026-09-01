@@ -16,6 +16,7 @@ try:
 except ImportError:
     fcntl = None  # type: ignore
 
+from epoch_manager import EpochManager
 from xray_grpc import XrayGrpcClient
 
 # Configure logging
@@ -102,6 +103,7 @@ def get_active_relays() -> List[Dict[str, Any]]:
 
 
 grpc_client = XrayGrpcClient(host=GRPC_HOST, port=GRPC_PORT)
+epoch_manager = EpochManager()
 
 
 # --- Thread/Process Safe Local Client Storage ---
@@ -271,16 +273,20 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
     target_inbounds = get_target_inbounds()
     relays = get_active_relays()
 
+    _pid, starttime, boot_id, node_epoch = epoch_manager.get_process_and_epoch() if epoch_manager else (None, 0, None, None)
+    if not node_epoch:
+        node_epoch = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
+
     data = {
-        "status": "ok" if grpc_ok else "error",
+        "status": "ok" if (grpc_ok and node_epoch) else "error",
         "xray_running": grpc_ok,
         "grpc_ok": grpc_ok,
         "active_clients_count": len(active_clients),
         "inbounds": target_inbounds,
         "relays": relays,
-        "node_epoch": "epoch_active",
-        "boot_id": "boot_active",
-        "starttime": 0,
+        "node_epoch": node_epoch,
+        "boot_id": boot_id or "boot_active",
+        "starttime": starttime or 0,
     }
     if not grpc_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -319,12 +325,16 @@ def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Xray gRPC is not available",
         )
+    _pid, starttime, boot_id, node_epoch = epoch_manager.get_process_and_epoch() if epoch_manager else (None, 0, None, None)
+    if not node_epoch:
+        node_epoch = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
+
     try:
         users_stats = grpc_client.get_users_stats(reset=False)
         return {
-            "node_epoch": "epoch_active",
-            "boot_id": "boot_active",
-            "starttime": 0,
+            "node_epoch": node_epoch,
+            "boot_id": boot_id or "boot_active",
+            "starttime": starttime or 0,
             "timestamp": int(time.time()),
             "users": users_stats,
         }
