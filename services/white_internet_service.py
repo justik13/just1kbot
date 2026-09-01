@@ -20,8 +20,6 @@ from bot import texts
 from config.constants import (
     DEFAULT_WHITE_INTERNET_PADDING_KEY,
     DEFAULT_WHITE_INTERNET_PATH,
-    DEFAULT_WHITE_INTERNET_PATH_DE,
-    DEFAULT_WHITE_INTERNET_PATH_NL,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
@@ -248,7 +246,13 @@ class WhiteInternetService:
 
 
     @staticmethod
-    def generate_vless_links(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443, path: str = DEFAULT_WHITE_INTERNET_PATH) -> list[str]:
+    def generate_vless_links(
+        subscription: WhiteInternetSubscription,
+        cdn_domain: str,
+        port: int = 443,
+        path: str = DEFAULT_WHITE_INTERNET_PATH,
+        relays: list[dict] | None = None,
+    ) -> list[str]:
         extra_dict = {
             "mode": "packet-up",
             "uplinkHTTPMethod": "OPTIONS",
@@ -259,9 +263,18 @@ class WhiteInternetService:
             "xPaddingPlacement": "header",
         }
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
-        tag = urllib.parse.quote(texts.WL_VLESS_TAG)
-        link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
-        return [link]
+        if not relays:
+            tag = urllib.parse.quote(texts.WL_VLESS_TAG)
+            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
+            return [link]
+
+        links: list[str] = []
+        for r in relays:
+            r_path = r.get("path") or f"{path.rstrip('/')}/{r.get('code', 'de')}"
+            r_tag = urllib.parse.quote(r.get("name") or texts.WL_VLESS_TAG)
+            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
+            links.append(link)
+        return links
 
     @staticmethod
     def generate_full_xray_config(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443, path: str = DEFAULT_WHITE_INTERNET_PATH) -> dict:
@@ -342,12 +355,16 @@ class WhiteInternetService:
                     {
                         "type": "field",
                         "port": "0-65535",
-                        "outboundTag": "proxy-de",
+                        "outboundTag": "proxy-white-internet",
                     },
                 ],
             },
         }
 
+    # =========================================================================
+    # TODO: Secondary Client Integrations (AmneziaVPN vpn:// / Happ / v2rayN)
+    # Primary focus is INCY HTTP Subscription Feed (/sub/wl/{token}).
+    # =========================================================================
     @staticmethod
     def generate_amnezia_vpn_key(
         subscription: WhiteInternetSubscription,

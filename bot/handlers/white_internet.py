@@ -78,7 +78,8 @@ def get_white_internet_overview_keyboard(
             and sub.provisioning_status == WhiteInternetProvisioningStatus.ACTIVE
             and bot_domain
         ):
-            sub_url = f"https://{bot_domain}/sub/wl/{sub.token}"
+            sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
+            sub_url = f"https://{bot_domain}{sub_prefix}/{sub.token}"
             builder.button(
                 text=texts.BTN_WL_COPY_LINK,
                 copy_text=CopyTextButton(text=sub_url),
@@ -301,21 +302,16 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         await query.message.edit_text(texts.WL_DOMAIN_UNCONFIGURED, reply_markup=kb.as_markup())
         return
 
-    sub_url = f"https://{bot_domain}/sub/wl/{sub.token}"
-    cdn_domain = os.getenv("WHITE_INTERNET_CDN_DOMAIN") or bot_domain
-    amnezia_key = WhiteInternetService.generate_amnezia_vpn_key(sub, cdn_domain=cdn_domain)
+    sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
+    sub_url = f"https://{bot_domain}{sub_prefix}/{sub.token}"
 
     kb = InlineKeyboardBuilder()
     kb.button(
         text=texts.BTN_WL_COPY_LINK,
         copy_text=CopyTextButton(text=sub_url),
     )
-    kb.button(
-        text=texts.BTN_WL_AMNEZIA_KEY,
-        copy_text=CopyTextButton(text=amnezia_key),
-    )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
-    kb.adjust(1, 1, 1)
+    kb.adjust(1, 1)
 
     await query.message.edit_text(
         texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url)),

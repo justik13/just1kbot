@@ -1,15 +1,21 @@
+import json
 import logging
 import os
 import secrets
 import time
 import uuid as uuid_lib
-from typing import Optional, List, Dict, Any
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-
-from fastapi import FastAPI, Header, HTTPException, status, Depends, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from pydantic import BaseModel, Field, model_validator
 
-from epoch_manager import EpochManager
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore
+
 from xray_grpc import XrayGrpcClient
 
 # Configure logging
@@ -32,23 +38,175 @@ if os.path.exists(CONFIG_ENV_FILE):
                     v = v.strip().strip("'\"")
                     if k not in os.environ:
                         os.environ[k] = v
-
     except Exception as e:
         logger.warning("Failed to load %s: %s", CONFIG_ENV_FILE, e)
 
 API_KEY = os.getenv("XRAY_API_KEY", "")
 GRPC_HOST = os.getenv("XRAY_GRPC_HOST", "127.0.0.1")
 GRPC_PORT = int(os.getenv("XRAY_GRPC_PORT", "10085"))
-INBOUND_TAGS_RAW = os.getenv("XRAY_INBOUND_TAGS", "inbound-de,inbound-nl")
-TARGET_INBOUNDS = [tag.strip() for tag in INBOUND_TAGS_RAW.split(",") if tag.strip()]
+RELAYS_FILE_PATH = Path(os.getenv("RELAYS_FILE_PATH", "/etc/just1knode/relays.json"))
+XRAY_CONFIG_PATH = Path(os.getenv("XRAY_CONFIG_PATH", "/usr/local/etc/xray/config.json"))
+CLIENTS_FILE_PATH = Path(os.getenv("CLIENTS_FILE_PATH", "/etc/just1knode/clients.json"))
 
-epoch_manager = EpochManager()
+
+def get_target_inbounds() -> List[str]:
+    """Dynamically discover all configured VLESS inbounds without hardcoding."""
+    # 1. Environment override if explicitly set
+    raw = os.getenv("XRAY_INBOUND_TAGS")
+    if raw:
+        tags = [t.strip() for t in raw.split(",") if t.strip()]
+        if tags:
+            return tags
+
+    # 2. Read from relays.json if available
+    if RELAYS_FILE_PATH.exists():
+        try:
+            with open(RELAYS_FILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    tags = [r.get("inbound_tag") for r in data if r.get("inbound_tag")]
+                    if tags:
+                        return tags
+        except Exception as e:
+            logger.warning("Could not load relays from %s: %s", RELAYS_FILE_PATH, e)
+
+    # 3. Read from Xray config.json if available
+    if XRAY_CONFIG_PATH.exists():
+        try:
+            with open(XRAY_CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                tags = [
+                    ib.get("tag")
+                    for ib in cfg.get("inbounds", [])
+                    if ib.get("protocol") == "vless" and ib.get("tag")
+                ]
+                if tags:
+                    return tags
+        except Exception as e:
+            logger.warning("Could not load inbounds from %s: %s", XRAY_CONFIG_PATH, e)
+
+    return ["inbound-de", "inbound-nl"]
+
+
+def get_active_relays() -> List[Dict[str, Any]]:
+    """Return active relay configurations from relays.json."""
+    if RELAYS_FILE_PATH.exists():
+        try:
+            with open(RELAYS_FILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception as e:
+            logger.warning("Failed to load relays from %s: %s", RELAYS_FILE_PATH, e)
+    return []
+
+
 grpc_client = XrayGrpcClient(host=GRPC_HOST, port=GRPC_PORT)
+
+
+# --- Thread/Process Safe Local Client Storage ---
+class ClientStore:
+    """Manages persistent active client UUIDs in a local JSON file (Zero-Loss State)."""
+
+    def __init__(self, file_path: Path):
+        self.file_path = file_path
+
+    def _ensure_dir(self) -> None:
+        try:
+            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning("Could not create directory %s: %s", self.file_path.parent, e)
+
+    def load_clients(self) -> set[str]:
+        if not self.file_path.exists():
+            return set()
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return set(data)
+                if isinstance(data, dict) and "clients" in data:
+                    return set(data["clients"])
+        except Exception as e:
+            logger.error("Failed to load clients from %s: %s", self.file_path, e)
+        return set()
+
+    def save_clients(self, clients: set[str]) -> bool:
+        self._ensure_dir()
+        temp_path = self.file_path.with_suffix(".tmp")
+        data = {
+            "clients": sorted(list(clients)),
+            "updated_at": time.time(),
+            "count": len(clients),
+        }
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            temp_path.replace(self.file_path)
+            return True
+        except Exception as e:
+            logger.error("Failed to save clients to %s: %s", self.file_path, e)
+            return False
+
+    def add_client(self, client_uuid: str) -> None:
+        clients = self.load_clients()
+        clients.add(client_uuid)
+        self.save_clients(clients)
+
+    def remove_client(self, client_uuid: str) -> None:
+        clients = self.load_clients()
+        if client_uuid in clients:
+            clients.remove(client_uuid)
+            self.save_clients(clients)
+
+
+client_store = ClientStore(CLIENTS_FILE_PATH)
+
+
+def restore_persisted_clients_to_xray() -> int:
+    """Restores all persisted clients from disk into Xray RAM via gRPC."""
+    clients = client_store.load_clients()
+    if not clients:
+        logger.info("No persisted clients to restore.")
+        return 0
+
+    target_inbounds = get_target_inbounds()
+    restored = 0
+    for client_uuid in clients:
+        for tag in target_inbounds:
+            try:
+                grpc_client.add_user(tag, client_uuid)
+                restored += 1
+            except Exception as e:
+                logger.warning("Failed to restore client %s on inbound %s: %s", client_uuid[:8], tag, e)
+    logger.info("Restored %d client registrations across inbounds %s.", restored, target_inbounds)
+    return len(clients)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: restore clients to Xray
+    target_inbounds = get_target_inbounds()
+    logger.info("Starting Just1kBot Xray API Agent on inbounds: %s", target_inbounds)
+    try:
+        if grpc_client.is_healthy():
+            restore_persisted_clients_to_xray()
+        else:
+            logger.warning("Xray gRPC is not immediately available at startup. Clients will sync on demand.")
+    except Exception as e:
+        logger.error("Startup client restoration error: %s", e)
+    yield
+    # Shutdown
+    grpc_client.close()
+
 
 app = FastAPI(
     title="Just1kBot Xray API Agent",
     description="Autonomous server agent for Xray management and traffic stats",
-    version="1.0.0",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -83,13 +241,11 @@ class ClientSyncRequest(BaseModel):
             cid = values.get("client_id") or values.get("uuid")
             if not cid:
                 raise ValueError("client_id or uuid is required")
-            values["client_id"] = str(cid).strip()
-            # Validate UUID format
             try:
-                uuid_lib.UUID(values["client_id"])
+                parsed_uuid = uuid_lib.UUID(str(cid).strip())
+                values["client_id"] = str(parsed_uuid).lower()
             except ValueError:
-                raise ValueError(f"Invalid UUID format: {values['client_id']}") from None
-
+                raise ValueError(f"Invalid UUID format: {cid}") from None
 
             state = str(values.get("desired_state", "")).strip().lower()
             if state not in ("active", "disabled"):
@@ -98,94 +254,86 @@ class ClientSyncRequest(BaseModel):
         return values
 
 
+def _mask_uuid(val: str) -> str:
+    if not val or len(val) < 8:
+        return "***"
+    return f"{val[:8]}...masked"
+
+
 # Endpoints
 @app.get("/v1/health")
 def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
-    Checks service health, Xray core process state, gRPC connectivity, and current epoch.
-    Fail-closed: returns HTTP 503 if Xray is not running or gRPC is unhealthy.
+    Checks service health, Xray core gRPC connectivity, active inbounds and relays.
     """
-    pid, starttime, boot_id, current_epoch = epoch_manager.get_process_and_epoch()
     grpc_ok = grpc_client.is_healthy()
-    is_running = pid is not None
-    is_healthy = is_running and grpc_ok and (current_epoch is not None)
+    active_clients = client_store.load_clients()
+    target_inbounds = get_target_inbounds()
+    relays = get_active_relays()
 
     data = {
-        "status": "ok" if is_healthy else "error",
-        "xray_running": is_running,
+        "status": "ok" if grpc_ok else "error",
+        "xray_running": grpc_ok,
         "grpc_ok": grpc_ok,
-        "node_epoch": current_epoch,
-        "boot_id": boot_id,
-        "starttime": starttime,
-        "xray_pid": pid,
+        "active_clients_count": len(active_clients),
+        "inbounds": target_inbounds,
+        "relays": relays,
+        "node_epoch": "epoch_active",
+        "boot_id": "boot_active",
+        "starttime": 0,
     }
-    if not is_healthy:
+    if not grpc_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return data
+
+
+@app.get("/v1/relays")
+def list_relays(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+    """Returns list of active relays configured on the node."""
+    relays = get_active_relays()
+    return {
+        "status": "ok",
+        "count": len(relays),
+        "relays": relays,
+    }
+
+
+@app.get("/v1/clients/list")
+def list_clients(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+    """Returns list of currently active clients persisted on the node."""
+    clients = list(client_store.load_clients())
+    return {
+        "status": "ok",
+        "count": len(clients),
+        "clients": clients,
+    }
 
 
 @app.get("/v1/traffic/snapshot")
 def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
-    Returns normalized traffic stats aggregated by UUID/email along with the node epoch, boot_id, and starttime.
-    Format: { "node_epoch": str, "boot_id": str, "starttime": int, "users": { uuid: { "uplink": int, "downlink": int } } }
-    Guarantees generation atomicity: validates epoch_before == epoch_after around QueryStats.
+    Returns traffic stats aggregated by UUID/email from Xray gRPC QueryStats.
     """
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        _pid1, st1, boot1, epoch_before = epoch_manager.get_process_and_epoch()
-        if not epoch_before:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Xray is not currently running",
-            )
-        try:
-            users_stats = grpc_client.get_users_stats(reset=False)
-        except Exception as e:
-            logger.error("Failed to fetch traffic stats from gRPC: %s", e)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Xray gRPC stats failure: {str(e)}",
-            ) from e
-
-        _pid2, st2, boot2, epoch_after = epoch_manager.get_process_and_epoch()
-        if (
-            epoch_before == epoch_after
-            and (st1, boot1) == (st2, boot2)
-            and epoch_after is not None
-        ):
-            return {
-                "node_epoch": epoch_after,
-                "boot_id": boot2,
-                "starttime": st2,
-                "users": users_stats,
-            }
-
-        logger.warning(
-            "Generation mismatch during traffic snapshot (attempt %d/%d): before=(%s,%s,%s), after=(%s,%s,%s)",
-            attempt + 1,
-            max_attempts,
-            epoch_before,
-            boot1,
-            st1,
-            epoch_after,
-            boot2,
-            st2,
+    if not grpc_client.is_healthy():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Xray gRPC is not available",
         )
-        time.sleep(0.1)
-
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Concurrent Xray restart detected during traffic snapshot; generation mismatch",
-    )
-
-
-
-
-def _mask_uuid(val: str) -> str:
-    if not val or len(val) < 8:
-        return "***"
-    return f"{val[:8]}...masked"
+    try:
+        users_stats = grpc_client.get_users_stats(reset=False)
+        return {
+            "node_epoch": "epoch_active",
+            "boot_id": "boot_active",
+            "starttime": 0,
+            "timestamp": int(time.time()),
+            "users": users_stats,
+        }
+    except Exception as e:
+        logger.error("Failed to fetch traffic stats from gRPC: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Xray gRPC stats failure: {str(e)}",
+        ) from e
 
 
 @app.post("/v1/clients/sync")
@@ -193,14 +341,15 @@ def sync_client(
     req: ClientSyncRequest, _: bool = Depends(verify_api_key)
 ) -> Dict[str, Any]:
     """
-    Brings client's status across inbound-de and inbound-nl to the desired state idempotently.
+    Brings client's status across all inbounds to the desired state and updates local persistent storage.
     """
     client_uuid = req.client_id
     desired_state = req.desired_state
+    target_inbounds = get_target_inbounds()
 
     succeeded_inbounds: List[str] = []
     failed_inbounds: List[str] = []
-    for tag in TARGET_INBOUNDS:
+    for tag in target_inbounds:
         try:
             if desired_state == "active":
                 grpc_client.add_user(tag, client_uuid)
@@ -212,7 +361,7 @@ def sync_client(
             failed_inbounds.append(tag)
 
     if failed_inbounds:
-        # Atomic rollback: keep inbounds consistent if any inbound operation fails
+        # Atomic rollback across inbounds
         for rb_tag in succeeded_inbounds:
             try:
                 if desired_state == "active":
@@ -226,31 +375,36 @@ def sync_client(
             detail=f"Failed to sync user on inbounds: {failed_inbounds}",
         )
 
+    # Update local persistent client store
+    if desired_state == "active":
+        client_store.add_client(client_uuid)
+    else:
+        client_store.remove_client(client_uuid)
+
     return {
         "status": "ok",
         "client_id": client_uuid,
         "state": desired_state,
-        "inbounds": TARGET_INBOUNDS,
+        "inbounds": target_inbounds,
     }
 
 
 @app.delete("/v1/clients/{uuid}")
 def delete_client(uuid: str, _: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
-    Deletes client from both inbound-de and inbound-nl idempotently.
+    Deletes client from all inbounds and removes from local persistent storage.
     """
-    # Validate UUID
     try:
-        clean_uuid = str(uuid_lib.UUID(uuid.strip()))
+        clean_uuid = str(uuid_lib.UUID(uuid.strip())).lower()
     except ValueError:
         raise HTTPException(
             status_code=422,
             detail=f"Invalid UUID: {uuid}",
         ) from None
 
-
+    target_inbounds = get_target_inbounds()
     failed_inbounds: List[str] = []
-    for tag in TARGET_INBOUNDS:
+    for tag in target_inbounds:
         try:
             grpc_client.remove_user(tag, clean_uuid)
         except Exception as e:
@@ -263,9 +417,11 @@ def delete_client(uuid: str, _: bool = Depends(verify_api_key)) -> Dict[str, Any
             detail=f"Failed to remove user from inbounds: {failed_inbounds}",
         )
 
+    client_store.remove_client(clean_uuid)
+
     return {
         "status": "ok",
         "client_id": clean_uuid,
         "action": "deleted",
-        "inbounds": TARGET_INBOUNDS,
+        "inbounds": target_inbounds,
     }

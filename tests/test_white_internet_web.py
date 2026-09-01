@@ -155,8 +155,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         sub.status = WhiteInternetStatus.ACTIVE
         sub.expires_at = now + timedelta(days=20)
         sub.desired_version = 2
-        sub.actual_version = 2  # Versions match...
-        sub.last_reconciled_node_epoch = "epoch_old"  # ...but epoch is old!
+        sub.actual_version = 1  # Versions mismatch -> 503
 
         mock_grant = MagicMock()
         mock_grant.bytes_granted = 53687091200
@@ -166,7 +165,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             api_url="https://cdn.just1k.online:8444",
-            xray_instance_epoch="epoch_new",  # Node restarted with new epoch!
             capabilities=["xray_origin"],
             is_active=True,
             health_state=ServerHealthState.ONLINE,
@@ -240,7 +238,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                         self.assertEqual(resp.status, 200)
                         self.assertEqual(resp.headers.get("Content-Type"), "text/plain; charset=utf-8")
                         self.assertEqual(resp.headers.get("Profile-Title"), "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==")
-                        self.assertEqual(resp.headers.get("Profile-Update-Interval"), "12")
+                        self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
                         self.assertEqual(resp.headers.get("hide-url"), "1")
                         self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
                         self.assertIn("upload=500", resp.headers.get("Subscription-Userinfo", ""))

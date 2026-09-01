@@ -226,3 +226,53 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("wl_topup_menu", callbacks_active)
         self.assertIn("wl_renew_confirm", callbacks_active)
         self.assertIn("back_to_main_menu", callbacks_active)
+
+    async def test_show_subscription_link_renders_clean_incy_instructions(self):
+        """Clicking wl_show_link renders instructions for INCY and provides CopyTextButton for subscription."""
+        from unittest.mock import AsyncMock, patch
+        from aiogram.types import CallbackQuery, User as TgUser, Message
+        from database.models import User, WhiteInternetSubscription
+        from config.enums import WhiteInternetStatus
+        from bot.handlers.white_internet import show_subscription_link
+
+        user = User(id=1, telegram_id=123456789)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=1,
+            token="sub-secret-token",
+            status=WhiteInternetStatus.ACTIVE,
+        )
+
+        mock_query = AsyncMock(spec=CallbackQuery)
+        mock_query.answer = AsyncMock()
+        mock_query.from_user = TgUser(id=123456789, is_bot=False, first_name="Tester")
+        mock_query.message = AsyncMock(spec=Message)
+        mock_query.message.edit_text = AsyncMock()
+
+        mock_session = AsyncMock()
+
+        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=user):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub):
+                await show_subscription_link(mock_query, mock_session)
+
+                mock_query.message.edit_text.assert_awaited_once()
+                call_args = mock_query.message.edit_text.call_args
+                text = call_args[0][0]
+                reply_markup = call_args[1]["reply_markup"]
+
+                self.assertIn("INCY", text)
+                self.assertIn("sub-secret-token", text)
+
+                # Check keyboard buttons
+                copy_btn = None
+                back_btn = None
+                for row in reply_markup.inline_keyboard:
+                    for btn in row:
+                        if btn.copy_text:
+                            copy_btn = btn
+                        if btn.callback_data == "white_internet":
+                            back_btn = btn
+
+                self.assertIsNotNone(copy_btn, "Copy subscription link button must be present")
+                self.assertIn("sub-secret-token", copy_btn.copy_text.text)
+                self.assertIsNotNone(back_btn, "Back button must be present")

@@ -462,3 +462,90 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(sub.last_uplink_snapshot, 50)
                     self.assertEqual(sub.last_downlink_snapshot, 150)
                     self.assertEqual(sub.traffic_stats_epoch, "epoch-200")
+
+    async def test_traffic_worker_handles_stats_reset_within_same_epoch(self):
+        """When stats reset within same epoch (uplink < snapshot), worker rebases baseline cleanly."""
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        server = Server(
+            id=1,
+            name="Origin-MSK",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://origin.just1k.online:8444",
+            api_key="secret-key",
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-100",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=server.id,
+            token="token123",
+            uuid="client-uuid-1",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=50 * 1024**3,
+            traffic_used_bytes=1000,
+            last_uplink_snapshot=500,  # Old higher baseline
+            last_downlink_snapshot=1500,
+            traffic_stats_epoch="epoch-100",  # Same epoch
+        )
+
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        # Snapshot reports smaller counters 50 and 150 (stats reset happened)
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-100",
+            "boot-1",
+            1000,
+            {"client-uuid-1": {"uplink": 50, "downlink": 150}},
+        )
+
+        worker = WhiteInternetTrafficWorker(node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = sub
+
+        mock_session.execute.side_effect = [
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),
+        ]
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+            with patch(
+                "database.repositories.white_internet_repo.deduct_traffic_atomic",
+                return_value=(200, False, 0),
+            ) as mock_deduct:
+                with patch("database.repositories.white_internet_repo.record_traffic_event_atomic") as mock_event:
+                    processed = await worker.run_traffic_cycle(mock_session)
+
+                    self.assertEqual(processed, 1)
+                    # Rebase treated baseline as 0 -> delta 50 + 150 = 200
+                    mock_deduct.assert_awaited_once_with(
+                        mock_session,
+                        subscription_id=sub.id,
+                        delta_bytes=200,
+                        delta_uplink=50,
+                        delta_downlink=150,
+                        now=unittest.mock.ANY,
+                    )
+                    mock_event.assert_awaited_once_with(
+                        mock_session,
+                        subscription_id=sub.id,
+                        node_epoch="epoch-100",
+                        node_boot_id="boot-1",
+                        node_starttime=1000,
+                        snapshot_uplink_before=0,
+                        snapshot_uplink_after=50,
+                        snapshot_downlink_before=0,
+                        snapshot_downlink_after=150,
+                        delta_uplink=50,
+                        delta_downlink=150,
+                        allocated_bytes=200,
+                        overage_bytes=0,
+                        now=unittest.mock.ANY,
+                    )
+                    self.assertEqual(sub.last_uplink_snapshot, 50)
+                    self.assertEqual(sub.last_downlink_snapshot, 150)
+                    self.assertEqual(sub.traffic_stats_epoch, "epoch-100")

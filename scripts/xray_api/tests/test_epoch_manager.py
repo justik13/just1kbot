@@ -1,45 +1,30 @@
 import tempfile
 from pathlib import Path
-from epoch_manager import EpochManager
+from app import ClientStore
 
 
-def test_epoch_generation_and_persistence():
+def test_client_store_persistence():
     with tempfile.TemporaryDirectory() as tmpdir:
-        epoch_file = Path(tmpdir) / "sub" / "epoch.json"
-        mgr = EpochManager(file_path=str(epoch_file))
+        store_file = Path(tmpdir) / "clients.json"
+        store = ClientStore(file_path=store_file)
 
-        epoch1 = mgr.get_current_epoch()
-        assert epoch1.startswith("epoch_")
-        assert epoch_file.exists()
+        # Initially empty
+        assert store.load_clients() == set()
 
-        state = mgr.load_state()
-        assert state["node_epoch"] == epoch1
+        # Add clients
+        uuid1 = "a2b9d4e1-73c5-4812-b964-f3e7b85a1901"
+        uuid2 = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+        store.add_client(uuid1)
+        store.add_client(uuid2)
 
-        # Second call should return identical epoch when no process change detected
-        epoch2 = mgr.get_current_epoch()
-        assert epoch1 == epoch2
+        clients = store.load_clients()
+        assert uuid1 in clients
+        assert uuid2 in clients
+        assert len(clients) == 2
 
-
-def test_epoch_change_detection():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        epoch_file = Path(tmpdir) / "epoch.json"
-        mgr = EpochManager(file_path=str(epoch_file))
-
-        # Seed initial state with a fake PID, starttime, and boot_id
-        mgr.get_system_boot_id = lambda: "boot_01"
-        mgr.save_state("epoch_initial", pid=1001, starttime=50000, boot_id="boot_01")
-        assert mgr.get_current_epoch() == "epoch_initial"
-
-        # Mock get_xray_process_info to simulate process restart (new PID, new starttime)
-        mgr.get_xray_process_info = lambda: (1002, 60000)
-
-        epoch_new = mgr.get_current_epoch()
-        assert epoch_new != "epoch_initial"
-        assert epoch_new.startswith("epoch_")
-
-        # Verify persisted state
-        state = mgr.load_state()
-        assert state["node_epoch"] == epoch_new
-        assert state["xray_pid"] == 1002
-        assert state["xray_starttime"] == 60000
-        assert state["boot_id"] == "boot_01"
+        # Remove client
+        store.remove_client(uuid1)
+        clients_after = store.load_clients()
+        assert uuid1 not in clients_after
+        assert uuid2 in clients_after
+        assert len(clients_after) == 1

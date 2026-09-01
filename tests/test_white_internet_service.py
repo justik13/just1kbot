@@ -315,3 +315,23 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                     # 4. Active topup grant extended to new expiration
                     self.assertEqual(grant_topup.bytes_remaining, 25 * 1024**3)
                     self.assertEqual(grant_topup.expires_at, renewed.expires_at)
+
+    def test_generate_full_xray_config_outbounds_consistency(self):
+        """Verify that every outboundTag in routing.rules exists in outbounds list."""
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            token="test-token",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+        )
+        cfg = WhiteInternetService.generate_full_xray_config(sub, cdn_domain="cdn.example.test")
+        outbound_tags = {ob["tag"] for ob in cfg["outbounds"]}
+
+        for rule in cfg["routing"]["rules"]:
+            tag = rule.get("outboundTag")
+            if tag:
+                self.assertIn(
+                    tag,
+                    outbound_tags,
+                    f"Routing rule references undefined outboundTag: {tag}",
+                )

@@ -448,7 +448,7 @@ setup_https_config() {
 # Generated: $(date -Iseconds)
 
 # Map for WebSocket-aware Connection header (empty upgrade -> close).
-map $http_upgrade $connection_upgrade {
+map \$http_upgrade \$connection_upgrade {
     default upgrade;
     ''      close;
 }

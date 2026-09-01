@@ -98,14 +98,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
 
-        # Runtime Truth Criterion: both configuration version and the physical
-        # Xray generation must match. Version equality alone is insufficient
-        # after an Xray restart because in-memory users are lost.
-        if (
-            sub.actual_version != sub.desired_version
-            or not server.xray_instance_epoch
-            or sub.last_reconciled_node_epoch != server.xray_instance_epoch
-        ):
+        if sub.actual_version != sub.desired_version:
             headers = dict(common_headers)
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
@@ -121,6 +114,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 headers=headers,
             )
 
+        # Generate multi-relay configs if available
         vless_links = WhiteInternetService.generate_vless_links(sub, cdn_domain=cdn_domain)
         payload = "\n".join(vless_links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
@@ -136,7 +130,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                     expire=expire_ts,
                 ),
                 "Profile-Title": "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==",
-                "Profile-Update-Interval": "12",
+                "Profile-Update-Interval": "6",
                 "hide-url": "1",
                 "no-limit-enabled": "1",
             }
@@ -146,6 +140,11 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
 
 
 def setup_white_internet_web_routes(app: web.Application) -> None:
-    """Register White Internet HTTP subscription feed route."""
-    app.router.add_get("/sub/wl/{token}", white_internet_subscription_feed_handler)
-    logger.info("White Internet subscription feed route registered: GET /sub/wl/{token}")
+    """Register White Internet HTTP subscription feed routes with support for custom prefixes."""
+    sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl/").strip().rstrip("/")
+    # Register custom prefix
+    app.router.add_get(f"{sub_prefix}/{{token}}", white_internet_subscription_feed_handler)
+    # Register default fallback if prefix differs
+    if sub_prefix != "/sub/wl":
+        app.router.add_get("/sub/wl/{token}", white_internet_subscription_feed_handler)
+    logger.info("White Internet subscription feed routes registered: %s/{token}", sub_prefix)

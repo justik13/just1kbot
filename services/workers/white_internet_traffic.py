@@ -129,12 +129,17 @@ class WhiteInternetTrafficWorker:
                         delta_up = uplink
                         delta_down = downlink
                     else:
-                        logger.warning(
-                            "Counter anomaly detected within same epoch for sub_id=%d on server %d. Skipping charge.",
+                        # Counter regression / stats reset within the same epoch:
+                        # Rebase cleanly so accounting continues without stalling forever.
+                        logger.info(
+                            "Xray counter reset/regression detected within epoch for sub_id=%d on server %d. Rebasing baseline.",
                             sub.id,
                             server_id,
                         )
-                        continue
+                        before_up = 0
+                        before_down = 0
+                        delta_up = uplink
+                        delta_down = downlink
 
                     delta = delta_up + delta_down
                     if delta <= 0:
