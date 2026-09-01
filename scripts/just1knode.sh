@@ -922,12 +922,12 @@ cmd_install_xray_origin() {
 
     # Интерактивный запрос только обязательных параметров
     if [[ -z "$domain" ]]; then
-        echo -e "${CYAN}📌 Шаг 1/2: Origin-домен${NC}"
+        echo -e "${CYAN}📌 Шаг 1/3: Origin-домен${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Поддомен в вашей DNS-панели (напр. origin.example.com), направленный A-записью на IP этого сервера ($(get_public_ip))."
         read -r -p "Введите Origin-домен: " domain
     fi
     if [[ -z "$exit_de_host" ]]; then
-        echo -e "${CYAN}📌 Шаг 2/2: Подключение к Exit-серверу Германии (DE)${NC}"
+        echo -e "${CYAN}📌 Шаг 2/3: Подключение к Exit-серверу Германии (DE)${NC}"
         echo -e "   ${YELLOW}💡 Подсказка:${NC} Вставьте строку быстрого импорта из шага установки Exit (IP:PORT:UUID:PUBKEY:SHORTID:SNI):"
         read -r -p "Введите строку импорта Exit DE: " input_exit_de
         if [[ "$input_exit_de" == *":"*":"*":"* ]]; then
@@ -955,8 +955,14 @@ cmd_install_xray_origin() {
         exit_de_sni="dl.google.com"
     fi
 
+    if [[ -z "$bot_ip" ]]; then
+        echo -e "${CYAN}📌 Шаг 3/3: IP-адрес сервера с Telegram-ботом (опционально)${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} Публичный IP VPS с ботом (или нажмите Enter, чтобы разрешить любой IP по секретному XRAY_API_KEY)."
+        read -r -p "Введите IP сервера бота [Enter — любой IP]: " input_bot_ip
+        bot_ip="${input_bot_ip:-}"
+    fi
+
     # Автогенерация и безопасные дефолты
-    bot_ip="${bot_ip:-127.0.0.1}"
     exit_nl_host="${exit_nl_host:-$exit_de_host}"
     exit_nl_port="${exit_nl_port:-$exit_de_port}"
     exit_nl_uuid="${exit_nl_uuid:-$exit_de_uuid}"
@@ -979,7 +985,9 @@ cmd_install_xray_origin() {
 
     # Санитизация входных параметров
     domain="$(sanitize_host "$domain")"
-    bot_ip="$(sanitize_host "$bot_ip")"
+    if [[ -n "$bot_ip" ]]; then
+        bot_ip="$(sanitize_host "$bot_ip")"
+    fi
     exit_de_host="$(sanitize_host "$exit_de_host")"
     exit_de_uuid="$(echo "$exit_de_uuid" | tr -d '[:space:]')"
     exit_de_pubkey="$(echo "$exit_de_pubkey" | tr -d '[:space:]')"
@@ -990,8 +998,9 @@ cmd_install_xray_origin() {
     # Валидация
     [[ -n "$domain" ]] || error "Домен обязателен."
     validate_host_or_ip "$domain" || error "Некорректный формат домена: ${domain}"
-    [[ -n "$bot_ip" ]] || error "IP-адрес бота обязателен."
-    validate_host_or_ip "$bot_ip" || error "Некорректный IP-адрес бота: ${bot_ip}"
+    if [[ -n "$bot_ip" ]]; then
+        validate_host_or_ip "$bot_ip" || error "Некорректный IP-адрес бота: ${bot_ip}"
+    fi
     [[ -n "$exit_de_host" ]] || error "Хост Exit DE обязателен."
     validate_host_or_ip "$exit_de_host" || error "Некорректный хост/IP Exit DE: ${exit_de_host}"
     [[ -n "$exit_de_uuid" ]] || error "UUID Exit DE обязателен."
@@ -1318,9 +1327,12 @@ EOF
             yes | ufw delete "$num" 2>/dev/null || true
         fi
     done
-    ufw delete allow 8444/tcp 2>/dev/null || true
     if [[ -n "${bot_ip}" ]]; then
         ufw allow from "${bot_ip}" to any port 8444 proto tcp 2>/dev/null || true
+        log "Порт 8444 (Xray API) ограничен в UFW для IP бота: ${bot_ip}"
+    else
+        ufw allow 8444/tcp 2>/dev/null || true
+        log "Порт 8444 (Xray API) открыт в UFW (авторизация по XRAY_API_KEY)"
     fi
     ufw --force enable 2>/dev/null || true
 
@@ -1354,7 +1366,7 @@ EOF
     echo -e " • Роль узла:         ${CYAN}xray-origin (XHTTP + Reality Outbound)${NC}"
     echo -e " • Домен:             ${CYAN}${domain}${NC} (IP: ${pub_ip})"
     echo -e " • Публичный порт:    ${CYAN}443/tcp (HTTPS / XHTTP)${NC}"
-    echo -e " • Порт управления:   ${CYAN}8444/tcp (Xray-API, доступен для ${bot_ip})${NC}"
+    echo -e " • Порт управления:   ${CYAN}8444/tcp (Xray-API, доступен для ${bot_ip:-любого IP по API Key})${NC}"
     echo -e " • Путь XHTTP DE:     ${CYAN}${path_de}${NC}"
     echo -e " • Путь XHTTP NL:     ${CYAN}${path_nl}${NC}"
     echo -e " • Туннель к Exit:    ${CYAN}${exit_de_host}:${exit_de_port} (VLESS Reality + Vision)${NC}"
