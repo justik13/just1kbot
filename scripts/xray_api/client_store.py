@@ -58,9 +58,9 @@ class ClientStore:
         return {}
 
     def load_clients(self) -> Set[str]:
-        """Returns set of currently active client UUIDs."""
+        """Returns set of currently active client UUIDs, excluding tombstones."""
         entries = self.load_client_entries()
-        return {u for u, meta in entries.items() if meta.get("is_active", True) is True}
+        return {u for u, meta in entries.items() if meta.get("is_active", True) is True and not meta.get("tombstone", False)}
 
     def save_client_entries(self, entries: Dict[str, Dict[str, Any]]) -> bool:
         self._ensure_dir()
@@ -68,7 +68,7 @@ class ClientStore:
         data = {
             "clients": entries,
             "updated_at": time.time(),
-            "count": len([u for u, m in entries.items() if m.get("is_active", True) is True]),
+            "count": len([u for u, m in entries.items() if m.get("is_active", True) is True and not m.get("tombstone", False)]),
         }
         try:
             with open(temp_path, "w", encoding="utf-8") as f:
@@ -165,10 +165,16 @@ class ClientStore:
                 logger.debug("Could not acquire client store lock: %s", e)
         try:
             entries = self.load_client_entries()
-            if client_uuid in entries:
-                del entries[client_uuid]
-                if not self.save_client_entries(entries):
-                    raise IOError(f"Failed to persist client deletion to disk: {client_uuid}")
+            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            new_ver = version if version is not None else max(curr_ver + 1, 1)
+            entries[client_uuid] = {
+                "is_active": False,
+                "version": new_ver,
+                "tombstone": True,
+                "updated_at": time.time(),
+            }
+            if not self.save_client_entries(entries):
+                raise IOError(f"Failed to persist client deletion tombstone to disk: {client_uuid}")
         finally:
             if fcntl is not None and lock_fd is not None:
                 try:

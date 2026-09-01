@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import enum
 import logging
 import os
 import re
@@ -17,6 +18,13 @@ logger = logging.getLogger(__name__)
 def _sanitize_url(url: str) -> str:
     """Mask UUIDs and sensitive endpoints in URL for safe logging."""
     return re.sub(r"/v1/clients/[a-fA-F0-9-]+", "/v1/clients/[MASKED]", url)
+
+
+class SyncResult(str, enum.Enum):
+    APPLIED = "applied"
+    ALREADY_NEWER = "already_newer"
+    FENCED = "fenced"
+    FAILED = "failed"
 
 
 class XrayNodeClientError(RuntimeError):
@@ -147,8 +155,8 @@ class XrayNodeClient:
         client_uuid: str,
         is_active: bool,
         version: int | None = None,
-    ) -> tuple[bool, str | None]:
-        """Idempotently synchronize a client across both Origin inbounds with optional monotonic version fencing."""
+    ) -> tuple[SyncResult, str | None]:
+        """Idempotently synchronize a client across both Origin inbounds with monotonic version fencing."""
         url = f"{api_url.rstrip('/')}/v1/clients/sync"
         headers = self._get_headers(api_key)
         payload: dict[str, Any] = {
@@ -157,10 +165,17 @@ class XrayNodeClient:
         }
         if version is not None:
             payload["version"] = version
-        status_code, _data, err = await self._make_request("POST", url, headers, json_data=payload)
-        if status_code in (200, 201):
-            return True, None
-        return False, err or f"Sync failed with HTTP {status_code}"
+        status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
+        if status_code in (200, 201) and isinstance(data, dict):
+            res_str = data.get("result", "applied")
+            if res_str == "already_newer":
+                return SyncResult.ALREADY_NEWER, None
+            if res_str == "fenced":
+                return SyncResult.FENCED, "Request was fenced by node version"
+            return SyncResult.APPLIED, None
+        if status_code in (409, 412):
+            return SyncResult.FENCED, err or "Version fenced"
+        return SyncResult.FAILED, err or f"Sync failed with HTTP {status_code}"
 
     async def remove_client(
         self,
@@ -168,16 +183,24 @@ class XrayNodeClient:
         api_key: str,
         client_uuid: str,
         version: int | None = None,
-    ) -> tuple[bool, str | None]:
-        """Remove a client from all inbounds on the node with optional version fencing."""
+    ) -> tuple[SyncResult, str | None]:
+        """Remove a client from all inbounds on the node with version fencing."""
         url = f"{api_url.rstrip('/')}/v1/clients/{client_uuid}"
         if version is not None:
             url = f"{url}?version={version}"
         headers = self._get_headers(api_key)
-        status_code, _data, err = await self._make_request("DELETE", url, headers)
+        status_code, data, err = await self._make_request("DELETE", url, headers)
         if status_code in (200, 204):
-            return True, None
-        return False, err or f"Delete failed with HTTP {status_code}"
+            if isinstance(data, dict):
+                res_str = data.get("result", "applied")
+                if res_str == "already_newer":
+                    return SyncResult.ALREADY_NEWER, None
+                if res_str == "fenced":
+                    return SyncResult.FENCED, "Request was fenced by node version"
+            return SyncResult.APPLIED, None
+        if status_code in (409, 412):
+            return SyncResult.FENCED, err or "Version fenced"
+        return SyncResult.FAILED, err or f"Delete failed with HTTP {status_code}"
 
     async def get_traffic_snapshot(
         self, api_url: str, api_key: str

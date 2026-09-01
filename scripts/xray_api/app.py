@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -131,7 +132,7 @@ def get_target_inbounds() -> List[str]:
                 if isinstance(data, list):
                     for r in data:
                         t = r.get("inbound_tag")
-                        if t and (t.startswith("just1k-wl-") or t.startswith("inbound-")):
+                        if t and t.startswith("just1k-wl-"):
                             relay_tags.append(t)
         except Exception as e:
             logger.warning("Could not load relays from %s: %s", RELAYS_FILE_PATH, e)
@@ -145,11 +146,10 @@ def get_target_inbounds() -> List[str]:
                 for ib in cfg.get("inbounds", []):
                     protocol = ib.get("protocol", "").lower()
                     tag = ib.get("tag", "")
-                    # Match managed VLESS/VMESS inbounds only
+                    # Match managed VLESS/VMESS inbounds strictly by just1k-wl- namespace
                     if protocol in ("vless", "vmess") and (
                         tag.startswith("just1k-wl-")
-                        or tag == "inbound-default"
-                        or tag.startswith("inbound-")
+                        or tag in ("just1k-wl-default", "inbound-default")
                     ):
                         config_tags.append(tag)
         except Exception as e:
@@ -371,7 +371,7 @@ def list_clients(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
 
 
 @app.get("/v1/traffic/snapshot")
-def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
     Returns traffic stats aggregated by UUID/email with double-checked epoch atomicity.
     """
@@ -425,7 +425,7 @@ def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
             epoch1,
             epoch2,
         )
-        time.sleep(0.05 * (2**attempt))
+        await asyncio.sleep(0.05 * (2**attempt))
 
     raise HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -435,7 +435,7 @@ def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
 
 @app.post("/v1/clients/sync")
 @app.post("/v1/clients")
-def sync_client(
+async def sync_client(
     req: ClientSyncRequest, _: bool = Depends(verify_api_key)
 ) -> Dict[str, Any]:
     """
@@ -448,26 +448,29 @@ def sync_client(
     desired_state = req.desired_state or "active"
     target_inbounds = get_target_inbounds()
 
-    # Monotonic version fencing check
+    # Monotonic version fencing check (including tombstones)
     if req.version is not None:
         entries = client_store.load_client_entries()
         curr_entry = entries.get(client_uuid)
         if curr_entry:
             curr_ver = curr_entry.get("version")
-            if curr_ver is not None and req.version < curr_ver:
+            is_tombstone = curr_entry.get("tombstone", False)
+            if curr_ver is not None and (req.version < curr_ver or (is_tombstone and req.version <= curr_ver)):
                 logger.warning(
-                    "Stale sync request for %s: incoming version %d < stored version %d. Fencing.",
+                    "Stale sync request for %s: incoming version %d <= stored version %d (tombstone=%s). Fencing.",
                     _mask_uuid(client_uuid),
                     req.version,
                     curr_ver,
+                    is_tombstone,
                 )
                 return {
                     "status": "ok",
                     "client_id": client_uuid,
                     "result": "already_newer",
-                    "state": "active" if curr_entry.get("is_active") else "disabled",
+                    "state": "disabled" if is_tombstone else ("active" if curr_entry.get("is_active") else "disabled"),
                     "version": curr_ver,
                     "fenced": True,
+                    "tombstone": is_tombstone,
                     "inbounds": target_inbounds,
                 }
 
@@ -528,13 +531,13 @@ def sync_client(
 
 
 @app.delete("/v1/clients/{uuid}")
-def delete_client(
+async def delete_client(
     uuid: str,
     version: Optional[int] = None,
     _: bool = Depends(verify_api_key),
 ) -> Dict[str, Any]:
     """
-    Deletes client from all inbounds and removes from local persistent storage with version fencing.
+    Deletes client from all inbounds and records a tombstone in local persistent storage with version fencing.
     """
     try:
         clean_uuid = str(uuid_lib.UUID(uuid.strip())).lower()

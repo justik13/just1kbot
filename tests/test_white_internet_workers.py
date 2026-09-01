@@ -7,7 +7,7 @@ from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, Whi
 from database.models import Server, WhiteInternetSubscription
 from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
 from services.workers.white_internet_traffic import WhiteInternetTrafficWorker
-from services.xray_node_client import XrayNodeClient
+from services.xray_node_client import SyncResult, XrayNodeClient
 
 
 class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
@@ -46,7 +46,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 12345})
-        mock_client.sync_client.return_value = (True, None)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
@@ -109,7 +109,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         mock_client = AsyncMock(spec=XrayNodeClient)
         # Node returns NEW epoch (Xray restarted!)
         mock_client.check_health.return_value = (True, "epoch-200", {"boot_id": "boot-1", "starttime": 2000})
-        mock_client.sync_client.return_value = (True, None)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
         mock_session = AsyncMock()
@@ -173,7 +173,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         mock_client = AsyncMock()
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 1000})
-        mock_client.sync_client.return_value = (True, None)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
@@ -231,7 +231,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 12345})
-        mock_client.sync_client.return_value = (True, None)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
@@ -258,6 +258,48 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(sub.status, WhiteInternetStatus.EXPIRED)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
+
+    async def test_reconciliation_already_newer_does_not_mutate_actual_version(self):
+        """P0: When node returns already_newer, actual_version must NOT be set to older target_version."""
+        server = Server(
+            id=1,
+            name="Origin-MSK",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://origin.just1k.online:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-100",
+        )
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="token",
+            uuid="11111111-2222-3333-4444-555555555555",
+            status=WhiteInternetStatus.ACTIVE,
+            desired_version=3,
+            actual_version=1,  # older
+            last_reconciled_node_epoch="epoch-90",
+            provisioning_status=WhiteInternetProvisioningStatus.PENDING_UPDATE,
+        )
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "b1", "starttime": 100})
+        mock_client.sync_client.return_value = (SyncResult.ALREADY_NEWER, None)
+
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = [
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),
+        ]
+        with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
+            with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+                synced = await worker.run_reconciliation_cycle(mock_session)
+                self.assertEqual(synced, 0)
+                self.assertEqual(sub.actual_version, 1)  # NOT mutated to 3!
+                self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.PENDING_UPDATE)
 
     async def test_disabled_or_problematic_node_skipped_from_reconciliation(self):
         """Disabled or unhealthy nodes must be excluded from reconciliation cycle."""
@@ -331,7 +373,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 max_concurrent_observed = active_concurrent
             await asyncio.sleep(0.01)
             active_concurrent -= 1
-            return True, None
+            return SyncResult.APPLIED, None
 
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 1000})

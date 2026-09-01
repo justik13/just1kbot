@@ -113,20 +113,20 @@ class WhiteInternetTrafficWorker:
                     continue
 
                 try:
-                    try:
-                        raw_up = stats.get("uplink", 0)
-                        raw_down = stats.get("downlink", 0)
-                        uplink = max(int(raw_up) if raw_up is not None else 0, 0)
-                        downlink = max(int(raw_down) if raw_down is not None else 0, 0)
-                    except (ValueError, TypeError) as parse_err:
-                        logger.warning(
-                            "Malformed uplink/downlink counters for client %s on server %d: %s",
-                            client_uuid,
-                            server_id,
-                            parse_err,
-                        )
-                        continue
+                    raw_up = stats.get("uplink", 0)
+                    raw_down = stats.get("downlink", 0)
+                    uplink = max(int(raw_up) if raw_up is not None else 0, 0)
+                    downlink = max(int(raw_down) if raw_down is not None else 0, 0)
+                except (ValueError, TypeError) as parse_err:
+                    logger.warning(
+                        "Malformed uplink/downlink counters for client %s on server %d: %s",
+                        client_uuid,
+                        server_id,
+                        parse_err,
+                    )
+                    continue
 
+                try:
                     async with sf() as sess:
                         sub_meta = await sess.scalar(
                             select(WhiteInternetSubscription).where(
@@ -175,52 +175,22 @@ class WhiteInternetTrafficWorker:
                             now=now,
                         )
 
-                        try:
-                            if isinstance(sess, AsyncSession):
-                                async with sess.begin_nested():
-                                    await white_internet_repo.record_traffic_event_atomic(
-                                        sess,
-                                        subscription_id=sub.id,
-                                        node_epoch=node_epoch,
-                                        node_boot_id=node_boot_id,
-                                        node_starttime=node_starttime,
-                                        snapshot_uplink_before=before_up,
-                                        snapshot_uplink_after=uplink,
-                                        snapshot_downlink_before=before_down,
-                                        snapshot_downlink_after=downlink,
-                                        delta_uplink=delta_up,
-                                        delta_downlink=delta_down,
-                                        allocated_bytes=consumed,
-                                        overage_bytes=overage,
-                                        now=now,
-                                    )
-                            else:
-                                await white_internet_repo.record_traffic_event_atomic(
-                                    sess,
-                                    subscription_id=sub.id,
-                                    node_epoch=node_epoch,
-                                    node_boot_id=node_boot_id,
-                                    node_starttime=node_starttime,
-                                    snapshot_uplink_before=before_up,
-                                    snapshot_uplink_after=uplink,
-                                    snapshot_downlink_before=before_down,
-                                    snapshot_downlink_after=downlink,
-                                    delta_uplink=delta_up,
-                                    delta_downlink=delta_down,
-                                    allocated_bytes=consumed,
-                                    overage_bytes=overage,
-                                    now=now,
-                                )
-                        except Exception as event_exc:
-                            logger.warning(
-                                "Duplicate or non-fatal traffic event collision for sub_id=%d on server %d (epoch=%s, up=%d, down=%d). Handled idempotently: %s",
-                                sub.id,
-                                server_id,
-                                node_epoch,
-                                uplink,
-                                downlink,
-                                event_exc,
-                            )
+                        await white_internet_repo.record_traffic_event_atomic(
+                            sess,
+                            subscription_id=sub.id,
+                            node_epoch=node_epoch,
+                            node_boot_id=node_boot_id,
+                            node_starttime=node_starttime,
+                            snapshot_uplink_before=before_up,
+                            snapshot_uplink_after=uplink,
+                            snapshot_downlink_before=before_down,
+                            snapshot_downlink_after=downlink,
+                            delta_uplink=delta_up,
+                            delta_downlink=delta_down,
+                            allocated_bytes=consumed,
+                            overage_bytes=overage,
+                            now=now,
+                        )
 
                         sub.last_uplink_snapshot = uplink
                         sub.last_downlink_snapshot = downlink

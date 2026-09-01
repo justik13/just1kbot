@@ -24,18 +24,12 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         _hub_render_locks.clear()
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
         async with self.sessions.begin() as session:
-            await session.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, "
-                    "hub_messages, vpn_profiles, maintenance_mode, audit_logs, "
-                    "users, tariffs, system_settings, payment_disputes "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await session.execute(text(TRUNCATE_SQL))
             # Create the admin user
             self.admin_user_db = DBUser(telegram_id=123456789)
             # Create a regular user

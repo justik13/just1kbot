@@ -14,7 +14,7 @@ from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, Whi
 from database.connection import session_scope
 from database.models import Server, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
-from services.xray_node_client import XrayNodeClient
+from services.xray_node_client import SyncResult, XrayNodeClient
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger("WhiteInternetReconciliation")
@@ -44,9 +44,13 @@ class WhiteInternetReconciliationWorker:
         self._sub_locks: dict[int, asyncio.Lock] = {}
 
     def _get_sub_lock(self, sub_id: int) -> asyncio.Lock:
-        if sub_id not in self._sub_locks:
-            self._sub_locks[sub_id] = asyncio.Lock()
-        return self._sub_locks[sub_id]
+        lock = self._sub_locks.get(sub_id)
+        if lock is None:
+            if len(self._sub_locks) > 1000:
+                self._sub_locks = {k: v for k, v in self._sub_locks.items() if v.locked()}
+            lock = asyncio.Lock()
+            self._sub_locks[sub_id] = lock
+        return lock
 
     async def _reconcile_single_subscription(
         self,
@@ -64,7 +68,7 @@ class WhiteInternetReconciliationWorker:
 
         async with self._get_sub_lock(sub_id):
             async with self._semaphore:
-                success, err_msg = await self.client.sync_client(
+                sync_result, err_msg = await self.client.sync_client(
                     api_url,
                     api_key,
                     sub_uuid,
@@ -78,7 +82,7 @@ class WhiteInternetReconciliationWorker:
                 if sub is None:
                     return False
 
-                if success and sub.desired_version == target_version:
+                if sync_result == SyncResult.APPLIED and sub.desired_version == target_version:
                     sub.actual_version = target_version
                     sub.last_reconciled_node_epoch = target_epoch
                     if sub.status == WhiteInternetStatus.PENDING and desired_active:
@@ -92,7 +96,30 @@ class WhiteInternetReconciliationWorker:
                     sub.last_synced_at = now_utc()
                     sub.last_sync_error = None
                     return True
-                elif not success:
+                elif sync_result == SyncResult.ALREADY_NEWER:
+                    # Node already has a newer version! NEVER overwrite DB actual_version with older target_version
+                    logger.warning(
+                        "Node reported already_newer for sub_id=%d on server %d (target=%d). Retaining DB state.",
+                        sub_id,
+                        server_id,
+                        target_version,
+                    )
+                    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                    sub.last_synced_at = now_utc()
+                    return False
+                elif sync_result == SyncResult.FENCED:
+                    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                    sub.last_sync_error = err_msg or "sync_fenced"
+                    sub.last_synced_at = now_utc()
+                    logger.warning(
+                        "Sync fenced for sub_id=%d on server %d (target_version=%d): %s",
+                        sub_id,
+                        server_id,
+                        target_version,
+                        err_msg,
+                    )
+                    return False
+                elif sync_result == SyncResult.FAILED:
                     sub.provisioning_status = WhiteInternetProvisioningStatus.FAILED
                     sub.last_sync_error = err_msg
                     sub.last_synced_at = now_utc()
@@ -206,7 +233,7 @@ class WhiteInternetReconciliationWorker:
                 pending_subs = res_subs.scalars().all()
 
                 for sub in pending_subs:
-                    if sub.expires_at <= now and sub.status in (
+                    if sub.expires_at is not None and sub.expires_at <= now and sub.status in (
                         WhiteInternetStatus.PENDING,
                         WhiteInternetStatus.ACTIVE,
                         WhiteInternetStatus.EXHAUSTED,
@@ -215,7 +242,7 @@ class WhiteInternetReconciliationWorker:
 
                     desired_active = (
                         sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
-                        and sub.expires_at > now
+                        and (sub.expires_at is None or sub.expires_at > now)
                     )
                     sync_tasks.append({
                         "sub_id": sub.id,

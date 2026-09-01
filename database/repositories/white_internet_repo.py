@@ -300,6 +300,55 @@ async def record_traffic_event_atomic(
     if delta_uplink == 0 and delta_downlink == 0:
         return None
 
+    try:
+        bind = session.get_bind()
+        is_pg = bind.dialect.name == "postgresql"
+    except Exception:
+        is_pg = True
+
+    if is_pg:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = (
+            pg_insert(WhiteInternetTrafficEvent)
+            .values(
+                subscription_id=subscription_id,
+                node_epoch=node_epoch,
+                node_boot_id=node_boot_id,
+                node_starttime=node_starttime,
+                snapshot_uplink_before=snapshot_uplink_before,
+                snapshot_uplink_after=snapshot_uplink_after,
+                snapshot_downlink_before=snapshot_downlink_before,
+                snapshot_downlink_after=snapshot_downlink_after,
+                delta_uplink=delta_uplink,
+                delta_downlink=delta_downlink,
+                allocated_bytes=allocated_bytes,
+                overage_bytes=overage_bytes,
+                created_at=now or now_utc(),
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    "subscription_id",
+                    "node_epoch",
+                    "snapshot_uplink_after",
+                    "snapshot_downlink_after",
+                ]
+            )
+        )
+        await session.execute(stmt)
+        return None
+
+    existing = await session.scalar(
+        select(WhiteInternetTrafficEvent).where(
+            WhiteInternetTrafficEvent.subscription_id == subscription_id,
+            WhiteInternetTrafficEvent.node_epoch == node_epoch,
+            WhiteInternetTrafficEvent.snapshot_uplink_after == snapshot_uplink_after,
+            WhiteInternetTrafficEvent.snapshot_downlink_after == snapshot_downlink_after,
+        )
+    )
+    if existing is not None:
+        return existing
+
     event = WhiteInternetTrafficEvent(
         subscription_id=subscription_id,
         node_epoch=node_epoch,

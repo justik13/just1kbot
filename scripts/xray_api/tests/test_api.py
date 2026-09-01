@@ -244,7 +244,7 @@ def test_client_delete_invalid_uuid():
 
 
 def test_client_sync_version_fencing():
-    uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+    uuid = "f5a9d4e1-73c5-4812-b964-f3e7b85a1905"
     with patch.object(grpc_client, "add_user", return_value=True):
         # Sync version 5
         res = client.post(
@@ -301,8 +301,46 @@ def test_client_delete_version_fencing():
         assert uuid not in client_store.load_clients()
 
 
+def test_client_tombstone_prevents_stale_resurrection():
+    """P0: Tombstones on DELETE prevent older out-of-order syncs from resurrecting deleted clients."""
+    uuid = "c4d9d4e1-73c5-4812-b964-f3e7b85a1904"
+    client_store.add_client(uuid, version=5)
+
+    # Delete client at version 5 -> creates persistent tombstone at version 5
+    with patch.object(grpc_client, "remove_user", return_value=True):
+        res = client.delete(f"/v1/clients/{uuid}?version=5", headers=VALID_HEADERS)
+        assert res.status_code == 200
+        assert res.json()["result"] == "applied"
+        assert uuid not in client_store.load_clients()
+
+    # Stale sync at version 5 or lower must be fenced and not resurrect client
+    with patch.object(grpc_client, "add_user", return_value=True) as mock_add:
+        res_stale = client.post(
+            "/v1/clients/sync",
+            json={"client_id": uuid, "desired_state": "active", "version": 5},
+            headers=VALID_HEADERS,
+        )
+        assert res_stale.status_code == 200
+        assert res_stale.json()["result"] == "already_newer"
+        assert res_stale.json().get("fenced") is True
+        assert mock_add.call_count == 0
+        assert uuid not in client_store.load_clients()
+
+    # Newer sync at version 6 successfully resurrects client
+    with patch.object(grpc_client, "add_user", return_value=True) as mock_add:
+        res_new = client.post(
+            "/v1/clients/sync",
+            json={"client_id": uuid, "desired_state": "active", "version": 6},
+            headers=VALID_HEADERS,
+        )
+        assert res_new.status_code == 200
+        assert res_new.json()["result"] == "applied"
+        assert mock_add.call_count > 0
+        assert uuid in client_store.load_clients()
+
+
 def test_dynamic_inbound_discovery(tmp_path):
-    """F10: Discovers VLESS inbounds strictly filtering by managed namespaced tags (just1k-wl-* and legacy inbound-)."""
+    """F10: Discovers VLESS inbounds strictly filtering by managed namespaced tags (just1k-wl-*)."""
     # 1. Unset explicit override
     with patch.dict(os.environ, {}, clear=False):
         if "XRAY_INBOUND_TAGS" in os.environ:
@@ -333,12 +371,12 @@ def test_dynamic_inbound_discovery(tmp_path):
         with patch("app.XRAY_CONFIG_PATH", cfg_file):
             with patch("app.RELAYS_FILE_PATH", relays_file):
                 inbounds = get_target_inbounds()
-                # Must include managed inbounds with default first, and exclude unmanaged tags
+                # Must include ONLY managed just1k-wl-* inbounds with default first, and exclude unmanaged tags
                 assert "just1k-wl-default" in inbounds
                 assert "just1k-wl-inbound-de" in inbounds
-                assert "inbound-nl" in inbounds
                 assert "just1k-wl-inbound-fr" in inbounds
-                assert "inbound-us" in inbounds
+                assert "inbound-nl" not in inbounds
+                assert "inbound-us" not in inbounds
                 assert "custom-unmanaged-vless" not in inbounds
                 assert "api-grpc" not in inbounds
                 assert "direct" not in inbounds

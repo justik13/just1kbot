@@ -44,7 +44,7 @@ from database.models import (
 )
 from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
 from services.workers.white_internet_traffic import WhiteInternetTrafficWorker
-from services.xray_node_client import XrayNodeClient
+from services.xray_node_client import SyncResult, XrayNodeClient
 
 
 class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
@@ -151,7 +151,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         # 3. Reconciliation Worker runs: provisions user on Xray node
         mock_node_client = AsyncMock(spec=XrayNodeClient)
         mock_node_client.check_health.return_value = (True, node_epoch, {"status": "ok", "grpc_ok": True, "xray_running": True, "boot_id": "boot-1", "starttime": 12345})
-        mock_node_client.sync_client.return_value = (True, None)
+        mock_node_client.sync_client.return_value = (SyncResult.APPLIED, None)
 
         recon_worker = WhiteInternetReconciliationWorker(node_client=mock_node_client)
 
@@ -290,7 +290,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
 
         # 8. Reconciliation de-provisions exhausted user from Xray
         mock_node_client.sync_client.reset_mock()
-        mock_node_client.sync_client.return_value = (True, None)
+        mock_node_client.sync_client.return_value = (SyncResult.APPLIED, None)
 
         recon_session_2 = AsyncMock()
         recon_session_2.get.return_value = sub

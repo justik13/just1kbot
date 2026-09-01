@@ -12,29 +12,21 @@ from database.models import Server, User, VPNProfile
 class DeviceNameIndexPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await s.execute(text(TRUNCATE_SQL))
 
     async def asyncTearDown(self):
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
         async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await s.execute(text(TRUNCATE_SQL))
         await self.engine.dispose()
 
     async def test_device_name_index_uses_column_expression(self):

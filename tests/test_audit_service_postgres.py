@@ -7,6 +7,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import User
 from services.audit_service import AuditService
 
+try:
+    from tests.db_utils import TRUNCATE_SQL
+except ImportError:
+    from db_utils import TRUNCATE_SQL
+
 DB = os.getenv("TEST_DATABASE_URL")
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
@@ -15,11 +20,11 @@ class TestAuditServicePostgres(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(DB)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as conn:
-            await conn.execute(text("TRUNCATE users, audit_logs RESTART IDENTITY CASCADE"))
+            await conn.execute(text(TRUNCATE_SQL))
 
     async def asyncTearDown(self):
         async with self.engine.begin() as conn:
-            await conn.execute(text("TRUNCATE users, audit_logs RESTART IDENTITY CASCADE"))
+            await conn.execute(text(TRUNCATE_SQL))
         await self.engine.dispose()
 
     async def test_audit_failure_does_not_poison_transaction(self):

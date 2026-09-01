@@ -32,7 +32,7 @@ from database.repositories import white_internet_repo
 from services.white_internet_service import WhiteInternetService
 from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
 from services.workers.white_internet_traffic import WhiteInternetTrafficWorker
-from services.xray_node_client import XrayNodeClient
+from services.xray_node_client import SyncResult, XrayNodeClient
 
 try:
     from tests.db_utils import TRUNCATE_SQL
@@ -73,6 +73,11 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         self.engine = create_async_engine(DB, pool_size=5, max_overflow=5)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        from database import connection
+        self.old_sessionmaker = connection._sessionmaker
+        self.old_engine = connection._engine
+        connection._sessionmaker = self.sessions
+        connection._engine = self.engine
 
         async with self.sessions.begin() as session:
             await session.execute(text(TRUNCATE_SQL))
@@ -80,13 +85,14 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
             self.user = User(telegram_id=int(uuid.uuid4().int % 1000000000))
             session.add(self.user)
             await session.flush()
+            self.user_id = self.user.id
 
             from database.repositories.account_ledger_repo import create_admin_adjustment
 
             # Credit user balance with 1000 RUB using real ledger transaction
             await create_admin_adjustment(
                 session,
-                user_id=self.user.id,
+                user_id=self.user_id,
                 signed_amount=1000,
                 idempotency_key=str(uuid.uuid4()),
                 metadata={"reason": "test setup"},
@@ -105,6 +111,10 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 xray_instance_starttime=1000,
             )
             session.add(self.server)
+            await session.flush()
+            self.server_id = self.server.id
+            self.server_api_url = self.server.api_url
+            self.server_api_key = self.server.api_key
 
             # Tariff & TariffVersion for White Internet
             self.tariff = Tariff(
@@ -132,6 +142,9 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
             await session.flush()
 
     async def asyncTearDown(self):
+        from database import connection
+        connection._sessionmaker = self.old_sessionmaker
+        connection._engine = self.old_engine
         await self.engine.dispose()
         self.env_patcher.stop()
 
@@ -143,7 +156,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             ok, msg, sub = await WhiteInternetService.purchase_subscription(
                 session=session,
-                user_id=self.user.id,
+                user_id=self.user_id,
             )
             self.assertTrue(ok, msg)
             self.assertIsNotNone(sub)
@@ -161,7 +174,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
             node_epoch,
             {"status": "ok", "grpc_ok": True, "xray_running": True, "boot_id": "boot_pipe_01", "starttime": 1000},
         )
-        mock_client.sync_client.return_value = (True, None)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
 
         recon_worker = WhiteInternetReconciliationWorker(node_client=mock_client)
         async with self.sessions.begin() as session:
@@ -221,13 +234,13 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         # 5. Reconciliation de-provisions exhausted user from Xray
         mock_client.sync_client.reset_mock()
-        mock_client.sync_client.return_value = (True, None)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
         async with self.sessions.begin() as session:
             synced = await recon_worker.run_reconciliation_cycle(session)
             self.assertEqual(synced, 1)
             mock_client.sync_client.assert_awaited_once_with(
-                self.server.api_url,
-                self.server.api_key,
+                self.server_api_url,
+                self.server_api_key,
                 sub_uuid,
                 is_active=False,
                 version=2,
@@ -242,7 +255,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             ok, msg, grant = await WhiteInternetService.topup_quota(
                 session=session,
-                user_id=self.user.id,
+                user_id=self.user_id,
                 pack_gb=25,
             )
             self.assertTrue(ok, msg)
@@ -255,13 +268,13 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         # 7. Reconciliation re-enables user on Xray node
         mock_client.sync_client.reset_mock()
-        mock_client.sync_client.return_value = (True, None)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
         async with self.sessions.begin() as session:
             synced = await recon_worker.run_reconciliation_cycle(session)
             self.assertEqual(synced, 1)
             mock_client.sync_client.assert_awaited_once_with(
-                self.server.api_url,
-                self.server.api_key,
+                self.server_api_url,
+                self.server_api_key,
                 sub_uuid,
                 is_active=True,
                 version=3,
@@ -276,7 +289,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             ok, msg, renewed_sub = await WhiteInternetService.renew_subscription(
                 session=session,
-                user_id=self.user.id,
+                user_id=self.user_id,
             )
             self.assertTrue(ok, msg)
             self.assertIsNotNone(renewed_sub)
@@ -298,7 +311,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             ok, msg, sub = await WhiteInternetService.purchase_subscription(
                 session=session,
-                user_id=self.user.id,
+                user_id=self.user_id,
             )
             self.assertTrue(ok, msg)
             sub_id = sub.id
@@ -311,7 +324,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
             node_epoch,
             {"status": "ok", "grpc_ok": True, "xray_running": True, "boot_id": "boot_pipe_01", "starttime": 1000},
         )
-        mock_client.sync_client.return_value = (True, None)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
 
         recon_worker = WhiteInternetReconciliationWorker(node_client=mock_client)
         async with self.sessions.begin() as session:
@@ -360,7 +373,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             ok, msg, sub = await WhiteInternetService.purchase_subscription(
                 session=session,
-                user_id=self.user.id,
+                user_id=self.user_id,
             )
             self.assertTrue(ok, msg)
             sub_id = sub.id

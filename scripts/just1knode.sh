@@ -137,7 +137,11 @@ manifest_begin() {
     done
 
     for f in "${deduped[@]}"; do
-        if [[ -f "$f" ]]; then
+        if [[ -L "$f" ]]; then
+            local target_link
+            target_link="$(readlink "$f")"
+            printf "SYMLINK\t%s\t%s\t-\t-\n" "$f" "$target_link" >> "$MANIFEST_LOG"
+        elif [[ -f "$f" ]]; then
             local rel_hash
             rel_hash="$(echo -n "$f" | md5sum | awk '{print $1}')"
             cp -p "$f" "$TXN_DIR/files/${rel_hash}"
@@ -153,6 +157,7 @@ manifest_begin() {
 
 manifest_rollback() {
     log "Выполняется транзакционный откат конфигураций к исходному состоянию..."
+    local rollback_failed=0
     if [[ -n "${MANIFEST_LOG:-}" && -f "$MANIFEST_LOG" ]]; then
         while IFS=$'\t' read -r status path rel_hash mode owner; do
             if [[ "$status" == "EXISTS" ]]; then
@@ -162,21 +167,37 @@ manifest_rollback() {
                     chmod "$mode" "$path" 2>/dev/null || true
                     chown "$owner" "$path" 2>/dev/null || true
                 fi
+            elif [[ "$status" == "SYMLINK" ]]; then
+                local target_link="$rel_hash"
+                rm -f "$path"
+                ln -sf "$target_link" "$path"
             elif [[ "$status" == "ABSENT" ]]; then
                 rm -f "$path"
             fi
         done < "$MANIFEST_LOG"
     fi
 
-    # Verify rollback
-    nginx -t 2>/dev/null || true
+    # Fail-closed rollback validation: check syntax
+    if command -v nginx &>/dev/null; then
+        if ! nginx -t 2>/dev/null; then
+            warn "КРИТИЧЕСКАЯ ОШИБКА: Nginx конфигурация не прошла валидацию после отката!"
+            rollback_failed=1
+        fi
+    fi
     if [[ -f "$XRAY_CONFIG" && -x "$XRAY_BIN" ]]; then
-        "$XRAY_BIN" run -test -config "$XRAY_CONFIG" 2>/dev/null || true
+        if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG" 2>/dev/null; then
+            warn "КРИТИЧЕСКАЯ ОШИБКА: Xray конфигурация не прошла валидацию после отката!"
+            rollback_failed=1
+        fi
     fi
     systemctl reload nginx 2>/dev/null || true
     systemctl restart xray 2>/dev/null || true
     systemctl restart xray-api 2>/dev/null || true
     rm -rf "${TXN_DIR:-}"
+
+    if [[ $rollback_failed -ne 0 ]]; then
+        warn "Откат конфигурации завершился с предупреждением валидации."
+    fi
 }
 
 manifest_commit() {
@@ -387,6 +408,7 @@ install_amnezia_api_node() {
 
     local domain="${1:-}"
     local email="${2:-}"
+    local port="8080"
 
     if [[ -z "$domain" ]]; then
         read -rp "Введите домен для Amnezia API (например: awg.example.com): " domain
@@ -411,10 +433,10 @@ install_amnezia_api_node() {
     log "Развертывание amnezia-api в $amnezia_dir..."
     if [[ -d "$amnezia_dir" ]]; then
         git -C "$amnezia_dir" fetch --all --prune || true
-        git -C "$amnezia_dir" checkout "$AMNEZIA_API_COMMIT" || true
+        git -C "$amnezia_dir" checkout "$AMNEZIA_API_COMMIT" || error "Не удалось переключиться на коммит $AMNEZIA_API_COMMIT"
     else
         git clone https://github.com/kyoresuas/amnezia-api.git "$amnezia_dir"
-        git -C "$amnezia_dir" checkout "$AMNEZIA_API_COMMIT" || true
+        git -C "$amnezia_dir" checkout "$AMNEZIA_API_COMMIT" || error "Не удалось переключиться на коммит $AMNEZIA_API_COMMIT"
     fi
 
     (cd "$amnezia_dir" && npm install --production)
@@ -423,27 +445,22 @@ install_amnezia_api_node() {
     api_key="$(python3 -c "import secrets; print(secrets.token_hex(32))")"
 
     cat > "$amnezia_dir/.env" <<EOF
-PORT=8080
+PORT=${port}
 FASTIFY_API_KEY=${api_key}
 EOF
 
     mkdir -p "${SYSTEMD_SYSTEM_DIR}"
     cat > "${SYSTEMD_SYSTEM_DIR}/amnezia-api.service" <<EOF
 [Unit]
-Description=Amnezia API Service
-After=network.target
-
-[Service]
-Type=simple
 Description=Amnezia API Service (AWG 2.0)
-After=docker.service
+After=network.target docker.service
 Requires=docker.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/amnezia-api
-EnvironmentFile=/etc/amnezia-api/config.env
+EnvironmentFile=-/etc/amnezia-api/config.env
 ExecStart=/usr/bin/docker compose up -d
 ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=0
@@ -535,12 +552,12 @@ if os.path.exists(config_file):
     except Exception:
         existing = {}
 
-# Сохраняем чужие inbounds, удаляя только управляемые just1k теги
+# Сохраняем чужие inbounds, удаляя ТОЛЬКО управляемые just1k теги
 inbounds = [
     ib for ib in existing.get('inbounds', [])
-    if ib.get('tag') not in ('just1k-wl-api-grpc', 'just1k-wl-default', 'api-grpc', 'inbound-default')
+    if ib.get('tag') not in ('just1k-wl-api-grpc', 'just1k-wl-default')
 ]
-# Сохраняем чужие outbounds, удаляя только управляемые just1k теги
+# Сохраняем чужие outbounds, удаляя ТОЛЬКО управляемые just1k теги
 outbounds = [
     ob for ob in existing.get('outbounds', [])
     if ob.get('tag') not in ('just1k-wl-direct', 'just1k-wl-block')
@@ -550,8 +567,8 @@ existing_rules = existing.get('routing', {}).get('rules', [])
 rules = [
     r for r in existing_rules
     if not (
-        (isinstance(r.get('inboundTag'), list) and any(t in ('just1k-wl-api-grpc', 'just1k-wl-default', 'api-grpc', 'inbound-default') for t in r.get('inboundTag')))
-        or r.get('outboundTag') in ('just1k-wl-api', 'api')
+        (isinstance(r.get('inboundTag'), list) and any(t in ('just1k-wl-api-grpc', 'just1k-wl-default') for t in r.get('inboundTag')))
+        or r.get('outboundTag') == 'just1k-wl-api'
     )
 ]
 

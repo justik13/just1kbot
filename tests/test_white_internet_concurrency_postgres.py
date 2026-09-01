@@ -85,12 +85,19 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         self.engine = create_async_engine(DB, pool_size=20, max_overflow=20, pool_timeout=60, connect_args={"timeout": 30})
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        from database import connection
+        self.old_sessionmaker = connection._sessionmaker
+        self.old_engine = connection._engine
+        connection._sessionmaker = self.sessions
+        connection._engine = self.engine
 
         async with self.sessions.begin() as session:
             await session.execute(text(TRUNCATE_SQL))
 
             self.user = User(telegram_id=int(uuid.uuid4().int % 1000000000))
             session.add(self.user)
+            await session.flush()
+            self.user_id = self.user.id
 
             self.server = Server(
                 name="Origin-MSK-PG-Test",
@@ -158,6 +165,9 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
 
 
     async def asyncTearDown(self):
+        from database import connection
+        connection._sessionmaker = self.old_sessionmaker
+        connection._engine = self.old_engine
         await self.engine.dispose()
         self.env_patcher.stop()
 
