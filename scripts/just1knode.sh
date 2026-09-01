@@ -489,7 +489,7 @@ inbounds.append({
             'xPaddingKey': 'dc',
             'xPaddingHeader': 'X-Cache',
             'xPaddingMethod': 'tokenish',
-            'xPaddingPlacement': 'queryInHeader'
+            'xPaddingPlacement': 'header'
         }
     }
 })
@@ -516,6 +516,7 @@ final_config = {
 with open(config_file, 'w', encoding='utf-8') as f:
     json.dump(final_config, f, indent=2)
 " "$XRAY_CONFIG" "$secret_path"
+    chmod 600 "$XRAY_CONFIG"
 
     cat > /etc/systemd/system/xray.service <<EOF
 [Unit]
@@ -553,6 +554,7 @@ CLIENTS_FILE_PATH=/etc/just1knode/clients.json
 RELAYS_FILE_PATH=/etc/just1knode/relays.json
 XRAY_INBOUND_TAGS=inbound-default
 EOF
+    chmod 600 /etc/xray-api/config.env
 
     python3 -m venv "${XRAY_API_DIR}/venv"
     "${XRAY_API_DIR}/venv/bin/pip" install --upgrade pip -q
@@ -1001,7 +1003,7 @@ xray_conf['inbounds'].append({
             'xPaddingKey': 'dc',
             'xPaddingHeader': 'X-Cache',
             'xPaddingMethod': 'tokenish',
-            'xPaddingPlacement': 'queryInHeader'
+            'xPaddingPlacement': 'header'
         }
     }
 })
@@ -1096,6 +1098,7 @@ if os.path.exists(env_file):
             f.write(line)
         f.write('XRAY_INBOUND_TAGS=' + ','.join(tags) + '\n')
 " "$RELAYS_FILE" "$XRAY_CONFIG" "$STATE_FILE" "$name" "$ip" "$port" "$uuid" "$code" "$security_type" "$pubkey" "$shortid" "$sni"
+    chmod 600 "$XRAY_CONFIG"
 
     # Валидация и безопасный перезапуск
     nginx -t && systemctl reload nginx
@@ -1159,6 +1162,7 @@ if os.path.exists(env_file):
             f.write(line)
         f.write('XRAY_INBOUND_TAGS=' + ','.join(tags) + '\n')
 " "$RELAYS_FILE" "$XRAY_CONFIG" "$target"
+    chmod 600 "$XRAY_CONFIG"
 
     nginx -t && systemctl reload nginx || true
     "$XRAY_BIN" run -test -config "$XRAY_CONFIG" || true

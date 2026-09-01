@@ -252,8 +252,8 @@ async def ping_server(
         if "xray_origin" in (server.capabilities or []) or server.protocol == "xray":
             from services.xray_node_client import XrayNodeClient
 
-            xclient = XrayNodeClient(timeout=10.0)
-            is_healthy, _epoch, _detail = await xclient.check_health(server.api_url, server.api_key)
+            async with XrayNodeClient(timeout=10.0) as xclient:
+                is_healthy, _epoch, _detail = await xclient.check_health(server.api_url, server.api_key)
         else:
             from services.amnezia_client import AmneziaClient
 

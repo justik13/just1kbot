@@ -353,7 +353,15 @@ async def update_server_xray_epoch_cas(
         await session.flush()
         return True, server
 
-    if new_st == cur_st and server.xray_instance_epoch == new_epoch:
+    if new_st == cur_st:
+        if server.xray_instance_epoch == new_epoch:
+            return True, server
+        # If starttime matches due to 10ms clock tick granularity during rapid restart,
+        # accept the new epoch to prevent billing stall:
+        server.xray_instance_epoch = new_epoch
+        server.xray_instance_boot_id = new_boot_id
+        server.xray_instance_starttime = new_starttime
+        await session.flush()
         return True, server
 
     # Stale starttime within same boot

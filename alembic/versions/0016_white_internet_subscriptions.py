@@ -374,7 +374,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["subscription_id"],
             ["white_internet_subscriptions.id"],
-            ondelete="RESTRICT",
+            ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(

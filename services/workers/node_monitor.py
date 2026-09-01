@@ -200,10 +200,10 @@ async def check_node_resources_and_alerts(bot: Bot):
         try:
             if is_xray_node:
                 from services.xray_node_client import XrayNodeClient
-                xray_client = XrayNodeClient(timeout=10.0)
-                is_healthy, xray_epoch, xray_data = await xray_client.check_health(
-                    server.api_url, server.api_key
-                )
+                async with XrayNodeClient(timeout=10.0) as xray_client:
+                    is_healthy, xray_epoch, xray_data = await xray_client.check_health(
+                        server.api_url, server.api_key
+                    )
             else:
                 client = AmneziaClient(server.api_url, server.api_key)
                 is_healthy = await client.healthcheck()

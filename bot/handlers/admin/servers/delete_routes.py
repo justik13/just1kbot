@@ -13,7 +13,14 @@ from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
 from config.enums import WhiteInternetStatus
-from database.models import APIOperation, Server, VPNProfile, WhiteInternetQuotaGrant, WhiteInternetSubscription
+from database.models import (
+    APIOperation,
+    Server,
+    VPNProfile,
+    WhiteInternetQuotaGrant,
+    WhiteInternetSubscription,
+    WhiteInternetTrafficEvent,
+)
 from database.repositories.servers_repo import (
     delete_profiles_by_server_id,
     delete_server,
@@ -262,6 +269,7 @@ async def confirm_delete_server(
         ).with_for_update()
     )).scalars().all())
     for wl_sub in inactive_wl_subs:
+        await session.execute(delete(WhiteInternetTrafficEvent).where(WhiteInternetTrafficEvent.subscription_id == wl_sub.id))
         await session.execute(delete(WhiteInternetQuotaGrant).where(WhiteInternetQuotaGrant.subscription_id == wl_sub.id))
         await session.delete(wl_sub)
 

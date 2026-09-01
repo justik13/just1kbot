@@ -217,16 +217,16 @@ async def process_add_server(
 
         from services.xray_node_client import XrayNodeClient
 
-        xray_client = XrayNodeClient(timeout=10.0)
         is_xray = False
         xray_epoch = None
         xray_data = None
         try:
-            xray_ok, xray_epoch, xray_data = await xray_client.check_health(
-                all_data["api_url"], api_key
-            )
-            if xray_ok:
-                is_xray = True
+            async with XrayNodeClient(timeout=10.0) as xray_client:
+                xray_ok, xray_epoch, xray_data = await xray_client.check_health(
+                    all_data["api_url"], api_key
+                )
+                if xray_ok:
+                    is_xray = True
         except Exception:
             is_xray = False
 

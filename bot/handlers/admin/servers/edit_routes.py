@@ -442,8 +442,8 @@ async def process_edit_server_url(
     if "xray_origin" in (server.capabilities or []) or server.protocol == "xray":
         from services.xray_node_client import XrayNodeClient
 
-        xclient = XrayNodeClient(timeout=10.0)
-        is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
+        async with XrayNodeClient(timeout=10.0) as xclient:
+            is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
         if not is_healthy:
             await render_hub(
                 message.bot,
@@ -724,8 +724,8 @@ async def process_edit_server_key(
     if "xray_origin" in (server.capabilities or []) or server.protocol == "xray":
         from services.xray_node_client import XrayNodeClient
 
-        xclient = XrayNodeClient(timeout=10.0)
-        is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
+        async with XrayNodeClient(timeout=10.0) as xclient:
+            is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
         if not is_healthy:
             await render_hub(
                 message.bot,

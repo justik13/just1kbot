@@ -114,33 +114,27 @@ class WhiteInternetTrafficWorker:
                     if sub is None:
                         continue
 
-                    if (
-                        sub.traffic_stats_epoch == node_epoch
-                        and uplink >= sub.last_uplink_snapshot
-                        and downlink >= sub.last_downlink_snapshot
-                    ):
-                        before_up = sub.last_uplink_snapshot
-                        before_down = sub.last_downlink_snapshot
-                        delta_up = uplink - before_up
-                        delta_down = downlink - before_down
-                    elif sub.traffic_stats_epoch != node_epoch:
-                        before_up = 0
-                        before_down = 0
-                        delta_up = uplink
-                        delta_down = downlink
+                    if sub.traffic_stats_epoch == node_epoch:
+                        before_up = sub.last_uplink_snapshot if uplink >= sub.last_uplink_snapshot else 0
+                        before_down = sub.last_downlink_snapshot if downlink >= sub.last_downlink_snapshot else 0
+                        if before_up == 0 and uplink < sub.last_uplink_snapshot:
+                            logger.info(
+                                "Xray uplink counter reset detected within epoch for sub_id=%d on server %d. Rebasing uplink baseline.",
+                                sub.id,
+                                server_id,
+                            )
+                        if before_down == 0 and downlink < sub.last_downlink_snapshot:
+                            logger.info(
+                                "Xray downlink counter reset detected within epoch for sub_id=%d on server %d. Rebasing downlink baseline.",
+                                sub.id,
+                                server_id,
+                            )
                     else:
-                        # Counter regression / stats reset within the same epoch:
-                        # Rebase cleanly so accounting continues without stalling forever.
-                        logger.info(
-                            "Xray counter reset/regression detected within epoch for sub_id=%d on server %d. Rebasing baseline.",
-                            sub.id,
-                            server_id,
-                        )
                         before_up = 0
                         before_down = 0
-                        delta_up = uplink
-                        delta_down = downlink
 
+                    delta_up = uplink - before_up
+                    delta_down = downlink - before_down
                     delta = delta_up + delta_down
                     if delta <= 0:
                         continue

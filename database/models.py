@@ -1444,7 +1444,7 @@ class WhiteInternetTrafficEvent(Base):
 
     subscription_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("white_internet_subscriptions.id", ondelete="RESTRICT"),
+        ForeignKey("white_internet_subscriptions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

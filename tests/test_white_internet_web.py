@@ -154,8 +154,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         sub.origin_node_id = 1
         sub.status = WhiteInternetStatus.ACTIVE
         sub.expires_at = now + timedelta(days=20)
-        sub.desired_version = 2
-        sub.actual_version = 1  # Versions mismatch -> 503
+        sub.desired_version = 1
+        sub.actual_version = 1  # Versions match!
+        sub.last_reconciled_node_epoch = "epoch-old"
 
         mock_grant = MagicMock()
         mock_grant.bytes_granted = 53687091200
@@ -165,6 +166,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch-new",  # Node rebooted / restarted!
             capabilities=["xray_origin"],
             is_active=True,
             health_state=ServerHealthState.ONLINE,

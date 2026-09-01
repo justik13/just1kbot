@@ -12,6 +12,7 @@ from aiohttp import web
 from sqlalchemy import select
 
 from bot import texts
+from config.constants import DEFAULT_WHITE_INTERNET_PATH
 from config.enums import ServerHealthState, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server
@@ -99,7 +100,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
 
-        if sub.actual_version != sub.desired_version:
+        if (
+            sub.actual_version != sub.desired_version
+            or sub.last_reconciled_node_epoch != server.xray_instance_epoch
+        ):
             headers = dict(common_headers)
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
@@ -115,6 +119,14 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 headers=headers,
             )
 
+        # Determine base path from server extra_data or env
+        base_path = DEFAULT_WHITE_INTERNET_PATH
+        if getattr(server, "extra_data", None) and isinstance(server.extra_data, dict):
+            if "secret_base_path" in server.extra_data:
+                base_path = server.extra_data["secret_base_path"]
+        elif os.getenv("WHITE_INTERNET_PATH"):
+            base_path = os.getenv("WHITE_INTERNET_PATH")
+
         # Generate multi-relay configs if available
         relays = None
         if getattr(server, "extra_data", None) and isinstance(server.extra_data, dict) and "relays" in server.extra_data:
@@ -128,6 +140,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         vless_links = WhiteInternetService.generate_vless_links(
             sub,
             cdn_domain=cdn_domain,
+            path=base_path,
             relays=relays,
         )
         payload = "\n".join(vless_links)
