@@ -23,6 +23,8 @@ class TestJust1kNodeScript(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.state_dir = Path(self.temp_dir) / "etc" / "just1knode"
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.nginx_conf_dir = Path(self.temp_dir) / "etc" / "nginx"
+        self.nginx_conf_dir.mkdir(parents=True, exist_ok=True)
         self.nginx_relays_d = Path(self.temp_dir) / "etc" / "nginx" / "just1k_relays.d"
         self.nginx_relays_d.mkdir(parents=True, exist_ok=True)
         self.xray_config_dir = Path(self.temp_dir) / "usr" / "local" / "etc" / "xray"
@@ -31,6 +33,12 @@ class TestJust1kNodeScript(unittest.TestCase):
         self.xray_share_dir.mkdir(parents=True, exist_ok=True)
         self.xray_api_etc = Path(self.temp_dir) / "etc" / "xray-api"
         self.xray_api_etc.mkdir(parents=True, exist_ok=True)
+        self.systemd_dir = Path(self.temp_dir) / "etc" / "systemd" / "system"
+        self.systemd_dir.mkdir(parents=True, exist_ok=True)
+        self.certbot_dir = Path(self.temp_dir) / "var" / "www" / "certbot"
+        self.certbot_dir.mkdir(parents=True, exist_ok=True)
+        self.www_html_dir = Path(self.temp_dir) / "var" / "www" / "html"
+        self.www_html_dir.mkdir(parents=True, exist_ok=True)
         self.bin_dir = Path(self.temp_dir) / "bin"
         self.bin_dir.mkdir(parents=True, exist_ok=True)
 
@@ -108,8 +116,12 @@ exit 0
         env["XRAY_SHARE_DIR"] = str(self.xray_share_dir)
         env["XRAY_BIN"] = str(self.bin_dir / "xray")
         env["BACKUP_DIR"] = str(Path(self.temp_dir) / "backups")
+        env["NGINX_CONF_DIR"] = str(self.nginx_conf_dir)
         env["NGINX_RELAYS_DIR"] = str(self.nginx_relays_d)
         env["XRAY_API_CONFIG_ENV"] = str(self.xray_api_etc / "config.env")
+        env["SYSTEMD_SYSTEM_DIR"] = str(self.systemd_dir)
+        env["CERTBOT_DIR"] = str(self.certbot_dir)
+        env["WWW_HTML_DIR"] = str(self.www_html_dir)
         if extra_env:
             env.update(extra_env)
 
@@ -124,8 +136,12 @@ export XRAY_CONFIG='{self.xray_config_dir / "config.json"}'
 export XRAY_SHARE_DIR='{self.xray_share_dir}'
 export XRAY_BIN='{self.bin_dir / "xray"}'
 export BACKUP_DIR='{Path(self.temp_dir) / "backups"}'
+export NGINX_CONF_DIR='{self.nginx_conf_dir}'
 export NGINX_RELAYS_DIR='{self.nginx_relays_d}'
 export XRAY_API_CONFIG_ENV='{self.xray_api_etc / "config.env"}'
+export SYSTEMD_SYSTEM_DIR='{self.systemd_dir}'
+export CERTBOT_DIR='{self.certbot_dir}'
+export WWW_HTML_DIR='{self.www_html_dir}'
 
 source '{JUST1KNODE_SH}'
 

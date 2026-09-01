@@ -34,8 +34,13 @@ XRAY_CONFIG_DIR="${XRAY_CONFIG_DIR:-/usr/local/etc/xray}"
 XRAY_CONFIG="${XRAY_CONFIG:-${XRAY_CONFIG_DIR}/config.json}"
 XRAY_SHARE_DIR="${XRAY_SHARE_DIR:-/usr/local/share/xray}"
 XRAY_API_DIR="${XRAY_API_DIR:-/opt/xray-api}"
-NGINX_RELAYS_DIR="${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}"
-XRAY_API_CONFIG_ENV="${XRAY_API_CONFIG_ENV:-/etc/xray-api/config.env}"
+XRAY_API_ETC="${XRAY_API_ETC:-/etc/xray-api}"
+NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
+NGINX_RELAYS_DIR="${NGINX_RELAYS_DIR:-${NGINX_CONF_DIR}/just1k_relays.d}"
+XRAY_API_CONFIG_ENV="${XRAY_API_CONFIG_ENV:-${XRAY_API_ETC}/config.env}"
+SYSTEMD_SYSTEM_DIR="${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
+CERTBOT_DIR="${CERTBOT_DIR:-/var/www/certbot}"
+WWW_HTML_DIR="${WWW_HTML_DIR:-/var/www/html}"
 
 # Цвета терминала
 RED='\033[0;31m'
@@ -422,7 +427,8 @@ PORT=8080
 FASTIFY_API_KEY=${api_key}
 EOF
 
-    cat > /etc/systemd/system/amnezia-api.service <<EOF
+    mkdir -p "${SYSTEMD_SYSTEM_DIR}"
+    cat > "${SYSTEMD_SYSTEM_DIR}/amnezia-api.service" <<EOF
 [Unit]
 Description=Amnezia API Service
 After=network.target
@@ -622,8 +628,8 @@ with open(config_file, 'w', encoding='utf-8') as f:
     chmod 600 "$XRAY_CONFIG"
 
     # Служба Xray
-    mkdir -p /etc/systemd/system
-    cat > /etc/systemd/system/xray.service <<EOF
+    mkdir -p "${SYSTEMD_SYSTEM_DIR}"
+    cat > "${SYSTEMD_SYSTEM_DIR}/xray.service" <<EOF
 [Unit]
 Description=Xray Service
 Documentation=https://github.com/xtls
@@ -634,7 +640,7 @@ User=root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
-ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+ExecStart=${XRAY_BIN} run -config ${XRAY_CONFIG}
 Restart=on-failure
 LimitNPROC=10000
 LimitNOFILE=1000000
@@ -648,20 +654,20 @@ EOF
 
     # Развертывание легкого Python xray-api агента
     log "Развертывание агента xray-api..."
-    mkdir -p /etc/xray-api
+    mkdir -p "${XRAY_API_ETC}"
     deploy_xray_api_sources
 
-    cat > /etc/xray-api/config.env <<EOF
+    cat > "${XRAY_API_CONFIG_ENV}" <<EOF
 XRAY_API_KEY=${api_key}
 XRAY_GRPC_HOST=127.0.0.1
 XRAY_GRPC_PORT=10085
-CLIENTS_FILE_PATH=/etc/just1knode/clients.json
-RELAYS_FILE_PATH=/etc/just1knode/relays.json
+CLIENTS_FILE_PATH=${STATE_DIR}/clients.json
+RELAYS_FILE_PATH=${STATE_DIR}/relays.json
 XRAY_INBOUND_TAGS=just1k-wl-default
 EOF
-    chmod 600 /etc/xray-api/config.env
+    chmod 600 "${XRAY_API_CONFIG_ENV}"
 
-    cat > /etc/systemd/system/xray-api.service <<EOF
+    cat > "${SYSTEMD_SYSTEM_DIR}/xray-api.service" <<EOF
 [Unit]
 Description=Just1kBot Xray API Agent
 After=network.target xray.service
@@ -670,7 +676,7 @@ After=network.target xray.service
 Type=simple
 User=root
 WorkingDirectory=${XRAY_API_DIR}
-EnvironmentFile=/etc/xray-api/config.env
+EnvironmentFile=${XRAY_API_CONFIG_ENV}
 ExecStart=${XRAY_API_DIR}/venv/bin/uvicorn app:app --host 127.0.0.1 --port 5001 --workers 1
 Restart=always
 RestartSec=3
@@ -688,8 +694,8 @@ EOF
     systemctl enable --now xray-api
 
     log "Настройка Nginx с поддержкой ^~, OPTIONS->POST и Let's Encrypt Webroot..."
-    mkdir -p /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled /var/www/certbot /var/www/html "$NGINX_RELAYS_DIR"
-    cat > /etc/nginx/conf.d/xhttp-map.conf <<EOF
+    mkdir -p "${NGINX_CONF_DIR}/conf.d" "${NGINX_CONF_DIR}/sites-available" "${NGINX_CONF_DIR}/sites-enabled" "${CERTBOT_DIR}" "${WWW_HTML_DIR}" "$NGINX_RELAYS_DIR"
+    cat > "${NGINX_CONF_DIR}/conf.d/xhttp-map.conf" <<EOF
 map \$request_method \$xhttp_proxy_method {
     OPTIONS POST;
     default \$request_method;
@@ -716,8 +722,8 @@ EOF
     }
 EOF
 
-    create_backup "/etc/nginx/sites-available/just1k-origin.conf"
-    cat > /etc/nginx/sites-available/just1k-origin.conf <<EOF
+    create_backup "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf"
+    cat > "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" <<EOF
 # HTTP (Порт 80 — Редирект на HTTPS + ACME Webroot)
 server {
     listen 80;
@@ -725,7 +731,7 @@ server {
     server_name ${domain};
 
     location ^~ /.well-known/acme-challenge/ {
-        root /var/www/certbot;
+        root ${CERTBOT_DIR};
     }
 
     location / {
@@ -776,7 +782,7 @@ server {
 }
 EOF
 
-    ln -sf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/
+    ln -sf "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" "${NGINX_CONF_DIR}/sites-enabled/"
     nginx -t && systemctl reload nginx
 
     # Fail-closed UFW: порт 8444 открывается СТРОГО для BOT_IP
@@ -892,7 +898,8 @@ install_xray_relay_node() {
 }
 EOF
 
-    cat > /etc/systemd/system/xray.service <<EOF
+    mkdir -p "${SYSTEMD_SYSTEM_DIR}"
+    cat > "${SYSTEMD_SYSTEM_DIR}/xray.service" <<EOF
 [Unit]
 Description=Xray Relay Service
 Documentation=https://github.com/xtls
@@ -903,7 +910,7 @@ User=root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
-ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+ExecStart=${XRAY_BIN} run -config ${XRAY_CONFIG}
 Restart=on-failure
 LimitNPROC=10000
 LimitNOFILE=1000000
