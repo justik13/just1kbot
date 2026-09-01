@@ -230,6 +230,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 self.server.api_key,
                 sub_uuid,
                 is_active=False,
+                version=2,
             )
 
         async with self.sessions.begin() as session:
@@ -263,6 +264,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 self.server.api_key,
                 sub_uuid,
                 is_active=True,
+                version=3,
             )
 
         async with self.sessions.begin() as session:
