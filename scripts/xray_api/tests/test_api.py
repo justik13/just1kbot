@@ -7,8 +7,15 @@ from fastapi.testclient import TestClient
 # Ensure environment is configured before importing app
 tmp_clients_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
 tmp_clients_file.close()
+tmp_epoch_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+tmp_epoch_file.close()
+tmp_epoch_lock = tempfile.NamedTemporaryFile(delete=False, suffix=".lock")
+tmp_epoch_lock.close()
+
 os.environ["XRAY_API_KEY"] = "test-secret-key-12345"
 os.environ["CLIENTS_FILE_PATH"] = tmp_clients_file.name
+os.environ["EPOCH_FILE_PATH"] = tmp_epoch_file.name
+os.environ["EPOCH_LOCK_PATH"] = tmp_epoch_lock.name
 os.environ["XRAY_INBOUND_TAGS"] = "inbound-de,inbound-nl"
 
 from app import (  # noqa: E402

@@ -56,19 +56,29 @@ class EpochManager:
         return None
 
     def load_state(self) -> Dict[str, Any]:
-        if not self.file_path.exists():
-            return {}
-        try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    return data
-        except Exception as e:
-            logger.warning("Failed to load epoch state from %s: %s", self.file_path, e)
+        if self.file_path.exists():
+            try:
+                with open(self.file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+            except Exception as e:
+                logger.warning("Failed to load epoch state from %s: %s", self.file_path, e)
+        if self._current_epoch is not None:
+            return {
+                "node_epoch": self._current_epoch,
+                "boot_id": self._last_boot_id,
+                "xray_pid": self._last_pid,
+                "xray_starttime": self._last_starttime,
+            }
         return {}
 
     def save_state(self, epoch: str, pid: Optional[int], starttime: Optional[int], boot_id: Optional[str]) -> bool:
         """Persists the epoch metadata atomically. Returns True on success, False on error."""
+        self._current_epoch = epoch
+        self._last_pid = pid
+        self._last_starttime = starttime
+        self._last_boot_id = boot_id
         self._ensure_dir()
         temp_path = self.file_path.with_suffix(".tmp")
         data = {
@@ -84,10 +94,6 @@ class EpochManager:
                 f.flush()
                 os.fsync(f.fileno())
             temp_path.replace(self.file_path)
-            self._current_epoch = epoch
-            self._last_pid = pid
-            self._last_starttime = starttime
-            self._last_boot_id = boot_id
             return True
         except Exception as e:
             logger.error("Failed to save epoch state to %s: %s", self.file_path, e)
