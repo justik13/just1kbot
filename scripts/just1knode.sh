@@ -16,21 +16,26 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATE_DIR="/etc/just1knode"
-STATE_FILE="${STATE_DIR}/state.json"
-CLIENTS_FILE="${STATE_DIR}/clients.json"
-RELAYS_FILE="${STATE_DIR}/relays.json"
-BACKUP_DIR="/var/backups/just1knode"
+STATE_DIR="${STATE_DIR:-/etc/just1knode}"
+STATE_FILE="${STATE_FILE:-${STATE_DIR}/state.json}"
+CLIENTS_FILE="${CLIENTS_FILE:-${STATE_DIR}/clients.json}"
+RELAYS_FILE="${RELAYS_FILE:-${STATE_DIR}/relays.json}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/just1knode}"
 
-XRAY_VERSION_PINNED="26.7.28"
+XRAY_VERSION_PINNED="${XRAY_VERSION_PINNED:-26.7.28}"
 XRAY_SHA256_64="8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40"
 XRAY_SHA256_ARM64="f5698bb218ada3b4022db26fafc39601c5f53b46b19eb76c9616325985807501"
 
-XRAY_BIN="/usr/local/bin/xray"
-XRAY_CONFIG_DIR="/usr/local/etc/xray"
-XRAY_CONFIG="${XRAY_CONFIG_DIR}/config.json"
-XRAY_SHARE_DIR="/usr/local/share/xray"
-XRAY_API_DIR="/opt/xray-api"
+JUST1KBOT_RELEASE_COMMIT="401fbbe4b3d7a85b98fbcfe8d1c68f76388cb20d"
+AMNEZIA_API_COMMIT="e6403d5248554fae85df6469cf2fa1742be9fbe4"
+
+XRAY_BIN="${XRAY_BIN:-/usr/local/bin/xray}"
+XRAY_CONFIG_DIR="${XRAY_CONFIG_DIR:-/usr/local/etc/xray}"
+XRAY_CONFIG="${XRAY_CONFIG:-${XRAY_CONFIG_DIR}/config.json}"
+XRAY_SHARE_DIR="${XRAY_SHARE_DIR:-/usr/local/share/xray}"
+XRAY_API_DIR="${XRAY_API_DIR:-/opt/xray-api}"
+NGINX_RELAYS_DIR="${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}"
+XRAY_API_CONFIG_ENV="${XRAY_API_CONFIG_ENV:-/etc/xray-api/config.env}"
 
 # Цвета терминала
 RED='\033[0;31m'
@@ -79,7 +84,7 @@ get_arch() {
     esac
 }
 
-# --- Автоматическое резервное копирование ---
+# --- Автоматическое резервное копирование и транзакционный манифест ---
 create_backup() {
     local target="$1"
     if [[ -f "$target" ]]; then
@@ -90,6 +95,89 @@ create_backup() {
         log "Создан защитный бэкап: $bkp"
     fi
 }
+
+manifest_begin() {
+    local target_relay_code="${1:-}"
+    local txn_id="txn_$$"
+    TXN_DIR="/tmp/just1knode_${txn_id}"
+    rm -rf "$TXN_DIR"
+    mkdir -p "$TXN_DIR/files"
+    MANIFEST_LOG="$TXN_DIR/manifest.tsv"
+    : > "$MANIFEST_LOG"
+
+    local targets=(
+        "$RELAYS_FILE"
+        "$XRAY_CONFIG"
+        "$XRAY_API_CONFIG_ENV"
+    )
+
+    if [[ -d "$NGINX_RELAYS_DIR" ]]; then
+        while IFS= read -r -d '' conf_file; do
+            targets+=("$conf_file")
+        done < <(find "$NGINX_RELAYS_DIR" -type f -name "*.conf" -print0 2>/dev/null)
+    fi
+
+    if [[ -n "$target_relay_code" ]]; then
+        targets+=("${NGINX_RELAYS_DIR}/${target_relay_code}.conf")
+    fi
+
+    # Deduplicate target list
+    local -A seen_targets=()
+    local deduped=()
+    for t in "${targets[@]}"; do
+        if [[ -z "${seen_targets[$t]:-}" ]]; then
+            seen_targets["$t"]=1
+            deduped+=("$t")
+        fi
+    done
+
+    for f in "${deduped[@]}"; do
+        if [[ -f "$f" ]]; then
+            local rel_hash
+            rel_hash="$(echo -n "$f" | md5sum | awk '{print $1}')"
+            cp -p "$f" "$TXN_DIR/files/${rel_hash}"
+            local mode owner
+            mode="$(stat -c '%a' "$f" 2>/dev/null || echo '600')"
+            owner="$(stat -c '%u:%g' "$f" 2>/dev/null || echo '0:0')"
+            printf "EXISTS\t%s\t%s\t%s\t%s\n" "$f" "$rel_hash" "$mode" "$owner" >> "$MANIFEST_LOG"
+        else
+            printf "ABSENT\t%s\t-\t-\t-\n" "$f" >> "$MANIFEST_LOG"
+        fi
+    done
+}
+
+manifest_rollback() {
+    log "Выполняется транзакционный откат конфигураций к исходному состоянию..."
+    if [[ -n "${MANIFEST_LOG:-}" && -f "$MANIFEST_LOG" ]]; then
+        while IFS=$'\t' read -r status path rel_hash mode owner; do
+            if [[ "$status" == "EXISTS" ]]; then
+                local src="$TXN_DIR/files/${rel_hash}"
+                if [[ -f "$src" ]]; then
+                    cp -f "$src" "$path"
+                    chmod "$mode" "$path" 2>/dev/null || true
+                    chown "$owner" "$path" 2>/dev/null || true
+                fi
+            elif [[ "$status" == "ABSENT" ]]; then
+                rm -f "$path"
+            fi
+        done < "$MANIFEST_LOG"
+    fi
+
+    # Verify rollback
+    nginx -t 2>/dev/null || true
+    if [[ -f "$XRAY_CONFIG" && -x "$XRAY_BIN" ]]; then
+        "$XRAY_BIN" run -test -config "$XRAY_CONFIG" 2>/dev/null || true
+    fi
+    systemctl reload nginx 2>/dev/null || true
+    systemctl restart xray 2>/dev/null || true
+    systemctl restart xray-api 2>/dev/null || true
+    rm -rf "${TXN_DIR:-}"
+}
+
+manifest_commit() {
+    rm -rf "${TXN_DIR:-}"
+}
+
 
 # --- Инициализация и атомарное сохранение состояния ---
 init_state_dir() {
@@ -256,17 +344,20 @@ deploy_xray_api_sources() {
     if [[ -d "${SCRIPT_DIR}/xray_api" && -f "${SCRIPT_DIR}/xray_api/app.py" ]]; then
         log "Копирование локальных исходников xray-api..."
         cp -r "${SCRIPT_DIR}/xray_api/"* "$XRAY_API_DIR/"
+    elif [[ -d "/app/scripts/xray_api" && -f "/app/scripts/xray_api/app.py" ]]; then
+        log "Копирование исходников xray-api из /app/scripts/xray_api..."
+        cp -r /app/scripts/xray_api/* "$XRAY_API_DIR/"
     else
-        log "Автономная загрузка модулей xray-api из репозитория GitHub..."
+        log "Автономная загрузка модулей xray-api (зафиксированная версия $JUST1KBOT_RELEASE_COMMIT)..."
         local tmp_tar="/tmp/just1k_repo.tar.gz"
-        curl -fsSL "https://github.com/justik13/just1kbot/archive/refs/heads/main.tar.gz" -o "$tmp_tar" 2>/dev/null || \
-        curl -fsSL "https://github.com/justik13/just1kbot/archive/refs/heads/feature/white-internet-just1knode.tar.gz" -o "$tmp_tar" || true
+        local pinned_url="https://github.com/justik13/just1kbot/archive/${JUST1KBOT_RELEASE_COMMIT}.tar.gz"
+        curl -fsSL "$pinned_url" -o "$tmp_tar" 2>/dev/null || true
 
         if [[ -f "$tmp_tar" ]]; then
             mkdir -p /tmp/just1k_extracted
             tar -xzf "$tmp_tar" -C /tmp/just1k_extracted/ || true
             local extracted_dir
-            extracted_dir="$(find /tmp/just1k_extracted -maxdepth 2 -type d -name "xray_api" | head -n 1)"
+            extracted_dir="$(find /tmp/just1k_extracted -maxdepth 3 -type d -name "xray_api" | head -n 1)"
             if [[ -n "$extracted_dir" && -d "$extracted_dir" ]]; then
                 cp -r "$extracted_dir/"* "$XRAY_API_DIR/"
                 log "Модули xray-api успешно распакованы из репозитория."
@@ -314,9 +405,11 @@ install_amnezia_api_node() {
     local amnezia_dir="/opt/amnezia-api"
     log "Развертывание amnezia-api в $amnezia_dir..."
     if [[ -d "$amnezia_dir" ]]; then
-        git -C "$amnezia_dir" pull || true
+        git -C "$amnezia_dir" fetch --all --prune || true
+        git -C "$amnezia_dir" checkout "$AMNEZIA_API_COMMIT" || true
     else
         git clone https://github.com/kyoresuas/amnezia-api.git "$amnezia_dir"
+        git -C "$amnezia_dir" checkout "$AMNEZIA_API_COMMIT" || true
     fi
 
     (cd "$amnezia_dir" && npm install --production)
@@ -336,12 +429,18 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=${amnezia_dir}
-EnvironmentFile=${amnezia_dir}/.env
-ExecStart=/usr/bin/npm start
-Restart=always
-RestartSec=3
+Description=Amnezia API Service (AWG 2.0)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/amnezia-api
+EnvironmentFile=/etc/amnezia-api/config.env
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
 
 [Install]
 WantedBy=multi-user.target
@@ -350,43 +449,11 @@ EOF
     systemctl daemon-reload
     systemctl enable --now amnezia-api
 
-    create_backup "/etc/nginx/sites-available/just1k-amnezia-api.conf"
-    cat > /etc/nginx/sites-available/just1k-amnezia-api.conf <<EOF
-server {
-    listen 8443 ssl http2;
-    server_name ${domain};
-
-    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF
-
-    ln -sf /etc/nginx/sites-available/just1k-amnezia-api.conf /etc/nginx/sites-enabled/
-    nginx -t && systemctl reload nginx
-
-    configure_safe_ufw "8443/tcp"
-
     set_state_val "role" "amnezia"
-    set_state_val "domain" "$domain"
-    set_state_val "api_url" "https://${domain}:8443"
     set_state_val "api_key" "$api_key"
+    set_state_val "port" "$port"
 
-    title "УСТАНОВКА AMNEZIA API УСПЕШНО ЗАВЕРШЕНА!"
-    echo -e "${BOLD}Данные для добавления сервера в Telegram-боте (/admin):${NC}"
-    echo -e "  🌐 Домен сервера:    ${CYAN}${domain}${NC}"
-    echo -e "  🔗 API URL:          ${CYAN}https://${domain}:8443${NC}"
-    echo -e "  🔑 API Ключ:          ${YELLOW}${api_key}${NC}\n"
+    log "Установка Amnezia API узла успешно завершена!"
 }
 
 # =============================================================================
@@ -402,21 +469,29 @@ install_xray_origin_node() {
     local email="${2:-}"
     local api_key="${3:-}"
     local secret_path="${4:-}"
+    local bot_ip="${5:-${BOT_IP:-}}"
 
     if [[ -z "$domain" ]]; then
-        read -rp "Введите домен Origin-сервера (например: origin.example.com): " domain
+        read -rp "Введите домен Origin-сервера (например: origin.example.com): " domain || true
     fi
     if [[ -z "$domain" ]]; then error "Домен не может быть пустым."; fi
 
     if [[ -z "$email" ]]; then
-        read -rp "Введите Email для SSL Let's Encrypt: " email
+        read -rp "Введите Email для SSL Let's Encrypt: " email || true
     fi
     if [[ -z "$email" ]]; then error "Email не может быть пустым."; fi
+
+    if [[ -z "$bot_ip" ]]; then
+        read -rp "Введите IP-адрес Telegram-бота (для защиты порта 8444): " bot_ip || true
+    fi
+    if [[ -z "$bot_ip" ]]; then
+        error "BOT_IP обязателен для безопасной настройки порта 8444."
+    fi
 
     if [[ -z "$secret_path" ]]; then
         local rnd_hex
         rnd_hex="$(python3 -c "import secrets; print(secrets.token_hex(4))")"
-        read -rp "Секретный префикс пути XHTTP [по умолчанию: /w_${rnd_hex}]: " input_path
+        read -rp "Секретный префикс пути XHTTP [по умолчанию: /w_${rnd_hex}]: " input_path || true
         secret_path="${input_path:-/w_${rnd_hex}}"
     fi
 
@@ -438,7 +513,7 @@ install_xray_origin_node() {
 
     create_backup "$XRAY_CONFIG"
 
-    # Хирургическое обновление Xray config: сохраняем чужие inbounds/outbounds
+    # Хирургическое обновление Xray config: сохраняем чужие inbounds/outbounds (Zero-Collateral)
     log "Формирование конфигурации Xray Origin (Surgical Merge)..."
     python3 -c "
 import sys, json, os
@@ -454,17 +529,29 @@ if os.path.exists(config_file):
     except Exception:
         existing = {}
 
-# Сохраняем чужие inbounds
-inbounds = [ib for ib in existing.get('inbounds', []) if ib.get('tag') not in ('api-grpc', 'inbound-default')]
-# Сохраняем чужие outbounds
-outbounds = [ob for ob in existing.get('outbounds', []) if ob.get('tag') not in ('direct', 'block')]
-# Сохраняем чужие rules
+# Сохраняем чужие inbounds, удаляя только управляемые just1k теги
+inbounds = [
+    ib for ib in existing.get('inbounds', [])
+    if ib.get('tag') not in ('just1k-wl-api-grpc', 'just1k-wl-default', 'api-grpc', 'inbound-default')
+]
+# Сохраняем чужие outbounds, удаляя только управляемые just1k теги
+outbounds = [
+    ob for ob in existing.get('outbounds', [])
+    if ob.get('tag') not in ('just1k-wl-direct', 'just1k-wl-block')
+]
+# Сохраняем чужие rules, удаляя только правила, управляемые Just1kBot
 existing_rules = existing.get('routing', {}).get('rules', [])
-rules = [r for r in existing_rules if r.get('outboundTag') not in ('api', 'direct')]
+rules = [
+    r for r in existing_rules
+    if not (
+        (isinstance(r.get('inboundTag'), list) and any(t in ('just1k-wl-api-grpc', 'just1k-wl-default', 'api-grpc', 'inbound-default') for t in r.get('inboundTag')))
+        or r.get('outboundTag') in ('just1k-wl-api', 'api')
+    )
+]
 
 # Добавляем необходимые сущности
 inbounds.insert(0, {
-    'tag': 'api-grpc',
+    'tag': 'just1k-wl-api-grpc',
     'listen': '127.0.0.1',
     'port': 10085,
     'protocol': 'dokodemo-door',
@@ -472,7 +559,7 @@ inbounds.insert(0, {
 })
 
 inbounds.append({
-    'tag': 'inbound-default',
+    'tag': 'just1k-wl-default',
     'listen': '127.0.0.1',
     'port': 8003,
     'protocol': 'vless',
@@ -494,34 +581,48 @@ inbounds.append({
     }
 })
 
-outbounds.append({'tag': 'direct', 'protocol': 'freedom'})
-outbounds.append({'tag': 'block', 'protocol': 'blackhole'})
+if not any(ob.get('tag') == 'just1k-wl-direct' for ob in outbounds):
+    outbounds.append({
+        'tag': 'just1k-wl-direct',
+        'protocol': 'freedom',
+        'settings': {'domainStrategy': 'UseIP'}
+    })
 
-rules.insert(0, {'type': 'field', 'inboundTag': ['api-grpc'], 'outboundTag': 'api'})
-rules.append({'type': 'field', 'inboundTag': ['inbound-default'], 'outboundTag': 'direct'})
+if not any(ob.get('tag') == 'just1k-wl-block' for ob in outbounds):
+    outbounds.append({
+        'tag': 'just1k-wl-block',
+        'protocol': 'blackhole',
+        'settings': {'response': {'type': 'none'}}
+    })
+
+rules.append({
+    'type': 'field',
+    'inboundTag': ['just1k-wl-api-grpc'],
+    'outboundTag': 'just1k-wl-api'
+})
+rules.append({
+    'type': 'field',
+    'inboundTag': ['just1k-wl-default'],
+    'outboundTag': 'just1k-wl-direct'
+})
 
 final_config = dict(existing)
-final_config['log'] = existing.get('log') or {'loglevel': 'warning'}
-final_config['api'] = {'tag': 'api', 'services': ['HandlerService', 'StatsService']}
-final_config['stats'] = existing.get('stats') if isinstance(existing.get('stats'), dict) else {}
-final_config['policy'] = existing.get('policy') if isinstance(existing.get('policy'), dict) else {}
-levels = final_config['policy'].setdefault('levels', {})
-levels.setdefault('0', {})['statsUserUplink'] = True
-levels['0']['statsUserDownlink'] = True
-system = final_config['policy'].setdefault('system', {})
-system['statsInboundUplink'] = True
-system['statsInboundDownlink'] = True
-
+final_config['log'] = existing.get('log', {'loglevel': 'warning'})
+final_config['api'] = {'tag': 'just1k-wl-api', 'services': ['HandlerService', 'StatsService']}
+final_config['stats'] = existing.get('stats', {})
 final_config['inbounds'] = inbounds
 final_config['outbounds'] = outbounds
-routing = final_config.setdefault('routing', {})
-routing['rules'] = rules
+final_config['routing'] = existing.get('routing', {})
+final_config['routing']['domainStrategy'] = existing.get('routing', {}).get('domainStrategy', 'IPIfNonMatch')
+final_config['routing']['rules'] = rules
 
 with open(config_file, 'w', encoding='utf-8') as f:
     json.dump(final_config, f, indent=2)
 " "$XRAY_CONFIG" "$secret_path"
     chmod 600 "$XRAY_CONFIG"
 
+    # Служба Xray
+    mkdir -p /etc/systemd/system
     cat > /etc/systemd/system/xray.service <<EOF
 [Unit]
 Description=Xray Service
@@ -556,13 +657,9 @@ XRAY_GRPC_HOST=127.0.0.1
 XRAY_GRPC_PORT=10085
 CLIENTS_FILE_PATH=/etc/just1knode/clients.json
 RELAYS_FILE_PATH=/etc/just1knode/relays.json
-XRAY_INBOUND_TAGS=inbound-default
+XRAY_INBOUND_TAGS=just1k-wl-default
 EOF
     chmod 600 /etc/xray-api/config.env
-
-    python3 -m venv "${XRAY_API_DIR}/venv"
-    "${XRAY_API_DIR}/venv/bin/pip" install --upgrade pip -q
-    "${XRAY_API_DIR}/venv/bin/pip" install fastapi==0.115.6 uvicorn==0.34.0 grpcio==1.68.1 protobuf==7.35.1 pydantic==2.10.4 -q
 
     cat > /etc/systemd/system/xray-api.service <<EOF
 [Unit]
@@ -577,6 +674,11 @@ EnvironmentFile=/etc/xray-api/config.env
 ExecStart=${XRAY_API_DIR}/venv/bin/uvicorn app:app --host 127.0.0.1 --port 5001 --workers 1
 Restart=always
 RestartSec=3
+LimitNOFILE=65535
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
@@ -586,6 +688,7 @@ EOF
     systemctl enable --now xray-api
 
     log "Настройка Nginx с поддержкой ^~, OPTIONS->POST и Let's Encrypt Webroot..."
+    mkdir -p /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled /var/www/certbot /var/www/html "$NGINX_RELAYS_DIR"
     cat > /etc/nginx/conf.d/xhttp-map.conf <<EOF
 map \$request_method \$xhttp_proxy_method {
     OPTIONS POST;
@@ -593,10 +696,9 @@ map \$request_method \$xhttp_proxy_method {
 }
 EOF
 
-    mkdir -p /etc/nginx/just1k_relays.d
-    create_backup "/etc/nginx/just1k_relays.d/default.conf"
+    create_backup "${NGINX_RELAYS_DIR}/default.conf"
 
-    cat > /etc/nginx/just1k_relays.d/default.conf <<EOF
+    cat > "${NGINX_RELAYS_DIR}/default.conf" <<EOF
     location ^~ ${secret_path}/default {
         proxy_pass http://127.0.0.1:8003;
         proxy_method \$xhttp_proxy_method;
@@ -646,7 +748,7 @@ server {
         return 204;
     }
 
-    include /etc/nginx/just1k_relays.d/*.conf;
+    include ${NGINX_RELAYS_DIR}/*.conf;
 
     location / {
         return 404;
@@ -677,10 +779,15 @@ EOF
     ln -sf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/
     nginx -t && systemctl reload nginx
 
-    configure_safe_ufw "80/tcp" "443/tcp" "8444/tcp"
+    # Fail-closed UFW: порт 8444 открывается СТРОГО для BOT_IP
+    configure_safe_ufw "80/tcp" "443/tcp"
+    ufw delete allow 8444/tcp 2>/dev/null || true
+    ufw delete allow 8444 2>/dev/null || true
+    ufw allow from "$bot_ip" to any port 8444 proto tcp || true
 
     set_state_val "role" "origin"
     set_state_val "domain" "$domain"
+    set_state_val "bot_ip" "$bot_ip"
     set_state_val "secret_base_path" "$secret_path"
     set_state_val "api_url" "https://${domain}:8444"
     set_state_val "api_key" "$api_key"
@@ -689,6 +796,7 @@ EOF
     echo -e "${BOLD}Данные для добавления Origin в Telegram-боте (/admin):${NC}"
     echo -e "  🌐 Origin Домен:      ${CYAN}${domain}${NC}"
     echo -e "  🔗 API URL бота:      ${CYAN}https://${domain}:8444${NC}"
+    echo -e "  🤖 BOT IP:            ${CYAN}${bot_ip}${NC}"
     echo -e "  🔑 API Ключ:          ${YELLOW}${api_key}${NC}"
     echo -e "  🛡️ Секретный префикс: ${MAGENTA}${secret_path}${NC}"
     echo -e "  🩺 Проверка CDN:      curl -X OPTIONS https://${domain}/cdn-check\n"
@@ -916,13 +1024,7 @@ add_relay_node() {
     fi
 
     log "Добавление Relay-узла: $name ($code) -> $ip:$port (Транспорт: $security_type, SNI: $sni)..."
-    create_backup "$RELAYS_FILE"
-    create_backup "$XRAY_CONFIG"
-
-    local nginx_conf_path="/etc/nginx/just1k_relays.d/${code}.conf"
-    if [[ -f "$nginx_conf_path" ]]; then
-        create_backup "$nginx_conf_path"
-    fi
+    manifest_begin "$code"
 
     python3 -c "
 import sys, json, os
@@ -930,9 +1032,6 @@ import sys, json, os
 relays_file = sys.argv[1]
 xray_conf_file = sys.argv[2]
 state_file = sys.argv[3]
-relays_d = '/etc/nginx/just1k_relays.d'
-os.makedirs(relays_d, exist_ok=True)
-
 name = sys.argv[4]
 ip = sys.argv[5]
 port = int(sys.argv[6])
@@ -942,6 +1041,10 @@ sec_type = sys.argv[9].lower()
 pubkey = sys.argv[10]
 shortid = sys.argv[11]
 sni = sys.argv[12]
+relays_d = sys.argv[13]
+env_file = sys.argv[14]
+
+os.makedirs(relays_d, exist_ok=True)
 
 state = {}
 if os.path.exists(state_file):
@@ -972,8 +1075,8 @@ new_relay = {
     'port': port,
     'uuid': uuid,
     'inbound_port': new_port,
-    'inbound_tag': f'inbound-{code}',
-    'outbound_tag': f'outbound-{code}',
+    'inbound_tag': f'just1k-wl-inbound-{code}',
+    'outbound_tag': f'just1k-wl-outbound-{code}',
     'path': loc_path,
     'security': sec_type,
     'public_key': pubkey,
@@ -989,14 +1092,14 @@ with open(xray_conf_file, 'r', encoding='utf-8') as f:
     xray_conf = json.load(f)
 
 # Хирургическое обновление без затирания чужих инбаундов
-xray_conf['inbounds'] = [ib for ib in xray_conf.get('inbounds', []) if ib.get('tag') != f'inbound-{code}']
-xray_conf['outbounds'] = [ob for ob in xray_conf.get('outbounds', []) if ob.get('tag') != f'outbound-{code}']
+xray_conf['inbounds'] = [ib for ib in xray_conf.get('inbounds', []) if ib.get('tag') not in (f'just1k-wl-inbound-{code}', f'inbound-{code}')]
+xray_conf['outbounds'] = [ob for ob in xray_conf.get('outbounds', []) if ob.get('tag') not in (f'just1k-wl-outbound-{code}', f'outbound-{code}')]
 xray_conf.setdefault('routing', {}).setdefault('rules', [])
-xray_conf['routing']['rules'] = [r for r in xray_conf['routing']['rules'] if r.get('outboundTag') != f'outbound-{code}']
+xray_conf['routing']['rules'] = [r for r in xray_conf['routing']['rules'] if r.get('outboundTag') not in (f'just1k-wl-outbound-{code}', f'outbound-{code}')]
 
 # Inbound (XHTTP от Nginx с полной поддержкой Padding)
 xray_conf['inbounds'].append({
-    'tag': f'inbound-{code}',
+    'tag': f'just1k-wl-inbound-{code}',
     'listen': '127.0.0.1',
     'port': new_port,
     'protocol': 'vless',
@@ -1056,7 +1159,7 @@ else:
     }
 
 xray_conf['outbounds'].insert(0, {
-    'tag': f'outbound-{code}',
+    'tag': f'just1k-wl-outbound-{code}',
     'protocol': 'vless',
     'settings': outbound_settings,
     'streamSettings': stream_settings
@@ -1065,8 +1168,8 @@ xray_conf['outbounds'].insert(0, {
 # Routing Rule
 xray_conf['routing']['rules'].append({
     'type': 'field',
-    'inboundTag': [f'inbound-{code}'],
-    'outboundTag': f'outbound-{code}'
+    'inboundTag': [f'just1k-wl-inbound-{code}'],
+    'outboundTag': f'just1k-wl-outbound-{code}'
 })
 
 with open(xray_conf_file, 'w', encoding='utf-8') as f:
@@ -1093,9 +1196,10 @@ with open(f'{relays_d}/{code}.conf', 'w', encoding='utf-8') as f:
     f.write(nginx_loc_content)
 
 # Обновление тегов инбаундов для xray-api
-env_file = '/etc/xray-api/config.env'
 tags = [r['inbound_tag'] for r in relays]
-if 'inbound-default' not in tags and any(ib.get('tag') == 'inbound-default' for ib in xray_conf.get('inbounds', [])):
+if 'just1k-wl-default' not in tags and any(ib.get('tag') == 'just1k-wl-default' for ib in xray_conf.get('inbounds', [])):
+    tags.insert(0, 'just1k-wl-default')
+elif 'inbound-default' not in tags and any(ib.get('tag') == 'inbound-default' for ib in xray_conf.get('inbounds', [])):
     tags.insert(0, 'inbound-default')
 
 if os.path.exists(env_file):
@@ -1107,30 +1211,42 @@ if os.path.exists(env_file):
                 continue
             f.write(line)
         f.write('XRAY_INBOUND_TAGS=' + ','.join(tags) + '\n')
-" "$RELAYS_FILE" "$XRAY_CONFIG" "$STATE_FILE" "$name" "$ip" "$port" "$uuid" "$code" "$security_type" "$pubkey" "$shortid" "$sni"
+" "$RELAYS_FILE" "$XRAY_CONFIG" "$STATE_FILE" "$name" "$ip" "$port" "$uuid" "$code" "$security_type" "$pubkey" "$shortid" "$sni" "$NGINX_RELAYS_DIR" "$XRAY_API_CONFIG_ENV"
     chmod 600 "$XRAY_CONFIG"
 
     # Валидация конфигурации перед перезапуском
     if ! nginx -t; then
-        rm -f "$nginx_conf_path"
-        error "Ошибка конфигурации Nginx при добавлении релея $name ($code). Изменения отменены."
+        manifest_rollback
+        error "Ошибка конфигурации Nginx при добавлении релея $name ($code). Изменения полностью отменены."
     fi
 
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
-        rm -f "$nginx_conf_path"
-        error "Ошибка тестирования Xray при добавлении релея $name ($code). Изменения отменены."
+        manifest_rollback
+        error "Ошибка тестирования Xray при добавлении релея $name ($code). Изменения полностью отменены."
     fi
 
+    set +e
     systemctl reload nginx
+    local ng_rc=$?
     systemctl restart xray
+    local xr_rc=$?
     systemctl restart xray-api
+    local api_rc=$?
+    set -e
 
+    if [[ $ng_rc -ne 0 || $xr_rc -ne 0 || $api_rc -ne 0 ]] || ! systemctl is-active --quiet xray; then
+        manifest_rollback
+        error "Ошибка перезапуска служб при добавлении релея $name ($code). Изменения полностью отменены."
+    fi
+
+    manifest_commit
     log "Relay-узел $name ($code) успешно добавлен и активирован!"
 }
 
 remove_relay_node() {
     local target="$1"
     log "Удаление Relay-узла: $target..."
+    manifest_begin "$target"
 
     local found
     found=$(python3 -c "
@@ -1146,12 +1262,10 @@ except Exception:
 " "$RELAYS_FILE" "$target")
 
     if [[ "$found" -eq 0 ]]; then
+        manifest_commit
         warn "Relay-узел '$target' не найден среди активных релеев."
         return 0
     fi
-
-    create_backup "$RELAYS_FILE"
-    create_backup "$XRAY_CONFIG"
 
     python3 -c "
 import sys, json, os
@@ -1159,7 +1273,8 @@ import sys, json, os
 relays_file = sys.argv[1]
 xray_conf_file = sys.argv[2]
 target = sys.argv[3]
-relays_d = '/etc/nginx/just1k_relays.d'
+relays_d = sys.argv[4]
+env_file = sys.argv[5]
 
 try:
     with open(relays_file, 'r', encoding='utf-8') as f: relays = json.load(f)
@@ -1182,17 +1297,26 @@ for m in matched:
     if os.path.exists(xray_conf_file):
         try:
             with open(xray_conf_file, 'r', encoding='utf-8') as f: xray_conf = json.load(f)
-            xray_conf['inbounds'] = [ib for ib in xray_conf.get('inbounds', []) if ib.get('tag') != f'inbound-{code}']
-            xray_conf['outbounds'] = [ob for ob in xray_conf.get('outbounds', []) if ob.get('tag') != f'outbound-{code}']
+            xray_conf['inbounds'] = [ib for ib in xray_conf.get('inbounds', []) if ib.get('tag') not in (f'just1k-wl-inbound-{code}', f'inbound-{code}')]
+            xray_conf['outbounds'] = [ob for ob in xray_conf.get('outbounds', []) if ob.get('tag') not in (f'just1k-wl-outbound-{code}', f'outbound-{code}')]
             if 'routing' in xray_conf and 'rules' in xray_conf['routing']:
-                xray_conf['routing']['rules'] = [r for r in xray_conf['routing']['rules'] if r.get('outboundTag') != f'outbound-{code}']
+                xray_conf['routing']['rules'] = [r for r in xray_conf['routing']['rules'] if r.get('outboundTag') not in (f'just1k-wl-outbound-{code}', f'outbound-{code}')]
             with open(xray_conf_file, 'w', encoding='utf-8') as f:
                 json.dump(xray_conf, f, indent=2)
         except Exception as e:
             print('Error cleaning xray config:', e)
 
-env_file = '/etc/xray-api/config.env'
-tags = [r['inbound_tag'] for r in relays]
+tags = [r.get('inbound_tag', f'just1k-wl-inbound-{r.get(\"code\")}') for r in relays]
+if 'just1k-wl-default' not in tags and os.path.exists(xray_conf_file):
+    try:
+        with open(xray_conf_file, 'r', encoding='utf-8') as f: xc = json.load(f)
+        if any(ib.get('tag') == 'just1k-wl-default' for ib in xc.get('inbounds', [])):
+            tags.insert(0, 'just1k-wl-default')
+        elif any(ib.get('tag') == 'inbound-default' for ib in xc.get('inbounds', [])):
+            tags.insert(0, 'inbound-default')
+    except Exception:
+        pass
+
 if os.path.exists(env_file):
     with open(env_file, 'r', encoding='utf-8') as f: lines = f.readlines()
     with open(env_file, 'w', encoding='utf-8') as f:
@@ -1200,17 +1324,35 @@ if os.path.exists(env_file):
             if line.startswith('XRAY_INBOUND_TAGS='): continue
             f.write(line)
         f.write('XRAY_INBOUND_TAGS=' + ','.join(tags) + '\n')
-" "$RELAYS_FILE" "$XRAY_CONFIG" "$target"
+" "$RELAYS_FILE" "$XRAY_CONFIG" "$target" "$NGINX_RELAYS_DIR" "$XRAY_API_CONFIG_ENV"
     chmod 600 "$XRAY_CONFIG"
 
-    if nginx -t; then
-        systemctl reload nginx
+    if ! nginx -t; then
+        manifest_rollback
+        error "Ошибка валидации Nginx при удалении релея $target. Изменения полностью отменены."
     fi
-    if "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
-        systemctl restart xray
+
+    if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+        manifest_rollback
+        error "Ошибка тестирования Xray при удалении релея $target. Изменения полностью отменены."
     fi
+
+    set +e
+    systemctl reload nginx
+    local ng_rc=$?
+    systemctl restart xray
+    local xr_rc=$?
     systemctl restart xray-api
-    log "Relay $target удален."
+    local api_rc=$?
+    set -e
+
+    if [[ $ng_rc -ne 0 || $xr_rc -ne 0 || $api_rc -ne 0 ]] || ! systemctl is-active --quiet xray; then
+        manifest_rollback
+        error "Ошибка перезапуска служб при удалении релея $target. Изменения полностью отменены."
+    fi
+
+    manifest_commit
+    log "Relay $target успешно удален."
 }
 
 list_relays() {
@@ -1333,16 +1475,65 @@ run_doctor() {
     local domain
     domain="$(get_state_val "domain")"
     if [[ -n "$domain" && -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]]; then
+        local cert_file="/etc/letsencrypt/live/${domain}/fullchain.pem"
         local exp_date
-        exp_date="$(openssl x509 -enddate -noout -in "/etc/letsencrypt/live/${domain}/fullchain.pem" | cut -d= -f2)"
-        echo -e "  ${GREEN}✔${NC} SSL сертификат для $domain валиден до: $exp_date"
+        exp_date="$(openssl x509 -enddate -noout -in "$cert_file" 2>/dev/null | cut -d= -f2 || echo "НЕИЗВЕСТНО")"
+        
+        # Проверка истечения срока действия (F21)
+        if ! openssl x509 -checkend 0 -noout -in "$cert_file" 2>/dev/null; then
+            echo -e "  ${RED}✗${NC} SSL сертификат для $domain истек ($exp_date)!"
+            failed=$((failed + 1))
+        elif ! openssl x509 -checkend 2592000 -noout -in "$cert_file" 2>/dev/null; then
+            echo -e "  ${YELLOW}!${NC} SSL сертификат для $domain истекает менее чем через 30 дней: $exp_date"
+        else
+            echo -e "  ${GREEN}✔${NC} SSL сертификат для $domain валиден до: $exp_date"
+        fi
+
+        # Проверка соответствия домена SAN / CN (F21)
+        local cert_text
+        cert_text="$(openssl x509 -noout -text -in "$cert_file" 2>/dev/null || true)"
+        if echo "$cert_text" | grep -qE "DNS:${domain}\b|CN\s*=\s*${domain}\b"; then
+            echo -e "  ${GREEN}✔${NC} Домен $domain подтвержден в сертификате (SAN/CN)"
+        else
+            echo -e "  ${RED}✗${NC} Домен $domain не найден в SAN/CN сертификата!"
+            failed=$((failed + 1))
+        fi
     else
         echo -e "  ${YELLOW}i${NC} SSL сертификат для домена $domain не найден (нормально для Relay)"
     fi
 
     log "6. Проверка UFW фаервола..."
-    if ufw status 2>/dev/null | grep -q "Status: active"; then
-        echo -e "  ${GREEN}✔${NC} UFW фаервол активен и защищает порты"
+    if ufw status 2>/dev/null | grep -qi "Status: active"; then
+        echo -e "  ${GREEN}✔${NC} UFW фаервол активен"
+        local ufw_out
+        ufw_out="$(ufw status verbose 2>/dev/null || ufw status 2>/dev/null || true)"
+
+        if [[ "$role" == "origin" ]]; then
+            local bot_ip
+            bot_ip="$(get_state_val "bot_ip")"
+            if echo "$ufw_out" | grep -E "8444(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                echo -e "  ${RED}✗${NC} УЯЗВИМОСТЬ: Порт 8444 открыт для всех (0.0.0.0/0)!"
+                failed=$((failed + 1))
+            elif [[ -n "$bot_ip" ]] && echo "$ufw_out" | grep -F "$bot_ip" | grep -q "8444"; then
+                echo -e "  ${GREEN}✔${NC} Порт 8444 защищен и доступен только с BOT_IP ($bot_ip)"
+            elif [[ -n "$bot_ip" ]]; then
+                echo -e "  ${YELLOW}!${NC} Правило для BOT_IP ($bot_ip) на порт 8444 не найдено в UFW"
+                failed=$((failed + 1))
+            else
+                echo -e "  ${YELLOW}!${NC} BOT_IP не настроен в state.json"
+            fi
+        elif [[ "$role" == "relay" ]]; then
+            local relay_port origin_ip
+            relay_port="$(get_state_val "relay_port" "10443")"
+            origin_ip="$(get_state_val "origin_ip")"
+
+            if echo "$ufw_out" | grep -E "${relay_port}(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                echo -e "  ${RED}✗${NC} УЯЗВИМОСТЬ: Порт релея $relay_port открыт для всех (0.0.0.0/0)!"
+                failed=$((failed + 1))
+            elif [[ -n "$origin_ip" ]] && echo "$ufw_out" | grep -F "$origin_ip" | grep -q "$relay_port"; then
+                echo -e "  ${GREEN}✔${NC} Порт $relay_port защищен и доступен только с ORIGIN_IP ($origin_ip)"
+            fi
+        fi
     else
         echo -e "  ${YELLOW}!${NC} UFW фаервол не активен"
     fi
@@ -1392,8 +1583,16 @@ update_xray() {
             warn "Xray не запустился после обновления! Выполняем откат на предыдущую версию..."
             if [[ -f "$backup_bin" ]]; then
                 cp "$backup_bin" "$XRAY_BIN"
-                systemctl restart xray || true
-                log "Откат завершен."
+                if "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+                    systemctl restart xray || true
+                    if systemctl is-active --quiet xray; then
+                        log "Откат на предыдущую версию успешно выполнен и подтвержден."
+                    else
+                        warn "Служба Xray не активна после отката."
+                    fi
+                else
+                    warn "Резервная копия Xray не прошла тестирование конфигурации."
+                fi
             fi
             error "Обновление прервано из-за сбоя запуска службы."
         fi
@@ -1449,29 +1648,32 @@ main_menu() {
 }
 
 # --- Точка входа ---
-if [[ $# -eq 0 ]]; then
-    main_menu
-else
-    case "$1" in
-        install)
-            case "${2:-}" in
-                amnezia) install_amnezia_api_node "${3:-}" "${4:-}" ;;
-                origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" ;;
-                relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-www.google.com}" ;;
-                *) error "Неизвестный тип установки: $2. Используйте: amnezia, origin, relay" ;;
-            esac
-            ;;
-        relay)
-            case "${2:-}" in
-                add) add_relay_node "${3:-}" "${4:-}" "${5:-10443}" "${6:-}" "${7:-de}" "${8:-tls}" "${9:-}" "${10:-}" "${11:-relay.just1k.best}" ;;
-                remove|del) remove_relay_node "${3:-}" ;;
-                list) list_relays ;;
-                *) manage_relays_menu ;;
-            esac
-            ;;
-        status) show_status ;;
-        doctor) run_doctor ;;
-        update) update_xray ;;
-        *) error "Неизвестная команда: $1. Запустите 'just1knode' без аргументов для входа в интерактивное меню." ;;
-    esac
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    if [[ $# -eq 0 ]]; then
+        main_menu
+    else
+        case "$1" in
+            install)
+                case "${2:-}" in
+                    amnezia) install_amnezia_api_node "${3:-}" "${4:-}" ;;
+                    origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" ;;
+                    relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-www.google.com}" ;;
+                    *) error "Неизвестный тип установки: $2. Используйте: amnezia, origin, relay" ;;
+                esac
+                ;;
+            relay)
+                case "${2:-}" in
+                    add) add_relay_node "${3:-}" "${4:-}" "${5:-10443}" "${6:-}" "${7:-de}" "${8:-tls}" "${9:-}" "${10:-}" "${11:-relay.just1k.best}" ;;
+                    remove|del) remove_relay_node "${3:-}" ;;
+                    list) list_relays ;;
+                    *) manage_relays_menu ;;
+                esac
+                ;;
+            status) show_status ;;
+            doctor) run_doctor ;;
+            update) update_xray ;;
+            *) error "Неизвестная команда: $1. Запустите 'just1knode' без аргументов для входа в интерактивное меню." ;;
+        esac
+    fi
 fi
+

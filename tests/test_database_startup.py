@@ -7,6 +7,35 @@ from database.connection import _run_alembic_migrations
 
 
 class DatabaseStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        db_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/database")
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "1234567890:TEST_BOT_TOKEN_FOR_TESTS",
+                "REDIS_URL": "redis://localhost:6379/1",
+                "REDIS_PASSWORD": "test_redis_password",
+                "ADMIN_IDS": "[123456789]",
+                "SUPPORT_USERNAME": "test_support_username",
+                "DOMAIN": "test.domain.example.com",
+                "SSL_EMAIL": "test@example.com",
+                "YOOKASSA_SHOP_ID": "123456",
+                "YOOKASSA_SECRET_KEY": "test_secret_key",
+                "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
+                "YOOKASSA_WEBHOOK_PORT": "8080",
+                "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+                "DATABASE_URL": db_url,
+            },
+        )
+        self.env_patcher.start()
+        from config.settings import get_settings
+        get_settings.cache_clear()
+
+    async def asyncTearDown(self):
+        self.env_patcher.stop()
+        from config.settings import get_settings
+        get_settings.cache_clear()
+
     async def test_migration_does_not_run_in_active_event_loop(self):
         upgrade_thread_id = None
 

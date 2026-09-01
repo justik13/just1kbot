@@ -289,3 +289,114 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
             # Available bytes includes fresh 50 GiB base + carried 25 GiB topup
             available = await white_internet_repo.get_available_quota_bytes(session, sub_id)
             self.assertEqual(available, (50 + 25) * 1024**3)
+
+    async def test_traffic_event_duplicate_idempotency(self):
+        """Replayed or duplicate snapshot event insertion must be handled idempotently."""
+        node_epoch = "epoch_pipe_100"
+
+        # 1. Purchase White Internet Subscription
+        async with self.sessions.begin() as session:
+            ok, msg, sub = await WhiteInternetService.purchase_subscription(
+                session=session,
+                user_id=self.user.id,
+            )
+            self.assertTrue(ok, msg)
+            sub_id = sub.id
+            sub_uuid = sub.uuid
+
+        # 2. Reconcile
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.check_health.return_value = (
+            True,
+            node_epoch,
+            {"status": "ok", "grpc_ok": True, "xray_running": True, "boot_id": "boot_pipe_01", "starttime": 1000},
+        )
+        mock_client.sync_client.return_value = (True, None)
+
+        recon_worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+        async with self.sessions.begin() as session:
+            synced = await recon_worker.run_reconciliation_cycle(session)
+            self.assertEqual(synced, 1)
+
+        # 3. Traffic Worker processes initial snapshot
+        mock_client.get_traffic_snapshot.return_value = (
+            node_epoch,
+            "boot_pipe_01",
+            1000,
+            {sub_uuid: {"uplink": 1000, "downlink": 2000}},
+        )
+        traffic_worker = WhiteInternetTrafficWorker(node_client=mock_client)
+        async with self.sessions.begin() as session:
+            processed = await traffic_worker.run_traffic_cycle(session)
+            self.assertEqual(processed, 1)
+
+        # 4. Simulate a crash before baseline update by resetting sub.last_uplink_snapshot to 0,
+        # while the traffic event with snapshot_uplink_after=1000, snapshot_downlink_after=2000 already exists in DB.
+        async with self.sessions.begin() as session:
+            sub = await white_internet_repo.get_subscription_by_id(session, sub_id)
+            sub.last_uplink_snapshot = 0
+            sub.last_downlink_snapshot = 0
+            await session.flush()
+
+        # 5. Re-run traffic cycle with the exact same counters.
+        # This will attempt to record a duplicate event on uq_white_internet_traffic_event_snapshot.
+        # It must complete cleanly without throwing an unhandled IntegrityError or aborting the cycle.
+        async with self.sessions.begin() as session:
+            processed = await traffic_worker.run_traffic_cycle(session)
+            self.assertEqual(processed, 1)
+
+        # Verify DB is consistent and subscription has updated snapshot markers
+        async with self.sessions.begin() as session:
+            sub = await white_internet_repo.get_subscription_by_id(session, sub_id)
+            self.assertEqual(sub.last_uplink_snapshot, 1000)
+            self.assertEqual(sub.last_downlink_snapshot, 2000)
+            self.assertEqual(sub.traffic_stats_epoch, node_epoch)
+
+    async def test_disabled_subscription_does_not_consume_grants(self):
+        """Disabled subscription records traffic strictly as overage; active quota grants remain intact."""
+        node_epoch = "epoch_pipe_100"
+
+        # 1. Purchase White Internet Subscription with 50 GB grant
+        async with self.sessions.begin() as session:
+            ok, msg, sub = await WhiteInternetService.purchase_subscription(
+                session=session,
+                user_id=self.user.id,
+            )
+            self.assertTrue(ok, msg)
+            sub_id = sub.id
+            sub_uuid = sub.uuid
+
+        # 2. Disable subscription (e.g. by admin)
+        async with self.sessions.begin() as session:
+            sub = await white_internet_repo.get_subscription_by_id(session, sub_id)
+            sub.status = WhiteInternetStatus.DISABLED
+            sub.status_reason = "admin_disabled"
+            await session.flush()
+
+        # 3. Traffic Worker processes incoming 10 GB traffic delta
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.get_traffic_snapshot.return_value = (
+            node_epoch,
+            "boot_pipe_01",
+            1000,
+            {sub_uuid: {"uplink": 4 * 1024**3, "downlink": 6 * 1024**3}},
+        )
+        traffic_worker = WhiteInternetTrafficWorker(node_client=mock_client)
+        async with self.sessions.begin() as session:
+            processed = await traffic_worker.run_traffic_cycle(session)
+            self.assertEqual(processed, 1)
+
+        # 4. Verify:
+        # - traffic_overage_bytes increased by 10 GB
+        # - traffic_used_bytes increased by 10 GB
+        # - Quota grant bytes_remaining is STILL exactly 50 GB (NOT consumed)
+        async with self.sessions.begin() as session:
+            sub = await white_internet_repo.get_subscription_by_id(session, sub_id)
+            self.assertEqual(sub.status, WhiteInternetStatus.DISABLED)
+            self.assertEqual(sub.traffic_used_bytes, 10 * 1024**3)
+            self.assertEqual(sub.traffic_overage_bytes, 10 * 1024**3)
+            self.assertEqual(sub.traffic_uplink_bytes, 4 * 1024**3)
+            self.assertEqual(sub.traffic_downlink_bytes, 6 * 1024**3)
+
+            available = await white_internet_repo.get_available_quota_bytes(session, sub.id)
+            self.assertEqual(available, WHITE_INTERNET_BASE_TRAFFIC_BYTES)

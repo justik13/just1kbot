@@ -179,7 +179,7 @@ class EpochManager:
         lock_fd = None
         if fcntl is not None:
             try:
-                lock_fd = open(self.lock_path, "w")
+                lock_fd = open(self.lock_path, "a")
                 fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
             except Exception as e:
                 logger.debug("Could not acquire file lock: %s", e)

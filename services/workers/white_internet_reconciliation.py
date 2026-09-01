@@ -23,6 +23,9 @@ RECONCILIATION_INTERVAL_SECONDS = 15.0
 BATCH_SIZE = 50
 
 
+DEFAULT_RECONCILIATION_CONCURRENCY = 10
+
+
 class WhiteInternetReconciliationWorker:
     """Worker keeping White Internet subscriptions in sync with Xray nodes."""
 
@@ -31,10 +34,85 @@ class WhiteInternetReconciliationWorker:
         bot: Bot | None = None,
         node_client: XrayNodeClient | None = None,
         session_factory=None,
+        max_concurrency: int = DEFAULT_RECONCILIATION_CONCURRENCY,
     ):
         self.bot = bot
         self.client = node_client or XrayNodeClient()
         self.session_factory = session_factory or session_scope
+        self.max_concurrency = max_concurrency
+        self._semaphore = asyncio.Semaphore(self.max_concurrency)
+        self._sub_locks: dict[int, asyncio.Lock] = {}
+
+    def _get_sub_lock(self, sub_id: int) -> asyncio.Lock:
+        if sub_id not in self._sub_locks:
+            self._sub_locks[sub_id] = asyncio.Lock()
+        return self._sub_locks[sub_id]
+
+    async def _reconcile_single_subscription(
+        self,
+        server_id: int,
+        api_url: str,
+        api_key: str,
+        target_epoch: str,
+        task: dict,
+        sf,
+    ) -> bool:
+        sub_id = task["sub_id"]
+        sub_uuid = task["uuid"]
+        desired_active = task["desired_active"]
+        target_version = task["target_version"]
+
+        async with self._get_sub_lock(sub_id):
+            async with self._semaphore:
+                success, err_msg = await self.client.sync_client(
+                    api_url,
+                    api_key,
+                    sub_uuid,
+                    is_active=desired_active,
+                    version=target_version,
+                )
+
+            # Persist result in short transaction under lock
+            async with sf() as sess:
+                sub = await white_internet_repo.get_subscription_with_lock(sess, sub_id)
+                if sub is None:
+                    return False
+
+                if success and sub.desired_version == target_version:
+                    sub.actual_version = target_version
+                    sub.last_reconciled_node_epoch = target_epoch
+                    if sub.status == WhiteInternetStatus.PENDING and desired_active:
+                        sub.status = WhiteInternetStatus.ACTIVE
+                        sub.status_reason = None
+                    sub.provisioning_status = (
+                        WhiteInternetProvisioningStatus.ACTIVE
+                        if desired_active
+                        else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                    )
+                    sub.last_synced_at = now_utc()
+                    sub.last_sync_error = None
+                    return True
+                elif not success:
+                    sub.provisioning_status = WhiteInternetProvisioningStatus.FAILED
+                    sub.last_sync_error = err_msg
+                    sub.last_synced_at = now_utc()
+                    logger.error(
+                        "Failed to reconcile White Internet sub_id=%d on server %d: %s",
+                        sub_id,
+                        server_id,
+                        err_msg,
+                    )
+                    return False
+                else:
+                    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                    logger.warning(
+                        "Reconciliation detected version drift during sync for sub_id=%d on server %d (desired=%d != target=%d)",
+                        sub_id,
+                        server_id,
+                        sub.desired_version,
+                        target_version,
+                    )
+                    return False
 
     async def run_reconciliation_cycle(self, session: AsyncSession | None = None) -> int:
         now = now_utc()
@@ -51,6 +129,7 @@ class WhiteInternetReconciliationWorker:
                 select(Server)
                 .where(
                     Server.api_url.is_not(None),
+                    Server.api_key.is_not(None),
                     Server.is_active.is_(True),
                     Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
                 )
@@ -145,58 +224,20 @@ class WhiteInternetReconciliationWorker:
                         "target_version": sub.desired_version,
                     })
 
-            # Remote network I/O outside DB transaction
-            for task in sync_tasks:
-                sub_id = task["sub_id"]
-                sub_uuid = task["uuid"]
-                desired_active = task["desired_active"]
-                target_version = task["target_version"]
-
-                success, err_msg = await self.client.sync_client(
-                    api_url,
-                    api_key,
-                    sub_uuid,
-                    is_active=desired_active,
-                    version=target_version,
-                )
-
-                # Persist result in short transaction under lock
-                async with sf() as sess:
-                    sub = await white_internet_repo.get_subscription_with_lock(sess, sub_id)
-                    if sub is None:
-                        continue
-
-                    if success and sub.desired_version == target_version:
-                        sub.actual_version = target_version
-                        sub.last_reconciled_node_epoch = target_epoch
-                        if sub.status == WhiteInternetStatus.PENDING and desired_active:
-                            sub.status = WhiteInternetStatus.ACTIVE
-                            sub.status_reason = None
-                        sub.provisioning_status = (
-                            WhiteInternetProvisioningStatus.ACTIVE
-                            if desired_active
-                            else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-                        )
-                        sub.last_synced_at = now_utc()
-                        sub.last_sync_error = None
+            # Bounded concurrent execution outside DB transaction
+            if sync_tasks:
+                tasks = [
+                    self._reconcile_single_subscription(
+                        server_id, api_url, api_key, target_epoch, task, sf
+                    )
+                    for task in sync_tasks
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for r in results:
+                    if isinstance(r, Exception):
+                        logger.error("Error in parallel reconciliation task: %s", r, exc_info=r)
+                    elif r is True:
                         synced_count += 1
-                    elif not success:
-                        sub.provisioning_status = WhiteInternetProvisioningStatus.FAILED
-                        sub.last_sync_error = err_msg
-                        sub.last_synced_at = now_utc()
-                        logger.error(
-                            "Failed to reconcile White Internet sub_id=%d on server %d: %s",
-                            sub_id,
-                            server_id,
-                            err_msg,
-                        )
-                    else:
-                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                        logger.warning(
-                            "Reconciliation detected version drift during sync for sub_id=%d on server %d",
-                            sub_id,
-                            server_id,
-                        )
 
         return synced_count
 

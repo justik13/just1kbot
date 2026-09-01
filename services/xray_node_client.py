@@ -163,10 +163,16 @@ class XrayNodeClient:
         return False, err or f"Sync failed with HTTP {status_code}"
 
     async def remove_client(
-        self, api_url: str, api_key: str, client_uuid: str
+        self,
+        api_url: str,
+        api_key: str,
+        client_uuid: str,
+        version: int | None = None,
     ) -> tuple[bool, str | None]:
-        """Remove a client from all inbounds on the node."""
+        """Remove a client from all inbounds on the node with optional version fencing."""
         url = f"{api_url.rstrip('/')}/v1/clients/{client_uuid}"
+        if version is not None:
+            url = f"{url}?version={version}"
         headers = self._get_headers(api_key)
         status_code, _data, err = await self._make_request("DELETE", url, headers)
         if status_code in (200, 204):

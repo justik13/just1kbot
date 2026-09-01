@@ -16,6 +16,8 @@ LimitNOFILE=65535
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target

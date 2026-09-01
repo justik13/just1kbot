@@ -92,17 +92,23 @@ async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
     counts = {row[0]: row[1] for row in vpn_result.all()}
 
     # 2. WhiteInternetSubscription counts (Xray Origin)
-    from config.enums import WhiteInternetStatus
+    from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
     from database.models import WhiteInternetSubscription
 
     wl_result = await session.execute(
         select(WhiteInternetSubscription.origin_node_id, func.count(WhiteInternetSubscription.id))
         .where(
             WhiteInternetSubscription.origin_node_id.is_not(None),
-            WhiteInternetSubscription.status.in_([
-                WhiteInternetStatus.PENDING,
-                WhiteInternetStatus.ACTIVE,
-            ]),
+            or_(
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.PENDING,
+                    WhiteInternetStatus.ACTIVE,
+                ]),
+                WhiteInternetSubscription.provisioning_status.in_([
+                    WhiteInternetProvisioningStatus.PENDING_CREATE,
+                    WhiteInternetProvisioningStatus.PENDING_UPDATE,
+                ]),
+            ),
         )
         .group_by(WhiteInternetSubscription.origin_node_id)
     )
@@ -241,7 +247,11 @@ async def update_server_health_snapshot(
     for key, value in kwargs.items():
         if key in PROTECTED_SERVER_FIELDS or key not in HEALTH_UPDATE_FIELDS:
             continue
-        if hasattr(current, key):
+        if key == "extra_data" and isinstance(value, dict):
+            existing_extra = dict(current.extra_data or {})
+            existing_extra.update(value)
+            setattr(current, key, existing_extra)
+        elif hasattr(current, key):
             setattr(current, key, value)
 
     await session.flush()

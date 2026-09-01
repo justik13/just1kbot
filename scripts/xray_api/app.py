@@ -11,11 +11,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from pydantic import BaseModel, Field, model_validator
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore
-
+from client_store import ClientStore
 from epoch_manager import EpochManager
 from xray_grpc import XrayGrpcClient
 
@@ -52,7 +48,10 @@ STATE_FILE_PATH = Path(os.getenv("STATE_FILE_PATH", "/etc/just1knode/state.json"
 
 
 def get_secret_base_path() -> str:
-    """Discovers canonical secret XHTTP base path configured for this Origin node."""
+    """Discovers canonical secret XHTTP base path configured for this Origin node.
+
+    Strictly matches managed tags ('just1k-wl-*' or legacy 'inbound-default').
+    """
     if STATE_FILE_PATH.exists():
         try:
             with open(STATE_FILE_PATH, "r", encoding="utf-8") as f:
@@ -62,17 +61,50 @@ def get_secret_base_path() -> str:
         except Exception as e:
             logger.warning("Could not read secret_base_path from %s: %s", STATE_FILE_PATH, e)
 
-    # Fallback: check config.json inbounds path
+    # Fallback: check config.json inbounds path prioritizing managed namespaced tags
     if XRAY_CONFIG_PATH.exists():
         try:
             with open(XRAY_CONFIG_PATH, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-                for ib in cfg.get("inbounds", []):
-                    path = ib.get("streamSettings", {}).get("xhttpSettings", {}).get("path", "")
-                    if path and path.startswith("/"):
-                        parts = [p for p in path.strip("/").split("/") if p]
-                        if parts:
-                            return f"/{parts[0]}"
+                inbounds = cfg.get("inbounds", [])
+                # Priority 1: tags matching just1k-wl-default or legacy inbound-default
+                for ib in inbounds:
+                    tag = ib.get("tag", "")
+                    if tag in ("just1k-wl-default", "inbound-default"):
+                        path = (
+                            ib.get("streamSettings", {})
+                            .get("xhttpSettings", {})
+                            .get("path", "")
+                        )
+                        if not path:
+                            path = (
+                                ib.get("streamSettings", {})
+                                .get("httpSettings", {})
+                                .get("path", "")
+                            )
+                        if path and path.startswith("/"):
+                            parts = [p for p in path.strip("/").split("/") if p]
+                            if parts:
+                                return f"/{parts[0]}"
+                # Priority 2: tags starting strictly with just1k-wl- (managed namespace)
+                for ib in inbounds:
+                    tag = ib.get("tag", "")
+                    if tag.startswith("just1k-wl-"):
+                        path = (
+                            ib.get("streamSettings", {})
+                            .get("xhttpSettings", {})
+                            .get("path", "")
+                        )
+                        if not path:
+                            path = (
+                                ib.get("streamSettings", {})
+                                .get("httpSettings", {})
+                                .get("path", "")
+                            )
+                        if path and path.startswith("/"):
+                            parts = [p for p in path.strip("/").split("/") if p]
+                            if parts:
+                                return f"/{parts[0]}"
         except Exception:
             pass
 
@@ -80,7 +112,7 @@ def get_secret_base_path() -> str:
 
 
 def get_target_inbounds() -> List[str]:
-    """Dynamically discover all configured VLESS inbounds without hardcoding."""
+    """Dynamically discover all configured Just1k VLESS inbounds strictly filtering by managed namespaces."""
     # 1. Environment override if explicitly set
     raw = os.getenv("XRAY_INBOUND_TAGS")
     if raw:
@@ -88,34 +120,53 @@ def get_target_inbounds() -> List[str]:
         if tags:
             return tags
 
+    discovered_tags: List[str] = []
+
     # 2. Read from relays.json if available
+    relay_tags: List[str] = []
     if RELAYS_FILE_PATH.exists():
         try:
             with open(RELAYS_FILE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
-                    tags = [r.get("inbound_tag") for r in data if r.get("inbound_tag")]
-                    if tags:
-                        return tags
+                    for r in data:
+                        t = r.get("inbound_tag")
+                        if t and (t.startswith("just1k-wl-") or t.startswith("inbound-")):
+                            relay_tags.append(t)
         except Exception as e:
             logger.warning("Could not load relays from %s: %s", RELAYS_FILE_PATH, e)
 
     # 3. Read from Xray config.json if available
+    config_tags: List[str] = []
     if XRAY_CONFIG_PATH.exists():
         try:
             with open(XRAY_CONFIG_PATH, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-                tags = [
-                    ib.get("tag")
-                    for ib in cfg.get("inbounds", [])
-                    if ib.get("protocol") == "vless" and ib.get("tag")
-                ]
-                if tags:
-                    return tags
+                for ib in cfg.get("inbounds", []):
+                    protocol = ib.get("protocol", "").lower()
+                    tag = ib.get("tag", "")
+                    # Match managed VLESS/VMESS inbounds only
+                    if protocol in ("vless", "vmess") and (
+                        tag.startswith("just1k-wl-")
+                        or tag == "inbound-default"
+                        or tag.startswith("inbound-")
+                    ):
+                        config_tags.append(tag)
         except Exception as e:
             logger.warning("Could not load inbounds from %s: %s", XRAY_CONFIG_PATH, e)
 
-    return []
+    # Prioritize default tag if present
+    all_candidate_tags = config_tags + relay_tags
+    for tag in all_candidate_tags:
+        if tag in ("just1k-wl-default", "inbound-default") and tag not in discovered_tags:
+            discovered_tags.insert(0, tag)
+        elif tag not in discovered_tags:
+            discovered_tags.append(tag)
+
+    if not discovered_tags and relay_tags:
+        discovered_tags = relay_tags
+
+    return discovered_tags
 
 
 def get_active_relays() -> List[Dict[str, Any]]:
@@ -133,160 +184,20 @@ def get_active_relays() -> List[Dict[str, Any]]:
 
 grpc_client = XrayGrpcClient(host=GRPC_HOST, port=GRPC_PORT)
 epoch_manager = EpochManager()
-
-
-# --- Thread/Process Safe Local Client Storage ---
-class ClientStore:
-    """Manages persistent active client UUIDs and versions in a local JSON file (Zero-Loss State) with file locking."""
-
-    def __init__(self, file_path: Path):
-        self.file_path = file_path
-        self.lock_path = file_path.with_suffix(".lock")
-
-    def _ensure_dir(self) -> None:
-        try:
-            self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            logger.warning("Could not create directory %s: %s", self.file_path.parent, e)
-
-    def load_client_entries(self) -> Dict[str, Dict[str, Any]]:
-        """Loads all client metadata entries {uuid: {is_active: bool, version: int, updated_at: float}}."""
-        if not self.file_path.exists() or self.file_path.stat().st_size == 0:
-            return {}
-        try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                # Format 1: Direct dict of dicts: {"clients": {uuid: {...}}}
-                if isinstance(data, dict) and "clients" in data and isinstance(data["clients"], dict):
-                    return data["clients"]
-                # Format 2: Dict of lists: {"clients": ["uuid1", "uuid2"]}
-                if isinstance(data, dict) and "clients" in data and isinstance(data["clients"], list):
-                    return {u: {"is_active": True, "version": 1, "updated_at": time.time()} for u in data["clients"]}
-                # Format 3: Raw list: ["uuid1", "uuid2"]
-                if isinstance(data, list):
-                    return {u: {"is_active": True, "version": 1, "updated_at": time.time()} for u in data}
-        except Exception as e:
-            logger.error("Failed to load clients from %s: %s", self.file_path, e)
-        return {}
-
-    def load_clients(self) -> set[str]:
-        """Returns set of currently active client UUIDs."""
-        entries = self.load_client_entries()
-        return {u for u, meta in entries.items() if meta.get("is_active", True) is True}
-
-    def save_client_entries(self, entries: Dict[str, Dict[str, Any]]) -> bool:
-        self._ensure_dir()
-        temp_path = self.file_path.with_suffix(".tmp")
-        data = {
-            "clients": entries,
-            "updated_at": time.time(),
-            "count": len([u for u, m in entries.items() if m.get("is_active", True) is True]),
-        }
-        try:
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            temp_path.replace(self.file_path)
-            try:
-                os.chmod(self.file_path, 0o600)
-            except Exception:
-                pass
-            return True
-        except Exception as e:
-            logger.error("Failed to save clients to %s: %s", self.file_path, e)
-            return False
-
-    def save_clients(self, clients: set[str]) -> bool:
-        """Backward-compatible save using set of active UUIDs."""
-        entries = {u: {"is_active": True, "version": 1, "updated_at": time.time()} for u in clients}
-        return self.save_client_entries(entries)
-
-    def add_client(self, client_uuid: str, version: Optional[int] = None) -> None:
-        self._ensure_dir()
-        lock_fd = None
-        if fcntl is not None:
-            try:
-                lock_fd = open(self.lock_path, "w")
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except Exception as e:
-                logger.debug("Could not acquire client store lock: %s", e)
-        try:
-            entries = self.load_client_entries()
-            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
-            new_ver = version if version is not None else max(curr_ver + 1, 1)
-            entries[client_uuid] = {
-                "is_active": True,
-                "version": new_ver,
-                "updated_at": time.time(),
-            }
-            if not self.save_client_entries(entries):
-                raise IOError(f"Failed to persist client addition to disk: {client_uuid}")
-        finally:
-            if fcntl is not None and lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
-
-    def remove_client(self, client_uuid: str, version: Optional[int] = None) -> None:
-        self._ensure_dir()
-        lock_fd = None
-        if fcntl is not None:
-            try:
-                lock_fd = open(self.lock_path, "w")
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except Exception as e:
-                logger.debug("Could not acquire client store lock: %s", e)
-        try:
-            entries = self.load_client_entries()
-            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
-            new_ver = version if version is not None else max(curr_ver + 1, 1)
-            entries[client_uuid] = {
-                "is_active": False,
-                "version": new_ver,
-                "updated_at": time.time(),
-            }
-            if not self.save_client_entries(entries):
-                raise IOError(f"Failed to persist client deactivation to disk: {client_uuid}")
-        finally:
-            if fcntl is not None and lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
-
-    def delete_client(self, client_uuid: str) -> None:
-        self._ensure_dir()
-        lock_fd = None
-        if fcntl is not None:
-            try:
-                lock_fd = open(self.lock_path, "w")
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except Exception as e:
-                logger.debug("Could not acquire client store lock: %s", e)
-        try:
-            entries = self.load_client_entries()
-            if client_uuid in entries:
-                del entries[client_uuid]
-                if not self.save_client_entries(entries):
-                    raise IOError(f"Failed to persist client deletion to disk: {client_uuid}")
-        finally:
-            if fcntl is not None and lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
-
-
 client_store = ClientStore(CLIENTS_FILE_PATH)
+
+# Node synchronization state (Central DB is authoritative SSOT; local cache is ephemeral hint)
+node_sync_state: Dict[str, Any] = {
+    "status": "unsynchronized",
+    "last_synced_at": None,
+}
 
 
 def restore_persisted_clients_to_xray() -> int:
-    """Restores ONLY active persisted clients from disk into Xray RAM via gRPC upon startup."""
+    """Restores active persisted clients from disk into Xray RAM as temporary crash-recovery hint.
+
+    The node remains in 'unsynchronized' state until Central DB reconciliation runs.
+    """
     active_clients = client_store.load_clients()
     if not active_clients:
         logger.info("No active persisted clients to restore.")
@@ -301,13 +212,15 @@ def restore_persisted_clients_to_xray() -> int:
                 restored += 1
             except Exception as e:
                 logger.warning("Failed to restore client %s on inbound %s: %s", client_uuid[:8], tag, e)
-    logger.info("Restored %d active client registrations across inbounds %s.", restored, target_inbounds)
+    logger.info("Restored %d active client registrations across inbounds %s as ephemeral hints.", restored, target_inbounds)
     return len(active_clients)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: restore clients to Xray
+    # Startup: restore clients to Xray strictly as ephemeral hints
+    node_sync_state["status"] = "unsynchronized"
+    node_sync_state["last_synced_at"] = None
     target_inbounds = get_target_inbounds()
     logger.info("Starting Just1kBot Xray API Agent on inbounds: %s", target_inbounds)
     try:
@@ -352,12 +265,14 @@ def verify_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
 class ClientSyncRequest(BaseModel):
     client_id: Optional[str] = Field(None, description="Client UUID")
     uuid: Optional[str] = Field(None, description="Client UUID alias")
-    desired_state: str = Field(..., description="Target state: 'active' or 'disabled'")
+    desired_state: Optional[str] = Field(None, description="Target state: 'active' or 'disabled'")
+    is_active: Optional[bool] = Field(None, description="Target state boolean alias")
     version: Optional[int] = Field(None, description="Monotonic desired version")
+    email: Optional[str] = Field(None, description="Optional client email/identifier")
 
     @model_validator(mode="before")
     @classmethod
-    def resolve_uuid(cls, values: Any) -> Any:
+    def resolve_fields(cls, values: Any) -> Any:
         if isinstance(values, dict):
             cid = values.get("client_id") or values.get("uuid")
             if not cid:
@@ -368,10 +283,17 @@ class ClientSyncRequest(BaseModel):
             except ValueError:
                 raise ValueError(f"Invalid UUID format: {cid}") from None
 
-            state = str(values.get("desired_state", "")).strip().lower()
-            if state not in ("active", "disabled"):
-                raise ValueError("desired_state must be 'active' or 'disabled'")
-            values["desired_state"] = state
+            state = values.get("desired_state")
+            is_act = values.get("is_active")
+            if state is not None:
+                s = str(state).strip().lower()
+                if s not in ("active", "disabled"):
+                    raise ValueError("desired_state must be 'active' or 'disabled'")
+                values["desired_state"] = s
+            elif is_act is not None:
+                values["desired_state"] = "active" if bool(is_act) else "disabled"
+            else:
+                values["desired_state"] = "active"
         return values
 
 
@@ -385,7 +307,7 @@ def _mask_uuid(val: str) -> str:
 @app.get("/v1/health")
 def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
-    Checks service health, Xray core gRPC connectivity, active inbounds and relays.
+    Checks service health, Xray core gRPC connectivity, active inbounds, relays, and synchronization status.
     """
     grpc_ok = grpc_client.is_healthy()
     active_clients = client_store.load_clients()
@@ -417,6 +339,9 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         "node_epoch": running_epoch if is_running else None,
         "boot_id": boot_id or "boot_active",
         "starttime": starttime or 0,
+        "sync_status": node_sync_state.get("status", "unsynchronized"),
+        "synchronized": node_sync_state.get("status") == "synchronized",
+        "last_synced_at": node_sync_state.get("last_synced_at"),
     }
     if not is_running:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -448,35 +373,68 @@ def list_clients(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
 @app.get("/v1/traffic/snapshot")
 def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
-    Returns traffic stats aggregated by UUID/email from Xray gRPC QueryStats.
+    Returns traffic stats aggregated by UUID/email with double-checked epoch atomicity.
     """
     if not grpc_client.is_healthy():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Xray gRPC is not available",
         )
-    _pid, starttime, boot_id, node_epoch = epoch_manager.get_process_and_epoch() if epoch_manager else (None, 0, None, None)
-    if not node_epoch:
-        node_epoch = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
 
-    try:
-        users_stats = grpc_client.get_users_stats(reset=False)
-        return {
-            "node_epoch": node_epoch,
-            "boot_id": boot_id or "boot_active",
-            "starttime": starttime or 0,
-            "timestamp": int(time.time()),
-            "users": users_stats,
-        }
-    except Exception as e:
-        logger.error("Failed to fetch traffic stats from gRPC: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Xray gRPC stats failure: {str(e)}",
-        ) from e
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        pid1, starttime1, boot_id1, epoch1 = (
+            epoch_manager.get_process_and_epoch() if epoch_manager else (None, 0, None, None)
+        )
+        if not epoch1:
+            epoch1 = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
+
+        try:
+            users_stats = grpc_client.get_users_stats(reset=False)
+        except Exception as e:
+            logger.error("Failed to fetch traffic stats from gRPC: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Xray gRPC stats failure: {str(e)}",
+            ) from e
+
+        pid2, starttime2, boot_id2, epoch2 = (
+            epoch_manager.get_process_and_epoch() if epoch_manager else (None, 0, None, None)
+        )
+        if not epoch2:
+            epoch2 = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
+
+        if (
+            epoch1 == epoch2
+            and pid1 == pid2
+            and starttime1 == starttime2
+            and boot_id1 == boot_id2
+        ):
+            return {
+                "node_epoch": epoch1,
+                "boot_id": boot_id1 or "boot_active",
+                "starttime": starttime1 or 0,
+                "timestamp": int(time.time()),
+                "users": users_stats,
+            }
+
+        logger.warning(
+            "Epoch drift detected during snapshot read (attempt %d/%d): %s -> %s. Retrying...",
+            attempt + 1,
+            max_attempts,
+            epoch1,
+            epoch2,
+        )
+        time.sleep(0.05 * (2**attempt))
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="EpochMismatchError: Xray instance changed during stats read",
+    )
 
 
 @app.post("/v1/clients/sync")
+@app.post("/v1/clients")
 def sync_client(
     req: ClientSyncRequest, _: bool = Depends(verify_api_key)
 ) -> Dict[str, Any]:
@@ -484,7 +442,10 @@ def sync_client(
     Brings client's status across all inbounds to the desired state with monotonic version fencing.
     """
     client_uuid = req.client_id
-    desired_state = req.desired_state
+    if not client_uuid:
+        raise HTTPException(status_code=422, detail="client_id is required")
+
+    desired_state = req.desired_state or "active"
     target_inbounds = get_target_inbounds()
 
     # Monotonic version fencing check
@@ -503,6 +464,7 @@ def sync_client(
                 return {
                     "status": "ok",
                     "client_id": client_uuid,
+                    "result": "already_newer",
                     "state": "active" if curr_entry.get("is_active") else "disabled",
                     "version": curr_ver,
                     "fenced": True,
@@ -540,7 +502,7 @@ def sync_client(
     # Update local persistent client store with monotonic version
     try:
         if desired_state == "active":
-            client_store.add_client(client_uuid, version=req.version)
+            client_store.add_client(client_uuid, version=req.version, email=req.email)
         else:
             client_store.remove_client(client_uuid, version=req.version)
     except Exception as e:
@@ -550,19 +512,29 @@ def sync_client(
             detail=f"Failed to persist client state: {str(e)}",
         ) from e
 
+    # Update synchronization state
+    node_sync_state["status"] = "synchronized"
+    node_sync_state["last_synced_at"] = time.time()
+
     return {
         "status": "ok",
         "client_id": client_uuid,
+        "result": "applied",
         "state": desired_state,
         "version": req.version,
+        "fenced": False,
         "inbounds": target_inbounds,
     }
 
 
 @app.delete("/v1/clients/{uuid}")
-def delete_client(uuid: str, _: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+def delete_client(
+    uuid: str,
+    version: Optional[int] = None,
+    _: bool = Depends(verify_api_key),
+) -> Dict[str, Any]:
     """
-    Deletes client from all inbounds and removes from local persistent storage.
+    Deletes client from all inbounds and removes from local persistent storage with version fencing.
     """
     try:
         clean_uuid = str(uuid_lib.UUID(uuid.strip())).lower()
@@ -573,6 +545,29 @@ def delete_client(uuid: str, _: bool = Depends(verify_api_key)) -> Dict[str, Any
         ) from None
 
     target_inbounds = get_target_inbounds()
+
+    # Monotonic version check
+    if version is not None:
+        entries = client_store.load_client_entries()
+        curr_entry = entries.get(clean_uuid)
+        if curr_entry:
+            curr_ver = curr_entry.get("version")
+            if curr_ver is not None and version < curr_ver:
+                logger.warning(
+                    "Stale delete request for %s: version %d < stored %d. Fencing.",
+                    _mask_uuid(clean_uuid),
+                    version,
+                    curr_ver,
+                )
+                return {
+                    "status": "ok",
+                    "client_id": clean_uuid,
+                    "result": "already_newer",
+                    "fenced": True,
+                    "version": curr_ver,
+                    "inbounds": target_inbounds,
+                }
+
     failed_inbounds: List[str] = []
     for tag in target_inbounds:
         try:
@@ -588,13 +583,16 @@ def delete_client(uuid: str, _: bool = Depends(verify_api_key)) -> Dict[str, Any
         )
 
     try:
-        client_store.delete_client(clean_uuid)
+        client_store.delete_client(clean_uuid, version=version)
     except Exception as e:
         logger.warning("Could not delete client from store: %s", e)
 
     return {
         "status": "ok",
         "client_id": clean_uuid,
+        "result": "applied",
         "action": "deleted",
+        "fenced": False,
+        "version": version,
         "inbounds": target_inbounds,
     }

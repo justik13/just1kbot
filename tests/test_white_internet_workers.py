@@ -1,5 +1,4 @@
-"""Unit and integration tests for White Internet reconciliation and traffic sync workers."""
-
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -277,8 +276,6 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
         mock_session = AsyncMock()
-        # When DB query filters is_active=True and health_state IN (ONLINE, WAITING_CONFIRMATION),
-        # disabled server is not in the active server list
         active_servers = [s for s in [server_disabled] if s.is_active and s.health_state == ServerHealthState.ONLINE]
         mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: active_servers))
 
@@ -286,6 +283,82 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(synced, 0)
         mock_client.check_health.assert_not_called()
         mock_client.sync_client.assert_not_called()
+
+    async def test_reconciliation_bounded_parallelism(self):
+        """Reconciliation worker must process tasks concurrently bounded by Semaphore(10)."""
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        server = Server(
+            id=1,
+            name="Origin-MSK",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://origin.just1k.online:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-100",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+
+        subs = [
+            WhiteInternetSubscription(
+                id=i,
+                user_id=100 + i,
+                origin_node_id=1,
+                token=f"token-{i}",
+                uuid=f"00000000-0000-0000-0000-{i:012d}",
+                status=WhiteInternetStatus.ACTIVE,
+                started_at=now,
+                expires_at=now + timedelta(days=30),
+                traffic_limit_bytes=50 * 1024**3,
+                traffic_used_bytes=0,
+                desired_version=2,
+                actual_version=1,
+                last_reconciled_node_epoch="epoch-100",
+                provisioning_status=WhiteInternetProvisioningStatus.PENDING_UPDATE,
+            )
+            for i in range(1, 16)
+        ]
+
+        active_concurrent = 0
+        max_concurrent_observed = 0
+
+        async def fake_sync(api_url, api_key, client_uuid, is_active, version):
+            nonlocal active_concurrent, max_concurrent_observed
+            active_concurrent += 1
+            if active_concurrent > max_concurrent_observed:
+                max_concurrent_observed = active_concurrent
+            await asyncio.sleep(0.01)
+            active_concurrent -= 1
+            return True, None
+
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 1000})
+        mock_client.sync_client.side_effect = fake_sync
+
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client, max_concurrency=10)
+
+        sub_map = {s.id: s for s in subs}
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = [
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
+            MagicMock(scalars=lambda: MagicMock(all=lambda: subs)),      # pending subs query
+        ]
+
+        with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
+            with patch(
+                "database.repositories.white_internet_repo.get_subscription_with_lock",
+                side_effect=lambda session, sid: sub_map.get(sid),
+            ):
+                synced = await worker.run_reconciliation_cycle(mock_session)
+
+                self.assertEqual(synced, 15)
+                self.assertLessEqual(max_concurrent_observed, 10)
+                self.assertGreater(max_concurrent_observed, 1)
+                for s in subs:
+                    self.assertEqual(s.actual_version, 2)
+                    self.assertEqual(s.provisioning_status, WhiteInternetProvisioningStatus.ACTIVE)
 
 
 class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
@@ -549,3 +622,182 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(sub.last_uplink_snapshot, 50)
                     self.assertEqual(sub.last_downlink_snapshot, 150)
                     self.assertEqual(sub.traffic_stats_epoch, "epoch-100")
+
+    async def test_traffic_worker_poison_record_isolation(self):
+        """Poison client records (corrupted stats, bad UUID, DB exceptions) must not abort the batch."""
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        server = Server(
+            id=1,
+            name="Origin-MSK",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://origin.just1k.online:8444",
+            api_key="secret-key",
+            health_state=ServerHealthState.ONLINE,
+            is_active=True,
+            xray_instance_epoch="epoch-100",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+
+        valid_sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="token-valid",
+            uuid="client-uuid-valid",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=50 * 1024**3,
+            traffic_used_bytes=1000,
+            last_uplink_snapshot=100,
+            last_downlink_snapshot=200,
+            traffic_stats_epoch="epoch-100",
+        )
+
+        error_sub = WhiteInternetSubscription(
+            id=2,
+            user_id=20,
+            origin_node_id=1,
+            token="token-error",
+            uuid="client-uuid-error",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=50 * 1024**3,
+            traffic_used_bytes=0,
+            last_uplink_snapshot=0,
+            last_downlink_snapshot=0,
+            traffic_stats_epoch="epoch-100",
+        )
+
+        # Diverse poison records + 1 error-raising client + 1 valid client
+        poison_users_stats = {
+            "": {"uplink": 100, "downlink": 100},                             # Poison 1: empty UUID
+            None: {"uplink": 100, "downlink": 100},                           # Poison 2: None UUID
+            12345: {"uplink": 100, "downlink": 100},                          # Poison 3: non-string UUID
+            "client-uuid-bad-stats": "not-a-dict",                            # Poison 4: non-dict stats
+            "client-uuid-bad-counters": {"uplink": "corrupted", "downlink": None}, # Poison 5: malformed counters
+            "client-uuid-not-found": {"uplink": 500, "downlink": 500},        # Poison 6: sub not in DB
+            "client-uuid-error": {"uplink": 500, "downlink": 500},            # Poison 7: triggers DB error
+            "client-uuid-valid": {"uplink": 150, "downlink": 350},            # Valid client! delta = 50 + 150 = 200
+        }
+
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-100",
+            "boot-1",
+            1000,
+            poison_users_stats,
+        )
+
+        worker = WhiteInternetTrafficWorker(node_client=mock_client)
+        mock_session = AsyncMock()
+
+        async def fake_scalar(stmt):
+            # Check params or query representation
+            params = stmt.compile().params
+            for v in params.values():
+                if v == "client-uuid-valid":
+                    return valid_sub
+                if v == "client-uuid-error":
+                    return error_sub
+            return None
+
+        mock_session.scalar.side_effect = fake_scalar
+        mock_session.execute.side_effect = [
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
+        ]
+
+        async def fake_deduct(session, subscription_id, **kwargs):
+            if subscription_id == error_sub.id:
+                raise RuntimeError("Simulated transient DB error on client 2")
+            return 200, False, 0
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", side_effect=lambda sess, sid: valid_sub if sid == 1 else error_sub):
+            with patch("database.repositories.white_internet_repo.deduct_traffic_atomic", side_effect=fake_deduct) as mock_deduct:
+                with patch("database.repositories.white_internet_repo.record_traffic_event_atomic") as mock_event:
+                    processed = await worker.run_traffic_cycle(mock_session)
+
+                    # Exactly 1 valid client was processed successfully
+                    self.assertEqual(processed, 1)
+                    mock_deduct.assert_awaited()
+                    mock_event.assert_awaited_once_with(
+                        mock_session,
+                        subscription_id=valid_sub.id,
+                        node_epoch="epoch-100",
+                        node_boot_id="boot-1",
+                        node_starttime=1000,
+                        snapshot_uplink_before=100,
+                        snapshot_uplink_after=150,
+                        snapshot_downlink_before=200,
+                        snapshot_downlink_after=350,
+                        delta_uplink=50,
+                        delta_downlink=150,
+                        allocated_bytes=200,
+                        overage_bytes=0,
+                        now=unittest.mock.ANY,
+                    )
+                    self.assertEqual(valid_sub.last_uplink_snapshot, 150)
+                    self.assertEqual(valid_sub.last_downlink_snapshot, 350)
+
+    async def test_traffic_worker_status_invariants(self):
+        """Traffic worker must only poll ONLINE and WAITING_CONFIRMATION servers with is_active=True."""
+        s_online = Server(
+            id=1, name="S-Online", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s1:8444", api_key="k1", is_active=True,
+            health_state=ServerHealthState.ONLINE, xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1", xray_instance_starttime=1000,
+        )
+        s_waiting = Server(
+            id=2, name="S-Waiting", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s2:8444", api_key="k2", is_active=True,
+            health_state=ServerHealthState.WAITING_CONFIRMATION, xray_instance_epoch="epoch-2",
+            xray_instance_boot_id="boot-2", xray_instance_starttime=1000,
+        )
+        s_manual_disabled = Server(
+            id=3, name="S-ManualDisabled", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s3:8444", api_key="k3", is_active=True,
+            health_state=ServerHealthState.MANUAL_DISABLED, xray_instance_epoch="epoch-3",
+        )
+        s_auto_disabled = Server(
+            id=4, name="S-AutoDisabled", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s4:8444", api_key="k4", is_active=True,
+            health_state=ServerHealthState.AUTO_DISABLED, xray_instance_epoch="epoch-4",
+        )
+        s_inactive = Server(
+            id=5, name="S-Inactive", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s5:8444", api_key="k5", is_active=False,
+            health_state=ServerHealthState.ONLINE, xray_instance_epoch="epoch-5",
+        )
+
+        all_servers = [s_online, s_waiting, s_manual_disabled, s_auto_disabled, s_inactive]
+        # Real DB query filters is_active=True and health_state IN (ONLINE, WAITING_CONFIRMATION)
+        queried_servers = [
+            s for s in all_servers
+            if s.is_active and s.health_state in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION)
+        ]
+
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.get_traffic_snapshot.side_effect = [
+            ("epoch-1", "boot-1", 1000, {}),
+            ("epoch-2", "boot-2", 1000, {}),
+        ]
+
+        worker = WhiteInternetTrafficWorker(node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = [
+            MagicMock(scalars=lambda: MagicMock(all=lambda: queried_servers)),
+        ]
+
+        await worker.run_traffic_cycle(mock_session)
+
+        # Only s_online (https://s1:8444) and s_waiting (https://s2:8444) must be polled
+        polled_urls = [call.args[0] for call in mock_client.get_traffic_snapshot.call_args_list]
+        self.assertEqual(len(polled_urls), 2)
+        self.assertIn("https://s1:8444", polled_urls)
+        self.assertIn("https://s2:8444", polled_urls)
+        self.assertNotIn("https://s3:8444", polled_urls)
+        self.assertNotIn("https://s4:8444", polled_urls)
+        self.assertNotIn("https://s5:8444", polled_urls)

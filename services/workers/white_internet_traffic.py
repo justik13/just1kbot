@@ -71,7 +71,13 @@ class WhiteInternetTrafficWorker:
             node_epoch, node_boot_id, node_starttime, users_stats = await self.client.get_traffic_snapshot(
                 api_url, api_key
             )
-            if not node_epoch or users_stats is None:
+            if not node_epoch or users_stats is None or not isinstance(users_stats, dict):
+                if users_stats is not None and not isinstance(users_stats, dict):
+                    logger.warning(
+                        "Node on server %d returned invalid users_stats type: %s",
+                        server_id,
+                        type(users_stats),
+                    )
                 continue
 
             if (
@@ -97,9 +103,29 @@ class WhiteInternetTrafficWorker:
                         continue
 
             for client_uuid, stats in users_stats.items():
+                if not isinstance(client_uuid, str) or not client_uuid.strip() or not isinstance(stats, dict):
+                    logger.warning(
+                        "Invalid client record on server %d: uuid=%r, stats=%r",
+                        server_id,
+                        client_uuid,
+                        stats,
+                    )
+                    continue
+
                 try:
-                    uplink = max(int(stats.get("uplink", 0)), 0)
-                    downlink = max(int(stats.get("downlink", 0)), 0)
+                    try:
+                        raw_up = stats.get("uplink", 0)
+                        raw_down = stats.get("downlink", 0)
+                        uplink = max(int(raw_up) if raw_up is not None else 0, 0)
+                        downlink = max(int(raw_down) if raw_down is not None else 0, 0)
+                    except (ValueError, TypeError) as parse_err:
+                        logger.warning(
+                            "Malformed uplink/downlink counters for client %s on server %d: %s",
+                            client_uuid,
+                            server_id,
+                            parse_err,
+                        )
+                        continue
 
                     async with sf() as sess:
                         sub_meta = await sess.scalar(
@@ -149,22 +175,52 @@ class WhiteInternetTrafficWorker:
                             now=now,
                         )
 
-                        await white_internet_repo.record_traffic_event_atomic(
-                            sess,
-                            subscription_id=sub.id,
-                            node_epoch=node_epoch,
-                            node_boot_id=node_boot_id,
-                            node_starttime=node_starttime,
-                            snapshot_uplink_before=before_up,
-                            snapshot_uplink_after=uplink,
-                            snapshot_downlink_before=before_down,
-                            snapshot_downlink_after=downlink,
-                            delta_uplink=delta_up,
-                            delta_downlink=delta_down,
-                            allocated_bytes=consumed,
-                            overage_bytes=overage,
-                            now=now,
-                        )
+                        try:
+                            if isinstance(sess, AsyncSession):
+                                async with sess.begin_nested():
+                                    await white_internet_repo.record_traffic_event_atomic(
+                                        sess,
+                                        subscription_id=sub.id,
+                                        node_epoch=node_epoch,
+                                        node_boot_id=node_boot_id,
+                                        node_starttime=node_starttime,
+                                        snapshot_uplink_before=before_up,
+                                        snapshot_uplink_after=uplink,
+                                        snapshot_downlink_before=before_down,
+                                        snapshot_downlink_after=downlink,
+                                        delta_uplink=delta_up,
+                                        delta_downlink=delta_down,
+                                        allocated_bytes=consumed,
+                                        overage_bytes=overage,
+                                        now=now,
+                                    )
+                            else:
+                                await white_internet_repo.record_traffic_event_atomic(
+                                    sess,
+                                    subscription_id=sub.id,
+                                    node_epoch=node_epoch,
+                                    node_boot_id=node_boot_id,
+                                    node_starttime=node_starttime,
+                                    snapshot_uplink_before=before_up,
+                                    snapshot_uplink_after=uplink,
+                                    snapshot_downlink_before=before_down,
+                                    snapshot_downlink_after=downlink,
+                                    delta_uplink=delta_up,
+                                    delta_downlink=delta_down,
+                                    allocated_bytes=consumed,
+                                    overage_bytes=overage,
+                                    now=now,
+                                )
+                        except Exception as event_exc:
+                            logger.warning(
+                                "Duplicate or non-fatal traffic event collision for sub_id=%d on server %d (epoch=%s, up=%d, down=%d). Handled idempotently: %s",
+                                sub.id,
+                                server_id,
+                                node_epoch,
+                                uplink,
+                                downlink,
+                                event_exc,
+                            )
 
                         sub.last_uplink_snapshot = uplink
                         sub.last_downlink_snapshot = downlink
@@ -176,7 +232,7 @@ class WhiteInternetTrafficWorker:
                 except Exception as client_exc:
                     logger.error(
                         "Error processing traffic deduction for client %s on server %d: %s",
-                        client_uuid[:8] if client_uuid else "unknown",
+                        client_uuid[:8] if isinstance(client_uuid, str) else "unknown",
                         server_id,
                         client_exc,
                         exc_info=True,

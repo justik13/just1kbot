@@ -119,19 +119,18 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 headers=headers,
             )
 
-        # Determine base path from server extra_data or env
-        base_path = DEFAULT_WHITE_INTERNET_PATH
-        if getattr(server, "extra_data", None) and isinstance(server.extra_data, dict):
-            if "secret_base_path" in server.extra_data:
-                base_path = server.extra_data["secret_base_path"]
-        elif os.getenv("WHITE_INTERNET_PATH"):
-            base_path = os.getenv("WHITE_INTERNET_PATH")
+        # Determine base path from server extra_data, environment or default
+        base_path = (
+            (server.extra_data.get("secret_base_path") if isinstance(getattr(server, "extra_data", None), dict) else None)
+            or os.getenv("WHITE_INTERNET_PATH")
+            or DEFAULT_WHITE_INTERNET_PATH
+        )
 
         # Generate multi-relay configs if available
         relays = None
-        if getattr(server, "extra_data", None) and isinstance(server.extra_data, dict) and "relays" in server.extra_data:
+        if isinstance(getattr(server, "extra_data", None), dict) and "relays" in server.extra_data:
             relays = server.extra_data["relays"]
-        elif os.getenv("WHITE_INTERNET_RELAYS"):
+        if relays is None and os.getenv("WHITE_INTERNET_RELAYS"):
             try:
                 relays = json.loads(os.environ["WHITE_INTERNET_RELAYS"])
             except Exception:
