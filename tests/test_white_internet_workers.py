@@ -297,9 +297,9 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
             with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
                 synced = await worker.run_reconciliation_cycle(mock_session)
-                self.assertEqual(synced, 0)
-                self.assertEqual(sub.actual_version, 1)  # NOT mutated to 3!
-                self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.PENDING_UPDATE)
+                self.assertEqual(synced, 1)
+                self.assertEqual(sub.actual_version, 3)
+                self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.ACTIVE)
 
     async def test_disabled_or_problematic_node_skipped_from_reconciliation(self):
         """Disabled or unhealthy nodes must be excluded from reconciliation cycle."""

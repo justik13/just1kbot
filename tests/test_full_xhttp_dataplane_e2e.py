@@ -181,8 +181,8 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
         self.assertIn("'xPaddingPlacement': 'queryInHeader'", sh_content)
 
-    def test_origin_routing_never_exits_to_russian_internet(self) -> None:
-        """On Origin node, just1k-wl-default must never route to direct freedom outbound."""
+    def test_origin_routing_default_fallback_and_ru_split(self) -> None:
+        """On Origin node, default inbound routes to relay/block, while RU domains route to just1k-wl-direct."""
         sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
 
         # In standalone mode (install_xray_origin_node), default inbound routes to blackhole block
@@ -195,23 +195,44 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertIn("primary_relay_tag = f'just1k-wl-outbound-{primary_relay_code}'", sh_content)
         self.assertIn("r['outboundTag'] = primary_relay_tag", sh_content)
 
-    def test_client_geosite_rules_use_category_ru_and_tld_ru(self) -> None:
-        """Client routing rules must use geosite:category-ru and geosite:tld-ru (not deprecated geosite:ru)."""
+        # Server-side split routing uses geosite:category-ru and geosite:tld-ru
+        self.assertIn("'geosite:category-ru'", sh_content)
+        self.assertIn("'geosite:tld-ru'", sh_content)
+        self.assertIn("'outboundTag': 'just1k-wl-direct'", sh_content)
+
+    def test_client_dns_fakedns_and_routing_architecture(self) -> None:
+        """Client routing and DNS must use FakeDNS, DoH via proxy, and no Yandex DNS leaks."""
         sub = DummySubscription()
         full_cfg = WhiteInternetService.generate_full_xray_config(
             subscription=sub,
             cdn_domain="cdn.example.com",
         )
+        # FakeDNS pool configured
+        fakedns = full_cfg.get("fakedns", [])
+        self.assertTrue(len(fakedns) > 0)
+        self.assertEqual(fakedns[0].get("ipPool"), "198.18.0.0/15")
+
+        # Sniffing with fakedns enabled
+        inbound = full_cfg["inbounds"][0]
+        self.assertIn("fakedns", inbound["sniffing"]["destOverride"])
+
+        # DNS servers use DoH, NOT plain Yandex DNS
+        dns_servers = full_cfg["dns"]["servers"]
+        self.assertIn("https://1.1.1.1/dns-query", dns_servers)
+        self.assertIn("https://dns.google/dns-query", dns_servers)
+        self.assertNotIn("https://77.88.8.8/dns-query", dns_servers)
+
+        # Static bootstrap hosts present
+        hosts = full_cfg["dns"]["hosts"]
+        self.assertEqual(hosts.get("cloudflare-dns.com"), "1.1.1.1")
+
+        # DoH routed into tunnel
         rules = full_cfg["routing"]["rules"]
-        direct_domain_rule = next(
-            (r for r in rules if r.get("outboundTag") == "direct" and "domain" in r),
+        doh_rule = next(
+            (r for r in rules if r.get("outboundTag") == "proxy-white-internet" and "1.1.1.1" in r.get("ip", [])),
             None,
         )
-        self.assertIsNotNone(direct_domain_rule)
-        domains = direct_domain_rule["domain"]
-        self.assertIn("geosite:category-ru", domains)
-        self.assertIn("geosite:tld-ru", domains)
-        self.assertNotIn("geosite:ru", domains)
+        self.assertIsNotNone(doh_rule)
 
     def test_nginx_camouflage_site_and_buffers(self) -> None:
         """Nginx must serve camouflage site on / and define zero request buffering for streaming."""

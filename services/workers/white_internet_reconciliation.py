@@ -102,16 +102,26 @@ class WhiteInternetReconciliationWorker:
                     sub.last_sync_error = None
                     return True
                 elif sync_result == SyncResult.ALREADY_NEWER:
-                    # Node already has a newer version! NEVER overwrite DB actual_version with older target_version
-                    logger.warning(
-                        "Node reported already_newer for sub_id=%d on server %d (target=%d). Retaining DB state.",
+                    # Node already has an equal or newer version applied!
+                    logger.info(
+                        "Node reported already_newer for sub_id=%d on server %d (target=%d). Marking synced.",
                         sub_id,
                         server_id,
                         target_version,
                     )
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                    sub.actual_version = max(sub.actual_version or 0, target_version)
+                    sub.last_reconciled_node_epoch = target_epoch
+                    if sub.status == WhiteInternetStatus.PENDING and desired_active:
+                        sub.status = WhiteInternetStatus.ACTIVE
+                        sub.status_reason = None
+                    sub.provisioning_status = (
+                        WhiteInternetProvisioningStatus.ACTIVE
+                        if desired_active
+                        else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                    )
                     sub.last_synced_at = now_utc()
-                    return False
+                    sub.last_sync_error = None
+                    return True
                 elif sync_result == SyncResult.FENCED:
                     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                     sub.last_sync_error = err_msg or "sync_fenced"

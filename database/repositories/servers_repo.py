@@ -201,6 +201,10 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
         ):
             continue
 
+        relays = (server.extra_data or {}).get("relays", [])
+        if not relays or len(relays) == 0:
+            continue
+
         from database.models import WhiteInternetSubscription
 
         active_count = (

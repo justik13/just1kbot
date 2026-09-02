@@ -210,11 +210,13 @@ class TestGroupFServersRepoAtomicAllocation(unittest.IsolatedAsyncioTestCase):
             id=1, name="srv1", is_active=True, health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE, api_url="https://s1:8444", api_key="k1",
             capabilities=["xray_origin"], max_clients=10,
+            extra_data={"relays": [{"code": "de"}]},
         )
         srv2 = Server(
             id=2, name="srv2", is_active=True, health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE, api_url="https://s2:8444", api_key="k2",
             capabilities=["xray_origin"], max_clients=10,
+            extra_data={"relays": [{"code": "de"}]},
         )
 
         call_count = 0
@@ -236,6 +238,23 @@ class TestGroupFServersRepoAtomicAllocation(unittest.IsolatedAsyncioTestCase):
         allocated = await servers_repo.allocate_origin_server_atomic(session)
         self.assertIsNotNone(allocated)
         self.assertEqual(allocated.id, 2)
+
+    async def test_allocate_origin_server_atomic_skips_origin_without_relays(self):
+        session = AsyncMock(spec=AsyncSession)
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [1]
+        session.scalars.return_value = scalars_mock
+
+        srv_no_relays = Server(
+            id=1, name="srv_no_relays", is_active=True, health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE, api_url="https://s1:8444", api_key="k1",
+            capabilities=["xray_origin"], max_clients=10,
+            extra_data={"relays": []},
+        )
+        session.scalar.return_value = srv_no_relays
+
+        allocated = await servers_repo.allocate_origin_server_atomic(session)
+        self.assertIsNone(allocated)
 
 
 class TestGroupGServersRepoGenerationCAS(unittest.IsolatedAsyncioTestCase):

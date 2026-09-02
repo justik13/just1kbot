@@ -296,14 +296,17 @@ async def assert_inv_12_paid_value_ledger_consistency(session: AsyncSession) -> 
 
 
 async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
-    """Inv 13: All VPN servers use AWG protocol (pure WireGuard 'wg' is strictly rejected)."""
+    """Inv 13: All VPN servers use AWG or Xray protocol (pure WireGuard 'wg' is strictly rejected)."""
     violations = await session.scalars(
-        select(Server).where(Server.protocol != AMNEZIA_PROTOCOL)
+        select(Server).where(
+            Server.protocol.notin_([AMNEZIA_PROTOCOL, "xray"])
+            | (Server.protocol == "wg")
+        )
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(13, "VPN Server Protocol (AWG)", False, f"Violations: {len(v_list)} non-AWG servers")
-    return InvariantResult(13, "VPN Server Protocol (AWG)", True, "All VPN servers strictly use AmneziaWG (awg)")
+        return InvariantResult(13, "VPN Server Protocol (AWG/Xray)", False, f"Violations: {len(v_list)} invalid protocol servers")
+    return InvariantResult(13, "VPN Server Protocol (AWG/Xray)", True, "All servers strictly use AmneziaWG (awg) or Xray (xray)")
 
 
 async def assert_inv_14_origin_server_capacity(session: AsyncSession) -> InvariantResult:

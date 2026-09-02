@@ -248,9 +248,15 @@ async def process_add_server(
             )
             if xray_epoch:
                 server.xray_instance_epoch = xray_epoch
-                if xray_data:
-                    server.xray_instance_boot_id = xray_data.get("boot_id")
-                    server.xray_instance_starttime = xray_data.get("starttime")
+            if xray_data:
+                server.xray_instance_boot_id = xray_data.get("boot_id")
+                server.xray_instance_starttime = xray_data.get("starttime")
+                extra = dict(server.extra_data or {})
+                if "secret_base_path" in xray_data:
+                    extra["secret_base_path"] = xray_data["secret_base_path"]
+                if "relays" in xray_data:
+                    extra["relays"] = xray_data["relays"]
+                server.extra_data = extra
 
             await AuditService.log_action(
                 session,

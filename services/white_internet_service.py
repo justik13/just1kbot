@@ -280,7 +280,7 @@ class WhiteInternetService:
                     "listen": "127.0.0.1",
                     "protocol": "socks",
                     "settings": {"auth": "noauth", "udp": True},
-                    "sniffing": {"enabled": True, "destOverride": ["http", "tls"]},
+                    "sniffing": {"enabled": True, "destOverride": ["http", "tls", "fakedns"]},
                 }
             ],
             "outbounds": [
@@ -325,23 +325,33 @@ class WhiteInternetService:
                 {"tag": "block", "protocol": "blackhole"},
             ],
             "dns": {
+                "hosts": {
+                    "cloudflare-dns.com": "1.1.1.1",
+                    "dns.google": "8.8.8.8",
+                },
                 "servers": [
                     "https://1.1.1.1/dns-query",
-                    "https://77.88.8.8/dns-query",
+                    "https://dns.google/dns-query",
                     "localhost",
-                ]
+                ],
             },
+            "fakedns": [
+                {
+                    "ipPool": "198.18.0.0/15",
+                    "poolSize": 32768,
+                }
+            ],
             "routing": {
                 "domainStrategy": "IPIfNonMatch",
                 "rules": [
                     {
                         "type": "field",
-                        "ip": ["geoip:private", "geoip:ru"],
-                        "outboundTag": "direct",
+                        "ip": ["1.1.1.1", "8.8.8.8"],
+                        "outboundTag": "proxy-white-internet",
                     },
                     {
                         "type": "field",
-                        "domain": ["geosite:category-ru", "geosite:tld-ru"],
+                        "ip": ["geoip:private"],
                         "outboundTag": "direct",
                     },
                     {

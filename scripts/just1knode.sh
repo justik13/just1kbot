@@ -618,7 +618,8 @@ install_xray_origin_node() {
     if [[ -z "$domain" ]]; then error "Домен не может быть пустым."; fi
 
     if [[ -z "$email" ]]; then
-        read -rp "Введите Email для SSL Let's Encrypt: " email || true
+        read -rp "Введите Email для SSL Let's Encrypt [по умолчанию: admin@${domain}]: " email || true
+        email="${email:-admin@${domain}}"
     fi
     if [[ -z "$email" ]]; then error "Email не может быть пустым."; fi
 
@@ -719,6 +720,10 @@ inbounds.append({
             'xPaddingMethod': 'tokenish',
             'xPaddingPlacement': 'queryInHeader'
         }
+    },
+    'sniffing': {
+        'enabled': True,
+        'destOverride': ['tls', 'http']
     }
 })
 
@@ -741,6 +746,25 @@ rules.append({
     'inboundTag': ['just1k-wl-api-grpc'],
     'outboundTag': 'just1k-wl-api'
 })
+
+# Серверный Split-Routing: прямой выход в Рунет с московского IP Origin-сервера
+rules.append({
+    'type': 'field',
+    'domain': [
+        'geosite:category-ru',
+        'geosite:tld-ru',
+        'domain:ru',
+        'domain:su',
+        'domain:xn--p1ai'
+    ],
+    'outboundTag': 'just1k-wl-direct'
+})
+rules.append({
+    'type': 'field',
+    'ip': ['geoip:ru'],
+    'outboundTag': 'just1k-wl-direct'
+})
+
 rules.append({
     'type': 'field',
     'inboundTag': ['just1k-wl-default'],
@@ -751,6 +775,14 @@ final_config = dict(existing)
 final_config['log'] = existing.get('log', {'loglevel': 'warning'})
 final_config['api'] = {'tag': 'just1k-wl-api', 'services': ['HandlerService', 'StatsService']}
 final_config['stats'] = existing.get('stats', {})
+final_config['policy'] = {
+    'levels': {
+        '0': {
+            'statsUserUplink': True,
+            'statsUserDownlink': True
+        }
+    }
+}
 final_config['inbounds'] = inbounds
 final_config['outbounds'] = outbounds
 final_config['routing'] = existing.get('routing', {})
@@ -953,11 +985,16 @@ EOF
     ln -sf "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" "${NGINX_CONF_DIR}/sites-enabled/"
     nginx -t && systemctl reload nginx
 
-    # Fail-closed UFW: порт 8444 открывается СТРОГО для BOT_IP
+    # Fail-closed UFW: порт 8444 открывается СТРОГО для BOT_IP (если задан)
     configure_safe_ufw "80/tcp" "443/tcp"
     ufw delete allow 8444/tcp 2>/dev/null || true
     ufw delete allow 8444 2>/dev/null || true
-    ufw allow from "$bot_ip" to any port 8444 proto tcp || true
+    if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]]; then
+        ufw allow from "$bot_ip" to any port 8444 proto tcp || true
+    else
+        ufw allow 8444/tcp || true
+        warn "BOT_IP не указан. Порт 8444 открыт для всех IP. Защита осуществляется по API-ключу."
+    fi
 
     set_state_val "role" "origin"
     set_state_val "domain" "$domain"
@@ -1302,6 +1339,10 @@ xray_conf['inbounds'].append({
             'xPaddingMethod': 'tokenish',
             'xPaddingPlacement': 'queryInHeader'
         }
+    },
+    'sniffing': {
+        'enabled': True,
+        'destOverride': ['tls', 'http']
     }
 })
 
@@ -1355,6 +1396,41 @@ xray_conf['routing']['rules'].append({
     'inboundTag': [f'just1k-wl-inbound-{code}'],
     'outboundTag': f'just1k-wl-outbound-{code}'
 })
+
+# Enforce policy stats for client billing if missing
+if 'policy' not in xray_conf:
+    xray_conf['policy'] = {
+        'levels': {
+            '0': {
+                'statsUserUplink': True,
+                'statsUserDownlink': True
+            }
+        }
+    }
+
+# Ensure Russian direct egress rules exist at the top of routing rules
+ru_rule_present = any(
+    r.get('outboundTag') == 'just1k-wl-direct' and 'geosite:category-ru' in r.get('domain', [])
+    for r in xray_conf.get('routing', {}).get('rules', [])
+)
+if not ru_rule_present:
+    insert_idx = 1 if len(xray_conf.get('routing', {}).get('rules', [])) > 0 else 0
+    xray_conf.setdefault('routing', {}).setdefault('rules', []).insert(insert_idx, {
+        'type': 'field',
+        'domain': [
+            'geosite:category-ru',
+            'geosite:tld-ru',
+            'domain:ru',
+            'domain:su',
+            'domain:xn--p1ai'
+        ],
+        'outboundTag': 'just1k-wl-direct'
+    })
+    xray_conf['routing']['rules'].insert(insert_idx + 1, {
+        'type': 'field',
+        'ip': ['geoip:ru'],
+        'outboundTag': 'just1k-wl-direct'
+    })
 
 # Enforce relay egress for default client traffic (C4)
 primary_relay_code = relays[0].get('code', code)
