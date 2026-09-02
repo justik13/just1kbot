@@ -24,7 +24,7 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
 
     def test_generate_vless_links_format(self):
         sub = MagicMock(spec=WhiteInternetSubscription)
-        sub.uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+        sub.uuid = "11111111-2222-3333-4444-555555555555"
         cdn_domain = "cdn.just1k.online"
 
         links = WhiteInternetService.generate_vless_links(sub, cdn_domain)
@@ -38,6 +38,7 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
         self.assertIn("path=%2Fstream%2Fv1%2Fdefault", link_wl)
         self.assertIn("mode=packet-up", link_wl)
         self.assertIn("security=tls", link_wl)
+        self.assertIn("fp=firefox", link_wl)
         self.assertIn("sni=cdn.just1k.online", link_wl)
         self.assertIn("Белый Интернет", urllib.parse.unquote(link_wl))
 

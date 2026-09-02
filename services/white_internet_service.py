@@ -22,6 +22,7 @@ from config.constants import (
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
     WHITE_INTERNET_SERVICE_TYPE,
+    WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
 )
 from config.enums import ServerHealthState, TariffQuoteOperation, TariffQuoteStatus, WhiteInternetStatus
@@ -272,14 +273,14 @@ class WhiteInternetService:
         if not relays:
             tag = urllib.parse.quote(texts.WL_VLESS_TAG)
             standalone_path = f"{base}/default"
-            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
+            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={WHITE_INTERNET_TLS_FINGERPRINT}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
             return [link]
 
         links: list[str] = []
         for r in relays:
             r_path = r.get("path") or f"{base}/{r.get('code', 'de')}"
             r_tag = urllib.parse.quote(r.get("name") or texts.WL_VLESS_TAG)
-            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
+            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={WHITE_INTERNET_TLS_FINGERPRINT}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
             links.append(link)
         return links
 
@@ -323,7 +324,7 @@ class WhiteInternetService:
                         "tlsSettings": {
                             "serverName": cdn_domain,
                             "alpn": ["h2"],
-                            "fingerprint": "chrome",
+                            "fingerprint": WHITE_INTERNET_TLS_FINGERPRINT,
                         },
                         "xhttpSettings": {
                             "path": f"{base}/default",

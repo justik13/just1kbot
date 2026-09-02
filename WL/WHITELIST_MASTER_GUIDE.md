@@ -237,8 +237,8 @@
 | `YOUR_ORIGIN_HOST` | Поддомен Origin-сервера в РФ | `origin.example.com` | DNS, Nginx, CDN Origin Host |
 | `YOUR_CDN_HOST` | Поддомен CDN (точка входа для клиентов) | `cdn.example.com` | DNS, YC CDN, INCY, Amnezia |
 | `YOUR_RELAY_HOST` | Поддомен Exit-сервера за рубежом | `relay.example.com` | DNS, Xray TLS |
-| `YOUR_ORIGIN_IP` | Публичный IP Origin-сервера (РФ) | `185.146.131.64` | DNS A-запись, UFW на Exit |
-| `YOUR_EXIT_IP` | Публичный IP Exit-сервера (Зарубежье) | `94.249.239.200` | DNS A-запись, Xray Outbound |
+| `YOUR_ORIGIN_IP` | Публичный IP Origin-сервера (РФ) | `192.0.2.10` | DNS A-запись, UFW на Exit |
+| `YOUR_EXIT_IP` | Публичный IP Exit-сервера (Зарубежье) | `198.51.100.10` | DNS A-запись, Xray Outbound |
 | `YOUR_UUID` | Секретный UUID пользователя | `a2b9d4e1-73c5-4812-b964-f3e7b85a1902` | Xray на Origin, Exit, INCY, Amnezia |
 | `YOUR_SECRET_PATH` | Секретный URL-эндпоинт XHTTP | `/api/v3/secure-data` | Nginx location, Xray, Клиенты |
 | `YOUR_PADDING_KEY` | Двухсимвольный ключ обфускации | `dc` | Xray Settings, Клиенты |
@@ -246,8 +246,8 @@
 
 ### 4.2. Настройка DNS-записей (DNS-Only)
 
-1. **A-запись `origin`** ➡️ `YOUR_ORIGIN_IP` (например, `185.146.131.64`)
-2. **A-запись `relay`** ➡️ `YOUR_EXIT_IP` (например, `94.249.239.200`)
+1. **A-запись `origin`** ➡️ `YOUR_ORIGIN_IP` (например, `192.0.2.10`)
+2. **A-запись `relay`** ➡️ `YOUR_EXIT_IP` (например, `198.51.100.10`)
 3. **CNAME-запись `_acme-challenge.cdn`** ➡️ проверочная запись из Yandex Certificate Manager
 4. **CNAME-запись `cdn`** ➡️ технический домен Yandex CDN вида `*.gslb.yccdn.ru`
 

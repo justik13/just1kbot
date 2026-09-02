@@ -27,7 +27,7 @@
 		}
 	}
 
-	@allowed_paths path /webhook/* /yookassa/* /sub/wl/* {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*
+	@allowed_paths path /webhook/* /yookassa/* {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*
 	handle @allowed_paths {
 		reverse_proxy bot:8080 {
 			header_up X-Real-IP {remote_host}

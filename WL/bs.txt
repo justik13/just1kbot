@@ -15,10 +15,10 @@
 
 * **Основной домен:** `example.com`
 
-* **Origin-домен (Aeza МСК):** `origin.example.com` (IP: `185.146.131.64`)
+* **Origin-домен (Aeza МСК):** `origin.example.com` (IP: `192.0.2.10`)
 
 
-* **Exit/Relay-домен (Германия):** `relay.example.com` (IP: `94.249.239.200`)
+* **Exit/Relay-домен (Германия):** `relay.example.com` (IP: `198.51.100.10`)
 
 
 * **CDN-домен:** `cdn.example.com`
@@ -36,9 +36,9 @@
 
 В панели Cloudflare для домена `example.com` должны быть созданы следующие записи с выключенным проксированием (серые облака — **«DNS Only»**):
 
-1. **A-запись `origin**` ➡️ указывает на `185.146.131.64`
+1. **A-запись `origin**` ➡️ указывает на `192.0.2.10`
 
-2. **A-запись `relay**` ➡️ указывает на `94.249.239.200`
+2. **A-запись `relay**` ➡️ указывает на `198.51.100.10`
 
 3. **CNAME-запись `_acme-challenge.cdn**` ➡️ проверочный адрес из Certificate Manager
 
@@ -161,7 +161,7 @@ chmod 755 /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh
 Рекомендуется разрешить порт `10443` только с IP-адреса Origin-сервера (Аэзы):
 
 ```bash
-ufw allow from 185.146.131.64 to any port 10443 proto tcp
+ufw allow from 192.0.2.10 to any port 10443 proto tcp
 
 ```
 
@@ -300,7 +300,7 @@ cat > /usr/local/etc/xray/config.json <<'EOF'
       "settings": {
         "vnext": [
           {
-            "address": "94.249.239.200",
+            "address": "198.51.100.10",
             "port": 10443,
             "users": [
               {

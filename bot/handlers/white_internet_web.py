@@ -169,9 +169,5 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
 def setup_white_internet_web_routes(app: web.Application) -> None:
     """Register White Internet HTTP subscription feed routes with support for custom prefixes."""
     sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl/").strip().rstrip("/")
-    # Register custom prefix
     app.router.add_get(f"{sub_prefix}/{{token}}", white_internet_subscription_feed_handler)
-    # Register default fallback if prefix differs
-    if sub_prefix != "/sub/wl":
-        app.router.add_get("/sub/wl/{token}", white_internet_subscription_feed_handler)
     logger.info("White Internet subscription feed routes registered: %s/{token}", sub_prefix)

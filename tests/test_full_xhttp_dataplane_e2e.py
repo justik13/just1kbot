@@ -231,8 +231,6 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         # Buffer limits (H12)
         self.assertIn("client_max_body_size 0;", sh_content)
         self.assertIn("large_client_header_buffers 8 64k;", sh_content)
-        self.assertIn("http2_max_field_size 64k;", sh_content)
-        self.assertIn("http2_max_header_size 64k;", sh_content)
 
         # Certbot renewal deploy hook installed with execute permissions
         self.assertIn("${LETSENCRYPT_DIR}/renewal-hooks/deploy/restart-xray-nginx.sh", sh_content)
@@ -245,7 +243,7 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         caddy_content = CADDYFILE.read_text(encoding="utf-8")
         caddy_ci_content = CADDYFILE_CI.read_text(encoding="utf-8")
 
-        expected_pattern = "@allowed_paths path /webhook/* /yookassa/* /sub/wl/* {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*"
+        expected_pattern = "@allowed_paths path /webhook/* /yookassa/* {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*"
         self.assertIn(expected_pattern, caddy_content)
         self.assertIn(expected_pattern, caddy_ci_content)
 

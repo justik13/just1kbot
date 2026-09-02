@@ -43,6 +43,7 @@ SYSTEMD_SYSTEM_DIR="${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
 CERTBOT_DIR="${CERTBOT_DIR:-/var/www/certbot}"
 WWW_HTML_DIR="${WWW_HTML_DIR:-/var/www/html}"
 LETSENCRYPT_DIR="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
+XRAY_API_LIB="${XRAY_API_LIB:-/var/lib/xray-api}"
 
 # Цвета терминала
 RED='\033[0;31m'
@@ -630,7 +631,7 @@ install_xray_origin_node() {
 
     if [[ -z "$secret_path" ]]; then
         local rnd_hex
-        rnd_hex="$(python3 -c "import secrets; print(secrets.token_hex(4))")"
+        rnd_hex="$(python3 -c "import secrets; print(secrets.token_hex(8))")"
         read -rp "Секретный префикс пути XHTTP [по умолчанию: /w_${rnd_hex}]: " input_path || true
         secret_path="${input_path:-/w_${rnd_hex}}"
     fi
@@ -789,7 +790,7 @@ EOF
     # Развертывание легкого Python xray-api агента
     log "Развертывание агента xray-api..."
     ensure_xrayapi_user
-    mkdir -p "${XRAY_API_ETC}" "${STATE_DIR}"
+    mkdir -p "${XRAY_API_ETC}" "${STATE_DIR}" "${XRAY_API_LIB}"
     deploy_xray_api_sources
     setup_xray_api_venv
 
@@ -799,6 +800,8 @@ XRAY_GRPC_HOST=127.0.0.1
 XRAY_GRPC_PORT=10085
 CLIENTS_FILE_PATH=${STATE_DIR}/clients.json
 RELAYS_FILE_PATH=${STATE_DIR}/relays.json
+EPOCH_FILE_PATH=${XRAY_API_LIB}/epoch.json
+EPOCH_LOCK_PATH=${XRAY_API_LIB}/epoch.lock
 XRAY_INBOUND_TAGS=just1k-wl-default
 EOF
     chown xrayapi:xrayapi "${XRAY_API_CONFIG_ENV}" 2>/dev/null || true
@@ -808,6 +811,8 @@ EOF
     chmod 750 "${XRAY_API_DIR}"
     chown -R xrayapi:xrayapi "${XRAY_API_ETC}" 2>/dev/null || true
     chmod 750 "${XRAY_API_ETC}"
+    chown -R xrayapi:xrayapi "${XRAY_API_LIB}" 2>/dev/null || true
+    chmod 750 "${XRAY_API_LIB}"
 
     # Права на каталог состояния для доступа пользователя xrayapi
     chown -R root:xrayapi "${STATE_DIR}" 2>/dev/null || true
@@ -836,7 +841,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
-ReadWritePaths=${XRAY_API_DIR} ${STATE_DIR}
+ReadWritePaths=${XRAY_API_DIR} ${STATE_DIR} ${XRAY_API_LIB}
 
 [Install]
 WantedBy=multi-user.target
@@ -909,8 +914,6 @@ server {
     client_max_body_size 0;
     client_body_buffer_size 128k;
     large_client_header_buffers 8 64k;
-    http2_max_field_size 64k;
-    http2_max_header_size 64k;
 
     location = /cdn-check {
         add_header Content-Type text/plain;
@@ -1321,7 +1324,7 @@ if sec_type == 'reality':
         'security': 'reality',
         'realitySettings': {
             'show': False,
-            'fingerprint': 'chrome',
+            'fingerprint': 'firefox',
             'serverName': sni,
             'publicKey': pubkey,
             'shortId': shortid,
@@ -1334,7 +1337,7 @@ else:
         'security': 'tls',
         'tlsSettings': {
             'serverName': sni,
-            'fingerprint': 'chrome',
+            'fingerprint': 'firefox',
             'alpn': ['h2', 'http/1.1']
         }
     }

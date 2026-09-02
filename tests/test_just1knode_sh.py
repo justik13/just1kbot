@@ -35,6 +35,8 @@ class TestJust1kNodeScript(unittest.TestCase):
         self.xray_api_etc.mkdir(parents=True, exist_ok=True)
         self.xray_api_dir = Path(self.temp_dir) / "opt" / "xray-api"
         self.xray_api_dir.mkdir(parents=True, exist_ok=True)
+        self.xray_api_lib = Path(self.temp_dir) / "var" / "lib" / "xray-api"
+        self.xray_api_lib.mkdir(parents=True, exist_ok=True)
         self.systemd_dir = Path(self.temp_dir) / "etc" / "systemd" / "system"
         self.systemd_dir.mkdir(parents=True, exist_ok=True)
         self.certbot_dir = Path(self.temp_dir) / "var" / "www" / "certbot"
@@ -123,6 +125,7 @@ exit 0
         env["NGINX_CONF_DIR"] = str(self.nginx_conf_dir)
         env["NGINX_RELAYS_DIR"] = str(self.nginx_relays_d)
         env["XRAY_API_DIR"] = str(self.xray_api_dir)
+        env["XRAY_API_LIB"] = str(self.xray_api_lib)
         env["XRAY_API_ETC"] = str(self.xray_api_etc)
         env["XRAY_API_CONFIG_ENV"] = str(self.xray_api_etc / "config.env")
         env["SYSTEMD_SYSTEM_DIR"] = str(self.systemd_dir)
@@ -146,6 +149,7 @@ export BACKUP_DIR='{Path(self.temp_dir) / "backups"}'
 export NGINX_CONF_DIR='{self.nginx_conf_dir}'
 export NGINX_RELAYS_DIR='{self.nginx_relays_d}'
 export XRAY_API_DIR='{self.xray_api_dir}'
+export XRAY_API_LIB='{self.xray_api_lib}'
 export XRAY_API_ETC='{self.xray_api_etc}'
 export XRAY_API_CONFIG_ENV='{self.xray_api_etc / "config.env"}'
 export SYSTEMD_SYSTEM_DIR='{self.systemd_dir}'
@@ -560,8 +564,6 @@ run_doctor
         nginx_text = nginx_conf.read_text(encoding="utf-8")
         self.assertIn("client_max_body_size 0;", nginx_text)
         self.assertIn("large_client_header_buffers 8 64k;", nginx_text)
-        self.assertIn("http2_max_field_size 64k;", nginx_text)
-        self.assertIn("http2_max_header_size 64k;", nginx_text)
         self.assertIn("location = /cdn-check", nginx_text)
         self.assertIn("return 204;", nginx_text)
         self.assertIn("location / {", nginx_text)
@@ -588,6 +590,8 @@ run_doctor
         self.assertIn("User=xrayapi", svc_text)
         self.assertIn("Group=xrayapi", svc_text)
         self.assertIn("uvicorn app:app", svc_text)
+        self.assertIn("ReadWritePaths=", svc_text)
+        self.assertIn(str(self.xray_api_lib), svc_text)
 
     # -------------------------------------------------------------------------
     # Functional Validation: Add Relay with REALITY & Relay Egress
