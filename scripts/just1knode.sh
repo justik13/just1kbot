@@ -42,6 +42,7 @@ XRAY_API_CONFIG_ENV="${XRAY_API_CONFIG_ENV:-${XRAY_API_ETC}/config.env}"
 SYSTEMD_SYSTEM_DIR="${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
 CERTBOT_DIR="${CERTBOT_DIR:-/var/www/certbot}"
 WWW_HTML_DIR="${WWW_HTML_DIR:-/var/www/html}"
+LETSENCRYPT_DIR="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
 
 # Цвета терминала
 RED='\033[0;31m'
@@ -358,14 +359,14 @@ configure_safe_ufw() {
 # --- Развертывание хуков автоматического обновления SSL сертификатов Let's Encrypt ---
 deploy_certbot_renewal_hook() {
     log "Настройка хуков автоматического обновления SSL сертификатов Let's Encrypt..."
-    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-    cat > /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh <<'EOF'
+    mkdir -p "${LETSENCRYPT_DIR}/renewal-hooks/deploy"
+    cat > "${LETSENCRYPT_DIR}/renewal-hooks/deploy/restart-xray-nginx.sh" <<'EOF'
 #!/bin/sh
 set -e
 systemctl reload nginx 2>/dev/null || true
 systemctl restart xray 2>/dev/null || true
 EOF
-    chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh
+    chmod +x "${LETSENCRYPT_DIR}/renewal-hooks/deploy/restart-xray-nginx.sh"
     systemctl enable --now certbot.timer 2>/dev/null || true
 }
 
@@ -505,9 +506,9 @@ obtain_ssl_certificate() {
     local domain="$1"
     local email="$2"
 
-    mkdir -p /var/www/certbot
+    mkdir -p "${CERTBOT_DIR}"
     deploy_certbot_renewal_hook
-    if [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]]; then
+    if [[ -f "${LETSENCRYPT_DIR}/live/${domain}/fullchain.pem" ]]; then
         log "SSL сертификат для $domain уже существует и действителен."
         return 0
     fi
@@ -515,7 +516,7 @@ obtain_ssl_certificate() {
     log "Выпуск SSL сертификата Let's Encrypt для $domain..."
     if systemctl is-active --quiet nginx 2>/dev/null; then
         # Если Nginx работает, выпускаем через webroot без остановки сервиса
-        certbot certonly --webroot -w /var/www/certbot -d "$domain" --non-interactive --agree-tos -m "$email" --keep-until-expiring || {
+        certbot certonly --webroot -w "${CERTBOT_DIR}" -d "$domain" --non-interactive --agree-tos -m "$email" --keep-until-expiring || {
             warn "Webroot выпуск не удался, пробуем certbot --nginx..."
             certbot certonly --nginx -d "$domain" --non-interactive --agree-tos -m "$email" --keep-until-expiring
         }
@@ -788,7 +789,7 @@ EOF
     # Развертывание легкого Python xray-api агента
     log "Развертывание агента xray-api..."
     ensure_xrayapi_user
-    mkdir -p "${XRAY_API_ETC}" /var/lib/xray-api
+    mkdir -p "${XRAY_API_ETC}" "${STATE_DIR}"
     deploy_xray_api_sources
     setup_xray_api_venv
 
@@ -807,8 +808,6 @@ EOF
     chmod 750 "${XRAY_API_DIR}"
     chown -R xrayapi:xrayapi "${XRAY_API_ETC}" 2>/dev/null || true
     chmod 750 "${XRAY_API_ETC}"
-    chown -R xrayapi:xrayapi /var/lib/xray-api 2>/dev/null || true
-    chmod 750 /var/lib/xray-api
 
     # Права на каталог состояния для доступа пользователя xrayapi
     chown -R root:xrayapi "${STATE_DIR}" 2>/dev/null || true
@@ -837,7 +836,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
-ReadWritePaths=${XRAY_API_DIR} ${STATE_DIR} /var/lib/xray-api
+ReadWritePaths=${XRAY_API_DIR} ${STATE_DIR}
 
 [Install]
 WantedBy=multi-user.target

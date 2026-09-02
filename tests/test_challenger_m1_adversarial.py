@@ -38,11 +38,21 @@ REQUIREMENTS_TXT = XRAY_API_DIR / "requirements.txt"
 if str(XRAY_API_DIR) not in sys.path:
     sys.path.insert(0, str(XRAY_API_DIR))
 
+try:
+    from fastapi.testclient import TestClient
+    HAS_FASTAPI = True
+except ImportError:
+    HAS_FASTAPI = False
 
+
+@unittest.skipUnless(HAS_FASTAPI, "fastapi not installed in current environment")
 class TestXrayApiAdversarial(unittest.TestCase):
     """Adversarial stress and edge case tests for Xray API agent."""
 
     def setUp(self):
+        if not HAS_FASTAPI:
+            self.skipTest("fastapi not installed in current environment")
+
         self.temp_dir = tempfile.mkdtemp()
         self.clients_file = Path(self.temp_dir) / "clients.json"
         self.epoch_file = Path(self.temp_dir) / "epoch.json"
@@ -72,7 +82,6 @@ class TestXrayApiAdversarial(unittest.TestCase):
         )
         self.epoch_mgr = self.app_module.epoch_manager
 
-        from fastapi.testclient import TestClient
         self.client = TestClient(app.app)
         self.headers = {"X-API-Key": "adv-test-secret-key"}
 

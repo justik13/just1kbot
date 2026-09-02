@@ -39,6 +39,8 @@ class TestJust1kNodeScript(unittest.TestCase):
         self.systemd_dir.mkdir(parents=True, exist_ok=True)
         self.certbot_dir = Path(self.temp_dir) / "var" / "www" / "certbot"
         self.certbot_dir.mkdir(parents=True, exist_ok=True)
+        self.letsencrypt_dir = Path(self.temp_dir) / "etc" / "letsencrypt"
+        self.letsencrypt_dir.mkdir(parents=True, exist_ok=True)
         self.www_html_dir = Path(self.temp_dir) / "var" / "www" / "html"
         self.www_html_dir.mkdir(parents=True, exist_ok=True)
         self.bin_dir = Path(self.temp_dir) / "bin"
@@ -125,6 +127,7 @@ exit 0
         env["XRAY_API_CONFIG_ENV"] = str(self.xray_api_etc / "config.env")
         env["SYSTEMD_SYSTEM_DIR"] = str(self.systemd_dir)
         env["CERTBOT_DIR"] = str(self.certbot_dir)
+        env["LETSENCRYPT_DIR"] = str(self.letsencrypt_dir)
         env["WWW_HTML_DIR"] = str(self.www_html_dir)
         if extra_env:
             env.update(extra_env)
@@ -147,6 +150,7 @@ export XRAY_API_ETC='{self.xray_api_etc}'
 export XRAY_API_CONFIG_ENV='{self.xray_api_etc / "config.env"}'
 export SYSTEMD_SYSTEM_DIR='{self.systemd_dir}'
 export CERTBOT_DIR='{self.certbot_dir}'
+export LETSENCRYPT_DIR='{self.letsencrypt_dir}'
 export WWW_HTML_DIR='{self.www_html_dir}'
 
 source '{JUST1KNODE_SH}'
@@ -667,10 +671,11 @@ run_doctor
         self.assertIn("Cloud Ingress", html_content)
 
         # 2. Certbot renewal hook
-        # Check script content inside just1knode.sh
-        sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
-        self.assertIn("/etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh", sh_content)
-        self.assertIn("chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh", sh_content)
+        hook_file = self.letsencrypt_dir / "renewal-hooks" / "deploy" / "restart-xray-nginx.sh"
+        self.assertTrue(hook_file.exists())
+        hook_content = hook_file.read_text(encoding="utf-8")
+        self.assertIn("systemctl reload nginx", hook_content)
+        self.assertIn("systemctl restart xray", hook_content)
 
 
 if __name__ == "__main__":
