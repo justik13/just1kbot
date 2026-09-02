@@ -25,7 +25,14 @@ from config.constants import (
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
 )
-from config.enums import TariffQuoteOperation, TariffQuoteStatus, WhiteInternetStatus
+from config.enums import (
+    ServerHealthState,
+    ServerLifecycleStatus,
+    TariffQuoteOperation,
+    TariffQuoteStatus,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
+)
 from database.models import Server, Tariff, TariffQuote, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
@@ -108,7 +115,11 @@ class WhiteInternetService:
 
         tariff = await cls.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
-        origin_node = await cls.select_origin_node(session)
+        try:
+            origin_node = await cls.select_origin_node(session)
+        except RuntimeError as exc:
+            logger.warning("No available origin node for white internet purchase: %s", exc)
+            return False, texts.WL_NO_SERVERS_AVAILABLE, None
         quote = cls._new_quote(user_id=user.id, operation_type=TariffQuoteOperation.PURCHASE, target_version_id=tariff_version.id, amount_due=Decimal(tariff_version.price_rub), expires_at=now + timedelta(minutes=15), resulting_paid_hours=tariff_version.duration_hours, resulting_paid_value=Decimal(tariff_version.price_rub))
         session.add(quote)
         await session.flush()
@@ -155,6 +166,30 @@ class WhiteInternetService:
             return False, texts.WL_SUB_DISABLED, None
         if sub.status == WhiteInternetStatus.PENDING:
             return False, texts.WL_SUB_NOT_READY, None
+
+        # Validate origin node health & availability before debiting funds
+        origin_node = await session.scalar(
+            select(Server).where(Server.id == sub.origin_node_id)
+        )
+        if (
+            not origin_node
+            or not origin_node.is_active
+            or origin_node.health_state != ServerHealthState.ONLINE
+            or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
+            or not (origin_node.extra_data or {}).get("relays")
+        ):
+            # Current node is offline, decommissioned or lacks relays; attempt migration
+            try:
+                new_origin = await cls.select_origin_node(session)
+                sub.origin_node_id = new_origin.id
+                sub.actual_version = 0
+                sub.last_reconciled_node_epoch = None
+                sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
+                await session.flush()
+            except RuntimeError as exc:
+                logger.warning("No healthy origin node available for renewal migration: %s", exc)
+                return False, texts.WL_NO_SERVERS_AVAILABLE, None
+
         tariff = await cls.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
         now = now_utc()

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from aiogram import Bot
-from sqlalchemy import or_, select
+from sqlalchemy import nulls_first, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.enums import (
@@ -242,7 +242,10 @@ class WhiteInternetReconciliationWorker:
                             ]),
                         ),
                     )
-                    .order_by(WhiteInternetSubscription.id.asc())
+                    .order_by(
+                        nulls_first(WhiteInternetSubscription.last_synced_at.asc()),
+                        WhiteInternetSubscription.id.asc(),
+                    )
                     .limit(BATCH_SIZE)
                 )
                 res_subs = await sess.execute(stmt_subs)

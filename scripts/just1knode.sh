@@ -631,14 +631,28 @@ install_xray_origin_node() {
     fi
 
     if [[ -z "$secret_path" ]]; then
-        local rnd_hex
-        rnd_hex="$(python3 -c "import secrets; print(secrets.token_hex(8))")"
-        read -rp "Секретный префикс пути XHTTP [по умолчанию: /w_${rnd_hex}]: " input_path || true
-        secret_path="${input_path:-/w_${rnd_hex}}"
+        local existing_secret_path
+        existing_secret_path="$(get_state_val "secret_base_path" 2>/dev/null || true)"
+        if [[ -n "$existing_secret_path" ]]; then
+            secret_path="$existing_secret_path"
+            info "Используется существующий префикс пути XHTTP: $secret_path"
+        else
+            local rnd_hex
+            rnd_hex="$(python3 -c "import secrets; print(secrets.token_hex(8))")"
+            read -rp "Секретный префикс пути XHTTP [по умолчанию: /w_${rnd_hex}]: " input_path || true
+            secret_path="${input_path:-/w_${rnd_hex}}"
+        fi
     fi
 
     if [[ -z "$api_key" ]]; then
-        api_key="$(python3 -c "import secrets; print(secrets.token_hex(32))")"
+        local existing_api_key
+        existing_api_key="$(get_state_val "api_key" 2>/dev/null || true)"
+        if [[ -n "$existing_api_key" ]]; then
+            api_key="$existing_api_key"
+            info "Используется существующий API-ключ узла."
+        else
+            api_key="$(python3 -c "import secrets; print(secrets.token_hex(32))")"
+        fi
     fi
 
     apt-get install -y -qq nginx certbot python3-certbot-nginx
@@ -1102,6 +1116,7 @@ install_xray_relay_node() {
   ]
 }
 EOF
+    chmod 600 "$XRAY_CONFIG"
 
     mkdir -p "${SYSTEMD_SYSTEM_DIR}"
     cat > "${SYSTEMD_SYSTEM_DIR}/xray.service" <<EOF

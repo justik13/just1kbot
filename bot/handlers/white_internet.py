@@ -119,6 +119,12 @@ def get_topup_keyboard() -> InlineKeyboardMarkup:
 @router.callback_query(F.data == "white_internet")
 async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
     await query.answer()
+    is_admin = query.from_user.id in (get_settings().ADMIN_IDS or [])
+    # TODO(prod): Перед публичным релизом снять проверку 'if not is_admin', открыв раздел всем
+    if not is_admin:
+        await query.message.answer(texts.WL_BETA_TESTING_ALERT)
+        return
+
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         await query.message.answer(texts.WL_USER_NOT_FOUND)
@@ -138,19 +144,24 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         available_bytes = await white_internet_repo.get_available_quota_bytes(session, sub.id, now)
         total_limit = sub.traffic_limit_bytes
         status_text_map = {
-            WhiteInternetStatus.ACTIVE: texts.STATUS_SUBSCRIPTION_ACTIVE,
             WhiteInternetStatus.PENDING: texts.WL_STATUS_PENDING,
+            WhiteInternetStatus.ACTIVE: texts.STATUS_SUBSCRIPTION_ACTIVE,
             WhiteInternetStatus.EXHAUSTED: texts.WL_STATUS_EXHAUSTED,
             WhiteInternetStatus.EXPIRED: texts.WL_STATUS_EXPIRED,
             WhiteInternetStatus.DISABLED: texts.WL_STATUS_DISABLED,
         }
+        status_str = status_text_map.get(sub.status, str(sub.status))
+        used_bytes = max(0, total_limit - available_bytes)
+        progress_bar = _render_progress_bar(used_bytes, total_limit)
+        expiry_str = sub.expires_at.strftime(texts.WL_DATETIME_FORMAT) if sub.expires_at else texts.TIME_FOREVER
+
         text = texts.WL_OVERVIEW_ACTIVE.format(
-            status=status_text_map.get(sub.status, sub.status),
-            expiry=sub.expires_at.strftime(texts.WL_DATETIME_FORMAT),
+            status=status_str,
+            expiry=expiry_str,
             available=_format_bytes(available_bytes),
-            used=_format_bytes(sub.traffic_used_bytes),
+            used=_format_bytes(used_bytes),
             total=_format_bytes(total_limit),
-            progress=_render_progress_bar(sub.traffic_used_bytes, total_limit),
+            progress=progress_bar,
         )
 
     kb = get_white_internet_overview_keyboard(sub, bot_domain)
@@ -170,9 +181,7 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
     if balance_snapshot.available < WHITE_INTERNET_BASE_PRICE_RUB:
         shortage = WHITE_INTERNET_BASE_PRICE_RUB - balance_snapshot.available
         kb = InlineKeyboardBuilder()
-        kb.button(text=texts.BUTTON_TOPUP, callback_data="menu_balance")
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
-        kb.adjust(1, 1)
         await query.message.edit_text(
             texts.WL_INSUFFICIENT_BALANCE_BUY.format(
                 price=int(WHITE_INTERNET_BASE_PRICE_RUB),
@@ -184,7 +193,12 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
         )
         return
 
-    success, msg, _sub = await WhiteInternetService.purchase_subscription(session, user.id)
+    try:
+        success, msg, _sub = await WhiteInternetService.purchase_subscription(session, user.id)
+    except Exception as exc:
+        logger.error("Unexpected error during white internet purchase: %s", exc)
+        success, msg = False, texts.WL_NO_SERVERS_AVAILABLE
+
     if not success:
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
