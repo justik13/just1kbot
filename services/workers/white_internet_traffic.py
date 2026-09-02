@@ -10,7 +10,7 @@ from aiogram import Bot
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import ServerHealthState
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.connection import session_scope
 from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
@@ -52,6 +52,7 @@ class WhiteInternetTrafficWorker:
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
+                    Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
                     Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
                 )
                 .order_by(Server.id.asc())

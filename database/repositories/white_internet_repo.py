@@ -429,3 +429,201 @@ async def deduct_traffic_atomic(
     sub.traffic_limit_bytes = available_after + (sub.traffic_used_bytes - (sub.traffic_overage_bytes or 0))
     await session.flush()
     return consumed_from_grants, became_exhausted, unallocated_overage
+
+
+async def record_and_deduct_traffic_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+    node_epoch: int | str,
+    snapshot_uplink_after: int,
+    snapshot_downlink_after: int,
+    snapshot_uplink_before: int = 0,
+    snapshot_downlink_before: int = 0,
+    *,
+    node_boot_id: str | None = None,
+    node_starttime: int | None = None,
+    now: datetime | None = None,
+) -> tuple[int, bool, int, WhiteInternetTrafficEvent | None]:
+    """
+    Atomically deduplicates traffic snapshot and deducts quota from active grants.
+
+    - Computes delta_uplink and delta_downlink from before/after counters.
+    - If total delta <= 0 (or counters monotonic violation): returns (0, False, available, None).
+    - Acquires row lock on subscription and active quota grants (SELECT ... FOR UPDATE).
+    - Calculates planned grant consumption (BASE first, then FIFO TOPUP) and overage such that
+      allocated_bytes + overage_bytes == delta_uplink + delta_downlink
+      (strictly satisfying ck_white_internet_traffic_events_conservation).
+    - Inserts WhiteInternetTrafficEvent with ON CONFLICT DO NOTHING RETURNING id.
+    - If insertion returned no row (already recorded snapshot / duplicate):
+      returns (0, False, available, None) WITHOUT deducting quota or modifying state.
+    - If insertion succeeded:
+      applies grant deductions, updates subscription counters (used, overage, uplink, downlink,
+      last snapshots, stats epoch), marks EXHAUSTED if quota reached 0, and returns
+      (allocated_bytes, became_exhausted, available_after, event).
+    """
+    now = now or now_utc()
+    str_node_epoch = str(node_epoch)
+
+    delta_uplink = snapshot_uplink_after - snapshot_uplink_before
+    delta_downlink = snapshot_downlink_after - snapshot_downlink_before
+    total_delta = delta_uplink + delta_downlink
+
+    if delta_uplink < 0 or delta_downlink < 0 or total_delta <= 0:
+        sub = await get_subscription_by_id(session, subscription_id)
+        if sub is None:
+            raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+        available = await get_available_quota_bytes(session, subscription_id, now)
+        return 0, False, available, None
+
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+
+    is_expired_or_disabled = (
+        sub.expires_at <= now or sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED)
+    )
+    if is_expired_or_disabled:
+        allocated_bytes = 0
+        overage_bytes = total_delta
+        grant_deductions: list[tuple[WhiteInternetQuotaGrant, int]] = []
+    else:
+        grants = await get_active_grants_for_deduction(session, subscription_id, now)
+        remaining_to_deduct = total_delta
+        consumed_from_grants = 0
+        grant_deductions = []
+        for grant in grants:
+            if remaining_to_deduct <= 0:
+                break
+            deduct = min(grant.bytes_remaining, remaining_to_deduct)
+            grant_deductions.append((grant, deduct))
+            remaining_to_deduct -= deduct
+            consumed_from_grants += deduct
+
+        allocated_bytes = consumed_from_grants
+        overage_bytes = max(0, remaining_to_deduct)
+
+    try:
+        bind = session.get_bind()
+        is_pg = bind.dialect.name == "postgresql"
+    except Exception:
+        is_pg = True
+
+    event: WhiteInternetTrafficEvent | None = None
+
+    if is_pg:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        insert_stmt = (
+            pg_insert(WhiteInternetTrafficEvent)
+            .values(
+                subscription_id=subscription_id,
+                node_epoch=str_node_epoch,
+                node_boot_id=node_boot_id,
+                node_starttime=node_starttime,
+                snapshot_uplink_before=snapshot_uplink_before,
+                snapshot_uplink_after=snapshot_uplink_after,
+                snapshot_downlink_before=snapshot_downlink_before,
+                snapshot_downlink_after=snapshot_downlink_after,
+                delta_uplink=delta_uplink,
+                delta_downlink=delta_downlink,
+                allocated_bytes=allocated_bytes,
+                overage_bytes=overage_bytes,
+                created_at=now,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    "subscription_id",
+                    "node_epoch",
+                    "snapshot_uplink_after",
+                    "snapshot_downlink_after",
+                ]
+            )
+            .returning(
+                WhiteInternetTrafficEvent.id,
+                WhiteInternetTrafficEvent.created_at,
+            )
+        )
+        res = (await session.execute(insert_stmt)).first()
+        if res is None:
+            # Duplicate snapshot: already processed
+            available = await get_available_quota_bytes(session, subscription_id, now)
+            return 0, False, available, None
+
+        event = WhiteInternetTrafficEvent(
+            id=res[0],
+            subscription_id=subscription_id,
+            node_epoch=str_node_epoch,
+            node_boot_id=node_boot_id,
+            node_starttime=node_starttime,
+            snapshot_uplink_before=snapshot_uplink_before,
+            snapshot_uplink_after=snapshot_uplink_after,
+            snapshot_downlink_before=snapshot_downlink_before,
+            snapshot_downlink_after=snapshot_downlink_after,
+            delta_uplink=delta_uplink,
+            delta_downlink=delta_downlink,
+            allocated_bytes=allocated_bytes,
+            overage_bytes=overage_bytes,
+            created_at=res[1],
+        )
+    else:
+        existing = await session.scalar(
+            select(WhiteInternetTrafficEvent).where(
+                WhiteInternetTrafficEvent.subscription_id == subscription_id,
+                WhiteInternetTrafficEvent.node_epoch == str_node_epoch,
+                WhiteInternetTrafficEvent.snapshot_uplink_after == snapshot_uplink_after,
+                WhiteInternetTrafficEvent.snapshot_downlink_after == snapshot_downlink_after,
+            )
+        )
+        if existing is not None:
+            available = await get_available_quota_bytes(session, subscription_id, now)
+            return 0, False, available, None
+
+        event = WhiteInternetTrafficEvent(
+            subscription_id=subscription_id,
+            node_epoch=str_node_epoch,
+            node_boot_id=node_boot_id,
+            node_starttime=node_starttime,
+            snapshot_uplink_before=snapshot_uplink_before,
+            snapshot_uplink_after=snapshot_uplink_after,
+            snapshot_downlink_before=snapshot_downlink_before,
+            snapshot_downlink_after=snapshot_downlink_after,
+            delta_uplink=delta_uplink,
+            delta_downlink=delta_downlink,
+            allocated_bytes=allocated_bytes,
+            overage_bytes=overage_bytes,
+            created_at=now,
+        )
+        session.add(event)
+        await session.flush()
+
+    for grant, deduct in grant_deductions:
+        grant.bytes_remaining -= deduct
+
+    if is_expired_or_disabled:
+        if sub.status not in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED):
+            sub.status = WhiteInternetStatus.EXPIRED
+            sub.status_reason = "subscription_expired"
+            sub.desired_version += 1
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+
+    sub.traffic_used_bytes = (sub.traffic_used_bytes or 0) + total_delta
+    sub.traffic_uplink_bytes = (sub.traffic_uplink_bytes or 0) + delta_uplink
+    sub.traffic_downlink_bytes = (sub.traffic_downlink_bytes or 0) + delta_downlink
+    sub.traffic_overage_bytes = (sub.traffic_overage_bytes or 0) + overage_bytes
+    sub.last_uplink_snapshot = snapshot_uplink_after
+    sub.last_downlink_snapshot = snapshot_downlink_after
+    sub.traffic_stats_epoch = str_node_epoch
+
+    available_after = await get_available_quota_bytes(session, subscription_id, now)
+    became_exhausted = False
+    if available_after == 0 and sub.status == WhiteInternetStatus.ACTIVE:
+        sub.status = WhiteInternetStatus.EXHAUSTED
+        sub.status_reason = "quota_exhausted"
+        sub.desired_version += 1
+        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        became_exhausted = True
+
+    # Update cache-only traffic_limit_bytes field
+    sub.traffic_limit_bytes = available_after + (sub.traffic_used_bytes - (sub.traffic_overage_bytes or 0))
+    await session.flush()
+    return allocated_bytes, became_exhausted, available_after, event

@@ -5,22 +5,78 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import BigInteger, Integer, Numeric, String
 
+from config.enums import ServerLifecycleStatus, ServiceType
 from database.models import (
     Server,
     Tariff,
     TariffQuote,
+    TariffVersion,
     WhiteInternetQuotaGrant,
     WhiteInternetSubscription,
 )
 
 
 class WhiteInternetModelsTests(unittest.TestCase):
-    def test_alembic_migration_0016_revision_chain(self):
+    def test_alembic_migration_0017_revision_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+        rev_0017 = scripts.get_revision("0017_white_internet_durations")
+        self.assertIsNotNone(rev_0017)
+        self.assertEqual(rev_0017.down_revision, "0016_white_internet")
         rev_0016 = scripts.get_revision("0016_white_internet")
         self.assertIsNotNone(rev_0016)
         self.assertEqual(rev_0016.down_revision, "0015_auto_fulfill_retry_idx")
-        self.assertEqual(scripts.get_heads(), ["0016_white_internet"])
+        self.assertEqual(scripts.get_heads(), ["0017_white_internet_durations"])
+
+    def test_server_lifecycle_status_field_and_constraints(self):
+        self.assertEqual(ServerLifecycleStatus.ACTIVE, "ACTIVE")
+        self.assertEqual(ServerLifecycleStatus.DECOMMISSIONING, "DECOMMISSIONING")
+        self.assertEqual(ServerLifecycleStatus.DECOMMISSIONED, "DECOMMISSIONED")
+        self.assertEqual(ServerLifecycleStatus.ARCHIVED, "ARCHIVED")
+
+        table = Server.__table__
+        self.assertIn("lifecycle_status", table.columns)
+        self.assertEqual(table.columns["lifecycle_status"].type.length, 30)
+        self.assertFalse(table.columns["lifecycle_status"].nullable)
+        self.assertEqual(table.columns["lifecycle_status"].default.arg, ServerLifecycleStatus.ACTIVE)
+        self.assertEqual(table.columns["lifecycle_status"].server_default.arg, ServerLifecycleStatus.ACTIVE)
+
+        constraint_names = {c.name for c in table.constraints if c.name}
+        self.assertIn("ck_servers_lifecycle_status", constraint_names)
+
+        index_names = {idx.name: idx for idx in table.indexes}
+        self.assertIn("ix_servers_lifecycle_status", index_names)
+
+    def test_tariff_version_white_internet_fields_and_constraints(self):
+        table = TariffVersion.__table__
+        self.assertIn("service_type", table.columns)
+        self.assertEqual(table.columns["service_type"].type.length, 30)
+        self.assertFalse(table.columns["service_type"].nullable)
+        self.assertEqual(table.columns["service_type"].default.arg, ServiceType.AWG)
+        self.assertEqual(table.columns["service_type"].server_default.arg, "awg")
+
+        self.assertIn("base_quota_bytes", table.columns)
+        self.assertTrue(table.columns["base_quota_bytes"].nullable)
+        self.assertIsInstance(table.columns["base_quota_bytes"].type, BigInteger)
+
+        constraint_names = {c.name for c in table.constraints if c.name}
+        self.assertIn("ck_tariff_versions_service_type", constraint_names)
+        self.assertIn("ck_tariff_versions_base_quota_positive", constraint_names)
+
+    def test_tariff_version_snapshot_and_duration_days(self):
+        tv = TariffVersion(
+            tariff_id=1,
+            version_number=1,
+            name_snapshot="Белый Интернет 50 ГБ",
+            service_type=ServiceType.WHITE_INTERNET,
+            duration_hours=720,
+            device_limit=1,
+            price_rub=Decimal("250.00"),
+            currency="RUB",
+            base_quota_bytes=53687091200,
+        )
+        self.assertEqual(tv.duration_days, 30)
+        self.assertEqual(tv.service_type, "white_internet")
+        self.assertEqual(tv.base_quota_bytes, 53687091200)
 
 
 

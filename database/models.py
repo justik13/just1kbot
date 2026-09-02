@@ -43,6 +43,8 @@ from config.enums import (
     PaymentQueueStatus,
     PaymentReconciliationStatus,
     ServerHealthState,
+    ServerLifecycleStatus,
+    ServiceType,
     TariffQuoteOperation,
     TariffQuoteStatus,
     VPNProvisioningStatus,
@@ -273,6 +275,11 @@ class Server(Base):
 
     __table_args__ = (
         UniqueConstraint("api_url", name="uq_servers_api_url"),
+        CheckConstraint(
+            sql_enum_in("lifecycle_status", ServerLifecycleStatus),
+            name="ck_servers_lifecycle_status",
+        ),
+        Index("ix_servers_lifecycle_status", "lifecycle_status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -293,6 +300,12 @@ class Server(Base):
 
     health_state: Mapped[str] = mapped_column(
         String(30), default=ServerHealthState.ONLINE, server_default=ServerHealthState.ONLINE
+    )
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default=ServerLifecycleStatus.ACTIVE,
+        server_default=ServerLifecycleStatus.ACTIVE,
     )
     problem_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -353,17 +366,29 @@ class TariffVersion(Base):
         CheckConstraint("device_limit > 0", name="ck_tariff_versions_device_limit_positive"),
         CheckConstraint("price_rub > 0", name="ck_tariff_versions_price_positive"),
         CheckConstraint("currency = 'RUB'", name="ck_tariff_versions_currency_rub"),
+        CheckConstraint(
+            sql_enum_in("service_type", ServiceType),
+            name="ck_tariff_versions_service_type",
+        ),
+        CheckConstraint(
+            "base_quota_bytes IS NULL OR base_quota_bytes > 0",
+            name="ck_tariff_versions_base_quota_positive",
+        ),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     tariff_id: Mapped[int] = mapped_column(ForeignKey("tariffs.id", ondelete="RESTRICT"), index=True)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     name_snapshot: Mapped[str] = mapped_column(String(100), nullable=False)
+    service_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, default=ServiceType.AWG, server_default="awg"
+    )
     duration_hours: Mapped[int] = mapped_column(Integer, nullable=False)
     device_limit: Mapped[int] = mapped_column(Integer, nullable=False)
     price_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     currency: Mapped[str] = mapped_column(
         String(3), nullable=False, default="RUB", server_default=text("'RUB'")
     )
+    base_quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_utc,
         server_default=text("now()")

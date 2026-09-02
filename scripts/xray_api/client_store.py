@@ -80,6 +80,14 @@ class ClientStore:
                 os.chmod(self.file_path, 0o660)
             except Exception:
                 pass
+            try:
+                dir_fd = os.open(str(self.file_path.parent), getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except Exception:
+                pass
             return True
         except Exception as e:
             logger.error("Failed to save clients to %s: %s", self.file_path, e)

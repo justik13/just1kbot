@@ -609,7 +609,11 @@ async def delete_client(
     try:
         client_store.delete_client(clean_uuid, version=version)
     except Exception as e:
-        logger.warning("Could not delete client from store: %s", e)
+        logger.error("Could not delete client tombstone from store: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to persist client tombstone to disk",
+        ) from e
 
     return {
         "status": "ok",

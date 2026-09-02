@@ -134,6 +134,13 @@ class ServerHealthState(StrEnum):
     MANUAL_DISABLED = "MANUAL_DISABLED"
 
 
+class ServerLifecycleStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DECOMMISSIONING = "DECOMMISSIONING"
+    DECOMMISSIONED = "DECOMMISSIONED"
+    ARCHIVED = "ARCHIVED"
+
+
 class PaymentProviderOperationStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -261,6 +268,7 @@ __all__ = [
     "PaymentReconciliationStatus",
     "ProviderRefundOperationStatus",
     "ServerHealthState",
+    "ServerLifecycleStatus",
     "ServiceType",
     "TariffQuoteOperation",
     "TariffQuoteStatus",

@@ -5,6 +5,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import AMNEZIA_PROTOCOL
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
 
@@ -40,6 +41,7 @@ class ServerUpdateFields(TypedDict, total=False):
     disabled_at: datetime | None
     last_successful_check: datetime | None
     health_state: str
+    lifecycle_status: str | ServerLifecycleStatus
     problem_started_at: datetime | None
     next_check_at: datetime | None
     consecutive_fails: int
@@ -77,7 +79,12 @@ async def get_all_servers(session: AsyncSession) -> list[Server]:
 
 async def get_active_servers(session: AsyncSession) -> list[Server]:
     result = await session.execute(
-        select(Server).where(Server.is_active.is_(True)).order_by(Server.name)
+        select(Server)
+        .where(
+            Server.is_active.is_(True),
+            Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+        )
+        .order_by(Server.name)
     )
     return result.scalars().all()
 
@@ -97,6 +104,7 @@ def capacity_consuming_wl_condition():
         WhiteInternetSubscription.provisioning_status.in_([
             WhiteInternetProvisioningStatus.PENDING_CREATE,
             WhiteInternetProvisioningStatus.PENDING_UPDATE,
+            WhiteInternetProvisioningStatus.PENDING_DELETE,
         ]),
     )
 
@@ -148,6 +156,68 @@ async def get_available_servers(session: AsyncSession) -> list[Server]:
     return available
 
 
+async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
+    """
+    Atomically selects and locks an available Xray origin server with spare capacity.
+
+    1. Select candidate server IDs that are active, online, and lifecycle ACTIVE.
+    2. Sequentially acquire row locks (SELECT ... FOR UPDATE) on candidates.
+    3. Re-verify is_active, health_state == ONLINE, lifecycle_status == ACTIVE,
+       valid api_url / api_key, and 'xray_origin' in capabilities.
+    4. Count capacity-consuming White Internet subscriptions on that origin node.
+    5. Return the locked Server instance if active consumers < max_clients.
+    6. Return None if no origin server has available capacity.
+    """
+    candidate_ids = (
+        await session.scalars(
+            select(Server.id)
+            .where(
+                Server.is_active.is_(True),
+                Server.health_state == ServerHealthState.ONLINE,
+                Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+                Server.api_url.is_not(None),
+                Server.api_key.is_not(None),
+            )
+            .order_by(Server.id.asc())
+        )
+    ).all()
+
+    for srv_id in candidate_ids:
+        server = await session.scalar(
+            select(Server)
+            .where(Server.id == srv_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if server is None:
+            continue
+        if (
+            not server.is_active
+            or server.health_state != ServerHealthState.ONLINE
+            or server.lifecycle_status != ServerLifecycleStatus.ACTIVE
+            or not (server.api_url and server.api_url.strip())
+            or not (server.api_key and server.api_key.strip())
+            or "xray_origin" not in (server.capabilities or [])
+        ):
+            continue
+
+        from database.models import WhiteInternetSubscription
+
+        active_count = (
+            await session.scalar(
+                select(func.count(WhiteInternetSubscription.id)).where(
+                    WhiteInternetSubscription.origin_node_id == server.id,
+                    capacity_consuming_wl_condition(),
+                )
+            )
+            or 0
+        )
+        if active_count < server.max_clients:
+            return server
+
+    return None
+
+
 async def get_server_by_id(
     session: AsyncSession,
     server_id: int,
@@ -170,6 +240,7 @@ async def create_server(
     protocol: str = AMNEZIA_PROTOCOL,
     max_clients: int = 50,
     capabilities: list[str] | None = None,
+    lifecycle_status: str | ServerLifecycleStatus = ServerLifecycleStatus.ACTIVE,
 ) -> Server:
     server = Server(
         name=name,
@@ -179,6 +250,7 @@ async def create_server(
         protocol=protocol,
         max_clients=max_clients,
         capabilities=capabilities or [],
+        lifecycle_status=str(lifecycle_status),
     )
     session.add(server)
     await session.flush()

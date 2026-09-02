@@ -10,7 +10,12 @@ from aiogram import Bot
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, WhiteInternetStatus
+from config.enums import (
+    ServerHealthState,
+    ServerLifecycleStatus,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
+)
 from database.connection import session_scope
 from database.models import Server, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
@@ -158,6 +163,7 @@ class WhiteInternetReconciliationWorker:
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
+                    Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
                     Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
                 )
                 .order_by(Server.id.asc())

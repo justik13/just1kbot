@@ -48,7 +48,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
 
     def test_all_enums_declared_are_strenums_with_values(self):
         """Every exported enum in config.enums must be a valid StrEnum with non-empty members."""
-        self.assertEqual(len(config.enums.__all__), 25)
+        self.assertEqual(len(config.enums.__all__), 26)
         for enum_name in config.enums.__all__:
             enum_cls = getattr(config.enums, enum_name)
             self.assertTrue(

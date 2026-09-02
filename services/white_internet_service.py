@@ -10,7 +10,7 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -25,16 +25,15 @@ from config.constants import (
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
 )
-from config.enums import ServerHealthState, TariffQuoteOperation, TariffQuoteStatus, WhiteInternetStatus
+from config.enums import TariffQuoteOperation, TariffQuoteStatus, WhiteInternetStatus
 from database.models import Server, Tariff, TariffQuote, WhiteInternetSubscription
-from database.repositories import white_internet_repo
+from database.repositories import servers_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     AccountLedgerError,
     InsufficientAccountBalanceError,
     create_purchase_debit,
     get_account_balance,
 )
-from database.repositories.servers_repo import capacity_consuming_wl_condition
 from database.repositories.tariff_quotes_repo import get_or_create_current_version, lock_checkout_user
 from utils.datetime_helpers import now_utc
 
@@ -75,43 +74,10 @@ class WhiteInternetService:
 
     @staticmethod
     async def select_origin_node(session: AsyncSession) -> Server:
-        candidate_ids = (
-            await session.scalars(
-                select(Server.id)
-                .where(
-                    Server.health_state == ServerHealthState.ONLINE,
-                    Server.api_url.is_not(None),
-                    Server.api_key.is_not(None),
-                    Server.is_active.is_(True),
-                )
-                .order_by(Server.id.asc())
-            )
-        ).all()
-
-        for srv_id in candidate_ids:
-            server = await session.scalar(
-                select(Server)
-                .where(Server.id == srv_id)
-                .with_for_update()
-            )
-            if server is None:
-                continue
-            if (
-                "xray_origin" in (server.capabilities or [])
-                and server.api_url
-                and server.api_url.strip()
-                and server.api_key
-                and server.api_key.strip()
-            ):
-                active_count = await session.scalar(
-                    select(func.count(WhiteInternetSubscription.id)).where(
-                        WhiteInternetSubscription.origin_node_id == server.id,
-                        capacity_consuming_wl_condition(),
-                    )
-                ) or 0
-                if active_count < server.max_clients:
-                    return server
-        raise RuntimeError("No healthy server with xray_origin capability and available capacity is available.")
+        server = await servers_repo.allocate_origin_server_atomic(session)
+        if server is None:
+            raise RuntimeError("No healthy server with xray_origin capability and available capacity is available.")
+        return server
 
 
     @staticmethod
@@ -164,7 +130,17 @@ class WhiteInternetService:
 
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
-        sub = await white_internet_repo.create_white_internet_subscription(session, user_id=user.id, origin_node_id=origin_node.id, token=secrets.token_hex(32), uuid=str(uuid.uuid4()), quote_id=quote.id, price_rub=Decimal(tariff_version.price_rub), duration_days=tariff.duration_days, base_bytes=WHITE_INTERNET_BASE_TRAFFIC_BYTES)
+        sub = await white_internet_repo.create_white_internet_subscription(
+            session,
+            user_id=user.id,
+            origin_node_id=origin_node.id,
+            token=secrets.token_hex(32),
+            uuid=str(uuid.uuid4()),
+            quote_id=quote.id,
+            price_rub=Decimal(tariff_version.price_rub),
+            duration_days=tariff.duration_days,
+            base_bytes=tariff_version.base_quota_bytes or WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+        )
         return True, texts.WL_BUY_SUCCESS, sub
 
     @classmethod
@@ -202,7 +178,14 @@ class WhiteInternetService:
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
-        renewed = await white_internet_repo.renew_subscription_atomic(session, subscription_id=sub.id, quote_id=quote.id, price_rub=Decimal(tariff_version.price_rub), duration_days=tariff.duration_days, base_bytes=WHITE_INTERNET_BASE_TRAFFIC_BYTES)
+        renewed = await white_internet_repo.renew_subscription_atomic(
+            session,
+            subscription_id=sub.id,
+            quote_id=quote.id,
+            price_rub=Decimal(tariff_version.price_rub),
+            duration_days=tariff.duration_days,
+            base_bytes=tariff_version.base_quota_bytes or WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+        )
         return True, texts.WL_RENEW_SUCCESS, renewed
 
     @classmethod
