@@ -235,8 +235,8 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertIn("http2_max_header_size 64k;", sh_content)
 
         # Certbot renewal deploy hook installed with execute permissions
-        self.assertIn("/etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh", sh_content)
-        self.assertIn("chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh", sh_content)
+        self.assertIn("${LETSENCRYPT_DIR}/renewal-hooks/deploy/restart-xray-nginx.sh", sh_content)
+        self.assertIn("chmod +x \"${LETSENCRYPT_DIR}/renewal-hooks/deploy/restart-xray-nginx.sh\"", sh_content)
         self.assertIn("systemctl reload nginx", sh_content)
         self.assertIn("systemctl restart xray", sh_content)
 
