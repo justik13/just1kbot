@@ -109,6 +109,7 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 xray_instance_epoch="epoch_100",
                 xray_instance_boot_id="boot_01",
                 xray_instance_starttime=1000,
+                extra_data={"secret_base_path": "/w_conc", "relays": [{"code": "de", "name": "Германия"}]},
             )
             session.add(self.server)
 

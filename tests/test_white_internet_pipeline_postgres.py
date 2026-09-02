@@ -109,6 +109,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 xray_instance_epoch="epoch_pipe_100",
                 xray_instance_boot_id="boot_pipe_01",
                 xray_instance_starttime=1000,
+                extra_data={"secret_base_path": "/w_pipe", "relays": [{"code": "de", "name": "Германия"}]},
             )
             session.add(self.server)
             await session.flush()

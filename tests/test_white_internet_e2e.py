@@ -71,6 +71,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             health_state=ServerHealthState.ONLINE,
             is_active=True,
             xray_instance_epoch=node_epoch,
+            extra_data={"secret_base_path": "/w_test", "relays": [{"code": "de", "name": "Германия"}]},
         )
 
         user = User(
