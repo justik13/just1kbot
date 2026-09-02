@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import secrets
-import struct
 import urllib.parse
 import uuid
-import zlib
 from datetime import timedelta
 from decimal import Decimal
 
@@ -36,10 +33,22 @@ from database.repositories.account_ledger_repo import (
     create_purchase_debit,
     get_account_balance,
 )
+from database.repositories.servers_repo import capacity_consuming_wl_condition
 from database.repositories.tariff_quotes_repo import get_or_create_current_version, lock_checkout_user
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_base_path(path: str | None) -> str:
+    cleaned = (path or "").strip().rstrip("/")
+    if cleaned.endswith("/default"):
+        cleaned = cleaned[:-8].rstrip("/")
+    if not cleaned:
+        cleaned = DEFAULT_WHITE_INTERNET_PATH.rstrip("/")
+    if not cleaned.startswith("/"):
+        cleaned = "/" + cleaned
+    return cleaned
 
 
 class WhiteInternetService:
@@ -96,10 +105,7 @@ class WhiteInternetService:
                 active_count = await session.scalar(
                     select(func.count(WhiteInternetSubscription.id)).where(
                         WhiteInternetSubscription.origin_node_id == server.id,
-                        WhiteInternetSubscription.status.in_([
-                            WhiteInternetStatus.PENDING,
-                            WhiteInternetStatus.ACTIVE,
-                        ]),
+                        capacity_consuming_wl_condition(),
                     )
                 ) or 0
                 if active_count < server.max_clients:
@@ -244,7 +250,6 @@ class WhiteInternetService:
         quote.consumed_at = now_utc()
         return True, texts.WL_TOPUP_SUCCESS.format(gb=pack_gb), grant
 
-
     @staticmethod
     def generate_vless_links(
         subscription: WhiteInternetSubscription,
@@ -260,17 +265,19 @@ class WhiteInternetService:
             "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
             "xPaddingHeader": "X-Cache",
             "xPaddingMethod": "tokenish",
-            "xPaddingPlacement": "header",
+            "xPaddingPlacement": "queryInHeader",
         }
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
+        base = _normalize_base_path(path)
         if not relays:
             tag = urllib.parse.quote(texts.WL_VLESS_TAG)
-            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
+            standalone_path = f"{base}/default"
+            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
             return [link]
 
         links: list[str] = []
         for r in relays:
-            r_path = r.get("path") or f"{path.rstrip('/')}/{r.get('code', 'de')}"
+            r_path = r.get("path") or f"{base}/{r.get('code', 'de')}"
             r_tag = urllib.parse.quote(r.get("name") or texts.WL_VLESS_TAG)
             link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
             links.append(link)
@@ -279,6 +286,7 @@ class WhiteInternetService:
     @staticmethod
     def generate_full_xray_config(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443, path: str = DEFAULT_WHITE_INTERNET_PATH) -> dict:
         """Generate complete Xray client JSON config for INCY / Happ / v2rayN."""
+        base = _normalize_base_path(path)
         return {
             "log": {"loglevel": "warning"},
             "inbounds": [
@@ -318,14 +326,14 @@ class WhiteInternetService:
                             "fingerprint": "chrome",
                         },
                         "xhttpSettings": {
-                            "path": path,
+                            "path": f"{base}/default",
                             "mode": "packet-up",
                             "uplinkHTTPMethod": "OPTIONS",
                             "xPaddingObfsMode": True,
                             "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
                             "xPaddingHeader": "X-Cache",
                             "xPaddingMethod": "tokenish",
-                            "xPaddingPlacement": "header",
+                            "xPaddingPlacement": "queryInHeader",
                         },
                     },
                 },
@@ -349,7 +357,7 @@ class WhiteInternetService:
                     },
                     {
                         "type": "field",
-                        "domain": ["geosite:ru", "geosite:category-ru"],
+                        "domain": ["geosite:category-ru", "geosite:tld-ru"],
                         "outboundTag": "direct",
                     },
                     {
@@ -361,53 +369,3 @@ class WhiteInternetService:
             },
         }
 
-    # =========================================================================
-    # TODO: Secondary Client Integrations (AmneziaVPN vpn:// / Happ / v2rayN)
-    # Primary focus is INCY HTTP Subscription Feed (/sub/wl/{token}).
-    # =========================================================================
-    @staticmethod
-    def generate_amnezia_vpn_key(
-        subscription: WhiteInternetSubscription,
-        cdn_domain: str,
-        port: int = 443,
-        description: str = texts.WL_PROFILE_NAME,
-    ) -> str:
-        """Generate vpn:// key for AmneziaVPN app."""
-        client_cfg = WhiteInternetService.generate_full_xray_config(subscription, cdn_domain, port)
-        amnezia_payload = {
-            "containers": [
-                {
-                    "container": "amnezia-xray",
-                    "xray": {
-                        "isThirdPartyConfig": True,
-                        "last_config": json.dumps(client_cfg, indent=2),
-                    },
-                }
-            ],
-            "defaultContainer": "amnezia-xray",
-            "description": description,
-            "dns1": "1.1.1.1",
-            "dns2": "1.0.0.1",
-            "hostName": cdn_domain,
-        }
-        raw_bytes = json.dumps(amnezia_payload, separators=(",", ":")).encode("utf-8")
-        # Qt qCompress format: 4-byte big-endian uncompressed length + zlib compressed payload
-        qcompressed = struct.pack(">I", len(raw_bytes)) + zlib.compress(raw_bytes, 8)
-        b64_key = base64.urlsafe_b64encode(qcompressed).decode("utf-8").rstrip("=")
-        return f"vpn://{b64_key}"
-
-    @staticmethod
-    def decode_amnezia_vpn_key(vpn_key: str) -> dict:
-        """Decode and decompress Amnezia vpn:// connection key into JSON config dict."""
-        if not vpn_key.startswith("vpn://"):
-            raise ValueError("Invalid key format: missing 'vpn://' scheme")
-        raw_b64 = vpn_key[6:].strip()
-        padding = "=" * ((4 - len(raw_b64) % 4) % 4)
-        compressed = base64.urlsafe_b64decode(raw_b64 + padding)
-        if len(compressed) < 4:
-            raise ValueError("Compressed payload is too short")
-        uncompressed_len = struct.unpack(">I", compressed[:4])[0]
-        decompressed = zlib.decompress(compressed[4:])
-        if len(decompressed) != uncompressed_len:
-            raise ValueError(f"Uncompressed length mismatch: expected {uncompressed_len}, got {len(decompressed)}")
-        return json.loads(decompressed.decode("utf-8"))

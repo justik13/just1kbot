@@ -1,92 +1,70 @@
-# Project: just1kbot White Internet Remediation & Production Hardening
+# Project: just1kbot Production Remediation & Full MVP Hardening
 
 ## Architecture
-- **Control Plane**:
-  - `bot/handlers/white_internet_web.py`: Web subscription feed generator for XHTTP / VLESS client configs.
-  - `services/white_internet_service.py`: Business logic for subscriptions, tariff management, quota allocations, and origin node capacity reservations.
-  - `database/repositories/`: Asynchronous database repositories (`servers_repo.py`, `white_internet_repo.py`) enforcing transactional integrity, row-level locks (`SELECT ... FOR UPDATE`), and `extra_data["just1k"]` namespace isolation.
-  - `services/workers/`: Resilient background workers (`white_internet_traffic.py`, `white_internet_reconciliation.py`, `node_monitor.py`) with per-client isolation, bounded concurrency, and remote version fencing.
-- **Data & Node Plane**:
-  - `scripts/xray_api/`: Lightweight FastAPI control daemon running on each Origin node. Bridges bot central control to local Xray gRPC. Enforces double-checked epoch atomicity, versioned delete fencing, and isolated inbound discovery (`just1k-wl-*`).
-  - `scripts/just1knode.sh`: Production installer and lifecycle orchestrator for Origin and Relay nodes. Enforces manifest-based transactional rollback, zero-collateral-damage namespacing (`just1k-wl-*`), fail-closed UFW firewalling, and immutable dependency pinning.
-  - `Xray-core (v26.7.28)`: High-performance proxy core configured with XHTTP packet-up inbounds, XTLS Vision, and multi-hop VLESS relay outbounds.
-
----
+just1kbot is a high-performance Telegram VPN bot (aiogram 3.30+) managing censorship-resistant VPN nodes:
+- **Protocol**: Exclusively AmneziaWG (`awg`/`amneziawg`) and Xray XHTTP (VLESS + REALITY + XHTTP). Pure WireGuard (`wg`) is strictly forbidden.
+- **Node Agent (`just1knode.sh`)**: Automated installer for origin and relay nodes running on Ubuntu 24.04 / 22.04 LTS. Installs and configures Xray-core, Nginx (camouflage & reverse proxy), Certbot, and `xray-api` daemon.
+- **Node REST API (`scripts/xray_api/app.py`)**: FastAPI daemon managing Xray client credentials, traffic snapshots, health checks, and lifecycle via CAS (Compare-And-Swap) loops over gRPC stats.
+- **Web Layer & Ingress**: Nginx / Caddy reverse proxies handling XHTTP stream multiplexing, camouflage sites, and dynamic subscription feeds (`/sub/wl/...`).
+- **Core Bot & Service Layer**: `services/white_internet_service.py`, `database/repositories/servers_repo.py`, `bot/handlers/white_internet_web.py`.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
-|---|---|---|---|---|
-| 1 | Double-Checked Epoch Atomicity (F01) | Double-checked epoch loop with exponential retry backoff and HTTP 503 EpochMismatchError in `/v1/traffic/snapshot`. | M1 | Survey / ORIGINAL_REQUEST |
-| 2 | DB Authority & Ephemeral Cache (F08) | `clients.json` treated strictly as ephemeral cache hint; node starts in `unsynchronized` status until Central DB reconciliation. | M1 | Survey / ORIGINAL_REQUEST |
-| 3 | Versioned DELETE & Lifecycle Contract (F09) | `DELETE /v1/clients/{uuid}` with version parameter, monotonic fencing, and explicit lifecycle responses (`applied`, `already_newer`, `fenced`). | M1 | Survey / ORIGINAL_REQUEST |
-| 4 | Dynamic Namespaced Inbound Discovery (F10) | Dynamic discovery of VLESS inbounds strictly filtering by `just1k-wl-*` prefix from `relays.json` and config. | M1 | Survey / ORIGINAL_REQUEST |
-| 5 | Managed Secret Base Path Discovery (F11) | Discovery of secret base path matching strictly `just1k-wl-*` (or legacy `inbound-default`) tags. | M1 | Survey / ORIGINAL_REQUEST |
-| 6 | Manifest-Based Transactional Rollback (F02, F03) | Full state manifest capture and bit-for-bit restore (content, existence, permissions, ownership) on `add_relay_node` / `remove_relay_node` validation failure with verified health check. | M2 | Survey / ORIGINAL_REQUEST |
-| 7 | Zero-Collateral Namespaced Tags (F04, F05) | Isolation of all Just1k inbounds, outbounds, and routing rules under `just1k-wl-*`, preserving third-party rules (`direct`, `block`, `api`). | M2 | Survey / ORIGINAL_REQUEST |
-| 8 | Fail-Closed UFW Firewall & Doctor Check (F19, F21) | Require `BOT_IP` before exposing 8444, machine-check UFW ACLs, and openssl certificate expiration / SAN match in doctor. | M2 | Survey / ORIGINAL_REQUEST |
-| 9 | Verified Update Rollback & Immutable Pins (F20, F22) | Verified service rollback in `update_xray` and immutable pinning of all package versions and binary checksums. | M2 | Survey / ORIGINAL_REQUEST |
-| 10 | Poison Record Immunity (F06) | Data type guards and per-client isolation in traffic worker to prevent a malformed client UUID from aborting the server batch. | M3 | Survey / ORIGINAL_REQUEST |
-| 11 | Traffic Snapshot Idempotency (F07) | Idempotent event insertion (`ON CONFLICT DO NOTHING`) on `uq_white_internet_traffic_event_snapshot` to eliminate retry loops. | M3 | Survey / ORIGINAL_REQUEST |
-| 12 | Bounded Concurrency & Per-Sub Lock (F15) | Bounded concurrency (`asyncio.Semaphore(10)`) with per-subscription lock serialization and version fencing in reconciliation worker. | M3 | Survey / ORIGINAL_REQUEST |
-| 13 | Consistent Server Health Invariants (F16) | Standardized `ServerHealthState` handling across background workers (`ONLINE` + `WAITING_CONFIRMATION`) and public feeds (`ONLINE` only). | M3 | Survey / ORIGINAL_REQUEST |
-| 14 | Disabled Sub Quota Non-Consumption (F17) | Disabled and expired subscriptions record traffic strictly as overage without depleting active quota grants. | M3 | Survey / ORIGINAL_REQUEST |
-| 15 | Pruning & Namespace Isolation in `extra_data` (F12, F13) | Isolate node snapshot in `extra_data["just1k"]` and merge authoritatively under `SELECT ... FOR UPDATE` row lock while preserving foreign keys. | M4 | Survey / ORIGINAL_REQUEST |
-| 16 | Transitional Capacity Accounting (F14) | Count all capacity-consuming statuses (`PENDING`, `ACTIVE`, `EXHAUSTED`, `PENDING_UPDATE`) in peer count queries to prevent oversubscription. | M4 | Survey / ORIGINAL_REQUEST |
-| 17 | Reversible Migration Downgrade (F18) | Complete reversible downgrade semantics and cycle verification `upgrade head -> downgrade base -> upgrade head` on PostgreSQL 16. | M4 | Survey / ORIGINAL_REQUEST |
-| 18 | Web Feed Environment Fallback (F23) | Sequential fallback cascade in `white_internet_web.py` to correctly evaluate environment variables when `extra_data` is empty. | M4 | Survey / ORIGINAL_REQUEST |
-| 19 | 24-Finding Automated Regression Matrix (R5) | Full suite of 24 automated regression tests covering F01 through F24. | M5 | Survey / ORIGINAL_REQUEST |
-| 20 | Failure Injection Testing (R5) | Automated verification against injected syntax errors, mid-query epoch drift, and duplicate event collisions. | M5 | Survey / ORIGINAL_REQUEST |
-| 21 | Full Data-Plane E2E Harness (F24) | Live multi-hop data-plane test harness (`test_full_xhttp_dataplane_e2e`) verifying Client → CDN → Origin → Relay → Target. | M5 | Survey / ORIGINAL_REQUEST |
-
----
+|---|---------|-------------|-----------|--------|
+| 1 | R1.1 | Dedicated Python venv `/opt/xray-api/venv` and pip requirements installation in `just1knode.sh` | M1 | ORIGINAL_REQUEST §R1 |
+| 2 | R1.2 | Pinned dependencies in `scripts/xray_api/requirements.txt` (`fastapi`, `uvicorn`, `psutil`, `pydantic`) | M1 | ORIGINAL_REQUEST §R1 |
+| 3 | R1.3 | Eliminate hallucinated commit hashes (`JUST1KBOT_RELEASE_COMMIT`, `AMNEZIA_API_COMMIT`) | M1 | ORIGINAL_REQUEST §R1 |
+| 4 | R1.4 | Purge broken third-party `amnezia-api` installer mode (AmneziaWG SSOT via INCY) | M1 | ORIGINAL_REQUEST §R1 |
+| 5 | R2.1 | Align C1/Nginx 404 path mismatch (`/default` vs secret base path across web/nginx/bot) | M2 | ORIGINAL_REQUEST §R2 |
+| 6 | R2.2 | Enforce C4 Relay Egress on Origin nodes (eliminate Russian direct exit) | M2 | ORIGINAL_REQUEST §R2 |
+| 7 | R2.3 | Set H11 `xPaddingPlacement` to `queryInHeader` across server, client, and subscription configs | M2 | ORIGINAL_REQUEST §R2 |
+| 8 | R2.4 | Support C3 dynamic subscription feeds in `Caddyfile` matching `{$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*` | M2 | ORIGINAL_REQUEST §R2 |
+| 9 | R3.1 | Deploy H1 Nginx responsive camouflage static site at `/var/www/html/index.html` with root fallback | M2 | ORIGINAL_REQUEST §R3 |
+| 10 | R3.2 | Deploy H2 Certbot post-renewal deploy hook (`/etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh`) | M2 | ORIGINAL_REQUEST §R3 |
+| 11 | R3.3 | Configure H12 buffering & limits (`client_max_body_size 0`, `large_client_header_buffers 8 64k`, `http2_max_field_size 64k`) | M2 | ORIGINAL_REQUEST §R3 |
+| 12 | R3.4 | Configure H13/H14 Relay protocol REALITY default and fail-closed origin role guard | M2 | ORIGINAL_REQUEST §R3 |
+| 13 | R4.1 | Provision C2 dedicated non-root `xrayapi` system user with strict directory permissions | M1 | ORIGINAL_REQUEST §R4 |
+| 14 | R4.2 | Eliminate H6 synthetic CAS bypasses in `xray_api/app.py` and enforce fail-closed 503 on Xray down | M1 | ORIGINAL_REQUEST §R4 |
+| 15 | R4.3 | Fix H5 `socat`/`ss` doctor tooling syntax error using portable Python socket check | M1 | ORIGINAL_REQUEST §R4 |
+| 16 | R5.1 | Fix Python 3.10 PEP 701 f-string compatibility (purge inline quotes/backslashes) | M3 | ORIGINAL_REQUEST §R5 |
+| 17 | R5.2 | Purge dead Amnezia key/button code (`generate_amnezia_vpn_key`, `BTN_WL_AMNEZIA_KEY`) | M3 | ORIGINAL_REQUEST §R5 |
+| 18 | R5.3 | Fix `.gitignore` case sensitivity for `WL/` directory | M3 | ORIGINAL_REQUEST §R5 |
+| 19 | R5.4 | Replace non-existent `geosite:ru` with `geosite:category-ru` and `geosite:tld-ru` | M3 | ORIGINAL_REQUEST §R5 |
+| 20 | R5.5 | Implement dynamic `Profile-Title` base64 encoding and env-driven tariff pricing overrides | M3 | ORIGINAL_REQUEST §R5 |
+| 21 | R5.6 | Align capacity accounting SSOT (`servers_repo.py` vs `white_internet_service.py`) | M3 | ORIGINAL_REQUEST §R5 |
+| 22 | R5.7 | Clean up outdated `PROJECT.md` and `TEST_INFRA.md` documentation | M4 | ORIGINAL_REQUEST §R5 |
+| 23 | R6.1 | Replace false-green mocks in `tests/test_just1knode_sh.py` with functional validation | M4 / E2E | ORIGINAL_REQUEST §R6 |
+| 24 | R6.2 | Implement `tests/test_full_xhttp_dataplane_e2e.py` for end-to-end XHTTP dataplane verification | M4 / E2E | ORIGINAL_REQUEST §R6 |
+| 25 | R6.3 | Validate full test suite (1,063+ tests) inside Ubuntu 24.04 Docker environment | M4 | ORIGINAL_REQUEST §R6 |
+| 26 | R6.4 | Enforce strict zero-lint-error compliance with `ruff check`, `ruff format --check`, and `shellcheck` | M4 | ORIGINAL_REQUEST §R6 |
 
 ## Milestones
-
-| # | Name | Scope | Dependencies | Status | Assigned Worker / Sub-Orch |
-|---|---|---|---|---|---|
-| **M1** | Node Agent Invariants, Epoch Fencing & Versioning | `scripts/xray_api/` (`app.py`, `epoch_manager.py`, `client_store.py`), `services/xray_node_client.py` (F01, F08, F09, F10, F11) | none | PLANNED | `sub_orch_m1_node_agent` |
-| **M2** | Node Provisioning, Namespacing & Transactional Rollback | `scripts/just1knode.sh`, `scripts/xray_api/requirements.txt` (F02, F03, F04, F05, F19, F20, F21, F22) | none | PLANNED | `sub_orch_m2_provisioning` |
-| **M3** | Resilient Background Workers & Traffic Accounting | `services/workers/white_internet_traffic.py`, `services/workers/white_internet_reconciliation.py`, `services/white_internet_service.py` (F06, F07, F15, F16, F17) | none | PLANNED | `sub_orch_m3_workers` |
-| **M4** | Database Consistency, Capacity Allocation & Web Handlers | `database/repositories/servers_repo.py`, `database/repositories/white_internet_repo.py`, `services/workers/node_monitor.py`, `bot/handlers/white_internet_web.py`, `alembic/versions/0016_white_internet_subscriptions.py` (F12, F13, F14, F18, F23) | M3 | PLANNED | `sub_orch_m4_database` |
-| **M5** | Full 24-Matrix Regression Suite, Data-Plane E2E & Hardening | Full regression suite (F01-F24), `tests/test_full_xhttp_dataplane_e2e.py`, `tests/test_alembic_downgrade_cycle.py`, Failure Injection, `ruff`, `shellcheck`, Docker Ubuntu 24.04 runtime tests | M1, M2, M3, M4 | PLANNED | `sub_orch_m5_e2e_final` |
-
----
+| # | Name | Scope | Dependencies | Status |
+|---|------|-------|-------------|--------|
+| M1 | Node Provisioning & Security Core | R1.1-R1.4, R4.1-R4.3 (venv, pinned deps, non-root user, real CAS, doctor fix) | none | DONE |
+| M2 | Data-Plane & Web Server Ingress | R2.1-R2.4, R3.1-R3.4 (C1 path sync, C4 relay egress, H11 xPadding, C3 feeds, H1 camo, H2 certbot, H12 streaming, H13/H14 REALITY) | M1 | PLANNED |
+| M3 | Codebase Hygiene & SSOT Alignment | R5.1-R5.6 (PEP 701 f-strings, dead Amnezia purge, .gitignore, geosite rules, Profile-Title base64, tariff overrides, capacity SSOT) | none | PLANNED |
+| M4 | E2E Integration, Docker Verification & Hardening | R5.7, R6.1-R6.4 (100% E2E test suite pass in Ubuntu 24.04 Docker, ruff, shellcheck, Tier 5 adversarial hardening) | M1, M2, M3, E2E | PLANNED |
+| E2E | E2E Testing Track | Requirement-driven opaque-box test suite (Tiers 1-4, `test_full_xhttp_dataplane_e2e.py`, `TEST_READY.md`) | none (parallel) | IN_PROGRESS |
 
 ## Interface Contracts
+### xray-api ↔ just1knode.sh
+- `xray-api.service`: Run as `User=xrayapi`, `Group=xrayapi`, `WorkingDirectory=/opt/xray-api`, `ExecStart=/opt/xray-api/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8080`.
+- Socket / Proc Health: `/v1/health` checks genuine Xray pid via `/proc` or `psutil`. If Xray process is not running or down, returns HTTP 503 (no synthetic CAS fallbacks).
+- CAS Snapshots: `/v1/traffic/snapshot` requires genuine `boot_id` and `process_starttime`. Returns 503 if Xray is offline.
 
-### 1. Bot Control Plane ↔ Node Agent API (`/v1/clients`)
-- **`POST /v1/clients`**:
-  - Request: `{"client_id": "uuid", "is_active": bool, "version": int, "email": Optional[str]}`
-  - Response: `{"status": "ok", "client_id": "uuid", "result": "applied" | "already_newer", "version": int, "inbounds": list[str]}`
-- **`DELETE /v1/clients/{uuid}?version={version}`**:
-  - Query Param: `version: Optional[int]`
-  - Response: `{"status": "ok", "client_id": "uuid", "result": "applied" | "already_newer", "fenced": bool, "version": int, "inbounds": list[str]}`
-- **`GET /v1/traffic/snapshot`**:
-  - Response: `{"node_epoch": str, "boot_id": str, "starttime": int, "timestamp": int, "users": dict[str, dict[str, int]]}`
-  - Error: HTTP 503 `{"detail": "EpochMismatchError: Xray instance changed during stats read"}` on unresolvable epoch drift.
+### Web Server (Nginx / Caddy) ↔ Xray XHTTP Ingress
+- Ingress path: `/secret_path/default` mapped to Xray XHTTP inbound stream.
+- Buffer / Stream: `client_max_body_size 0`, `proxy_request_buffering off`, `proxy_buffering off`.
+- Camouflage: Root `/` serves `/var/www/html/index.html` responsive HTML (HTTP 200).
+- Subscriptions: `@allowed_paths` in Caddy includes `{$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*`.
 
-### 2. Central DB ↔ Node Monitor (`extra_data["just1k"]`)
-- `Server.extra_data`:
-  ```json
-  {
-    "just1k": {
-      "secret_base_path": "/secret_prefix",
-      "relays": [
-        {"code": "de", "name": "Frankfurt", "ip": "1.2.3.4", "port": 18001}
-      ]
-    },
-    "custom_user_key": "preserved_value"
-  }
-  ```
-- Merged under `SELECT ... FOR UPDATE` row lock in `update_server_health_snapshot`.
-
----
+### Bot ↔ Web Subscription & Xray API
+- VLESS Link: `vless://{uuid}@{host}:{port}?path=%2F{secret_path}%2Fdefault&type=xhttp&mode=multi&security=reality&pbk={pbk}&fp=chrome&sni={sni}&encryption=none&extra=%7B%22xPaddingPlacement%22%3A%22queryInHeader%22%7D#{encoded_tag}`
+- Profile-Title: Header `Profile-Title: base64:{b64_title}` with URL-safe / standard base64 encoding.
 
 ## Code Layout & Write Ownership
-| Subagent / Milestone | Exclusive Writable Files |
-|---|---|
-| **M1: Node Agent** | `scripts/xray_api/app.py`, `scripts/xray_api/epoch_manager.py`, `scripts/xray_api/client_store.py`, `services/xray_node_client.py` |
-| **M2: Node Provisioning** | `scripts/just1knode.sh`, `scripts/xray_api/requirements.txt` |
-| **M3: Workers & Traffic** | `services/workers/white_internet_traffic.py`, `services/workers/white_internet_reconciliation.py`, `services/white_internet_service.py` |
-| **M4: Database & Handlers** | `database/repositories/servers_repo.py`, `database/repositories/white_internet_repo.py`, `services/workers/node_monitor.py`, `bot/handlers/white_internet_web.py`, `alembic/versions/0016_white_internet_subscriptions.py` |
-| **M5 & E2E Testing Track** | `tests/test_*.py`, `scripts/xray_api/tests/test_*.py`, `tests/test_full_xhttp_dataplane_e2e.py`, `tests/test_alembic_downgrade_cycle.py`, `tests/test_just1knode_sh.py` |
+- **M1 Owner**: `scripts/just1knode.sh` (provisioning, venv, service units, doctor, user setup), `scripts/xray_api/requirements.txt`, `scripts/xray_api/app.py`, `scripts/xray_api/tests/*`.
+- **M2 Owner**: `scripts/just1knode.sh` (nginx template, certbot hook, relay menu, routing rules), `Caddyfile`, `Caddyfile.ci`, `services/white_internet_service.py` (VLESS link & xPadding), `bot/handlers/white_internet_web.py`.
+- **M3 Owner**: `.gitignore`, `config/constants.py`, `database/repositories/servers_repo.py`, `bot/texts/user/white_internet.py`, `services/white_internet_service.py` (purge dead code, routing geosite), `bot/handlers/white_internet_web.py` (Profile-Title).
+- **E2E / M4 Owner**: `tests/test_just1knode_sh.py`, `tests/test_full_xhttp_dataplane_e2e.py`, `TEST_INFRA.md`, `TEST_READY.md`.

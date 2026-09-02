@@ -145,6 +145,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         payload = "\n".join(vless_links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
 
+        profile_title_b64 = base64.b64encode(texts.WL_PROFILE_NAME.encode("utf-8")).decode("ascii")
         response_headers = dict(common_headers)
         response_headers.update(
             {
@@ -155,7 +156,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                     total=current_period_total,
                     expire=expire_ts,
                 ),
-                "Profile-Title": "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==",
+                "Profile-Title": f"base64:{profile_title_b64}",
                 "Profile-Update-Interval": "6",
                 "hide-url": "1",
                 "no-limit-enabled": "1",

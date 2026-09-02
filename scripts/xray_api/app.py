@@ -308,6 +308,7 @@ def _mask_uuid(val: str) -> str:
 def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
     Checks service health, Xray core gRPC connectivity, active inbounds, relays, and synchronization status.
+    Fail-closed: returns HTTP 503 if Xray is not running, gRPC is down, or /proc process inspection fails.
     """
     grpc_ok = grpc_client.is_healthy()
     active_clients = client_store.load_clients()
@@ -315,37 +316,37 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
     relays = get_active_relays()
     secret_path = get_secret_base_path()
 
-    running_epoch = epoch_manager.get_current_running_epoch() if epoch_manager else None
-    _pid, starttime = epoch_manager.get_xray_process_info() if epoch_manager else (None, None)
-    boot_id = epoch_manager.get_system_boot_id() if epoch_manager else None
+    pid, starttime, boot_id, running_epoch = (
+        epoch_manager.get_process_and_epoch() if epoch_manager else (None, None, None, None)
+    )
 
-    # In unit test environments where /proc has no real xray process, fallback if grpc_ok is mocked
-    if grpc_ok and not running_epoch:
-        running_epoch = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
+    is_running = bool(
+        grpc_ok
+        and running_epoch is not None
+        and pid is not None
+        and starttime is not None
+        and boot_id is not None
+    )
 
-    is_running = bool(grpc_ok and running_epoch)
-    if not grpc_ok:
-        is_running = False
+    if not is_running:
         running_epoch = None
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
-    data = {
+    return {
         "status": "ok" if is_running else "error",
         "xray_running": is_running,
-        "grpc_ok": grpc_ok,
+        "grpc_ok": bool(grpc_ok),
         "active_clients_count": len(active_clients),
         "inbounds": target_inbounds,
         "relays": relays,
         "secret_base_path": secret_path,
         "node_epoch": running_epoch if is_running else None,
-        "boot_id": boot_id or "boot_active",
-        "starttime": starttime or 0,
+        "boot_id": boot_id if is_running else None,
+        "starttime": starttime if is_running else None,
         "sync_status": node_sync_state.get("status", "unsynchronized"),
         "synchronized": node_sync_state.get("status") == "synchronized",
         "last_synced_at": node_sync_state.get("last_synced_at"),
     }
-    if not is_running:
-        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return data
 
 
 @app.get("/v1/relays")
@@ -374,6 +375,7 @@ def list_clients(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
 async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
     Returns traffic stats aggregated by UUID/email with double-checked epoch atomicity.
+    Fail-closed: requires genuine running process, valid starttime, boot_id, and matching epoch.
     """
     if not grpc_client.is_healthy():
         raise HTTPException(
@@ -384,10 +386,18 @@ async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, A
     max_attempts = 3
     for attempt in range(max_attempts):
         pid1, starttime1, boot_id1, epoch1 = (
-            epoch_manager.get_process_and_epoch() if epoch_manager else (None, 0, None, None)
+            epoch_manager.get_process_and_epoch() if epoch_manager else (None, None, None, None)
         )
-        if not epoch1:
-            epoch1 = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
+        if (
+            pid1 is None
+            or starttime1 is None
+            or boot_id1 is None
+            or epoch1 is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Xray process or epoch is unavailable",
+            )
 
         try:
             users_stats = grpc_client.get_users_stats(reset=False)
@@ -399,10 +409,21 @@ async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, A
             ) from e
 
         pid2, starttime2, boot_id2, epoch2 = (
-            epoch_manager.get_process_and_epoch() if epoch_manager else (None, 0, None, None)
+            epoch_manager.get_process_and_epoch() if epoch_manager else (None, None, None, None)
         )
-        if not epoch2:
-            epoch2 = epoch_manager.get_current_epoch() if epoch_manager else "epoch_active"
+        if (
+            pid2 is None
+            or starttime2 is None
+            or boot_id2 is None
+            or epoch2 is None
+        ):
+            logger.warning(
+                "Xray stopped during traffic snapshot read (attempt %d/%d). Retrying...",
+                attempt + 1,
+                max_attempts,
+            )
+            await asyncio.sleep(0.05 * (2**attempt))
+            continue
 
         if (
             epoch1 == epoch2
@@ -412,8 +433,8 @@ async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, A
         ):
             return {
                 "node_epoch": epoch1,
-                "boot_id": boot_id1 or "boot_active",
-                "starttime": starttime1 or 0,
+                "boot_id": boot_id1,
+                "starttime": starttime1,
                 "timestamp": int(time.time()),
                 "users": users_stats,
             }

@@ -12,6 +12,7 @@ class DatabaseStartupTests(unittest.IsolatedAsyncioTestCase):
         self.env_patcher = patch.dict(
             os.environ,
             {
+                "ENVIRONMENT": "development",
                 "BOT_TOKEN": "1234567890:TEST_BOT_TOKEN_FOR_TESTS",
                 "REDIS_URL": "redis://localhost:6379/1",
                 "REDIS_PASSWORD": "test_redis_password",

@@ -82,6 +82,25 @@ async def get_active_servers(session: AsyncSession) -> list[Server]:
     return result.scalars().all()
 
 
+def capacity_consuming_wl_condition():
+    """A White Internet subscription consumes server capacity if it is active,
+    exhausted, pending, or in a transitional provisioning lifecycle state."""
+    from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+    from database.models import WhiteInternetSubscription
+
+    return or_(
+        WhiteInternetSubscription.status.in_([
+            WhiteInternetStatus.PENDING,
+            WhiteInternetStatus.ACTIVE,
+            WhiteInternetStatus.EXHAUSTED,
+        ]),
+        WhiteInternetSubscription.provisioning_status.in_([
+            WhiteInternetProvisioningStatus.PENDING_CREATE,
+            WhiteInternetProvisioningStatus.PENDING_UPDATE,
+        ]),
+    )
+
+
 async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
     # 1. VPNProfile counts (AWG)
     vpn_result = await session.execute(
@@ -92,23 +111,13 @@ async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
     counts = {row[0]: row[1] for row in vpn_result.all()}
 
     # 2. WhiteInternetSubscription counts (Xray Origin)
-    from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
     from database.models import WhiteInternetSubscription
 
     wl_result = await session.execute(
         select(WhiteInternetSubscription.origin_node_id, func.count(WhiteInternetSubscription.id))
         .where(
             WhiteInternetSubscription.origin_node_id.is_not(None),
-            or_(
-                WhiteInternetSubscription.status.in_([
-                    WhiteInternetStatus.PENDING,
-                    WhiteInternetStatus.ACTIVE,
-                ]),
-                WhiteInternetSubscription.provisioning_status.in_([
-                    WhiteInternetProvisioningStatus.PENDING_CREATE,
-                    WhiteInternetProvisioningStatus.PENDING_UPDATE,
-                ]),
-            ),
+            capacity_consuming_wl_condition(),
         )
         .group_by(WhiteInternetSubscription.origin_node_id)
     )

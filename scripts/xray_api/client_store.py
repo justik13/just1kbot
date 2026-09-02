@@ -77,7 +77,7 @@ class ClientStore:
                 os.fsync(f.fileno())
             temp_path.replace(self.file_path)
             try:
-                os.chmod(self.file_path, 0o600)
+                os.chmod(self.file_path, 0o660)
             except Exception:
                 pass
             return True

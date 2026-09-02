@@ -156,6 +156,8 @@ install_base_deps() {{ return 0; }}
 obtain_ssl_certificate() {{ return 0; }}
 download_and_verify_xray() {{ return 0; }}
 deploy_xray_api_sources() {{ return 0; }}
+setup_xray_api_venv() {{ return 0; }}
+ensure_xrayapi_user() {{ return 0; }}
 
 {snippet}
 """
@@ -487,21 +489,190 @@ run_doctor
             self.assertIn("==", line, f"Requirement {line} must be strictly pinned with ==")
             self.assertFalse(re.search(r"[><~]=?", line.split("==")[0]), f"Range specifiers forbidden in {line}")
 
-        pinned_packages = dict(item.split("==") for item in req_lines)
+        pinned_packages = {}
+        for item in req_lines:
+            pkg, ver = item.split("==")
+            pkg_name = pkg.split("[")[0].strip()
+            pinned_packages[pkg_name] = ver.strip()
+
         self.assertEqual(pinned_packages.get("fastapi"), "0.115.6")
         self.assertEqual(pinned_packages.get("uvicorn"), "0.34.0")
         self.assertEqual(pinned_packages.get("grpcio"), "1.68.1")
         self.assertEqual(pinned_packages.get("protobuf"), "7.35.1")
         self.assertEqual(pinned_packages.get("pydantic"), "2.10.4")
+        self.assertEqual(pinned_packages.get("psutil"), "6.1.1")
 
-        # 2. Check just1knode.sh for absence of floating git tarballs / unpinned upgrades
+        # 2. Check just1knode.sh for absence of floating git tarballs / unpinned upgrades / dead commits
         sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
-        self.assertNotIn("refs/heads/main.tar.gz", sh_content, "Floating main.tar.gz downloads are forbidden")
-        self.assertNotIn("refs/heads/feature", sh_content, "Floating branch downloads are forbidden")
         self.assertNotIn("pip install --upgrade pip", sh_content, "Unpinned pip self-upgrade is forbidden")
-        self.assertIn("JUST1KBOT_RELEASE_COMMIT=", sh_content, "Fixed release commit pin must be present")
-        self.assertIn("AMNEZIA_API_COMMIT=", sh_content, "Amnezia API commit pin must be present")
+        self.assertNotIn("JUST1KBOT_RELEASE_COMMIT", sh_content, "Hallucinated release commit must be removed")
+        self.assertNotIn("AMNEZIA_API_COMMIT", sh_content, "Hallucinated Amnezia API commit must be removed")
+        self.assertNotIn("install_amnezia_api_node", sh_content, "Third-party amnezia-api installer must be purged")
+        self.assertIn("setup_xray_api_venv", sh_content, "Virtualenv setup function must be present")
+        self.assertIn("useradd -r", sh_content, "System user creation must be present")
+        self.assertIn("xrayapi", sh_content, "Non-root xrayapi user must be configured")
+        self.assertIn("JUST1KBOT_REF", sh_content, "Dynamic ref resolution must be configured")
+
+    # -------------------------------------------------------------------------
+    # Functional Validation: Origin Node Installation & Complete Artifacts
+    # -------------------------------------------------------------------------
+    def test_functional_origin_node_installation_and_artifacts(self):
+        self._prepare_base_env()
+        domain = "origin.example.com"
+        secret_path = "/stream"
+
+        cmd = f'install_xray_origin_node "{domain}" "admin@example.com" "test_api_key_123" "{secret_path}" "198.51.100.1"'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}")
+
+        # 1. Verify Xray config.json
+        xray_conf_file = self.xray_config_dir / "config.json"
+        self.assertTrue(xray_conf_file.exists())
+        with open(xray_conf_file, "r", encoding="utf-8") as f:
+            xray_conf = json.load(f)
+
+        inbound_tags = [ib["tag"] for ib in xray_conf["inbounds"]]
+        self.assertIn("just1k-wl-default", inbound_tags)
+        self.assertIn("just1k-wl-api-grpc", inbound_tags)
+
+        default_ib = next(ib for ib in xray_conf["inbounds"] if ib["tag"] == "just1k-wl-default")
+        self.assertEqual(default_ib["streamSettings"]["network"], "xhttp")
+        self.assertEqual(default_ib["streamSettings"]["xhttpSettings"]["xPaddingPlacement"], "queryInHeader")
+        self.assertEqual(default_ib["streamSettings"]["xhttpSettings"]["path"], f"{secret_path}/default")
+
+        outbound_tags = [ob["tag"] for ob in xray_conf["outbounds"]]
+        self.assertIn("just1k-wl-direct", outbound_tags)
+        self.assertIn("just1k-wl-block", outbound_tags)
+
+        # Standalone origin routing must route default traffic to block (no Russian ISP exit)
+        rules = xray_conf["routing"]["rules"]
+        default_rule = next((r for r in rules if r.get("inboundTag") == ["just1k-wl-default"]), None)
+        self.assertIsNotNone(default_rule)
+        self.assertEqual(default_rule["outboundTag"], "just1k-wl-block")
+
+        # 2. Verify Nginx configurations
+        nginx_conf = self.nginx_conf_dir / "sites-available" / "just1k-origin.conf"
+        self.assertTrue(nginx_conf.exists())
+        nginx_text = nginx_conf.read_text(encoding="utf-8")
+        self.assertIn("client_max_body_size 0;", nginx_text)
+        self.assertIn("large_client_header_buffers 8 64k;", nginx_text)
+        self.assertIn("http2_max_field_size 64k;", nginx_text)
+        self.assertIn("http2_max_header_size 64k;", nginx_text)
+        self.assertIn("location = /cdn-check", nginx_text)
+        self.assertIn("return 204;", nginx_text)
+        self.assertIn("location / {", nginx_text)
+        self.assertIn("try_files $uri $uri/ =404;", nginx_text)
+
+        # 3. Verify Nginx xhttp-map.conf
+        map_conf = self.nginx_conf_dir / "conf.d" / "xhttp-map.conf"
+        self.assertTrue(map_conf.exists())
+        map_text = map_conf.read_text(encoding="utf-8")
+        self.assertIn("OPTIONS POST;", map_text)
+
+        # 4. Verify Nginx default relay config
+        relays_default = self.nginx_relays_d / "default.conf"
+        self.assertTrue(relays_default.exists())
+        relays_text = relays_default.read_text(encoding="utf-8")
+        self.assertIn(f"location ^~ {secret_path}/default", relays_text)
+        self.assertIn("proxy_method $xhttp_proxy_method;", relays_text)
+        self.assertIn("client_max_body_size 0;", relays_text)
+
+        # 5. Verify systemd units
+        xray_service = self.systemd_dir / "xray-api.service"
+        self.assertTrue(xray_service.exists())
+        svc_text = xray_service.read_text(encoding="utf-8")
+        self.assertIn("User=xrayapi", svc_text)
+        self.assertIn("Group=xrayapi", svc_text)
+        self.assertIn("uvicorn app:app", svc_text)
+
+    # -------------------------------------------------------------------------
+    # Functional Validation: Add Relay with REALITY & Relay Egress
+    # -------------------------------------------------------------------------
+    def test_functional_add_relay_node_reality_and_egress_enforcement(self):
+        self._prepare_base_env()
+        # Initialize origin config first
+        cmd_init = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "198.51.100.1"'
+        self._run_shell_snippet(cmd_init)
+
+        # Add Relay with REALITY
+        cmd_relay = 'add_relay_node "Germany" "203.0.113.50" "10443" "test-relay-uuid" "de" "reality" "pubkey123" "shortid123" "www.google.com"'
+        res = self._run_shell_snippet(cmd_relay)
+        self.assertEqual(res.returncode, 0, f"add_relay_node failed: {res.stderr + res.stdout}")
+
+        # Verify Nginx relay conf
+        de_conf = self.nginx_relays_d / "de.conf"
+        self.assertTrue(de_conf.exists())
+        de_text = de_conf.read_text(encoding="utf-8")
+        self.assertIn("location ^~ /stream/de", de_text)
+        self.assertIn("client_max_body_size 0;", de_text)
+
+        # Verify Xray config has relay inbound, outbound, and enforced egress routing
+        with open(self.xray_config_dir / "config.json", "r", encoding="utf-8") as f:
+            xray_conf = json.load(f)
+
+        inbound_tags = [ib["tag"] for ib in xray_conf["inbounds"]]
+        self.assertIn("just1k-wl-inbound-de", inbound_tags)
+        de_ib = next(ib for ib in xray_conf["inbounds"] if ib["tag"] == "just1k-wl-inbound-de")
+        self.assertEqual(de_ib["streamSettings"]["xhttpSettings"]["xPaddingPlacement"], "queryInHeader")
+        self.assertEqual(de_ib["streamSettings"]["xhttpSettings"]["path"], "/stream/de")
+
+        outbound_tags = [ob["tag"] for ob in xray_conf["outbounds"]]
+        self.assertIn("just1k-wl-outbound-de", outbound_tags)
+        de_ob = next(ob for ob in xray_conf["outbounds"] if ob["tag"] == "just1k-wl-outbound-de")
+        self.assertEqual(de_ob["streamSettings"]["security"], "reality")
+        self.assertEqual(de_ob["streamSettings"]["realitySettings"]["publicKey"], "pubkey123")
+        self.assertEqual(de_ob["streamSettings"]["realitySettings"]["serverName"], "www.google.com")
+
+        # Verify default traffic is routed through the relay outbound (anti-Russian exit)
+        rules = xray_conf["routing"]["rules"]
+        default_rule = next((r for r in rules if r.get("inboundTag") == ["just1k-wl-default"]), None)
+        self.assertIsNotNone(default_rule)
+        self.assertEqual(default_rule["outboundTag"], "just1k-wl-outbound-de")
+
+    # -------------------------------------------------------------------------
+    # Functional Validation: Role Guard in manage_relays_menu
+    # -------------------------------------------------------------------------
+    def test_functional_manage_relays_menu_role_guard(self):
+        self._prepare_base_env()
+        # Case 1: Role is 'relay' -> must fail closed
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "relay", "domain": "relay.example.com"}, f)
+
+        res = self._run_shell_snippet("manage_relays_menu < /dev/null")
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("ТОЛЬКО на Origin-сервере", res.stderr + res.stdout)
+
+        # Case 2: Role is empty/unset -> must fail closed
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({}, f)
+
+        res_empty = self._run_shell_snippet("manage_relays_menu < /dev/null")
+        self.assertNotEqual(res_empty.returncode, 0)
+        self.assertIn("ТОЛЬКО на Origin-сервере", res_empty.stderr + res_empty.stdout)
+
+    # -------------------------------------------------------------------------
+    # Functional Validation: Camouflage Landing & Certbot Deploy Hook
+    # -------------------------------------------------------------------------
+    def test_functional_camouflage_and_certbot_deploy_hook(self):
+        self._prepare_base_env()
+        res = self._run_shell_snippet("deploy_camouflage_site; deploy_certbot_renewal_hook")
+        self.assertEqual(res.returncode, 0)
+
+        # 1. Camouflage index.html
+        index_file = self.www_html_dir / "index.html"
+        self.assertTrue(index_file.exists())
+        html_content = index_file.read_text(encoding="utf-8")
+        self.assertIn("<!DOCTYPE html>", html_content)
+        self.assertIn("<html", html_content)
+        self.assertIn("Cloud Ingress", html_content)
+
+        # 2. Certbot renewal hook
+        # Check script content inside just1knode.sh
+        sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
+        self.assertIn("/etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh", sh_content)
+        self.assertIn("chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh", sh_content)
 
 
 if __name__ == "__main__":
     unittest.main()
+

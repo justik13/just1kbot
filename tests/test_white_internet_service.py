@@ -35,7 +35,7 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
         # Verify link structure
         self.assertTrue(link_wl.startswith(f"vless://{sub.uuid}@{cdn_domain}:443"))
         self.assertIn("type=xhttp", link_wl)
-        self.assertIn("path=%2Fstream%2Fv1", link_wl)
+        self.assertIn("path=%2Fstream%2Fv1%2Fdefault", link_wl)
         self.assertIn("mode=packet-up", link_wl)
         self.assertIn("security=tls", link_wl)
         self.assertIn("sni=cdn.just1k.online", link_wl)
@@ -55,31 +55,7 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
         self.assertEqual(extra["xPaddingKey"], "dc")
         self.assertEqual(extra["xPaddingHeader"], "X-Cache")
         self.assertEqual(extra["xPaddingMethod"], "tokenish")
-        self.assertEqual(extra["xPaddingPlacement"], "header")
-
-    def test_generate_amnezia_vpn_key_roundtrip_decompression(self):
-        sub = MagicMock(spec=WhiteInternetSubscription)
-        sub.uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
-        cdn_domain = "cdn.just1k.online"
-
-        key = WhiteInternetService.generate_amnezia_vpn_key(sub, cdn_domain)
-        self.assertTrue(key.startswith("vpn://"))
-
-        # Decompress and decode using qUncompress format
-        payload = WhiteInternetService.decode_amnezia_vpn_key(key)
-
-        self.assertIn("containers", payload)
-        self.assertEqual(len(payload["containers"]), 1)
-        container = payload["containers"][0]
-        self.assertEqual(container["container"], "amnezia-xray")
-        self.assertTrue(container["xray"]["isThirdPartyConfig"])
-
-        # Validate extracted Xray config
-        last_config = json.loads(container["xray"]["last_config"])
-        self.assertIn("outbounds", last_config)
-        self.assertIn("routing", last_config)
-        self.assertEqual(payload["defaultContainer"], "amnezia-xray")
-        self.assertEqual(payload["hostName"], cdn_domain)
+        self.assertEqual(extra["xPaddingPlacement"], "queryInHeader")
 
 
 class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):

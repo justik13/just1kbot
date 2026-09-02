@@ -1,0 +1,437 @@
+Вот обезличенное пошаговое руководство по развертыванию VLESS XHTTP + Padding (OPTIONS) через Yandex Cloud CDN с двухсерверным каскадом, адаптированное специально под Amnezia VPN.
+
+Все реальные IP-адреса, домены, ключи и UUID заменены на наглядные плейсхолдеры.
+
+---
+
+# Руководство VLESS XHTTP + Padding + Yandex CDN для Amnezia VPN
+
+Схема работы
+
+`Клиент Amnezia` ➡️ `Yandex Cloud CDN (HTTP2)` ➡️ `Origin Россия (Nginx + Xray)` ➡️ `Exit Зарубежье (Xray Vision)` ➡️ `Свободный интернет`
+
+---
+
+## 1. Список плейсхолдеров (замените своими данными)
+
+ Плейсхолдер  Что подставить  Пример 
+ ---  ---  --- 
+ `YOUR_DOMAIN.COM`  Ваш основной домен  `example.com` 
+ `YOUR_ORIGIN_IP`  IP-адрес Origin-сервера (РФ)  `185.x.x.x` 
+ `YOUR_EXIT_IP`  IP-адрес Exit-сервера (Зарубежье)  `94.x.x.x` 
+ `YOUR_UUID`  Ваш секретный UUID  `a2b9d4e1-73c5-4812-b964-f3e7b85a1902` 
+ `YOUR_SECRET_PATH`  Секретный путь для XHTTP  `apiv3secure-data` 
+ `YOUR_PADDING_KEY`  Ключ для обфускации (2 символа)  `dc` или `a1` 
+ `YOUR_EMAIL`  Email для выпуска сертификатов  `admin@example.com` 
+
+---
+
+## 2. Настройка DNS (Cloudflare  Ваш DNS-провайдер)
+
+Создайте A-записи в режиме «DNS Only» (без проксирования через Cloudflare)
+
+1. A-запись `origin` ➡️ `YOUR_ORIGIN_IP`
+2. A-запись `relay` ➡️ `YOUR_EXIT_IP`
+3. CNAME-запись `cdn` ➡️ `СЛУЧАЙНЫЙ_ID.topology.gslb.yccdn.ru` (выдается в консоли Yandex CDN)
+4. CNAME-запись `_acme-challenge.cdn` ➡️ проверочная запись из Yandex Certificate Manager
+
+---
+
+## 3. Exit-сервер Зарубежье (Xray + TLS)
+
+Подключитесь по SSH к Exit-серверу под `root`.
+
+### 3.1. Установка Xray и выпуск SSL-сертификата
+
+```bash
+apt update && apt install -y curl certbot
+bash -c $(curl -L httpsgithub.comXTLSXray-installrawmaininstall-release.sh) @ install --version 26.5.9
+
+# Выпуск сертификата (порт 80 должен быть свободен)
+certbot certonly --standalone --non-interactive --agree-tos --email YOUR_EMAIL -d relay.YOUR_DOMAIN.COM
+
+# Подготовка директории и прав доступа для Xray
+install -d -m 750 -o root -g nogroup usrlocaletcxraytls
+install -m 640 -o root -g nogroup etcletsencryptliverelay.YOUR_DOMAIN.COMfullchain.pem usrlocaletcxraytlsfullchain.pem
+install -m 640 -o root -g nogroup etcletsencryptliverelay.YOUR_DOMAIN.COMprivkey.pem usrlocaletcxraytlsprivkey.pem
+
+```
+
+### 3.2. Конфигурация `usrlocaletcxrayconfig.json` (Exit)
+
+```json
+{
+  log {
+    loglevel warning
+  },
+  inbounds [
+    {
+      tag from-origin,
+      listen 0.0.0.0,
+      port 10443,
+      protocol vless,
+      settings {
+        users [
+          {
+            id YOUR_UUID,
+            flow xtls-rprx-vision
+          }
+        ],
+        decryption none
+      },
+      streamSettings {
+        network tcp,
+        security tls,
+        tlsSettings {
+          alpn [h2, http1.1],
+          certificates [
+            {
+              certificateFile usrlocaletcxraytlsfullchain.pem,
+              keyFile usrlocaletcxraytlsprivkey.pem
+            }
+          ]
+        }
+      }
+    }
+  ],
+  outbounds [
+    {
+      tag internet,
+      protocol freedom
+    }
+  ]
+}
+
+```
+
+### 3.3. Запуск и ограничение доступа
+
+```bash
+usrlocalbinxray run -test -config usrlocaletcxrayconfig.json
+systemctl enable --now xray
+
+# Разрешаем входящий порт 10443 строго с IP-адреса Origin-сервера
+ufw allow from YOUR_ORIGIN_IP to any port 10443 proto tcp
+
+```
+
+---
+
+## 4. Origin-сервер Россия (Nginx + Xray)
+
+Подключитесь по SSH к Origin-серверу под `root`.
+
+### 4.1. Установка Nginx, Xray и выпуск SSL
+
+```bash
+apt update && apt install -y nginx certbot curl wget nano
+
+# Установка Xray-core
+bash -c $(curl -L httpsgithub.comXTLSXray-installrawmaininstall-release.sh) @ install --version 26.5.9
+
+# Временный конфиг Nginx для прохождения ACME-челленджа
+install -d -m 755 varwwwacme
+rm -f etcnginxsites-enableddefault
+
+cat  etcnginxsites-availablexhttp-origin.conf 'EOF'
+server {
+    listen 80;
+    listen []80;
+    server_name origin.YOUR_DOMAIN.COM;
+
+    location ^~ .well-knownacme-challenge {
+        root varwwwacme;
+    }
+
+    location  {
+        default_type textplain;
+        return 200 origin readyn;
+    }
+}
+EOF
+
+ln -sfn etcnginxsites-availablexhttp-origin.conf etcnginxsites-enabledxhttp-origin.conf
+nginx -t && systemctl enable --now nginx && systemctl reload nginx
+
+# Выпуск SSL-сертификата
+certbot certonly --webroot -w varwwwacme --non-interactive --agree-tos --email YOUR_EMAIL -d origin.YOUR_DOMAIN.COM
+
+```
+
+### 4.2. Конфигурация `usrlocaletcxrayconfig.json` (Origin)
+
+```json
+{
+  log {
+    loglevel warning
+  },
+  inbounds [
+    {
+      tag from-yandex-cdn,
+      listen 127.0.0.1,
+      port 8003,
+      protocol vless,
+      settings {
+        users [
+          {
+            id YOUR_UUID
+          }
+        ],
+        decryption none
+      },
+      streamSettings {
+        network xhttp,
+        security none,
+        xhttpSettings {
+          mode packet-up,
+          path YOUR_SECRET_PATH,
+          xPaddingObfsMode true,
+          xPaddingKey YOUR_PADDING_KEY,
+          xPaddingHeader X-Cache,
+          xPaddingMethod tokenish,
+          xPaddingPlacement queryInHeader
+        }
+      }
+    }
+  ],
+  outbounds [
+    {
+      tag to-exit,
+      protocol vless,
+      settings {
+        vnext [
+          {
+            address YOUR_EXIT_IP,
+            port 10443,
+            users [
+              {
+                id YOUR_UUID,
+                encryption none,
+                flow xtls-rprx-vision
+              }
+            ]
+          }
+        ]
+      },
+      streamSettings {
+        network tcp,
+        security tls,
+        tlsSettings {
+          serverName relay.YOUR_DOMAIN.COM,
+          alpn [h2, http1.1]
+        }
+      }
+    },
+    {
+      tag direct,
+      protocol freedom
+    }
+  ]
+}
+
+```
+
+Запуск Xray
+
+```bash
+usrlocalbinxray run -test -config usrlocaletcxrayconfig.json
+systemctl enable --now xray && systemctl restart xray
+
+```
+
+### 4.3. Боевая конфигурация Nginx (Origin)
+
+Создаем карту преобразования метода `OPTIONS` в `POST` (для маскировки исходящего трафика)
+
+```bash
+cat  etcnginxconf.dxhttp-method.conf 'EOF'
+map $request_method $xhttp_proxy_method {
+    default  $request_method;
+    OPTIONS  POST;
+}
+EOF
+
+```
+
+Записываем основной конфигурационный файл Nginx
+
+```bash
+cat  etcnginxsites-availablexhttp-origin.conf 'EOF'
+server {
+    listen 80;
+    listen []80;
+    server_name origin.YOUR_DOMAIN.COM;
+
+    location ^~ .well-knownacme-challenge {
+        root varwwwacme;
+    }
+
+    location  {
+        return 301 https$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen []443 ssl http2;
+    server_name origin.YOUR_DOMAIN.COM;
+
+    ssl_certificate     etcletsencryptliveorigin.YOUR_DOMAIN.COMfullchain.pem;
+    ssl_certificate_key etcletsencryptliveorigin.YOUR_DOMAIN.COMprivkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 0;
+    client_header_buffer_size 64k;
+    large_client_header_buffers 8 128k;
+
+    location = cdn-check {
+        add_header X-CDN-Origin ok always;
+        add_header X-Origin-Method $request_method always;
+        add_header X-Origin-Content-Length $http_content_length always;
+        return 204;
+    }
+
+    location YOUR_SECRET_PATH {
+        proxy_pass http127.0.0.18003;
+        proxy_method $xhttp_proxy_method;
+        proxy_http_version 1.1;
+        proxy_set_header Connection ;
+
+        proxy_pass_request_headers on;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+EOF
+
+nginx -t && systemctl restart nginx
+
+```
+
+---
+
+## 5. Настройка Yandex Cloud CDN
+
+### 5.1. Certificate Manager
+
+1. В консоли Yandex Cloud перейдите в Certificate Manager ➔ Добавить сертификат Let's Encrypt.
+2. Укажите домен `cdn.YOUR_DOMAIN.COM` (тип проверки DNS).
+3. Добавьте полученную CNAME-запись `_acme-challenge.cdn` в DNS вашего домена.
+4. Дождитесь перевода статуса сертификата в Issued.
+
+### 5.2. Настройка CDN-ресурса
+
+1. Cloud CDN ➔ Группы источников ➔ Создать группу источников
+ Тип Сервер
+ Домен источника `origin.YOUR_DOMAIN.COM`
+
+
+2. Создать CDN-ресурс
+ Доменное имя `cdn.YOUR_DOMAIN.COM`
+ Протокол для источников HTTPS (порт 443)
+ Заголовок Host  Имя SNI-хоста `origin.YOUR_DOMAIN.COM`
+ Сертификат Выберите выпущенный из Certificate Manager
+ Перенаправление HTTP ➔ HTTPS
+ Кеширование Отключить полностью (в браузере и на CDN)
+ Разрешенные методы `GET`, `HEAD`, `OPTIONS`
+
+
+
+---
+
+## 6. Конфигурация для Amnezia VPN (Raw JSON)
+
+Поскольку парсер ссылок `vless` в Amnezia VPN не распознает расширенные параметры XHTTP, конфигурация импортируется в виде прямого JSON-кода.
+
+### Порядок импорта
+
+1. Скопируйте JSON-код ниже и замените значения плейсхолдеров на свои.
+2. В Amnezia VPN нажмите «+» (Добавить подключение) ➔ «Импортировать из файла или текста».
+3. Вставьте готовый код и сохраните.
+
+```json
+{
+  inbounds [
+    {
+      listen 127.0.0.1,
+      port 10808,
+      protocol socks,
+      settings {
+        udp true
+      }
+    }
+  ],
+  outbounds [
+    {
+      protocol vless,
+      settings {
+        vnext [
+          {
+            address cdn.YOUR_DOMAIN.COM,
+            port 443,
+            users [
+              {
+                encryption none,
+                id YOUR_UUID
+              }
+            ]
+          }
+        ]
+      },
+      streamSettings {
+        network xhttp,
+        security tls,
+        tlsSettings {
+          alpn [
+            h2
+          ],
+          serverName cdn.YOUR_DOMAIN.COM
+        },
+        xhttpSettings {
+          mode packet-up,
+          path YOUR_SECRET_PATH,
+          scMaxBufferedPosts 30,
+          scMaxEachPostBytes 1000000,
+          scMinPostsIntervalMs 30,
+          uplinkHTTPMethod OPTIONS,
+          xPaddingHeader X-Cache,
+          xPaddingKey YOUR_PADDING_KEY,
+          xPaddingMethod tokenish,
+          xPaddingObfsMode true,
+          xPaddingPlacement queryInHeader
+        }
+      }
+    }
+  ]
+}
+
+```
+
+---
+
+## 7. Команды диагностики
+
+### Проверка работоспособности CDN и Origin
+
+Запустите команду с любого ПК
+
+```bash
+curl -sS -D - -o devnull -X OPTIONS httpscdn.YOUR_DOMAIN.COMcdn-checknocache=$(date +%s)
+
+```
+
+Ожидаемый ответ `HTTP2 204` и наличие заголовка `x-cdn-origin ok`.
+
+### Просмотр логов активных подключений в реальном времени (на Origin-сервере)
+
+```bash
+tail -f varlognginxaccess.log  grep YOUR_SECRET_PATH
+
+```

@@ -45,12 +45,17 @@ def test_auth_enforcement():
 
     # Correct header
     with patch.object(grpc_client, "is_healthy", return_value=True):
-        res = client.get("/v1/health", headers=VALID_HEADERS)
-        assert res.status_code == 200
-        data = res.json()
-        assert data["status"] == "ok"
-        assert data["xray_running"] is True
-        assert data["grpc_ok"] is True
+        with patch.object(
+            epoch_manager,
+            "get_process_and_epoch",
+            return_value=(100, 1000, "boot-1", "epoch_1"),
+        ):
+            res = client.get("/v1/health", headers=VALID_HEADERS)
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "ok"
+            assert data["xray_running"] is True
+            assert data["grpc_ok"] is True
 
 
 def test_traffic_snapshot():
@@ -59,11 +64,17 @@ def test_traffic_snapshot():
     }
     with patch.object(grpc_client, "is_healthy", return_value=True):
         with patch.object(grpc_client, "get_users_stats", return_value=mock_stats):
-            res = client.get("/v1/traffic/snapshot", headers=VALID_HEADERS)
-            assert res.status_code == 200
-            data = res.json()
-            assert data["users"] == mock_stats
-            assert "timestamp" in data
+            with patch.object(
+                epoch_manager,
+                "get_process_and_epoch",
+                return_value=(100, 1000, "boot-1", "epoch_1"),
+            ):
+                res = client.get("/v1/traffic/snapshot", headers=VALID_HEADERS)
+                assert res.status_code == 200
+                data = res.json()
+                assert data["users"] == mock_stats
+                assert "timestamp" in data
+                assert data["node_epoch"] == "epoch_1"
 
 
 def test_traffic_snapshot_epoch_drift_retry():
@@ -126,15 +137,20 @@ def test_startup_reconciliation_db_authority():
 
     with patch.object(grpc_client, "is_healthy", return_value=True):
         with patch.object(grpc_client, "add_user", return_value=True):
-            restored_count = restore_persisted_clients_to_xray()
-            assert restored_count == 2
+            with patch.object(
+                epoch_manager,
+                "get_process_and_epoch",
+                return_value=(100, 1000, "boot-1", "epoch_1"),
+            ):
+                restored_count = restore_persisted_clients_to_xray()
+                assert restored_count == 2
 
-            # Health reports unsynchronized on startup
-            res = client.get("/v1/health", headers=VALID_HEADERS)
-            assert res.status_code == 200
-            data = res.json()
-            assert data["sync_status"] == "unsynchronized"
-            assert data["synchronized"] is False
+                # Health reports unsynchronized on startup
+                res = client.get("/v1/health", headers=VALID_HEADERS)
+                assert res.status_code == 200
+                data = res.json()
+                assert data["sync_status"] == "unsynchronized"
+                assert data["synchronized"] is False
 
     # Central DB reconciliation executes desired-state alignment:
     # uuid_active is confirmed active with version 2
@@ -159,11 +175,16 @@ def test_startup_reconciliation_db_authority():
 
     # Node is now synchronized according to Central DB authority
     with patch.object(grpc_client, "is_healthy", return_value=True):
-        health_after = client.get("/v1/health", headers=VALID_HEADERS).json()
-        assert health_after["sync_status"] == "synchronized"
-        assert health_after["synchronized"] is True
-        assert uuid_active in client_store.load_clients()
-        assert uuid_stale not in client_store.load_clients()
+        with patch.object(
+            epoch_manager,
+            "get_process_and_epoch",
+            return_value=(100, 1000, "boot-1", "epoch_1"),
+        ):
+            health_after = client.get("/v1/health", headers=VALID_HEADERS).json()
+            assert health_after["sync_status"] == "synchronized"
+            assert health_after["synchronized"] is True
+            assert uuid_active in client_store.load_clients()
+            assert uuid_stale not in client_store.load_clients()
 
 
 def test_client_sync_active_and_persistence():
@@ -421,9 +442,65 @@ def test_secret_base_path_managed_tag_only(tmp_path):
 
 def test_health_includes_secret_base_path():
     with patch.object(grpc_client, "is_healthy", return_value=True):
-        res = client.get("/v1/health", headers=VALID_HEADERS)
-        assert res.status_code == 200
-        data = res.json()
-        assert "secret_base_path" in data
-        assert "sync_status" in data
-        assert "synchronized" in data
+        with patch.object(
+            epoch_manager,
+            "get_process_and_epoch",
+            return_value=(100, 1000, "boot-1", "epoch_1"),
+        ):
+            res = client.get("/v1/health", headers=VALID_HEADERS)
+            assert res.status_code == 200
+            data = res.json()
+            assert "secret_base_path" in data
+            assert "sync_status" in data
+            assert "synchronized" in data
+
+
+def test_health_fail_closed_when_grpc_down():
+    with patch.object(grpc_client, "is_healthy", return_value=False):
+        with patch.object(
+            epoch_manager,
+            "get_process_and_epoch",
+            return_value=(100, 1000, "boot-1", "epoch_1"),
+        ):
+            res = client.get("/v1/health", headers=VALID_HEADERS)
+            assert res.status_code == 503
+            data = res.json()
+            assert data["status"] == "error"
+            assert data["xray_running"] is False
+            assert data["grpc_ok"] is False
+            assert data["node_epoch"] is None
+
+
+def test_health_fail_closed_when_process_unreadable():
+    with patch.object(grpc_client, "is_healthy", return_value=True):
+        with patch.object(
+            epoch_manager,
+            "get_process_and_epoch",
+            return_value=(None, None, "boot-1", None),
+        ):
+            res = client.get("/v1/health", headers=VALID_HEADERS)
+            assert res.status_code == 503
+            data = res.json()
+            assert data["status"] == "error"
+            assert data["xray_running"] is False
+            assert data["node_epoch"] is None
+
+
+def test_traffic_snapshot_fail_closed_when_grpc_down():
+    with patch.object(grpc_client, "is_healthy", return_value=False):
+        res = client.get("/v1/traffic/snapshot", headers=VALID_HEADERS)
+        assert res.status_code == 503
+        assert "not available" in res.json().get("detail", "").lower()
+
+
+def test_traffic_snapshot_fail_closed_when_process_unreadable():
+    with patch.object(grpc_client, "is_healthy", return_value=True):
+        with patch.object(
+            epoch_manager,
+            "get_process_and_epoch",
+            return_value=(None, None, None, None),
+        ):
+            res = client.get("/v1/traffic/snapshot", headers=VALID_HEADERS)
+            assert res.status_code == 503
+            assert "unavailable" in res.json().get("detail", "").lower()
+

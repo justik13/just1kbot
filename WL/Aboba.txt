@@ -1,0 +1,566 @@
+Вот полное, систематизированное руководство по развертыванию устойчивой к блокировкам архитектуры **VLESS XHTTP + Padding (OPTIONS) через Yandex Cloud CDN** с каскадом двух серверов (Origin в РФ ➔ Exit в Зарубежье) и генерацией готовых ключей формата **`vpn://`** для Amnezia VPN.
+
+Все личные IP-адреса, домены, ключи и UUID полностью обезличены и заменены на удобные плейсхолдеры.
+
+---
+
+# Полный гайд: VLESS XHTTP + Padding + Yandex CDN (Multi-Hop)
+
+## 🏗 Схема архитектуры
+
+```text
+[Клиент Amnezia / Happ]
+       │
+       ▼ (HTTPS / HTTP2)
+[Yandex Cloud CDN] ── (Балансировка и маскировка под CDN)
+       │
+       ▼ (TLS 443)
+[Origin-сервер: Россия] ── (Nginx: раскодирование OPTIONS → POST → Xray Inbound XHTTP)
+       │
+       ▼ (VLESS-Vision TLS 10443)
+[Exit-сервер: Зарубежье] ── (Xray Freedom Outbound)
+       │
+       ▼
+[Свободный интернет]
+
+```
+
+---
+
+## 📋 Таблица плейсхолдеров (замените перед настройкой)
+
+| Плейсхолдер | Что подставить | Пример |
+| --- | --- | --- |
+| `YOUR_DOMAIN.COM` | Ваш основной домен | `example.com` |
+| `YOUR_ORIGIN_IP` | IP-адрес Origin-сервера (Россия) | `185.x.x.x` |
+| `YOUR_EXIT_IP` | IP-адрес Exit-сервера (Зарубежье) | `94.x.x.x` |
+| `YOUR_UUID` | Ваш UUID (генерируется через `xray uuid`) | `a2b9d4e1-73c5-4812-b964-f3e7b85a1902` |
+| `YOUR_SECRET_PATH` | Секретный URL-путь для XHTTP | `/api/v3/secure-data` |
+| `YOUR_PADDING_KEY` | Двухсимвольный ключ обфускации | `dc` или `a1` |
+| `YOUR_EMAIL` | Email для выпуска SSL-сертификатов | `admin@example.com` |
+
+---
+
+## Шаг 1. Настройка DNS (Cloudflare)
+
+В панели управления DNS создайте следующие записи в режиме **«DNS Only»** (серые облака):
+
+1. **A-запись `origin**` ➡️ `YOUR_ORIGIN_IP`
+2. **A-запись `relay**` ➡️ `YOUR_EXIT_IP`
+3. **CNAME-запись `cdn**` ➡️ `СЛУЧАЙНЫЙ_ID.topology.gslb.yccdn.ru` *(выдается при создании CDN в Yandex Cloud)*
+4. **CNAME-запись `_acme-challenge.cdn**` ➡️ проверочная запись из Yandex Certificate Manager
+
+---
+
+## Шаг 2. Настройка Exit-сервера (Зарубежье)
+
+Подключитесь к **Exit-серверу** по SSH под `root`.
+
+### 1. Установка ПО и выпуск SSL
+
+```bash
+apt update && apt install -y curl certbot
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --version 26.5.9
+
+# Выпуск SSL-сертификата
+certbot certonly --standalone --non-interactive --agree-tos --email "YOUR_EMAIL" -d "relay.YOUR_DOMAIN.COM"
+
+# Настройка прав для Xray
+install -d -m 750 -o root -g nogroup /usr/local/etc/xray/tls
+install -m 640 -o root -g nogroup "/etc/letsencrypt/live/relay.YOUR_DOMAIN.COM/fullchain.pem" /usr/local/etc/xray/tls/fullchain.pem
+install -m 640 -o root -g nogroup "/etc/letsencrypt/live/relay.YOUR_DOMAIN.COM/privkey.pem" /usr/local/etc/xray/tls/privkey.pem
+
+```
+
+### 2. Конфигурация `/usr/local/etc/xray/config.json`
+
+```json
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "from-origin",
+      "listen": "0.0.0.0",
+      "port": 10443,
+      "protocol": "vless",
+      "settings": {
+        "users": [
+          {
+            "id": "YOUR_UUID",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h2", "http/1.1"],
+          "certificates": [
+            {
+              "certificateFile": "/usr/local/etc/xray/tls/fullchain.pem",
+              "keyFile": "/usr/local/etc/xray/tls/privkey.pem"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "internet",
+      "protocol": "freedom"
+    }
+  ]
+}
+
+```
+
+### 3. Запуск и файрвол
+
+```bash
+/usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+systemctl enable --now xray
+
+# Ограничиваем доступ к порту 10443 только с IP Origin-сервера
+ufw allow from YOUR_ORIGIN_IP to any port 10443 proto tcp
+
+```
+
+---
+
+## Шаг 3. Настройка Origin-сервера (Россия)
+
+Подключитесь к **Origin-серверу** по SSH под `root`.
+
+### 1. Установка Nginx, Xray и выпуск SSL
+
+```bash
+apt update && apt install -y nginx certbot curl wget nano
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --version 26.5.9
+
+# Временный хост для прохождения ACME-проверки
+install -d -m 755 /var/www/acme
+rm -f /etc/nginx/sites-enabled/default
+
+cat > /etc/nginx/sites-available/xhttp-origin.conf <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name origin.YOUR_DOMAIN.COM;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+    }
+
+    location / {
+        default_type text/plain;
+        return 200 "origin ready\n";
+    }
+}
+EOF
+
+ln -sfn /etc/nginx/sites-available/xhttp-origin.conf /etc/nginx/sites-enabled/xhttp-origin.conf
+nginx -t && systemctl enable --now nginx && systemctl reload nginx
+
+# Выпуск SSL
+certbot certonly --webroot -w /var/www/acme --non-interactive --agree-tos --email "YOUR_EMAIL" -d "origin.YOUR_DOMAIN.COM"
+
+```
+
+### 2. Конфигурация `/usr/local/etc/xray/config.json`
+
+```json
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "from-yandex-cdn",
+      "listen": "127.0.0.1",
+      "port": 8003,
+      "protocol": "vless",
+      "settings": {
+        "users": [
+          {
+            "id": "YOUR_UUID"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "none",
+        "xhttpSettings": {
+          "mode": "packet-up",
+          "path": "YOUR_SECRET_PATH",
+          "xPaddingObfsMode": true,
+          "xPaddingKey": "YOUR_PADDING_KEY",
+          "xPaddingHeader": "X-Cache",
+          "xPaddingMethod": "tokenish",
+          "xPaddingPlacement": "queryInHeader"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "to-exit",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "YOUR_EXIT_IP",
+            "port": 10443,
+            "users": [
+              {
+                "id": "YOUR_UUID",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "relay.YOUR_DOMAIN.COM",
+          "alpn": ["h2", "http/1.1"]
+        }
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ]
+}
+
+```
+
+Запустите службу:
+
+```bash
+/usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+systemctl enable --now xray && systemctl restart xray
+
+```
+
+### 3. Настройка Nginx (Конвертация OPTIONS → POST + Отключение буферизации)
+
+Создаем маппинг метода `OPTIONS` в `conf.d`:
+
+```bash
+cat > /etc/nginx/conf.d/xhttp-method.conf <<'EOF'
+map $request_method $xhttp_proxy_method {
+    default  $request_method;
+    OPTIONS  POST;
+}
+EOF
+
+```
+
+Основной виртуальный хост:
+
+```bash
+cat > /etc/nginx/sites-available/xhttp-origin.conf <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name origin.YOUR_DOMAIN.COM;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name origin.YOUR_DOMAIN.COM;
+
+    ssl_certificate     /etc/letsencrypt/live/origin.YOUR_DOMAIN.COM/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/origin.YOUR_DOMAIN.COM/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 0;
+    client_header_buffer_size 64k;
+    large_client_header_buffers 8 128k;
+
+    location = /cdn-check {
+        add_header X-CDN-Origin "ok" always;
+        add_header X-Origin-Method $request_method always;
+        add_header X-Origin-Content-Length $http_content_length always;
+        return 204;
+    }
+
+    location YOUR_SECRET_PATH {
+        proxy_pass http://127.0.0.1:8003;
+        proxy_method $xhttp_proxy_method;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        proxy_pass_request_headers on;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Критически важно для предотвращения задержек
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+EOF
+
+nginx -t && systemctl restart nginx
+
+```
+
+---
+
+## Шаг 4. Настройка Yandex Cloud CDN
+
+1. **Certificate Manager:**
+* Добавьте сертификат Let's Encrypt для `cdn.YOUR_DOMAIN.COM`.
+* Добавьте полученную CNAME-запись `_acme-challenge.cdn` в ваш DNS.
+* Дождитесь статуса **Issued**.
+
+
+2. **CDN-ресурс:**
+* **Группа источников:** Домен источника ➡️ `origin.YOUR_DOMAIN.COM`.
+* **Доменное имя CDN:** `cdn.YOUR_DOMAIN.COM`.
+* **Протокол источников:** **HTTPS** (порт 443).
+* **Заголовок Host / SNI:** `origin.YOUR_DOMAIN.COM`.
+* **Перенаправление:** HTTP ➔ HTTPS.
+* **Кеширование:** Отключить полностью (в браузере и на CDN).
+* **Разрешенные методы:** `GET`, `HEAD`, `OPTIONS`.
+
+
+
+---
+
+## Шаг 5. Клиентские конфигурации
+
+### Вариант 1: Прямой `.json` файл для Amnezia VPN
+
+Используется при импорте через **«Импортировать из файла»**:
+
+```json
+{
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": {
+        "udp": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "cdn.YOUR_DOMAIN.COM",
+            "port": 443,
+            "users": [
+              {
+                "encryption": "none",
+                "id": "YOUR_UUID"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": [
+            "h2"
+          ],
+          "serverName": "cdn.YOUR_DOMAIN.COM"
+        },
+        "xhttpSettings": {
+          "mode": "packet-up",
+          "path": "YOUR_SECRET_PATH",
+          "scMaxBufferedPosts": 30,
+          "scMaxEachPostBytes": 1000000,
+          "scMinPostsIntervalMs": 30,
+          "uplinkHTTPMethod": "OPTIONS",
+          "xPaddingHeader": "X-Cache",
+          "xPaddingKey": "YOUR_PADDING_KEY",
+          "xPaddingMethod": "tokenish",
+          "xPaddingObfsMode": true,
+          "xPaddingPlacement": "queryInHeader"
+        }
+      }
+    }
+  ]
+}
+
+```
+
+---
+
+### Вариант 2: Готовый `vless://` URL (Для Happ, NekoBox, v2rayNG, Sing-box)
+
+> ⚠️ **Важно:** Не используйте этот формат в Amnezia VPN, так как парсер Amnezia обрезает параметр `extra` и ломает настройки обфускации.
+
+```text
+vless://YOUR_UUID@cdn.YOUR_DOMAIN.COM:443?encryption=none&security=tls&sni=cdn.YOUR_DOMAIN.COM&alpn=h2&fp=firefox&type=xhttp&mode=packet-up&host=cdn.YOUR_DOMAIN.COM&path=YOUR_SECRET_PATH&extra=%7B%22mode%22%3A%22packet-up%22%2C%22scMaxEachPostBytes%22%3A1000000%2C%22scMinPostsIntervalMs%22%3A30%2C%22scMaxBufferedPosts%22%3A30%2C%22xPaddingObfsMode%22%3Atrue%2C%22xPaddingKey%22%3A%22YOUR_PADDING_KEY%22%2C%22xPaddingHeader%22%3A%22X-Cache%22%2C%22xPaddingMethod%22%3A%22tokenish%22%2C%22xPaddingPlacement%22%3A%22queryInHeader%22%2C%22uplinkHTTPMethod%22%3A%22OPTIONS%22%7D#XHTTP-YandexCDN
+
+```
+
+---
+
+## Шаг 6. Генератор ключей `vpn://` для Amnezia VPN (Python-скрипт)
+
+Формат `vpn://` для Amnezia VPN представляет собой Base64-строку контейнерной обёртки Amnezia (`amnezia-xray`), внутри которой лежит экранированный JSON-конфиг Xray (`last_config`).
+
+Используйте этот Python-скрипт в ваших проектах или Telegram-ботах для мгновенной генерации валидных `vpn://` ключей:
+
+```python
+import base64
+import json
+
+
+def generate_amnezia_vpn_key(
+    domain: str,
+    uuid_str: str,
+    path: str,
+    padding_key: str = "dc",
+    pretty_json: bool = True,
+) -> str:
+    # 1. Формируем исходный Xray JSON
+    xray_cfg = {
+        "inbounds": [
+            {
+                "listen": "127.0.0.1",
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {"udp": True},
+            }
+        ],
+        "outbounds": [
+            {
+                "protocol": "vless",
+                "settings": {
+                    "vnext": [
+                        {
+                            "address": domain,
+                            "port": 443,
+                            "users": [
+                                {"encryption": "none", "id": uuid_str}
+                            ],
+                        }
+                    ]
+                },
+                "streamSettings": {
+                    "network": "xhttp",
+                    "security": "tls",
+                    "tlsSettings": {"alpn": ["h2"], "serverName": domain},
+                    "xhttpSettings": {
+                        "mode": "packet-up",
+                        "path": path,
+                        "scMaxBufferedPosts": 30,
+                        "scMaxEachPostBytes": 1000000,
+                        "scMinPostsIntervalMs": 30,
+                        "uplinkHTTPMethod": "OPTIONS",
+                        "xPaddingHeader": "X-Cache",
+                        "xPaddingKey": padding_key,
+                        "xPaddingMethod": "tokenish",
+                        "xPaddingObfsMode": True,
+                        "xPaddingPlacement": "queryInHeader",
+                    },
+                },
+            }
+        ],
+    }
+
+    # Для красивого отображения форматируем отступы в last_config
+    if pretty_json:
+        xray_json_str = json.dumps(xray_cfg, indent=2)
+    else:
+        xray_json_str = json.dumps(xray_cfg, separators=(",", ":"))
+
+    # 2. Упаковываем в контейнерную обёртку Amnezia
+    amnezia_payload = {
+        "containers": [
+            {
+                "container": "amnezia-xray",
+                "xray": {
+                    "isThirdPartyConfig": True,
+                    "last_config": xray_json_str,
+                },
+            }
+        ],
+        "defaultContainer": "amnezia-xray",
+        "description": "XHTTP-YandexCDN",
+        "dns1": "1.1.1.1",
+        "dns2": "1.0.0.1",
+        "hostName": domain,
+    }
+
+    # 3. Кодируем всю обёртку в Base64
+    encoded_b64 = base64.b64encode(
+        json.dumps(amnezia_payload, separators=(",", ":")).encode("utf-8")
+    ).decode("utf-8")
+
+    return f"vpn://{encoded_b64}"
+
+
+# Пример использования:
+if __name__ == "__main__":
+    key = generate_amnezia_vpn_key(
+        domain="cdn.YOUR_DOMAIN.COM",
+        uuid_str="YOUR_UUID",
+        path="YOUR_SECRET_PATH",
+        padding_key="YOUR_PADDING_KEY",
+    )
+    print("Готовый ключ vpn://:\n")
+    print(key)
+
+```
+
+---
+
+## Шаг 7. Проверка и диагностика
+
+1. **Проверка работы CDN и Origin со стороннего ПК:**
+```bash
+curl -sS -D - -o /dev/null -X OPTIONS "https://cdn.YOUR_DOMAIN.COM/cdn-check?nocache=$(date +%s)"
+
+```
+
+
+* **Успех:** Ответ `HTTP/2 204` с заголовком `x-cdn-origin: ok`.
+
+
+2. **Мониторинг логов в реальном времени на Origin-сервере:**
+```bash
+tail -f /var/log/nginx/access.log | grep "YOUR_SECRET_PATH"
+
+```
+
+
+3. **Проверка логов Xray на Origin-сервере:**
+```bash
+journalctl -u xray -n 50 -f
+
+```
