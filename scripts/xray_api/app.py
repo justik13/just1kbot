@@ -132,16 +132,9 @@ def get_cdn_domain() -> Optional[str]:
 
 def get_target_inbounds() -> List[str]:
     """Dynamically discover all configured Just1k VLESS inbounds strictly filtering by managed namespaces."""
-    # 1. Environment override if explicitly set
-    raw = os.getenv("XRAY_INBOUND_TAGS")
-    if raw:
-        tags = [t.strip() for t in raw.split(",") if t.strip()]
-        if tags:
-            return tags
-
     discovered_tags: List[str] = []
 
-    # 2. Read from relays.json if available
+    # 1. Read from relays.json if available
     relay_tags: List[str] = []
     if RELAYS_FILE_PATH.exists():
         try:
@@ -155,7 +148,7 @@ def get_target_inbounds() -> List[str]:
         except Exception as e:
             logger.warning("Could not load relays from %s: %s", RELAYS_FILE_PATH, e)
 
-    # 3. Read from Xray config.json if available
+    # 2. Read from Xray config.json if available
     config_tags: List[str] = []
     if XRAY_CONFIG_PATH.exists():
         try:
@@ -183,6 +176,14 @@ def get_target_inbounds() -> List[str]:
 
     if not discovered_tags and relay_tags:
         discovered_tags = relay_tags
+
+    # 3. Fallback to environment override (for mock/test environments without real config files)
+    if not discovered_tags:
+        raw = os.getenv("XRAY_INBOUND_TAGS")
+        if raw:
+            tags = [t.strip() for t in raw.split(",") if t.strip()]
+            if tags:
+                return tags
 
     return discovered_tags
 
