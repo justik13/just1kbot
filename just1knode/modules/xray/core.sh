@@ -92,7 +92,8 @@ update_xray_core() {
     if /tmp/xray_new/xray run -test -config "$XRAY_CONFIG"; then
         log "Тест пройден успешно. Создание резервной копии старого бинарника..."
         mkdir -p "$BACKUP_DIR"
-        local backup_bin="${BACKUP_DIR}/xray_$(date +%Y%m%d_%H%M%S).bak"
+        local backup_bin
+        backup_bin="${BACKUP_DIR}/xray_$(date +%Y%m%d_%H%M%S).bak"
         if [[ -f "$XRAY_BIN" ]]; then
             cp "$XRAY_BIN" "$backup_bin"
         fi
@@ -105,6 +106,9 @@ update_xray_core() {
         set -e
 
         if [[ $restart_rc -eq 0 ]] && systemctl is-active --quiet xray; then
+            if systemctl is-active --quiet xray-api 2>/dev/null; then
+                systemctl restart xray-api 2>/dev/null || true
+            fi
             log "Обновление завершено успешно! Версия: $($XRAY_BIN version | head -n 1)"
         else
             warn "Xray не запустился после обновления! Выполняем откат на предыдущую версию..."

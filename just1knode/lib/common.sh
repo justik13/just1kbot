@@ -80,12 +80,13 @@ configure_safe_ufw() {
 
     # Детектируем порт SSH (Zero-Lockout гарантия)
     local ssh_port=22
-    if [[ -f /etc/ssh/sshd_config ]]; then
-        local detected
-        detected="$(grep -E "^Port " /etc/ssh/sshd_config | awk '{print $2}' | head -n 1 || true)"
-        if [[ -n "$detected" ]]; then
-            ssh_port="$detected"
-        fi
+    local detected
+    detected="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
+    if [[ -z "$detected" ]]; then
+        detected="$(grep -E -h "^Port " /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
+    fi
+    if [[ -n "$detected" ]]; then
+        ssh_port="$detected"
     fi
 
     ufw allow "$ssh_port/tcp" >/dev/null 2>&1 || true

@@ -66,8 +66,9 @@ normalize_overcommit_file() {
 }
 
 ensure_overcommit_persistence() {
+    local custom_conf="${1:-}"
     normalize_overcommit_file "${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}" || return 1
-    normalize_overcommit_file "${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}" || return 1
+    normalize_overcommit_file "${custom_conf:-${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}}" || return 1
     return 0
 }
 

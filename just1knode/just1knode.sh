@@ -329,6 +329,47 @@ run_doctor() {
         echo -e "  ${YELLOW}!${NC} UFW фаервол не активен"
     fi
 
+    if [[ "$role" == "origin" && -f "$RELAYS_FILE" ]]; then
+        log "7. Проверка доступности подключенных Relay-узлов..."
+        auto_heal_relays_registry
+        local relay_probe_res
+        relay_probe_res=$(python3 -c "
+import json, socket, sys, os
+rf = sys.argv[1]
+if os.path.exists(rf):
+    try:
+        with open(rf, 'r', encoding='utf-8') as f:
+            relays = json.load(f)
+        for r in relays:
+            if not isinstance(r, dict): continue
+            name = r.get('name', '-')
+            code = r.get('code', '-')
+            ip = r.get('ip', '')
+            port = int(r.get('port', 10443))
+            if not ip: continue
+            try:
+                s = socket.create_connection((ip, port), timeout=3)
+                s.close()
+                print(f'OK\t{name}\t{code}\t{ip}\t{port}')
+            except Exception as e:
+                print(f'FAIL\t{name}\t{code}\t{ip}\t{port}\t{e}')
+    except Exception as e:
+        print(f'ERROR\t{e}')
+" "$RELAYS_FILE" 2>/dev/null || true)
+        if [[ -n "$relay_probe_res" ]]; then
+            while IFS=$'\t' read -r status name code ip port err; do
+                if [[ "$status" == "OK" ]]; then
+                    echo -e "  ${GREEN}✔${NC} Relay '$name' ($code: $ip:$port) доступен по сети"
+                elif [[ "$status" == "FAIL" ]]; then
+                    echo -e "  ${RED}✗${NC} Relay '$name' ($code: $ip:$port) НЕ ОТВЕЧАЕТ (${err:-timeout})!"
+                    failed=$((failed + 1))
+                fi
+            done <<< "$relay_probe_res"
+        else
+            echo -e "  ${YELLOW}i${NC} Нет зарегистрированных Relay-узлов для проверки"
+        fi
+    fi
+
     if [[ $failed -eq 0 ]]; then
         echo -e "\n${BOLD}${GREEN}Все проверки пройдены успешно! Узел полностью здоров.${NC}\n"
     else

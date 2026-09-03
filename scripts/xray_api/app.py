@@ -249,8 +249,14 @@ async def lifespan(app: FastAPI):
     target_inbounds = get_target_inbounds()
     logger.info("Starting Just1kBot Xray API Agent on inbounds: %s", target_inbounds)
     try:
-        if grpc_client.is_healthy():
-            restore_persisted_clients_to_xray()
+        retries = 5
+        while retries > 0:
+            if grpc_client.is_healthy():
+                restore_persisted_clients_to_xray()
+                break
+            retries -= 1
+            if retries > 0:
+                await asyncio.sleep(1)
         else:
             logger.warning(
                 "Xray gRPC is not immediately available at startup. Clients will sync on demand."

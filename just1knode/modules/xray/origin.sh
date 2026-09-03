@@ -429,9 +429,10 @@ heal_and_update_origin_config() {
 
     create_backup "$XRAY_CONFIG"
     manifest_begin
+    auto_heal_relays_registry
 
     if ! python3 -c "
-import json, os, sys
+import json, os, sys, tempfile
 
 cfg_file = sys.argv[1]
 relays_file = sys.argv[2]
@@ -636,13 +637,74 @@ else:
     if not any(ob.get('tag') == curr_out for ob in outbounds):
         def_rule['outboundTag'] = first_relay_tag
 
-with open(cfg_file, 'w', encoding='utf-8') as f:
+# 4.5. Правила маршрутизации для каждого индивидуального релея
+for r in relays:
+    if not isinstance(r, dict): continue
+    code = r.get('code')
+    if not code: continue
+    in_tag = f"just1k-wl-inbound-{code}"
+    out_tag = f"just1k-wl-outbound-{code}"
+    if not any(rl.get('inboundTag') == [in_tag] and rl.get('outboundTag') == out_tag for rl in rules):
+        rules.append({
+            'type': 'field',
+            'inboundTag': [in_tag],
+            'outboundTag': out_tag
+        })
+
+# Атомарное сохранение конфигурации Xray
+d = os.path.dirname(os.path.abspath(cfg_file))
+os.makedirs(d, exist_ok=True)
+t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+with os.fdopen(t_fd, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(t_path, cfg_file)
 
 print('[+] Xray Origin config успешно согласован с эталоном (Desired-State Reconciliation)')
 " "$XRAY_CONFIG" "$RELAYS_FILE" "${STATE_DIR}/state.json"; then
         manifest_rollback
         error "Ошибка выполнения Python-скрипта реконсиляции Origin."
+    fi
+
+    # Авто-восстановление Nginx location файлов для всех релеев
+    if [[ -f "$RELAYS_FILE" ]]; then
+        mkdir -p "$NGINX_RELAYS_DIR"
+        python3 -c "
+import json, sys, os
+rf, nginx_dir = sys.argv[1], sys.argv[2]
+try:
+    with open(rf, 'r', encoding='utf-8') as f:
+        relays = json.load(f)
+    for r in relays:
+        if not isinstance(r, dict): continue
+        code, path = r.get('code'), r.get('path')
+        port = r.get('inbound_port') or r.get('port')
+        if not code or not path or not port: continue
+        cf_path = os.path.join(nginx_dir, f'{code}.conf')
+        if not os.path.exists(cf_path):
+            with open(cf_path, 'w', encoding='utf-8') as cf:
+                cf.write(f'''location ^~ {path} {{
+    proxy_pass http://127.0.0.1:{port};
+    proxy_method \$xhttp_proxy_method;
+    proxy_http_version 1.1;
+    proxy_set_header Connection \"\";
+    proxy_pass_request_headers on;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    client_max_body_size 0;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}}
+''')
+            print(f'[+] Восстановлен Nginx конфиг для релея {code}')
+except Exception:
+    pass
+" "$RELAYS_FILE" "$NGINX_RELAYS_DIR" 2>/dev/null || true
     fi
 
     # Системное отключение IPv6

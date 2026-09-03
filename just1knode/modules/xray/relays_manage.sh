@@ -6,9 +6,119 @@
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
 NGINX_RELAYS_DIR="${NGINX_RELAYS_DIR:-${NGINX_CONF_DIR}/just1k_relays.d}"
 
+auto_heal_relays_registry() {
+    init_state_dir
+    local healed=0
+    local heal_out
+    heal_out=$(python3 -c "
+import glob, json, os, sys, tempfile
+
+rf = sys.argv[1]
+cfg_file = sys.argv[2]
+backup_dir = sys.argv[3]
+
+def is_valid_relays_file(path):
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return False
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return isinstance(data, list) and len(data) > 0
+    except Exception:
+        return False
+
+if is_valid_relays_file(rf):
+    sys.exit(0)
+
+relays = None
+
+# 1. Попытка восстановить из свежей резервной копии
+baks = sorted(glob.glob(os.path.join(backup_dir, 'relays_*.bak*')) + glob.glob(os.path.join(backup_dir, 'relays*.json*')), key=os.path.getmtime, reverse=True)
+for b in baks:
+    if is_valid_relays_file(b):
+        try:
+            with open(b, 'r', encoding='utf-8') as f:
+                relays = json.load(f)
+            print(f'[+] Реестр релеев автоматически восстановлен из резервной копии: {os.path.basename(b)}')
+            break
+        except Exception:
+            continue
+
+# 2. Реконструкция из живой конфигурации Xray (config.json)
+if not relays and os.path.exists(cfg_file):
+    try:
+        with open(cfg_file, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+        known_names = {'de': 'Германия', 'ee': 'Эстония', 'nl': 'Нидерланды', 'fi': 'Финляндия', 'se': 'Швеция', 'pl': 'Польша', 'fr': 'Франция', 'us': 'США', 'gb': 'Великобритания'}
+        reconstructed = []
+        for ob in cfg.get('outbounds', []):
+            tag = ob.get('tag', '')
+            if tag.startswith('just1k-wl-outbound-'):
+                code = tag.replace('just1k-wl-outbound-', '')
+                vnext = (ob.get('settings', {}).get('vnext') or [{}])[0]
+                ip = vnext.get('address', '')
+                port = vnext.get('port', 10443)
+                uuid = ((vnext.get('users') or [{}])[0]).get('id', '')
+                sec = ob.get('streamSettings', {}).get('security', 'reality')
+                sni = ob.get('streamSettings', {}).get('realitySettings', {}).get('serverName', 'www.google.com')
+                pk = ob.get('streamSettings', {}).get('realitySettings', {}).get('publicKey', '')
+                sid = ob.get('streamSettings', {}).get('realitySettings', {}).get('shortId', '')
+                in_tag = f'just1k-wl-inbound-{code}'
+                in_ib = next((ib for ib in cfg.get('inbounds', []) if ib.get('tag') == in_tag), None)
+                path = in_ib.get('streamSettings', {}).get('xhttpSettings', {}).get('path', f'/stream/{code}') if in_ib else f'/stream/{code}'
+                in_port = in_ib.get('port', 8004) if in_ib else port
+                name = known_names.get(code.lower(), f'Релей {code.upper()}')
+                reconstructed.append({
+                    'name': name,
+                    'code': code,
+                    'ip': ip,
+                    'port': port,
+                    'uuid': uuid,
+                    'inbound_port': in_port,
+                    'path': path,
+                    'inbound_tag': in_tag,
+                    'outbound_tag': tag,
+                    'security': sec,
+                    'public_key': pk,
+                    'short_id': sid,
+                    'sni': sni
+                })
+        if reconstructed:
+            relays = reconstructed
+            print(f'[+] Реестр релеев автоматически реконструирован из рабочего Xray config ({len(relays)} узлов)')
+    except Exception as e:
+        print(f'[!] Ошибка реконструкции: {e}')
+
+if relays is not None:
+    d = os.path.dirname(os.path.abspath(rf))
+    os.makedirs(d, exist_ok=True)
+    t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+    with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+        json.dump(relays, fp, ensure_ascii=False, indent=2)
+        fp.flush()
+        os.fsync(fp.fileno())
+    os.replace(t_path, rf)
+    try:
+        import shutil
+        shutil.chown(rf, user='root', group='xrayapi')
+        os.chmod(rf, 0o644)
+    except Exception:
+        pass
+    print('HEALED')
+" "$RELAYS_FILE" "$XRAY_CONFIG" "${BACKUP_DIR:-/var/backups/just1knode}" 2>/dev/null || true)
+
+    if echo "$heal_out" | grep -q "HEALED"; then
+        echo -e "${GREEN}✔${NC} ${heal_out//HEALED/}"
+        if systemctl is-active --quiet xray-api 2>/dev/null; then
+            systemctl restart xray-api 2>/dev/null || true
+        fi
+    fi
+}
+
 list_relays() {
     title "СПИСОК АКТИВНЫХ RELAY-УЗЛОВ"
     init_state_dir
+    auto_heal_relays_registry
 
     if [[ ! -s "$RELAYS_FILE" ]] || [[ "$(cat "$RELAYS_FILE")" == "[]" ]]; then
         info "На данном Origin-сервере нет подключенных Relay-узлов."
@@ -17,8 +127,9 @@ list_relays() {
 
     python3 -c "
 import json, sys
+rf = sys.argv[1]
 try:
-    with open('$RELAYS_FILE', 'r', encoding='utf-8') as f:
+    with open(rf, 'r', encoding='utf-8') as f:
         relays = json.load(f)
     print(f'Всего релеев: {len(relays)}\n')
     print(f'{\"ИМЯ\":<16} {\"КОД\":<6} {\"IP/ДОМЕН\":<22} {\"ПОРТ\":<8} {\"ПРОТОКОЛ\":<10} {\"ПУТЬ\":<20}')
@@ -33,7 +144,7 @@ try:
         print(f'{name:<16} {code:<6} {ip:<22} {port:<8} {sec:<10} {path:<20}')
 except Exception as e:
     print(f'Ошибка чтения реестра релеев: {e}')
-"
+" "$RELAYS_FILE"
     echo ""
 }
 

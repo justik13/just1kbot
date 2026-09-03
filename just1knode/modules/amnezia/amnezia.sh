@@ -12,9 +12,9 @@ install_amnezia_node() {
 
 show_amnezia_status() {
     title "СТАТУС AMNEZIAWG"
-    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -iE "amnezia|wireguard"; then
+    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -iE "amnezia|awg"; then
         log "Обнаружен активный контейнер AmneziaWG в Docker:"
-        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -iE "NAMES|amnezia|wireguard"
+        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -iE "NAMES|amnezia|awg"
     else
         info "Активных контейнеров AmneziaWG на данном сервере не обнаружено."
     fi

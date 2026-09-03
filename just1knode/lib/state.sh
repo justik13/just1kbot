@@ -145,7 +145,14 @@ manifest_begin() {
         if [[ -z "$target" ]]; then
             continue
         fi
-        if [[ " ${seen_targets[*]} " =~ " ${target} " ]]; then
+        local already_seen=0
+        for s in "${seen_targets[@]}"; do
+            if [[ "$s" == "$target" ]]; then
+                already_seen=1
+                break
+            fi
+        done
+        if [[ $already_seen -eq 1 ]]; then
             continue
         fi
         seen_targets+=("$target")
@@ -153,7 +160,8 @@ manifest_begin() {
         if [[ -f "$target" ]]; then
             local hash_orig
             hash_orig="$(sha256sum "$target" | awk '{print $1}')"
-            local backup_path="$TXN_DIR/files/$(basename "$target")_$$_${RANDOM}"
+            local backup_path
+            backup_path="$TXN_DIR/files/$(basename "$target")_$$_${RANDOM}"
             cp "$target" "$backup_path"
             echo -e "${target}\tpresent\t${hash_orig}\t${backup_path}" >> "$MANIFEST_LOG"
         else
@@ -173,7 +181,8 @@ manifest_track_file() {
     if [[ -f "$target" ]]; then
         local hash_orig
         hash_orig="$(sha256sum "$target" | awk '{print $1}')"
-        local backup_path="$TXN_DIR/files/$(basename "$target")_$$_${RANDOM}"
+        local backup_path
+        backup_path="$TXN_DIR/files/$(basename "$target")_$$_${RANDOM}"
         cp "$target" "$backup_path"
         echo -e "${target}\tpresent\t${hash_orig}\t${backup_path}" >> "$MANIFEST_LOG"
     else
@@ -195,7 +204,7 @@ manifest_rollback() {
         return
     fi
 
-    while IFS=$'\t' read -r target status orig_hash backup_path; do
+    while IFS=$'\t' read -r target status _orig_hash backup_path; do
         if [[ "$status" == "present" ]]; then
             if [[ -f "$backup_path" ]]; then
                 cp "$backup_path" "$target"
