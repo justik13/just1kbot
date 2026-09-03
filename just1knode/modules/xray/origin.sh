@@ -520,7 +520,7 @@ if not def_ib:
             'network': 'xhttp',
             'xhttpSettings': {
                 'mode': 'packet-up',
-                'path': f'{secret_base}/default',
+                'path': secret_base + '/default',
                 'xPaddingObfsMode': True,
                 'xPaddingKey': 'dc',
                 'xPaddingHeader': 'X-Cache',
@@ -625,7 +625,7 @@ else:
 
 # 4.4. Дефолтное правило для just1k-wl-default
 def_rule = next((r for r in rules if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r), None)
-first_relay_tag = f\"just1k-wl-outbound-{relays[0]['code']}\" if relays and relays[0].get('code') else 'just1k-wl-block'
+first_relay_tag = ('just1k-wl-outbound-' + str(relays[0]['code'])) if relays and relays[0].get('code') else 'just1k-wl-block'
 if not def_rule:
     rules.append({
         'type': 'field',
@@ -642,8 +642,8 @@ for r in relays:
     if not isinstance(r, dict): continue
     code = r.get('code')
     if not code: continue
-    in_tag = f"just1k-wl-inbound-{code}"
-    out_tag = f"just1k-wl-outbound-{code}"
+    in_tag = 'just1k-wl-inbound-' + str(code)
+    out_tag = 'just1k-wl-outbound-' + str(code)
     if not any(rl.get('inboundTag') == [in_tag] and rl.get('outboundTag') == out_tag for rl in rules):
         rules.append({
             'type': 'field',

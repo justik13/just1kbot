@@ -815,6 +815,51 @@ run_doctor
         hook_content = hook_file.read_text(encoding="utf-8")
         self.assertIn("systemctl reload nginx", hook_content)
         self.assertIn("systemctl restart xray", hook_content)
+        self.assertIn("systemctl restart xray-api", hook_content)
+
+    def test_heal_and_update_origin_config_with_relays(self):
+        self._prepare_base_env()
+        relays = [
+            {"name": "Германия", "code": "de", "ip": "217.60.183.229", "port": 10443, "path": "/stream/de"},
+            {"name": "Эстония", "code": "ee", "ip": "217.60.182.33", "port": 10443, "path": "/stream/ee"}
+        ]
+        with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
+            json.dump(relays, f)
+
+        res = self._run_shell_snippet("heal_and_update_origin_config")
+        self.assertEqual(res.returncode, 0, f"STDOUT: {res.stdout}\nSTDERR: {res.stderr}")
+
+        with open(self.xray_config_dir / "config.json", "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        rules = cfg.get("routing", {}).get("rules", [])
+        rule_outbounds = [r.get("outboundTag") for r in rules]
+        self.assertIn("just1k-wl-outbound-de", rule_outbounds)
+        self.assertIn("just1k-wl-outbound-ee", rule_outbounds)
+
+    def test_auto_heal_relays_registry_when_corrupted(self):
+        self._prepare_base_env()
+        # Create corrupted relays.json simulating the exact issue
+        with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
+            f.write("[\n  {\n    \"name\": \n")
+
+        with open(self.xray_config_dir / "config.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "inbounds": [{"tag": "just1k-wl-inbound-de", "port": 8005, "protocol": "vless", "streamSettings": {"xhttpSettings": {"path": "/stream/de"}}}],
+                "outbounds": [{
+                    "tag": "just1k-wl-outbound-de",
+                    "settings": {"vnext": [{"address": "217.60.183.229", "port": 10443, "users": [{"id": "test-uuid"}]}]},
+                    "streamSettings": {"security": "reality", "realitySettings": {"serverName": "www.google.com"}}
+                }]
+            }, f)
+
+        res = self._run_shell_snippet("auto_heal_relays_registry")
+        self.assertEqual(res.returncode, 0, f"STDOUT: {res.stdout}\nSTDERR: {res.stderr}")
+
+        with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
+            healed = json.load(f)
+        self.assertEqual(len(healed), 1)
+        self.assertEqual(healed[0]["code"], "de")
+        self.assertEqual(healed[0]["ip"], "217.60.183.229")
 
 
 if __name__ == "__main__":
