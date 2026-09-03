@@ -439,52 +439,68 @@ async def process_edit_server_url(
 
         return
 
-    client = AmneziaClient(new_url, server.api_key)
+    if "xray_origin" in (server.capabilities or []) or server.protocol == "xray":
+        from services.xray_node_client import XrayNodeClient
 
-    if not await client.healthcheck():
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_SERVER_UNREACHABLE,
-            get_back_button("admin_servers"),
-            parse_mode="HTML",
-        )
+        async with XrayNodeClient(timeout=10.0) as xclient:
+            is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
+        if not is_healthy:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_UNREACHABLE,
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
+    else:
+        client = AmneziaClient(new_url, server.api_key)
 
-        await state.clear()
+        if not await client.healthcheck():
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_UNREACHABLE,
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
 
-        return
+            await state.clear()
 
-    server_info = await client.get_server_info()
+            return
 
-    if not server_info:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_SERVER_API_INFO_FAILED,
-            get_back_button("admin_servers"),
-            parse_mode="HTML",
-        )
+        server_info = await client.get_server_info()
 
-        await state.clear()
+        if not server_info:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_API_INFO_FAILED,
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
 
-        return
+            await state.clear()
 
-    if AMNEZIA_PROTOCOL not in server_info.protocols:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
-                protocols=safe(
-                    ", ".join(server_info.protocols)
-                    if server_info.protocols
-                    else texts.LABEL_UNKNOWN_LOWER
+            return
+
+        if AMNEZIA_PROTOCOL not in server_info.protocols:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
+                    protocols=safe(
+                        ", ".join(server_info.protocols)
+                        if server_info.protocols
+                        else texts.LABEL_UNKNOWN_LOWER
+                    ),
                 ),
-            ),
-            get_back_button("admin_servers"),
-            parse_mode="HTML",
-        )
-        await state.clear()
-        return
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
 
     if server.api_url != new_url:
         server = await get_server_by_id(session, server_id, for_update=True)
@@ -705,54 +721,68 @@ async def process_edit_server_key(
         return
 
 
-    client = AmneziaClient(server.api_url, new_key)
+    if "xray_origin" in (server.capabilities or []) or server.protocol == "xray":
+        from services.xray_node_client import XrayNodeClient
 
-    if not await client.healthcheck():
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_SERVER_UNREACHABLE,
-            get_back_button("admin_servers"),
-            parse_mode="HTML",
-        )
+        async with XrayNodeClient(timeout=10.0) as xclient:
+            is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
+        if not is_healthy:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_UNREACHABLE,
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
+    else:
+        client = AmneziaClient(server.api_url, new_key)
 
-        await state.clear()
+        if not await client.healthcheck():
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_UNREACHABLE,
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
 
-        return
+            await state.clear()
 
-    server_info = await client.get_server_info()
+            return
 
-    if not server_info:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_SERVER_API_INFO_FAILED,
-            get_back_button("admin_servers"),
-            parse_mode="HTML",
-        )
+        server_info = await client.get_server_info()
 
-        await state.clear()
+        if not server_info:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_API_INFO_FAILED,
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
 
-        return
+            await state.clear()
 
-    if AMNEZIA_PROTOCOL not in server_info.protocols:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
-                protocols=safe(
-                    ", ".join(server_info.protocols)
-                    if server_info.protocols
-                    else texts.LABEL_UNKNOWN_LOWER
+            return
+
+        if AMNEZIA_PROTOCOL not in server_info.protocols:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
+                    protocols=safe(
+                        ", ".join(server_info.protocols)
+                        if server_info.protocols
+                        else texts.LABEL_UNKNOWN_LOWER
+                    ),
                 ),
-            ),
-            get_back_button("admin_servers"),
-            parse_mode="HTML",
-        )
-
-        await state.clear()
-
-        return
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
 
     if server.api_key != new_key:
         server = await get_server_by_id(session, server_id, for_update=True)

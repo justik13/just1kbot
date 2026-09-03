@@ -14,6 +14,7 @@ from config.constants import (
     AdminAuditAction,
     ApiOperationStatus,
     ApiOperationType,
+    CANONICAL_XHTTP_PROFILE,
     DEVICE_DAILY_LIMIT,
     EntitlementEntryType,
     GRACE_PERIOD_HOURS,
@@ -36,6 +37,7 @@ from config.constants import (
     RATE_LIMIT_REQUESTS_PER_MINUTE,
     SELF_HEALING_MAX_PER_CYCLE,
     ServerHealthState,
+    ServerLifecycleStatus,
     STALE_PAYMENT_THRESHOLD,
     TELEGRAM_MESSAGE_LIMIT,
     TRAFFIC_SYNC_INTERVAL,
@@ -46,9 +48,14 @@ from config.constants import (
     VPN_ACCESS_GRACE_HOURS,
     VPNProvisioningStatus,
     WebhookInboxStatus,
+    WhiteInternetGrantType,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
+    ServiceType,
     WORKER_ERROR_SLEEP_INTERVAL,
     YOOKASSA_IP_RANGES,
 )
+
 
 __all__ = [
     "AMNEZIA_PROTOCOL",
@@ -61,6 +68,7 @@ __all__ = [
     "AdminAuditAction",
     "ApiOperationStatus",
     "ApiOperationType",
+    "CANONICAL_XHTTP_PROFILE",
     "DEVICE_DAILY_LIMIT",
     "EntitlementEntryType",
     "GRACE_PERIOD_HOURS",
@@ -83,6 +91,7 @@ __all__ = [
     "RATE_LIMIT_REQUESTS_PER_MINUTE",
     "SELF_HEALING_MAX_PER_CYCLE",
     "ServerHealthState",
+    "ServerLifecycleStatus",
     "STALE_PAYMENT_THRESHOLD",
     "TELEGRAM_MESSAGE_LIMIT",
     "TRAFFIC_SYNC_INTERVAL",
@@ -93,6 +102,10 @@ __all__ = [
     "VPN_ACCESS_GRACE_HOURS",
     "VPNProvisioningStatus",
     "WebhookInboxStatus",
+    "WhiteInternetGrantType",
+    "WhiteInternetProvisioningStatus",
+    "WhiteInternetStatus",
+    "ServiceType",
     "WORKER_ERROR_SLEEP_INTERVAL",
     "YOOKASSA_IP_RANGES",
 ]

@@ -24,6 +24,8 @@ from .payment_pipeline import payment_pipeline_loop
 from .payments import stale_payments_checker_loop
 from .queue_health import queue_health_loop
 from .traffic import traffic_sync_loop
+from .white_internet_reconciliation import white_internet_reconciliation_loop
+from .white_internet_traffic import white_internet_traffic_loop
 
 
 class _ExpectedNodeMonitorNetworkWarningFilter(logging.Filter):
@@ -103,6 +105,8 @@ def _account_balance(bot): return account_balance_notifications_loop(bot, shutdo
 def _payment_pipeline(bot): return payment_pipeline_loop(bot, shutdown_event)
 def _queue_health(bot): return queue_health_loop(bot, shutdown_event)
 def _node_monitor(bot): return node_monitor_loop(bot, shutdown_event)
+def _white_internet_reconciliation(bot): return white_internet_reconciliation_loop(bot, shutdown_event)
+def _white_internet_traffic(bot): return white_internet_traffic_loop(bot, shutdown_event)
 
 
 WORKERS: tuple[WorkerDefinition, ...] = (
@@ -114,9 +118,12 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("heartbeat", _heartbeat, False),
     WorkerDefinition("queue_health", _queue_health, False),
     WorkerDefinition("node_monitor", _node_monitor, False),
+    WorkerDefinition("white_internet_reconciliation", _white_internet_reconciliation, True),
+    WorkerDefinition("white_internet_traffic", _white_internet_traffic, True),
     WorkerDefinition("api_operations", _api_operations, True),
     WorkerDefinition("payment_pipeline", _payment_pipeline, True),
 )
+
 
 _WORKERS_BY_NAME = {definition.name: definition for definition in WORKERS}
 

@@ -51,7 +51,7 @@ def get_hub_keyboard(
         )
 
     if is_admin:
-        # White Internet is under development and visible only to administrators
+        # TODO(prod): Перед публичным релизом снять проверку 'if is_admin', открыв раздел всем пользователям
         builder.button(
             text=texts.BTN_WHITE_INTERNET,
             callback_data="white_internet",
@@ -71,6 +71,8 @@ def get_hub_keyboard(
     builder.adjust(*sizes)
 
     return builder.as_markup()
+
+
 
 
 

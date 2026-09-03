@@ -36,9 +36,7 @@ from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger("BackgroundWorker")
 
-_unmanaged_peers_log_cache: TTLCache[tuple[int, str], float] = TTLCache(
-    maxsize=5000, ttl=3600.0
-)
+_unmanaged_peers_log_cache: TTLCache[tuple[int, str], float] = TTLCache(maxsize=5000, ttl=3600.0)
 _unmanaged_peers_summary_last_logged: float | None = None
 
 MAX_PENDING_ATTEMPTS = 10
@@ -57,16 +55,14 @@ EXPIRE_TIME_BUDGET_SECONDS = 120.0
 
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30
+WHITE_INTERNET_TRAFFIC_EVENTS_RETENTION_DAYS = 30
 
 _last_old_cleanup: float = 0.0
 
 
-
 def _safe_log_value(value, limit=64):
     text = str(value or "unknown")
-    sanitized = "".join(
-        character if character.isprintable() else "?" for character in text
-    )
+    sanitized = "".join(character if character.isprintable() else "?" for character in text)
     return sanitized[:limit]
 
 
@@ -164,6 +160,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                 if user.subscription_end is None:
                     continue
                 from utils.datetime_helpers import is_permanent_subscription
+
                 if is_permanent_subscription(user.subscription_end):
                     continue
                 if not user.financial_hold and user.subscription_end >= threshold:
@@ -189,6 +186,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                     deleted_users_count += 1
                     deleted_profiles_count += deleted
                     from services.audit_service import AuditService
+
                     await AuditService.log_action(
                         session,
                         admin_id=0,
@@ -252,40 +250,54 @@ async def _cleanup_stuck_profiles():
     # Only clean up profiles that do NOT have an active APIOperation in flight.
     from sqlalchemy import func
     from sqlalchemy import update as sa_update
+
     async with session_scope() as session:
         cutoff_time = now_utc() - timedelta(hours=1)
 
         stuck_profiles = (
-            await session.execute(
-                select(VPNProfile)
-                .where(
-                    VPNProfile.provisioning_status.in_(["pending_create", "create_cleanup_pending", "deleting"]),
-                    VPNProfile.created_at < cutoff_time,
+            (
+                await session.execute(
+                    select(VPNProfile)
+                    .where(
+                        VPNProfile.provisioning_status.in_(
+                            ["pending_create", "create_cleanup_pending", "deleting"]
+                        ),
+                        VPNProfile.created_at < cutoff_time,
+                    )
+                    .limit(100)
+                    .with_for_update(skip_locked=True)
                 )
-                .limit(100)
-                .with_for_update(skip_locked=True)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         for profile in stuck_profiles:
             active_op_res = await session.execute(
-                select(APIOperation.id).where(
+                select(APIOperation.id)
+                .where(
                     APIOperation.profile_id == profile.id,
                     APIOperation.status.in_(["pending", "processing", "retry"]),
-                ).limit(1)
+                )
+                .limit(1)
             )
             if active_op_res.scalar_one_or_none() is not None:
-                logger.debug("Skipping profile %s cleanup: APIOperation is still active", profile.id)
+                logger.debug(
+                    "Skipping profile %s cleanup: APIOperation is still active", profile.id
+                )
                 continue
 
             peer_id = profile.peer_id
             create_op = None
             if not peer_id:
                 create_op_res = await session.execute(
-                    select(APIOperation).where(
+                    select(APIOperation)
+                    .where(
                         APIOperation.profile_id == profile.id,
                         APIOperation.operation_type == "create_peer",
-                    ).order_by(APIOperation.id.desc()).limit(1)
+                    )
+                    .order_by(APIOperation.id.desc())
+                    .limit(1)
                 )
                 create_op = create_op_res.scalar_one_or_none()
                 if create_op is not None:
@@ -298,7 +310,13 @@ async def _cleanup_stuck_profiles():
                         ensure_delete_operation,
                         resolve_profile_endpoint_snapshot,
                     )
-                    server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
+
+                    (
+                        server_id,
+                        server_name,
+                        api_url,
+                        api_key,
+                    ) = await resolve_profile_endpoint_snapshot(session, profile)
                     await ensure_delete_operation(
                         session,
                         idempotency_key=f"delete-peer:{profile.id}:{peer_id}",
@@ -313,12 +331,16 @@ async def _cleanup_stuck_profiles():
                     )
                     profile.provisioning_status = "deleting"
                 except Exception as exc:
-                    logger.warning("Failed to queue delete_peer operation during stuck profile cleanup: %s", exc)
+                    logger.warning(
+                        "Failed to queue delete_peer operation during stuck profile cleanup: %s",
+                        exc,
+                    )
                     profile.provisioning_status = "create_cleanup_pending"
             elif profile.provisioning_status in {"create_cleanup_pending", "deleting"}:
                 # Peer ID unknown: requeue create_peer for reconciliation by client_name on Amnezia
                 if create_op and create_op.status in {"dead", "cancelled"}:
                     from database.models import Server
+
                     server = await session.get(Server, profile.server_id)
                     if server and server.is_active:
                         await session.execute(
@@ -336,7 +358,11 @@ async def _cleanup_stuck_profiles():
                                 last_error="Requeued by stuck profile cleanup worker for peer reconciliation",
                             )
                         )
-                        logger.info("Requeued create_peer op %s for profile %s reconciliation", create_op.id, profile.id)
+                        logger.info(
+                            "Requeued create_peer op %s for profile %s reconciliation",
+                            create_op.id,
+                            profile.id,
+                        )
                 elif not create_op and profile.provisioning_status == "create_cleanup_pending":
                     # Recreate the durable reconciliation command instead of
                     # deleting a state that explicitly means a peer may exist.
@@ -345,9 +371,13 @@ async def _cleanup_stuck_profiles():
                             enqueue_api_operation,
                             resolve_profile_endpoint_snapshot,
                         )
-                        server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(
-                            session, profile
-                        )
+
+                        (
+                            server_id,
+                            server_name,
+                            api_url,
+                            api_key,
+                        ) = await resolve_profile_endpoint_snapshot(session, profile)
                         await enqueue_api_operation(
                             session,
                             operation_type="create_peer",
@@ -373,21 +403,24 @@ async def _cleanup_stuck_profiles():
                 elif not create_op and profile.provisioning_status == "deleting":
                     # No operation ever existed and no peer_id; safe to delete local tombstone
                     await session.delete(profile)
-                    logger.info("Deleted orphaned tombstone profile %s without operations", profile.id)
+                    logger.info(
+                        "Deleted orphaned tombstone profile %s without operations", profile.id
+                    )
             else:
                 # pending_create where attempts == 0: safe to fail closed without side effects
                 profile.provisioning_status = "create_failed"
                 profile.last_sync_error = "Creation timed out by cleanup worker"
-                logger.info("Marked unattempted pending_create profile %s as create_failed", profile.id)
+                logger.info(
+                    "Marked unattempted pending_create profile %s as create_failed", profile.id
+                )
+
 
 async def _cleanup_dangling_peers():
     servers_data = []
     db_server_peers = set()
 
     async with session_scope() as session:
-        servers_result = await session.execute(
-            select(Server).where(Server.is_active.is_(True))
-        )
+        servers_result = await session.execute(select(Server).where(Server.is_active.is_(True)))
         servers = servers_result.scalars().all()
 
         result = await session.execute(select(VPNProfile.server_id, VPNProfile.peer_id))
@@ -411,6 +444,7 @@ async def _cleanup_dangling_peers():
 
     async def _fetch_api_peers(server_info):
         from services.slots_cache import get_server_generation
+
         client = AmneziaClient(
             server_info["api_url"],
             server_info["api_key"],
@@ -442,6 +476,7 @@ async def _cleanup_dangling_peers():
 
         server_info, api_clients_list, t_done, gen = result
         from services.slots_cache import get_server_generation
+
         if gen != get_server_generation(server_info["id"]):
             logger.info(
                 "Skipping cleanup for server %s due to configuration generation change",
@@ -451,6 +486,7 @@ async def _cleanup_dangling_peers():
 
         if api_clients_list is not None:
             from services.slots_cache import update_cached_peer_count
+
             update_cached_peer_count(
                 server_info["id"], len(api_clients_list), timestamp=t_done, generation=gen
             )
@@ -492,7 +528,9 @@ async def _cleanup_dangling_peers():
             peer_key = (server_info["id"], client_id)
             now_ts = time.monotonic()
             last_logged = _unmanaged_peers_log_cache.get(peer_key)
-            if last_logged is None or now_ts - last_logged >= 3600.0:  # Log at most once per hour per peer
+            if (
+                last_logged is None or now_ts - last_logged >= 3600.0
+            ):  # Log at most once per hour per peer
                 _unmanaged_peers_log_cache[peer_key] = now_ts
                 logger.warning(
                     "Unmanaged VPN peer detected: server_id=%s, "
@@ -530,7 +568,7 @@ async def _batch_delete_matching(
     max_rounds: int = MAX_BATCH_DELETE_ROUNDS,
 ) -> int:
     """Delete rows matching where_clauses in bounded primary-key batches with skip_locked.
-    
+
     When session is None, each batch executes and commits in its own short-lived session_scope() transaction,
     immediately releasing row-level locks in PostgreSQL.
     """
@@ -590,8 +628,6 @@ async def _batch_delete_matching(
     return total_deleted
 
 
-
-
 async def _cleanup_old_records():
     current_time = now_utc()
 
@@ -636,6 +672,7 @@ async def _cleanup_old_records():
     threshold_payments = current_time - timedelta(hours=PAYMENT_EXPIRATION_HOURS)
     payments_expired = 0
     last_id = 0
+
     # Bounded drain: up to EXPIRE_MAX_BATCHES_PER_PASS batches per daily pass,
     # each batch committed separately, so a large backlog shrinks every day
     # without one unbounded run.
@@ -693,9 +730,7 @@ async def _cleanup_old_records():
             verify_results = []
         for item in verify_results:
             if isinstance(item, Exception) or not isinstance(item, tuple):
-                logger.warning(
-                    "Auto-expire verification task failed unexpectedly: %r", item
-                )
+                logger.warning("Auto-expire verification task failed unexpectedly: %r", item)
                 continue
             payment_id, result = item
             if not result.ok:
@@ -799,4 +834,3 @@ async def _cleanup_old_records():
             payments_expired,
             webhooks_deleted,
         )
-

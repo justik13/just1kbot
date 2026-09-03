@@ -87,12 +87,11 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
 
         async with self.session_factory() as session:
-            await session.execute(
-                text(
-                    "TRUNCATE vpn_profiles, users, servers "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            try:
+                from tests.db_utils import TRUNCATE_SQL
+            except ImportError:
+                from db_utils import TRUNCATE_SQL
+            await session.execute(text(TRUNCATE_SQL))
             await session.commit()
 
     async def asyncTearDown(self):

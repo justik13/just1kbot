@@ -1967,17 +1967,18 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
         get_settings.cache_clear()
 
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        from database import connection
+        self.old_sessionmaker = connection._sessionmaker
+        self.old_engine = connection._engine
+        connection._sessionmaker = self.sessions
+        connection._engine = self.engine
         async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers, audit_logs, system_settings, payment_disputes "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await s.execute(text(TRUNCATE_SQL))
             u = User(
                 telegram_id=987654,
                 username="testuser",
@@ -1999,16 +2000,15 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.sid = v.id
 
     async def asyncTearDown(self):
+        from database import connection
+        connection._sessionmaker = self.old_sessionmaker
+        connection._engine = self.old_engine
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
         async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers, audit_logs, system_settings, payment_disputes "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await s.execute(text(TRUNCATE_SQL))
         await self.engine.dispose()
         self.env_patcher.stop()
         from config.settings import get_settings
@@ -2119,6 +2119,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 idempotency_key=f"create-peer:{prof_id}",
                 server_id=self.sid,
                 profile_id=prof_id,
+                next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1),
             )
             s.add(op)
             await s.flush()

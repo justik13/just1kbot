@@ -27,6 +27,7 @@ from database.repositories.servers_repo import (
     get_server_by_id,
     update_server,
     update_server_health_snapshot,
+    update_server_xray_epoch_cas,
 )
 from services.amnezia_client import AmneziaClient
 from utils.datetime_helpers import now_utc
@@ -190,12 +191,22 @@ async def check_node_resources_and_alerts(bot: Bot):
         expected_consecutive_successes = st.consecutive_successes
 
         st.last_check_monotonic = now_m
-        client = AmneziaClient(server.api_url, server.api_key)
+        is_xray_node = "xray_origin" in (getattr(server, "capabilities", None) or [])
 
         # 4. Исполнение проверки с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
+        xray_epoch = None
+        xray_data = None
         try:
-            is_healthy = await client.healthcheck()
+            if is_xray_node:
+                from services.xray_node_client import XrayNodeClient
+                async with XrayNodeClient(timeout=10.0) as xray_client:
+                    is_healthy, xray_epoch, xray_data = await xray_client.check_health(
+                        server.api_url, server.api_key
+                    )
+            else:
+                client = AmneziaClient(server.api_url, server.api_key)
+                is_healthy = await client.healthcheck()
         except Exception as exc:
             logger.warning("Healthcheck exception for server %s (%s): %s", server.id, server.name, exc)
             is_healthy = False
@@ -227,35 +238,36 @@ async def check_node_resources_and_alerts(bot: Bot):
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
-                # Проверка диска (с 1-часовым кулдауном)
-                try:
-                    load_info = await client.get_server_load()
-                    if load_info and isinstance(load_info, dict):
-                        disk_percent = (
-                            load_info.get("disk_percent")
-                            or load_info.get("disk_used_percent")
-                            or load_info.get("disk")
-                        )
-                        if disk_percent is not None and isinstance(disk_percent, (int, float)):
-                            if disk_percent > 85.0:
-                                should_alert = False
-                                if st.disk_alert_last_sent is None or (now_m - st.disk_alert_last_sent) >= DISK_ALERT_COOLDOWN_SECONDS:
-                                    should_alert = True
+                # Проверка диска (с 1-часовым кулдауном) для Amnezia узлов
+                if not is_xray_node:
+                    try:
+                        load_info = await client.get_server_load()
+                        if load_info and isinstance(load_info, dict):
+                            disk_percent = (
+                                load_info.get("disk_percent")
+                                or load_info.get("disk_used_percent")
+                                or load_info.get("disk")
+                            )
+                            if disk_percent is not None and isinstance(disk_percent, (int, float)):
+                                if disk_percent > 85.0:
+                                    should_alert = False
+                                    if st.disk_alert_last_sent is None or (now_m - st.disk_alert_last_sent) >= DISK_ALERT_COOLDOWN_SECONDS:
+                                        should_alert = True
 
-                                if should_alert:
-                                    alerts_to_send.append({
-                                        "text": ALERT_SERVER_DISK_CRITICAL.format(
-                                            server_name=safe(server.name),
-                                            server_id=server.id,
-                                            disk_percent=disk_percent,
-                                        ),
-                                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
-                                    })
-                                    st.disk_alert_last_sent = now_m
-                            elif disk_percent <= 80.0:
-                                st.disk_alert_last_sent = None
-                except Exception as exc:
-                    logger.warning("Error reading server load for server %s: %s", server.id, exc)
+                                    if should_alert:
+                                        alerts_to_send.append({
+                                            "text": ALERT_SERVER_DISK_CRITICAL.format(
+                                                server_name=safe(server.name),
+                                                server_id=server.id,
+                                                disk_percent=disk_percent,
+                                            ),
+                                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                        })
+                                        st.disk_alert_last_sent = now_m
+                                elif disk_percent <= 80.0:
+                                    st.disk_alert_last_sent = None
+                    except Exception as exc:
+                        logger.warning("Error reading server load for server %s: %s", server.id, exc)
 
             elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails = 0
@@ -370,6 +382,15 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         if is_healthy:
             update_kwargs["last_successful_check"] = now_utc()
+            if is_xray_node and xray_data:
+                extra_update = {}
+                if "relays" in xray_data:
+                    extra_update["relays"] = xray_data["relays"]
+                if "secret_base_path" in xray_data:
+                    extra_update["secret_base_path"] = xray_data["secret_base_path"]
+                if extra_update:
+                    update_kwargs["extra_data"] = extra_update
+
             if st.health_state == ServerHealthState.ONLINE:
                 update_kwargs["problem_started_at"] = None
                 update_kwargs["next_check_at"] = None
@@ -389,6 +410,37 @@ async def check_node_resources_and_alerts(bot: Bot):
             update_kwargs["disabled_at"] = now_utc()
 
         async with session_scope() as session:
+            # Monotonic CAS update for Xray generation
+            if is_healthy and is_xray_node and xray_epoch:
+                boot_id = xray_data.get("boot_id") if xray_data else None
+                starttime = xray_data.get("starttime") if xray_data else None
+                cas_ok, updated_srv = await update_server_xray_epoch_cas(
+                    session,
+                    server.id,
+                    expected_boot_id=server.xray_instance_boot_id,
+                    expected_starttime=server.xray_instance_starttime,
+                    new_epoch=xray_epoch,
+                    new_boot_id=boot_id,
+                    new_starttime=starttime,
+                )
+                if cas_ok and updated_srv:
+                    server.xray_instance_epoch = updated_srv.xray_instance_epoch
+                    server.xray_instance_boot_id = updated_srv.xray_instance_boot_id
+                    server.xray_instance_starttime = updated_srv.xray_instance_starttime
+
+                    # Синхронизация динамических метаданных (релеи, cdn_domain) при изменениях на ноде
+                    if xray_data and isinstance(xray_data, dict):
+                        extra = dict(updated_srv.extra_data or {})
+                        extra_changed = False
+                        for key in ("cdn_domain", "relays", "secret_base_path"):
+                            if key in xray_data and xray_data[key] and extra.get(key) != xray_data[key]:
+                                extra[key] = xray_data[key]
+                                extra_changed = True
+                        if extra_changed:
+                            updated_srv.extra_data = extra
+                            server.extra_data = extra
+                            await session.flush()
+
             db_server, applied = await update_server_health_snapshot(
                 session,
                 server.id,

@@ -5,7 +5,10 @@ internal dependencies, allowing safe downward imports by utils, database,
 integrations, services, and bot layers without architectural cycles.
 """
 
+import os
 from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
 
 from config.enums import (
     AccountLedgerEntryType,
@@ -25,11 +28,17 @@ from config.enums import (
     PaymentReconciliationStatus,
     ProviderRefundOperationStatus,
     ServerHealthState,
+    ServerLifecycleStatus,
+    ServiceType,
     TariffQuoteOperation,
     TariffQuoteStatus,
     VPNProvisioningStatus,
     WebhookInboxStatus,
+    WhiteInternetGrantType,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
 )
+
 
 # Protocol
 AMNEZIA_PROTOCOL = "amneziawg2"
@@ -91,6 +100,45 @@ USER_CONTEXT_CACHE_MAX_SIZE = 2000
 USER_CONTEXT_CACHE_TTL = 15.0
 
 
+# White Internet Service Constants
+WHITE_INTERNET_SERVICE_TYPE = "white_internet"
+WHITE_INTERNET_BASE_PRICE_RUB = Decimal(os.getenv("WHITE_INTERNET_BASE_PRICE_RUB", "250.00"))
+WHITE_INTERNET_BASE_DURATION_DAYS = int(os.getenv("WHITE_INTERNET_BASE_DURATION_DAYS", "30"))
+WHITE_INTERNET_BASE_TRAFFIC_BYTES = int(
+    os.getenv("WHITE_INTERNET_BASE_TRAFFIC_BYTES", str(53_687_091_200))
+)  # 50 GiB
+WHITE_INTERNET_MAX_QUOTA_BYTES = int(
+    os.getenv("WHITE_INTERNET_MAX_QUOTA_BYTES", str(161_061_273_600))
+)  # 150 GiB
+WHITE_INTERNET_TOPUP_PACKS: dict[int, Decimal] = {
+    10: Decimal(os.getenv("WHITE_INTERNET_TOPUP_10GB_PRICE_RUB", "40.00")),
+    25: Decimal(os.getenv("WHITE_INTERNET_TOPUP_25GB_PRICE_RUB", "100.00")),
+    50: Decimal(os.getenv("WHITE_INTERNET_TOPUP_50GB_PRICE_RUB", "200.00")),
+}
+SUPPORTED_MIN_XRAY_VERSION = "26.5.9"
+DEFAULT_PINNED_XRAY_VERSION = "26.7.28"
+DEFAULT_XRAY_ORIGIN_MAX_CLIENTS = 1000
+INCY_LINK_ENCODER_VERSION = "1.0.0"
+# White Internet / XHTTP defaults (Censorship resistance)
+DEFAULT_WHITE_INTERNET_PATH = os.getenv("WHITE_INTERNET_XHTTP_PATH", "/stream/v1")
+DEFAULT_WHITE_INTERNET_PATH_DE = DEFAULT_WHITE_INTERNET_PATH
+DEFAULT_WHITE_INTERNET_PADDING_KEY = os.getenv("WHITE_INTERNET_PADDING_KEY", "dc")
+WHITE_INTERNET_TLS_FINGERPRINT = os.getenv("WHITE_INTERNET_TLS_FINGERPRINT", "firefox")
+
+CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
+    "mode": "packet-up",
+    "uplinkHTTPMethod": "OPTIONS",
+    "xPaddingPlacement": "queryInHeader",
+    "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
+    "xPaddingHeader": "X-Cache",
+    "xPaddingMethod": "tokenish",
+    "xPaddingObfsMode": True,
+    "security": "tls",
+    "alpn": ["h2", "http/1.1"],
+    "fp": WHITE_INTERNET_TLS_FINGERPRINT,
+}
+
+
 __all__ = [
     "AMNEZIA_PROTOCOL",
     "API_CONCURRENCY_LIMIT",
@@ -101,7 +149,10 @@ __all__ = [
     "AccountReservationType",
     "AdminAuditAction",
     "ApiOperationStatus",
+    "CANONICAL_XHTTP_PROFILE",
     "ApiOperationType",
+    "DEFAULT_PINNED_XRAY_VERSION",
+    "DEFAULT_XRAY_ORIGIN_MAX_CLIENTS",
     "DEVICE_DAILY_LIMIT",
     "EntitlementEntryType",
     "GRACE_PERIOD_HOURS",
@@ -125,6 +176,8 @@ __all__ = [
     "RATE_LIMIT_REQUESTS_PER_MINUTE",
     "SELF_HEALING_MAX_PER_CYCLE",
     "ServerHealthState",
+    "ServerLifecycleStatus",
+    "ServiceType",
     "STALE_PAYMENT_THRESHOLD",
     "TELEGRAM_MESSAGE_LIMIT",
     "TRAFFIC_SYNC_INTERVAL",
@@ -134,7 +187,16 @@ __all__ = [
     "USER_CONTEXT_CACHE_TTL",
     "VPN_ACCESS_GRACE_HOURS",
     "VPNProvisioningStatus",
+    "WHITE_INTERNET_BASE_DURATION_DAYS",
+    "WHITE_INTERNET_BASE_PRICE_RUB",
+    "WHITE_INTERNET_BASE_TRAFFIC_BYTES",
+    "WHITE_INTERNET_MAX_QUOTA_BYTES",
+    "WHITE_INTERNET_SERVICE_TYPE",
+    "WHITE_INTERNET_TOPUP_PACKS",
     "WebhookInboxStatus",
+    "WhiteInternetGrantType",
+    "WhiteInternetProvisioningStatus",
+    "WhiteInternetStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
     "YOOKASSA_IP_RANGES",
 ]

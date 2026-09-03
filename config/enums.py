@@ -134,6 +134,13 @@ class ServerHealthState(StrEnum):
     MANUAL_DISABLED = "MANUAL_DISABLED"
 
 
+class ServerLifecycleStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DECOMMISSIONING = "DECOMMISSIONING"
+    DECOMMISSIONED = "DECOMMISSIONED"
+    ARCHIVED = "ARCHIVED"
+
+
 class PaymentProviderOperationStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -216,6 +223,33 @@ class AdminAuditAction(StrEnum):
     WELCOME_BONUS_GRANTED = "WELCOME_BONUS_GRANTED"
 
 
+class ServiceType(StrEnum):
+    AWG = "awg"
+    WHITE_INTERNET = "white_internet"
+
+
+class WhiteInternetStatus(StrEnum):
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
+    EXHAUSTED = "EXHAUSTED"
+    EXPIRED = "EXPIRED"
+    DISABLED = "DISABLED"
+
+
+class WhiteInternetProvisioningStatus(StrEnum):
+    PENDING_CREATE = "PENDING_CREATE"
+    ACTIVE = "ACTIVE"
+    PENDING_UPDATE = "PENDING_UPDATE"
+    PENDING_DELETE = "PENDING_DELETE"
+    SYNCED_INACTIVE = "SYNCED_INACTIVE"
+    FAILED = "FAILED"
+
+
+class WhiteInternetGrantType(StrEnum):
+    BASE = "BASE"
+    TOPUP = "TOPUP"
+
+
 __all__ = [
     "AccountLedgerEntryType",
     "AccountReservationStatus",
@@ -234,8 +268,13 @@ __all__ = [
     "PaymentReconciliationStatus",
     "ProviderRefundOperationStatus",
     "ServerHealthState",
+    "ServerLifecycleStatus",
+    "ServiceType",
     "TariffQuoteOperation",
     "TariffQuoteStatus",
     "VPNProvisioningStatus",
     "WebhookInboxStatus",
+    "WhiteInternetGrantType",
+    "WhiteInternetProvisioningStatus",
+    "WhiteInternetStatus",
 ]

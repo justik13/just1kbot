@@ -14,7 +14,7 @@ TEXTS_DIR = ROOT / "bot" / "texts"
 
 EXPECTED_FILES = {
     "__init__.py", "common/__init__.py", "common/buttons.py", "common/errors.py", "common/status.py",
-    "user/__init__.py", "user/hub.py", "user/onboarding.py", "user/referral.py", "user/support.py",
+    "user/__init__.py", "user/hub.py", "user/onboarding.py", "user/referral.py", "user/support.py", "user/white_internet.py",
     "connection/__init__.py", "connection/devices.py", "connection/config.py", "connection/actions.py",
     "payment/__init__.py", "payment/balance.py", "payment/topup.py", "payment/tariffs.py",
     "payment/tariff_change.py", "payment/status.py",

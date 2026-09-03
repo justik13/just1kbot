@@ -1,0 +1,717 @@
+УНИВЕРСАЛЬНАЯ ИНСТРУКЦИЯ
+XHTTP + Padding через Yandex Cloud CDN
+
+Актуальность интерфейса Yandex Cloud: 01.07.2026
+Серверы: Ubuntu 22.04
+Xray-core: 26.5.9
+
+Архитектура:
+Клиент -> Yandex Cloud CDN -> Origin-сервер (Nginx + Xray) -> Exit-сервер (Xray) -> Интернет
+
+
+
+============================================================
+0. ЗНАЧЕНИЯ, КОТОРЫЕ НУЖНО ПОДГОТОВИТЬ
+============================================================
+
+Пример структуры имен (example.com — зарезервированный пример, замените его):
+
+Основной домен:              example.com
+Origin-домен:                origin.example.com
+CDN-домен для клиентов:      cdn.example.com
+Exit/Relay-домен:            relay.example.com
+IP Origin-сервера:           IP_ORIGIN_СЕРВЕРА
+IP Exit-сервера:             IP_EXIT_СЕРВЕРА
+Email для Let's Encrypt:     admin@example.com
+Единый UUID:                 СГЕНЕРИРОВАННЫЙ_UUID
+Путь XHTTP:                  /api-test
+Ключ Padding:                dc
+
+UUID можно сгенерировать на любом Ubuntu-сервере:
+
+cat /proc/sys/kernel/random/uuid
+
+Скопируйте полученный UUID и сохраните. Он понадобится на обоих серверах и в клиенте.
+
+
+============================================================
+1. DNS ДО НАСТРОЙКИ СЕРВЕРОВ
+============================================================
+
+В DNS-панели вашего домена создайте две записи:
+
+Запись 1 — Origin:
+Тип:       A
+Имя/хост:  origin
+Значение:  IP_ORIGIN_СЕРВЕРА
+
+Запись 2 — Exit/Relay:
+Тип:       A
+Имя/хост:  relay
+Значение:  IP_EXIT_СЕРВЕРА
+
+CDN-запись пока не создавайте. Ее значение выдаст Yandex Cloud CDN.
+
+Проверка DNS с любого Linux-компьютера:
+
+getent ahostsv4 origin.example.com
+getent ahostsv4 relay.example.com
+
+В выводе должны быть IP ваших серверов.
+
+
+============================================================
+2. EXIT-СЕРВЕР: XRAY + TLS
+============================================================
+
+Подключитесь по SSH к Exit-серверу и перейдите в root:
+
+sudo -i
+
+Один раз задайте свои значения. Замените значения справа:
+
+export RELAY_HOST='relay.example.com'
+export UUID='ВСТАВЬТЕ_ЕДИНЫЙ_UUID'
+export EMAIL='admin@example.com'
+
+Проверьте переменные:
+
+printf 'RELAY_HOST=%s\nUUID=%s\nEMAIL=%s\n' "$RELAY_HOST" "$UUID" "$EMAIL"
+
+Установите Certbot, curl и Xray-core 26.5.9:
+
+apt update && apt install -y curl certbot
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --version 26.5.9
+
+До следующей команды TCP-порт 80 должен быть доступен из интернета.
+Получите сертификат для Relay-домена:
+
+certbot certonly --standalone --non-interactive --agree-tos --email "$EMAIL" -d "$RELAY_HOST"
+
+Xray из официального установщика работает от пользователя nobody. Скопируйте сертификат
+в отдельный каталог с правами на чтение для группы nogroup:
+
+install -d -m 750 -o root -g nogroup /usr/local/etc/xray/tls
+install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${RELAY_HOST}/fullchain.pem" /usr/local/etc/xray/tls/fullchain.pem
+install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${RELAY_HOST}/privkey.pem" /usr/local/etc/xray/tls/privkey.pem
+
+Создайте конфигурацию Xray:
+
+cat > /usr/local/etc/xray/config.json <<EOF
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "from-origin",
+      "listen": "0.0.0.0",
+      "port": 10443,
+      "protocol": "vless",
+      "settings": {
+        "users": [
+          {
+            "id": "${UUID}",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h2", "http/1.1"],
+          "certificates": [
+            {
+              "certificateFile": "/usr/local/etc/xray/tls/fullchain.pem",
+              "keyFile": "/usr/local/etc/xray/tls/privkey.pem"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "internet",
+      "protocol": "freedom"
+    }
+  ]
+}
+EOF
+
+Проверьте конфигурацию и запустите Xray:
+
+/usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+systemctl enable xray
+systemctl restart xray
+systemctl --no-pager --full status xray
+
+Добавьте копирование обновленного сертификата и перезапуск Xray после его продления:
+
+install -d /etc/letsencrypt/renewal-hooks/deploy
+cat > /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh <<'EOF'
+#!/bin/sh
+set -eu
+install -m 640 -o root -g nogroup "${RENEWED_LINEAGE}/fullchain.pem" /usr/local/etc/xray/tls/fullchain.pem
+install -m 640 -o root -g nogroup "${RENEWED_LINEAGE}/privkey.pem" /usr/local/etc/xray/tls/privkey.pem
+systemctl restart xray
+EOF
+chmod 755 /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh
+
+Проверьте открытый порт:
+
+ss -lntp | grep ':10443'
+
+На Exit-сервере должны быть разрешены входящие TCP-порты:
+
+- SSH-порт;
+- 80 — выпуск и продление сертификата;
+- 10443 — соединение от Origin-сервера.
+
+Безопаснее разрешить порт 10443 только с IP Origin-сервера. Пример для UFW:
+
+ufw allow from IP_ORIGIN_СЕРВЕРА to any port 10443 proto tcp
+
+Не выполняйте ufw enable, пока отдельно не разрешили реальный SSH-порт.
+
+
+============================================================
+3. ORIGIN-СЕРВЕР: NGINX + XRAY
+============================================================
+
+Подключитесь по SSH к Origin-серверу и перейдите в root:
+
+sudo -i
+
+Задайте свои значения:
+
+export ORIGIN_HOST='origin.example.com'
+export CDN_HOST='cdn.example.com'
+export RELAY_HOST='relay.example.com'
+export RELAY_IP='IP_EXIT_СЕРВЕРА'
+export UUID='ВСТАВЬТЕ_ТОТ_ЖЕ_UUID'
+export EMAIL='admin@example.com'
+export XHTTP_PATH='/api-test'
+export PADDING_KEY='dc'
+
+Проверьте переменные:
+
+printf 'ORIGIN_HOST=%s\nCDN_HOST=%s\nRELAY_HOST=%s\nRELAY_IP=%s\nUUID=%s\nXHTTP_PATH=%s\nPADDING_KEY=%s\n' \
+  "$ORIGIN_HOST" "$CDN_HOST" "$RELAY_HOST" "$RELAY_IP" "$UUID" "$XHTTP_PATH" "$PADDING_KEY"
+
+Установите Nginx, Certbot, curl и Xray-core 26.5.9:
+
+apt update && apt install -y nginx certbot curl
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --version 26.5.9
+
+Создайте временный HTTP-конфиг для выпуска сертификата:
+
+install -d -m 755 /var/www/acme
+rm -f /etc/nginx/sites-enabled/default
+
+cat > /etc/nginx/sites-available/xhttp-origin.conf <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${ORIGIN_HOST};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+    }
+
+    location / {
+        default_type text/plain;
+        return 200 "origin is ready\n";
+    }
+}
+EOF
+
+ln -sfn /etc/nginx/sites-available/xhttp-origin.conf /etc/nginx/sites-enabled/xhttp-origin.conf
+nginx -t && systemctl enable --now nginx && systemctl reload nginx
+
+Получите сертификат Origin-домена:
+
+certbot certonly --webroot -w /var/www/acme --non-interactive --agree-tos --email "$EMAIL" -d "$ORIGIN_HOST"
+
+
+------------------------------------------------------------
+3.1. КОНФИГУРАЦИЯ XRAY НА ORIGIN
+------------------------------------------------------------
+
+Создайте конфигурацию:
+
+cat > /usr/local/etc/xray/config.json <<EOF
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "from-yandex-cdn",
+      "listen": "127.0.0.1",
+      "port": 8003,
+      "protocol": "vless",
+      "settings": {
+        "users": [
+          {
+            "id": "${UUID}"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "none",
+        "xhttpSettings": {
+          "mode": "packet-up",
+          "path": "${XHTTP_PATH}",
+          "xPaddingObfsMode": true,
+          "xPaddingKey": "${PADDING_KEY}",
+          "xPaddingHeader": "X-Cache",
+          "xPaddingMethod": "tokenish",
+          "xPaddingPlacement": "queryInHeader"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "to-exit",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "${RELAY_IP}",
+            "port": 10443,
+            "users": [
+              {
+                "id": "${UUID}",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "${RELAY_HOST}",
+          "alpn": ["h2", "http/1.1"]
+        }
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ]
+}
+EOF
+
+Проверьте конфигурацию и перезапустите Xray:
+
+/usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+systemctl enable xray
+systemctl restart xray
+systemctl --no-pager --full status xray
+ss -lntp | grep ':8003'
+
+Xray должен слушать 127.0.0.1:8003, а не публичный интерфейс.
+
+
+------------------------------------------------------------
+3.2. КОНФИГУРАЦИЯ NGINX НА ORIGIN
+------------------------------------------------------------
+
+Создайте преобразование метода OPTIONS в POST:
+
+cat > /etc/nginx/conf.d/xhttp-method.conf <<'EOF'
+map $request_method $xhttp_proxy_method {
+    default  $request_method;
+    OPTIONS  POST;
+}
+EOF
+
+Замените конфигурацию сайта:
+
+cat > /etc/nginx/sites-available/xhttp-origin.conf <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${ORIGIN_HOST};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${ORIGIN_HOST};
+
+    ssl_certificate     /etc/letsencrypt/live/${ORIGIN_HOST}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${ORIGIN_HOST}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 0;
+    client_header_buffer_size 64k;
+    large_client_header_buffers 8 128k;
+    http2_max_field_size 128k;
+    http2_max_header_size 128k;
+
+    # Служебная проверка прохождения OPTIONS через CDN.
+    location = /cdn-check {
+        add_header X-CDN-Origin "ok" always;
+        add_header X-Origin-Method \$request_method always;
+        add_header X-Origin-Content-Length \$http_content_length always;
+        return 204;
+    }
+
+    location ${XHTTP_PATH} {
+        proxy_pass http://127.0.0.1:8003;
+        proxy_method \$xhttp_proxy_method;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        proxy_pass_request_headers on;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+EOF
+
+Проверьте конфигурацию и перезагрузите Nginx:
+
+nginx -t && systemctl reload nginx
+systemctl --no-pager --full status nginx
+
+Добавьте перезагрузку Nginx после автоматического продления сертификата:
+
+install -d /etc/letsencrypt/renewal-hooks/deploy
+cat > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh <<'EOF'
+#!/bin/sh
+systemctl reload nginx
+EOF
+chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+
+Проверьте Origin напрямую:
+
+curl -sS -D - -o /dev/null -X OPTIONS --data-binary 'test' "https://${ORIGIN_HOST}/cdn-check"
+
+Ожидаемый результат:
+
+- HTTP-код 204;
+- заголовок X-CDN-Origin: ok;
+- заголовок X-Origin-Method: OPTIONS;
+- заголовок X-Origin-Content-Length: 4.
+
+На Origin-сервере должны быть разрешены входящие TCP-порты:
+
+- SSH-порт;
+- 80 — выпуск и продление сертификата;
+- 443 — запросы Yandex Cloud CDN.
+
+Порт 8003 наружу открывать нельзя.
+
+
+============================================================
+4. СЕРТИФИКАТ ДЛЯ CDN-ДОМЕНА В YANDEX CERTIFICATE MANAGER
+============================================================
+
+Этот сертификат используется между клиентом и Yandex Cloud CDN.
+Сертификат Origin-домена из раздела 3 используется отдельно — между CDN и Origin.
+
+1. Откройте консоль Yandex Cloud.
+2. Выберите облако и каталог, в котором будет создан CDN-ресурс.
+3. Откройте «Certificate Manager».
+4. Нажмите «Добавить сертификат».
+5. Выберите «Сертификат от Let's Encrypt».
+6. В поле «Имя» укажите любое понятное имя, например xhttp-cdn-cert.
+7. В поле «Домены» укажите только ваш CDN-домен:
+
+   cdn.example.com
+
+8. Тип проверки прав выберите «DNS».
+9. Нажмите «Создать».
+10. Откройте созданный сертификат и скопируйте предложенную запись проверки прав.
+11. В DNS-панели домена создайте ровно ту CNAME- или TXT-запись, которую показал Certificate Manager.
+12. Дождитесь статуса сертификата «Issued» / «Выпущен».
+
+Для автоматического продления предпочтительна проверка DNS_CNAME. Не удаляйте проверочную запись после выпуска сертификата.
+
+Важно: сертификат и CDN-ресурс должны находиться в одном каталоге Yandex Cloud.
+
+
+============================================================
+5. СОЗДАНИЕ РЕСУРСА В YANDEX CLOUD CDN
+============================================================
+
+Названия пунктов ниже соответствуют панели Yandex Cloud на 01.07.2026.
+
+1. В том же каталоге Yandex Cloud откройте «Cloud CDN».
+2. Перейдите на вкладку «CDN-ресурсы».
+3. Нажмите «Создать ресурс».
+
+Раздел «Основные настройки» / «Контент»:
+
+4. «Доступ конечных пользователей к контенту» — включить.
+5. «Запрос контента» — выбрать «Из одного источника».
+6. «Тип источника» — выбрать «Сервер».
+7. «Доменное имя источника» — указать Origin-домен:
+
+   origin.example.com
+
+8. «Протокол для запросов к источнику» — выбрать HTTPS.
+9. «Доменное имя» — указать CDN-домен для клиентов:
+
+   cdn.example.com
+
+Первое доменное имя становится основным и после создания ресурса не меняется.
+
+Раздел «Дополнительные настройки»:
+
+10. «Перенаправление клиентов» — при первоначальном создании выбрать «Не использовать».
+11. «Тип сертификата» — выбрать «Использовать из Certificate Manager».
+12. Выбрать сертификат для cdn.example.com со статусом «Выпущен».
+13. «Заголовок Host» — выбрать «Свое значение» и указать:
+
+    origin.example.com
+
+Это обязательно: Nginx на Origin ожидает именно этот Host.
+
+14. Нажмите «Продолжить».
+
+Раздел «Кеширование»:
+
+15. Отключите «Кеширование на CDN».
+16. Отключите «Кеширование в браузере».
+17. Не включайте игнорирование query-параметров.
+18. Не включайте игнорирование Cookie.
+
+Раздел «HTTP-заголовки и методы»:
+
+19. В «Методы запросов клиентов» / «Разрешенные методы» оставьте:
+
+    GET
+    HEAD
+    OPTIONS
+
+OPTIONS разрешен Yandex Cloud CDN по умолчанию, но его нужно явно проверить в готовом ресурсе.
+POST, PUT, PATCH и DELETE для этой схемы не требуются.
+
+20. Не добавляйте правила, удаляющие или заменяющие заголовок X-Cache.
+21. CORS отдельно не включайте: OPTIONS здесь используется XHTTP, а не браузерным preflight.
+
+Раздел «Расширенные настройки»:
+
+22. Сжатие — выключить.
+23. Сегментация контента — выключить.
+24. Экранирование источников / Origin shielding — выключить.
+25. Следование редиректам источника — выключить.
+26. WebSocket включать не требуется: XHTTP packet-up работает через HTTP OPTIONS.
+
+27. Завершите создание ресурса.
+28. Дождитесь создания. Применение настроек может занять до 15 минут.
+
+
+============================================================
+6. CNAME ДЛЯ CDN-ДОМЕНА
+============================================================
+
+1. Откройте созданный CDN-ресурс.
+2. На вкладке «Обзор» найдите блок «Настройки DNS».
+3. Скопируйте служебное доменное имя. Оно имеет вид:
+
+   СЛУЧАЙНЫЙ_ID.topology.gslb.yccdn.ru
+
+4. В DNS-панели вашего домена создайте запись:
+
+Тип:       CNAME
+Имя/хост:  cdn
+Значение:  СЛУЧАЙНЫЙ_ID.topology.gslb.yccdn.ru.
+
+Точка в конце значения зависит от DNS-панели. Если панель добавляет ее сама, вручную точку не ставьте.
+
+Не используйте ANAME вместо CNAME.
+
+5. Дождитесь обновления DNS.
+6. Проверьте запись:
+
+getent hosts cdn.example.com
+
+Или, если установлен пакет dnsutils:
+
+dig +short CNAME cdn.example.com
+
+
+============================================================
+7. ВКЛЮЧЕНИЕ ПЕРЕНАПРАВЛЕНИЯ HTTP -> HTTPS
+============================================================
+
+После того как сертификат подключен и CNAME работает:
+
+1. Откройте Cloud CDN -> CDN-ресурсы -> ваш ресурс.
+2. Откройте основные настройки ресурса и нажмите «Изменить».
+3. В поле «Перенаправление клиентов» выберите «С HTTP на HTTPS».
+4. Сохраните настройки.
+5. Подождите до 15 минут, пока изменение применится.
+
+
+============================================================
+8. ПРОВЕРКА OPTIONS ЧЕРЕЗ YANDEX CLOUD CDN
+============================================================
+
+На любом Linux-компьютере задайте CDN-домен:
+
+export CDN_HOST='cdn.example.com'
+
+Отправьте OPTIONS с телом из четырех байт:
+
+curl -sS -D - -o /dev/null -X OPTIONS --data-binary 'test' \
+  "https://${CDN_HOST}/cdn-check?nocache=$(date +%s)"
+
+Ожидаемый результат:
+
+- HTTP-код 204;
+- X-CDN-Origin: ok;
+- X-Origin-Method: OPTIONS;
+- X-Origin-Content-Length: 4.
+
+На Origin-сервере можно одновременно смотреть запросы:
+
+tail -f /var/log/nginx/access.log
+
+Если запрос не дошел:
+
+1. Проверьте CNAME CDN-домена.
+2. Проверьте статус CDN-ресурса.
+3. Проверьте, что разрешен метод OPTIONS.
+4. Проверьте, что протокол источника — HTTPS.
+5. Проверьте, что Host источника равен origin.example.com.
+6. Проверьте доступность TCP-порта 443 Origin-сервера.
+7. Проверьте сертификат Origin-домена.
+
+
+============================================================
+9. НАСТРОЙКА КЛИЕНТА HAPP / V2RAYNG
+============================================================
+
+Создайте профиль VLESS со следующими параметрами:
+
+Protocol:             VLESS
+Address:              cdn.example.com
+Port:                 443
+UUID / ID:            ВАШ_ЕДИНЫЙ_UUID
+Encryption:           none
+Flow:                 пусто
+Network / Transport:  xhttp
+Path:                 /api-test
+TLS / Security:       tls, включено
+SNI / Server name:    cdn.example.com
+Host:                 cdn.example.com
+Allow insecure:       выключено
+
+Не указывайте Origin-домен и служебный домен *.yccdn.ru в Address/SNI клиента.
+Клиент подключается к вашему CDN-домену, для которого подключен сертификат Certificate Manager.
+
+В поле XHTTP extra / Raw JSON вставьте:
+
+{
+  "mode": "packet-up",
+  "scMaxEachPostBytes": 1000000,
+  "scMinPostsIntervalMs": 30,
+  "scMaxBufferedPosts": 30,
+  "xPaddingObfsMode": true,
+  "xPaddingKey": "dc",
+  "xPaddingHeader": "X-Cache",
+  "xPaddingMethod": "tokenish",
+  "xPaddingPlacement": "queryInHeader",
+  "uplinkHTTPMethod": "OPTIONS"
+}
+
+Если вы изменили PADDING_KEY или XHTTP_PATH на Origin, укажите здесь те же значения.
+
+Сохраните профиль и подключитесь.
+
+
+============================================================
+10. ФИНАЛЬНАЯ ПРОВЕРКА СЕРВЕРОВ
+============================================================
+
+На Origin-сервере:
+
+systemctl is-active nginx xray
+nginx -t
+/usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+journalctl -u nginx -u xray --since '10 minutes ago' --no-pager
+
+На Exit-сервере:
+
+systemctl is-active xray
+/usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+journalctl -u xray --since '10 minutes ago' --no-pager
+
+Проверка сертификатов:
+
+certbot certificates
+
+
+============================================================
+11. ТИПОВЫЕ ОШИБКИ
+============================================================
+
+405 Method Not Allowed
+Причина: OPTIONS не разрешен в настройках CDN-ресурса.
+Решение: Cloud CDN -> ресурс -> HTTP-заголовки и методы -> разрешить OPTIONS.
+
+502 / 504 от CDN
+Причина: CDN не может подключиться к Origin или Origin отвечает неправильно.
+Проверьте HTTPS источника, Host, DNS, firewall, Nginx и сертификат Origin-домена.
+
+Ошибка TLS на клиенте
+Address, SNI и Host клиента должны совпадать с CDN-доменом из сертификата Certificate Manager.
+Allow insecure должен быть выключен.
+
+Ошибка TLS между Origin и Exit
+Проверьте RELAY_IP, RELAY_HOST, сертификат Relay-домена и порт 10443.
+
+Xray не запускается
+Выполните:
+
+/usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+journalctl -u xray -n 100 --no-pager
+
+Nginx не запускается
+Выполните:
+
+nginx -t
+journalctl -u nginx -n 100 --no-pager
+
+400 / 414 на Origin
+Проверьте, что в Nginx сохранены увеличенные client_header_buffer_size,
+large_client_header_buffers, http2_max_field_size и http2_max_header_size.
+
+Сертификат Certificate Manager не выпускается
+Проверьте запись _acme-challenge. Для DNS_CNAME у этого имени не должно быть одновременно TXT-записи или второго CNAME.
+
+

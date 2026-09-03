@@ -48,6 +48,7 @@ from services.account_topup import (
     settle_succeeded_topup,
     settle_succeeded_topup_by_id,
 )
+from tests.db_utils import TRUNCATE_SQL
 from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
@@ -59,17 +60,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as session:
-            await session.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, users, tariffs, system_settings, payment_disputes "
-
-                    "RESTART IDENTITY CASCADE"
-
-                )
-            )
+            await session.execute(text(TRUNCATE_SQL))
             user = User(telegram_id=uuid.uuid4().int % 10**12)
             tariff = Tariff(
                 name="Account test",
@@ -732,16 +723,16 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
         from sqlalchemy import func, select
 
         from database.models import AccountLedgerEntry
-        
+
         async with self.sessions.begin() as session:
             # 1. Topup 1000
             payment1 = await self.topup(session, 1000)
             await credit_succeeded_topup(session, payment_id=payment1.id)
-            
+
             # 2. Purchase 400
             quote = await self.quote(session, 400)
             await create_purchase_debit(session, user_id=self.user_id, quote_id=quote.id, amount=400)
-            
+
             # 3. Topup 500
             payment2 = await self.topup(session, 500)
             await credit_succeeded_topup(session, payment_id=payment2.id)
@@ -771,11 +762,11 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
 
             snapshot = await get_account_balance(session, user_id=self.user_id)
-            
+
             # The mathematical invariant: net balance == sum(all ledger entries)
             # Net balance is available + reserved - debt
             net_balance = snapshot.available + snapshot.reserved - snapshot.debt
-            
+
             self.assertEqual(net_balance, total_ledger_sum)
             # 1000 - 400 + 500 - 200 - 1000 = -100 (which is 100 debt)
             self.assertEqual(net_balance, Decimal("-100.00"))

@@ -29,13 +29,12 @@ class TestCleanupRetentionPostgres(unittest.IsolatedAsyncioTestCase):
         from database import connection
         self.old_sessionmaker = connection._sessionmaker
         connection._sessionmaker = self.sessions
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
         async with self.sessions.begin() as session:
-            await session.execute(
-                text(
-                    "TRUNCATE webhook_inbox, tariff_quotes, tariff_versions, tariffs, users "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await session.execute(text(TRUNCATE_SQL))
             tariff_id = (
                 await session.execute(
                     text(
@@ -60,13 +59,12 @@ class TestCleanupRetentionPostgres(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         try:
+            try:
+                from tests.db_utils import TRUNCATE_SQL
+            except ImportError:
+                from db_utils import TRUNCATE_SQL
             async with self.sessions.begin() as session:
-                await session.execute(
-                    text(
-                        "TRUNCATE webhook_inbox, tariff_quotes, tariff_versions, tariffs, users "
-                        "RESTART IDENTITY CASCADE"
-                    )
-                )
+                await session.execute(text(TRUNCATE_SQL))
         finally:
             from database import connection
             connection._sessionmaker = self.old_sessionmaker

@@ -215,6 +215,84 @@ async def process_add_server(
             parse_mode="HTML",
         )
 
+        from services.xray_node_client import XrayNodeClient
+
+        is_xray = False
+        xray_epoch = None
+        xray_data = None
+        try:
+            async with XrayNodeClient(timeout=10.0) as xray_client:
+                xray_ok, xray_epoch, xray_data = await xray_client.check_health(
+                    all_data["api_url"], api_key
+                )
+                if xray_ok:
+                    is_xray = True
+        except Exception:
+            is_xray = False
+
+        if is_xray:
+            from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
+            api_server_name = all_data["name"]
+            api_max_peers = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
+            protocol_name = "xray"
+            capabilities = ["xray_origin"]
+            server = await create_server(
+                session,
+                name=api_server_name,
+                country_flag=all_data["country_flag"],
+                api_url=all_data["api_url"],
+                api_key=api_key,
+                protocol=protocol_name,
+                max_clients=api_max_peers,
+                capabilities=capabilities,
+            )
+            if xray_epoch:
+                server.xray_instance_epoch = xray_epoch
+            if xray_data:
+                server.xray_instance_boot_id = xray_data.get("boot_id")
+                server.xray_instance_starttime = xray_data.get("starttime")
+                extra = dict(server.extra_data or {})
+                if "secret_base_path" in xray_data:
+                    extra["secret_base_path"] = xray_data["secret_base_path"]
+                if "relays" in xray_data:
+                    extra["relays"] = xray_data["relays"]
+                if "cdn_domain" in xray_data and xray_data["cdn_domain"]:
+                    extra["cdn_domain"] = xray_data["cdn_domain"]
+                server.extra_data = extra
+
+            await AuditService.log_action(
+                session,
+                message.from_user.id,
+                AdminAuditAction.ADD_SERVER,
+                "Server",
+                server.id,
+                api_server_name,
+            )
+
+            msg_text = texts.ADMIN_SERVER_ADDED.format(
+                flag=all_data["country_flag"],
+                name=safe(api_server_name),
+                protocol=texts.PROTOCOL_XRAY_ORIGIN,
+                max_clients=api_max_peers,
+                api_url=safe(all_data["api_url"]),
+            )
+            relays = (server.extra_data or {}).get("relays", [])
+            if not relays:
+                msg_text += texts.ADMIN_SERVER_ADDED_NO_RELAYS_WARNING
+
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                msg_text,
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            logger.info(
+                f"Admin {message.from_user.id} added Xray server: {server.id}"
+            )
+            await state.clear()
+            return
+
         client = AmneziaClient(
             all_data["api_url"],
             api_key,

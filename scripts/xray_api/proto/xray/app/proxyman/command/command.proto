@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package xray.app.proxyman.command;
+
+import "xray/common/protocol/user.proto";
+import "xray/common/serial/typed_message.proto";
+
+message AddUserOperation {
+  xray.common.protocol.User user = 1;
+}
+
+message RemoveUserOperation {
+  string email = 1;
+}
+
+message AlterInboundRequest {
+  string tag = 1;
+  xray.common.serial.TypedMessage operation = 2;
+}
+
+message AlterInboundResponse {}
+
+service HandlerService {
+  rpc AlterInbound(AlterInboundRequest) returns (AlterInboundResponse) {}
+}

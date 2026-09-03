@@ -7,7 +7,8 @@ from decimal import Decimal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import TariffQuoteOperation, TariffQuoteStatus
+from config.constants import WHITE_INTERNET_BASE_TRAFFIC_BYTES
+from config.enums import ServiceType, TariffQuoteOperation, TariffQuoteStatus
 from database.models import Tariff, TariffQuote, TariffVersion, User
 from utils.datetime_helpers import now_utc
 
@@ -33,6 +34,11 @@ async def get_or_create_current_version(
     await session.execute(
         text("SELECT pg_advisory_xact_lock(:key)"), {"key": tariff.id}
     )
+    base_quota = (
+        WHITE_INTERNET_BASE_TRAFFIC_BYTES
+        if tariff.service_type == ServiceType.WHITE_INTERNET
+        else None
+    )
     version = await session.scalar(
         select(TariffVersion)
         .where(
@@ -42,6 +48,8 @@ async def get_or_create_current_version(
             TariffVersion.device_limit == tariff.device_limit,
             TariffVersion.price_rub == Decimal(tariff.price_rub),
             TariffVersion.currency == "RUB",
+            TariffVersion.service_type == tariff.service_type,
+            TariffVersion.base_quota_bytes == base_quota,
         )
         .order_by(TariffVersion.version_number.desc())
         .limit(1)
@@ -65,6 +73,8 @@ async def get_or_create_current_version(
         device_limit=tariff.device_limit,
         price_rub=Decimal(tariff.price_rub),
         currency="RUB",
+        service_type=tariff.service_type,
+        base_quota_bytes=base_quota,
     )
     session.add(version)
     await session.flush()
@@ -152,6 +162,7 @@ async def get_or_create_checkout_quote(
     quote = TariffQuote(
         public_id=uuid.uuid4(),
         user_id=user_id,
+        service_type=tariff.service_type,
         operation_type=operation_type,
         target_tariff_version_id=version.id,
         current_paid_hours=0,

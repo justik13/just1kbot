@@ -4,7 +4,7 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -12,7 +12,13 @@ from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
-from database.models import APIOperation, Server, VPNProfile
+from config.enums import WhiteInternetStatus
+from database.models import (
+    APIOperation,
+    Server,
+    VPNProfile,
+    WhiteInternetSubscription,
+)
 from database.repositories.servers_repo import (
     delete_profiles_by_server_id,
     delete_server,
@@ -90,20 +96,34 @@ async def request_delete_server(
             VPNProfile.server_id == server.id
         ),
     )
-
     profiles_count = len(result.all())
+
+    wl_subs_count = await session.scalar(
+        select(func.count(WhiteInternetSubscription.id)).where(
+            WhiteInternetSubscription.origin_node_id == server.id,
+            WhiteInternetSubscription.status.in_([
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.EXHAUSTED,
+            ]),
+        )
+    ) or 0
 
     flag = server.country_flag or texts.EMOJI_GLOBE
 
     await state.update_data(delete_server_id=server_id)
     await state.set_state(AdminStates.confirming_server_delete)
 
+    confirm_msg = texts.ADMIN_SERVER_DELETE_CONFIRM.format(
+        flag=flag,
+        name=safe(server.name),
+        profiles_count=profiles_count,
+    )
+    if wl_subs_count > 0:
+        confirm_msg += texts.ADMIN_SERVER_DELETE_WL_SUBS_NOTE.format(count=wl_subs_count)
+
     await callback.message.edit_text(
-        texts.ADMIN_SERVER_DELETE_CONFIRM.format(
-            flag=flag,
-            name=safe(server.name),
-            profiles_count=profiles_count,
-        ),
+        confirm_msg,
         reply_markup=get_server_delete_confirm_keyboard(server_id),
         parse_mode="HTML",
     )
@@ -175,6 +195,37 @@ async def confirm_delete_server(
         op.status == "processing" and op.operation_type == "update_peer"
         for op in operations
     )
+
+    active_wl_subs = list((await session.execute(
+        select(WhiteInternetSubscription).where(
+            WhiteInternetSubscription.origin_node_id == server.id,
+            WhiteInternetSubscription.status.in_([
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.EXHAUSTED,
+            ]),
+        ).with_for_update()
+    )).scalars().all())
+
+    if active_wl_subs:
+        await session.rollback()
+        await callback.answer(
+            texts.ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_ALERT.format(count=len(active_wl_subs)),
+            show_alert=True,
+        )
+        try:
+            await callback.message.edit_text(
+                texts.ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_TEXT.format(
+                    name=safe(server_name),
+                    count=len(active_wl_subs),
+                ),
+                reply_markup=get_back_button(f"admin_server_card:{server.id}"),
+                parse_mode="HTML",
+            )
+        except TelegramBadRequest:
+            pass
+        return
+
     if _has_unfinished_create_cleanup(profiles, operations) or processing_update:
         await session.rollback()
         await callback.answer(
@@ -213,6 +264,12 @@ async def confirm_delete_server(
     deleted_profiles = await delete_profiles_by_server_id(
         session,
         server_id,
+    )
+
+    await session.execute(
+        update(WhiteInternetSubscription)
+        .where(WhiteInternetSubscription.origin_node_id == server_id)
+        .values(origin_node_id=None)
     )
 
     await delete_server(session, server)

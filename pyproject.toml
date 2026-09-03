@@ -7,6 +7,9 @@ requires-python = ">=3.12"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+extend-exclude = [
+    "scripts/xray_api/generated",
+]
 
 [tool.ruff.lint]
 select = [
@@ -22,3 +25,10 @@ ignore = [
     "PLW0108",
     "ASYNC109",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/xray_api/generated/*" = ["F401", "F821", "E402", "E741", "E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [".git", ".pytest_cache", "scripts"]

@@ -116,6 +116,7 @@ cleanup_on_exit() {
     if (( exit_code != 0 )); then
         warn "Скрипт установки завершился с ошибкой (код $exit_code)."
         rm -f /tmp/get-docker.sh 2>/dev/null || true
+        (exit "$exit_code")
     fi
 }
 trap cleanup_on_exit EXIT

@@ -32,6 +32,12 @@ from services.api_operations_queue import (
 from utils.vpn_parser import build_conf_file, is_valid_vpn_uri
 
 
+try:
+    from tests.db_utils import TRUNCATE_SQL
+except ImportError:
+    from db_utils import TRUNCATE_SQL
+
+
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -42,15 +48,7 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
         connection._sessionmaker = self.sessions
         connection._engine = self.engine
         async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await s.execute(text(TRUNCATE_SQL))
             user = User(
                 telegram_id=90001,
                 subscription_end=datetime.now(timezone.utc) + timedelta(days=1),

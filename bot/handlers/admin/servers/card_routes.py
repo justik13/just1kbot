@@ -247,12 +247,19 @@ async def ping_server(
 
     import time
 
-    from services.amnezia_client import AmneziaClient
-
-    client = AmneziaClient(server.api_url, server.api_key)
     start_t = time.monotonic()
     try:
-        is_healthy = await client.healthcheck()
+        if "xray_origin" in (server.capabilities or []) or server.protocol == "xray":
+            from services.xray_node_client import XrayNodeClient
+
+            async with XrayNodeClient(timeout=10.0) as xclient:
+                is_healthy, _epoch, _detail = await xclient.check_health(server.api_url, server.api_key)
+        else:
+            from services.amnezia_client import AmneziaClient
+
+            client = AmneziaClient(server.api_url, server.api_key)
+            is_healthy = await client.healthcheck()
+
         duration_ms = int((time.monotonic() - start_t) * 1000)
         if is_healthy:
             ping_res = texts.ADMIN_SERVER_PING_ONLINE.format(latency_ms=duration_ms)

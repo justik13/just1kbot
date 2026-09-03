@@ -3,6 +3,8 @@ from __future__ import annotations
 
 ADMIN_BTN_ADD_SERVER = "➕ Добавить сервер"
 
+PROTOCOL_XRAY_ORIGIN = "Xray (Origin)"
+
 ADMIN_BTN_BACK_TO_SERVERS = "← К списку серверов"
 
 ADMIN_SERVERS_COMMON = """🛠 Админка › 🌍 <b>Серверы</b>
@@ -26,6 +28,12 @@ ADMIN_SERVER_ADDED = """🛠 Админка › 🖥 <b>Серверы</b>
 <b>Лимит клиентов:</b> {max_clients}
 <b>API URL:</b> <code>{api_url}</code>"""
 
+ADMIN_SERVER_ADDED_NO_RELAYS_WARNING = (
+    "\n\n⚠️ <b>Внимание:</b> на сервере нет подключенных Relay!\n"
+    "Шлюз переведен в режим ожидания и <b>не будет выдавать подписки</b>, "
+    "пока вы не привяжете хотя бы один Relay через <code>just1knode relay add</code>."
+)
+
 ADMIN_SERVER_BTN_DELETE = "🗑 Удалить сервер"
 
 ADMIN_SERVER_BTN_CHANGE_LIMIT = "👥 Изменить лимит"
@@ -44,10 +52,20 @@ ADMIN_SERVER_DELETE_BLOCKED_PENDING = """⚠️ <b>Удаление сервер
 
 ADMIN_SERVER_DELETE_BLOCKED_PENDING_CLIENT = "На сервере есть незавершённое создание клиента. Дождитесь reconciliation и повторите удаление."
 
+ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_ALERT = "Удаление заблокировано: к серверу привязано {count} активных подписок White Internet. Сначала отключите их."
+
+ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_TEXT = """❌ <b>Удаление сервера невозможно</b>
+
+К серверу <b>{name}</b> привязано активных подписок Белый Интернет: <b>{count}</b>.
+
+Перед удалением сервера необходимо отключить или перенести активные подписки."""
+
 ADMIN_SERVER_DELETE_CONFIRM = """⚠️ <b>Удаление сервера</b>
 
 Вы уверены, что хотите удалить сервер {flag} <b>{name}</b>?
 📱 Активных устройств на сервере: <b>{profiles_count}</b>"""
+
+ADMIN_SERVER_DELETE_WL_SUBS_NOTE = "\n\n🌐 <i>К серверу также привязано подписок Белый Интернет: {count}</i>"
 
 ADMIN_SERVER_DELETE_SUCCESS_NOTICE = "✅ Сервер {v0} удалён ({v1} устр.)"
 

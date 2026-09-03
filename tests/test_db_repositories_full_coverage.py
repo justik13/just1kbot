@@ -48,17 +48,13 @@ class DBRepositoriesFullCoverageTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
 
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
+
         async with self.sessions.begin() as session:
-            await session.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, vpn_profiles, "
-                    "maintenance_mode, audit_logs, hub_messages, users, tariffs, servers, system_settings, payment_disputes "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await session.execute(text(TRUNCATE_SQL))
 
     async def asyncTearDown(self):
         from config.settings import get_settings

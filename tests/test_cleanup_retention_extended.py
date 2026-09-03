@@ -54,11 +54,11 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
 
         mock_session.execute.side_effect = [
             round1_res,  # select ids round 1
-            del_res1,   # delete round 1
+            del_res1,  # delete round 1
             round2_res,  # select ids round 2
-            del_res2,   # delete round 2
+            del_res2,  # delete round 2
             round3_res,  # select ids round 3
-            del_res3,   # delete round 3
+            del_res3,  # delete round 3
         ]
 
         total = await _batch_delete_matching(
@@ -102,13 +102,17 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("services.workers.cleanup.session_scope") as mock_scope,
-            patch("services.workers.cleanup.clear_audit_logs", new_callable=AsyncMock) as mock_clear_audit,
-            patch("services.workers.cleanup._batch_delete_matching", new_callable=AsyncMock) as mock_batch_del,
+            patch(
+                "services.workers.cleanup.clear_audit_logs", new_callable=AsyncMock
+            ) as mock_clear_audit,
+            patch(
+                "services.workers.cleanup._batch_delete_matching", new_callable=AsyncMock
+            ) as mock_batch_del,
             patch("services.workers.cleanup.logger") as mock_logger,
         ):
             mock_scope.return_value.__aenter__.return_value = mock_session
             mock_clear_audit.return_value = 15
-            mock_batch_del.side_effect = [3, 2, 8]  # broadcasts, hub, webhooks
+            mock_batch_del.side_effect = [3, 2, 8, 5]  # broadcasts, hub, webhooks, traffic_events
 
             await _cleanup_old_records()
 
@@ -116,7 +120,7 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
                 older_than_days=AUDIT_LOG_RETENTION_DAYS,
             )
 
-            # Verify _batch_delete_matching called for:
+            # Verify batch deletes were called for:
             # 1. BroadcastProgress
             # 2. HubMessage
             # 3. WebhookInbox
@@ -155,10 +159,20 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         # Webhook matching assertions
         self.assertTrue(matches_webhook_retention("succeeded", old_dt))
         self.assertTrue(matches_webhook_retention("dead", old_dt))
-        self.assertFalse(matches_webhook_retention("pending", old_dt), "Pending webhook must NEVER be deleted")
-        self.assertFalse(matches_webhook_retention("processing", old_dt), "Processing webhook must NEVER be deleted")
-        self.assertFalse(matches_webhook_retention("retry", old_dt), "Retry webhook must NEVER be deleted")
-        self.assertFalse(matches_webhook_retention("succeeded", recent_dt), "Recent succeeded webhook must NOT be deleted")
-        self.assertFalse(matches_webhook_retention("dead", recent_dt), "Recent dead webhook must NOT be deleted")
-
-
+        self.assertFalse(
+            matches_webhook_retention("pending", old_dt), "Pending webhook must NEVER be deleted"
+        )
+        self.assertFalse(
+            matches_webhook_retention("processing", old_dt),
+            "Processing webhook must NEVER be deleted",
+        )
+        self.assertFalse(
+            matches_webhook_retention("retry", old_dt), "Retry webhook must NEVER be deleted"
+        )
+        self.assertFalse(
+            matches_webhook_retention("succeeded", recent_dt),
+            "Recent succeeded webhook must NOT be deleted",
+        )
+        self.assertFalse(
+            matches_webhook_retention("dead", recent_dt), "Recent dead webhook must NOT be deleted"
+        )

@@ -13,9 +13,25 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_head_is_0015_auto_fulfill_retry_idx(self):
+    def test_alembic_head_is_0019_wi_server_set_null(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0015_auto_fulfill_retry_idx"])
+        self.assertEqual(scripts.get_heads(), ["0019_wi_server_set_null"])
+        self.assertEqual(
+            scripts.get_revision("0019_wi_server_set_null").down_revision,
+            "0018_simplify_wi_traffic",
+        )
+        self.assertEqual(
+            scripts.get_revision("0018_simplify_wi_traffic").down_revision,
+            "0017_white_internet_durations",
+        )
+        self.assertEqual(
+            scripts.get_revision("0017_white_internet_durations").down_revision,
+            "0016_white_internet",
+        )
+        self.assertEqual(
+            scripts.get_revision("0016_white_internet").down_revision,
+            "0015_auto_fulfill_retry_idx",
+        )
         self.assertEqual(
             scripts.get_revision("0015_auto_fulfill_retry_idx").down_revision,
             "0014_drop_sub_token",
