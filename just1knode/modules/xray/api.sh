@@ -97,12 +97,16 @@ EOF
     chown -R xrayapi:xrayapi "${XRAY_API_LIB}" 2>/dev/null || true
     chmod 750 "${XRAY_API_LIB}"
 
+    # Права на чтение конфигурации Xray для пользователя xrayapi
+    chmod 755 /usr/local/etc/xray 2>/dev/null || true
+    chmod 644 /usr/local/etc/xray/config.json 2>/dev/null || true
+
     # Права на каталог состояния для пользователя xrayapi
     chown -R root:xrayapi "${STATE_DIR}" 2>/dev/null || true
-    chmod 770 "${STATE_DIR}"
-    [[ -f "${CLIENTS_FILE}" ]] && { chown root:xrayapi "${CLIENTS_FILE}" 2>/dev/null || true; chmod 660 "${CLIENTS_FILE}"; }
-    [[ -f "${RELAYS_FILE}" ]] && { chown root:xrayapi "${RELAYS_FILE}" 2>/dev/null || true; chmod 640 "${RELAYS_FILE}"; }
-    [[ -f "${STATE_FILE}" ]] && { chown root:xrayapi "${STATE_FILE}" 2>/dev/null || true; chmod 640 "${STATE_FILE}"; }
+    chmod 775 "${STATE_DIR}"
+    [[ -f "${CLIENTS_FILE}" ]] && { chown root:xrayapi "${CLIENTS_FILE}" 2>/dev/null || true; chmod 664 "${CLIENTS_FILE}"; }
+    [[ -f "${RELAYS_FILE}" ]] && { chown root:xrayapi "${RELAYS_FILE}" 2>/dev/null || true; chmod 644 "${RELAYS_FILE}"; }
+    [[ -f "${STATE_FILE}" ]] && { chown root:xrayapi "${STATE_FILE}" 2>/dev/null || true; chmod 644 "${STATE_FILE}"; }
 
     cat > "${SYSTEMD_SYSTEM_DIR}/xray-api.service" <<EOF
 [Unit]
