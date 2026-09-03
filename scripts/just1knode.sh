@@ -12,10 +12,20 @@ if [[ -n "$SCRIPT_SOURCE" && "$SCRIPT_SOURCE" != "bash" && "$SCRIPT_SOURCE" != "
 fi
 
 TARGET=""
-if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../just1knode/just1knode.sh" ]]; then
-    TARGET="${SCRIPT_DIR}/../just1knode/just1knode.sh"
-elif [[ -f "/opt/just1knode/just1knode.sh" ]]; then
-    TARGET="/opt/just1knode/just1knode.sh"
+current_real="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")"
+
+if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../just1knode/just1knode.sh" && -f "${SCRIPT_DIR}/../just1knode/lib/common.sh" ]]; then
+    cand="$(readlink -f "${SCRIPT_DIR}/../just1knode/just1knode.sh" 2>/dev/null || echo "${SCRIPT_DIR}/../just1knode/just1knode.sh")"
+    if [[ "$cand" != "$current_real" ]]; then
+        TARGET="$cand"
+    fi
+fi
+
+if [[ -z "$TARGET" && -f "/opt/just1knode/just1knode.sh" && -f "/opt/just1knode/lib/common.sh" ]]; then
+    cand="$(readlink -f "/opt/just1knode/just1knode.sh" 2>/dev/null || echo "/opt/just1knode/just1knode.sh")"
+    if [[ "$cand" != "$current_real" ]]; then
+        TARGET="$cand"
+    fi
 fi
 
 if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
@@ -32,6 +42,8 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
     tmp_extract="/tmp/just1knode_extract_$$"
     rm -rf "$tmp_tar" "$tmp_extract"
     mkdir -p "$tmp_extract"
+    echo -e "\033[0;36m[i]\033[0m Модули just1knode не обнаружены в /opt/just1knode."
+    echo -e "\033[0;36m[i]\033[0m Загрузка и распаковка компонентов с GitHub (${JUST1KBOT_REF})..."
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$archive_url" -o "$tmp_tar"
     elif command -v wget >/dev/null 2>&1; then
