@@ -352,7 +352,6 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         ]
 
         allowed_files = {
-            (root / "services" / "incy_crypto.py").resolve(),
             (root / "config" / "constants.py").resolve(),
         }
 

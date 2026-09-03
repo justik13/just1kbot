@@ -142,9 +142,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0018_simplify_wi_traffic"])
-        rev = scripts.get_revision("0018_simplify_wi_traffic")
-        self.assertEqual(rev.down_revision, "0017_white_internet_durations")
+        self.assertEqual(heads, ["0019_wi_server_set_null"])
+        rev = scripts.get_revision("0019_wi_server_set_null")
+        self.assertEqual(rev.down_revision, "0018_simplify_wi_traffic")
 
     def test_migration_0017_source_content(self):
         m17_path = Path("alembic/versions/0017_white_internet_durations.py")

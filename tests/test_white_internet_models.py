@@ -16,15 +16,18 @@ from database.models import (
 
 
 class WhiteInternetModelsTests(unittest.TestCase):
-    def test_alembic_migration_0018_revision_chain(self):
+    def test_alembic_migration_0019_revision_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+        rev_0019 = scripts.get_revision("0019_wi_server_set_null")
+        self.assertIsNotNone(rev_0019)
+        self.assertEqual(rev_0019.down_revision, "0018_simplify_wi_traffic")
         rev_0018 = scripts.get_revision("0018_simplify_wi_traffic")
         self.assertIsNotNone(rev_0018)
         self.assertEqual(rev_0018.down_revision, "0017_white_internet_durations")
         rev_0017 = scripts.get_revision("0017_white_internet_durations")
         self.assertIsNotNone(rev_0017)
         self.assertEqual(rev_0017.down_revision, "0016_white_internet")
-        self.assertEqual(scripts.get_heads(), ["0018_simplify_wi_traffic"])
+        self.assertEqual(scripts.get_heads(), ["0019_wi_server_set_null"])
 
     def test_server_lifecycle_status_field_and_constraints(self):
         self.assertEqual(ServerLifecycleStatus.ACTIVE, "ACTIVE")
@@ -180,7 +183,8 @@ class WhiteInternetModelsTests(unittest.TestCase):
         fk_user = next(fk for fk in table.foreign_keys if fk.column.table.name == "users")
         self.assertEqual(fk_user.ondelete, "CASCADE")
         fk_server = next(fk for fk in table.foreign_keys if fk.column.table.name == "servers")
-        self.assertEqual(fk_server.ondelete, "RESTRICT")
+        self.assertEqual(fk_server.ondelete, "SET NULL")
+        self.assertTrue(table.columns["origin_node_id"].nullable)
 
         # Constraints
         constraint_names = {c.name for c in table.constraints if c.name}

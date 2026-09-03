@@ -79,39 +79,44 @@ class WhiteInternetReconciliationWorker:
                 expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
 
         async with self._get_sub_lock(sub_id):
-            async with self._semaphore:
-                resp = await self.client.sync_client(
-                    api_url,
-                    api_key,
-                    sub_uuid,
-                    is_active=desired_active,
-                    version=target_version,
-                    expected_node_epoch=target_epoch,
-                    idempotency_key=f"reconcile:{sub_id}:{target_version}:{desired_active}",
-                )
-
-            sync_result = resp.result if hasattr(resp, "result") else resp[0]
-            err_msg = resp.error if hasattr(resp, "error") else resp[1]
-            verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
-            verified_inbounds = getattr(resp, "verified_inbounds", None) or []
-
-            # Persist result in short transaction under lock
+            # 1. Distributed lock BEFORE mutation (Rule 9.4 Lock-Before-Mutation)
+            is_pg = False
             async with sf() as sess:
-                # PostgreSQL distributed transaction-level advisory lock per subscription ID
                 bind = getattr(sess, "bind", None)
                 if not bind and hasattr(sess, "sync_session"):
                     bind = getattr(sess.sync_session, "bind", None)
                 if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
+                    is_pg = True
                     locked = await sess.scalar(
-                        select(func.pg_try_advisory_xact_lock(sub_id + 7_000_000_000))
+                        select(func.pg_try_advisory_lock(sub_id + 7_000_000_000))
                     )
-                    if locked is False:
+                    if not locked:
                         logger.debug("Subscription %d locked by peer worker process. Skipping.", sub_id)
                         return False
 
-                sub = await white_internet_repo.get_subscription_with_lock(sess, sub_id)
-                if sub is None:
-                    return False
+            try:
+                # 2. External network mutation on Xray node
+                async with self._semaphore:
+                    resp = await self.client.sync_client(
+                        api_url,
+                        api_key,
+                        sub_uuid,
+                        is_active=desired_active,
+                        version=target_version,
+                        expected_node_epoch=target_epoch,
+                        idempotency_key=f"reconcile:{sub_id}:{target_version}:{desired_active}",
+                    )
+
+                sync_result = resp.result if hasattr(resp, "result") else resp[0]
+                err_msg = resp.error if hasattr(resp, "error") else resp[1]
+                verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
+                verified_inbounds = getattr(resp, "verified_inbounds", None) or []
+
+                # 3. Persist result in short transaction under row lock
+                async with sf() as sess:
+                    sub = await white_internet_repo.get_subscription_with_lock(sess, sub_id)
+                    if sub is None:
+                        return False
 
                 if sync_result == SyncResult.APPLIED and sub.desired_version == target_version:
                     # Postcondition verification: check all required inbounds were verified
@@ -220,6 +225,13 @@ class WhiteInternetReconciliationWorker:
                         target_version,
                     )
                     return False
+            finally:
+                if is_pg:
+                    async with sf() as sess:
+                        try:
+                            await sess.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
+                        except Exception as exc:
+                            logger.debug("Error releasing advisory lock for sub_id %d: %s", sub_id, exc)
 
     async def run_reconciliation_cycle(self, session: AsyncSession | None = None) -> int:
         now = now_utc()

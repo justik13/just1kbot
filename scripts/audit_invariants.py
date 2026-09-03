@@ -416,15 +416,15 @@ def _inspect_alembic_head() -> list[str]:
 
 
 async def assert_inv_15_alembic_single_head(session: AsyncSession | None = None) -> InvariantResult:
-    """Inv 15: Alembic migration graph has exactly one head at '0018_simplify_wi_traffic'."""
+    """Inv 15: Alembic migration graph has exactly one head at '0019_wi_server_set_null'."""
     try:
         heads = await asyncio.to_thread(_inspect_alembic_head)
-        if len(heads) != 1 or heads[0] != "0018_simplify_wi_traffic":
+        if len(heads) != 1 or heads[0] != "0019_wi_server_set_null":
             return InvariantResult(
                 15,
                 "Alembic Single Head Invariant",
                 False,
-                f"Expected ['0018_simplify_wi_traffic'], got {heads}",
+                f"Expected ['0019_wi_server_set_null'], got {heads}",
             )
         return InvariantResult(
             15, "Alembic Single Head Invariant", True, f"Single head verified: {heads[0]}"

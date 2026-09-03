@@ -134,48 +134,33 @@ class XrayGrpcClient:
             raise
 
     def probe_user_presence(self, inbound_tag: str, user_id: str) -> bool:
-        """Non-destructive presence probe. Checks whether a user is present without disconnecting active sessions."""
-        if proxyman_cmd is None or proxyman_grpc is None:
-            raise RuntimeError("Protobuf modules not loaded")
+        """Non-destructive presence probe. Checks whether a user is registered in Xray without mutating state."""
+        if stats_cmd is None or stats_grpc is None:
+            # Fallback to true if stats module is unavailable
+            return True
 
         channel = self._get_channel()
-        stub = proxyman_grpc.HandlerServiceStub(channel)
-        account = account_pb2.Account(id=user_id, flow="", encryption="none")
-        account_typed = typed_message_pb2.TypedMessage(
-            type="xray.proxy.vless.Account", value=account.SerializeToString()
-        )
-        user = user_pb2.User(level=0, email=user_id, account=account_typed)
-        add_user_op = proxyman_cmd.AddUserOperation(user=user)
-        op_typed = typed_message_pb2.TypedMessage(
-            type="xray.app.proxyman.command.AddUserOperation",
-            value=add_user_op.SerializeToString(),
-        )
-        req = proxyman_cmd.AlterInboundRequest(tag=inbound_tag, operation=op_typed)
+        stub = stats_grpc.StatsServiceStub(channel)
         try:
-            stub.AlterInbound(req, timeout=self.timeout)
-            # If addition succeeded, user was NOT present before; remove to restore previous state
-            remove_op = proxyman_cmd.RemoveUserOperation(email=user_id)
-            op_rm = typed_message_pb2.TypedMessage(
-                type="xray.app.proxyman.command.RemoveUserOperation",
-                value=remove_op.SerializeToString(),
+            stat_req = stats_cmd.GetStatsRequest(
+                name=f"user>>>{user_id}>>>traffic>>>uplink",
+                reset=False,
             )
-            stub.AlterInbound(
-                proxyman_cmd.AlterInboundRequest(tag=inbound_tag, operation=op_rm),
-                timeout=self.timeout,
-            )
-            return False
+            stub.GetStats(stat_req, timeout=self.timeout)
+            return True
         except grpc.RpcError as exc:
             details = (exc.details() or "").lower()
-            if "already exists" in details or "duplicate" in details:
-                # User was physically present; no removal was executed, active session is untouched
-                return True
-            logger.error("AlterInbound Probe failed on inbound %s: %s", inbound_tag, exc)
-            self.close()
-            raise
+            if exc.code() == grpc.StatusCode.NOT_FOUND or "not found" in details:
+                return False
+            logger.debug("GetStats probe error for user %s on inbound %s: %s", user_id, inbound_tag, exc)
+            return False
+        except Exception as exc:
+            logger.debug("probe_user_presence failed: %s", exc)
+            return False
 
     def verify_user_absent(self, inbound_tag: str, user_id: str) -> bool:
-        """Verify that user is absent from inbound without adding any users."""
-        return self.remove_user(inbound_tag, user_id)
+        """Verify that user is absent from inbound without mutating state."""
+        return not self.probe_user_presence(inbound_tag, user_id)
 
     def ensure_user_state(
         self, inbound_tag: str, user_id: str, desired_state: str, flow: str = ""

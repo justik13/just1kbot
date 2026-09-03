@@ -1366,10 +1366,10 @@ class WhiteInternetSubscription(Base):
         nullable=False,
         index=True,
     )
-    origin_node_id: Mapped[int] = mapped_column(
+    origin_node_id: Mapped[int | None] = mapped_column(
         Integer,
-        ForeignKey("servers.id", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey("servers.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
 

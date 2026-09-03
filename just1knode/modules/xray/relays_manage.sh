@@ -172,7 +172,7 @@ else:
     stream_settings['tlsSettings'] = {
         'serverName': r_sni,
         'fingerprint': 'chrome',
-        'alpn': ['h2', 'http/1.1']
+        'alpn': ['http/1.1']
     }
 
 new_ob = {

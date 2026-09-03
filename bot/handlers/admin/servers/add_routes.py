@@ -269,16 +269,25 @@ async def process_add_server(
                 api_server_name,
             )
 
+            msg_text = texts.ADMIN_SERVER_ADDED.format(
+                flag=all_data["country_flag"],
+                name=safe(api_server_name),
+                protocol=texts.PROTOCOL_XRAY_ORIGIN,
+                max_clients=api_max_peers,
+                api_url=safe(all_data["api_url"]),
+            )
+            relays = (server.extra_data or {}).get("relays", [])
+            if not relays:
+                msg_text += (
+                    "\n\n⚠️ <b>Внимание:</b> на сервере нет подключенных Relay!\n"
+                    "Шлюз переведен в режим ожидания и <b>не будет выдавать подписки</b>, "
+                    "пока вы не привяжете хотя бы один Relay через <code>just1knode relay add</code>."
+                )
+
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.ADMIN_SERVER_ADDED.format(
-                    flag=all_data["country_flag"],
-                    name=safe(api_server_name),
-                    protocol=texts.PROTOCOL_XRAY_ORIGIN,
-                    max_clients=api_max_peers,
-                    api_url=safe(all_data["api_url"]),
-                ),
+                msg_text,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )

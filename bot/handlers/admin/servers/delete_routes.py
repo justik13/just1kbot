@@ -4,7 +4,7 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -12,6 +12,7 @@ from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
+from config.enums import WhiteInternetStatus
 from database.models import (
     APIOperation,
     Server,
@@ -99,7 +100,12 @@ async def request_delete_server(
 
     wl_subs_count = await session.scalar(
         select(func.count(WhiteInternetSubscription.id)).where(
-            WhiteInternetSubscription.origin_node_id == server.id
+            WhiteInternetSubscription.origin_node_id == server.id,
+            WhiteInternetSubscription.status.in_([
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.EXHAUSTED,
+            ]),
         )
     ) or 0
 
@@ -190,23 +196,28 @@ async def confirm_delete_server(
         for op in operations
     )
 
-    wl_subs = list((await session.execute(
+    active_wl_subs = list((await session.execute(
         select(WhiteInternetSubscription).where(
             WhiteInternetSubscription.origin_node_id == server.id,
+            WhiteInternetSubscription.status.in_([
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.EXHAUSTED,
+            ]),
         ).with_for_update()
     )).scalars().all())
 
-    if wl_subs:
+    if active_wl_subs:
         await session.rollback()
         await callback.answer(
-            texts.ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_ALERT.format(count=len(wl_subs)),
+            texts.ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_ALERT.format(count=len(active_wl_subs)),
             show_alert=True,
         )
         try:
             await callback.message.edit_text(
                 texts.ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_TEXT.format(
                     name=safe(server_name),
-                    count=len(wl_subs),
+                    count=len(active_wl_subs),
                 ),
                 reply_markup=get_back_button(f"admin_server_card:{server.id}"),
                 parse_mode="HTML",
@@ -253,6 +264,12 @@ async def confirm_delete_server(
     deleted_profiles = await delete_profiles_by_server_id(
         session,
         server_id,
+    )
+
+    await session.execute(
+        update(WhiteInternetSubscription)
+        .where(WhiteInternetSubscription.origin_node_id == server_id)
+        .values(origin_node_id=None)
     )
 
     await delete_server(session, server)
