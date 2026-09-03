@@ -156,9 +156,40 @@ check_apt_locked() {
             return 0
         fi
     fi
-    if command -v pgrep >/dev/null 2>&1; then
-        if pgrep -f '(apt-get|dpkg|unattended-upgrade|apt\.systemd\.daily)' >/dev/null 2>&1; then
+    if command -v python3 >/dev/null 2>&1; then
+        if python3 -c '
+import fcntl, os, sys
+for path in sys.argv[1:]:
+    if os.path.exists(path):
+        try:
+            fd = os.open(path, os.O_RDWR)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+        except (BlockingIOError, OSError):
+            sys.exit(0)
+sys.exit(1)
+' "${lock_files[@]}" >/dev/null 2>&1; then
             return 0
+        fi
+    fi
+    if command -v pgrep >/dev/null 2>&1; then
+        local pids
+        pids="$(pgrep -f '(apt-get|dpkg|apt\.systemd\.daily)' 2>/dev/null || true)"
+        if [[ -n "$pids" ]]; then
+            return 0
+        fi
+        pids="$(pgrep -f 'unattended-upgrade' 2>/dev/null || true)"
+        if [[ -n "$pids" ]]; then
+            for pid in $pids; do
+                local cmdline
+                cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+                if [[ "$cmdline" != *"unattended-upgrade-shutdown"* && -n "$cmdline" ]]; then
+                    return 0
+                fi
+            done
         fi
     fi
     return 1
