@@ -262,6 +262,24 @@ exit 0
         with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
             self.assertEqual(json.load(f), relays_data)
 
+    def test_rename_relay_node(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.env", "w", encoding="utf-8") as f:
+            f.write("role=origin\n")
+
+        relays_data = [{"name": "Германия", "code": "de", "ip": "1.2.3.4", "port": 10443}]
+        with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
+            json.dump(relays_data, f, ensure_ascii=False)
+
+        cmd = 'rename_relay_node "de" "Финляндия"'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"rename_relay_node failed: {res.stderr + res.stdout}")
+
+        with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
+            updated = json.load(f)
+        self.assertEqual(updated[0]["name"], "Финляндия")
+        self.assertEqual(updated[0]["code"], "de")
+
     # -------------------------------------------------------------------------
     # F04: Zero-Collateral Preservation of Custom Outbounds
     # -------------------------------------------------------------------------

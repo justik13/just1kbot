@@ -98,18 +98,40 @@ install_xray_relay_node() {
   "outbounds": [
     {
       "tag": "direct",
-      "protocol": "freedom"
+      "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "UseIPv4"
+      }
     },
     {
       "tag": "block",
       "protocol": "blackhole"
     }
-  ]
+  ],
+  "dns": {
+    "servers": [
+      "1.1.1.1",
+      "1.0.0.1",
+      "8.8.8.8",
+      "localhost"
+    ],
+    "queryStrategy": "UseIPv4"
+  }
 }
 EOF
 
     chown root:root "$XRAY_CONFIG"
     chmod 640 "$XRAY_CONFIG"
+
+    if [[ $EUID -eq 0 ]]; then
+        mkdir -p /etc/sysctl.d 2>/dev/null || true
+        cat > /etc/sysctl.d/99-disable-ipv6.conf <<EOF 2>/dev/null || true
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+EOF
+        sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+    fi
 
     deploy_xray_systemd_service
     systemctl restart xray

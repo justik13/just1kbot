@@ -222,6 +222,15 @@ if not default_rule_found:
 
 cfg['routing']['rules'] = rules
 
+for ob in cfg.get('outbounds', []):
+    if ob.get('tag') == 'just1k-wl-direct' or ob.get('protocol') == 'freedom':
+        ob.setdefault('settings', {})['domainStrategy'] = 'UseIPv4'
+
+dns_conf = dict(cfg.get('dns', {}))
+dns_conf['servers'] = ['1.1.1.1', '1.0.0.1', '8.8.8.8', 'localhost']
+dns_conf['queryStrategy'] = 'UseIPv4'
+cfg['dns'] = dns_conf
+
 with open(cfg_file, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
 " "$XRAY_CONFIG" "$code" "$relay_inbound_tag" "$relay_outbound_tag" "$relay_inbound_path" "$next_port" "$ip" "$port" "$uuid" "$security_type" "$pubkey" "$shortid" "$sni"; then
@@ -286,7 +295,7 @@ relays.append({
     'sni': '$sni'
 })
 with open(rf, 'w', encoding='utf-8') as f:
-    json.dump(relays, f, indent=2)
+    json.dump(relays, f, ensure_ascii=False, indent=2)
 "
 
     systemctl reload nginx
@@ -400,6 +409,55 @@ with open(rf, 'w') as f: json.dump(relays, f, indent=2)
     manifest_commit
 
     log "Relay '${target}' (код: ${code}) успешно удален."
+}
+
+rename_relay_node() {
+    local target="$1"
+    local new_name="$2"
+    if [[ -z "$target" || -z "$new_name" ]]; then
+        error "Использование: just1knode relay rename <код_или_текущее_имя> <новое_название>"
+    fi
+
+    local role
+    role="$(get_state_val "role")"
+    if [[ "$role" != "origin" ]]; then
+        error "Переименование Relay-узлов доступно ТОЛЬКО на Origin-сервере."
+    fi
+
+    init_state_dir
+    local updated
+    updated=$(python3 -c "
+import json, os, sys
+rf = '$RELAYS_FILE'
+target = sys.argv[1].lower()
+new_name = sys.argv[2]
+found = False
+if os.path.exists(rf):
+    try:
+        with open(rf, 'r', encoding='utf-8') as f:
+            relays = json.load(f)
+        for r in relays:
+            if r.get('code', '').lower() == target or r.get('name', '').lower() == target:
+                r['name'] = new_name
+                found = True
+                break
+        if found:
+            with open(rf, 'w', encoding='utf-8') as f:
+                json.dump(relays, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        sys.stderr.write(str(e))
+print('true' if found else 'false')
+" "$target" "$new_name")
+
+    if [[ "$updated" != "true" ]]; then
+        error "Релей '$target' не найден в $RELAYS_FILE."
+    fi
+
+    if systemctl is-active --quiet xray-api; then
+        systemctl restart xray-api
+    fi
+
+    log "Релей '$target' успешно переименован в '$new_name'."
 }
 
 manage_relays_menu() {

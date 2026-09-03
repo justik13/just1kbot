@@ -240,6 +240,16 @@ with open(config_file, 'w', encoding='utf-8') as f:
     chown root:xrayapi "$XRAY_CONFIG" 2>/dev/null || true
     chmod 640 "$XRAY_CONFIG"
 
+    if [[ $EUID -eq 0 ]]; then
+        mkdir -p /etc/sysctl.d 2>/dev/null || true
+        cat > /etc/sysctl.d/99-disable-ipv6.conf <<EOF 2>/dev/null || true
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+EOF
+        sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+    fi
+
     deploy_xray_systemd_service
     systemctl restart xray
 
