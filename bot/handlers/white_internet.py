@@ -20,7 +20,7 @@ from config.constants import (
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_TOPUP_PACKS,
 )
-from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+from config.enums import WhiteInternetStatus
 from config.settings import get_settings
 from database.models import Server, WhiteInternetSubscription
 from database.repositories import white_internet_repo
