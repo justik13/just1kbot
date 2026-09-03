@@ -557,24 +557,45 @@ async def sync_client(req: ClientSyncRequest, _: bool = Depends(verify_api_key))
 
             # Idempotent retry: exact same version and same desired_state already applied!
             if curr_ver is not None and req.version == curr_ver and curr_state == desired_state:
+                inbounds_healthy = True
+                for tag in target_inbounds:
+                    try:
+                        if desired_state == "active":
+                            if not grpc_client.probe_user_presence(tag, client_uuid):
+                                inbounds_healthy = False
+                                break
+                        else:
+                            if not grpc_client.verify_user_absent(tag, client_uuid):
+                                inbounds_healthy = False
+                                break
+                    except Exception:
+                        inbounds_healthy = False
+                        break
+
+                if inbounds_healthy:
+                    logger.info(
+                        "Idempotent retry for %s: version %d already in desired_state %s across all inbounds",
+                        _mask_uuid(client_uuid),
+                        req.version,
+                        desired_state,
+                    )
+                    return {
+                        "status": "ok",
+                        "client_id": client_uuid,
+                        "result": "applied",
+                        "state": curr_state,
+                        "version": curr_ver,
+                        "verified_epoch": epoch_before,
+                        "verified_inbounds": target_inbounds,
+                        "all_inbounds_verified": True,
+                        "idempotent": True,
+                        "inbounds": target_inbounds,
+                    }
                 logger.info(
-                    "Idempotent retry for %s: version %d already in desired_state %s",
+                    "Idempotent retry for %s detected missing inbounds in Xray RAM. Re-applying to %s.",
                     _mask_uuid(client_uuid),
-                    req.version,
-                    desired_state,
+                    target_inbounds,
                 )
-                return {
-                    "status": "ok",
-                    "client_id": client_uuid,
-                    "result": "applied",
-                    "state": curr_state,
-                    "version": curr_ver,
-                    "verified_epoch": epoch_before,
-                    "verified_inbounds": target_inbounds,
-                    "all_inbounds_verified": True,
-                    "idempotent": True,
-                    "inbounds": target_inbounds,
-                }
 
             if curr_ver is not None and (
                 req.version < curr_ver or (is_tombstone and req.version <= curr_ver)

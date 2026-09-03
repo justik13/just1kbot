@@ -327,6 +327,9 @@ with open(rf, 'w', encoding='utf-8') as f:
         manifest_rollback
         error "Xray не запустился после добавления релея $name ($code). Выполнен полный откат."
     fi
+    if systemctl is-active --quiet xray-api; then
+        systemctl restart xray-api || true
+    fi
     manifest_commit
 
     log "Relay '${name}' (код: ${code}) успешно добавлен и подключен к шлюзу Origin!"
@@ -441,6 +444,9 @@ with open(rf, 'w') as f: json.dump(relays, f, indent=2)
         manifest_rollback
         error "Xray не запустился после удаления релея $target. Выполнен полный откат."
     fi
+    if systemctl is-active --quiet xray-api; then
+        systemctl restart xray-api || true
+    fi
     manifest_commit
 
     log "Relay '${target}' (код: ${code}) успешно удален."
@@ -479,13 +485,15 @@ if os.path.exists(rf):
         if found:
             with open(rf, 'w', encoding='utf-8') as f:
                 json.dump(relays, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        sys.stderr.write(str(e))
-print('true' if found else 'false')
+            print('ok')
+    except:
+        pass
+if not found:
+    print('not_found')
 " "$target" "$new_name")
 
-    if [[ "$updated" != "true" ]]; then
-        error "Релей '$target' не найден в $RELAYS_FILE."
+    if [[ "$updated" != "ok" ]]; then
+        error "Relay с кодом или именем '$target' не найден."
     fi
 
     if systemctl is-active --quiet xray-api; then
@@ -508,10 +516,11 @@ manage_relays_menu() {
 
     echo -e "  ${BOLD}[1]${NC} ➕ Добавить новый Relay-узел"
     echo -e "  ${BOLD}[2]${NC} ➖ Удалить Relay-узел"
-    echo -e "  ${BOLD}[3]${NC} 📋 Список активных Relay-узлов"
+    echo -e "  ${BOLD}[3]${NC} ✏️  Переименовать Relay-узел"
+    echo -e "  ${BOLD}[4]${NC} 📋 Список активных Relay-узлов"
     echo -e "  ${BOLD}[0]${NC} ⬅️  Назад"
     echo ""
-    read -rp "Выберите действие [0-3]: " r_choice
+    read -rp "Выберите действие [0-4]: " r_choice
 
     case "$r_choice" in
         1)
@@ -551,6 +560,11 @@ manage_relays_menu() {
             remove_relay_node "$r_del"
             ;;
         3)
+            read -rp "Введите код страны или текущее имя Relay: " r_target
+            read -rp "Введите новое название (например: Германия): " r_new_name
+            rename_relay_node "$r_target" "$r_new_name"
+            ;;
+        4)
             list_relays
             ;;
         0)
