@@ -503,6 +503,21 @@ if not found:
     log "Релей '$target' успешно переименован в '$new_name'."
 }
 
+get_relays_tsv() {
+    python3 -c "
+import json, os
+rf = '$RELAYS_FILE'
+if os.path.exists(rf):
+    try:
+        with open(rf, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        for i, r in enumerate(data, 1):
+            print(f\"{i}\t{r.get('code','')}\t{r.get('name','')}\t{r.get('ip','')}\")
+    except:
+        pass
+"
+}
+
 manage_relays_menu() {
     title "УПРАВЛЕНИЕ RELAY-НОДАМИ НА ORIGIN"
     check_root
@@ -524,45 +539,133 @@ manage_relays_menu() {
 
     case "$r_choice" in
         1)
-            read -rp "Название локации (например: Германия): " r_name
-            read -rp "IP или Домен Relay сервера: " r_ip
-            read -rp "Порт Relay сервера [по умолчанию: 10443]: " r_port
-            r_port="${r_port:-10443}"
-            read -rp "UUID туннеля Relay: " r_uuid
-            read -rp "Код страны (например: de, nl, se) [по умолчанию: de]: " r_code
-            r_code="${r_code:-de}"
-            echo -e "Тип безопасности моста:"
-            echo -e "  [1] REALITY (Бессертификатный x25519 по IP, рекомендуемый)"
-            echo -e "  [2] TLS (Доменный сертификат Let's Encrypt)"
-            read -rp "Выберите тип [1/2, по умолчанию 1]: " t_choice
-            t_choice="${t_choice:-1}"
-            local r_sec="reality"
-            local r_pubkey=""
-            local r_shortid=""
-            local r_sni="www.google.com"
-            if [[ "$t_choice" == "1" ]]; then
-                r_sec="reality"
-                read -rp "REALITY Public Key: " r_pubkey
-                read -rp "REALITY Short ID: " r_shortid
-                read -rp "REALITY SNI [по умолчанию: www.google.com]: " r_sni_in
-                r_sni="${r_sni_in:-www.google.com}"
-            else
-                r_sec="tls"
-                read -rp "TLS Домен / SNI: " r_sni_in
-                if [[ -z "$r_sni_in" ]]; then error "Домен SNI обязателен для TLS."; fi
-                r_sni="$r_sni_in"
+            echo -e "\n${BOLD}=== СПОСОБ ДОБАВЛЕНИЯ RELAY-УЗЛА ===${NC}\n"
+            echo -e "  ${BOLD}[1]${NC} 📋 Вставить готовую строку 'just1knode relay add ...' (в 1 клик)"
+            echo -e "  ${BOLD}[2]${NC} ✍️  Заполнить параметры вручную по шагам"
+            echo -e "  ${BOLD}[0]${NC} ⬅️  Отмена\n"
+            read -rp "Выберите способ [0-2]: " add_mode
+            if [[ "$add_mode" == "1" ]]; then
+                echo -e "\nВставьте команду, которую выдал Relay-сервер при установке:"
+                read -rp "> " paste_cmd
+                if [[ -n "$paste_cmd" ]]; then
+                    local eval_args
+                    eval_args=$(python3 -c "
+import shlex, sys, json
+cmd = sys.argv[1].strip()
+try:
+    tokens = shlex.split(cmd)
+    while tokens and (tokens[0].endswith('just1knode') or tokens[0] in ('sudo', 'relay', 'add')):
+        tokens = tokens[1:]
+    if len(tokens) >= 5:
+        name, ip, port, uuid, code = tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]
+        sec = tokens[5] if len(tokens) > 5 else 'reality'
+        pk = tokens[6] if len(tokens) > 6 else ''
+        sid = tokens[7] if len(tokens) > 7 else ''
+        sni = tokens[8] if len(tokens) > 8 else 'www.google.com'
+        print(' '.join(shlex.quote(x) for x in [name, ip, port, uuid, code, sec, pk, sid, sni]))
+    else:
+        sys.exit(1)
+except Exception:
+    sys.exit(1)
+" "$paste_cmd" 2>/dev/null || true)
+                    if [[ -n "$eval_args" ]]; then
+                        eval "add_relay_node $eval_args"
+                    else
+                        error "Не удалось распознать аргументы команды. Проверьте формат строки."
+                    fi
+                fi
+            elif [[ "$add_mode" == "2" ]]; then
+                read -rp "Название локации (например: Германия): " r_name
+                read -rp "IP или Домен Relay сервера: " r_ip
+                read -rp "Порт Relay сервера [по умолчанию: 10443]: " r_port
+                r_port="${r_port:-10443}"
+                read -rp "UUID туннеля Relay: " r_uuid
+                read -rp "Код страны (например: de, nl, se) [по умолчанию: de]: " r_code
+                r_code="${r_code:-de}"
+                echo -e "Тип безопасности моста:"
+                echo -e "  [1] REALITY (Бессертификатный x25519 по IP, рекомендуемый)"
+                echo -e "  [2] TLS (Доменный сертификат Let's Encrypt)"
+                read -rp "Выберите тип [1/2, по умолчанию 1]: " t_choice
+                t_choice="${t_choice:-1}"
+                local r_sec="reality"
+                local r_pubkey=""
+                local r_shortid=""
+                local r_sni="www.google.com"
+                if [[ "$t_choice" == "1" ]]; then
+                    r_sec="reality"
+                    read -rp "REALITY Public Key: " r_pubkey
+                    read -rp "REALITY Short ID: " r_shortid
+                    read -rp "REALITY SNI [по умолчанию: www.google.com]: " r_sni_in
+                    r_sni="${r_sni_in:-www.google.com}"
+                else
+                    r_sec="tls"
+                    read -rp "TLS Домен / SNI: " r_sni_in
+                    if [[ -z "$r_sni_in" ]]; then error "Домен SNI обязателен для TLS."; fi
+                    r_sni="$r_sni_in"
+                fi
+                add_relay_node "$r_name" "$r_ip" "$r_port" "$r_uuid" "$r_code" "$r_sec" "$r_pubkey" "$r_shortid" "$r_sni"
             fi
-
-            add_relay_node "$r_name" "$r_ip" "$r_port" "$r_uuid" "$r_code" "$r_sec" "$r_pubkey" "$r_shortid" "$r_sni"
             ;;
         2)
-            read -rp "Введите код страны или имя Relay для удаления: " r_del
-            remove_relay_node "$r_del"
+            local list_output
+            list_output="$(get_relays_tsv)"
+            if [[ -z "$list_output" ]]; then
+                warn "Список Relay-узлов пуст."
+                return
+            fi
+            echo -e "\n${BOLD}=== ВЫБЕРИТЕ RELAY ДЛЯ УДАЛЕНИЯ ===${NC}\n"
+            local codes=()
+            local names=()
+            local count=0
+            while IFS=$'\t' read -r num code name ip; do
+                count=$((count + 1))
+                codes+=("$code")
+                names+=("$name")
+                echo -e "  ${BOLD}[$count]${NC} $name (код: ${CYAN}$code${NC}, IP: $ip)"
+            done <<< "$list_output"
+            echo -e "  ${BOLD}[0]${NC} ⬅️  Отмена\n"
+            read -rp "Выберите номер релея для удаления [0-$count]: " r_num
+            if [[ "$r_num" =~ ^[1-9][0-9]*$ ]] && (( r_num >= 1 && r_num <= count )); then
+                local sel_code="${codes[$((r_num - 1))]}"
+                local sel_name="${names[$((r_num - 1))]}"
+                read -rp "Вы уверены, что хотите удалить Relay '$sel_name' ($sel_code)? [y/N]: " confirm_del
+                if [[ "$confirm_del" =~ ^[YyДд]$ ]]; then
+                    remove_relay_node "$sel_code"
+                else
+                    log "Удаление отменено."
+                fi
+            fi
             ;;
         3)
-            read -rp "Введите код страны или текущее имя Relay: " r_target
-            read -rp "Введите новое название (например: Германия): " r_new_name
-            rename_relay_node "$r_target" "$r_new_name"
+            local list_output
+            list_output="$(get_relays_tsv)"
+            if [[ -z "$list_output" ]]; then
+                warn "Список Relay-узлов пуст."
+                return
+            fi
+            echo -e "\n${BOLD}=== ВЫБЕРИТЕ RELAY ДЛЯ ПЕРЕИМЕНОВАНИЯ ===${NC}\n"
+            local codes=()
+            local names=()
+            local count=0
+            while IFS=$'\t' read -r num code name ip; do
+                count=$((count + 1))
+                codes+=("$code")
+                names+=("$name")
+                echo -e "  ${BOLD}[$count]${NC} $name (код: ${CYAN}$code${NC}, IP: $ip)"
+            done <<< "$list_output"
+            echo -e "  ${BOLD}[0]${NC} ⬅️  Отмена\n"
+            read -rp "Выберите номер релея [0-$count]: " r_num
+            if [[ "$r_num" =~ ^[1-9][0-9]*$ ]] && (( r_num >= 1 && r_num <= count )); then
+                local sel_code="${codes[$((r_num - 1))]}"
+                local sel_name="${names[$((r_num - 1))]}"
+                echo -e "Выбран узел: ${BOLD}$sel_name${NC} (код: $sel_code)"
+                read -rp "Введите новое название: " r_new_name
+                if [[ -n "$r_new_name" ]]; then
+                    rename_relay_node "$sel_code" "$r_new_name"
+                else
+                    warn "Название не может быть пустым."
+                fi
+            fi
             ;;
         4)
             list_relays
