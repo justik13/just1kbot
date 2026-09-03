@@ -139,7 +139,7 @@ new_ib = {
             'xPaddingPlacement': 'queryInHeader'
         }
     },
-    'sniffing': {'enabled': True, 'destOverride': ['tls', 'http']}
+    'sniffing': {'enabled': True, 'destOverride': ['tls', 'http'], 'routeOnly': False}
 }
 cfg['inbounds'].append(new_ib)
 
@@ -192,6 +192,8 @@ for r in rules:
         existing_ib = r.get('inboundTag', [])
         if isinstance(existing_ib, list) and in_tag not in existing_ib:
             r['inboundTag'] = existing_ib + [in_tag]
+        if 'domain' in r and 'domain:2ip.ru' not in r['domain']:
+            r['domain'].append('domain:2ip.ru')
 
 # Вставляем правило выхода на Relay СТРОГО ПОСЛЕ правил прямого выхода в Рунет
 direct_indices = [i for i, r in enumerate(rules) if r.get('outboundTag') == 'just1k-wl-direct']
@@ -227,7 +229,22 @@ for ob in cfg.get('outbounds', []):
         ob.setdefault('settings', {})['domainStrategy'] = 'UseIPv4'
 
 dns_conf = dict(cfg.get('dns', {}))
-dns_conf['servers'] = ['1.1.1.1', '1.0.0.1', '8.8.8.8', 'localhost']
+dns_conf['servers'] = [
+    {
+        'address': '77.88.8.8',
+        'port': 53,
+        'domains': [
+            'geosite:category-ru',
+            'geosite:tld-ru',
+            'domain:ru',
+            'domain:su',
+            'domain:xn--p1ai',
+            'domain:2ip.ru'
+        ]
+    },
+    '1.1.1.1',
+    'localhost'
+]
 dns_conf['queryStrategy'] = 'UseIPv4'
 cfg['dns'] = dns_conf
 

@@ -280,6 +280,60 @@ exit 0
         self.assertEqual(updated[0]["name"], "Финляндия")
         self.assertEqual(updated[0]["code"], "de")
 
+    def test_heal_and_update_origin_config(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.env", "w", encoding="utf-8") as f:
+            f.write("role=origin\n")
+
+        xray_config_file = self.xray_config_dir / "config.json"
+        with open(xray_config_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "inbounds": [
+                    {"tag": "just1k-wl-default", "port": 8003, "protocol": "vless"},
+                    {"tag": "just1k-wl-inbound-de", "port": 8004, "protocol": "vless"}
+                ],
+                "outbounds": [
+                    {"tag": "just1k-wl-direct", "protocol": "freedom", "settings": {"domainStrategy": "UseIP"}}
+                ],
+                "routing": {
+                    "rules": [
+                        {
+                            "type": "field",
+                            "inboundTag": ["just1k-wl-default"],
+                            "domain": ["domain:ru"],
+                            "outboundTag": "just1k-wl-direct"
+                        }
+                    ]
+                }
+            }, f)
+
+        cmd = 'heal_and_update_origin_config'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"heal_and_update_origin_config failed: {res.stderr + res.stdout}")
+
+        with open(xray_config_file, "r", encoding="utf-8") as f:
+            updated = json.load(f)
+
+        # 1. Check UseIPv4
+        direct_ob = next(ob for ob in updated["outbounds"] if ob["tag"] == "just1k-wl-direct")
+        self.assertEqual(direct_ob["settings"]["domainStrategy"], "UseIPv4")
+
+        # 2. Check direct routing rule updated with domain:2ip.ru and inbound-de
+        direct_rule = next(r for r in updated["routing"]["rules"] if r.get("outboundTag") == "just1k-wl-direct")
+        self.assertIn("domain:2ip.ru", direct_rule["domain"])
+        self.assertIn("just1k-wl-inbound-de", direct_rule["inboundTag"])
+
+        # 3. Check Split-DNS
+        self.assertEqual(updated["dns"]["queryStrategy"], "UseIPv4")
+        ru_server = updated["dns"]["servers"][0]
+        self.assertEqual(ru_server["address"], "77.88.8.8")
+        self.assertIn("domain:2ip.ru", ru_server["domains"])
+
+        # 4. Check sniffing routeOnly == False
+        for ib in updated["inbounds"]:
+            self.assertTrue(ib["sniffing"]["enabled"])
+            self.assertFalse(ib["sniffing"]["routeOnly"])
+
     # -------------------------------------------------------------------------
     # F04: Zero-Collateral Preservation of Custom Outbounds
     # -------------------------------------------------------------------------

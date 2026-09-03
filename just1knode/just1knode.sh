@@ -406,19 +406,21 @@ main_menu() {
             echo -e "  ${BOLD}[2]${NC} 📊 Статус узла и подключенные клиенты"
             echo -e "  ${BOLD}[3]${NC} 🩺 Комплексная самодиагностика (Doctor)"
             echo -e "  ${BOLD}[4]${NC} 🔑 Показать данные для Telegram-бота (/admin)"
-            echo -e "  ${BOLD}[5]${NC} 🔄 Обновление ядра Xray-core"
-            echo -e "  ${BOLD}[6]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[5]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[6]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[7]${NC} ⚠️ Сбросить / переустановить узел"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-6]: " choice
+            read -rp "Выберите действие [0-7]: " choice
 
             case "$choice" in
                 1) manage_relays_menu; read -rp "Нажмите Enter для продолжения...";;
                 2) show_status; read -rp "Нажмите Enter для продолжения...";;
                 3) run_doctor; read -rp "Нажмите Enter для продолжения...";;
                 4) show_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
-                5) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
-                6) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                5) update_node; read -rp "Нажмите Enter для продолжения...";;
+                6) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                7) reset_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -434,18 +436,20 @@ main_menu() {
             echo -e "  ${BOLD}[1]${NC} 📋 Показать данные подключения (команда для Origin)"
             echo -e "  ${BOLD}[2]${NC} 📊 Статус туннеля и сетевой трафик"
             echo -e "  ${BOLD}[3]${NC} 🩺 Комплексная самодиагностика (Doctor)"
-            echo -e "  ${BOLD}[4]${NC} 🔄 Обновление ядра Xray-core"
-            echo -e "  ${BOLD}[5]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[4]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[5]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[6]${NC} ⚠️ Сбросить / переустановить узел"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-5]: " choice
+            read -rp "Выберите действие [0-6]: " choice
 
             case "$choice" in
                 1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
                 2) show_status; read -rp "Нажмите Enter для продолжения...";;
                 3) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                4) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
-                5) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                4) update_node; read -rp "Нажмите Enter для продолжения...";;
+                5) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                6) reset_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -478,7 +482,22 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 ;;
             status) show_status ;;
             doctor|test) run_doctor ;;
-            update) update_xray_core ;;
+            update)
+                case "${2:-}" in
+                    core|xray) update_xray_core ;;
+                    config|heal)
+                        role="$(get_state_val "role")"
+                        if [[ "$role" == "origin" ]]; then
+                            heal_and_update_origin_config
+                        elif [[ "$role" == "relay" ]]; then
+                            heal_and_update_relay_config
+                        else
+                            error "Узел не настроен."
+                        fi
+                        ;;
+                    *) update_node "${2:-all}" ;;
+                esac
+                ;;
             reset) reset_node ;;
             *) error "Неизвестная команда: $1. Запустите 'just1knode' без аргументов для входа в меню." ;;
         esac

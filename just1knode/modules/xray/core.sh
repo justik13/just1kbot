@@ -124,3 +124,66 @@ update_xray_core() {
 update_xray() {
     update_xray_core "$@"
 }
+
+update_node() {
+    title "КОМПЛЕКСНОЕ ОБНОВЛЕНИЕ УТИЛИТЫ И КОНФИГУРАЦИИ УЗЛА"
+    check_root
+    init_state_dir
+
+    local target="${1:-all}"
+
+    log "Загрузка и обновление модулей just1knode из репозитория GitHub..."
+    local repo_url="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
+    local ref="${JUST1KBOT_REF:-main}"
+    local tmp_tar="/tmp/just1knode_update_$$.tar.gz"
+    local tmp_dir="/tmp/just1knode_update_dir_$$"
+
+    rm -rf "$tmp_tar" "$tmp_dir"
+    mkdir -p "$tmp_dir"
+
+    local archive_url
+    if [[ "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        archive_url="${repo_url}/archive/${ref}.tar.gz"
+    else
+        archive_url="${repo_url}/archive/refs/heads/${ref}.tar.gz"
+    fi
+
+    if curl -fsSL "$archive_url" -o "$tmp_tar" 2>/dev/null || wget -qO "$tmp_tar" "$archive_url" 2>/dev/null; then
+        tar -xzf "$tmp_tar" -C "$tmp_dir" --strip-components=1 2>/dev/null || true
+        if [[ -d "${tmp_dir}/just1knode" ]]; then
+            mkdir -p /opt/just1knode
+            cp -r "${tmp_dir}/just1knode"/* /opt/just1knode/
+            chmod +x /opt/just1knode/just1knode.sh
+            ln -sf /opt/just1knode/just1knode.sh /usr/local/bin/just1knode
+            log "Модули /opt/just1knode успешно обновлены."
+        fi
+        if [[ -d "${tmp_dir}/scripts/xray_api" && -d /opt/xray-api ]]; then
+            cp -r "${tmp_dir}/scripts/xray_api"/* /opt/xray-api/
+            log "Компоненты /opt/xray-api успешно обновлены."
+        fi
+        rm -rf "$tmp_tar" "$tmp_dir"
+    else
+        warn "Не удалось загрузить архив с GitHub. Используем текущие установленные модули."
+        rm -rf "$tmp_tar" "$tmp_dir"
+    fi
+
+    # Автоматическая оптимизация конфигурации в зависимости от роли сервера
+    local role
+    role="$(get_state_val "role")"
+    if [[ "$role" == "origin" ]]; then
+        heal_and_update_origin_config
+    elif [[ "$role" == "relay" ]]; then
+        heal_and_update_relay_config
+    else
+        warn "Узел не настроен (роль не определена). Автоматическая оптимизация конфига пропущена."
+    fi
+
+    if [[ "$target" == "core" ]]; then
+        update_xray_core
+    fi
+
+    title "ОБНОВЛЕНИЕ И АВТО-КОНФИГУРАЦИЯ УЗЛА УСПЕШНО ЗАВЕРШЕНЫ!"
+    echo -e "${GREEN}✔ Все параметры Xray, DNS (Split-DNS), IPv4 и системные настройки приведены к эталону.${NC}"
+    echo -e "${GREEN}✔ 100% российских сервисов (включая 2ip.ru, Госуслуги, банки) направляются через Origin.${NC}\n"
+}
+

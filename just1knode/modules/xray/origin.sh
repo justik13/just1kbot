@@ -153,7 +153,7 @@ inbounds.append({
             'xPaddingPlacement': 'queryInHeader'
         }
     },
-    'sniffing': {'enabled': True, 'destOverride': ['tls', 'http']}
+    'sniffing': {'enabled': True, 'destOverride': ['tls', 'http'], 'routeOnly': False}
 })
 
 if not any(ob.get('tag') == 'just1k-wl-direct' for ob in outbounds):
@@ -177,7 +177,6 @@ rules.append({
 })
 
 # Split-Routing: прямой выход в Рунет с московского IP Origin-сервера
-# Split-Routing: прямой выход в Рунет с московского IP Origin-сервера
 rules.append({
     'type': 'field',
     'inboundTag': ['just1k-wl-default', 'just1k-wl-inbounds'],
@@ -186,7 +185,8 @@ rules.append({
         'geosite:tld-ru',
         'domain:ru',
         'domain:su',
-        'domain:xn--p1ai'
+        'domain:xn--p1ai',
+        'domain:2ip.ru'
     ],
     'outboundTag': 'just1k-wl-direct'
 })
@@ -223,7 +223,22 @@ policy_conf['levels'] = policy_levels
 final_config['policy'] = policy_conf
 
 dns_conf = dict(existing.get('dns', {}))
-dns_conf['servers'] = ['1.1.1.1', '1.0.0.1', '8.8.8.8', 'localhost']
+dns_conf['servers'] = [
+    {
+        'address': '77.88.8.8',
+        'port': 53,
+        'domains': [
+            'geosite:category-ru',
+            'geosite:tld-ru',
+            'domain:ru',
+            'domain:su',
+            'domain:xn--p1ai',
+            'domain:2ip.ru'
+        ]
+    },
+    '1.1.1.1',
+    'localhost'
+]
 dns_conf['queryStrategy'] = 'UseIPv4'
 final_config['dns'] = dns_conf
 
@@ -393,3 +408,113 @@ EOF
     echo -e "  🛡️ Секретный префикс: ${MAGENTA}${secret_path}${NC}"
     echo -e "  🩺 Проверка CDN:      curl -X OPTIONS https://${cdn_domain}/cdn-check\n"
 }
+
+heal_and_update_origin_config() {
+    title "АВТОМАТИЧЕСКАЯ ОПТИМИЗАЦИЯ И ОБНОВЛЕНИЕ КОНФИГУРАЦИИ ORIGIN"
+    check_root
+    init_state_dir
+
+    local role
+    role="$(get_state_val "role")"
+    if [[ "$role" != "origin" ]]; then
+        error "Функция доступна только на Origin-узле (текущая роль: ${role:-не установлена})."
+    fi
+
+    log "Проверка и исправление параметров ядра Xray Origin..."
+    if [[ ! -f "$XRAY_CONFIG" ]]; then
+        error "Файл конфигурации Xray не найден: $XRAY_CONFIG"
+    fi
+
+    create_backup "$XRAY_CONFIG"
+
+    python3 -c "
+import json, os, sys
+
+cfg_file = sys.argv[1]
+relays_file = sys.argv[2]
+
+with open(cfg_file, 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+
+# 1. Принудительный UseIPv4 на всех freedom outbounds (устраняет 5-10с задержки IPv6)
+for ob in cfg.get('outbounds', []):
+    if ob.get('tag') == 'just1k-wl-direct' or ob.get('protocol') == 'freedom':
+        ob.setdefault('settings', {})['domainStrategy'] = 'UseIPv4'
+
+# 2. Оптимальный Split-DNS: Рунет через быстрый внутренний DNS, остальное через fallback
+cfg['dns'] = {
+    'servers': [
+        {
+            'address': '77.88.8.8',
+            'port': 53,
+            'domains': [
+                'geosite:category-ru',
+                'geosite:tld-ru',
+                'domain:ru',
+                'domain:su',
+                'domain:xn--p1ai',
+                'domain:2ip.ru'
+            ]
+        },
+        '1.1.1.1',
+        'localhost'
+    ],
+    'queryStrategy': 'UseIPv4'
+}
+
+# 3. Гарантируем Sniffing с destOverride на всех клиентских инбаундах
+for ib in cfg.get('inbounds', []):
+    if ib.get('tag', '').startswith('just1k-wl-'):
+        ib['sniffing'] = {
+            'enabled': True,
+            'destOverride': ['tls', 'http'],
+            'routeOnly': False
+        }
+
+# 4. Проверяем правила routing и инбаунды релеев
+cfg.setdefault('routing', {})['domainStrategy'] = 'IPIfNonMatch'
+rules = cfg.setdefault('routing', {}).setdefault('rules', [])
+
+# Собираем актуальные теги всех входящих подключений
+known_inbounds = [ib.get('tag') for ib in cfg.get('inbounds', []) if ib.get('tag', '').startswith('just1k-wl-inbound-') or ib.get('tag') == 'just1k-wl-default']
+
+for r in rules:
+    if r.get('outboundTag') == 'just1k-wl-direct':
+        curr = r.get('inboundTag', [])
+        if isinstance(curr, list):
+            r['inboundTag'] = list(dict.fromkeys(curr + known_inbounds))
+        if 'domain' in r and 'domain:2ip.ru' not in r['domain']:
+            r['domain'].append('domain:2ip.ru')
+
+with open(cfg_file, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2)
+
+print('[+] Xray Origin config успешно оптимизирован (UseIPv4 + Split-DNS + Sniffing 2ip.ru)')
+" "$XRAY_CONFIG" "$RELAYS_FILE"
+
+    # Системное отключение IPv6
+    if [[ $EUID -eq 0 ]]; then
+        mkdir -p /etc/sysctl.d 2>/dev/null || true
+        cat > /etc/sysctl.d/99-disable-ipv6.conf <<EOF 2>/dev/null || true
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+EOF
+        sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+    fi
+
+    # Валидация Xray и Nginx
+    if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+        manifest_rollback 2>/dev/null || true
+        error "Ошибка валидации Xray после оптимизации!"
+    fi
+
+    nginx -t && systemctl reload nginx
+    systemctl restart xray
+    if systemctl is-active --quiet xray-api; then
+        systemctl restart xray-api
+    fi
+
+    log "Оптимизация и обновление конфигурации Origin завершены успешно!"
+}
+
