@@ -13,9 +13,13 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_head_is_0017_white_internet_durations(self):
+    def test_alembic_head_is_0018_simplify_wi_traffic(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0017_white_internet_durations"])
+        self.assertEqual(scripts.get_heads(), ["0018_simplify_wi_traffic"])
+        self.assertEqual(
+            scripts.get_revision("0018_simplify_wi_traffic").down_revision,
+            "0017_white_internet_durations",
+        )
         self.assertEqual(
             scripts.get_revision("0017_white_internet_durations").down_revision,
             "0016_white_internet",

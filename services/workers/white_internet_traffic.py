@@ -48,6 +48,7 @@ class WhiteInternetTrafficWorker:
         now = now_utc()
         sf = self.session_factory
         if session is not None:
+
             @asynccontextmanager
             async def _session_ctx():
                 yield session
@@ -62,13 +63,22 @@ class WhiteInternetTrafficWorker:
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
                     Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
-                    Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
+                    Server.health_state.in_(
+                        [ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]
+                    ),
                 )
                 .order_by(Server.id.asc())
             )
             servers = (await sess.execute(stmt)).scalars().all()
             server_list = [
-                (s.id, s.api_url, s.api_key, s.xray_instance_epoch, s.xray_instance_boot_id, s.xray_instance_starttime)
+                (
+                    s.id,
+                    s.api_url,
+                    s.api_key,
+                    s.xray_instance_epoch,
+                    s.xray_instance_boot_id,
+                    s.xray_instance_starttime,
+                )
                 for s in servers
                 if "xray_origin" in (s.capabilities or []) and s.api_url and s.api_key
             ]
@@ -78,9 +88,12 @@ class WhiteInternetTrafficWorker:
 
         for server_id, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime in server_list:
             # Network I/O outside DB transaction
-            node_epoch, node_boot_id, node_starttime, users_stats = await self.client.get_traffic_snapshot(
-                api_url, api_key
-            )
+            (
+                node_epoch,
+                node_boot_id,
+                node_starttime,
+                users_stats,
+            ) = await self.client.get_traffic_snapshot(api_url, api_key)
             if not node_epoch or users_stats is None or not isinstance(users_stats, dict):
                 if users_stats is not None and not isinstance(users_stats, dict):
                     logger.warning(
@@ -113,7 +126,11 @@ class WhiteInternetTrafficWorker:
                         continue
 
             for client_uuid, stats in users_stats.items():
-                if not isinstance(client_uuid, str) or not client_uuid.strip() or not isinstance(stats, dict):
+                if (
+                    not isinstance(client_uuid, str)
+                    or not client_uuid.strip()
+                    or not isinstance(stats, dict)
+                ):
                     logger.warning(
                         "Invalid client record on server %d: uuid=%r, stats=%r",
                         server_id,
@@ -147,7 +164,9 @@ class WhiteInternetTrafficWorker:
                         if sub_meta is None:
                             continue
 
-                        sub = await white_internet_repo.get_subscription_with_lock(sess, sub_meta.id)
+                        sub = await white_internet_repo.get_subscription_with_lock(
+                            sess, sub_meta.id
+                        )
                         if sub is None:
                             continue
 
@@ -165,10 +184,21 @@ class WhiteInternetTrafficWorker:
                             counter_state = TrafficCounterState.EPOCH_CHANGED
                             before_up = 0
                             before_down = 0
-                        elif uplink < sub.last_uplink_snapshot or downlink < sub.last_downlink_snapshot:
+                        elif (
+                            uplink < sub.last_uplink_snapshot
+                            or downlink < sub.last_downlink_snapshot
+                        ):
                             counter_state = TrafficCounterState.RESET
-                            before_up = sub.last_uplink_snapshot if uplink >= sub.last_uplink_snapshot else 0
-                            before_down = sub.last_downlink_snapshot if downlink >= sub.last_downlink_snapshot else 0
+                            before_up = (
+                                sub.last_uplink_snapshot
+                                if uplink >= sub.last_uplink_snapshot
+                                else 0
+                            )
+                            before_down = (
+                                sub.last_downlink_snapshot
+                                if downlink >= sub.last_downlink_snapshot
+                                else 0
+                            )
                             logger.info(
                                 "TrafficCounterState.RESET detected within epoch for sub_id=%d on server %d: up(%d -> %d), down(%d -> %d). Rebasing baseline.",
                                 sub.id,
@@ -196,19 +226,22 @@ class WhiteInternetTrafficWorker:
                             delta,
                         )
 
-                        consumed, became_exhausted, _available, event = (
-                            await white_internet_repo.record_and_deduct_traffic_atomic(
-                                sess,
-                                subscription_id=sub.id,
-                                node_epoch=node_epoch,
-                                snapshot_uplink_after=uplink,
-                                snapshot_downlink_after=downlink,
-                                snapshot_uplink_before=before_up,
-                                snapshot_downlink_before=before_down,
-                                node_boot_id=node_boot_id,
-                                node_starttime=node_starttime,
-                                now=now,
-                            )
+                        (
+                            consumed,
+                            became_exhausted,
+                            _available,
+                            event,
+                        ) = await white_internet_repo.record_and_deduct_traffic_atomic(
+                            sess,
+                            subscription_id=sub.id,
+                            node_epoch=node_epoch,
+                            snapshot_uplink_after=uplink,
+                            snapshot_downlink_after=downlink,
+                            snapshot_uplink_before=before_up,
+                            snapshot_downlink_before=before_down,
+                            node_boot_id=node_boot_id,
+                            node_starttime=node_starttime,
+                            now=now,
                         )
                         total_processed += 1
 
@@ -233,6 +266,7 @@ class WhiteInternetTrafficWorker:
                 if telegram_id:
                     try:
                         from bot import texts
+
                         await self.bot.send_message(
                             chat_id=telegram_id,
                             text=texts.WL_TRAFFIC_EXHAUSTED_ALERT,

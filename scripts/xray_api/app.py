@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import secrets
-import sys
 import time
 import uuid as uuid_lib
 from contextlib import asynccontextmanager
@@ -76,16 +75,10 @@ def get_secret_base_path() -> str:
                 for ib in inbounds:
                     tag = ib.get("tag", "")
                     if tag in ("just1k-wl-default", "inbound-default"):
-                        path = (
-                            ib.get("streamSettings", {})
-                            .get("xhttpSettings", {})
-                            .get("path", "")
-                        )
+                        path = ib.get("streamSettings", {}).get("xhttpSettings", {}).get("path", "")
                         if not path:
                             path = (
-                                ib.get("streamSettings", {})
-                                .get("httpSettings", {})
-                                .get("path", "")
+                                ib.get("streamSettings", {}).get("httpSettings", {}).get("path", "")
                             )
                         if path and path.startswith("/"):
                             parts = [p for p in path.strip("/").split("/") if p]
@@ -95,16 +88,10 @@ def get_secret_base_path() -> str:
                 for ib in inbounds:
                     tag = ib.get("tag", "")
                     if tag.startswith("just1k-wl-"):
-                        path = (
-                            ib.get("streamSettings", {})
-                            .get("xhttpSettings", {})
-                            .get("path", "")
-                        )
+                        path = ib.get("streamSettings", {}).get("xhttpSettings", {}).get("path", "")
                         if not path:
                             path = (
-                                ib.get("streamSettings", {})
-                                .get("httpSettings", {})
-                                .get("path", "")
+                                ib.get("streamSettings", {}).get("httpSettings", {}).get("path", "")
                             )
                         if path and path.startswith("/"):
                             parts = [p for p in path.strip("/").split("/") if p]
@@ -114,6 +101,33 @@ def get_secret_base_path() -> str:
             pass
 
     return os.getenv("WHITE_INTERNET_PATH", "/stream/v1")
+
+
+def get_cdn_domain() -> Optional[str]:
+    """Resolves CDN domain configured for this Origin node.
+
+    1. Checks CDN_DOMAIN environment variable.
+    2. Reads cdn_domain from STATE_FILE_PATH (/etc/just1knode/state.json).
+    3. Fallback to WHITE_INTERNET_CDN_DOMAIN environment variable.
+    """
+    env_cdn = os.getenv("CDN_DOMAIN")
+    if env_cdn and env_cdn.strip():
+        return env_cdn.strip()
+
+    if STATE_FILE_PATH.exists():
+        try:
+            with open(STATE_FILE_PATH, "r", encoding="utf-8") as f:
+                st = json.load(f)
+                if isinstance(st, dict) and st.get("cdn_domain"):
+                    return str(st["cdn_domain"]).strip()
+        except Exception as e:
+            logger.warning("Could not read cdn_domain from %s: %s", STATE_FILE_PATH, e)
+
+    fallback = os.getenv("WHITE_INTERNET_CDN_DOMAIN")
+    if fallback and fallback.strip():
+        return fallback.strip()
+
+    return None
 
 
 def get_target_inbounds() -> List[str]:
@@ -215,8 +229,14 @@ def restore_persisted_clients_to_xray() -> int:
                 grpc_client.add_user(tag, client_uuid)
                 restored += 1
             except Exception as e:
-                logger.warning("Failed to restore client %s on inbound %s: %s", client_uuid[:8], tag, e)
-    logger.info("Restored %d active client registrations across inbounds %s as ephemeral hints.", restored, target_inbounds)
+                logger.warning(
+                    "Failed to restore client %s on inbound %s: %s", client_uuid[:8], tag, e
+                )
+    logger.info(
+        "Restored %d active client registrations across inbounds %s as ephemeral hints.",
+        restored,
+        target_inbounds,
+    )
     return len(active_clients)
 
 
@@ -231,7 +251,9 @@ async def lifespan(app: FastAPI):
         if grpc_client.is_healthy():
             restore_persisted_clients_to_xray()
         else:
-            logger.warning("Xray gRPC is not immediately available at startup. Clients will sync on demand.")
+            logger.warning(
+                "Xray gRPC is not immediately available at startup. Clients will sync on demand."
+            )
     except Exception as e:
         logger.error("Startup client restoration error: %s", e)
     yield
@@ -257,7 +279,9 @@ def verify_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
             detail="Node API key is not configured",
         )
     if not x_api_key or not secrets.compare_digest(x_api_key, expected_key):
-        logger.warning("Unauthorized access attempt with X-API-Key: %s", "present" if x_api_key else "missing")
+        logger.warning(
+            "Unauthorized access attempt with X-API-Key: %s", "present" if x_api_key else "missing"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-API-Key",
@@ -274,8 +298,9 @@ class ClientSyncRequest(BaseModel):
     version: Optional[int] = Field(None, description="Monotonic desired version")
     email: Optional[str] = Field(None, description="Optional client email/identifier")
     expected_node_epoch: Optional[str] = Field(None, description="Optional node epoch fencing")
-    idempotency_key: Optional[str] = Field(None, description="Optional idempotency key for durable retry")
-
+    idempotency_key: Optional[str] = Field(
+        None, description="Optional idempotency key for durable retry"
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -305,7 +330,9 @@ class ClientSyncRequest(BaseModel):
 
 
 class InventoryRequest(BaseModel):
-    client_ids: Optional[List[str]] = Field(None, description="Optional list of client UUIDs to probe")
+    client_ids: Optional[List[str]] = Field(
+        None, description="Optional list of client UUIDs to probe"
+    )
 
 
 def _mask_uuid(val: str) -> str:
@@ -359,6 +386,7 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         "inbounds": target_inbounds,
         "relays": relays,
         "secret_base_path": secret_path,
+        "cdn_domain": get_cdn_domain(),
         "node_epoch": running_epoch if is_running else None,
         "boot_id": boot_id if is_running else None,
         "starttime": starttime if is_running else None,
@@ -407,12 +435,7 @@ async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, A
         pid1, starttime1, boot_id1, epoch1 = (
             epoch_manager.get_process_and_epoch() if epoch_manager else (None, None, None, None)
         )
-        if (
-            pid1 is None
-            or starttime1 is None
-            or boot_id1 is None
-            or epoch1 is None
-        ):
+        if pid1 is None or starttime1 is None or boot_id1 is None or epoch1 is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Xray process or epoch is unavailable",
@@ -430,12 +453,7 @@ async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, A
         pid2, starttime2, boot_id2, epoch2 = (
             epoch_manager.get_process_and_epoch() if epoch_manager else (None, None, None, None)
         )
-        if (
-            pid2 is None
-            or starttime2 is None
-            or boot_id2 is None
-            or epoch2 is None
-        ):
+        if pid2 is None or starttime2 is None or boot_id2 is None or epoch2 is None:
             logger.warning(
                 "Xray stopped during traffic snapshot read (attempt %d/%d). Retrying...",
                 attempt + 1,
@@ -444,12 +462,7 @@ async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, A
             await asyncio.sleep(0.05 * (2**attempt))
             continue
 
-        if (
-            epoch1 == epoch2
-            and pid1 == pid2
-            and starttime1 == starttime2
-            and boot_id1 == boot_id2
-        ):
+        if epoch1 == epoch2 and pid1 == pid2 and starttime1 == starttime2 and boot_id1 == boot_id2:
             return {
                 "node_epoch": epoch1,
                 "boot_id": boot_id1,
@@ -475,9 +488,7 @@ async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, A
 
 @app.post("/v1/clients/sync")
 @app.post("/v1/clients")
-async def sync_client(
-    req: ClientSyncRequest, _: bool = Depends(verify_api_key)
-) -> Dict[str, Any]:
+async def sync_client(req: ClientSyncRequest, _: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
     Brings client's status across all inbounds to the desired state with two-phase epoch fencing,
     durable idempotency, and read-after-write postcondition verification.
@@ -503,8 +514,8 @@ async def sync_client(
 
     # Phase 1: Pre-mutation Epoch Check
     epoch_before = epoch_manager.get_current_running_epoch() if epoch_manager else None
-    if not epoch_before and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
-        epoch_before = (epoch_manager.load_state().get("node_epoch") if epoch_manager else None) or "test_epoch"
+    if not epoch_before and epoch_manager:
+        epoch_before = epoch_manager.load_state().get("node_epoch")
     if not epoch_before:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -537,7 +548,11 @@ async def sync_client(
         if curr_entry:
             curr_ver = curr_entry.get("version")
             is_tombstone = curr_entry.get("tombstone", False)
-            curr_state = "disabled" if is_tombstone else ("active" if curr_entry.get("is_active") else "disabled")
+            curr_state = (
+                "disabled"
+                if is_tombstone
+                else ("active" if curr_entry.get("is_active") else "disabled")
+            )
 
             # Idempotent retry: exact same version and same desired_state already applied!
             if curr_ver is not None and req.version == curr_ver and curr_state == desired_state:
@@ -560,7 +575,9 @@ async def sync_client(
                     "inbounds": target_inbounds,
                 }
 
-            if curr_ver is not None and (req.version < curr_ver or (is_tombstone and req.version <= curr_ver)):
+            if curr_ver is not None and (
+                req.version < curr_ver or (is_tombstone and req.version <= curr_ver)
+            ):
                 logger.warning(
                     "Stale sync request for %s: incoming version %d <= stored version %d (tombstone=%s). Fencing.",
                     _mask_uuid(client_uuid),
@@ -590,7 +607,9 @@ async def sync_client(
             grpc_client.ensure_user_state(tag, client_uuid, desired_state=desired_state)
             succeeded_inbounds.append(tag)
         except Exception as e:
-            logger.error("Failed to sync user %s on inbound %s: %s", _mask_uuid(client_uuid), tag, e)
+            logger.error(
+                "Failed to sync user %s on inbound %s: %s", _mask_uuid(client_uuid), tag, e
+            )
             failed_inbounds.append(tag)
 
     if failed_inbounds:
@@ -600,7 +619,12 @@ async def sync_client(
                 rollback_state = "disabled" if desired_state == "active" else "active"
                 grpc_client.ensure_user_state(rb_tag, client_uuid, desired_state=rollback_state)
             except Exception as rb_exc:
-                logger.error("Rollback failed for user %s on inbound %s: %s", _mask_uuid(client_uuid), rb_tag, rb_exc)
+                logger.error(
+                    "Rollback failed for user %s on inbound %s: %s",
+                    _mask_uuid(client_uuid),
+                    rb_tag,
+                    rb_exc,
+                )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to sync user on inbounds: {failed_inbounds}",
@@ -608,8 +632,8 @@ async def sync_client(
 
     # Phase 2: Post-mutation Epoch Check (Atomic Epoch Fencing)
     epoch_after = epoch_manager.get_current_running_epoch() if epoch_manager else None
-    if not epoch_after and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
-        epoch_after = epoch_before
+    if not epoch_after and epoch_manager:
+        epoch_after = epoch_manager.load_state().get("node_epoch")
     if epoch_after != epoch_before or not epoch_after:
         logger.critical(
             "Epoch drift during mutation for %s: epoch_before=%s != epoch_after=%s. Xray restarted during sync!",
@@ -627,18 +651,17 @@ async def sync_client(
     unverified_inbounds: List[str] = []
     for tag in target_inbounds:
         try:
-            is_present = grpc_client.probe_user_presence(tag, client_uuid)
-            expected_present = (desired_state == "active")
-            if is_present == expected_present:
+            if desired_state == "active":
+                is_verified = grpc_client.probe_user_presence(tag, client_uuid)
+            else:
+                is_verified = grpc_client.verify_user_absent(tag, client_uuid)
+            if is_verified:
                 verified_inbounds.append(tag)
             else:
                 unverified_inbounds.append(tag)
         except Exception as e:
-            logger.debug("Probe failed or not supported in test environment for %s: %s", tag, e)
-            if tag in succeeded_inbounds:
-                verified_inbounds.append(tag)
-            else:
-                unverified_inbounds.append(tag)
+            logger.error("Postcondition check failed for %s on inbound %s: %s", _mask_uuid(client_uuid), tag, e)
+            unverified_inbounds.append(tag)
 
     if unverified_inbounds:
         logger.error(
@@ -715,8 +738,8 @@ async def delete_client(
         )
 
     current_epoch = epoch_manager.get_current_running_epoch() if epoch_manager else None
-    if not current_epoch and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
-        current_epoch = (epoch_manager.load_state().get("node_epoch") if epoch_manager else None) or "test_epoch"
+    if not current_epoch and epoch_manager:
+        current_epoch = epoch_manager.load_state().get("node_epoch")
     if not current_epoch:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -749,7 +772,9 @@ async def delete_client(
                     "inbounds": target_inbounds,
                 }
 
-            if curr_ver is not None and (version < curr_ver or (is_tombstone and version <= curr_ver)):
+            if curr_ver is not None and (
+                version < curr_ver or (is_tombstone and version <= curr_ver)
+            ):
                 logger.warning(
                     "Stale delete request for %s: version %d <= stored %d (tombstone=%s). Fencing.",
                     _mask_uuid(clean_uuid),
@@ -771,7 +796,9 @@ async def delete_client(
         try:
             grpc_client.remove_user(tag, clean_uuid)
         except Exception as e:
-            logger.error("Failed to delete user %s from inbound %s: %s", _mask_uuid(clean_uuid), tag, e)
+            logger.error(
+                "Failed to delete user %s from inbound %s: %s", _mask_uuid(clean_uuid), tag, e
+            )
             failed_inbounds.append(tag)
 
     if failed_inbounds:
@@ -811,8 +838,8 @@ async def get_clients_inventory(
     """
     target_inbounds = get_target_inbounds()
     running_epoch = epoch_manager.get_current_running_epoch() if epoch_manager else None
-    if not running_epoch and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
-        running_epoch = (epoch_manager.load_state().get("node_epoch") if epoch_manager else None) or "test_epoch"
+    if not running_epoch and epoch_manager:
+        running_epoch = epoch_manager.load_state().get("node_epoch")
 
     # Determine which clients to probe:
     client_ids = req.client_ids if req and req.client_ids else None

@@ -80,7 +80,6 @@ class XrayGrpcClient:
             self.close()
             return False
 
-
     def add_user(self, inbound_tag: str, user_id: str, flow: str = "") -> bool:
         if proxyman_cmd is None or proxyman_grpc is None:
             raise RuntimeError("Protobuf modules not loaded")
@@ -135,32 +134,52 @@ class XrayGrpcClient:
             raise
 
     def probe_user_presence(self, inbound_tag: str, user_id: str) -> bool:
-        """Probes whether a user is currently registered in an Xray inbound's memory."""
+        """Non-destructive presence probe. Checks whether a user is present without disconnecting active sessions."""
         if proxyman_cmd is None or proxyman_grpc is None:
             raise RuntimeError("Protobuf modules not loaded")
 
         channel = self._get_channel()
         stub = proxyman_grpc.HandlerServiceStub(channel)
-        remove_user_op = proxyman_cmd.RemoveUserOperation(email=user_id)
+        account = account_pb2.Account(id=user_id, flow="", encryption="none")
+        account_typed = typed_message_pb2.TypedMessage(
+            type="xray.proxy.vless.Account", value=account.SerializeToString()
+        )
+        user = user_pb2.User(level=0, email=user_id, account=account_typed)
+        add_user_op = proxyman_cmd.AddUserOperation(user=user)
         op_typed = typed_message_pb2.TypedMessage(
-            type="xray.app.proxyman.command.RemoveUserOperation",
-            value=remove_user_op.SerializeToString(),
+            type="xray.app.proxyman.command.AddUserOperation",
+            value=add_user_op.SerializeToString(),
         )
         req = proxyman_cmd.AlterInboundRequest(tag=inbound_tag, operation=op_typed)
         try:
             stub.AlterInbound(req, timeout=self.timeout)
-            # User was physically present; restore it immediately
-            self.add_user(inbound_tag, user_id)
-            return True
+            # If addition succeeded, user was NOT present before; remove to restore previous state
+            remove_op = proxyman_cmd.RemoveUserOperation(email=user_id)
+            op_rm = typed_message_pb2.TypedMessage(
+                type="xray.app.proxyman.command.RemoveUserOperation",
+                value=remove_op.SerializeToString(),
+            )
+            stub.AlterInbound(
+                proxyman_cmd.AlterInboundRequest(tag=inbound_tag, operation=op_rm),
+                timeout=self.timeout,
+            )
+            return False
         except grpc.RpcError as exc:
             details = (exc.details() or "").lower()
-            if "not found" in details or "does not exist" in details:
-                return False
+            if "already exists" in details or "duplicate" in details:
+                # User was physically present; no removal was executed, active session is untouched
+                return True
             logger.error("AlterInbound Probe failed on inbound %s: %s", inbound_tag, exc)
             self.close()
             raise
 
-    def ensure_user_state(self, inbound_tag: str, user_id: str, desired_state: str, flow: str = "") -> bool:
+    def verify_user_absent(self, inbound_tag: str, user_id: str) -> bool:
+        """Verify that user is absent from inbound without adding any users."""
+        return self.remove_user(inbound_tag, user_id)
+
+    def ensure_user_state(
+        self, inbound_tag: str, user_id: str, desired_state: str, flow: str = ""
+    ) -> bool:
         """Applies desired state (active/disabled) and ensures postcondition."""
         if desired_state == "active":
             return self.add_user(inbound_tag, user_id, flow=flow)
@@ -224,7 +243,10 @@ class XrayGrpcClient:
             )
             return self._aggregate_user_stats(resp)
         except grpc.RpcError as exc:
-            if result is not None and getattr(exc, "code", lambda: None)() == grpc.StatusCode.UNIMPLEMENTED:
+            if (
+                result is not None
+                and getattr(exc, "code", lambda: None)() == grpc.StatusCode.UNIMPLEMENTED
+            ):
                 return result
             logger.error("Both Xray traffic statistics APIs failed: %s", exc)
             self.close()

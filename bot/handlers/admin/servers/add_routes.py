@@ -256,6 +256,8 @@ async def process_add_server(
                     extra["secret_base_path"] = xray_data["secret_base_path"]
                 if "relays" in xray_data:
                     extra["relays"] = xray_data["relays"]
+                if "cdn_domain" in xray_data and xray_data["cdn_domain"]:
+                    extra["cdn_domain"] = xray_data["cdn_domain"]
                 server.extra_data = extra
 
             await AuditService.log_action(

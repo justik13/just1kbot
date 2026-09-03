@@ -510,8 +510,15 @@ run_doctor
         self.assertEqual(pinned_packages.get("pydantic"), "2.10.4")
         self.assertEqual(pinned_packages.get("psutil"), "6.1.1")
 
-        # 2. Check just1knode.sh for absence of floating git tarballs / unpinned upgrades / dead commits
-        sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
+        # 2. Check just1knode for absence of floating git tarballs / unpinned upgrades / dead commits
+        sh_content = ""
+        just1knode_dir = REPO_ROOT / "just1knode"
+        if just1knode_dir.exists():
+            for p in just1knode_dir.glob("**/*"):
+                if p.is_file():
+                    sh_content += p.read_text(encoding="utf-8", errors="ignore") + "\n"
+        if JUST1KNODE_SH.exists():
+            sh_content += JUST1KNODE_SH.read_text(encoding="utf-8", errors="ignore")
         self.assertNotIn("pip install --upgrade pip", sh_content, "Unpinned pip self-upgrade is forbidden")
         self.assertNotIn("JUST1KBOT_RELEASE_COMMIT", sh_content, "Hallucinated release commit must be removed")
         self.assertNotIn("AMNEZIA_API_COMMIT", sh_content, "Hallucinated Amnezia API commit must be removed")

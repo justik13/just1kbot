@@ -18,7 +18,6 @@ import base64
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 
@@ -28,18 +27,13 @@ from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
 from config.enums import (
     ServerHealthState,
-    TariffQuoteOperation,
-    TariffQuoteStatus,
-    WhiteInternetGrantType,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
 
 from database.models import (
     Server,
-    TariffQuote,
     User,
-    WhiteInternetQuotaGrant,
     WhiteInternetSubscription,
 )
 from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
@@ -71,7 +65,10 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             health_state=ServerHealthState.ONLINE,
             is_active=True,
             xray_instance_epoch=node_epoch,
-            extra_data={"secret_base_path": "/w_test", "relays": [{"code": "de", "name": "Германия"}]},
+            extra_data={
+                "secret_base_path": "/w_test",
+                "relays": [{"code": "de", "name": "Германия"}],
+            },
         )
 
         user = User(
@@ -79,28 +76,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             telegram_id=999888777,
         )
 
-
         base_bytes = 50 * 1024**3
-        quote = TariffQuote(
-            id=101,
-            user_id=user.id,
-            service_type="white_internet",
-            operation_type=TariffQuoteOperation.PURCHASE,
-            status=TariffQuoteStatus.ACTIVE,
-            target_tariff_version_id=1,
-            current_paid_hours=0,
-            current_paid_value_rub=Decimal("0.00"),
-            bonus_hours=0,
-            amount_due_rub=Decimal("120.00"),
-            resulting_paid_hours=720,
-            resulting_paid_value_rub=Decimal("120.00"),
-            resulting_bonus_hours=0,
-            rounding_loss_hours=Decimal("0.00"),
-            rounding_loss_value_rub=Decimal("0.00"),
-            expires_at=now + timedelta(hours=1),
-        )
-
-
 
         # Create subscription in PENDING state (post-purchase)
         sub = WhiteInternetSubscription(
@@ -112,7 +88,8 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             status=WhiteInternetStatus.PENDING,
             started_at=now,
             expires_at=now + timedelta(days=30),
-            traffic_limit_bytes=base_bytes,
+            base_traffic_bytes=base_bytes,
+            extra_traffic_bytes=0,
             traffic_used_bytes=0,
             traffic_uplink_bytes=0,
             traffic_downlink_bytes=0,
@@ -125,18 +102,6 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             last_reconciled_node_epoch=None,
         )
 
-        grant = WhiteInternetQuotaGrant(
-            id=1,
-            subscription_id=sub.id,
-            grant_type=WhiteInternetGrantType.BASE,
-            bytes_granted=base_bytes,
-            bytes_remaining=base_bytes,
-            price_rub=Decimal("120.00"),
-            quote_id=quote.id,
-            expires_at=sub.expires_at,
-            created_at=now,
-        )
-
         # 2. Feed check before reconciliation -> must return 503 (Retry-After: 5)
         with patch("bot.handlers.white_internet_web.session_scope") as mock_scope:
             session = AsyncMock()
@@ -144,14 +109,27 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
             mock_scope.return_value.__aenter__.return_value = session
 
-            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+            with patch(
+                "database.repositories.white_internet_repo.get_subscription_by_token",
+                return_value=sub,
+            ):
                 resp = await self.client.get(f"/sub/wl/{sub.token}")
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
         # 3. Reconciliation Worker runs: provisions user on Xray node
         mock_node_client = AsyncMock(spec=XrayNodeClient)
-        mock_node_client.check_health.return_value = (True, node_epoch, {"status": "ok", "grpc_ok": True, "xray_running": True, "boot_id": "boot-1", "starttime": 12345})
+        mock_node_client.check_health.return_value = (
+            True,
+            node_epoch,
+            {
+                "status": "ok",
+                "grpc_ok": True,
+                "xray_running": True,
+                "boot_id": "boot-1",
+                "starttime": 12345,
+            },
+        )
         mock_node_client.sync_client.return_value = (SyncResult.APPLIED, None)
 
         recon_worker = WhiteInternetReconciliationWorker(node_client=mock_node_client)
@@ -160,11 +138,17 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         recon_session.get.return_value = sub
         recon_session.execute.side_effect = [
             MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
-            MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),     # pending subscriptions query
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),  # pending subscriptions query
         ]
 
-        with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
-            with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+        with patch(
+            "database.repositories.servers_repo.update_server_xray_epoch_cas",
+            return_value=(True, server),
+        ):
+            with patch(
+                "database.repositories.white_internet_repo.get_subscription_with_lock",
+                return_value=sub,
+            ):
                 synced = await recon_worker.run_reconciliation_cycle(recon_session)
                 self.assertEqual(synced, 1)
                 mock_node_client.sync_client.assert_awaited_once_with(
@@ -190,24 +174,29 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                 session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
                 mock_scope.return_value.__aenter__.return_value = session
 
-                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                    with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[grant]):
-                        resp = await self.client.get(f"/sub/wl/{sub.token}")
-                        self.assertEqual(resp.status, 200)
-                        self.assertEqual(resp.headers.get("Profile-Title"), "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==")
-                        self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
-                        self.assertEqual(resp.headers.get("hide-url"), "1")
-                        self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
+                with patch(
+                    "database.repositories.white_internet_repo.get_subscription_by_token",
+                    return_value=sub,
+                ):
+                    resp = await self.client.get(f"/sub/wl/{sub.token}")
+                    self.assertEqual(resp.status, 200)
+                    self.assertEqual(
+                        resp.headers.get("Profile-Title"),
+                        "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==",
+                    )
+                    self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
+                    self.assertEqual(resp.headers.get("hide-url"), "1")
+                    self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
 
-                        body_b64 = await resp.text()
-                        decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
-                        self.assertTrue(len(decoded_lines) >= 1)
-                        self.assertTrue(decoded_lines[0].startswith("vless://"))
+                    body_b64 = await resp.text()
+                    decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
+                    self.assertTrue(len(decoded_lines) >= 1)
+                    self.assertTrue(decoded_lines[0].startswith("vless://"))
 
-                        userinfo = resp.headers.get("Subscription-Userinfo", "")
-                        self.assertIn("upload=0;", userinfo)
-                        self.assertIn("download=0;", userinfo)
-                        self.assertIn(f"total={base_bytes};", userinfo)
+                    userinfo = resp.headers.get("Subscription-Userinfo", "")
+                    self.assertIn("upload=0;", userinfo)
+                    self.assertIn("download=0;", userinfo)
+                    self.assertIn(f"total={base_bytes};", userinfo)
 
         # 5. Traffic sync worker consumes 20 GB (5 GB up, 15 GB down)
         up_1 = 5 * 1024**3
@@ -222,13 +211,28 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         traffic_worker = WhiteInternetTrafficWorker(node_client=mock_node_client)
 
         traffic_session = AsyncMock()
-        traffic_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
+        traffic_session.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [server])
+        )
         traffic_session.scalar.return_value = sub
 
-        with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
-            with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
-                with patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic") as mock_record_and_deduct:
-                    mock_record_and_deduct.return_value = (up_1 + down_1, False, base_bytes - (up_1 + down_1), MagicMock())
+        with patch(
+            "database.repositories.servers_repo.update_server_xray_epoch_cas",
+            return_value=(True, server),
+        ):
+            with patch(
+                "database.repositories.white_internet_repo.get_subscription_with_lock",
+                return_value=sub,
+            ):
+                with patch(
+                    "database.repositories.white_internet_repo.record_and_deduct_traffic_atomic"
+                ) as mock_record_and_deduct:
+                    mock_record_and_deduct.return_value = (
+                        up_1 + down_1,
+                        False,
+                        base_bytes - (up_1 + down_1),
+                        MagicMock(),
+                    )
 
                     await traffic_worker.run_traffic_cycle(traffic_session)
 
@@ -249,7 +253,6 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         sub.traffic_used_bytes = up_1 + down_1
         sub.traffic_uplink_bytes = up_1
         sub.traffic_downlink_bytes = down_1
-        grant.bytes_remaining = base_bytes - (up_1 + down_1)
 
         # 6. Second traffic cycle exhausts remaining 30 GB (additional 35 GB total consumed)
         up_2 = 10 * 1024**3
@@ -261,10 +264,18 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             {sub.uuid: {"uplink": up_2, "downlink": down_2}},
         )
 
-        with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
-            with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
-                with patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic") as mock_record_and_deduct:
-                    mock_record_and_deduct.return_value = (grant.bytes_remaining, True, 0, MagicMock())
+        with patch(
+            "database.repositories.servers_repo.update_server_xray_epoch_cas",
+            return_value=(True, server),
+        ):
+            with patch(
+                "database.repositories.white_internet_repo.get_subscription_with_lock",
+                return_value=sub,
+            ):
+                with patch(
+                    "database.repositories.white_internet_repo.record_and_deduct_traffic_atomic"
+                ) as mock_record_and_deduct:
+                    mock_record_and_deduct.return_value = (35 * 1024**3, True, 0, None)
 
                     sub.status = WhiteInternetStatus.EXHAUSTED
                     sub.desired_version = 2
@@ -272,7 +283,6 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                     sub.traffic_used_bytes = 55 * 1024**3
                     sub.traffic_uplink_bytes = up_2
                     sub.traffic_downlink_bytes = down_2
-                    grant.bytes_remaining = 0
 
                     await traffic_worker.run_traffic_cycle(traffic_session)
 
@@ -284,14 +294,16 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             session = AsyncMock()
             mock_scope.return_value.__aenter__.return_value = session
 
-            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[grant]):
-                    resp = await self.client.get(f"/sub/wl/{sub.token}")
-                    self.assertEqual(resp.status, 403)
-                    userinfo = resp.headers.get("Subscription-Userinfo", "")
-                    self.assertIn(f"upload={sub.traffic_uplink_bytes};", userinfo)
-                    self.assertIn(f"download={sub.traffic_downlink_bytes};", userinfo)
-                    self.assertIn(f"total={base_bytes};", userinfo)
+            with patch(
+                "database.repositories.white_internet_repo.get_subscription_by_token",
+                return_value=sub,
+            ):
+                resp = await self.client.get(f"/sub/wl/{sub.token}")
+                self.assertEqual(resp.status, 403)
+                userinfo = resp.headers.get("Subscription-Userinfo", "")
+                self.assertIn(f"upload={sub.traffic_uplink_bytes};", userinfo)
+                self.assertIn(f"download={sub.traffic_downlink_bytes};", userinfo)
+                self.assertIn(f"total={base_bytes};", userinfo)
 
         # 8. Reconciliation de-provisions exhausted user from Xray
         mock_node_client.sync_client.reset_mock()
@@ -304,8 +316,14 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),
         ]
 
-        with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
-            with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+        with patch(
+            "database.repositories.servers_repo.update_server_xray_epoch_cas",
+            return_value=(True, server),
+        ):
+            with patch(
+                "database.repositories.white_internet_repo.get_subscription_with_lock",
+                return_value=sub,
+            ):
                 synced = await recon_worker.run_reconciliation_cycle(recon_session_2)
                 self.assertEqual(synced, 1)
                 mock_node_client.sync_client.assert_awaited_once_with(
@@ -322,22 +340,10 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         # 9. Top-up grant recovery: user purchases real 25 GB topup pack (100 RUB)
         topup_gb = 25
         topup_bytes = topup_gb * 1024**3
-        topup_price = Decimal("100.00")
-        sub.traffic_limit_bytes += topup_bytes
+        sub.extra_traffic_bytes += topup_bytes
         sub.status = WhiteInternetStatus.ACTIVE
         sub.desired_version = 3
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-        grant_topup = WhiteInternetQuotaGrant(
-            id=2,
-            subscription_id=sub.id,
-            grant_type=WhiteInternetGrantType.TOPUP,
-            bytes_granted=topup_bytes,
-            bytes_remaining=topup_bytes,
-            price_rub=topup_price,
-            quote_id=102,
-            expires_at=sub.expires_at,
-            created_at=now,
-        )
 
         # Reconciliation re-enables user on node
         mock_node_client.sync_client.reset_mock()
@@ -348,8 +354,14 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),
         ]
 
-        with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
-            with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+        with patch(
+            "database.repositories.servers_repo.update_server_xray_epoch_cas",
+            return_value=(True, server),
+        ):
+            with patch(
+                "database.repositories.white_internet_repo.get_subscription_with_lock",
+                return_value=sub,
+            ):
                 synced = await recon_worker.run_reconciliation_cycle(recon_session_3)
                 self.assertEqual(synced, 1)
                 mock_node_client.sync_client.assert_awaited_once_with(
@@ -371,7 +383,9 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                 session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
                 mock_scope.return_value.__aenter__.return_value = session
 
-                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                    with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[grant, grant_topup]):
-                        resp = await self.client.get(f"/sub/wl/{sub.token}")
-                        self.assertEqual(resp.status, 200)
+                with patch(
+                    "database.repositories.white_internet_repo.get_subscription_by_token",
+                    return_value=sub,
+                ):
+                    resp = await self.client.get(f"/sub/wl/{sub.token}")
+                    self.assertEqual(resp.status, 200)

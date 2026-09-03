@@ -6,8 +6,12 @@ from fastapi.testclient import TestClient
 
 # Ensure environment is configured before importing app
 tmp_clients_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+tmp_clients_file.write(b"{}")
 tmp_clients_file.close()
 tmp_epoch_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+tmp_epoch_file.write(
+    b'{"node_epoch": "epoch_test_fixture", "boot_id": "test_boot", "xray_pid": 123, "xray_starttime": 1000}'
+)
 tmp_epoch_file.close()
 tmp_epoch_lock = tempfile.NamedTemporaryFile(delete=False, suffix=".lock")
 tmp_epoch_lock.close()
@@ -156,22 +160,24 @@ def test_startup_reconciliation_db_authority():
     # uuid_active is confirmed active with version 2
     # uuid_stale was revoked in Central DB, so it is disabled with version 2
     with patch.object(grpc_client, "add_user", return_value=True):
-        res1 = client.post(
-            "/v1/clients/sync",
-            json={"client_id": uuid_active, "desired_state": "active", "version": 2},
-            headers=VALID_HEADERS,
-        )
-        assert res1.status_code == 200
-        assert res1.json()["result"] == "applied"
+        with patch.object(grpc_client, "probe_user_presence", return_value=True):
+            res1 = client.post(
+                "/v1/clients/sync",
+                json={"client_id": uuid_active, "desired_state": "active", "version": 2},
+                headers=VALID_HEADERS,
+            )
+            assert res1.status_code == 200
+            assert res1.json()["result"] == "applied"
 
     with patch.object(grpc_client, "remove_user", return_value=True):
-        res2 = client.post(
-            "/v1/clients/sync",
-            json={"client_id": uuid_stale, "desired_state": "disabled", "version": 2},
-            headers=VALID_HEADERS,
-        )
-        assert res2.status_code == 200
-        assert res2.json()["result"] == "applied"
+        with patch.object(grpc_client, "verify_user_absent", return_value=True):
+            res2 = client.post(
+                "/v1/clients/sync",
+                json={"client_id": uuid_stale, "desired_state": "disabled", "version": 2},
+                headers=VALID_HEADERS,
+            )
+            assert res2.status_code == 200
+            assert res2.json()["result"] == "applied"
 
     # Node is now synchronized according to Central DB authority
     with patch.object(grpc_client, "is_healthy", return_value=True):
@@ -190,39 +196,41 @@ def test_startup_reconciliation_db_authority():
 def test_client_sync_active_and_persistence():
     uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
     with patch.object(grpc_client, "add_user", return_value=True) as mock_add:
-        res = client.post(
-            "/v1/clients/sync",
-            json={"client_id": uuid, "desired_state": "active"},
-            headers=VALID_HEADERS,
-        )
-        assert res.status_code == 200
-        data = res.json()
-        assert data["status"] == "ok"
-        assert data["result"] == "applied"
-        assert data["client_id"] == uuid
-        assert data["state"] == "active"
-        assert mock_add.call_count == 2
-        # Check persisted client store
-        assert uuid in client_store.load_clients()
+        with patch.object(grpc_client, "probe_user_presence", return_value=True):
+            res = client.post(
+                "/v1/clients/sync",
+                json={"client_id": uuid, "desired_state": "active"},
+                headers=VALID_HEADERS,
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "ok"
+            assert data["result"] == "applied"
+            assert data["client_id"] == uuid
+            assert data["state"] == "active"
+            assert mock_add.call_count == 2
+            # Check persisted client store
+            assert uuid in client_store.load_clients()
 
 
 def test_client_sync_disabled():
     uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
     with patch.object(grpc_client, "remove_user", return_value=True) as mock_remove:
-        res = client.post(
-            "/v1/clients/sync",
-            json={"uuid": uuid, "desired_state": "disabled"},
-            headers=VALID_HEADERS,
-        )
-        assert res.status_code == 200
-        data = res.json()
-        assert data["status"] == "ok"
-        assert data["result"] == "applied"
-        assert data["client_id"] == uuid
-        assert data["state"] == "disabled"
-        assert mock_remove.call_count == 2
-        # Check removed from client store
-        assert uuid not in client_store.load_clients()
+        with patch.object(grpc_client, "verify_user_absent", return_value=True):
+            res = client.post(
+                "/v1/clients/sync",
+                json={"uuid": uuid, "desired_state": "disabled"},
+                headers=VALID_HEADERS,
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "ok"
+            assert data["result"] == "applied"
+            assert data["client_id"] == uuid
+            assert data["state"] == "disabled"
+            assert mock_remove.call_count == 2
+            # Check removed from client store
+            assert uuid not in client_store.load_clients()
 
 
 def test_client_sync_invalid_uuid():
@@ -267,15 +275,16 @@ def test_client_delete_invalid_uuid():
 def test_client_sync_version_fencing():
     uuid = "f5a9d4e1-73c5-4812-b964-f3e7b85a1905"
     with patch.object(grpc_client, "add_user", return_value=True):
-        # Sync version 5
-        res = client.post(
-            "/v1/clients/sync",
-            json={"client_id": uuid, "desired_state": "active", "version": 5},
-            headers=VALID_HEADERS,
-        )
-        assert res.status_code == 200
-        assert res.json()["result"] == "applied"
-        assert res.json()["version"] == 5
+        with patch.object(grpc_client, "probe_user_presence", return_value=True):
+            # Sync version 5
+            res = client.post(
+                "/v1/clients/sync",
+                json={"client_id": uuid, "desired_state": "active", "version": 5},
+                headers=VALID_HEADERS,
+            )
+            assert res.status_code == 200
+            assert res.json()["result"] == "applied"
+            assert res.json()["version"] == 5
 
     # Try sync older version 4 (should be fenced/ignored)
     with patch.object(grpc_client, "remove_user", return_value=True) as mock_remove:
@@ -349,15 +358,16 @@ def test_client_tombstone_prevents_stale_resurrection():
 
     # Newer sync at version 6 successfully resurrects client
     with patch.object(grpc_client, "add_user", return_value=True) as mock_add:
-        res_new = client.post(
-            "/v1/clients/sync",
-            json={"client_id": uuid, "desired_state": "active", "version": 6},
-            headers=VALID_HEADERS,
-        )
-        assert res_new.status_code == 200
-        assert res_new.json()["result"] == "applied"
-        assert mock_add.call_count > 0
-        assert uuid in client_store.load_clients()
+        with patch.object(grpc_client, "probe_user_presence", return_value=True):
+            res_new = client.post(
+                "/v1/clients/sync",
+                json={"client_id": uuid, "desired_state": "active", "version": 6},
+                headers=VALID_HEADERS,
+            )
+            assert res_new.status_code == 200
+            assert res_new.json()["result"] == "applied"
+            assert mock_add.call_count > 0
+            assert uuid in client_store.load_clients()
 
 
 def test_dynamic_inbound_discovery(tmp_path):
@@ -451,8 +461,33 @@ def test_health_includes_secret_base_path():
             assert res.status_code == 200
             data = res.json()
             assert "secret_base_path" in data
+            assert "cdn_domain" in data
             assert "sync_status" in data
             assert "synchronized" in data
+
+
+def test_health_includes_cdn_domain(tmp_path):
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps({"cdn_domain": "cdn.testnode.com"}), encoding="utf-8")
+
+    with patch.object(grpc_client, "is_healthy", return_value=True):
+        with patch.object(
+            epoch_manager,
+            "get_process_and_epoch",
+            return_value=(100, 1000, "boot-1", "epoch_1"),
+        ):
+            with patch("app.STATE_FILE_PATH", state_file):
+                with patch.dict(os.environ, {}, clear=False):
+                    os.environ.pop("CDN_DOMAIN", None)
+                    os.environ.pop("WHITE_INTERNET_CDN_DOMAIN", None)
+                    res = client.get("/v1/health", headers=VALID_HEADERS)
+                    assert res.status_code == 200
+                    assert res.json()["cdn_domain"] == "cdn.testnode.com"
+
+            with patch.dict(os.environ, {"CDN_DOMAIN": "cdn.override.com"}):
+                res = client.get("/v1/health", headers=VALID_HEADERS)
+                assert res.status_code == 200
+                assert res.json()["cdn_domain"] == "cdn.override.com"
 
 
 def test_health_fail_closed_when_grpc_down():
@@ -509,27 +544,28 @@ def test_client_sync_idempotent_retry():
     """Retrying sync with exact same version and desired_state succeeds idempotently without calling gRPC again."""
     uuid = "e1a2b3c4-d5e6-47a8-9b0c-1d2e3f4a5b6c"
     with patch.object(grpc_client, "add_user", return_value=True) as mock_add:
-        # First call: applies mutation
-        res1 = client.post(
-            "/v1/clients/sync",
-            json={"client_id": uuid, "desired_state": "active", "version": 10},
-            headers=VALID_HEADERS,
-        )
-        assert res1.status_code == 200
-        assert res1.json()["result"] == "applied"
-        assert mock_add.call_count == 2  # 2 inbounds
+        with patch.object(grpc_client, "probe_user_presence", return_value=True):
+            # First call: applies mutation
+            res1 = client.post(
+                "/v1/clients/sync",
+                json={"client_id": uuid, "desired_state": "active", "version": 10},
+                headers=VALID_HEADERS,
+            )
+            assert res1.status_code == 200
+            assert res1.json()["result"] == "applied"
+            assert mock_add.call_count == 2  # 2 inbounds
 
-        # Second call with exact same version and state: idempotent retry!
-        res2 = client.post(
-            "/v1/clients/sync",
-            json={"client_id": uuid, "desired_state": "active", "version": 10},
-            headers=VALID_HEADERS,
-        )
-        assert res2.status_code == 200
-        assert res2.json()["result"] == "applied"
-        assert res2.json()["idempotent"] is True
-        # gRPC add_user was NOT called again (preventing 'user already exists' error)
-        assert mock_add.call_count == 2
+            # Second call with exact same version and state: idempotent retry!
+            res2 = client.post(
+                "/v1/clients/sync",
+                json={"client_id": uuid, "desired_state": "active", "version": 10},
+                headers=VALID_HEADERS,
+            )
+            assert res2.status_code == 200
+            assert res2.json()["result"] == "applied"
+            assert res2.json()["idempotent"] is True
+            # gRPC add_user was NOT called again (preventing 'user already exists' error)
+            assert mock_add.call_count == 2
 
 
 def test_client_sync_epoch_fencing():

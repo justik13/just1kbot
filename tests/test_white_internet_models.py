@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import BigInteger, Integer, Numeric, String
+from sqlalchemy import BigInteger, Integer, String
 
 from config.enums import ServerLifecycleStatus, ServiceType
 from database.models import (
@@ -11,21 +11,20 @@ from database.models import (
     Tariff,
     TariffQuote,
     TariffVersion,
-    WhiteInternetQuotaGrant,
     WhiteInternetSubscription,
 )
 
 
 class WhiteInternetModelsTests(unittest.TestCase):
-    def test_alembic_migration_0017_revision_chain(self):
+    def test_alembic_migration_0018_revision_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+        rev_0018 = scripts.get_revision("0018_simplify_wi_traffic")
+        self.assertIsNotNone(rev_0018)
+        self.assertEqual(rev_0018.down_revision, "0017_white_internet_durations")
         rev_0017 = scripts.get_revision("0017_white_internet_durations")
         self.assertIsNotNone(rev_0017)
         self.assertEqual(rev_0017.down_revision, "0016_white_internet")
-        rev_0016 = scripts.get_revision("0016_white_internet")
-        self.assertIsNotNone(rev_0016)
-        self.assertEqual(rev_0016.down_revision, "0015_auto_fulfill_retry_idx")
-        self.assertEqual(scripts.get_heads(), ["0017_white_internet_durations"])
+        self.assertEqual(scripts.get_heads(), ["0018_simplify_wi_traffic"])
 
     def test_server_lifecycle_status_field_and_constraints(self):
         self.assertEqual(ServerLifecycleStatus.ACTIVE, "ACTIVE")
@@ -37,8 +36,12 @@ class WhiteInternetModelsTests(unittest.TestCase):
         self.assertIn("lifecycle_status", table.columns)
         self.assertEqual(table.columns["lifecycle_status"].type.length, 30)
         self.assertFalse(table.columns["lifecycle_status"].nullable)
-        self.assertEqual(table.columns["lifecycle_status"].default.arg, ServerLifecycleStatus.ACTIVE)
-        self.assertEqual(table.columns["lifecycle_status"].server_default.arg, ServerLifecycleStatus.ACTIVE)
+        self.assertEqual(
+            table.columns["lifecycle_status"].default.arg, ServerLifecycleStatus.ACTIVE
+        )
+        self.assertEqual(
+            table.columns["lifecycle_status"].server_default.arg, ServerLifecycleStatus.ACTIVE
+        )
 
         constraint_names = {c.name for c in table.constraints if c.name}
         self.assertIn("ck_servers_lifecycle_status", constraint_names)
@@ -77,8 +80,6 @@ class WhiteInternetModelsTests(unittest.TestCase):
         self.assertEqual(tv.duration_days, 30)
         self.assertEqual(tv.service_type, "white_internet")
         self.assertEqual(tv.base_quota_bytes, 53687091200)
-
-
 
     def test_tariff_model_white_internet_fields_and_constraints(self):
         table = Tariff.__table__
@@ -144,7 +145,8 @@ class WhiteInternetModelsTests(unittest.TestCase):
             "status_reason": String,
             "started_at": None,
             "expires_at": None,
-            "traffic_limit_bytes": BigInteger,
+            "base_traffic_bytes": BigInteger,
+            "extra_traffic_bytes": BigInteger,
             "traffic_used_bytes": BigInteger,
             "traffic_uplink_bytes": BigInteger,
             "traffic_downlink_bytes": BigInteger,
@@ -186,57 +188,16 @@ class WhiteInternetModelsTests(unittest.TestCase):
         self.assertIn("ck_white_internet_subscriptions_provisioning_status", constraint_names)
         self.assertIn("ck_white_internet_subscriptions_traffic_nonnegative", constraint_names)
 
-    def test_white_internet_quota_grant_table_structure(self):
-        table = WhiteInternetQuotaGrant.__table__
-        self.assertEqual(table.name, "white_internet_quota_grants")
-
-        self.assertIsInstance(table.columns["id"].type, BigInteger)
-        self.assertTrue(table.columns["id"].primary_key)
-
-        self.assertIsInstance(table.columns["subscription_id"].type, Integer)
-        self.assertTrue(table.columns["subscription_id"].index)
-
-        self.assertIsInstance(table.columns["grant_type"].type, String)
-        self.assertIsInstance(table.columns["bytes_granted"].type, BigInteger)
-        self.assertIsInstance(table.columns["bytes_remaining"].type, BigInteger)
-        self.assertIsInstance(table.columns["price_rub"].type, Numeric)
-        self.assertEqual(table.columns["price_rub"].default.arg, Decimal("0.00"))
-
-        self.assertIsInstance(table.columns["quote_id"].type, BigInteger)
-        self.assertTrue(table.columns["expires_at"].index)
-
-        # Foreign keys
-        fk_sub = next(
-            fk for fk in table.foreign_keys if fk.column.table.name == "white_internet_subscriptions"
+    def test_white_internet_subscription_hybrid_traffic_limit(self):
+        sub = WhiteInternetSubscription(
+            base_traffic_bytes=53_687_091_200,
+            extra_traffic_bytes=10_737_418_240,
         )
-        self.assertEqual(fk_sub.ondelete, "CASCADE")
-        fk_quote = next(fk for fk in table.foreign_keys if fk.column.table.name == "tariff_quotes")
-        self.assertEqual(fk_quote.ondelete, "RESTRICT")
-
-        # Constraints
-        constraint_names = {c.name for c in table.constraints if c.name}
-        self.assertIn("ck_white_internet_quota_grants_grant_type", constraint_names)
-        self.assertIn("ck_white_internet_quota_grants_bytes_granted_positive", constraint_names)
-        self.assertIn("ck_white_internet_quota_grants_bytes_remaining_nonnegative", constraint_names)
-        self.assertIn("ck_white_internet_quota_grants_bytes_remaining_le_granted", constraint_names)
-        self.assertIn("ck_white_internet_quota_grants_price_nonnegative", constraint_names)
-        self.assertIn("uq_white_internet_quota_grants_sub_quote_type", constraint_names)
-
-    def test_white_internet_traffic_event_table_structure(self):
-        from database.models import WhiteInternetTrafficEvent
-        table = WhiteInternetTrafficEvent.__table__
-        self.assertEqual(table.name, "white_internet_traffic_events")
-
-        self.assertIsInstance(table.columns["id"].type, BigInteger)
-        self.assertTrue(table.columns["id"].primary_key)
-        self.assertTrue(table.columns["subscription_id"].index)
-        self.assertIn("created_at", table.columns)
-
-        constraint_names = {c.name for c in table.constraints if c.name}
-        self.assertIn("ck_white_internet_traffic_events_conservation", constraint_names)
-        self.assertIn("ck_white_internet_traffic_events_uplink_monotonic", constraint_names)
-        self.assertIn("ck_white_internet_traffic_events_downlink_monotonic", constraint_names)
-        self.assertIn("uq_white_internet_traffic_event_snapshot", constraint_names)
+        self.assertEqual(sub.traffic_limit_bytes, 64_424_509_440)
+        # Test backward-compatible setter
+        sub.traffic_limit_bytes = 100_000_000_000
+        self.assertEqual(sub.base_traffic_bytes, 100_000_000_000)
+        self.assertEqual(sub.extra_traffic_bytes, 0)
 
 
 if __name__ == "__main__":

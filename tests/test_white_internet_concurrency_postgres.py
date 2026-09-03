@@ -18,14 +18,13 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from config.enums import (
     ServerHealthState,
     TariffQuoteOperation,
     TariffQuoteStatus,
-    WhiteInternetGrantType,
     WhiteInternetStatus,
 )
 
@@ -35,9 +34,7 @@ from database.models import (
     TariffQuote,
     TariffVersion,
     User,
-    WhiteInternetQuotaGrant,
     WhiteInternetSubscription,
-    WhiteInternetTrafficEvent,
 )
 from database.repositories import servers_repo, white_internet_repo
 from utils import now_utc
@@ -83,9 +80,12 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         get_settings.cache_clear()
 
-        self.engine = create_async_engine(DB, pool_size=20, max_overflow=20, pool_timeout=60, connect_args={"timeout": 30})
+        self.engine = create_async_engine(
+            DB, pool_size=20, max_overflow=20, pool_timeout=60, connect_args={"timeout": 30}
+        )
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         from database import connection
+
         self.old_sessionmaker = connection._sessionmaker
         self.old_engine = connection._engine
         connection._sessionmaker = self.sessions
@@ -109,7 +109,10 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 xray_instance_epoch="epoch_100",
                 xray_instance_boot_id="boot_01",
                 xray_instance_starttime=1000,
-                extra_data={"secret_base_path": "/w_conc", "relays": [{"code": "de", "name": "Германия"}]},
+                extra_data={
+                    "secret_base_path": "/w_conc",
+                    "relays": [{"code": "de", "name": "Германия"}],
+                },
             )
             session.add(self.server)
 
@@ -138,7 +141,6 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             session.add(self.tariff_version)
             await session.flush()
 
-
             # TariffQuote
             self.quote = TariffQuote(
                 public_id=uuid.uuid4(),
@@ -162,11 +164,9 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             session.add(self.quote)
             await session.flush()
 
-
-
-
     async def asyncTearDown(self):
         from database import connection
+
         connection._sessionmaker = self.old_sessionmaker
         connection._engine = self.old_engine
         await self.engine.dispose()
@@ -208,7 +208,6 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             server = await session.get(Server, self.server.id)
             self.assertEqual(server.xray_instance_epoch, "epoch_200")  # Untouched
 
-
     async def test_concurrent_traffic_deduction_and_event_recording(self):
         """Verify row locking and atomic ledger consistency under concurrent traffic sync workers."""
         now = now_utc()
@@ -224,7 +223,8 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 status=WhiteInternetStatus.ACTIVE,
                 started_at=now,
                 expires_at=now + timedelta(days=30),
-                traffic_limit_bytes=base_50_gib,
+                base_traffic_bytes=base_50_gib,
+                extra_traffic_bytes=0,
                 traffic_used_bytes=0,
                 desired_version=1,
                 actual_version=1,
@@ -232,17 +232,6 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             session.add(sub)
             await session.flush()
-
-            grant = WhiteInternetQuotaGrant(
-                subscription_id=sub.id,
-                grant_type=WhiteInternetGrantType.BASE,
-                bytes_granted=base_50_gib,
-                bytes_remaining=base_50_gib,
-                price_rub=Decimal("250.00"),
-                quote_id=self.quote.id,
-                expires_at=sub.expires_at,
-            )
-            session.add(grant)
             sub_id = sub.id
 
         # Run 10 parallel traffic increments of 2 GiB each
@@ -258,22 +247,6 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                     delta_downlink=chunk_gib // 2,
                     now=now,
                 )
-                await white_internet_repo.record_traffic_event_atomic(
-                    session,
-                    subscription_id=sub_id,
-                    node_epoch="epoch_100",
-                    node_boot_id="boot_01",
-                    node_starttime=1000,
-                    snapshot_uplink_before=idx * (chunk_gib // 2),
-                    snapshot_uplink_after=(idx + 1) * (chunk_gib // 2),
-                    snapshot_downlink_before=idx * (chunk_gib // 2),
-                    snapshot_downlink_after=(idx + 1) * (chunk_gib // 2),
-                    delta_uplink=chunk_gib // 2,
-                    delta_downlink=chunk_gib // 2,
-                    allocated_bytes=consumed,
-                    overage_bytes=overage,
-                    now=now,
-                )
 
         tasks = [worker_task(i) for i in range(10)]
         await asyncio.gather(*tasks)
@@ -287,14 +260,8 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             avail = await white_internet_repo.get_available_quota_bytes(session, sub_id, now=now)
             self.assertEqual(avail, base_50_gib - (10 * chunk_gib))
 
-            # Verify traffic events count
-            events_count = await session.scalar(
-                select(text("count(*)")).select_from(WhiteInternetTrafficEvent)
-            )
-            self.assertEqual(events_count, 10)
-
-    async def test_topup_500_gib_cap_under_concurrent_purchases(self):
-        """Verify that concurrent topups strictly respect the 500 GiB accumulation cap."""
+    async def test_topup_150_gib_cap_under_concurrent_purchases(self):
+        """Verify that concurrent topups strictly respect the 150 GiB accumulation cap."""
         now = now_utc()
         base_50_gib = 50 * 1024**3
 
@@ -307,27 +274,17 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 status=WhiteInternetStatus.ACTIVE,
                 started_at=now,
                 expires_at=now + timedelta(days=30),
-                traffic_limit_bytes=base_50_gib,
+                base_traffic_bytes=base_50_gib,
+                extra_traffic_bytes=0,
                 traffic_used_bytes=0,
                 desired_version=1,
                 actual_version=1,
             )
             session.add(sub)
             await session.flush()
-
-            grant = WhiteInternetQuotaGrant(
-                subscription_id=sub.id,
-                grant_type=WhiteInternetGrantType.BASE,
-                bytes_granted=base_50_gib,
-                bytes_remaining=base_50_gib,
-                price_rub=Decimal("250.00"),
-                quote_id=self.quote.id,
-                expires_at=sub.expires_at,
-            )
-            session.add(grant)
             sub_id = sub.id
 
-        # Attempt to concurrently purchase 10 packs of 50 GiB each (500 GiB + 50 GiB base = 550 GiB > 500 GiB cap)
+        # Attempt to concurrently purchase 10 packs of 50 GiB each (50 GiB base + 2*50 GiB = 150 GiB cap)
         async def try_topup(idx: int) -> bool:
             async with self.sessions.begin() as session:
                 # Create unique quote for this topup
@@ -373,10 +330,10 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         successes = sum(1 for r in results if r is True)
         cap_errors = sum(1 for r in results if r is False)
 
-        # 50 GiB base + 9 * 50 GiB topups = 500 GiB (exactly at cap). 10th must fail!
-        self.assertEqual(successes, 9)
-        self.assertEqual(cap_errors, 1)
+        # 50 GiB base + 2 * 50 GiB topups = 150 GiB (exactly at cap). Remaining 8 must fail!
+        self.assertEqual(successes, 2)
+        self.assertEqual(cap_errors, 8)
 
         async with self.sessions() as session:
             avail = await white_internet_repo.get_available_quota_bytes(session, sub_id, now=now)
-            self.assertEqual(avail, 500 * 1024**3)
+            self.assertEqual(avail, 150 * 1024**3)

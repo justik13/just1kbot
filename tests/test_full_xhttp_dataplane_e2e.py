@@ -58,6 +58,18 @@ CADDYFILE = REPO_ROOT / "Caddyfile"
 CADDYFILE_CI = REPO_ROOT / "Caddyfile.ci"
 
 
+def _read_just1knode_content() -> str:
+    content = ""
+    just1knode_dir = REPO_ROOT / "just1knode"
+    if just1knode_dir.exists():
+        for p in sorted(just1knode_dir.glob("**/*")):
+            if p.is_file():
+                content += p.read_text(encoding="utf-8", errors="ignore") + "\n"
+    if JUST1KNODE_SH.exists():
+        content += JUST1KNODE_SH.read_text(encoding="utf-8", errors="ignore")
+    return content
+
+
 class DummySubscription:
     """Mock WhiteInternetSubscription model for unit and contract verification."""
 
@@ -82,7 +94,7 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
 
     def test_link_path_strictly_matches_nginx_location(self) -> None:
         """VLESS link path generated for standalone origin must match Nginx location ^~ block."""
-        sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
+        sh_content = _read_just1knode_content()
         sub = DummySubscription()
 
         # 1. Standalone Origin (no relays attached)
@@ -177,13 +189,13 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertEqual(xhttp_settings.get("path"), "/w_custom/default")
         self.assertEqual(xhttp_settings.get("uplinkHTTPMethod"), "OPTIONS")
 
-        # just1knode.sh template must also use queryInHeader
-        sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
+        # just1knode template must also use queryInHeader
+        sh_content = _read_just1knode_content()
         self.assertIn("'xPaddingPlacement': 'queryInHeader'", sh_content)
 
     def test_origin_routing_default_fallback_and_ru_split(self) -> None:
         """On Origin node, default inbound routes to relay/block, while RU domains route to just1k-wl-direct."""
-        sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
+        sh_content = _read_just1knode_content()
 
         # In standalone mode (install_xray_origin_node), default inbound routes to blackhole block
         self.assertIn(
@@ -236,7 +248,7 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
 
     def test_nginx_camouflage_site_and_buffers(self) -> None:
         """Nginx must serve camouflage site on / and define zero request buffering for streaming."""
-        sh_content = JUST1KNODE_SH.read_text(encoding="utf-8")
+        sh_content = _read_just1knode_content()
 
         # Camouflage site landing page created
         self.assertIn("mkdir -p \"${WWW_HTML_DIR}\"", sh_content)

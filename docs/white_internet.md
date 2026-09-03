@@ -53,8 +53,9 @@
 * Поддерживается алгоритм оптимизации потока `xtls-rprx-vision`.
 * Порт туннеля (по умолчанию 10443) защищен UFW-фаерволом и открыт строго для IP-адреса Origin-сервера.
 
-### 2.3. Учет квот и биллинг (Grant Ledger)
-* Каждый пользователь имеет подписку `WhiteInternetSubscription` и цепочку грантов `WhiteInternetQuotaGrant` (Base 50 ГБ + накопительные пакеты продления).
+### 2.3. Учет квот, докупка и биллинг (Traffic & Anti-Abuse Policy)
+* **Модель пула:** Учет ведется по схеме `base_traffic_bytes` (50 ГБ) + `extra_traffic_bytes` (докуп). Неиспользованная база сгорает при продлении, докуп переносится (подробнее: `WL/TRAFFIC_POLICY_AND_ANTIABUSE_SPEC.md`).
+* **Анти-абуз:** Hard Cap остатка (150 ГБ), докупка только при активной подписке (`now < expires_at`), Grace Period 7 дней при просрочке.
 * Воркер `white_internet_traffic` опрашивает агент `xray-api` по безопасному TLS-каналу (порт `8444`).
 * Семантика **Anomaly Guard**, **Generation CAS** и **Stats Reset Rebase** предотвращает ложные списания при перезапусках ядра Xray и сбросе счетчиков.
 
@@ -62,60 +63,35 @@
 
 ## 3. Управление узлами через `just1knode` (Zero-Collateral-Damage)
 
-### 3.1. Установка Relay-узла (Зарубежный выход)
+### 3.1. Интерактивное меню управления узлами (`just1knode`)
+На любом сервере достаточно запустить команду без параметров:
 ```bash
-# Интерактивная установка Relay
-sudo just1knode install relay
-
-# Или с аргументами:
-sudo just1knode install relay 10443 "<IP_ORIGIN_В_РФ>" "www.google.com"
+sudo just1knode
 ```
-После завершения скрипт выдаст готовую команду для добавления реле на Origin-сервере.
+Скрипт автоматически определит текущее состояние машины (не настроен / Origin / Relay) и отобразит контекстное меню с пошаговым опросником.
 
-### 3.2. Установка Origin-узла (РФ / Москва)
-```bash
-# Интерактивная установка Origin
-sudo just1knode install origin
+* **Установка Relay (Зарубежье):**
+  В меню выбрать пункт `[2] Установить Relay узел`. Скрипт запросит порт туннеля (по умолчанию: 10443) и IP-адрес Origin-сервера в РФ для настройки защитного UFW-фаервола. При наличии AmneziaWG скрипт работает в режиме Zero-Collateral и не затрагивает порт 51820/udp.
+* **Установка Origin (РФ / Москва):**
+  В меню выбрать пункт `[1] Установить Origin узел`. Скрипт запросит домен Origin, домен Yandex Cloud CDN, Email для SSL и IP Telegram-бота.
+* **Управление Relay-узлами на Origin:**
+  В меню Origin доступен пункт `[1] Управление Relay-узлами` (добавление, удаление, просмотр списка подключенных мостов).
 
-# Или с аргументами:
-sudo just1knode install origin "origin.yourdomain.com" "admin@yourdomain.com" "<API_KEY>" "/w_secret"
-```
-
-### 3.3. Управление Relay-узлами на Origin
-```bash
-# Добавление Relay с доменным TLS (например, нода justik):
-sudo just1knode relay add "Германия" "94.249.239.236" 10443 "<UUID>" "de" "tls" "" "" "relay.just1k.best"
-
-# Добавление Relay с REALITY:
-sudo just1knode relay add "Швеция" "<RELAY_IP>" 10443 "<UUID>" "se" "reality" "<PUBKEY>" "<SHORT_ID>" "www.google.com"
-
-# Просмотр списка активных релеев
-sudo just1knode relay list
-
-# Удаление Relay
-sudo just1knode relay remove de
-```
-
-### 3.4. Диагностика и статус
+### 3.2. Диагностика и статус
 ```bash
 # Комплексная самодиагностика узла (DNS, SSL, Xray, gRPC/Relay, Nginx, UFW)
 sudo just1knode doctor
 
 # Статус служб и количество активных клиентов
 sudo just1knode status
-
-# Безопасное тестирование API агента
-curl -k -H "X-API-Key: $(grep XRAY_API_KEY /etc/xray-api/config.env | cut -d= -f2)" https://127.0.0.1:8444/v1/health
 ```
 
 ---
 
-## 4. Конфигурация Telegram-бота (`.env`)
+## 4. Добавление сервера в Telegram-боте (/admin)
 
-```env
-# Публичный CDN домен
-WHITE_INTERNET_CDN_DOMAIN=cdn.just1k.best
+Ручное редактирование `.env` **НЕ ТРЕБУЕТСЯ**.
 
-# Префикс пути для HTTP подписки (по умолчанию: /sub/wl)
-WHITE_INTERNET_SUB_PATH_PREFIX=/sub/wl
-```
+1. В Telegram-боте отправьте команду `/admin` ➔ **Серверы** ➔ **➕ Добавить сервер**.
+2. Укажите название (`🇷🇺 Москва Origin`), флаг (`🇷🇺`), API URL (`https://origin.yourdomain.com:8444`) и API-ключ, выданный скриптом.
+3. Бот автоматически запросит агент `xray-api`, заберет `cdn_domain`, секретные префиксы и список подключенных релеев и сохранит их в базе данных. Веб-выдача подписок `/sub/wl/{token}` начнет работать сразу.

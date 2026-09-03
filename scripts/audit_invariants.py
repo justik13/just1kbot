@@ -40,7 +40,6 @@ from config.enums import (
     ServiceType,
     TariffQuoteOperation,
     TariffQuoteStatus,
-    WhiteInternetGrantType,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
@@ -51,9 +50,7 @@ from database.models import (
     Server,
     TariffQuote,
     TariffVersion,
-    WhiteInternetQuotaGrant,
     WhiteInternetSubscription,
-    WhiteInternetTrafficEvent,
 )
 from database.repositories.servers_repo import capacity_consuming_wl_condition
 
@@ -74,14 +71,19 @@ async def assert_inv_1_tariff_versions(session: AsyncSession) -> InvariantResult
                 TariffVersion.duration_hours <= 0,
                 TariffVersion.price_rub <= 0,
                 TariffVersion.currency != "RUB",
-                (TariffVersion.base_quota_bytes.is_not(None)) & (TariffVersion.base_quota_bytes <= 0),
+                (TariffVersion.base_quota_bytes.is_not(None))
+                & (TariffVersion.base_quota_bytes <= 0),
             )
         )
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(1, "Tariff Version Constraints", False, f"Violations found: {len(v_list)} rows")
-    return InvariantResult(1, "Tariff Version Constraints", True, "All tariff versions satisfy schema invariants")
+        return InvariantResult(
+            1, "Tariff Version Constraints", False, f"Violations found: {len(v_list)} rows"
+        )
+    return InvariantResult(
+        1, "Tariff Version Constraints", True, "All tariff versions satisfy schema invariants"
+    )
 
 
 async def assert_inv_2_server_lifecycle(session: AsyncSession) -> InvariantResult:
@@ -98,8 +100,12 @@ async def assert_inv_2_server_lifecycle(session: AsyncSession) -> InvariantResul
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(2, "Server Lifecycle & Health", False, f"Violations found: {len(v_list)} servers")
-    return InvariantResult(2, "Server Lifecycle & Health", True, "All servers have valid lifecycle and health states")
+        return InvariantResult(
+            2, "Server Lifecycle & Health", False, f"Violations found: {len(v_list)} servers"
+        )
+    return InvariantResult(
+        2, "Server Lifecycle & Health", True, "All servers have valid lifecycle and health states"
+    )
 
 
 async def assert_inv_3_white_internet_subscriptions(session: AsyncSession) -> InvariantResult:
@@ -118,69 +124,88 @@ async def assert_inv_3_white_internet_subscriptions(session: AsyncSession) -> In
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(3, "White Internet Subscriptions", False, f"Violations found: {len(v_list)} subs")
-    return InvariantResult(3, "White Internet Subscriptions", True, "All subscriptions satisfy state invariants")
+        return InvariantResult(
+            3, "White Internet Subscriptions", False, f"Violations found: {len(v_list)} subs"
+        )
+    return InvariantResult(
+        3, "White Internet Subscriptions", True, "All subscriptions satisfy state invariants"
+    )
 
 
-async def assert_inv_4_quota_grants_conservation(session: AsyncSession) -> InvariantResult:
-    """Inv 4: Quota grants have 0 <= bytes_remaining <= bytes_granted and valid grant_type."""
-    valid_grant_types = [g.value for g in WhiteInternetGrantType]
+async def assert_inv_4_subscription_traffic_pools(session: AsyncSession) -> InvariantResult:
+    """Inv 4: Subscriptions have non-negative base and extra traffic pools within Hard Cap."""
+    from config.constants import WHITE_INTERNET_MAX_QUOTA_BYTES
+
     violations = await session.scalars(
-        select(WhiteInternetQuotaGrant).where(
+        select(WhiteInternetSubscription).where(
             or_(
-                WhiteInternetQuotaGrant.bytes_granted <= 0,
-                WhiteInternetQuotaGrant.bytes_remaining < 0,
-                WhiteInternetQuotaGrant.bytes_remaining > WhiteInternetQuotaGrant.bytes_granted,
-                ~WhiteInternetQuotaGrant.grant_type.in_(valid_grant_types),
+                WhiteInternetSubscription.base_traffic_bytes < 0,
+                WhiteInternetSubscription.extra_traffic_bytes < 0,
+                WhiteInternetSubscription.base_traffic_bytes
+                + WhiteInternetSubscription.extra_traffic_bytes
+                > WHITE_INTERNET_MAX_QUOTA_BYTES,
             )
         )
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(4, "Quota Grant Conservation", False, f"Violations found: {len(v_list)} grants")
-    return InvariantResult(4, "Quota Grant Conservation", True, "All quota grants satisfy conservation laws")
+        return InvariantResult(
+            4, "Subscription Traffic Pools & Cap", False, f"Violations found: {len(v_list)} subs"
+        )
+    return InvariantResult(
+        4,
+        "Subscription Traffic Pools & Cap",
+        True,
+        "All subscriptions satisfy traffic pool and cap invariants",
+    )
 
 
-async def assert_inv_5_traffic_events_conservation(session: AsyncSession) -> InvariantResult:
-    """Inv 5: Traffic events satisfy allocated_bytes + overage_bytes == delta_uplink + delta_downlink."""
+async def assert_inv_5_subscription_counter_monotonicity(session: AsyncSession) -> InvariantResult:
+    """Inv 5: Subscriptions satisfy last snapshots non-negativity and used traffic bounds."""
     violations = await session.scalars(
-        select(WhiteInternetTrafficEvent).where(
+        select(WhiteInternetSubscription).where(
             or_(
-                WhiteInternetTrafficEvent.allocated_bytes + WhiteInternetTrafficEvent.overage_bytes
-                != WhiteInternetTrafficEvent.delta_uplink + WhiteInternetTrafficEvent.delta_downlink,
-                WhiteInternetTrafficEvent.delta_uplink < 0,
-                WhiteInternetTrafficEvent.delta_downlink < 0,
+                WhiteInternetSubscription.last_uplink_snapshot < 0,
+                WhiteInternetSubscription.last_downlink_snapshot < 0,
+                WhiteInternetSubscription.traffic_used_bytes < 0,
             )
         )
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(5, "Traffic Event Conservation", False, f"Violations found: {len(v_list)} events")
-    return InvariantResult(5, "Traffic Event Conservation", True, "All traffic events strictly conserve byte delta")
+        return InvariantResult(
+            5, "Subscription Counter Monotonicity", False, f"Violations found: {len(v_list)} subs"
+        )
+    return InvariantResult(
+        5,
+        "Subscription Counter Monotonicity",
+        True,
+        "All subscription counters satisfy monotonicity invariants",
+    )
 
 
-async def assert_inv_6_traffic_events_idempotency_key(session: AsyncSession) -> InvariantResult:
-    """Inv 6: (subscription_id, node_epoch, snapshot_uplink_after, snapshot_downlink_after) uniqueness."""
+async def assert_inv_6_subscription_live_uniqueness(session: AsyncSession) -> InvariantResult:
+    """Inv 6: Live users have at most one active/pending subscription."""
     res = await session.execute(
-        select(
-            WhiteInternetTrafficEvent.subscription_id,
-            WhiteInternetTrafficEvent.node_epoch,
-            WhiteInternetTrafficEvent.snapshot_uplink_after,
-            WhiteInternetTrafficEvent.snapshot_downlink_after,
-            func.count(WhiteInternetTrafficEvent.id),
-        )
-        .group_by(
-            WhiteInternetTrafficEvent.subscription_id,
-            WhiteInternetTrafficEvent.node_epoch,
-            WhiteInternetTrafficEvent.snapshot_uplink_after,
-            WhiteInternetTrafficEvent.snapshot_downlink_after,
-        )
-        .having(func.count(WhiteInternetTrafficEvent.id) > 1)
+        select(WhiteInternetSubscription.user_id, func.count(WhiteInternetSubscription.id))
+        .where(WhiteInternetSubscription.status.in_(["PENDING", "ACTIVE", "EXHAUSTED"]))
+        .group_by(WhiteInternetSubscription.user_id)
+        .having(func.count(WhiteInternetSubscription.id) > 1)
     )
     dups = res.all()
     if dups:
-        return InvariantResult(6, "Traffic Event Idempotency Key", False, f"Duplicate events found: {len(dups)}")
-    return InvariantResult(6, "Traffic Event Idempotency Key", True, "Traffic event idempotency key is strictly unique")
+        return InvariantResult(
+            6,
+            "Live User Subscription Uniqueness",
+            False,
+            f"Duplicate live subscriptions found: {len(dups)}",
+        )
+    return InvariantResult(
+        6,
+        "Live User Subscription Uniqueness",
+        True,
+        "Live user subscription uniqueness holds strictly",
+    )
 
 
 async def assert_inv_7_subscription_period_usage(session: AsyncSession) -> InvariantResult:
@@ -192,14 +217,19 @@ async def assert_inv_7_subscription_period_usage(session: AsyncSession) -> Invar
                 WhiteInternetSubscription.traffic_uplink_bytes < 0,
                 WhiteInternetSubscription.traffic_downlink_bytes < 0,
                 WhiteInternetSubscription.traffic_overage_bytes < 0,
-                WhiteInternetSubscription.traffic_limit_bytes < 0,
+                WhiteInternetSubscription.base_traffic_bytes < 0,
+                WhiteInternetSubscription.extra_traffic_bytes < 0,
             )
         )
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(7, "Subscription Usage Non-Negativity", False, f"Violations found: {len(v_list)} subs")
-    return InvariantResult(7, "Subscription Usage Non-Negativity", True, "All subscription counters are non-negative")
+        return InvariantResult(
+            7, "Subscription Usage Non-Negativity", False, f"Violations found: {len(v_list)} subs"
+        )
+    return InvariantResult(
+        7, "Subscription Usage Non-Negativity", True, "All subscription counters are non-negative"
+    )
 
 
 async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> InvariantResult:
@@ -207,7 +237,9 @@ async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> Invari
     subs = (await session.scalars(select(WhiteInternetSubscription))).all()
     origin_ids = {s.origin_node_id for s in subs if s.origin_node_id is not None}
     if not origin_ids:
-        return InvariantResult(8, "Origin Node Capabilities", True, "No subscription origin nodes to check")
+        return InvariantResult(
+            8, "Origin Node Capabilities", True, "No subscription origin nodes to check"
+        )
 
     servers = (await session.scalars(select(Server).where(Server.id.in_(origin_ids)))).all()
     server_map = {srv.id: srv for srv in servers}
@@ -222,7 +254,9 @@ async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> Invari
 
     if bad_nodes:
         return InvariantResult(8, "Origin Node Capabilities", False, "; ".join(bad_nodes))
-    return InvariantResult(8, "Origin Node Capabilities", True, "All origin servers have 'xray_origin' capability")
+    return InvariantResult(
+        8, "Origin Node Capabilities", True, "All origin servers have 'xray_origin' capability"
+    )
 
 
 async def assert_inv_9_tariff_quotes_consistency(session: AsyncSession) -> InvariantResult:
@@ -242,8 +276,15 @@ async def assert_inv_9_tariff_quotes_consistency(session: AsyncSession) -> Invar
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(9, "Tariff Quotes Consistency", False, f"Violations found: {len(v_list)} quotes")
-    return InvariantResult(9, "Tariff Quotes Consistency", True, "All tariff quotes have consistent status and operation")
+        return InvariantResult(
+            9, "Tariff Quotes Consistency", False, f"Violations found: {len(v_list)} quotes"
+        )
+    return InvariantResult(
+        9,
+        "Tariff Quotes Consistency",
+        True,
+        "All tariff quotes have consistent status and operation",
+    )
 
 
 async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) -> InvariantResult:
@@ -258,8 +299,15 @@ async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) ->
     )
     violations = res.all()
     if violations:
-        return InvariantResult(10, "Account Balance Non-Negativity", False, f"Violations found: {len(violations)} users with negative balance")
-    return InvariantResult(10, "Account Balance Non-Negativity", True, "All user accounting balances are non-negative")
+        return InvariantResult(
+            10,
+            "Account Balance Non-Negativity",
+            False,
+            f"Violations found: {len(violations)} users with negative balance",
+        )
+    return InvariantResult(
+        10, "Account Balance Non-Negativity", True, "All user accounting balances are non-negative"
+    )
 
 
 async def assert_inv_11_account_ledger_conservation(session: AsyncSession) -> InvariantResult:
@@ -275,8 +323,12 @@ async def assert_inv_11_account_ledger_conservation(session: AsyncSession) -> In
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(11, "Account Ledger Conservation", False, f"Violations found: {len(v_list)} entries")
-    return InvariantResult(11, "Account Ledger Conservation", True, "All account ledger entries satisfy invariants")
+        return InvariantResult(
+            11, "Account Ledger Conservation", False, f"Violations found: {len(v_list)} entries"
+        )
+    return InvariantResult(
+        11, "Account Ledger Conservation", True, "All account ledger entries satisfy invariants"
+    )
 
 
 async def assert_inv_12_paid_value_ledger_consistency(session: AsyncSession) -> InvariantResult:
@@ -291,22 +343,35 @@ async def assert_inv_12_paid_value_ledger_consistency(session: AsyncSession) -> 
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(12, "Paid Value Ledger Consistency", False, f"Violations found: {len(v_list)} entries")
-    return InvariantResult(12, "Paid Value Ledger Consistency", True, "All paid value ledger entries are consistent")
+        return InvariantResult(
+            12, "Paid Value Ledger Consistency", False, f"Violations found: {len(v_list)} entries"
+        )
+    return InvariantResult(
+        12, "Paid Value Ledger Consistency", True, "All paid value ledger entries are consistent"
+    )
 
 
 async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
     """Inv 13: All VPN servers use AWG or Xray protocol (pure WireGuard 'wg' is strictly rejected)."""
     violations = await session.scalars(
         select(Server).where(
-            Server.protocol.notin_([AMNEZIA_PROTOCOL, "xray"])
-            | (Server.protocol == "wg")
+            Server.protocol.notin_([AMNEZIA_PROTOCOL, "xray"]) | (Server.protocol == "wg")
         )
     )
     v_list = violations.all()
     if v_list:
-        return InvariantResult(13, "VPN Server Protocol (AWG/Xray)", False, f"Violations: {len(v_list)} invalid protocol servers")
-    return InvariantResult(13, "VPN Server Protocol (AWG/Xray)", True, "All servers strictly use AmneziaWG (awg) or Xray (xray)")
+        return InvariantResult(
+            13,
+            "VPN Server Protocol (AWG/Xray)",
+            False,
+            f"Violations: {len(v_list)} invalid protocol servers",
+        )
+    return InvariantResult(
+        13,
+        "VPN Server Protocol (AWG/Xray)",
+        True,
+        "All servers strictly use AmneziaWG (awg) or Xray (xray)",
+    )
 
 
 async def assert_inv_14_origin_server_capacity(session: AsyncSession) -> InvariantResult:
@@ -337,39 +402,46 @@ async def assert_inv_14_origin_server_capacity(session: AsyncSession) -> Invaria
 
     if breaches:
         return InvariantResult(14, "Origin Server Capacity", False, "; ".join(breaches))
-    return InvariantResult(14, "Origin Server Capacity", True, "All origin servers operate within max_clients capacity")
+    return InvariantResult(
+        14, "Origin Server Capacity", True, "All origin servers operate within max_clients capacity"
+    )
 
 
 def _inspect_alembic_head() -> list[str]:
     from pathlib import Path
+
     config_path = "alembic.ini" if Path("alembic.ini").is_file() else "../alembic.ini"
     scripts = ScriptDirectory.from_config(Config(config_path))
     return scripts.get_heads()
 
 
 async def assert_inv_15_alembic_single_head(session: AsyncSession | None = None) -> InvariantResult:
-    """Inv 15: Alembic migration graph has exactly one head at '0017_white_internet_durations'."""
+    """Inv 15: Alembic migration graph has exactly one head at '0018_simplify_wi_traffic'."""
     try:
         heads = await asyncio.to_thread(_inspect_alembic_head)
-        if len(heads) != 1 or heads[0] != "0017_white_internet_durations":
+        if len(heads) != 1 or heads[0] != "0018_simplify_wi_traffic":
             return InvariantResult(
                 15,
                 "Alembic Single Head Invariant",
                 False,
-                f"Expected ['0017_white_internet_durations'], got {heads}",
+                f"Expected ['0018_simplify_wi_traffic'], got {heads}",
             )
-        return InvariantResult(15, "Alembic Single Head Invariant", True, f"Single head verified: {heads[0]}")
+        return InvariantResult(
+            15, "Alembic Single Head Invariant", True, f"Single head verified: {heads[0]}"
+        )
     except Exception as e:
-        return InvariantResult(15, "Alembic Single Head Invariant", False, f"Error inspecting alembic graph: {e}")
+        return InvariantResult(
+            15, "Alembic Single Head Invariant", False, f"Error inspecting alembic graph: {e}"
+        )
 
 
 ALL_INVARIANT_CHECKS = [
     assert_inv_1_tariff_versions,
     assert_inv_2_server_lifecycle,
     assert_inv_3_white_internet_subscriptions,
-    assert_inv_4_quota_grants_conservation,
-    assert_inv_5_traffic_events_conservation,
-    assert_inv_6_traffic_events_idempotency_key,
+    assert_inv_4_subscription_traffic_pools,
+    assert_inv_5_subscription_counter_monotonicity,
+    assert_inv_6_subscription_live_uniqueness,
     assert_inv_7_subscription_period_usage,
     assert_inv_8_origin_node_capabilities,
     assert_inv_9_tariff_quotes_consistency,
@@ -412,7 +484,11 @@ def main() -> int:
 
     print("=" * 80)
     if all_passed:
-        print(" SUCCESS: All 15 invariant integrity assertions passed with 0 violations. ".center(80, "="))
+        print(
+            " SUCCESS: All 15 invariant integrity assertions passed with 0 violations. ".center(
+                80, "="
+            )
+        )
         print("=" * 80)
         return 0
     else:

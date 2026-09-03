@@ -12,7 +12,10 @@ from aiohttp import web
 from sqlalchemy import select
 
 from bot import texts
-from config.constants import DEFAULT_WHITE_INTERNET_PATH
+from config.constants import (
+    DEFAULT_WHITE_INTERNET_PATH,
+    WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+)
 from config.enums import ServerHealthState, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server
@@ -69,22 +72,53 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_PENDING, headers=headers)
 
-        if sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED) or sub.expires_at <= now:
+        if (
+            sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED)
+            or sub.expires_at <= now
+        ):
             return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
 
-        period_grants = await white_internet_repo.get_period_grants(session, sub.id, now)
-        available_bytes = sum(g.bytes_remaining for g in period_grants)
-        current_period_total = sum(g.bytes_granted for g in period_grants)
-        expire_ts = int(sub.expires_at.timestamp())
-        upload_bytes = sub.traffic_uplink_bytes or 0
-        download_bytes = sub.traffic_downlink_bytes or 0
+        base_bytes = getattr(sub, "base_traffic_bytes", None)
+        extra_bytes = getattr(sub, "extra_traffic_bytes", None)
+        traffic_limit = getattr(sub, "traffic_limit_bytes", None)
+
+        if isinstance(base_bytes, (int, float)) or isinstance(extra_bytes, (int, float)):
+            base_val = int(base_bytes) if isinstance(base_bytes, (int, float)) else 0
+            extra_val = int(extra_bytes) if isinstance(extra_bytes, (int, float)) else 0
+            total_quota = base_val + extra_val
+        elif isinstance(traffic_limit, (int, float)):
+            total_quota = int(traffic_limit)
+        else:
+            total_quota = WHITE_INTERNET_BASE_TRAFFIC_BYTES
+
+        used_val = (
+            int(sub.traffic_used_bytes)
+            if isinstance(getattr(sub, "traffic_used_bytes", None), (int, float))
+            else 0
+        )
+        available_bytes = max(0, total_quota - used_val)
+        expire_ts = (
+            int(sub.expires_at.timestamp())
+            if hasattr(getattr(sub, "expires_at", None), "timestamp")
+            else 0
+        )
+        upload_bytes = (
+            int(sub.traffic_uplink_bytes)
+            if isinstance(getattr(sub, "traffic_uplink_bytes", None), (int, float))
+            else 0
+        )
+        download_bytes = (
+            int(sub.traffic_downlink_bytes)
+            if isinstance(getattr(sub, "traffic_downlink_bytes", None), (int, float))
+            else 0
+        )
 
         if sub.status == WhiteInternetStatus.EXHAUSTED or available_bytes <= 0:
             headers = dict(common_headers)
             headers["Subscription-Userinfo"] = texts.WL_USERINFO_HEADER_TEMPLATE.format(
                 upload=upload_bytes,
                 download=download_bytes,
-                total=current_period_total,
+                total=total_quota,
                 expire=expire_ts,
             )
             return web.Response(status=403, text=texts.WL_WEB_EXHAUSTED, headers=headers)
@@ -108,9 +142,18 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
 
-        cdn_domain = os.getenv("WHITE_INTERNET_CDN_DOMAIN")
+        cdn_domain = (
+            (
+                server.extra_data.get("cdn_domain")
+                if isinstance(getattr(server, "extra_data", None), dict)
+                else None
+            )
+            or os.getenv("WHITE_INTERNET_CDN_DOMAIN")
+        )
         if not cdn_domain:
-            logger.error("Configuration error: WHITE_INTERNET_CDN_DOMAIN environment variable is missing")
+            logger.error(
+                "Configuration error: CDN domain is missing from server extra_data and WHITE_INTERNET_CDN_DOMAIN environment variable"
+            )
             headers = dict(common_headers)
             headers["Retry-After"] = "60"
             return web.Response(
@@ -121,7 +164,11 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
 
         # Determine base path from server extra_data, environment or default
         base_path = (
-            (server.extra_data.get("secret_base_path") if isinstance(getattr(server, "extra_data", None), dict) else None)
+            (
+                server.extra_data.get("secret_base_path")
+                if isinstance(getattr(server, "extra_data", None), dict)
+                else None
+            )
             or os.getenv("WHITE_INTERNET_PATH")
             or DEFAULT_WHITE_INTERNET_PATH
         )
@@ -153,7 +200,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 "Subscription-Userinfo": texts.WL_USERINFO_HEADER_TEMPLATE.format(
                     upload=upload_bytes,
                     download=download_bytes,
-                    total=current_period_total,
+                    total=total_quota,
                     expire=expire_ts,
                 ),
                 "Profile-Title": f"base64:{profile_title_b64}",

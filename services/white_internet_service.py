@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import secrets
@@ -42,14 +41,21 @@ from database.repositories.account_ledger_repo import (
     create_purchase_debit,
     get_account_balance,
 )
-from database.repositories.tariff_quotes_repo import get_or_create_current_version, lock_checkout_user
+from database.repositories.tariff_quotes_repo import (
+    get_or_create_current_version,
+    lock_checkout_user,
+)
 from services.xray_node_client import XrayNodeClient, _sanitize_url
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
 
-async def _deprovision_old_node_safe(api_url: str, api_key: str, client_uuid: str, version: int) -> None:
+
+async def _deprovision_old_node_safe(
+    api_url: str, api_key: str, client_uuid: str, version: int
+) -> None:
     try:
         async with XrayNodeClient() as client:
             await client.sync_client(
@@ -78,22 +84,37 @@ class WhiteInternetService:
     """Service managing the White Internet product lifecycle."""
 
     @staticmethod
-    async def get_or_create_white_internet_tariff(session: AsyncSession, *, price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB, duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS) -> Tariff:
-        stmt = select(Tariff).where(
-            Tariff.service_type == WHITE_INTERNET_SERVICE_TYPE,
-            Tariff.duration_days == duration_days,
-            Tariff.device_limit == 1,
-        ).limit(1)
+    async def get_or_create_white_internet_tariff(
+        session: AsyncSession,
+        *,
+        price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
+        duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
+    ) -> Tariff:
+        stmt = (
+            select(Tariff)
+            .where(
+                Tariff.service_type == WHITE_INTERNET_SERVICE_TYPE,
+                Tariff.duration_days == duration_days,
+                Tariff.device_limit == 1,
+            )
+            .limit(1)
+        )
         res = await session.execute(stmt)
         tariff = res.scalar_one_or_none()
-        if inspect.iscoroutine(tariff):
-            tariff = await tariff
         if tariff is not None:
             if not tariff.is_active:
                 tariff.is_active = True
                 await session.flush()
             return tariff
-        tariff = Tariff(name=texts.WL_DEFAULT_TARIFF_NAME, service_type=WHITE_INTERNET_SERVICE_TYPE, device_limit=1, duration_days=duration_days, price_rub=int(price_rub), is_active=True, sort_order=100)
+        tariff = Tariff(
+            name=texts.WL_DEFAULT_TARIFF_NAME,
+            service_type=WHITE_INTERNET_SERVICE_TYPE,
+            device_limit=1,
+            duration_days=duration_days,
+            price_rub=int(price_rub),
+            is_active=True,
+            sort_order=100,
+        )
         session.add(tariff)
         await session.flush()
         return tariff
@@ -102,19 +123,42 @@ class WhiteInternetService:
     async def select_origin_node(session: AsyncSession) -> Server:
         server = await servers_repo.allocate_origin_server_atomic(session)
         if server is None:
-            raise RuntimeError("No healthy server with xray_origin capability and available capacity is available.")
+            raise RuntimeError(
+                "No healthy server with xray_origin capability and available capacity is available."
+            )
         return server
 
-
     @staticmethod
-    def _new_quote(*, user_id: int, operation_type: str, target_version_id: int, amount_due: Decimal, expires_at, resulting_paid_hours: int = 0, resulting_paid_value: Decimal = Decimal("0"), source_version_id: int | None = None) -> TariffQuote:
+    def _new_quote(
+        *,
+        user_id: int,
+        operation_type: str,
+        target_version_id: int,
+        amount_due: Decimal,
+        expires_at,
+        resulting_paid_hours: int = 0,
+        resulting_paid_value: Decimal = Decimal("0"),
+        source_version_id: int | None = None,
+    ) -> TariffQuote:
         return TariffQuote(
-            public_id=uuid.uuid4(), user_id=user_id, service_type=WHITE_INTERNET_SERVICE_TYPE,
-            operation_type=operation_type, source_tariff_version_id=source_version_id, target_tariff_version_id=target_version_id,
-            current_paid_hours=0, current_paid_value_rub=Decimal("0"), bonus_hours=0, amount_due_rub=amount_due,
-            resulting_paid_hours=resulting_paid_hours, resulting_paid_value_rub=resulting_paid_value, resulting_bonus_hours=0,
-            rounding_loss_hours=Decimal("0"), rounding_loss_value_rub=Decimal("0"), currency="RUB",
-            status=TariffQuoteStatus.ACTIVE, expires_at=expires_at,
+            public_id=uuid.uuid4(),
+            user_id=user_id,
+            service_type=WHITE_INTERNET_SERVICE_TYPE,
+            operation_type=operation_type,
+            source_tariff_version_id=source_version_id,
+            target_tariff_version_id=target_version_id,
+            current_paid_hours=0,
+            current_paid_value_rub=Decimal("0"),
+            bonus_hours=0,
+            amount_due_rub=amount_due,
+            resulting_paid_hours=resulting_paid_hours,
+            resulting_paid_value_rub=resulting_paid_value,
+            resulting_bonus_hours=0,
+            rounding_loss_hours=Decimal("0"),
+            rounding_loss_value_rub=Decimal("0"),
+            currency="RUB",
+            status=TariffQuoteStatus.ACTIVE,
+            expires_at=expires_at,
         )
 
     @classmethod
@@ -127,40 +171,69 @@ class WhiteInternetService:
         if existing is not None:
             if existing.status == WhiteInternetStatus.DISABLED:
                 return False, texts.WL_SUB_DISABLED, existing
-            if existing.expires_at <= now and existing.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
+            if existing.expires_at <= now and existing.status in (
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.EXHAUSTED,
+            ):
                 await white_internet_repo.expire_subscription_atomic(session, existing.id)
-            elif existing.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
+            elif existing.status in (
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.EXHAUSTED,
+            ):
                 return False, texts.WL_ALREADY_ACTIVE, existing
 
         tariff = await cls.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
+
+        # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
+        if not tariff_version.base_quota_bytes or tariff_version.base_quota_bytes <= 0:
+            raise ValueError(
+                f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes"
+            )
+
         try:
             origin_node = await cls.select_origin_node(session)
         except RuntimeError as exc:
             logger.warning("No available origin node for white internet purchase: %s", exc)
             return False, texts.WL_NO_SERVERS_AVAILABLE, None
-        quote = cls._new_quote(user_id=user.id, operation_type=TariffQuoteOperation.PURCHASE, target_version_id=tariff_version.id, amount_due=Decimal(tariff_version.price_rub), expires_at=now + timedelta(minutes=15), resulting_paid_hours=tariff_version.duration_hours, resulting_paid_value=Decimal(tariff_version.price_rub))
+        quote = cls._new_quote(
+            user_id=user.id,
+            operation_type=TariffQuoteOperation.PURCHASE,
+            target_version_id=tariff_version.id,
+            amount_due=Decimal(tariff_version.price_rub),
+            expires_at=now + timedelta(minutes=15),
+            resulting_paid_hours=tariff_version.duration_hours,
+            resulting_paid_value=Decimal(tariff_version.price_rub),
+        )
         session.add(quote)
         await session.flush()
         try:
-            await create_purchase_debit(session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub)
+            await create_purchase_debit(
+                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+            )
         except InsufficientAccountBalanceError:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
-            return False, texts.WL_INSUFFICIENT_BALANCE_BUY.format(
-                price=int(tariff_version.price_rub),
-                balance=balance_snap.available,
-                shortage=max(Decimal(tariff_version.price_rub) - balance_snap.available, Decimal(0)),
-            ), None
+            return (
+                False,
+                texts.WL_INSUFFICIENT_BALANCE_BUY.format(
+                    price=int(tariff_version.price_rub),
+                    balance=balance_snap.available,
+                    shortage=max(
+                        Decimal(tariff_version.price_rub) - balance_snap.available, Decimal(0)
+                    ),
+                ),
+                None,
+            )
         except AccountLedgerError as exc:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
 
         quote.status = TariffQuoteStatus.CONSUMED
-        if not tariff_version.base_quota_bytes or tariff_version.base_quota_bytes <= 0:
-            raise ValueError(f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes")
 
         sub = await white_internet_repo.create_white_internet_subscription(
             session,
@@ -189,9 +262,7 @@ class WhiteInternetService:
             return False, texts.WL_SUB_NOT_READY, None
 
         # Validate origin node health & availability before debiting funds
-        origin_node = await session.scalar(
-            select(Server).where(Server.id == sub.origin_node_id)
-        )
+        origin_node = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
         needs_migration = (
             not origin_node
             or not origin_node.is_active
@@ -209,6 +280,13 @@ class WhiteInternetService:
 
         tariff = await cls.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
+
+        # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
+        if not tariff_version.base_quota_bytes or tariff_version.base_quota_bytes <= 0:
+            raise ValueError(
+                f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes"
+            )
+
         now = now_utc()
         quote = cls._new_quote(
             user_id=user.id,
@@ -223,16 +301,24 @@ class WhiteInternetService:
         session.add(quote)
         await session.flush()
         try:
-            await create_purchase_debit(session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub)
+            await create_purchase_debit(
+                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+            )
         except InsufficientAccountBalanceError:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
-            return False, texts.WL_INSUFFICIENT_BALANCE_RENEW.format(
-                price=int(tariff_version.price_rub),
-                balance=balance_snap.available,
-                shortage=max(Decimal(tariff_version.price_rub) - balance_snap.available, Decimal(0)),
-            ), None
+            return (
+                False,
+                texts.WL_INSUFFICIENT_BALANCE_RENEW.format(
+                    price=int(tariff_version.price_rub),
+                    balance=balance_snap.available,
+                    shortage=max(
+                        Decimal(tariff_version.price_rub) - balance_snap.available, Decimal(0)
+                    ),
+                ),
+                None,
+            )
         except AccountLedgerError as exc:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
@@ -250,9 +336,6 @@ class WhiteInternetService:
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
             await session.flush()
 
-        if not tariff_version.base_quota_bytes or tariff_version.base_quota_bytes <= 0:
-            raise ValueError(f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes")
-
         renewed = await white_internet_repo.renew_subscription_atomic(
             session,
             subscription_id=sub.id,
@@ -263,18 +346,28 @@ class WhiteInternetService:
         )
 
         # Best-effort deprovisioning of UUID on old origin node to prevent orphaned credentials
-        if old_origin_for_cleanup and old_origin_for_cleanup.api_url and old_origin_for_cleanup.api_key:
+        if (
+            old_origin_for_cleanup
+            and old_origin_for_cleanup.api_url
+            and old_origin_for_cleanup.api_key
+        ):
             try:
-                asyncio.create_task(
+                task = asyncio.create_task(
                     _deprovision_old_node_safe(
                         old_origin_for_cleanup.api_url,
                         old_origin_for_cleanup.api_key,
                         client_uuid=sub.uuid,
-                        version=sub.desired_version + 100,
+                        version=sub.desired_version + 1,
                     )
                 )
+                _BACKGROUND_TASKS.add(task)
+                task.add_done_callback(_BACKGROUND_TASKS.discard)
             except Exception as deprov_err:
-                logger.warning("Failed to dispatch async deprovision on old origin %s: %s", old_origin_for_cleanup.id, deprov_err)
+                logger.warning(
+                    "Failed to dispatch async deprovision on old origin %s: %s",
+                    old_origin_for_cleanup.id,
+                    deprov_err,
+                )
 
         return True, texts.WL_RENEW_SUCCESS, renewed
 
@@ -294,35 +387,72 @@ class WhiteInternetService:
             return False, texts.WL_SUB_NOT_READY, None
         if sub.status == WhiteInternetStatus.EXPIRED or sub.expires_at <= now:
             return False, texts.WL_SUB_EXPIRED, None
-        current_available = await white_internet_repo.get_available_quota_bytes(session, sub.id, now)
+
         pack_bytes = pack_gb * 1024 * 1024 * 1024
-        if current_available + pack_bytes > WHITE_INTERNET_MAX_QUOTA_BYTES:
-            return False, texts.WL_CAP_EXCEEDED.format(gb=pack_gb, available=current_available // (1024**3)), None
+        total_accumulated = (
+            (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0) + pack_bytes
+        )
+        if total_accumulated > WHITE_INTERNET_MAX_QUOTA_BYTES:
+            current_available = await white_internet_repo.get_available_quota_bytes(
+                session, sub.id, now
+            )
+            return (
+                False,
+                texts.WL_CAP_EXCEEDED.format(gb=pack_gb, available=current_available // (1024**3)),
+                None,
+            )
+
         tariff = await cls.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
-        quote = cls._new_quote(user_id=user.id, operation_type=TariffQuoteOperation.PURCHASE, target_version_id=tariff_version.id, amount_due=pack_price, expires_at=now + timedelta(minutes=15))
+        quote = cls._new_quote(
+            user_id=user.id,
+            operation_type=TariffQuoteOperation.PURCHASE,
+            target_version_id=tariff_version.id,
+            amount_due=pack_price,
+            expires_at=now + timedelta(minutes=15),
+        )
         session.add(quote)
         await session.flush()
         try:
-            await create_purchase_debit(session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub)
+            await create_purchase_debit(
+                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+            )
         except InsufficientAccountBalanceError:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
-            return False, texts.WL_INSUFFICIENT_BALANCE_TOPUP.format(
-                gb=pack_gb,
-                price=int(pack_price),
-                balance=balance_snap.available,
-                shortage=max(pack_price - balance_snap.available, Decimal(0)),
-            ), None
+            return (
+                False,
+                texts.WL_INSUFFICIENT_BALANCE_TOPUP.format(
+                    gb=pack_gb,
+                    price=int(pack_price),
+                    balance=balance_snap.available,
+                    shortage=max(pack_price - balance_snap.available, Decimal(0)),
+                ),
+                None,
+            )
         except AccountLedgerError as exc:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
-        grant = await white_internet_repo.topup_quota_atomic(session, subscription_id=sub.id, quote_id=quote.id, pack_gb=pack_gb, price_rub=pack_price)
+        grant = await white_internet_repo.topup_quota_atomic(
+            session,
+            subscription_id=sub.id,
+            quote_id=quote.id,
+            pack_gb=pack_gb,
+            price_rub=pack_price,
+        )
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
         return True, texts.WL_TOPUP_SUCCESS.format(gb=pack_gb), grant
+
+    @classmethod
+    async def create_trial_subscription(cls, session: AsyncSession, user_id: int):
+        """
+        # TODO(trial): Trial period implementation (1-3 days, 5-10 GiB, 0 RUB)
+        # To be enabled in UI after primary White Internet rollout stabilization.
+        """
+        raise NotImplementedError("Trial period feature is planned for a future release.")
 
     @staticmethod
     def generate_vless_links(
@@ -352,14 +482,20 @@ class WhiteInternetService:
 
         links: list[str] = []
         for r in relays:
-            r_path = r.get("path") or f"{base}/{r.get('code', 'de')}"
+            relay_code = r.get("code") or r.get("name") or "default"
+            r_path = r.get("path") or f"{base}/{relay_code}"
             r_tag = urllib.parse.quote(r.get("name") or texts.WL_VLESS_TAG)
             link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
             links.append(link)
         return links
 
     @staticmethod
-    def generate_full_xray_config(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443, path: str = DEFAULT_WHITE_INTERNET_PATH) -> dict:
+    def generate_full_xray_config(
+        subscription: WhiteInternetSubscription,
+        cdn_domain: str,
+        port: int = 443,
+        path: str = DEFAULT_WHITE_INTERNET_PATH,
+    ) -> dict:
         """Generate complete Xray client JSON config for INCY / Happ / v2rayN."""
         base = _normalize_base_path(path)
         return {
@@ -398,7 +534,9 @@ class WhiteInternetService:
                         "tlsSettings": {
                             "serverName": cdn_domain,
                             "alpn": CANONICAL_XHTTP_PROFILE["alpn"],
-                            "fingerprint": CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT),
+                            "fingerprint": CANONICAL_XHTTP_PROFILE.get(
+                                "fp", WHITE_INTERNET_TLS_FINGERPRINT
+                            ),
                         },
                         "xhttpSettings": {
                             "path": f"{base}/default",
@@ -453,4 +591,3 @@ class WhiteInternetService:
                 ],
             },
         }
-
