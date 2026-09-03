@@ -20,6 +20,11 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.session = AsyncMock()
+        mock_res = MagicMock()
+        mock_res.scalar_one_or_none.return_value = None
+        mock_res.scalars.return_value.all.return_value = []
+        self.session.execute.return_value = mock_res
+        self.session.add = MagicMock()
         self.user = User(id=42, telegram_id=999888777)
         self.tg_user = TgUser(id=999888777, is_bot=False, first_name="TestUser")
 

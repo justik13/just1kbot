@@ -428,6 +428,19 @@ async def check_node_resources_and_alerts(bot: Bot):
                     server.xray_instance_boot_id = updated_srv.xray_instance_boot_id
                     server.xray_instance_starttime = updated_srv.xray_instance_starttime
 
+                    # Синхронизация динамических метаданных (релеи, cdn_domain) при изменениях на ноде
+                    if xray_data and isinstance(xray_data, dict):
+                        extra = dict(updated_srv.extra_data or {})
+                        extra_changed = False
+                        for key in ("cdn_domain", "relays", "secret_base_path"):
+                            if key in xray_data and xray_data[key] and extra.get(key) != xray_data[key]:
+                                extra[key] = xray_data[key]
+                                extra_changed = True
+                        if extra_changed:
+                            updated_srv.extra_data = extra
+                            server.extra_data = extra
+                            await session.flush()
+
             db_server, applied = await update_server_health_snapshot(
                 session,
                 server.id,

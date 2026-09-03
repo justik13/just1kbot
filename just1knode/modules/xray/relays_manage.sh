@@ -183,20 +183,25 @@ new_ob = {
 }
 cfg['outbounds'].append(new_ob)
 
-# 3. Добавляем правило маршрутизации: inbound этого релея -> outbound этого релея
+# 3. Добавляем inbound этого релея в правила прямого выхода в Рунет (just1k-wl-direct)
 rules = cfg.setdefault('routing', {}).setdefault('rules', [])
 rules = [r for r in rules if r.get('outboundTag') != out_tag]
-rules.insert(0, {
-    'type': 'field',
-    'inboundTag': [in_tag],
-    'outboundTag': out_tag
-})
 
 for r in rules:
     if r.get('outboundTag') == 'just1k-wl-direct':
         existing_ib = r.get('inboundTag', [])
         if isinstance(existing_ib, list) and in_tag not in existing_ib:
             r['inboundTag'] = existing_ib + [in_tag]
+
+# Вставляем правило выхода на Relay СТРОГО ПОСЛЕ правил прямого выхода в Рунет
+direct_indices = [i for i, r in enumerate(rules) if r.get('outboundTag') == 'just1k-wl-direct']
+insert_idx = (max(direct_indices) + 1) if direct_indices else 0
+
+rules.insert(insert_idx, {
+    'type': 'field',
+    'inboundTag': [in_tag],
+    'outboundTag': out_tag
+})
 
 # Enforce relay egress for default client traffic (anti-Russian exit)
 primary_relay_code = code
@@ -333,16 +338,38 @@ print(code)
     local out_tag="just1k-wl-outbound-${code}"
 
     python3 -c "
-import json
+import json, os
 cfg_file = '$XRAY_CONFIG'
 code = '$code'
 in_tag = '$in_tag'
 out_tag = '$out_tag'
+rf = '$RELAYS_FILE'
+
 with open(cfg_file) as f: cfg = json.load(f)
 cfg['inbounds'] = [ib for ib in cfg.get('inbounds', []) if ib.get('tag') not in (in_tag, f'just1k-wl-{code}', f'inbound-{code}')]
 cfg['outbounds'] = [ob for ob in cfg.get('outbounds', []) if ob.get('tag') not in (out_tag, f'just1k-wl-out-{code}', f'outbound-{code}')]
+
+# Очищаем тег из правил маршрутизации
 if 'routing' in cfg and 'rules' in cfg['routing']:
     cfg['routing']['rules'] = [r for r in cfg['routing']['rules'] if r.get('outboundTag') not in (out_tag, f'just1k-wl-out-{code}', f'outbound-{code}')]
+    for r in cfg['routing']['rules']:
+        if r.get('outboundTag') == 'just1k-wl-direct':
+            existing_ib = r.get('inboundTag', [])
+            if isinstance(existing_ib, list) and in_tag in existing_ib:
+                r['inboundTag'] = [t for t in existing_ib if t != in_tag]
+
+# Если остались другие релеи, переключаем дефолтный маршрут на следующий релей, иначе на блок
+remaining = []
+if os.path.exists(rf):
+    try:
+        with open(rf) as f_r: remaining = [r for r in json.load(f_r) if r.get('code') != code]
+    except: pass
+
+new_def_out = f\"just1k-wl-outbound-{remaining[0]['code']}\" if remaining else 'just1k-wl-block'
+for r in cfg.get('routing', {}).get('rules', []):
+    if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r:
+        r['outboundTag'] = new_def_out
+
 with open(cfg_file, 'w') as f: json.dump(cfg, f, indent=2)
 "
 
