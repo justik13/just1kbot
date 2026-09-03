@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import logging
 import secrets
@@ -42,6 +44,7 @@ from database.repositories.account_ledger_repo import (
     get_account_balance,
 )
 from database.repositories.tariff_quotes_repo import get_or_create_current_version, lock_checkout_user
+from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -68,7 +71,10 @@ class WhiteInternetService:
             Tariff.duration_days == duration_days,
             Tariff.device_limit == 1,
         ).limit(1)
-        tariff = (await session.execute(stmt)).scalar_one_or_none()
+        res = await session.execute(stmt)
+        tariff = res.scalar_one_or_none()
+        if inspect.iscoroutine(tariff):
+            tariff = await tariff
         if tariff is not None:
             if not tariff.is_active:
                 tariff.is_active = True
@@ -171,21 +177,17 @@ class WhiteInternetService:
         origin_node = await session.scalar(
             select(Server).where(Server.id == sub.origin_node_id)
         )
-        if (
+        needs_migration = (
             not origin_node
             or not origin_node.is_active
             or origin_node.health_state != ServerHealthState.ONLINE
             or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
             or not (origin_node.extra_data or {}).get("relays")
-        ):
-            # Current node is offline, decommissioned or lacks relays; attempt migration
+        )
+        new_origin_server: Server | None = None
+        if needs_migration:
             try:
-                new_origin = await cls.select_origin_node(session)
-                sub.origin_node_id = new_origin.id
-                sub.actual_version = 0
-                sub.last_reconciled_node_epoch = None
-                sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
-                await session.flush()
+                new_origin_server = await cls.select_origin_node(session)
             except RuntimeError as exc:
                 logger.warning("No healthy origin node available for renewal migration: %s", exc)
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
@@ -193,7 +195,16 @@ class WhiteInternetService:
         tariff = await cls.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
         now = now_utc()
-        quote = cls._new_quote(user_id=user.id, operation_type=TariffQuoteOperation.RENEW, target_version_id=tariff_version.id, source_version_id=tariff_version.id, amount_due=Decimal(tariff_version.price_rub), expires_at=now + timedelta(minutes=15), resulting_paid_hours=tariff_version.duration_hours, resulting_paid_value=Decimal(tariff_version.price_rub))
+        quote = cls._new_quote(
+            user_id=user.id,
+            operation_type=TariffQuoteOperation.RENEW,
+            target_version_id=tariff_version.id,
+            source_version_id=tariff_version.id,
+            amount_due=Decimal(tariff_version.price_rub),
+            expires_at=now + timedelta(minutes=15),
+            resulting_paid_hours=tariff_version.duration_hours,
+            resulting_paid_value=Decimal(tariff_version.price_rub),
+        )
         session.add(quote)
         await session.flush()
         try:
@@ -213,6 +224,17 @@ class WhiteInternetService:
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
+
+        # Apply node migration ONLY after successful financial debit
+        old_origin_for_cleanup: Server | None = None
+        if needs_migration and new_origin_server is not None:
+            old_origin_for_cleanup = origin_node
+            sub.origin_node_id = new_origin_server.id
+            sub.actual_version = 0
+            sub.last_reconciled_node_epoch = None
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
+            await session.flush()
+
         renewed = await white_internet_repo.renew_subscription_atomic(
             session,
             subscription_id=sub.id,
@@ -221,6 +243,23 @@ class WhiteInternetService:
             duration_days=tariff.duration_days,
             base_bytes=tariff_version.base_quota_bytes or WHITE_INTERNET_BASE_TRAFFIC_BYTES,
         )
+
+        # Best-effort deprovisioning of UUID on old origin node to prevent orphaned credentials
+        if old_origin_for_cleanup and old_origin_for_cleanup.api_url and old_origin_for_cleanup.api_key:
+            try:
+                xclient = XrayNodeClient()
+                asyncio.create_task(
+                    xclient.sync_client(
+                        old_origin_for_cleanup.api_url,
+                        old_origin_for_cleanup.api_key,
+                        client_id=sub.uuid,
+                        desired_state="disabled",
+                        version=sub.desired_version + 100,
+                    )
+                )
+            except Exception as deprov_err:
+                logger.warning("Failed to dispatch async deprovision on old origin %s: %s", old_origin_for_cleanup.id, deprov_err)
+
         return True, texts.WL_RENEW_SUCCESS, renewed
 
     @classmethod
@@ -365,9 +404,9 @@ class WhiteInternetService:
                     "dns.google": "8.8.8.8",
                 },
                 "servers": [
+                    "fakedns",
                     "https://1.1.1.1/dns-query",
                     "https://dns.google/dns-query",
-                    "localhost",
                 ],
             },
             "fakedns": [

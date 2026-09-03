@@ -468,6 +468,11 @@ async def sync_client(
 
     desired_state = req.desired_state or "active"
     target_inbounds = get_target_inbounds()
+    if not target_inbounds:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No managed Xray inbounds configured on node",
+        )
 
     # Monotonic version fencing check (including tombstones)
     if req.version is not None:
@@ -569,6 +574,11 @@ async def delete_client(
         ) from None
 
     target_inbounds = get_target_inbounds()
+    if not target_inbounds:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No managed Xray inbounds configured on node",
+        )
 
     # Monotonic version check
     if version is not None:
@@ -576,12 +586,14 @@ async def delete_client(
         curr_entry = entries.get(clean_uuid)
         if curr_entry:
             curr_ver = curr_entry.get("version")
-            if curr_ver is not None and version < curr_ver:
+            is_tombstone = curr_entry.get("tombstone", False)
+            if curr_ver is not None and (version < curr_ver or (is_tombstone and version <= curr_ver)):
                 logger.warning(
-                    "Stale delete request for %s: version %d < stored %d. Fencing.",
+                    "Stale delete request for %s: version %d <= stored %d (tombstone=%s). Fencing.",
                     _mask_uuid(clean_uuid),
                     version,
                     curr_ver,
+                    is_tombstone,
                 )
                 return {
                     "status": "ok",

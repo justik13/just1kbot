@@ -12,6 +12,8 @@ from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from decimal import Decimal
+
 from bot import texts
 from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
@@ -23,6 +25,7 @@ from config.settings import get_settings
 from database.models import WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import get_account_balance
+from database.repositories.tariff_quotes_repo import get_or_create_current_version
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
@@ -47,13 +50,14 @@ def _render_progress_bar(used_bytes: int, total_bytes: int, length: int = 10) ->
 def get_white_internet_overview_keyboard(
     sub: WhiteInternetSubscription | None,
     bot_domain: str | None,
+    base_price: int = int(WHITE_INTERNET_BASE_PRICE_RUB),
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     if sub is None:
         builder.button(
             text=texts.BTN_WL_BUY_ACCESS.format(
-                price=int(WHITE_INTERNET_BASE_PRICE_RUB),
+                price=base_price,
                 days=WHITE_INTERNET_BASE_DURATION_DAYS,
             ),
             callback_data="wl_buy_confirm",
@@ -63,7 +67,7 @@ def get_white_internet_overview_keyboard(
         builder.adjust(1, 1)
     elif sub.status == WhiteInternetStatus.EXPIRED:
         builder.button(
-            text=texts.BTN_WL_RENEW.format(price=int(WHITE_INTERNET_BASE_PRICE_RUB)),
+            text=texts.BTN_WL_RENEW.format(price=base_price),
             callback_data="wl_renew_confirm",
             style="success",
         )
@@ -90,7 +94,7 @@ def get_white_internet_overview_keyboard(
         if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
             builder.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
             builder.button(
-                text=texts.BTN_WL_RENEW.format(price=int(WHITE_INTERNET_BASE_PRICE_RUB)),
+                text=texts.BTN_WL_RENEW.format(price=base_price),
                 callback_data="wl_renew_confirm",
             )
         builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
@@ -134,10 +138,42 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
     bot_domain = get_settings().DOMAIN
     now = now_utc()
 
+async def _get_effective_base_price(session: AsyncSession) -> tuple[Decimal, int, int]:
+    base_price = WHITE_INTERNET_BASE_PRICE_RUB
+    duration_days = WHITE_INTERNET_BASE_DURATION_DAYS
+    try:
+        tariff = await WhiteInternetService.get_or_create_white_internet_tariff(session)
+        tariff_version = await get_or_create_current_version(session, tariff)
+        price_val = getattr(tariff_version, "price_rub", None)
+        if isinstance(price_val, (int, float, str, Decimal)):
+            base_price = Decimal(str(price_val))
+        if isinstance(getattr(tariff, "duration_days", None), int):
+            duration_days = tariff.duration_days
+    except Exception:
+        pass
+    return base_price, int(base_price), duration_days
+
+
+async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
+    if not is_admin(query.from_user.id):
+        await query.message.answer(texts.WL_BETA_TESTING_ALERT)
+        return
+
+    user = await get_user_by_telegram_id(session, query.from_user.id)
+    if user is None:
+        await query.message.answer(texts.WL_USER_NOT_FOUND)
+        return
+
+    sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    bot_domain = get_settings().DOMAIN
+    now = now_utc()
+
+    _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
+
     if sub is None:
         text = texts.WL_OVERVIEW_NO_SUB.format(
-            price=int(WHITE_INTERNET_BASE_PRICE_RUB),
-            days=WHITE_INTERNET_BASE_DURATION_DAYS,
+            price=base_price_int,
+            days=duration_days,
             traffic=50,
         )
     else:
@@ -164,7 +200,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             progress=progress_bar,
         )
 
-    kb = get_white_internet_overview_keyboard(sub, bot_domain)
+    kb = get_white_internet_overview_keyboard(sub, bot_domain, base_price=base_price_int)
     try:
         await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
@@ -177,14 +213,16 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
+    base_price, base_price_int, _days = await _get_effective_base_price(session)
+
     balance_snapshot = await get_account_balance(session, user_id=user.id)
-    if balance_snapshot.available < WHITE_INTERNET_BASE_PRICE_RUB:
-        shortage = WHITE_INTERNET_BASE_PRICE_RUB - balance_snapshot.available
+    if balance_snapshot.available < base_price:
+        shortage = base_price - balance_snapshot.available
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         await query.message.edit_text(
             texts.WL_INSUFFICIENT_BALANCE_BUY.format(
-                price=int(WHITE_INTERNET_BASE_PRICE_RUB),
+                price=base_price_int,
                 balance=balance_snapshot.available,
                 shortage=shortage,
             ),
@@ -214,16 +252,18 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
+    base_price, base_price_int, _days = await _get_effective_base_price(session)
+
     balance_snapshot = await get_account_balance(session, user_id=user.id)
-    if balance_snapshot.available < WHITE_INTERNET_BASE_PRICE_RUB:
-        shortage = WHITE_INTERNET_BASE_PRICE_RUB - balance_snapshot.available
+    if balance_snapshot.available < base_price:
+        shortage = base_price - balance_snapshot.available
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BUTTON_TOPUP, callback_data="menu_balance")
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         kb.adjust(1, 1)
         await query.message.edit_text(
             texts.WL_INSUFFICIENT_BALANCE_RENEW.format(
-                price=int(WHITE_INTERNET_BASE_PRICE_RUB),
+                price=base_price_int,
                 balance=balance_snapshot.available,
                 shortage=shortage,
             ),

@@ -102,7 +102,21 @@ class WhiteInternetReconciliationWorker:
                     sub.last_sync_error = None
                     return True
                 elif sync_result == SyncResult.ALREADY_NEWER:
-                    # Node already has an equal or newer version applied!
+                    # Node has a newer version. If we wanted user to be active, adopt the node's state.
+                    # But if we were disabling/deleting an expired or exhausted user, force disable by incrementing version!
+                    if not desired_active:
+                        sub.desired_version = max(sub.desired_version, target_version) + 1
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        sub.last_sync_error = "node_already_newer_force_disable_retry"
+                        sub.last_synced_at = now_utc()
+                        logger.warning(
+                            "Node reported already_newer while trying to disable sub_id=%d on server %d. Incrementing desired_version to %d to force deprovisioning.",
+                            sub_id,
+                            server_id,
+                            sub.desired_version,
+                        )
+                        return False
+
                     logger.info(
                         "Node reported already_newer for sub_id=%d on server %d (target=%d). Marking synced.",
                         sub_id,
@@ -114,23 +128,21 @@ class WhiteInternetReconciliationWorker:
                     if sub.status == WhiteInternetStatus.PENDING and desired_active:
                         sub.status = WhiteInternetStatus.ACTIVE
                         sub.status_reason = None
-                    sub.provisioning_status = (
-                        WhiteInternetProvisioningStatus.ACTIVE
-                        if desired_active
-                        else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-                    )
+                    sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
                     sub.last_synced_at = now_utc()
                     sub.last_sync_error = None
                     return True
                 elif sync_result == SyncResult.FENCED:
+                    sub.desired_version = max(sub.desired_version, target_version) + 1
                     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                     sub.last_sync_error = err_msg or "sync_fenced"
                     sub.last_synced_at = now_utc()
                     logger.warning(
-                        "Sync fenced for sub_id=%d on server %d (target_version=%d): %s",
+                        "Sync fenced for sub_id=%d on server %d (target_version=%d). Bumped desired_version to %d: %s",
                         sub_id,
                         server_id,
                         target_version,
+                        sub.desired_version,
                         err_msg,
                     )
                     return False
@@ -147,6 +159,7 @@ class WhiteInternetReconciliationWorker:
                     return False
                 else:
                     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                    sub.last_synced_at = now_utc()
                     logger.warning(
                         "Reconciliation detected version drift during sync for sub_id=%d on server %d (desired=%d != target=%d)",
                         sub_id,

@@ -171,16 +171,15 @@ class XrayGrpcClient:
 
         channel = self._get_channel()
         stub = stats_grpc.StatsServiceStub(channel)
+        result = None
         try:
             resp = stub.QueryStats(
-
                 stats_cmd.QueryStatsRequest(pattern="user>>>", reset=reset),
                 timeout=self.timeout,
             )
             result = self._aggregate_query_stats(resp)
             if result:
                 return result
-            logger.warning("QueryStats returned no user traffic counters; trying GetUsersStats")
         except grpc.RpcError as exc:
             logger.warning("QueryStats(user>>>) failed: %s; trying GetUsersStats", exc)
 
@@ -191,6 +190,8 @@ class XrayGrpcClient:
             )
             return self._aggregate_user_stats(resp)
         except grpc.RpcError as exc:
+            if result is not None and getattr(exc, "code", lambda: None)() == grpc.StatusCode.UNIMPLEMENTED:
+                return result
             logger.error("Both Xray traffic statistics APIs failed: %s", exc)
             self.close()
             raise

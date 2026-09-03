@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import secrets
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
@@ -64,7 +65,7 @@ class ClientStore:
 
     def save_client_entries(self, entries: Dict[str, Dict[str, Any]]) -> bool:
         self._ensure_dir()
-        temp_path = self.file_path.with_suffix(".tmp")
+        temp_path = self.file_path.with_name(f"{self.file_path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp")
         data = {
             "clients": entries,
             "updated_at": time.time(),
@@ -92,6 +93,11 @@ class ClientStore:
         except Exception as e:
             logger.error("Failed to save clients to %s: %s", self.file_path, e)
             return False
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def save_clients(self, clients: Set[str]) -> bool:
         """Backward-compatible save using set of active UUIDs."""

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import secrets
 import time
 import uuid
 from datetime import datetime, timezone
@@ -46,14 +47,26 @@ class EpochManager:
             logger.warning("Could not create directory %s: %s", self.file_path.parent, e)
 
     def get_system_boot_id(self) -> Optional[str]:
-        """Reads kernel random boot_id from /proc."""
+        """Reads kernel random boot_id from /proc, with fallback to machine-id for containers."""
         boot_id_file = Path("/proc/sys/kernel/random/boot_id")
         if boot_id_file.exists():
             try:
-                return boot_id_file.read_text(encoding="utf-8").strip()
+                val = boot_id_file.read_text(encoding="utf-8").strip()
+                if val:
+                    return val
             except Exception as e:
                 logger.debug("Failed to read boot_id: %s", e)
-        return None
+        # Container fallback: /etc/machine-id or /var/lib/dbus/machine-id
+        for mid_path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            p = Path(mid_path)
+            if p.exists():
+                try:
+                    val = p.read_text(encoding="utf-8").strip()
+                    if val:
+                        return f"container-{val[:32]}"
+                except Exception:
+                    pass
+        return "container-fallback-boot-id"
 
     def load_state(self) -> Dict[str, Any]:
         if self.file_path.exists():
@@ -80,7 +93,7 @@ class EpochManager:
         self._last_starttime = starttime
         self._last_boot_id = boot_id
         self._ensure_dir()
-        temp_path = self.file_path.with_suffix(".tmp")
+        temp_path = self.file_path.with_name(f"{self.file_path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp")
         data = {
             "node_epoch": epoch,
             "boot_id": boot_id,
@@ -98,6 +111,11 @@ class EpochManager:
         except Exception as e:
             logger.error("Failed to save epoch state to %s: %s", self.file_path, e)
             return False
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def get_xray_process_info(self) -> Tuple[Optional[int], Optional[int]]:
         """

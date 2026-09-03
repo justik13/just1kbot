@@ -269,8 +269,13 @@ try:
     with os.fdopen(tmp_fd, 'w', encoding='utf-8') as fp:
         json.dump(data, fp, indent=2)
         fp.flush()
-        os.fsync(fp.fileno())
     os.replace(tmp_path, f)
+    try:
+        import shutil
+        shutil.chown(f, user="root", group="xrayapi")
+        os.chmod(f, 0o640)
+    except Exception:
+        pass
 finally:
     if fcntl:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
@@ -556,6 +561,7 @@ deploy_xray_api_sources() {
     else
         log "Автономная загрузка модулей xray-api (ref: $JUST1KBOT_REF)..."
         local tmp_tar="/tmp/just1k_repo.tar.gz"
+        rm -rf "$tmp_tar" /tmp/just1k_extracted
         local archive_url
         if [[ "$JUST1KBOT_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
             archive_url="${JUST1KBOT_REPO_URL}/archive/${JUST1KBOT_REF}.tar.gz"
@@ -656,7 +662,28 @@ install_xray_origin_node() {
     fi
 
     apt-get install -y -qq nginx certbot python3-certbot-nginx
+    mkdir -p "${CERTBOT_DIR}" "${NGINX_CONF_DIR}/conf.d"
+    chmod 755 "${CERTBOT_DIR}" 2>/dev/null || true
+    configure_safe_ufw "80/tcp"
+
+    # Разворачиваем минимальный bootstrap HTTP server block для ACME challenge в Nginx
+    cat > "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+    location ^~ /.well-known/acme-challenge/ {
+        root ${CERTBOT_DIR};
+        default_type "text/plain";
+    }
+}
+EOF
+    rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+    systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+
     obtain_ssl_certificate "$domain" "$email"
+
+    rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" 2>/dev/null || true
 
     local tmp_zip="/tmp/xray_origin.zip"
     download_and_verify_xray "$tmp_zip"
@@ -761,9 +788,10 @@ rules.append({
     'outboundTag': 'just1k-wl-api'
 })
 
-# Серверный Split-Routing: прямой выход в Рунет с московского IP Origin-сервера
+# Серверный Split-Routing: прямой выход в Рунет с московского IP Origin-сервера (Zero-Collateral)
 rules.append({
     'type': 'field',
+    'inboundTag': ['just1k-wl-default', 'just1k-wl-inbounds'],
     'domain': [
         'geosite:category-ru',
         'geosite:tld-ru',
@@ -775,6 +803,7 @@ rules.append({
 })
 rules.append({
     'type': 'field',
+    'inboundTag': ['just1k-wl-default', 'just1k-wl-inbounds'],
     'ip': ['geoip:ru'],
     'outboundTag': 'just1k-wl-direct'
 })
@@ -787,16 +816,27 @@ rules.append({
 
 final_config = dict(existing)
 final_config['log'] = existing.get('log', {'loglevel': 'warning'})
-final_config['api'] = {'tag': 'just1k-wl-api', 'services': ['HandlerService', 'StatsService']}
+
+# Хирургический merge блока API: сохраняем существующие сервисы
+api_conf = dict(existing.get('api', {}))
+api_conf['tag'] = 'just1k-wl-api'
+existing_services = set(api_conf.get('services', []))
+existing_services.update(['HandlerService', 'StatsService'])
+api_conf['services'] = list(existing_services)
+final_config['api'] = api_conf
+
 final_config['stats'] = existing.get('stats', {})
-final_config['policy'] = {
-    'levels': {
-        '0': {
-            'statsUserUplink': True,
-            'statsUserDownlink': True
-        }
-    }
-}
+
+# Хирургический merge блока Policy: сохраняем существующие уровни и включаем statsUser для level 0
+policy_conf = dict(existing.get('policy', {}))
+policy_levels = dict(policy_conf.get('levels', {}))
+level_0 = dict(policy_levels.get('0', {}))
+level_0['statsUserUplink'] = True
+level_0['statsUserDownlink'] = True
+policy_levels['0'] = level_0
+policy_conf['levels'] = policy_levels
+final_config['policy'] = policy_conf
+
 final_config['inbounds'] = inbounds
 final_config['outbounds'] = outbounds
 final_config['routing'] = existing.get('routing', {})
@@ -806,7 +846,8 @@ final_config['routing']['rules'] = rules
 with open(config_file, 'w', encoding='utf-8') as f:
     json.dump(final_config, f, indent=2)
 " "$XRAY_CONFIG" "$secret_path"
-    chmod 600 "$XRAY_CONFIG"
+    chown root:xrayapi "$XRAY_CONFIG" 2>/dev/null || true
+    chmod 640 "$XRAY_CONFIG"
 
     # Служба Xray
     mkdir -p "${SYSTEMD_SYSTEM_DIR}"
@@ -949,6 +990,7 @@ server {
 # 1. CDN Ingress (Порт 443 — Входящий трафик от клиентов через CDN)
 server {
     listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name ${domain};
 
     ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
@@ -978,6 +1020,7 @@ server {
 # 2. Management API (Порт 8444 — Управление нодой для бота)
 server {
     listen 8444 ssl http2;
+    listen [::]:8444 ssl http2;
     server_name ${domain};
 
     ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
@@ -1394,7 +1437,7 @@ else:
         'tlsSettings': {
             'serverName': sni,
             'fingerprint': 'firefox',
-            'alpn': ['h2', 'http/1.1']
+            'alpn': ['http/1.1']
         }
     }
 
@@ -1423,15 +1466,19 @@ if 'policy' not in xray_conf:
         }
     }
 
-# Ensure Russian direct egress rules exist at the top of routing rules
-ru_rule_present = any(
-    r.get('outboundTag') == 'just1k-wl-direct' and 'geosite:category-ru' in r.get('domain', [])
-    for r in xray_conf.get('routing', {}).get('rules', [])
-)
+# Ensure Russian direct egress rules exist and only apply to Just1k managed inbounds (Zero-Collateral)
+all_wl_inbounds = ['just1k-wl-default'] + [f'just1k-wl-inbound-{r.get("code")}' for r in relays if r.get('code')]
+ru_rule_present = False
+for r in xray_conf.get('routing', {}).get('rules', []):
+    if r.get('outboundTag') == 'just1k-wl-direct':
+        r['inboundTag'] = all_wl_inbounds
+        ru_rule_present = True
+
 if not ru_rule_present:
     insert_idx = 1 if len(xray_conf.get('routing', {}).get('rules', [])) > 0 else 0
     xray_conf.setdefault('routing', {}).setdefault('rules', []).insert(insert_idx, {
         'type': 'field',
+        'inboundTag': all_wl_inbounds,
         'domain': [
             'geosite:category-ru',
             'geosite:tld-ru',
@@ -1443,6 +1490,7 @@ if not ru_rule_present:
     })
     xray_conf['routing']['rules'].insert(insert_idx + 1, {
         'type': 'field',
+        'inboundTag': all_wl_inbounds,
         'ip': ['geoip:ru'],
         'outboundTag': 'just1k-wl-direct'
     })
@@ -1452,7 +1500,8 @@ primary_relay_code = relays[0].get('code', code)
 primary_relay_tag = f'just1k-wl-outbound-{primary_relay_code}'
 default_rule_found = False
 for r in xray_conf['routing']['rules']:
-    if r.get('inboundTag') == ['just1k-wl-default'] or 'just1k-wl-default' in r.get('inboundTag', []):
+    if (r.get('inboundTag') == ['just1k-wl-default'] or 'just1k-wl-default' in r.get('inboundTag', [])) and 'domain' not in r and 'ip' not in r:
+        r['inboundTag'] = ['just1k-wl-default']
         r['outboundTag'] = primary_relay_tag
         default_rule_found = True
         break
@@ -1739,7 +1788,11 @@ run_doctor() {
     role="$(get_state_val "role" "не определена")"
 
     log "1. Проверка системных служб..."
-    for srv in nginx xray; do
+    local services_to_check=("xray")
+    if [[ "$role" == "origin" ]]; then
+        services_to_check+=("nginx" "xray-api")
+    fi
+    for srv in "${services_to_check[@]}"; do
         if systemctl is-active --quiet "$srv" 2>/dev/null; then
             echo -e "  ${GREEN}✔${NC} Служба $srv активна"
         else
@@ -1776,12 +1829,14 @@ run_doctor() {
         failed=$((failed + 1))
     fi
 
-    log "4. Проверка синтаксиса Nginx..."
-    if nginx -t 2>/dev/null; then
-        echo -e "  ${GREEN}✔${NC} Конфигурация Nginx корректна"
-    else
-        echo -e "  ${RED}✗${NC} Ошибка синтаксиса Nginx"
-        failed=$((failed + 1))
+    if [[ "$role" == "origin" ]]; then
+        log "4. Проверка синтаксиса Nginx..."
+        if nginx -t 2>/dev/null; then
+            echo -e "  ${GREEN}✔${NC} Конфигурация Nginx корректна"
+        else
+            echo -e "  ${RED}✗${NC} Ошибка синтаксиса Nginx"
+            failed=$((failed + 1))
+        fi
     fi
 
     log "5. Проверка SSL сертификатов Let's Encrypt..."
