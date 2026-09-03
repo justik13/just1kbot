@@ -10,6 +10,7 @@ from cachetools import TTLCache
 from sqlalchemy import select, update
 
 from config.constants import (
+    AMNEZIA_PROTOCOL,
     TRAFFIC_SYNC_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,
 )
@@ -115,7 +116,10 @@ async def _traffic_sync_once(bot: Bot | None = None):
                 Server.name,
                 Server.is_active,
             )
-            .where(Server.is_active.is_(True))
+            .where(
+                Server.is_active.is_(True),
+                Server.protocol == AMNEZIA_PROTOCOL,
+            )
         )
         result = await session.execute(stmt)
         servers = [
