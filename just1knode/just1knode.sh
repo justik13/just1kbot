@@ -4,7 +4,76 @@
 # =============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Определение каталога скрипта с защитой от запуска через pipe (curl | bash)
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [[ -n "$SCRIPT_SOURCE" && "$SCRIPT_SOURCE" != "bash" && "$SCRIPT_SOURCE" != "-bash" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" 2>/dev/null && pwd)"
+fi
+
+# Если скрипт запущен через pipe (curl | bash) или модули не найдены локально:
+# выполняем автономную загрузку модулей в /opt/just1knode и перезапускаем
+if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
+    INSTALL_DIR="/opt/just1knode"
+    mkdir -p "$INSTALL_DIR"
+    
+    echo -e "\033[1;34m==>\033[0m \033[1mJUST1KNODE: Инициализация и развертывание модулей в ${INSTALL_DIR}...\033[0m"
+    
+    if [[ -d "/app/just1knode" && -f "/app/just1knode/lib/common.sh" ]]; then
+        cp -r /app/just1knode/* "$INSTALL_DIR/"
+        if [[ -d "/app/scripts/xray_api" ]]; then
+            mkdir -p /opt/xray-api
+            cp -r /app/scripts/xray_api/* /opt/xray-api/
+        fi
+    else
+        JUST1KBOT_REPO_URL="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
+        JUST1KBOT_REF="${JUST1KBOT_REF:-main}"
+        
+        if [[ "$JUST1KBOT_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            archive_url="${JUST1KBOT_REPO_URL}/archive/${JUST1KBOT_REF}.tar.gz"
+        else
+            archive_url="${JUST1KBOT_REPO_URL}/archive/refs/heads/${JUST1KBOT_REF}.tar.gz"
+        fi
+        
+        tmp_tar="/tmp/just1knode_boot_$$.tar.gz"
+        tmp_extract="/tmp/just1knode_extract_$$"
+        rm -rf "$tmp_tar" "$tmp_extract"
+        mkdir -p "$tmp_extract"
+        
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL "$archive_url" -o "$tmp_tar"
+        elif command -v wget >/dev/null 2>&1; then
+            wget -qO "$tmp_tar" "$archive_url"
+        else
+            echo "Ошибка: для установки требуется curl или wget." >&2
+            exit 1
+        fi
+        
+        tar -xzf "$tmp_tar" -C "$tmp_extract" --strip-components=1
+        cp -r "$tmp_extract/just1knode"/* "$INSTALL_DIR/"
+        if [[ -d "$tmp_extract/scripts/xray_api" ]]; then
+            mkdir -p /opt/xray-api
+            cp -r "$tmp_extract/scripts/xray_api"/* /opt/xray-api/
+        fi
+        rm -rf "$tmp_tar" "$tmp_extract"
+    fi
+    
+    chmod +x "$INSTALL_DIR/just1knode.sh"
+    ln -sf "$INSTALL_DIR/just1knode.sh" /usr/local/bin/just1knode
+    
+    echo -e "\033[1;32m✔\033[0m Модули успешно установлены в ${INSTALL_DIR}"
+    echo -e "\033[1;32m✔\033[0m Команда зарегистрирована: \033[1;36mjust1knode\033[0m"
+    echo ""
+    
+    if [[ -t 0 ]]; then
+        exec "$INSTALL_DIR/just1knode.sh" "$@"
+    elif (exec </dev/tty) 2>/dev/null; then
+        exec "$INSTALL_DIR/just1knode.sh" "$@" </dev/tty
+    else
+        exec "$INSTALL_DIR/just1knode.sh" "$@"
+    fi
+fi
+
 VERSION_FILE="${SCRIPT_DIR}/VERSION"
 JUST1KNODE_VERSION="2.0.0"
 if [[ -f "$VERSION_FILE" ]]; then
@@ -385,7 +454,7 @@ main_menu() {
 }
 
 # --- Точка входа CLI ---
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
     if [[ $# -eq 0 ]]; then
         main_menu
     else

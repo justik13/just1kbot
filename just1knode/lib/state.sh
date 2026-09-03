@@ -72,7 +72,7 @@ finally:
 get_state_val() {
     local key="$1"
     local default_val="${2:-}"
-    if [[ ! -f "$STATE_FILE" ]]; then
+    if [[ ! -f "$STATE_FILE" ]] || ! command -v python3 >/dev/null 2>&1; then
         echo "$default_val"
         return
     fi
