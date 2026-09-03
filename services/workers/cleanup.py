@@ -11,6 +11,7 @@ from cachetools import TTLCache
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
+    AMNEZIA_PROTOCOL,
     AdminAuditAction,
     GRACE_PERIOD_HOURS,
     PAYMENT_EXPIRATION_HOURS,
@@ -420,7 +421,12 @@ async def _cleanup_dangling_peers():
     db_server_peers = set()
 
     async with session_scope() as session:
-        servers_result = await session.execute(select(Server).where(Server.is_active.is_(True)))
+        servers_result = await session.execute(
+            select(Server).where(
+                Server.is_active.is_(True),
+                Server.protocol == AMNEZIA_PROTOCOL,
+            )
+        )
         servers = servers_result.scalars().all()
 
         result = await session.execute(select(VPNProfile.server_id, VPNProfile.peer_id))
