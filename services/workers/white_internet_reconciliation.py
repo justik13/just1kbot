@@ -98,7 +98,10 @@ class WhiteInternetReconciliationWorker:
             # Persist result in short transaction under lock
             async with sf() as sess:
                 # PostgreSQL distributed transaction-level advisory lock per subscription ID
-                if sess.bind and sess.bind.dialect.name == "postgresql":
+                bind = getattr(sess, "bind", None)
+                if not bind and hasattr(sess, "sync_session"):
+                    bind = getattr(sess.sync_session, "bind", None)
+                if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
                     locked = await sess.scalar(
                         select(func.pg_try_advisory_xact_lock(sub_id + 7_000_000_000))
                     )
