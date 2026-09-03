@@ -9,18 +9,20 @@ def get_admin_server_card_keyboard(
     is_active: bool,
     used_clients: int | None = None,
     max_clients: int | None = None,
+    is_xray: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    if used_clients is not None and max_clients is not None:
-        peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS.format(used=used_clients, total=max_clients)
-    else:
-        peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS_NO_COUNT
+    if not is_xray:
+        if used_clients is not None and max_clients is not None:
+            peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS.format(used=used_clients, total=max_clients)
+        else:
+            peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS_NO_COUNT
 
-    builder.button(
-        text=peers_btn_text,
-        callback_data=f"admin_server_peers:{server_id}:1",
-    )
+        builder.button(
+            text=peers_btn_text,
+            callback_data=f"admin_server_peers:{server_id}:1",
+        )
     builder.button(
         text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
         callback_data=f"admin_users_filter:server:{server_id}:1",

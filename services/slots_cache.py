@@ -25,6 +25,15 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         server = await session.get(Server, server_id)
         if not server:
             raise LookupError("server not found")
+        server_proto = getattr(server, "protocol", None)
+        server_caps = getattr(server, "capabilities", None) or []
+        is_xray = (server_proto == "xray" or "xray_origin" in server_caps)
+        if is_xray:
+            return ServerPeerSnapshot(
+                server_id,
+                frozenset(),
+                datetime.now(timezone.utc),
+            )
         endpoint = (server.api_url, server.api_key)
     clients = await AmneziaClient(*endpoint).get_all_clients()
     if clients is None:
@@ -127,8 +136,32 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         if not force_refresh and cached is not None:
             return cached
 
-        client = AmneziaClient(server.api_url, server.api_key)
         gen = get_server_generation(server.id)
+
+        server_proto = getattr(server, "protocol", None)
+        server_caps = getattr(server, "capabilities", None) or []
+        is_xray = (server_proto == "xray" or "xray_origin" in server_caps)
+        if is_xray:
+            from database.connection import session_scope
+            from database.models import WhiteInternetSubscription
+            from database.repositories.servers_repo import capacity_consuming_wl_condition
+            from sqlalchemy import func, select
+
+            t_done = time.monotonic()
+            async with session_scope() as session:
+                count_stmt = select(func.count(WhiteInternetSubscription.id)).where(
+                    WhiteInternetSubscription.origin_node_id == server.id,
+                    capacity_consuming_wl_condition(),
+                )
+                count = (await session.execute(count_stmt)).scalar() or 0
+            update_cached_peer_count(server.id, count, timestamp=t_done, generation=gen)
+            logger.info(
+                "Cached real peer count for Xray server %s (%s): %s/%s",
+                server.id, server.name, count, server.max_clients,
+            )
+            return count
+
+        client = AmneziaClient(server.api_url, server.api_key)
         try:
             clients = await client.get_all_clients()
             t_done = time.monotonic()

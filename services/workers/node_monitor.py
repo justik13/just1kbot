@@ -18,7 +18,7 @@ from bot.texts.runtime.alerts import (
     ALERT_SERVER_PROBLEM,
     ALERT_SERVER_RESTORED,
 )
-from config.constants import ServerHealthState
+from config.constants import AMNEZIA_PROTOCOL, ServerHealthState, XRAY_PROTOCOL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server
@@ -191,12 +191,21 @@ async def check_node_resources_and_alerts(bot: Bot):
         expected_consecutive_successes = st.consecutive_successes
 
         st.last_check_monotonic = now_m
-        is_xray_node = "xray_origin" in (getattr(server, "capabilities", None) or [])
+        server_proto = getattr(server, "protocol", None)
+        if not isinstance(server_proto, str):
+            server_proto = AMNEZIA_PROTOCOL
+
+        is_xray_node = (
+            server_proto in (XRAY_PROTOCOL, "xray")
+            or "xray_origin" in (getattr(server, "capabilities", None) or [])
+        )
+        is_amnezia_node = not is_xray_node and server_proto == AMNEZIA_PROTOCOL
 
         # 4. Исполнение проверки с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
         xray_epoch = None
         xray_data = None
+        client = None
         try:
             if is_xray_node:
                 from services.xray_node_client import XrayNodeClient
@@ -204,9 +213,15 @@ async def check_node_resources_and_alerts(bot: Bot):
                     is_healthy, xray_epoch, xray_data = await xray_client.check_health(
                         server.api_url, server.api_key
                     )
-            else:
+            elif is_amnezia_node:
                 client = AmneziaClient(server.api_url, server.api_key)
                 is_healthy = await client.healthcheck()
+            else:
+                logger.warning(
+                    "Server %s (%s) has unsupported or unassigned protocol '%s', skipping healthcheck",
+                    server.id, server.name, server.protocol,
+                )
+                is_healthy = False
         except Exception as exc:
             logger.warning("Healthcheck exception for server %s (%s): %s", server.id, server.name, exc)
             is_healthy = False
@@ -239,7 +254,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     })
 
                 # Проверка диска (с 1-часовым кулдауном) для Amnezia узлов
-                if not is_xray_node:
+                if is_amnezia_node and client is not None:
                     try:
                         load_info = await client.get_server_load()
                         if load_info and isinstance(load_info, dict):

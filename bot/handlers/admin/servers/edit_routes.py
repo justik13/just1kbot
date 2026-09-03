@@ -454,7 +454,7 @@ async def process_edit_server_url(
             )
             await state.clear()
             return
-    else:
+    elif server.protocol == AMNEZIA_PROTOCOL:
         client = AmneziaClient(new_url, server.api_key)
 
         if not await client.healthcheck():
@@ -465,9 +465,7 @@ async def process_edit_server_url(
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
-
             await state.clear()
-
             return
 
         server_info = await client.get_server_info()
@@ -480,9 +478,7 @@ async def process_edit_server_url(
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
-
             await state.clear()
-
             return
 
         if AMNEZIA_PROTOCOL not in server_info.protocols:
@@ -501,6 +497,16 @@ async def process_edit_server_url(
             )
             await state.clear()
             return
+    else:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_SERVER_UNREACHABLE,
+            get_back_button("admin_servers"),
+            parse_mode="HTML",
+        )
+        await state.clear()
+        return
 
     if server.api_url != new_url:
         server = await get_server_by_id(session, server_id, for_update=True)
@@ -736,7 +742,7 @@ async def process_edit_server_key(
             )
             await state.clear()
             return
-    else:
+    elif server.protocol == AMNEZIA_PROTOCOL:
         client = AmneziaClient(server.api_url, new_key)
 
         if not await client.healthcheck():
@@ -747,9 +753,7 @@ async def process_edit_server_key(
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
-
             await state.clear()
-
             return
 
         server_info = await client.get_server_info()
@@ -762,9 +766,7 @@ async def process_edit_server_key(
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
-
             await state.clear()
-
             return
 
         if AMNEZIA_PROTOCOL not in server_info.protocols:
@@ -783,6 +785,16 @@ async def process_edit_server_key(
             )
             await state.clear()
             return
+    else:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_SERVER_UNREACHABLE,
+            get_back_button("admin_servers"),
+            parse_mode="HTML",
+        )
+        await state.clear()
+        return
 
     if server.api_key != new_key:
         server = await get_server_by_id(session, server_id, for_update=True)

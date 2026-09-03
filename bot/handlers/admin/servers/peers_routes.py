@@ -59,6 +59,15 @@ async def show_server_peers(
         await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
         return
 
+    server_proto = getattr(server, "protocol", None)
+    server_caps = getattr(server, "capabilities", None) or []
+    if server_proto == "xray" or "xray_origin" in server_caps:
+        await callback.answer(
+            texts.ADMIN_SERVER_PEERS_AWG_ONLY,
+            show_alert=True,
+        )
+        return
+
     await callback.answer(show_alert=False)
 
     # 1. Fetch bot profiles for this server (include all lifecycle states so

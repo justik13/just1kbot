@@ -58,13 +58,22 @@ async def _build_servers_list_text_and_kb(
         for server in servers:
             flag = server.country_flag or texts.EMOJI_GLOBE
             status = texts.STATUS_ACTIVE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
+            proto_badge = (
+                "[Xray]"
+                if (
+                    getattr(server, "protocol", None) == "xray"
+                    or "xray_origin" in (getattr(server, "capabilities", None) or [])
+                )
+                else "[AWG]"
+            )
             db_used = db_counts.get(server.id, 0)
             cached_used = get_cached_peer_count(server.id)
             total = server.max_clients or 240
             effective_used = max(cached_used, db_used) if cached_used is not None else db_used
             cap_str = f"{effective_used}/{total}"
+            server_display_name = f"{proto_badge} {server.name}"
             button_text = truncate_button_text(
-                texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server.name, v3=cap_str)
+                texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server_display_name, v3=cap_str)
             )
             builder.button(
                 text=button_text,
@@ -190,7 +199,10 @@ async def _show_server_card(
 
     if ping_result:
         rendered += texts.COMMON_REZULTAT_PROVERKI_SVYAZI.format(ping_result=ping_result)
-
+    is_xray = (
+        getattr(server, "protocol", None) == "xray"
+        or "xray_origin" in (getattr(server, "capabilities", None) or [])
+    )
     try:
         await callback.message.edit_text(
             rendered,
@@ -199,6 +211,7 @@ async def _show_server_card(
                 server.is_active,
                 used_clients=actual_peers,
                 max_clients=max_clients,
+                is_xray=is_xray,
             ),
             parse_mode="HTML",
         )

@@ -153,7 +153,6 @@ show_status() {
 
         echo -e "\n  Службы:"
         systemctl is-active --quiet xray && echo -e "    Xray Relay:  ${GREEN}● Активен${NC}" || echo -e "    Xray Relay:  ${RED}○ Не работает${NC}"
-        show_amnezia_status
     fi
 }
 

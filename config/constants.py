@@ -42,6 +42,7 @@ from config.enums import (
 
 # Protocol
 AMNEZIA_PROTOCOL = "amneziawg2"
+XRAY_PROTOCOL = "xray"
 
 # VPN Configuration transport limits
 MAX_RAW_CONFIG_BYTES = 65536  # 64 KiB max raw config payload
