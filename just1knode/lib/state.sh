@@ -113,6 +113,7 @@ get_node_status() {
 
 # Транзакционный манифест
 manifest_begin() {
+    local extra_targets=("$@")
     local txn_id="txn_$$"
     TXN_DIR="/tmp/just1knode_${txn_id}"
     rm -rf "$TXN_DIR"
@@ -132,11 +133,27 @@ manifest_begin() {
         done < <(find "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" -type f -name "*.conf" -print0 2>/dev/null)
     fi
 
+    for extra in "${extra_targets[@]}"; do
+        if [[ -n "$extra" ]]; then
+            targets+=("$extra")
+        fi
+    done
+
+    # Дедупликация и регистрация
+    local seen_targets=()
     for target in "${targets[@]}"; do
+        if [[ -z "$target" ]]; then
+            continue
+        fi
+        if [[ " ${seen_targets[*]} " =~ " ${target} " ]]; then
+            continue
+        fi
+        seen_targets+=("$target")
+
         if [[ -f "$target" ]]; then
             local hash_orig
             hash_orig="$(sha256sum "$target" | awk '{print $1}')"
-            local backup_path="$TXN_DIR/files/$(basename "$target")"
+            local backup_path="$TXN_DIR/files/$(basename "$target")_$$_${RANDOM}"
             cp "$target" "$backup_path"
             echo -e "${target}\tpresent\t${hash_orig}\t${backup_path}" >> "$MANIFEST_LOG"
         else
@@ -145,10 +162,30 @@ manifest_begin() {
     done
 }
 
+manifest_track_file() {
+    local target="$1"
+    if [[ -z "${MANIFEST_LOG:-}" || ! -f "${MANIFEST_LOG:-}" ]]; then
+        return
+    fi
+    if grep -q "^${target}\t" "$MANIFEST_LOG" 2>/dev/null; then
+        return
+    fi
+    if [[ -f "$target" ]]; then
+        local hash_orig
+        hash_orig="$(sha256sum "$target" | awk '{print $1}')"
+        local backup_path="$TXN_DIR/files/$(basename "$target")_$$_${RANDOM}"
+        cp "$target" "$backup_path"
+        echo -e "${target}\tpresent\t${hash_orig}\t${backup_path}" >> "$MANIFEST_LOG"
+    else
+        echo -e "${target}\tabsent\t-\t-" >> "$MANIFEST_LOG"
+    fi
+}
+
 manifest_commit() {
     if [[ -n "${TXN_DIR:-}" && -d "${TXN_DIR:-}" ]]; then
         rm -rf "$TXN_DIR"
     fi
+    MANIFEST_LOG=""
 }
 
 manifest_rollback() {
@@ -162,7 +199,7 @@ manifest_rollback() {
         if [[ "$status" == "present" ]]; then
             if [[ -f "$backup_path" ]]; then
                 cp "$backup_path" "$target"
-                log "Восстановлен файл: $target"
+                log "Восстановлен исходный файл: $target"
             fi
         elif [[ "$status" == "absent" ]]; then
             rm -f "$target" 2>/dev/null || true
@@ -171,5 +208,17 @@ manifest_rollback() {
     done < "$MANIFEST_LOG"
 
     rm -rf "${TXN_DIR:-}"
+    MANIFEST_LOG=""
+
+    # Восстановление рабочего состояния сервисов
+    if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
+        systemctl reload nginx 2>/dev/null || true
+    fi
+    if [[ -n "${XRAY_CONFIG:-}" && -f "${XRAY_CONFIG:-}" && -n "${XRAY_BIN:-}" && -x "${XRAY_BIN:-}" ]]; then
+        if "$XRAY_BIN" run -test -config "$XRAY_CONFIG" >/dev/null 2>&1; then
+            systemctl restart xray 2>/dev/null || true
+        fi
+    fi
+
     log "Откат транзакции завершен."
 }

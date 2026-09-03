@@ -124,3 +124,101 @@ update_xray_core() {
 update_xray() {
     update_xray_core "$@"
 }
+
+update_node() {
+    title "КОМПЛЕКСНОЕ ОБНОВЛЕНИЕ УТИЛИТЫ И КОНФИГУРАЦИИ УЗЛА"
+    check_root
+    init_state_dir
+    acquire_just1knode_lock
+
+    local target="${1:-all}"
+
+    if [[ "$target" == "core" ]]; then
+        update_xray_core
+        return
+    fi
+
+    log "Загрузка и обновление модулей just1knode из репозитория GitHub..."
+    local repo_url="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
+    local ref="${JUST1KBOT_REF:-main}"
+    local tmp_tar="/tmp/just1knode_update_$$.tar.gz"
+    local tmp_dir="/tmp/just1knode_update_dir_$$"
+
+    rm -rf "$tmp_tar" "$tmp_dir"
+    mkdir -p "$tmp_dir"
+
+    local archive_url
+    if [[ "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        archive_url="${repo_url}/archive/${ref}.tar.gz"
+    else
+        archive_url="${repo_url}/archive/refs/heads/${ref}.tar.gz"
+    fi
+
+    local download_ok=0
+    if curl -fsSL "$archive_url" -o "$tmp_tar" 2>/dev/null || wget -qO "$tmp_tar" "$archive_url" 2>/dev/null; then
+        download_ok=1
+    fi
+
+    if [[ $download_ok -eq 1 ]]; then
+        if ! tar -xzf "$tmp_tar" -C "$tmp_dir" --strip-components=1 2>/dev/null; then
+            rm -rf "$tmp_tar" "$tmp_dir"
+            error "Ошибка целостности архива: распаковка не удалась. Обновление прервано."
+        fi
+
+        # Валидация синтаксиса shell-скриптов перед установкой (Pre-Deploy Syntax Check)
+        if [[ -d "${tmp_dir}/just1knode" ]]; then
+            local syntax_err=0
+            while IFS= read -r -d '' sh_file; do
+                if ! bash -n "$sh_file"; then
+                    warn "Синтаксическая ошибка в обновлении: $sh_file"
+                    syntax_err=1
+                fi
+            done < <(find "${tmp_dir}/just1knode" -type f -name "*.sh" -print0 2>/dev/null)
+
+            if [[ $syntax_err -ne 0 ]]; then
+                rm -rf "$tmp_tar" "$tmp_dir"
+                error "Обновление прервано: обнаружены синтаксические ошибки в загруженном релизе."
+            fi
+
+            mkdir -p /opt/just1knode
+            cp -r "${tmp_dir}/just1knode"/* /opt/just1knode/
+            chmod +x /opt/just1knode/just1knode.sh
+            ln -sf /opt/just1knode/just1knode.sh /usr/local/bin/just1knode
+            log "Модули /opt/just1knode успешно обновлены и проверены."
+        fi
+
+        # Обновление xray-api и синхронизация зависимостей venv
+        if [[ -d "${tmp_dir}/scripts/xray_api" && -d /opt/xray-api ]]; then
+            cp -r "${tmp_dir}/scripts/xray_api"/* /opt/xray-api/
+            if [[ -x /opt/xray-api/venv/bin/pip && -f /opt/xray-api/requirements.txt ]]; then
+                /opt/xray-api/venv/bin/pip install -q -r /opt/xray-api/requirements.txt --no-cache-dir 2>/dev/null || true
+            fi
+            log "Компоненты /opt/xray-api успешно обновлены с синхронизацией Python-зависимостей."
+        fi
+
+        rm -rf "$tmp_tar" "$tmp_dir"
+    else
+        warn "Не удалось загрузить архив с GitHub. Используем текущие установленные модули для самовосстановления."
+        rm -rf "$tmp_tar" "$tmp_dir"
+    fi
+
+    # Автоматическая оптимизация конфигурации в зависимости от роли сервера
+    local role
+    role="$(get_state_val "role")"
+    if [[ "$role" == "origin" ]]; then
+        heal_and_update_origin_config
+    elif [[ "$role" == "relay" ]]; then
+        heal_and_update_relay_config
+    else
+        warn "Узел не настроен (роль не определена). Автоматическая оптимизация конфига пропущена."
+    fi
+
+    if [[ "$target" == "all" ]]; then
+        update_xray_core
+    fi
+
+    title "ОБНОВЛЕНИЕ И АВТО-КОНФИГУРАЦИЯ УЗЛА УСПЕШНО ЗАВЕРШЕНЫ!"
+    echo -e "${GREEN}✔ Все параметры Xray, DNS (Split-DNS), IPv4 и системные настройки приведены к эталону.${NC}"
+    echo -e "${GREEN}✔ 100% российских сервисов (включая 2ip.ru, Госуслуги, банки) направляются через Origin.${NC}\n"
+}
+

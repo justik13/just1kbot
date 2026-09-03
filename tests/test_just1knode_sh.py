@@ -264,8 +264,8 @@ exit 0
 
     def test_rename_relay_node(self):
         self._prepare_base_env()
-        with open(self.state_dir / "state.env", "w", encoding="utf-8") as f:
-            f.write("role=origin\n")
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "origin"}, f)
 
         relays_data = [{"name": "Германия", "code": "de", "ip": "1.2.3.4", "port": 10443}]
         with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
@@ -279,6 +279,116 @@ exit 0
             updated = json.load(f)
         self.assertEqual(updated[0]["name"], "Финляндия")
         self.assertEqual(updated[0]["code"], "de")
+
+    def test_heal_and_update_origin_config(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "origin", "secret_base_path": "/stream"}, f)
+
+        xray_config_file = self.xray_config_dir / "config.json"
+        with open(xray_config_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "inbounds": [
+                    {"tag": "just1k-wl-default", "port": 8003, "protocol": "vless"},
+                    {"tag": "just1k-wl-inbound-de", "port": 8004, "protocol": "vless"},
+                    {"tag": "just1k-wl-api-grpc", "port": 10085, "protocol": "dokodemo-door"}
+                ],
+                "outbounds": [
+                    {"tag": "just1k-wl-direct", "protocol": "freedom", "settings": {"domainStrategy": "UseIP"}}
+                ],
+                "routing": {
+                    "rules": [
+                        {
+                            "type": "field",
+                            "inboundTag": ["just1k-wl-default"],
+                            "domain": ["domain:ru"],
+                            "outboundTag": "just1k-wl-direct"
+                        }
+                    ]
+                }
+            }, f)
+
+        cmd = 'heal_and_update_origin_config'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"heal_and_update_origin_config failed: {res.stderr + res.stdout}")
+
+        with open(xray_config_file, "r", encoding="utf-8") as f:
+            updated = json.load(f)
+
+        # 1. Check UseIPv4
+        direct_ob = next(ob for ob in updated["outbounds"] if ob["tag"] == "just1k-wl-direct")
+        self.assertEqual(direct_ob["settings"]["domainStrategy"], "UseIPv4")
+
+        # 2. Check direct routing rule updated with domain:2ip.ru and inbound-de
+        direct_rule = next(r for r in updated["routing"]["rules"] if r.get("outboundTag") == "just1k-wl-direct")
+        self.assertIn("domain:2ip.ru", direct_rule["domain"])
+        self.assertIn("just1k-wl-inbound-de", direct_rule["inboundTag"])
+
+        # 3. Check Split-DNS and skipFallback
+        self.assertEqual(updated["dns"]["queryStrategy"], "UseIPv4")
+        ru_server = updated["dns"]["servers"][0]
+        self.assertEqual(ru_server["address"], "77.88.8.8")
+        self.assertIn("domain:2ip.ru", ru_server["domains"])
+        self.assertTrue(ru_server.get("skipFallback"))
+
+        # 4. Check sniffing routeOnly == False and quic on client inbounds
+        for ib in updated["inbounds"]:
+            if ib["tag"] == "just1k-wl-api-grpc":
+                # Ensure API inbound does NOT have sniffing
+                self.assertNotIn("sniffing", ib)
+            else:
+                self.assertTrue(ib["sniffing"]["enabled"])
+                self.assertFalse(ib["sniffing"]["routeOnly"])
+                self.assertIn("quic", ib["sniffing"]["destOverride"])
+
+    def test_heal_reconstructs_missing_invariants(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "origin", "secret_base_path": "/custom_stream"}, f)
+
+        xray_config_file = self.xray_config_dir / "config.json"
+        # Config completely lacking outbounds and routing rules
+        with open(xray_config_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "inbounds": [],
+                "outbounds": []
+            }, f)
+
+        cmd = 'heal_and_update_origin_config'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"heal_and_update_origin_config failed on broken config: {res.stderr + res.stdout}")
+
+        with open(xray_config_file, "r", encoding="utf-8") as f:
+            reconciled = json.load(f)
+
+        # Invariants reconstructed
+        out_tags = [ob["tag"] for ob in reconciled["outbounds"]]
+        self.assertIn("just1k-wl-direct", out_tags)
+        self.assertIn("just1k-wl-block", out_tags)
+        self.assertIn("just1k-wl-api", out_tags)
+
+        in_tags = [ib["tag"] for ib in reconciled["inbounds"]]
+        self.assertIn("just1k-wl-default", in_tags)
+        self.assertIn("just1k-wl-api-grpc", in_tags)
+
+        # Routing rules reconstructed
+        rule_out_tags = [r.get("outboundTag") for r in reconciled["routing"]["rules"]]
+        self.assertIn("just1k-wl-direct", rule_out_tags)
+        self.assertIn("just1k-wl-api", rule_out_tags)
+
+    def test_rollback_removes_newly_created_relay_nginx_conf(self):
+        self._prepare_base_env()
+        new_conf = self.nginx_relays_d / "fr.conf"
+        self.assertFalse(new_conf.exists())
+
+        cmd = f'''
+        manifest_begin "{new_conf}"
+        echo "fake nginx config" > "{new_conf}"
+        manifest_rollback
+        '''
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"rollback snippet failed: {res.stderr + res.stdout}")
+        self.assertFalse(new_conf.exists(), "Rollback failed to remove newly created relay nginx config file!")
 
     # -------------------------------------------------------------------------
     # F04: Zero-Collateral Preservation of Custom Outbounds

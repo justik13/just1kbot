@@ -184,3 +184,77 @@ EOF
     echo -e "${GREEN}just1knode relay add \"${detected_country}\" ${my_ip} ${relay_port} ${tunnel_uuid} \"${detected_code}\" \"reality\" \"${public_key}\" \"${short_id}\" \"${dest_server}\"${NC}\n"
     echo -e "${YELLOW}Примечание: вы можете заменить название \"${detected_country}\" на любое удобное вам.${NC}\n"
 }
+
+heal_and_update_relay_config() {
+    title "АВТОМАТИЧЕСКАЯ ОПТИМИЗАЦИЯ И ОБНОВЛЕНИЕ КОНФИГУРАЦИИ RELAY"
+    check_root
+    init_state_dir
+    acquire_just1knode_lock
+
+    local role
+    role="$(get_state_val "role")"
+    if [[ "$role" != "relay" ]]; then
+        error "Функция доступна только на Relay-узле (текущая роль: ${role:-не установлена})."
+    fi
+
+    log "Проверка и исправление параметров ядра Xray Relay..."
+    if [[ ! -f "$XRAY_CONFIG" ]]; then
+        error "Файл конфигурации Xray не найден: $XRAY_CONFIG"
+    fi
+
+    create_backup "$XRAY_CONFIG"
+    manifest_begin
+
+    if ! python3 -c "
+import json, sys
+cfg_file = sys.argv[1]
+with open(cfg_file, 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+
+for ob in cfg.get('outbounds', []):
+    if ob.get('tag') == 'direct' or ob.get('protocol') == 'freedom':
+        ob.setdefault('settings', {})['domainStrategy'] = 'UseIPv4'
+
+cfg['dns'] = {
+    'servers': ['1.1.1.1', '1.0.0.1', '8.8.8.8', 'localhost'],
+    'queryStrategy': 'UseIPv4'
+}
+
+with open(cfg_file, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2)
+
+print('[+] Xray Relay config успешно оптимизирован (UseIPv4 + Независимый DNS)')
+" "$XRAY_CONFIG"; then
+        manifest_rollback
+        error "Ошибка выполнения Python-скрипта реконсиляции Relay."
+    fi
+
+    if [[ $EUID -eq 0 ]]; then
+        mkdir -p /etc/sysctl.d 2>/dev/null || true
+        cat > /etc/sysctl.d/99-disable-ipv6.conf <<EOF 2>/dev/null || true
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+EOF
+        sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+    fi
+
+    if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+        manifest_rollback
+        error "Ошибка валидации Xray Relay после оптимизации! Выполнен полный откат."
+    fi
+
+    set +e
+    systemctl restart xray
+    local xray_rc=$?
+    set -e
+    if [[ $xray_rc -ne 0 ]] || ! systemctl is-active --quiet xray; then
+        warn "Служба Xray Relay не запустилась. Выполняется полный откат..."
+        manifest_rollback
+        error "Откат выполнен: служба Xray Relay не смогла запуститься с новой конфигурацией."
+    fi
+
+    manifest_commit
+    log "Оптимизация и обновление конфигурации Relay завершены успешно!"
+}
+
