@@ -11,7 +11,7 @@ import os
 import unittest
 import uuid
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -246,6 +246,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 is_active=False,
                 version=2,
                 expected_node_epoch=node_epoch,
+                idempotency_key=ANY,
             )
 
         async with self.sessions.begin() as session:
@@ -281,6 +282,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 is_active=True,
                 version=3,
                 expected_node_epoch=node_epoch,
+                idempotency_key=ANY,
             )
 
         async with self.sessions.begin() as session:
