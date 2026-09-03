@@ -244,11 +244,24 @@ install_dependencies() {
     if ! command -v docker >/dev/null 2>&1; then
         info "Docker не обнаружен. Начинаем автоматическую установку Docker Engine..."
         wait_for_apt_locks
-        curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-        sh /tmp/get-docker.sh >/dev/null 2>&1
-        rm -f /tmp/get-docker.sh
+        local installed_docker=0
+        if curl -fsSL https://get.docker.com -o /tmp/get-docker.sh 2>/dev/null; then
+            if sh /tmp/get-docker.sh >/dev/null 2>&1; then
+                installed_docker=1
+            fi
+            rm -f /tmp/get-docker.sh
+        fi
+        if (( installed_docker == 0 )); then
+            info "Установка Docker через стандартный репозиторий системы..."
+            apt-get update -qq
+            apt-get install -y -qq docker.io docker-compose-v2 >/dev/null 2>&1 || \
+            apt-get install -y -qq docker.io >/dev/null 2>&1 || true
+        fi
         systemctl enable docker >/dev/null 2>&1 || true
         systemctl start docker >/dev/null 2>&1 || true
+        if ! command -v docker >/dev/null 2>&1; then
+            error "Не удалось установить Docker. Установите Docker вручную и перезапустите скрипт."
+        fi
         log "Docker успешно установлен."
     else
         log "Docker уже установлен: $(docker --version)"
@@ -256,11 +269,27 @@ install_dependencies() {
 
     # Проверка Docker Compose
     if ! docker compose version >/dev/null 2>&1; then
-        info "Установка плагина docker-compose-plugin..."
+        info "Установка плагина Docker Compose..."
         wait_for_apt_locks
-        apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 || {
-            error "Не удалось установить docker-compose-plugin. Установите Docker Compose вручную."
+        apt-get install -y -qq docker-compose-v2 >/dev/null 2>&1 || \
+        apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 || \
+        apt-get install -y -qq docker-compose >/dev/null 2>&1 || {
+            info "Загрузка официального бинарного плагина docker-compose..."
+            local compose_dir="/usr/local/lib/docker/cli-plugins"
+            mkdir -p "$compose_dir"
+            local arch
+            arch="$(uname -m)"
+            case "$arch" in
+                x86_64) arch="x86_64" ;;
+                aarch64|arm64) arch="aarch64" ;;
+                *) arch="x86_64" ;;
+            esac
+            curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${arch}" -o "${compose_dir}/docker-compose" 2>/dev/null || true
+            chmod +x "${compose_dir}/docker-compose" 2>/dev/null || true
         }
+        if ! docker compose version >/dev/null 2>&1; then
+            error "Не удалось установить Docker Compose. Установите docker-compose-v2 или docker-compose-plugin вручную."
+        fi
     fi
     log "Docker Compose готов к работе: $(docker compose version)"
 

@@ -30,7 +30,7 @@ fi
 
 # 2. Если не найдено, определяем реальный путь к скрипту с раскрытием всех симлинков
 if [[ -z "$PROJECT_DIR" ]]; then
-    SOURCE="${BASH_SOURCE[0]}"
+    SOURCE="${BASH_SOURCE[0]:-$0}"
     max_links=20
     while [ -h "$SOURCE" ] && [ "$max_links" -gt 0 ]; do
         DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
@@ -1092,6 +1092,6 @@ main() {
     fi
 }
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
     main "$@"
 fi

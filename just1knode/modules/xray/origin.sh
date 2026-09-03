@@ -277,6 +277,9 @@ EOF
         server_name_str="${domain} ${cdn_domain}"
     fi
 
+    rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" "${NGINX_CONF_DIR}/conf.d/just1k-origin.conf" "${NGINX_CONF_DIR}/conf.d/origin.conf" 2>/dev/null || true
+    rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+
     cat > "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" <<EOF
 server {
     listen 80;
