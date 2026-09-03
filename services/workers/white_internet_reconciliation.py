@@ -72,11 +72,14 @@ class WhiteInternetReconciliationWorker:
         target_version = task["target_version"]
         expected_relays = task.get("expected_relays") or []
 
-        expected_inbound_tags = {"just1k-wl-default"}
-        for r in expected_relays:
-            code = r.get("code")
-            if code:
-                expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
+        expected_inbound_tags = set()
+        if expected_relays:
+            for r in expected_relays:
+                code = r.get("code")
+                if code:
+                    expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
+        else:
+            expected_inbound_tags.add("just1k-wl-default")
 
         async with self._get_sub_lock(sub_id):
             # 1. Distributed lock BEFORE mutation (Rule 9.4 Lock-Before-Mutation)
