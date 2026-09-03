@@ -189,6 +189,7 @@ heal_and_update_relay_config() {
     title "АВТОМАТИЧЕСКАЯ ОПТИМИЗАЦИЯ И ОБНОВЛЕНИЕ КОНФИГУРАЦИИ RELAY"
     check_root
     init_state_dir
+    acquire_just1knode_lock
 
     local role
     role="$(get_state_val "role")"
@@ -202,8 +203,9 @@ heal_and_update_relay_config() {
     fi
 
     create_backup "$XRAY_CONFIG"
+    manifest_begin
 
-    python3 -c "
+    if ! python3 -c "
 import json, sys
 cfg_file = sys.argv[1]
 with open(cfg_file, 'r', encoding='utf-8') as f:
@@ -222,7 +224,10 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
 
 print('[+] Xray Relay config успешно оптимизирован (UseIPv4 + Независимый DNS)')
-" "$XRAY_CONFIG"
+" "$XRAY_CONFIG"; then
+        manifest_rollback
+        error "Ошибка выполнения Python-скрипта реконсиляции Relay."
+    fi
 
     if [[ $EUID -eq 0 ]]; then
         mkdir -p /etc/sysctl.d 2>/dev/null || true
@@ -235,11 +240,21 @@ EOF
     fi
 
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
-        manifest_rollback 2>/dev/null || true
-        error "Ошибка валидации Xray Relay после оптимизации!"
+        manifest_rollback
+        error "Ошибка валидации Xray Relay после оптимизации! Выполнен полный откат."
     fi
 
+    set +e
     systemctl restart xray
+    local xray_rc=$?
+    set -e
+    if [[ $xray_rc -ne 0 ]] || ! systemctl is-active --quiet xray; then
+        warn "Служба Xray Relay не запустилась. Выполняется полный откат..."
+        manifest_rollback
+        error "Откат выполнен: служба Xray Relay не смогла запуститься с новой конфигурацией."
+    fi
+
+    manifest_commit
     log "Оптимизация и обновление конфигурации Relay завершены успешно!"
 }
 

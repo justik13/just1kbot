@@ -153,7 +153,7 @@ inbounds.append({
             'xPaddingPlacement': 'queryInHeader'
         }
     },
-    'sniffing': {'enabled': True, 'destOverride': ['tls', 'http'], 'routeOnly': False}
+    'sniffing': {'enabled': True, 'destOverride': ['tls', 'http', 'quic'], 'routeOnly': False}
 })
 
 if not any(ob.get('tag') == 'just1k-wl-direct' for ob in outbounds):
@@ -234,7 +234,8 @@ dns_conf['servers'] = [
             'domain:su',
             'domain:xn--p1ai',
             'domain:2ip.ru'
-        ]
+        ],
+        'skipFallback': True
     },
     '1.1.1.1',
     'localhost'
@@ -410,9 +411,10 @@ EOF
 }
 
 heal_and_update_origin_config() {
-    title "АВТОМАТИЧЕСКАЯ ОПТИМИЗАЦИЯ И ОБНОВЛЕНИЕ КОНФИГУРАЦИИ ORIGIN"
+    title "АВТОМАТИЧЕСКАЯ ОПТИМИЗАЦИЯ И ВОССТАНОВЛЕНИЕ КОНФИГУРАЦИИ ORIGIN"
     check_root
     init_state_dir
+    acquire_just1knode_lock
 
     local role
     role="$(get_state_val "role")"
@@ -420,28 +422,127 @@ heal_and_update_origin_config() {
         error "Функция доступна только на Origin-узле (текущая роль: ${role:-не установлена})."
     fi
 
-    log "Проверка и исправление параметров ядра Xray Origin..."
+    log "Проверка и исправление параметров ядра Xray Origin (Desired-State Reconciliation)..."
     if [[ ! -f "$XRAY_CONFIG" ]]; then
         error "Файл конфигурации Xray не найден: $XRAY_CONFIG"
     fi
 
     create_backup "$XRAY_CONFIG"
+    manifest_begin
 
-    python3 -c "
+    if ! python3 -c "
 import json, os, sys
 
 cfg_file = sys.argv[1]
 relays_file = sys.argv[2]
+state_file = sys.argv[3]
 
 with open(cfg_file, 'r', encoding='utf-8') as f:
     cfg = json.load(f)
 
-# 1. Принудительный UseIPv4 на всех freedom outbounds (устраняет 5-10с задержки IPv6)
-for ob in cfg.get('outbounds', []):
-    if ob.get('tag') == 'just1k-wl-direct' or ob.get('protocol') == 'freedom':
+# Читаем зарегистрированные релеи
+relays = []
+if os.path.exists(relays_file):
+    try:
+        with open(relays_file, 'r', encoding='utf-8') as rf:
+            relays = json.load(rf)
+    except:
+        relays = []
+
+# Читаем базовый путь из state.json
+secret_base = '/stream'
+if os.path.exists(state_file):
+    try:
+        with open(state_file, 'r', encoding='utf-8') as sf:
+            s_data = json.load(sf)
+            secret_base = s_data.get('secret_base_path', '/stream')
+    except:
+        secret_base = '/stream'
+
+# 1. OUTBOUNDS: гарантия наличия и параметров
+outbounds = cfg.setdefault('outbounds', [])
+
+# 1.1. just1k-wl-direct (freedom, UseIPv4)
+direct_ob = next((ob for ob in outbounds if ob.get('tag') == 'just1k-wl-direct'), None)
+if not direct_ob:
+    direct_ob = {'tag': 'just1k-wl-direct', 'protocol': 'freedom', 'settings': {}}
+    outbounds.insert(0, direct_ob)
+direct_ob.setdefault('settings', {})['domainStrategy'] = 'UseIPv4'
+
+# 1.2. Принудительный UseIPv4 на всех freedom outbounds
+for ob in outbounds:
+    if ob.get('protocol') == 'freedom':
         ob.setdefault('settings', {})['domainStrategy'] = 'UseIPv4'
 
-# 2. Оптимальный Split-DNS: Рунет через быстрый внутренний DNS, остальное через fallback
+# 1.3. just1k-wl-block (blackhole)
+if not any(ob.get('tag') == 'just1k-wl-block' for ob in outbounds):
+    outbounds.append({
+        'tag': 'just1k-wl-block',
+        'protocol': 'blackhole',
+        'settings': {'response': {'type': 'none'}}
+    })
+
+# 1.4. just1k-wl-api (blackhole)
+if not any(ob.get('tag') == 'just1k-wl-api' for ob in outbounds):
+    outbounds.append({
+        'tag': 'just1k-wl-api',
+        'protocol': 'blackhole'
+    })
+
+# 2. INBOUNDS: гарантия наличия базовых инбаундов и правильный sniffing
+inbounds = cfg.setdefault('inbounds', [])
+
+# 2.1. just1k-wl-api-grpc (локальный gRPC API)
+api_ib = next((ib for ib in inbounds if ib.get('tag') == 'just1k-wl-api-grpc'), None)
+if not api_ib:
+    api_ib = {
+        'tag': 'just1k-wl-api-grpc',
+        'listen': '127.0.0.1',
+        'port': 10085,
+        'protocol': 'dokodemo-door',
+        'settings': {'address': '127.0.0.1'}
+    }
+    inbounds.append(api_ib)
+# ИСКЛЮЧАЕМ sniffing с внутреннего API
+api_ib.pop('sniffing', None)
+
+# 2.2. just1k-wl-default (основной клиентский инбаунд)
+def_ib = next((ib for ib in inbounds if ib.get('tag') == 'just1k-wl-default'), None)
+if not def_ib:
+    def_ib = {
+        'tag': 'just1k-wl-default',
+        'listen': '127.0.0.1',
+        'port': 8003,
+        'protocol': 'vless',
+        'settings': {'clients': [], 'decryption': 'none'},
+        'streamSettings': {
+            'network': 'xhttp',
+            'xhttpSettings': {
+                'mode': 'packet-up',
+                'path': f'{secret_base}/default',
+                'xPaddingObfsMode': True,
+                'xPaddingKey': 'dc',
+                'xPaddingHeader': 'X-Cache',
+                'xPaddingMethod': 'tokenish',
+                'xPaddingPlacement': 'queryInHeader'
+            }
+        }
+    }
+    inbounds.append(def_ib)
+
+# 2.3. Sniffing ТОЛЬКО для клиентских инбаундов (default + релейные инбаунды)
+for ib in inbounds:
+    tag = ib.get('tag', '')
+    if tag == 'just1k-wl-api-grpc':
+        ib.pop('sniffing', None)
+    elif tag == 'just1k-wl-default' or tag.startswith('just1k-wl-inbound-'):
+        ib['sniffing'] = {
+            'enabled': True,
+            'destOverride': ['tls', 'http', 'quic'],
+            'routeOnly': False
+        }
+
+# 3. DNS: Split-DNS с UseIPv4 и skipFallback для доменов РФ
 cfg['dns'] = {
     'servers': [
         {
@@ -454,7 +555,8 @@ cfg['dns'] = {
                 'domain:su',
                 'domain:xn--p1ai',
                 'domain:2ip.ru'
-            ]
+            ],
+            'skipFallback': True
         },
         '1.1.1.1',
         'localhost'
@@ -462,35 +564,86 @@ cfg['dns'] = {
     'queryStrategy': 'UseIPv4'
 }
 
-# 3. Гарантируем Sniffing с destOverride на всех клиентских инбаундах
-for ib in cfg.get('inbounds', []):
-    if ib.get('tag', '').startswith('just1k-wl-'):
-        ib['sniffing'] = {
-            'enabled': True,
-            'destOverride': ['tls', 'http'],
-            'routeOnly': False
-        }
-
-# 4. Проверяем правила routing и инбаунды релеев
+# 4. ROUTING: Восстановление инвариантов маршрутизации
 cfg.setdefault('routing', {})['domainStrategy'] = 'IPIfNonMatch'
 rules = cfg.setdefault('routing', {}).setdefault('rules', [])
 
-# Собираем актуальные теги всех входящих подключений
-known_inbounds = [ib.get('tag') for ib in cfg.get('inbounds', []) if ib.get('tag', '').startswith('just1k-wl-inbound-') or ib.get('tag') == 'just1k-wl-default']
+# Собираем актуальные теги всех входящих подключений клиентов
+known_client_inbounds = [
+    ib.get('tag') for ib in inbounds
+    if ib.get('tag') == 'just1k-wl-default' or ib.get('tag', '').startswith('just1k-wl-inbound-')
+]
 
-for r in rules:
-    if r.get('outboundTag') == 'just1k-wl-direct':
-        curr = r.get('inboundTag', [])
-        if isinstance(curr, list):
-            r['inboundTag'] = list(dict.fromkeys(curr + known_inbounds))
-        if 'domain' in r and 'domain:2ip.ru' not in r['domain']:
-            r['domain'].append('domain:2ip.ru')
+# 4.1. Правило API
+if not any(r.get('outboundTag') == 'just1k-wl-api' for r in rules):
+    rules.insert(0, {
+        'type': 'field',
+        'inboundTag': ['just1k-wl-api-grpc'],
+        'outboundTag': 'just1k-wl-api'
+    })
+
+# 4.2. Правило Direct для доменов РФ
+ru_domains = [
+    'geosite:category-ru',
+    'geosite:tld-ru',
+    'domain:ru',
+    'domain:su',
+    'domain:xn--p1ai',
+    'domain:2ip.ru'
+]
+dom_rule = next((r for r in rules if r.get('outboundTag') == 'just1k-wl-direct' and 'domain' in r), None)
+if not dom_rule:
+    dom_rule = {
+        'type': 'field',
+        'inboundTag': list(known_client_inbounds),
+        'domain': ru_domains,
+        'outboundTag': 'just1k-wl-direct'
+    }
+    rules.insert(1, dom_rule)
+else:
+    dom_rule['domain'] = list(dict.fromkeys(dom_rule.get('domain', []) + ru_domains))
+    curr_ib = dom_rule.get('inboundTag', [])
+    dom_rule['inboundTag'] = list(dict.fromkeys((curr_ib if isinstance(curr_ib, list) else [curr_ib]) + known_client_inbounds))
+
+# 4.3. Правило Direct для IP РФ (geoip:ru)
+ip_rule = next((r for r in rules if r.get('outboundTag') == 'just1k-wl-direct' and 'ip' in r), None)
+if not ip_rule:
+    ip_rule = {
+        'type': 'field',
+        'inboundTag': list(known_client_inbounds),
+        'ip': ['geoip:ru'],
+        'outboundTag': 'just1k-wl-direct'
+    }
+    dom_idx = rules.index(dom_rule)
+    rules.insert(dom_idx + 1, ip_rule)
+else:
+    if 'geoip:ru' not in ip_rule.get('ip', []):
+        ip_rule.setdefault('ip', []).append('geoip:ru')
+    curr_ib = ip_rule.get('inboundTag', [])
+    ip_rule['inboundTag'] = list(dict.fromkeys((curr_ib if isinstance(curr_ib, list) else [curr_ib]) + known_client_inbounds))
+
+# 4.4. Дефолтное правило для just1k-wl-default
+def_rule = next((r for r in rules if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r), None)
+first_relay_tag = f\"just1k-wl-outbound-{relays[0]['code']}\" if relays and relays[0].get('code') else 'just1k-wl-block'
+if not def_rule:
+    rules.append({
+        'type': 'field',
+        'inboundTag': ['just1k-wl-default'],
+        'outboundTag': first_relay_tag
+    })
+else:
+    curr_out = def_rule.get('outboundTag')
+    if not any(ob.get('tag') == curr_out for ob in outbounds):
+        def_rule['outboundTag'] = first_relay_tag
 
 with open(cfg_file, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
 
-print('[+] Xray Origin config успешно оптимизирован (UseIPv4 + Split-DNS + Sniffing 2ip.ru)')
-" "$XRAY_CONFIG" "$RELAYS_FILE"
+print('[+] Xray Origin config успешно согласован с эталоном (Desired-State Reconciliation)')
+" "$XRAY_CONFIG" "$RELAYS_FILE" "${STATE_DIR}/state.json"; then
+        manifest_rollback
+        error "Ошибка выполнения Python-скрипта реконсиляции Origin."
+    fi
 
     # Системное отключение IPv6
     if [[ $EUID -eq 0 ]]; then
@@ -505,16 +658,31 @@ EOF
 
     # Валидация Xray и Nginx
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
-        manifest_rollback 2>/dev/null || true
-        error "Ошибка валидации Xray после оптимизации!"
+        manifest_rollback
+        error "Ошибка валидации Xray после оптимизации! Выполнен полный откат."
+    fi
+
+    if ! nginx -t; then
+        manifest_rollback
+        error "Ошибка валидации Nginx после оптимизации! Выполнен полный откат."
     fi
 
     nginx -t && systemctl reload nginx
+    set +e
     systemctl restart xray
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api
+    local xray_rc=$?
+    set -e
+    if [[ $xray_rc -ne 0 ]] || ! systemctl is-active --quiet xray; then
+        warn "Служба Xray не запустилась. Выполняется полный откат..."
+        manifest_rollback
+        error "Откат выполнен: служба Xray не смогла запуститься с новой конфигурацией."
     fi
 
-    log "Оптимизация и обновление конфигурации Origin завершены успешно!"
+    if systemctl is-active --quiet xray-api; then
+        systemctl restart xray-api 2>/dev/null || true
+    fi
+
+    manifest_commit
+    log "Оптимизация и восстановление конфигурации Origin завершены успешно!"
 }
 

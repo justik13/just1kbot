@@ -34,6 +34,21 @@ title() {
     echo -e "\n${BOLD}${BLUE}=== $1 ===${NC}\n"
 }
 
+JUST1KNODE_LOCK_FD=200
+acquire_just1knode_lock() {
+    local lock_dir="/run/lock/just1knode"
+    mkdir -p "$lock_dir" 2>/dev/null || lock_dir="/tmp/just1knode_locks"
+    mkdir -p "$lock_dir" 2>/dev/null || true
+    local lock_file="${lock_dir}/just1knode.lock"
+    eval "exec ${JUST1KNODE_LOCK_FD}>\"${lock_file}\""
+    if command -v flock >/dev/null 2>&1; then
+        if ! flock -n "$JUST1KNODE_LOCK_FD"; then
+            warn "Другой процесс just1knode уже выполняется. Ожидание снятия блокировки..."
+            flock "$JUST1KNODE_LOCK_FD"
+        fi
+    fi
+}
+
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         error "Скрипт должен быть запущен с правами root (используйте: sudo just1knode)"
