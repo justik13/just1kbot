@@ -319,11 +319,10 @@ install_dependencies() {
 
     # Настройка брандмауэра UFW (если активен)
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        info "Брандмауэр UFW активен. Открытие портов 80/tcp, 443/tcp и 443/udp (QUIC/HTTP3) для Caddy..."
+        info "Брандмауэр UFW активен. Открытие портов 80/tcp и 443/tcp для Caddy..."
         ufw allow 80/tcp >/dev/null 2>&1 || true
         ufw allow 443/tcp >/dev/null 2>&1 || true
-        ufw allow 443/udp >/dev/null 2>&1 || true
-        log "Порты 80/tcp, 443/tcp и 443/udp разрешены в UFW."
+        log "Порты 80/tcp и 443/tcp разрешены в UFW."
     fi
 
     # Настройка ядра для Redis (overcommit_memory)

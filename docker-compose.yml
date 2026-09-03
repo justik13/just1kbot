@@ -147,7 +147,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "443:443/udp"
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}

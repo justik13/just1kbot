@@ -54,7 +54,6 @@ class DockerComposeSecurityTests(unittest.TestCase):
         # 4. Caddy ports
         self.assertIn('"80:80"', compose)
         self.assertIn('"443:443"', compose)
-        self.assertIn('"443:443/udp"', compose)
 
         # 5. Postgres and Bot graceful shutdown
         self.assertIn("stop_grace_period: 30s", compose)
