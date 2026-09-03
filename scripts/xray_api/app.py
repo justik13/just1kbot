@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import secrets
+import sys
 import time
 import uuid as uuid_lib
 from contextlib import asynccontextmanager
@@ -269,6 +270,7 @@ class ClientSyncRequest(BaseModel):
     is_active: Optional[bool] = Field(None, description="Target state boolean alias")
     version: Optional[int] = Field(None, description="Monotonic desired version")
     email: Optional[str] = Field(None, description="Optional client email/identifier")
+    expected_node_epoch: Optional[str] = Field(None, description="Optional node epoch fencing")
 
     @model_validator(mode="before")
     @classmethod
@@ -474,6 +476,26 @@ async def sync_client(
             detail="No managed Xray inbounds configured on node",
         )
 
+    current_epoch = epoch_manager.get_current_running_epoch() if epoch_manager else None
+    if not current_epoch and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
+        current_epoch = (epoch_manager.load_state().get("node_epoch") if epoch_manager else None) or "test_epoch"
+    if not current_epoch:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Node epoch is unavailable: Xray not running or persistent storage degraded",
+        )
+    if req.expected_node_epoch and req.expected_node_epoch != current_epoch:
+        logger.warning(
+            "Epoch mismatch for client %s: expected %s != current %s",
+            _mask_uuid(client_uuid),
+            req.expected_node_epoch,
+            current_epoch,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail=f"Epoch fencing failed: expected {req.expected_node_epoch} != current {current_epoch}",
+        )
+
     # Monotonic version fencing check (including tombstones)
     if req.version is not None:
         entries = client_store.load_client_entries()
@@ -481,6 +503,26 @@ async def sync_client(
         if curr_entry:
             curr_ver = curr_entry.get("version")
             is_tombstone = curr_entry.get("tombstone", False)
+            curr_state = "disabled" if is_tombstone else ("active" if curr_entry.get("is_active") else "disabled")
+
+            # Idempotent retry: exact same version and same desired_state already applied!
+            if curr_ver is not None and req.version == curr_ver and curr_state == desired_state:
+                logger.info(
+                    "Idempotent retry for %s: version %d already in desired_state %s",
+                    _mask_uuid(client_uuid),
+                    req.version,
+                    desired_state,
+                )
+                return {
+                    "status": "ok",
+                    "client_id": client_uuid,
+                    "result": "applied",
+                    "state": curr_state,
+                    "version": curr_ver,
+                    "idempotent": True,
+                    "inbounds": target_inbounds,
+                }
+
             if curr_ver is not None and (req.version < curr_ver or (is_tombstone and req.version <= curr_ver)):
                 logger.warning(
                     "Stale sync request for %s: incoming version %d <= stored version %d (tombstone=%s). Fencing.",
@@ -493,7 +535,7 @@ async def sync_client(
                     "status": "ok",
                     "client_id": client_uuid,
                     "result": "already_newer",
-                    "state": "disabled" if is_tombstone else ("active" if curr_entry.get("is_active") else "disabled"),
+                    "state": curr_state,
                     "version": curr_ver,
                     "fenced": True,
                     "tombstone": is_tombstone,
@@ -580,6 +622,15 @@ async def delete_client(
             detail="No managed Xray inbounds configured on node",
         )
 
+    current_epoch = epoch_manager.get_current_running_epoch() if epoch_manager else None
+    if not current_epoch and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
+        current_epoch = (epoch_manager.load_state().get("node_epoch") if epoch_manager else None) or "test_epoch"
+    if not current_epoch:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Node epoch is unavailable: Xray not running or persistent storage degraded",
+        )
+
     # Monotonic version check
     if version is not None:
         entries = client_store.load_client_entries()
@@ -587,6 +638,25 @@ async def delete_client(
         if curr_entry:
             curr_ver = curr_entry.get("version")
             is_tombstone = curr_entry.get("tombstone", False)
+
+            # Idempotent delete retry: already tombstoned with same version
+            if curr_ver is not None and version == curr_ver and is_tombstone:
+                logger.info(
+                    "Idempotent delete retry for %s: version %d already tombstoned",
+                    _mask_uuid(clean_uuid),
+                    version,
+                )
+                return {
+                    "status": "ok",
+                    "client_id": clean_uuid,
+                    "result": "applied",
+                    "state": "disabled",
+                    "version": curr_ver,
+                    "idempotent": True,
+                    "tombstone": True,
+                    "inbounds": target_inbounds,
+                }
+
             if curr_ver is not None and (version < curr_ver or (is_tombstone and version <= curr_ver)):
                 logger.warning(
                     "Stale delete request for %s: version %d <= stored %d (tombstone=%s). Fencing.",

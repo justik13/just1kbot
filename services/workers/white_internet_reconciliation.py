@@ -79,6 +79,7 @@ class WhiteInternetReconciliationWorker:
                     sub_uuid,
                     is_active=desired_active,
                     version=target_version,
+                    expected_node_epoch=target_epoch,
                 )
 
             # Persist result in short transaction under lock
@@ -102,33 +103,48 @@ class WhiteInternetReconciliationWorker:
                     sub.last_sync_error = None
                     return True
                 elif sync_result == SyncResult.ALREADY_NEWER:
-                    # Node has a newer version. If we wanted user to be active, adopt the node's state.
-                    # But if we were disabling/deleting an expired or exhausted user, force disable by incrementing version!
-                    if not desired_active:
+                    # err_msg may contain "state=active" or "state=disabled"
+                    if err_msg and err_msg.startswith("state="):
+                        node_is_active = (err_msg == "state=active")
+                        if desired_active != node_is_active:
+                            # Semantic state mismatch: node is newer, but its state contradicts Central desired state!
+                            sub.desired_version = max(sub.desired_version, target_version) + 1
+                            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                            sub.last_sync_error = f"node_state_mismatch_{err_msg}"
+                            sub.last_synced_at = now_utc()
+                            logger.warning(
+                                "Node reported already_newer with %s for sub_id=%d on server %d, but desired_active=%s. Bumping desired_version to %d to enforce state.",
+                                err_msg,
+                                sub_id,
+                                server_id,
+                                desired_active,
+                                sub.desired_version,
+                            )
+                            return False
+                    elif not desired_active:
                         sub.desired_version = max(sub.desired_version, target_version) + 1
                         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                         sub.last_sync_error = "node_already_newer_force_disable_retry"
                         sub.last_synced_at = now_utc()
-                        logger.warning(
-                            "Node reported already_newer while trying to disable sub_id=%d on server %d. Incrementing desired_version to %d to force deprovisioning.",
-                            sub_id,
-                            server_id,
-                            sub.desired_version,
-                        )
                         return False
 
                     logger.info(
-                        "Node reported already_newer for sub_id=%d on server %d (target=%d). Marking synced.",
+                        "Node reported already_newer for sub_id=%d on server %d (target=%d, state=%s). Semantic state matches, marking synced.",
                         sub_id,
                         server_id,
                         target_version,
+                        err_msg,
                     )
                     sub.actual_version = max(sub.actual_version or 0, target_version)
                     sub.last_reconciled_node_epoch = target_epoch
                     if sub.status == WhiteInternetStatus.PENDING and desired_active:
                         sub.status = WhiteInternetStatus.ACTIVE
                         sub.status_reason = None
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+                    sub.provisioning_status = (
+                        WhiteInternetProvisioningStatus.ACTIVE
+                        if desired_active
+                        else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                    )
                     sub.last_synced_at = now_utc()
                     sub.last_sync_error = None
                     return True

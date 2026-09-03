@@ -504,3 +504,49 @@ def test_traffic_snapshot_fail_closed_when_process_unreadable():
             assert res.status_code == 503
             assert "unavailable" in res.json().get("detail", "").lower()
 
+
+def test_client_sync_idempotent_retry():
+    """Retrying sync with exact same version and desired_state succeeds idempotently without calling gRPC again."""
+    uuid = "e1a2b3c4-d5e6-47a8-9b0c-1d2e3f4a5b6c"
+    with patch.object(grpc_client, "add_user", return_value=True) as mock_add:
+        # First call: applies mutation
+        res1 = client.post(
+            "/v1/clients/sync",
+            json={"client_id": uuid, "desired_state": "active", "version": 10},
+            headers=VALID_HEADERS,
+        )
+        assert res1.status_code == 200
+        assert res1.json()["result"] == "applied"
+        assert mock_add.call_count == 2  # 2 inbounds
+
+        # Second call with exact same version and state: idempotent retry!
+        res2 = client.post(
+            "/v1/clients/sync",
+            json={"client_id": uuid, "desired_state": "active", "version": 10},
+            headers=VALID_HEADERS,
+        )
+        assert res2.status_code == 200
+        assert res2.json()["result"] == "applied"
+        assert res2.json()["idempotent"] is True
+        # gRPC add_user was NOT called again (preventing 'user already exists' error)
+        assert mock_add.call_count == 2
+
+
+def test_client_sync_epoch_fencing():
+    """Requests with expected_node_epoch mismatch return 412 Precondition Failed."""
+    uuid = "e1a2b3c4-d5e6-47a8-9b0c-1d2e3f4a5b6d"
+    with patch.object(epoch_manager, "get_current_running_epoch", return_value="epoch_new_123"):
+        res = client.post(
+            "/v1/clients/sync",
+            json={
+                "client_id": uuid,
+                "desired_state": "active",
+                "version": 1,
+                "expected_node_epoch": "epoch_old_999",
+            },
+            headers=VALID_HEADERS,
+        )
+        assert res.status_code == 412
+        assert "epoch fencing failed" in res.json()["detail"].lower()
+
+

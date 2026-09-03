@@ -44,10 +44,24 @@ from database.repositories.account_ledger_repo import (
     get_account_balance,
 )
 from database.repositories.tariff_quotes_repo import get_or_create_current_version, lock_checkout_user
-from services.xray_node_client import XrayNodeClient
+from services.xray_node_client import XrayNodeClient, _sanitize_url
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
+
+
+async def _deprovision_old_node_safe(api_url: str, api_key: str, client_uuid: str, version: int) -> None:
+    try:
+        async with XrayNodeClient() as client:
+            await client.sync_client(
+                api_url,
+                api_key,
+                client_uuid=client_uuid,
+                is_active=False,
+                version=version,
+            )
+    except Exception as exc:
+        logger.warning("Failed to deprovision old origin node %s: %s", _sanitize_url(api_url), exc)
 
 
 def _normalize_base_path(path: str | None) -> str:
@@ -247,13 +261,11 @@ class WhiteInternetService:
         # Best-effort deprovisioning of UUID on old origin node to prevent orphaned credentials
         if old_origin_for_cleanup and old_origin_for_cleanup.api_url and old_origin_for_cleanup.api_key:
             try:
-                xclient = XrayNodeClient()
                 asyncio.create_task(
-                    xclient.sync_client(
+                    _deprovision_old_node_safe(
                         old_origin_for_cleanup.api_url,
                         old_origin_for_cleanup.api_key,
-                        client_id=sub.uuid,
-                        desired_state="disabled",
+                        client_uuid=sub.uuid,
                         version=sub.desired_version + 100,
                     )
                 )

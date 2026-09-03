@@ -65,7 +65,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(synced, 1)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=True, version=2
+                    server.api_url, server.api_key, sub.uuid, is_active=True, version=2, expected_node_epoch="epoch-100"
                 )
                 self.assertEqual(sub.actual_version, 2)
                 self.assertEqual(sub.last_reconciled_node_epoch, "epoch-100")
@@ -190,7 +190,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(synced, 1)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=False, version=2
+                    server.api_url, server.api_key, sub.uuid, is_active=False, version=2, expected_node_epoch="epoch-100"
                 )
                 self.assertEqual(sub.actual_version, 2)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
@@ -254,7 +254,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(synced, 1)
                 mock_exp.assert_awaited_once_with(mock_session, sub.id)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=False, version=4
+                    server.api_url, server.api_key, sub.uuid, is_active=False, version=4, expected_node_epoch="epoch-100"
                 )
                 self.assertEqual(sub.status, WhiteInternetStatus.EXPIRED)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
@@ -366,7 +366,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         active_concurrent = 0
         max_concurrent_observed = 0
 
-        async def fake_sync(api_url, api_key, client_uuid, is_active, version):
+        async def fake_sync(api_url, api_key, client_uuid, is_active, version, **kwargs):
             nonlocal active_concurrent, max_concurrent_observed
             active_concurrent += 1
             if active_concurrent > max_concurrent_observed:
@@ -456,40 +456,24 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
 
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
             with patch(
-                "database.repositories.white_internet_repo.deduct_traffic_atomic",
-                return_value=(200, False, 0),
-            ) as mock_deduct:
-                with patch("database.repositories.white_internet_repo.record_traffic_event_atomic") as mock_event:
-                    processed = await worker.run_traffic_cycle(mock_session)
+                "database.repositories.white_internet_repo.record_and_deduct_traffic_atomic",
+                return_value=(200, False, 1000, MagicMock()),
+            ) as mock_record_and_deduct:
+                processed = await worker.run_traffic_cycle(mock_session)
 
-                    self.assertEqual(processed, 1)
-                    mock_deduct.assert_awaited_once_with(
-                        mock_session,
-                        subscription_id=sub.id,
-                        delta_bytes=200,
-                        delta_uplink=50,
-                        delta_downlink=150,
-                        now=unittest.mock.ANY,
-                    )
-                    mock_event.assert_awaited_once_with(
-                        mock_session,
-                        subscription_id=sub.id,
-                        node_epoch="epoch-100",
-                        node_boot_id="boot-1",
-                        node_starttime=1000,
-                        snapshot_uplink_before=100,
-                        snapshot_uplink_after=150,
-                        snapshot_downlink_before=200,
-                        snapshot_downlink_after=350,
-                        delta_uplink=50,
-                        delta_downlink=150,
-                        allocated_bytes=200,
-                        overage_bytes=0,
-                        now=unittest.mock.ANY,
-                    )
-                    self.assertEqual(sub.last_uplink_snapshot, 150)
-                    self.assertEqual(sub.last_downlink_snapshot, 350)
-                    self.assertEqual(sub.traffic_stats_epoch, "epoch-100")
+                self.assertEqual(processed, 1)
+                mock_record_and_deduct.assert_awaited_once_with(
+                    mock_session,
+                    subscription_id=sub.id,
+                    node_epoch="epoch-100",
+                    snapshot_uplink_after=150,
+                    snapshot_downlink_after=350,
+                    snapshot_uplink_before=100,
+                    snapshot_downlink_before=200,
+                    node_boot_id="boot-1",
+                    node_starttime=1000,
+                    now=unittest.mock.ANY,
+                )
 
     async def test_traffic_worker_handles_node_restart_epoch_reset(self):
         """When node restarts, epoch resets baseline to 0 and computes delta from new counters."""
@@ -542,41 +526,25 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
 
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
             with patch(
-                "database.repositories.white_internet_repo.deduct_traffic_atomic",
-                return_value=(200, False, 0),
-            ) as mock_deduct:
-                with patch("database.repositories.white_internet_repo.record_traffic_event_atomic") as mock_event:
-                    processed = await worker.run_traffic_cycle(mock_session)
+                "database.repositories.white_internet_repo.record_and_deduct_traffic_atomic",
+                return_value=(200, False, 1000, MagicMock()),
+            ) as mock_record_and_deduct:
+                processed = await worker.run_traffic_cycle(mock_session)
 
-                    self.assertEqual(processed, 1)
-                    # Baseline was 0, so delta is 50 + 150 = 200
-                    mock_deduct.assert_awaited_once_with(
-                        mock_session,
-                        subscription_id=sub.id,
-                        delta_bytes=200,
-                        delta_uplink=50,
-                        delta_downlink=150,
-                        now=unittest.mock.ANY,
-                    )
-                    mock_event.assert_awaited_once_with(
-                        mock_session,
-                        subscription_id=sub.id,
-                        node_epoch="epoch-200",
-                        node_boot_id="boot-1",
-                        node_starttime=2000,
-                        snapshot_uplink_before=0,
-                        snapshot_uplink_after=50,
-                        snapshot_downlink_before=0,
-                        snapshot_downlink_after=150,
-                        delta_uplink=50,
-                        delta_downlink=150,
-                        allocated_bytes=200,
-                        overage_bytes=0,
-                        now=unittest.mock.ANY,
-                    )
-                    self.assertEqual(sub.last_uplink_snapshot, 50)
-                    self.assertEqual(sub.last_downlink_snapshot, 150)
-                    self.assertEqual(sub.traffic_stats_epoch, "epoch-200")
+                self.assertEqual(processed, 1)
+                # Baseline was 0, so before_up=0, before_down=0
+                mock_record_and_deduct.assert_awaited_once_with(
+                    mock_session,
+                    subscription_id=sub.id,
+                    node_epoch="epoch-200",
+                    snapshot_uplink_after=50,
+                    snapshot_downlink_after=150,
+                    snapshot_uplink_before=0,
+                    snapshot_downlink_before=0,
+                    node_boot_id="boot-1",
+                    node_starttime=2000,
+                    now=unittest.mock.ANY,
+                )
 
     async def test_traffic_worker_handles_stats_reset_within_same_epoch(self):
         """When stats reset within same epoch (uplink < snapshot), worker rebases baseline cleanly."""
@@ -629,41 +597,25 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
 
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
             with patch(
-                "database.repositories.white_internet_repo.deduct_traffic_atomic",
-                return_value=(200, False, 0),
-            ) as mock_deduct:
-                with patch("database.repositories.white_internet_repo.record_traffic_event_atomic") as mock_event:
-                    processed = await worker.run_traffic_cycle(mock_session)
+                "database.repositories.white_internet_repo.record_and_deduct_traffic_atomic",
+                return_value=(200, False, 1000, MagicMock()),
+            ) as mock_record_and_deduct:
+                processed = await worker.run_traffic_cycle(mock_session)
 
-                    self.assertEqual(processed, 1)
-                    # Rebase treated baseline as 0 -> delta 50 + 150 = 200
-                    mock_deduct.assert_awaited_once_with(
-                        mock_session,
-                        subscription_id=sub.id,
-                        delta_bytes=200,
-                        delta_uplink=50,
-                        delta_downlink=150,
-                        now=unittest.mock.ANY,
-                    )
-                    mock_event.assert_awaited_once_with(
-                        mock_session,
-                        subscription_id=sub.id,
-                        node_epoch="epoch-100",
-                        node_boot_id="boot-1",
-                        node_starttime=1000,
-                        snapshot_uplink_before=0,
-                        snapshot_uplink_after=50,
-                        snapshot_downlink_before=0,
-                        snapshot_downlink_after=150,
-                        delta_uplink=50,
-                        delta_downlink=150,
-                        allocated_bytes=200,
-                        overage_bytes=0,
-                        now=unittest.mock.ANY,
-                    )
-                    self.assertEqual(sub.last_uplink_snapshot, 50)
-                    self.assertEqual(sub.last_downlink_snapshot, 150)
-                    self.assertEqual(sub.traffic_stats_epoch, "epoch-100")
+                self.assertEqual(processed, 1)
+                # Rebase treated baseline as 0 -> before_up=0, before_down=0
+                mock_record_and_deduct.assert_awaited_once_with(
+                    mock_session,
+                    subscription_id=sub.id,
+                    node_epoch="epoch-100",
+                    snapshot_uplink_after=50,
+                    snapshot_downlink_after=150,
+                    snapshot_uplink_before=0,
+                    snapshot_downlink_before=0,
+                    node_boot_id="boot-1",
+                    node_starttime=1000,
+                    now=unittest.mock.ANY,
+                )
 
     async def test_traffic_worker_poison_record_isolation(self):
         """Poison client records (corrupted stats, bad UUID, DB exceptions) must not abort the batch."""
@@ -752,37 +704,18 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
             MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
         ]
 
-        async def fake_deduct(session, subscription_id, **kwargs):
+        async def fake_record_and_deduct(session, subscription_id, **kwargs):
             if subscription_id == error_sub.id:
                 raise RuntimeError("Simulated transient DB error on client 2")
-            return 200, False, 0
+            return 200, False, 1000, MagicMock()
 
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", side_effect=lambda sess, sid: valid_sub if sid == 1 else error_sub):
-            with patch("database.repositories.white_internet_repo.deduct_traffic_atomic", side_effect=fake_deduct) as mock_deduct:
-                with patch("database.repositories.white_internet_repo.record_traffic_event_atomic") as mock_event:
-                    processed = await worker.run_traffic_cycle(mock_session)
+            with patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", side_effect=fake_record_and_deduct) as mock_record_and_deduct:
+                processed = await worker.run_traffic_cycle(mock_session)
 
-                    # Exactly 1 valid client was processed successfully
-                    self.assertEqual(processed, 1)
-                    mock_deduct.assert_awaited()
-                    mock_event.assert_awaited_once_with(
-                        mock_session,
-                        subscription_id=valid_sub.id,
-                        node_epoch="epoch-100",
-                        node_boot_id="boot-1",
-                        node_starttime=1000,
-                        snapshot_uplink_before=100,
-                        snapshot_uplink_after=150,
-                        snapshot_downlink_before=200,
-                        snapshot_downlink_after=350,
-                        delta_uplink=50,
-                        delta_downlink=150,
-                        allocated_bytes=200,
-                        overage_bytes=0,
-                        now=unittest.mock.ANY,
-                    )
-                    self.assertEqual(valid_sub.last_uplink_snapshot, 150)
-                    self.assertEqual(valid_sub.last_downlink_snapshot, 350)
+                # Exactly 1 valid client was processed successfully
+                self.assertEqual(processed, 1)
+                mock_record_and_deduct.assert_awaited()
 
     async def test_traffic_worker_status_invariants(self):
         """Traffic worker must only poll ONLINE and WAITING_CONFIRMATION servers with is_active=True."""

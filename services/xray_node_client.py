@@ -155,6 +155,7 @@ class XrayNodeClient:
         client_uuid: str,
         is_active: bool,
         version: int | None = None,
+        expected_node_epoch: str | None = None,
     ) -> tuple[SyncResult, str | None]:
         """Idempotently synchronize a client across both Origin inbounds with monotonic version fencing."""
         url = f"{api_url.rstrip('/')}/v1/clients/sync"
@@ -165,11 +166,13 @@ class XrayNodeClient:
         }
         if version is not None:
             payload["version"] = version
+        if expected_node_epoch is not None:
+            payload["expected_node_epoch"] = expected_node_epoch
         status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
         if status_code in (200, 201) and isinstance(data, dict):
             res_str = data.get("result", "applied")
             if res_str == "already_newer":
-                return SyncResult.ALREADY_NEWER, None
+                return SyncResult.ALREADY_NEWER, f"state={data.get('state', 'unknown')}"
             if res_str == "fenced":
                 return SyncResult.FENCED, "Request was fenced by node version"
             return SyncResult.APPLIED, None

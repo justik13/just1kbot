@@ -167,36 +167,22 @@ class WhiteInternetTrafficWorker:
                         if delta <= 0:
                             continue
 
-                        consumed, became_exhausted, overage = await white_internet_repo.deduct_traffic_atomic(
-                            sess,
-                            subscription_id=sub.id,
-                            delta_bytes=delta,
-                            delta_uplink=delta_up,
-                            delta_downlink=delta_down,
-                            now=now,
+                        consumed, became_exhausted, _available, event = (
+                            await white_internet_repo.record_and_deduct_traffic_atomic(
+                                sess,
+                                subscription_id=sub.id,
+                                node_epoch=node_epoch,
+                                snapshot_uplink_after=uplink,
+                                snapshot_downlink_after=downlink,
+                                snapshot_uplink_before=before_up,
+                                snapshot_downlink_before=before_down,
+                                node_boot_id=node_boot_id,
+                                node_starttime=node_starttime,
+                                now=now,
+                            )
                         )
-
-                        await white_internet_repo.record_traffic_event_atomic(
-                            sess,
-                            subscription_id=sub.id,
-                            node_epoch=node_epoch,
-                            node_boot_id=node_boot_id,
-                            node_starttime=node_starttime,
-                            snapshot_uplink_before=before_up,
-                            snapshot_uplink_after=uplink,
-                            snapshot_downlink_before=before_down,
-                            snapshot_downlink_after=downlink,
-                            delta_uplink=delta_up,
-                            delta_downlink=delta_down,
-                            allocated_bytes=consumed,
-                            overage_bytes=overage,
-                            now=now,
-                        )
-
-                        sub.last_uplink_snapshot = uplink
-                        sub.last_downlink_snapshot = downlink
-                        sub.traffic_stats_epoch = node_epoch
-                        total_processed += 1
+                        if event is not None:
+                            total_processed += 1
 
                         if became_exhausted:
                             exhausted_users_to_notify.append(sub.user_id)
