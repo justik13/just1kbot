@@ -434,30 +434,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # 1. Drop white_internet_traffic_events
-    op.drop_index(
-        "ix_white_internet_traffic_events_created_at",
-        table_name="white_internet_traffic_events",
-    )
-    op.drop_index(
-        "ix_white_internet_traffic_events_subscription_id",
-        table_name="white_internet_traffic_events",
-    )
-    op.drop_table("white_internet_traffic_events")
+    op.execute(sa.text("DROP TABLE IF EXISTS white_internet_traffic_events CASCADE"))
 
     # 2. Drop white_internet_quota_grants
-    op.drop_index(
-        "ix_white_internet_quota_grants_expires_at",
-        table_name="white_internet_quota_grants",
-    )
-    op.drop_index(
-        "ix_white_internet_quota_grants_quote_id",
-        table_name="white_internet_quota_grants",
-    )
-    op.drop_index(
-        "ix_white_internet_quota_grants_subscription_id",
-        table_name="white_internet_quota_grants",
-    )
-    op.drop_table("white_internet_quota_grants")
+    op.execute(sa.text("DROP TABLE IF EXISTS white_internet_quota_grants CASCADE"))
 
 
     # 4. Drop white_internet_subscriptions
