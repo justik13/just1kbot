@@ -278,11 +278,7 @@ async def process_add_server(
             )
             relays = (server.extra_data or {}).get("relays", [])
             if not relays:
-                msg_text += (
-                    "\n\n⚠️ <b>Внимание:</b> на сервере нет подключенных Relay!\n"
-                    "Шлюз переведен в режим ожидания и <b>не будет выдавать подписки</b>, "
-                    "пока вы не привяжете хотя бы один Relay через <code>just1knode relay add</code>."
-                )
+                msg_text += texts.ADMIN_SERVER_ADDED_NO_RELAYS_WARNING
 
             await render_hub(
                 message.bot,

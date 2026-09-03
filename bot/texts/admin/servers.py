@@ -28,6 +28,12 @@ ADMIN_SERVER_ADDED = """🛠 Админка › 🖥 <b>Серверы</b>
 <b>Лимит клиентов:</b> {max_clients}
 <b>API URL:</b> <code>{api_url}</code>"""
 
+ADMIN_SERVER_ADDED_NO_RELAYS_WARNING = (
+    "\n\n⚠️ <b>Внимание:</b> на сервере нет подключенных Relay!\n"
+    "Шлюз переведен в режим ожидания и <b>не будет выдавать подписки</b>, "
+    "пока вы не привяжете хотя бы один Relay через <code>just1knode relay add</code>."
+)
+
 ADMIN_SERVER_BTN_DELETE = "🗑 Удалить сервер"
 
 ADMIN_SERVER_BTN_CHANGE_LIMIT = "👥 Изменить лимит"
