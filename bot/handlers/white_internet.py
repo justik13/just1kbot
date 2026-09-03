@@ -120,24 +120,6 @@ def get_topup_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-@router.callback_query(F.data == "white_internet")
-async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
-    is_admin = query.from_user.id in (get_settings().ADMIN_IDS or [])
-    # TODO(prod): Перед публичным релизом снять проверку 'if not is_admin', открыв раздел всем
-    if not is_admin:
-        await query.message.answer(texts.WL_BETA_TESTING_ALERT)
-        return
-
-    user = await get_user_by_telegram_id(session, query.from_user.id)
-    if user is None:
-        await query.message.answer(texts.WL_USER_NOT_FOUND)
-        return
-
-    sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-    bot_domain = get_settings().DOMAIN
-    now = now_utc()
-
 async def _get_effective_base_price(session: AsyncSession) -> tuple[Decimal, int, int]:
     base_price = WHITE_INTERNET_BASE_PRICE_RUB
     duration_days = WHITE_INTERNET_BASE_DURATION_DAYS
@@ -154,8 +136,12 @@ async def _get_effective_base_price(session: AsyncSession) -> tuple[Decimal, int
     return base_price, int(base_price), duration_days
 
 
+@router.callback_query(F.data == "white_internet")
 async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
-    if not is_admin(query.from_user.id):
+    await query.answer()
+    is_admin = query.from_user.id in (get_settings().ADMIN_IDS or [])
+    # TODO(prod): Перед публичным релизом снять проверку 'if not is_admin', открыв раздел всем
+    if not is_admin:
         await query.message.answer(texts.WL_BETA_TESTING_ALERT)
         return
 
