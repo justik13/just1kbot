@@ -118,113 +118,134 @@ class WhiteInternetReconciliationWorker:
                     if sub is None:
                         return False
 
-                if sync_result == SyncResult.APPLIED and sub.desired_version == target_version:
-                    # Postcondition verification: check all required inbounds were verified
-                    if verified_inbounds and not expected_inbound_tags.issubset(set(verified_inbounds)):
-                        missing = expected_inbound_tags - set(verified_inbounds)
+                    if sync_result == SyncResult.APPLIED and sub.desired_version == target_version:
+                        # Postcondition verification: check all required inbounds were verified
+                        if verified_inbounds and not expected_inbound_tags.issubset(set(verified_inbounds)):
+                            missing = expected_inbound_tags - set(verified_inbounds)
+                            logger.warning(
+                                "Inbound coverage incomplete for sub_id=%d on server %d: missing %s. Keeping PENDING_UPDATE.",
+                                sub_id,
+                                server_id,
+                                missing,
+                            )
+                            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                            sub.last_sync_error = f"missing_inbounds:{','.join(sorted(missing))}"
+                            sub.last_synced_at = now_utc()
+                            await sess.commit()
+                            return False
+
+                        if verified_epoch != target_epoch:
+                            logger.warning(
+                                "Epoch drift detected after mutation for sub_id=%d: verified=%s != target=%s. Keeping PENDING_UPDATE.",
+                                sub_id,
+                                verified_epoch,
+                                target_epoch,
+                            )
+                            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                            sub.last_sync_error = "epoch_drift_detected"
+                            sub.last_synced_at = now_utc()
+                            await sess.commit()
+                            return False
+
+                        sub.actual_version = target_version
+                        sub.last_reconciled_node_epoch = verified_epoch
+                        if sub.status == WhiteInternetStatus.PENDING and desired_active:
+                            sub.status = WhiteInternetStatus.ACTIVE
+                            sub.status_reason = None
+                        sub.provisioning_status = (
+                            WhiteInternetProvisioningStatus.ACTIVE
+                            if desired_active
+                            else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                        )
+                        sub.last_synced_at = now_utc()
+                        sub.last_sync_error = None
+                        await sess.commit()
+                        return True
+                    elif sync_result == SyncResult.ALREADY_NEWER:
+                        # Check real observed runtime inventory before trusting ALREADY_NEWER
+                        inv_ok, inv_data, _ = await self.client.get_inventory(api_url, api_key, client_ids=[sub_uuid])
+                        if inv_ok and inv_data and "inventory" in inv_data:
+                            client_inv = inv_data["inventory"].get(sub_uuid)
+                            if client_inv:
+                                observed_state = client_inv.get("observed_state")
+                                expected_state = "active" if desired_active else "disabled"
+                                if observed_state == expected_state:
+                                    logger.info(
+                                        "Runtime inventory verified for sub_id=%d on server %d: observed=%s matches desired=%s. Marking synced.",
+                                        sub_id,
+                                        server_id,
+                                        observed_state,
+                                        desired_active,
+                                    )
+                                    sub.actual_version = max(sub.actual_version or 0, target_version)
+                                    sub.last_reconciled_node_epoch = target_epoch
+                                    if sub.status == WhiteInternetStatus.PENDING and desired_active:
+                                        sub.status = WhiteInternetStatus.ACTIVE
+                                        sub.status_reason = None
+                                    sub.provisioning_status = (
+                                        WhiteInternetProvisioningStatus.ACTIVE
+                                        if desired_active
+                                        else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                                    )
+                                    sub.last_synced_at = now_utc()
+                                    sub.last_sync_error = None
+                                    await sess.commit()
+                                    return True
+
+                        # Observed state does not match desired state: force convergence by bumping desired_version
+                        sub.desired_version = max(sub.desired_version, target_version) + 1
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        sub.last_sync_error = f"node_already_newer_inventory_mismatch_{err_msg}"
+                        sub.last_synced_at = now_utc()
                         logger.warning(
-                            "Inbound coverage incomplete for sub_id=%d on server %d: missing %s. Keeping PENDING_UPDATE.",
+                            "Node reported already_newer but observed state did not match for sub_id=%d on server %d. Bumping desired_version to %d.",
                             sub_id,
                             server_id,
-                            missing,
+                            sub.desired_version,
                         )
-                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                        sub.last_sync_error = f"missing_inbounds:{','.join(sorted(missing))}"
-                        sub.last_synced_at = now_utc()
+                        await sess.commit()
                         return False
-
-                    if verified_epoch != target_epoch:
+                    elif sync_result == SyncResult.FENCED:
+                        sub.desired_version = max(sub.desired_version, target_version) + 1
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        sub.last_sync_error = err_msg or "sync_fenced"
+                        sub.last_synced_at = now_utc()
                         logger.warning(
-                            "Epoch drift detected after mutation for sub_id=%d: verified=%s != target=%s. Keeping PENDING_UPDATE.",
+                            "Sync fenced for sub_id=%d on server %d (target_version=%d). Bumped desired_version to %d: %s",
                             sub_id,
-                            verified_epoch,
-                            target_epoch,
+                            server_id,
+                            target_version,
+                            sub.desired_version,
+                            err_msg,
                         )
-                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                        sub.last_sync_error = "epoch_drift_detected"
-                        sub.last_synced_at = now_utc()
+                        await sess.commit()
                         return False
-
-                    sub.actual_version = target_version
-                    sub.last_reconciled_node_epoch = verified_epoch
-                    if sub.status == WhiteInternetStatus.PENDING and desired_active:
-                        sub.status = WhiteInternetStatus.ACTIVE
-                        sub.status_reason = None
-                    sub.provisioning_status = (
-                        WhiteInternetProvisioningStatus.ACTIVE
-                        if desired_active
-                        else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-                    )
-                    sub.last_synced_at = now_utc()
-                    sub.last_sync_error = None
-                    return True
-                elif sync_result == SyncResult.ALREADY_NEWER:
-                    # Check real observed runtime inventory before trusting ALREADY_NEWER
-                    inv_ok, inv_data, _ = await self.client.get_inventory(api_url, api_key, client_ids=[sub_uuid])
-                    if inv_ok and inv_data and "inventory" in inv_data:
-                        client_inv = inv_data["inventory"].get(sub_uuid)
-                        if client_inv:
-                            observed_state = client_inv.get("observed_state")
-                            expected_state = "active" if desired_active else "disabled"
-                            if observed_state == expected_state:
-                                logger.info(
-                                    "Runtime inventory verified for sub_id=%d on server %d: observed=%s matches desired=%s. Marking synced.",
-                                    sub_id,
-                                    server_id,
-                                    observed_state,
-                                    desired_active,
-                                )
-                                sub.actual_version = max(sub.actual_version or 0, target_version)
-                                sub.last_reconciled_node_epoch = target_epoch
-                                if sub.status == WhiteInternetStatus.PENDING and desired_active:
-                                    sub.status = WhiteInternetStatus.ACTIVE
-                                    sub.status_reason = None
-                                sub.provisioning_status = (
-                                    WhiteInternetProvisioningStatus.ACTIVE
-                                    if desired_active
-                                    else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-                                )
-                                sub.last_synced_at = now_utc()
-                                sub.last_sync_error = None
-                                return True
-
-                    # Observed state does not match desired state: force convergence by bumping desired_version
-                    sub.desired_version = max(sub.desired_version, target_version) + 1
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                    sub.last_sync_error = f"node_already_newer_inventory_mismatch_{err_msg}"
-                    sub.last_synced_at = now_utc()
-                    logger.warning(
-                        "Node reported already_newer but observed state did not match for sub_id=%d on server %d. Bumping desired_version to %d.",
-                        sub_id,
-                        server_id,
-                        sub.desired_version,
-                    )
-                    return False
-                elif sync_result == SyncResult.FENCED:
-                    sub.desired_version = max(sub.desired_version, target_version) + 1
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                    sub.last_sync_error = err_msg or "sync_fenced"
-                    sub.last_synced_at = now_utc()
-                    logger.warning(
-                        "Sync fenced for sub_id=%d on server %d (target_version=%d). Bumped desired_version to %d: %s",
-                        sub_id,
-                        server_id,
-                        target_version,
-                        sub.desired_version,
-                        err_msg,
-                    )
-                    return False
-                else:
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                    sub.last_synced_at = now_utc()
-                    logger.warning(
-                        "Reconciliation detected version drift during sync for sub_id=%d on server %d (desired=%d != target=%d)",
-                        sub_id,
-                        server_id,
-                        sub.desired_version,
-                        target_version,
-                    )
-                    return False
+                    elif sync_result == SyncResult.FAILED:
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        sub.last_sync_error = err_msg or "sync_failed"
+                        sub.last_synced_at = now_utc()
+                        logger.error(
+                            "Sync failed for sub_id=%d on server %d: %s",
+                            sub_id,
+                            server_id,
+                            err_msg,
+                        )
+                        await sess.commit()
+                        return False
+                    else:
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        sub.last_synced_at = now_utc()
+                        logger.warning(
+                            "Reconciliation detected version drift during sync for sub_id=%d on server %d (desired=%d != target=%d): result=%s error=%s",
+                            sub_id,
+                            server_id,
+                            sub.desired_version,
+                            target_version,
+                            sync_result,
+                            err_msg,
+                        )
+                        await sess.commit()
+                        return False
             finally:
                 if is_pg:
                     async with sf() as sess:
