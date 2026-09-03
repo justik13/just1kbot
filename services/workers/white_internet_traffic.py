@@ -181,8 +181,7 @@ class WhiteInternetTrafficWorker:
                                 now=now,
                             )
                         )
-                        if event is not None:
-                            total_processed += 1
+                        total_processed += 1
 
                         if became_exhausted:
                             exhausted_users_to_notify.append(sub.user_id)

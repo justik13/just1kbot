@@ -245,6 +245,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 sub_uuid,
                 is_active=False,
                 version=2,
+                expected_node_epoch=node_epoch,
             )
 
         async with self.sessions.begin() as session:
@@ -279,6 +280,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 sub_uuid,
                 is_active=True,
                 version=3,
+                expected_node_epoch=node_epoch,
             )
 
         async with self.sessions.begin() as session:

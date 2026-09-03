@@ -545,7 +545,11 @@ async def record_and_deduct_traffic_atomic(
         )
         res = (await session.execute(insert_stmt)).first()
         if res is None:
-            # Duplicate snapshot: already processed
+            # Duplicate snapshot: already processed, advance baseline markers
+            sub.last_uplink_snapshot = max(sub.last_uplink_snapshot or 0, snapshot_uplink_after)
+            sub.last_downlink_snapshot = max(sub.last_downlink_snapshot or 0, snapshot_downlink_after)
+            sub.traffic_stats_epoch = str_node_epoch
+            await session.flush()
             available = await get_available_quota_bytes(session, subscription_id, now)
             return 0, False, available, None
 
@@ -575,6 +579,10 @@ async def record_and_deduct_traffic_atomic(
             )
         )
         if existing is not None:
+            sub.last_uplink_snapshot = max(sub.last_uplink_snapshot or 0, snapshot_uplink_after)
+            sub.last_downlink_snapshot = max(sub.last_downlink_snapshot or 0, snapshot_downlink_after)
+            sub.traffic_stats_epoch = str_node_epoch
+            await session.flush()
             available = await get_available_quota_bytes(session, subscription_id, now)
             return 0, False, available, None
 
