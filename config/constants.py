@@ -8,6 +8,7 @@ integrations, services, and bot layers without architectural cycles.
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 from config.enums import (
     AccountLedgerEntryType,
@@ -120,7 +121,18 @@ DEFAULT_WHITE_INTERNET_PATH_DE = DEFAULT_WHITE_INTERNET_PATH
 DEFAULT_WHITE_INTERNET_PADDING_KEY = os.getenv("WHITE_INTERNET_PADDING_KEY", "dc")
 WHITE_INTERNET_TLS_FINGERPRINT = os.getenv("WHITE_INTERNET_TLS_FINGERPRINT", "firefox")
 
-
+CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
+    "mode": "packet-up",
+    "uplinkHTTPMethod": "OPTIONS",
+    "xPaddingPlacement": "queryInHeader",
+    "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
+    "xPaddingHeader": "X-Cache",
+    "xPaddingMethod": "tokenish",
+    "xPaddingObfsMode": True,
+    "security": "tls",
+    "alpn": ["h2", "http/1.1"],
+    "fp": WHITE_INTERNET_TLS_FINGERPRINT,
+}
 
 
 __all__ = [
@@ -133,6 +145,7 @@ __all__ = [
     "AccountReservationType",
     "AdminAuditAction",
     "ApiOperationStatus",
+    "CANONICAL_XHTTP_PROFILE",
     "ApiOperationType",
     "DEFAULT_PINNED_XRAY_VERSION",
     "DEFAULT_XRAY_ORIGIN_MAX_CLIENTS",

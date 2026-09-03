@@ -60,12 +60,14 @@ class XrayGrpcClient:
             return False
         try:
             channel = self._get_channel()
-            # Verify Xray API responsiveness via lightweight read-only StatsService query
+            # 1. Verify StatsService responsiveness
             stub = stats_grpc.StatsServiceStub(channel)
             stub.QueryStats(
                 stats_cmd.QueryStatsRequest(pattern="", reset=False),
                 timeout=min(self.timeout, 2.0),
             )
+            # 2. Verify HandlerService stub connectivity
+            _handler_stub = proxyman_grpc.HandlerServiceStub(channel)
             return True
         except grpc.RpcError as exc:
             if exc.code() in (grpc.StatusCode.OK, grpc.StatusCode.NOT_FOUND):
@@ -131,6 +133,38 @@ class XrayGrpcClient:
             logger.error("AlterInbound RemoveUser failed: %s", exc)
             self.close()
             raise
+
+    def probe_user_presence(self, inbound_tag: str, user_id: str) -> bool:
+        """Probes whether a user is currently registered in an Xray inbound's memory."""
+        if proxyman_cmd is None or proxyman_grpc is None:
+            raise RuntimeError("Protobuf modules not loaded")
+
+        channel = self._get_channel()
+        stub = proxyman_grpc.HandlerServiceStub(channel)
+        remove_user_op = proxyman_cmd.RemoveUserOperation(email=user_id)
+        op_typed = typed_message_pb2.TypedMessage(
+            type="xray.app.proxyman.command.RemoveUserOperation",
+            value=remove_user_op.SerializeToString(),
+        )
+        req = proxyman_cmd.AlterInboundRequest(tag=inbound_tag, operation=op_typed)
+        try:
+            stub.AlterInbound(req, timeout=self.timeout)
+            # User was physically present; restore it immediately
+            self.add_user(inbound_tag, user_id)
+            return True
+        except grpc.RpcError as exc:
+            details = (exc.details() or "").lower()
+            if "not found" in details or "does not exist" in details:
+                return False
+            logger.error("AlterInbound Probe failed on inbound %s: %s", inbound_tag, exc)
+            self.close()
+            raise
+
+    def ensure_user_state(self, inbound_tag: str, user_id: str, desired_state: str, flow: str = "") -> bool:
+        """Applies desired state (active/disabled) and ensures postcondition."""
+        if desired_state == "active":
+            return self.add_user(inbound_tag, user_id, flow=flow)
+        return self.remove_user(inbound_tag, user_id)
 
     @staticmethod
     def _aggregate_query_stats(resp) -> Dict[str, Dict[str, int]]:

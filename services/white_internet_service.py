@@ -17,11 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from config.constants import (
-    DEFAULT_WHITE_INTERNET_PADDING_KEY,
+    CANONICAL_XHTTP_PROFILE,
     DEFAULT_WHITE_INTERNET_PATH,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
-    WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
     WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
@@ -160,7 +159,9 @@ class WhiteInternetService:
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
 
         quote.status = TariffQuoteStatus.CONSUMED
-        quote.consumed_at = now_utc()
+        if not tariff_version.base_quota_bytes or tariff_version.base_quota_bytes <= 0:
+            raise ValueError(f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes")
+
         sub = await white_internet_repo.create_white_internet_subscription(
             session,
             user_id=user.id,
@@ -170,7 +171,7 @@ class WhiteInternetService:
             quote_id=quote.id,
             price_rub=Decimal(tariff_version.price_rub),
             duration_days=tariff.duration_days,
-            base_bytes=tariff_version.base_quota_bytes or WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+            base_bytes=tariff_version.base_quota_bytes,
         )
         return True, texts.WL_BUY_SUCCESS, sub
 
@@ -249,13 +250,16 @@ class WhiteInternetService:
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
             await session.flush()
 
+        if not tariff_version.base_quota_bytes or tariff_version.base_quota_bytes <= 0:
+            raise ValueError(f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes")
+
         renewed = await white_internet_repo.renew_subscription_atomic(
             session,
             subscription_id=sub.id,
             quote_id=quote.id,
             price_rub=Decimal(tariff_version.price_rub),
             duration_days=tariff.duration_days,
-            base_bytes=tariff_version.base_quota_bytes or WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+            base_bytes=tariff_version.base_quota_bytes,
         )
 
         # Best-effort deprovisioning of UUID on old origin node to prevent orphaned credentials
@@ -329,27 +333,28 @@ class WhiteInternetService:
         relays: list[dict] | None = None,
     ) -> list[str]:
         extra_dict = {
-            "mode": "packet-up",
-            "uplinkHTTPMethod": "OPTIONS",
-            "xPaddingObfsMode": True,
-            "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
-            "xPaddingHeader": "X-Cache",
-            "xPaddingMethod": "tokenish",
-            "xPaddingPlacement": "queryInHeader",
+            "mode": CANONICAL_XHTTP_PROFILE["mode"],
+            "uplinkHTTPMethod": CANONICAL_XHTTP_PROFILE["uplinkHTTPMethod"],
+            "xPaddingObfsMode": CANONICAL_XHTTP_PROFILE["xPaddingObfsMode"],
+            "xPaddingKey": CANONICAL_XHTTP_PROFILE["xPaddingKey"],
+            "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
+            "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
+            "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
         }
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
+        fp = CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT)
         base = _normalize_base_path(path)
         if not relays:
             tag = urllib.parse.quote(texts.WL_VLESS_TAG)
             standalone_path = f"{base}/default"
-            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={WHITE_INTERNET_TLS_FINGERPRINT}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
+            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
             return [link]
 
         links: list[str] = []
         for r in relays:
             r_path = r.get("path") or f"{base}/{r.get('code', 'de')}"
             r_tag = urllib.parse.quote(r.get("name") or texts.WL_VLESS_TAG)
-            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={WHITE_INTERNET_TLS_FINGERPRINT}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
+            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
             links.append(link)
         return links
 
@@ -389,21 +394,21 @@ class WhiteInternetService:
                     },
                     "streamSettings": {
                         "network": "xhttp",
-                        "security": "tls",
+                        "security": CANONICAL_XHTTP_PROFILE["security"],
                         "tlsSettings": {
                             "serverName": cdn_domain,
-                            "alpn": ["h2"],
-                            "fingerprint": WHITE_INTERNET_TLS_FINGERPRINT,
+                            "alpn": CANONICAL_XHTTP_PROFILE["alpn"],
+                            "fingerprint": CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT),
                         },
                         "xhttpSettings": {
                             "path": f"{base}/default",
-                            "mode": "packet-up",
-                            "uplinkHTTPMethod": "OPTIONS",
-                            "xPaddingObfsMode": True,
-                            "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
-                            "xPaddingHeader": "X-Cache",
-                            "xPaddingMethod": "tokenish",
-                            "xPaddingPlacement": "queryInHeader",
+                            "mode": CANONICAL_XHTTP_PROFILE["mode"],
+                            "uplinkHTTPMethod": CANONICAL_XHTTP_PROFILE["uplinkHTTPMethod"],
+                            "xPaddingObfsMode": CANONICAL_XHTTP_PROFILE["xPaddingObfsMode"],
+                            "xPaddingKey": CANONICAL_XHTTP_PROFILE["xPaddingKey"],
+                            "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
+                            "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
+                            "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
                         },
                     },
                 },

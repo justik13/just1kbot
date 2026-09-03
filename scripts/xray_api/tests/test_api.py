@@ -550,3 +550,117 @@ def test_client_sync_epoch_fencing():
         assert "epoch fencing failed" in res.json()["detail"].lower()
 
 
+def test_client_sync_two_phase_epoch_drift():
+    """F02: If Xray crashes/restarts mid-mutation, epoch_after != epoch_before, must fail-closed 412."""
+    uuid = "e1a2b3c4-d5e6-47a8-9b0c-1d2e3f4a5b6e"
+    # Call 1 (pre-mutation): epoch_1
+    # Call 2 (post-mutation): epoch_2 -> drift!
+    epoch_drift_sequence = ["epoch_1", "epoch_2"]
+    with patch.object(grpc_client, "ensure_user_state", return_value=True):
+        with patch.object(epoch_manager, "get_current_running_epoch", side_effect=epoch_drift_sequence):
+            res = client.post(
+                "/v1/clients/sync",
+                json={
+                    "client_id": uuid,
+                    "desired_state": "active",
+                    "version": 1,
+                    "expected_node_epoch": "epoch_1",
+                },
+                headers=VALID_HEADERS,
+            )
+            assert res.status_code == 412
+            assert "epoch_drift_during_mutation" in res.json()["detail"].lower()
+
+
+def test_client_sync_durable_idempotency_key():
+    """F03: Repeated operations with same idempotency_key return cached durable response."""
+    uuid = "e1a2b3c4-d5e6-47a8-9b0c-1d2e3f4a5b6f"
+    with patch.object(grpc_client, "ensure_user_state", return_value=True) as mock_mutate:
+        with patch.object(grpc_client, "probe_user_presence", return_value=True):
+            res1 = client.post(
+                "/v1/clients/sync",
+                json={
+                    "client_id": uuid,
+                    "desired_state": "active",
+                    "version": 5,
+                    "idempotency_key": "op_test_key_999",
+                },
+                headers=VALID_HEADERS,
+            )
+            assert res1.status_code == 200
+            assert res1.json()["verified_inbounds"] == ["inbound-de", "inbound-nl"]
+            call_count = mock_mutate.call_count
+
+            # Second call with exact same idempotency_key
+            res2 = client.post(
+                "/v1/clients/sync",
+                json={
+                    "client_id": uuid,
+                    "desired_state": "active",
+                    "version": 5,
+                    "idempotency_key": "op_test_key_999",
+                },
+                headers=VALID_HEADERS,
+            )
+            assert res2.status_code == 200
+            assert res2.json()["idempotent"] is True
+            # gRPC mutate was not called again
+            assert mock_mutate.call_count == call_count
+
+
+def test_clients_inventory_endpoint():
+    """F01: Inventory returns observed state across all inbounds from Xray memory."""
+    uuid1 = "11111111-2222-3333-4444-555555555555"
+    uuid2 = "22222222-3333-4444-5555-666666666666"
+
+    def fake_probe(tag, uid):
+        if uid == uuid1:
+            return True
+        return False
+
+    with patch.object(grpc_client, "probe_user_presence", side_effect=fake_probe):
+        with patch.object(epoch_manager, "get_current_running_epoch", return_value="epoch_inv_test"):
+            res = client.post(
+                "/v1/clients/inventory",
+                json={"client_ids": [uuid1, uuid2]},
+                headers=VALID_HEADERS,
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["node_epoch"] == "epoch_inv_test"
+            assert data["inventory"][uuid1]["observed_state"] == "active"
+            assert data["inventory"][uuid1]["all_inbounds_matched"] is True
+            assert data["inventory"][uuid2]["observed_state"] == "disabled"
+            assert data["inventory"][uuid2]["all_inbounds_matched"] is True
+
+
+def test_client_store_corrupted_fail_closed():
+    """F07: Corrupted clients.json causes health to report 503 and sync to fail closed."""
+    # Write garbage to clients.json
+    with open(tmp_clients_file.name, "w", encoding="utf-8") as f:
+        f.write("{corrupt_json_garbage_!")
+
+    # Health check should return 503
+    with patch.object(grpc_client, "is_healthy", return_value=True):
+        with patch.object(
+            epoch_manager,
+            "get_process_and_epoch",
+            return_value=(100, 1000, "boot-1", "epoch-1"),
+        ):
+            res = client.get("/v1/health", headers=VALID_HEADERS)
+            assert res.status_code == 503
+
+    # Sync should return 503
+    res_sync = client.post(
+        "/v1/clients/sync",
+        json={"client_id": "33333333-4444-5555-6666-777777777777", "desired_state": "active", "version": 1},
+        headers=VALID_HEADERS,
+    )
+    assert res_sync.status_code == 503
+    assert "corrupted" in res_sync.json()["detail"].lower()
+
+    # Restore valid state for remaining tests
+    with open(tmp_clients_file.name, "w", encoding="utf-8") as f:
+        f.write("{}")
+
+

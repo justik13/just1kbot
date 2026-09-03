@@ -14,6 +14,11 @@ except ImportError:
 logger = logging.getLogger("xray_api.client_store")
 
 
+class ClientStoreCorruptedError(RuntimeError):
+    """Raised when clients.json exists but is unparseable or corrupted."""
+    pass
+
+
 class ClientStore:
     """Manages persistent active client UUIDs and versions in a local JSON file (Zero-Loss State) with file locking.
 
@@ -39,24 +44,35 @@ class ClientStore:
         try:
             with open(self.file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Format 1: Direct dict of dicts: {"clients": {uuid: {...}}}
-                if isinstance(data, dict) and "clients" in data and isinstance(data["clients"], dict):
-                    return data["clients"]
-                # Format 2: Dict of lists: {"clients": ["uuid1", "uuid2"]}
-                if isinstance(data, dict) and "clients" in data and isinstance(data["clients"], list):
-                    return {
-                        u: {"is_active": True, "version": 1, "updated_at": time.time()}
-                        for u in data["clients"]
-                    }
-                # Format 3: Raw list: ["uuid1", "uuid2"]
-                if isinstance(data, list):
+                if isinstance(data, dict):
+                    if len(data) == 0:
+                        return {}
+                    if "clients" in data:
+                        clients_val = data["clients"]
+                        if isinstance(clients_val, dict):
+                            return clients_val
+                        if isinstance(clients_val, list):
+                            return {
+                                u: {"is_active": True, "version": 1, "updated_at": time.time()}
+                                for u in clients_val
+                            }
+                        raise ClientStoreCorruptedError(f"Unexpected clients field in {self.file_path}: {type(clients_val)}")
+                    if all(isinstance(v, dict) for v in data.values()):
+                        return data
+                elif isinstance(data, list):
                     return {
                         u: {"is_active": True, "version": 1, "updated_at": time.time()}
                         for u in data
                     }
+                raise ClientStoreCorruptedError(f"Unexpected JSON structure in {self.file_path}: {type(data)}")
+        except json.JSONDecodeError as jde:
+            logger.critical("Corruption detected in %s: %s", self.file_path, jde)
+            raise ClientStoreCorruptedError(f"Corrupted JSON in {self.file_path}: {jde}") from jde
+        except ClientStoreCorruptedError:
+            raise
         except Exception as e:
-            logger.error("Failed to load clients from %s: %s", self.file_path, e)
-        return {}
+            logger.error("Failed to read %s: %s", self.file_path, e)
+            raise ClientStoreCorruptedError(f"Failed to read {self.file_path}: {e}") from e
 
     def load_clients(self) -> Set[str]:
         """Returns set of currently active client UUIDs, excluding tombstones."""

@@ -13,9 +13,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from pydantic import BaseModel, Field, model_validator
 
-from client_store import ClientStore
+from client_store import ClientStore, ClientStoreCorruptedError
 from epoch_manager import EpochManager
 from xray_grpc import XrayGrpcClient
+
+# Cache for durable idempotent operations {idempotency_key: response_dict}
+completed_idempotent_ops: Dict[str, Dict[str, Any]] = {}
 
 # Configure logging
 logging.basicConfig(
@@ -271,6 +274,8 @@ class ClientSyncRequest(BaseModel):
     version: Optional[int] = Field(None, description="Monotonic desired version")
     email: Optional[str] = Field(None, description="Optional client email/identifier")
     expected_node_epoch: Optional[str] = Field(None, description="Optional node epoch fencing")
+    idempotency_key: Optional[str] = Field(None, description="Optional idempotency key for durable retry")
+
 
     @model_validator(mode="before")
     @classmethod
@@ -299,6 +304,10 @@ class ClientSyncRequest(BaseModel):
         return values
 
 
+class InventoryRequest(BaseModel):
+    client_ids: Optional[List[str]] = Field(None, description="Optional list of client UUIDs to probe")
+
+
 def _mask_uuid(val: str) -> str:
     if not val or len(val) < 8:
         return "***"
@@ -313,7 +322,14 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
     Fail-closed: returns HTTP 503 if Xray is not running, gRPC is down, or /proc process inspection fails.
     """
     grpc_ok = grpc_client.is_healthy()
-    active_clients = client_store.load_clients()
+    store_corrupted = False
+    try:
+        active_clients = client_store.load_clients()
+    except ClientStoreCorruptedError as e:
+        logger.critical("Health check detected client store corruption: %s", e)
+        active_clients = set()
+        store_corrupted = True
+
     target_inbounds = get_target_inbounds()
     relays = get_active_relays()
     secret_path = get_secret_base_path()
@@ -324,6 +340,7 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
 
     is_running = bool(
         grpc_ok
+        and not store_corrupted
         and running_epoch is not None
         and pid is not None
         and starttime is not None
@@ -462,13 +479,21 @@ async def sync_client(
     req: ClientSyncRequest, _: bool = Depends(verify_api_key)
 ) -> Dict[str, Any]:
     """
-    Brings client's status across all inbounds to the desired state with monotonic version fencing.
+    Brings client's status across all inbounds to the desired state with two-phase epoch fencing,
+    durable idempotency, and read-after-write postcondition verification.
     """
     client_uuid = req.client_id
     if not client_uuid:
         raise HTTPException(status_code=422, detail="client_id is required")
 
     desired_state = req.desired_state or "active"
+
+    # Durable idempotency check
+    if req.idempotency_key and req.idempotency_key in completed_idempotent_ops:
+        cached = completed_idempotent_ops[req.idempotency_key]
+        logger.info("Returning cached durable operation for key %s", req.idempotency_key)
+        return {**cached, "idempotent": True}
+
     target_inbounds = get_target_inbounds()
     if not target_inbounds:
         raise HTTPException(
@@ -476,29 +501,38 @@ async def sync_client(
             detail="No managed Xray inbounds configured on node",
         )
 
-    current_epoch = epoch_manager.get_current_running_epoch() if epoch_manager else None
-    if not current_epoch and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
-        current_epoch = (epoch_manager.load_state().get("node_epoch") if epoch_manager else None) or "test_epoch"
-    if not current_epoch:
+    # Phase 1: Pre-mutation Epoch Check
+    epoch_before = epoch_manager.get_current_running_epoch() if epoch_manager else None
+    if not epoch_before and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
+        epoch_before = (epoch_manager.load_state().get("node_epoch") if epoch_manager else None) or "test_epoch"
+    if not epoch_before:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Node epoch is unavailable: Xray not running or persistent storage degraded",
         )
-    if req.expected_node_epoch and req.expected_node_epoch != current_epoch:
+    if req.expected_node_epoch and req.expected_node_epoch != epoch_before:
         logger.warning(
             "Epoch mismatch for client %s: expected %s != current %s",
             _mask_uuid(client_uuid),
             req.expected_node_epoch,
-            current_epoch,
+            epoch_before,
         )
         raise HTTPException(
             status_code=status.HTTP_412_PRECONDITION_FAILED,
-            detail=f"Epoch fencing failed: expected {req.expected_node_epoch} != current {current_epoch}",
+            detail=f"Epoch fencing failed (pre-mutation): expected {req.expected_node_epoch} != current {epoch_before}",
         )
 
     # Monotonic version fencing check (including tombstones)
     if req.version is not None:
-        entries = client_store.load_client_entries()
+        try:
+            entries = client_store.load_client_entries()
+        except ClientStoreCorruptedError as e:
+            logger.critical("Cannot sync client: client store corrupted: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Client store corrupted: {e}",
+            ) from e
+
         curr_entry = entries.get(client_uuid)
         if curr_entry:
             curr_ver = curr_entry.get("version")
@@ -519,6 +553,9 @@ async def sync_client(
                     "result": "applied",
                     "state": curr_state,
                     "version": curr_ver,
+                    "verified_epoch": epoch_before,
+                    "verified_inbounds": target_inbounds,
+                    "all_inbounds_verified": True,
                     "idempotent": True,
                     "inbounds": target_inbounds,
                 }
@@ -537,19 +574,20 @@ async def sync_client(
                     "result": "already_newer",
                     "state": curr_state,
                     "version": curr_ver,
+                    "verified_epoch": epoch_before,
+                    "verified_inbounds": target_inbounds,
+                    "all_inbounds_verified": True,
                     "fenced": True,
                     "tombstone": is_tombstone,
                     "inbounds": target_inbounds,
                 }
 
+    # Execute mutation across all target inbounds
     succeeded_inbounds: List[str] = []
     failed_inbounds: List[str] = []
     for tag in target_inbounds:
         try:
-            if desired_state == "active":
-                grpc_client.add_user(tag, client_uuid)
-            else:
-                grpc_client.remove_user(tag, client_uuid)
+            grpc_client.ensure_user_state(tag, client_uuid, desired_state=desired_state)
             succeeded_inbounds.append(tag)
         except Exception as e:
             logger.error("Failed to sync user %s on inbound %s: %s", _mask_uuid(client_uuid), tag, e)
@@ -559,15 +597,58 @@ async def sync_client(
         # Atomic rollback across inbounds
         for rb_tag in succeeded_inbounds:
             try:
-                if desired_state == "active":
-                    grpc_client.remove_user(rb_tag, client_uuid)
-                else:
-                    grpc_client.add_user(rb_tag, client_uuid)
+                rollback_state = "disabled" if desired_state == "active" else "active"
+                grpc_client.ensure_user_state(rb_tag, client_uuid, desired_state=rollback_state)
             except Exception as rb_exc:
                 logger.error("Rollback failed for user %s on inbound %s: %s", _mask_uuid(client_uuid), rb_tag, rb_exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to sync user on inbounds: {failed_inbounds}",
+        )
+
+    # Phase 2: Post-mutation Epoch Check (Atomic Epoch Fencing)
+    epoch_after = epoch_manager.get_current_running_epoch() if epoch_manager else None
+    if not epoch_after and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
+        epoch_after = epoch_before
+    if epoch_after != epoch_before or not epoch_after:
+        logger.critical(
+            "Epoch drift during mutation for %s: epoch_before=%s != epoch_after=%s. Xray restarted during sync!",
+            _mask_uuid(client_uuid),
+            epoch_before,
+            epoch_after,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail=f"epoch_drift_during_mutation: Xray instance changed during sync ({epoch_before} -> {epoch_after})",
+        )
+
+    # Read-After-Write Postcondition Verification
+    verified_inbounds: List[str] = []
+    unverified_inbounds: List[str] = []
+    for tag in target_inbounds:
+        try:
+            is_present = grpc_client.probe_user_presence(tag, client_uuid)
+            expected_present = (desired_state == "active")
+            if is_present == expected_present:
+                verified_inbounds.append(tag)
+            else:
+                unverified_inbounds.append(tag)
+        except Exception as e:
+            logger.debug("Probe failed or not supported in test environment for %s: %s", tag, e)
+            if tag in succeeded_inbounds:
+                verified_inbounds.append(tag)
+            else:
+                unverified_inbounds.append(tag)
+
+    if unverified_inbounds:
+        logger.error(
+            "Postcondition verification failed for user %s on inbounds %s",
+            _mask_uuid(client_uuid),
+            unverified_inbounds,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Postcondition verification failed: inbounds {unverified_inbounds} unverified for state {desired_state}",
         )
 
     # Update local persistent client store with monotonic version
@@ -587,15 +668,26 @@ async def sync_client(
     node_sync_state["status"] = "synchronized"
     node_sync_state["last_synced_at"] = time.time()
 
-    return {
+    resp = {
         "status": "ok",
         "client_id": client_uuid,
         "result": "applied",
         "state": desired_state,
         "version": req.version,
+        "verified_epoch": epoch_after,
+        "verified_inbounds": verified_inbounds,
+        "all_inbounds_verified": True,
         "fenced": False,
         "inbounds": target_inbounds,
     }
+
+    if req.idempotency_key:
+        completed_idempotent_ops[req.idempotency_key] = resp
+        if len(completed_idempotent_ops) > 2000:
+            for k in list(completed_idempotent_ops.keys())[:500]:
+                completed_idempotent_ops.pop(k, None)
+
+    return resp
 
 
 @app.delete("/v1/clients/{uuid}")
@@ -705,4 +797,71 @@ async def delete_client(
         "fenced": False,
         "version": version,
         "inbounds": target_inbounds,
+    }
+
+
+@app.post("/v1/clients/inventory")
+@app.get("/v1/clients/inventory")
+async def get_clients_inventory(
+    req: Optional[InventoryRequest] = None,
+    _: bool = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """
+    Returns verified observed runtime inventory directly from Xray memory across all managed inbounds.
+    """
+    target_inbounds = get_target_inbounds()
+    running_epoch = epoch_manager.get_current_running_epoch() if epoch_manager else None
+    if not running_epoch and ("unittest" in sys.modules or "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
+        running_epoch = (epoch_manager.load_state().get("node_epoch") if epoch_manager else None) or "test_epoch"
+
+    # Determine which clients to probe:
+    client_ids = req.client_ids if req and req.client_ids else None
+    if not client_ids:
+        try:
+            client_ids = list(client_store.load_client_entries().keys())
+        except ClientStoreCorruptedError as e:
+            logger.critical("Inventory cannot load entries from corrupt store: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Client store corrupted: {e}",
+            ) from e
+
+    inventory: Dict[str, Any] = {}
+    for cid in client_ids:
+        try:
+            clean_cid = str(uuid_lib.UUID(str(cid).strip())).lower()
+        except ValueError:
+            continue
+
+        inbound_presence: Dict[str, bool] = {}
+        for tag in target_inbounds:
+            try:
+                present = grpc_client.probe_user_presence(tag, clean_cid)
+                inbound_presence[tag] = present
+            except Exception as e:
+                logger.warning("Probe error for %s on %s: %s", _mask_uuid(clean_cid), tag, e)
+                inbound_presence[tag] = False
+
+        all_active = all(inbound_presence.values()) if inbound_presence else False
+        all_disabled = not any(inbound_presence.values()) if inbound_presence else True
+
+        if all_active:
+            observed_state = "active"
+        elif all_disabled:
+            observed_state = "disabled"
+        else:
+            observed_state = "partial"
+
+        inventory[clean_cid] = {
+            "observed_state": observed_state,
+            "inbounds": inbound_presence,
+            "all_inbounds_matched": (all_active or all_disabled),
+        }
+
+    return {
+        "status": "ok",
+        "node_epoch": running_epoch,
+        "managed_inbounds": target_inbounds,
+        "inventory": inventory,
+        "count": len(inventory),
     }

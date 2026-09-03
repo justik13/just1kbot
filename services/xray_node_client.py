@@ -27,6 +27,33 @@ class SyncResult(str, enum.Enum):
     FAILED = "failed"
 
 
+class SyncResponse:
+    """Structured response from sync_client, unpacking as (result, error) for backwards compatibility."""
+
+    def __init__(
+        self,
+        result: SyncResult,
+        error: str | None = None,
+        verified_epoch: str | None = None,
+        verified_inbounds: list[str] | None = None,
+        raw_data: dict[str, Any] | None = None,
+    ):
+        self.result = result
+        self.error = error
+        self.verified_epoch = verified_epoch
+        self.verified_inbounds = verified_inbounds or []
+        self.raw_data = raw_data or {}
+
+    def __iter__(self):
+        return iter((self.result, self.error))
+
+    def __getitem__(self, idx):
+        return (self.result, self.error)[idx]
+
+    def __repr__(self):
+        return f"<SyncResponse result={self.result} epoch={self.verified_epoch} inbounds={self.verified_inbounds}>"
+
+
 class XrayNodeClientError(RuntimeError):
     """Base exception for Xray Node API errors."""
     pass
@@ -156,8 +183,9 @@ class XrayNodeClient:
         is_active: bool,
         version: int | None = None,
         expected_node_epoch: str | None = None,
-    ) -> tuple[SyncResult, str | None]:
-        """Idempotently synchronize a client across both Origin inbounds with monotonic version fencing."""
+        idempotency_key: str | None = None,
+    ) -> SyncResponse:
+        """Synchronize a client with two-phase epoch fencing, durable idempotency, and verified inbounds."""
         url = f"{api_url.rstrip('/')}/v1/clients/sync"
         headers = self._get_headers(api_key)
         payload: dict[str, Any] = {
@@ -168,17 +196,55 @@ class XrayNodeClient:
             payload["version"] = version
         if expected_node_epoch is not None:
             payload["expected_node_epoch"] = expected_node_epoch
+        if idempotency_key is not None:
+            payload["idempotency_key"] = idempotency_key
+
         status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
         if status_code in (200, 201) and isinstance(data, dict):
             res_str = data.get("result", "applied")
+            epoch = data.get("verified_epoch")
+            inbounds = data.get("verified_inbounds") or data.get("inbounds") or []
             if res_str == "already_newer":
-                return SyncResult.ALREADY_NEWER, f"state={data.get('state', 'unknown')}"
+                return SyncResponse(
+                    SyncResult.ALREADY_NEWER,
+                    f"state={data.get('state', 'unknown')}",
+                    verified_epoch=epoch,
+                    verified_inbounds=inbounds,
+                    raw_data=data,
+                )
             if res_str == "fenced":
-                return SyncResult.FENCED, "Request was fenced by node version"
-            return SyncResult.APPLIED, None
+                return SyncResponse(
+                    SyncResult.FENCED,
+                    "Request was fenced by node version",
+                    verified_epoch=epoch,
+                    verified_inbounds=inbounds,
+                    raw_data=data,
+                )
+            return SyncResponse(
+                SyncResult.APPLIED,
+                None,
+                verified_epoch=epoch,
+                verified_inbounds=inbounds,
+                raw_data=data,
+            )
         if status_code in (409, 412):
-            return SyncResult.FENCED, err or "Version fenced"
-        return SyncResult.FAILED, err or f"Sync failed with HTTP {status_code}"
+            return SyncResponse(SyncResult.FENCED, err or "Version fenced")
+        return SyncResponse(SyncResult.FAILED, err or f"Sync failed with HTTP {status_code}")
+
+    async def get_inventory(
+        self,
+        api_url: str,
+        api_key: str,
+        client_ids: list[str] | None = None,
+    ) -> tuple[bool, dict[str, Any] | None, str | None]:
+        """Query real observed runtime inventory from Xray memory."""
+        url = f"{api_url.rstrip('/')}/v1/clients/inventory"
+        headers = self._get_headers(api_key)
+        payload = {"client_ids": client_ids} if client_ids else None
+        status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
+        if status_code == 200 and isinstance(data, dict):
+            return True, data, None
+        return False, None, err
 
     async def remove_client(
         self,

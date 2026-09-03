@@ -17,9 +17,18 @@ from database.repositories import servers_repo, white_internet_repo
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
 
+import enum
+
 logger = logging.getLogger("WhiteInternetTraffic")
 
 TRAFFIC_SYNC_INTERVAL_SECONDS = 60.0
+
+
+class TrafficCounterState(str, enum.Enum):
+    NORMAL = "normal"
+    RESET = "reset"
+    EPOCH_CHANGED = "epoch_changed"
+    INVALID = "invalid"
 
 
 class WhiteInternetTrafficWorker:
@@ -142,30 +151,50 @@ class WhiteInternetTrafficWorker:
                         if sub is None:
                             continue
 
-                        if sub.traffic_stats_epoch == node_epoch:
-                            before_up = sub.last_uplink_snapshot if uplink >= sub.last_uplink_snapshot else 0
-                            before_down = sub.last_downlink_snapshot if downlink >= sub.last_downlink_snapshot else 0
-                            if before_up == 0 and uplink < sub.last_uplink_snapshot:
-                                logger.info(
-                                    "Xray uplink counter reset detected within epoch for sub_id=%d on server %d. Rebasing uplink baseline.",
-                                    sub.id,
-                                    server_id,
-                                )
-                            if before_down == 0 and downlink < sub.last_downlink_snapshot:
-                                logger.info(
-                                    "Xray downlink counter reset detected within epoch for sub_id=%d on server %d. Rebasing downlink baseline.",
-                                    sub.id,
-                                    server_id,
-                                )
-                        else:
+                        if uplink < 0 or downlink < 0:
+                            logger.warning(
+                                "Invalid negative counter detected for sub_id=%d on server %d: up=%d, down=%d. Skipping.",
+                                sub.id,
+                                server_id,
+                                uplink,
+                                downlink,
+                            )
+                            continue
+
+                        if sub.traffic_stats_epoch != node_epoch:
+                            counter_state = TrafficCounterState.EPOCH_CHANGED
                             before_up = 0
                             before_down = 0
+                        elif uplink < sub.last_uplink_snapshot or downlink < sub.last_downlink_snapshot:
+                            counter_state = TrafficCounterState.RESET
+                            before_up = sub.last_uplink_snapshot if uplink >= sub.last_uplink_snapshot else 0
+                            before_down = sub.last_downlink_snapshot if downlink >= sub.last_downlink_snapshot else 0
+                            logger.info(
+                                "TrafficCounterState.RESET detected within epoch for sub_id=%d on server %d: up(%d -> %d), down(%d -> %d). Rebasing baseline.",
+                                sub.id,
+                                server_id,
+                                sub.last_uplink_snapshot,
+                                uplink,
+                                sub.last_downlink_snapshot,
+                                downlink,
+                            )
+                        else:
+                            counter_state = TrafficCounterState.NORMAL
+                            before_up = sub.last_uplink_snapshot
+                            before_down = sub.last_downlink_snapshot
 
                         delta_up = uplink - before_up
                         delta_down = downlink - before_down
                         delta = delta_up + delta_down
                         if delta <= 0:
                             continue
+
+                        logger.debug(
+                            "Processing sub_id=%d traffic with counter_state=%s, delta=%d",
+                            sub.id,
+                            counter_state.value,
+                            delta,
+                        )
 
                         consumed, became_exhausted, _available, event = (
                             await white_internet_repo.record_and_deduct_traffic_atomic(

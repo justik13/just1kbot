@@ -255,6 +255,7 @@ async def create_server(
         max_clients=max_clients,
         capabilities=capabilities or [],
         lifecycle_status=str(lifecycle_status),
+        is_active=(str(lifecycle_status) == ServerLifecycleStatus.ACTIVE),
     )
     session.add(server)
     await session.flush()
@@ -273,6 +274,9 @@ async def update_server(
             continue
         if hasattr(server, key):
             setattr(server, key, value)
+
+    if "lifecycle_status" in kwargs:
+        server.is_active = (str(server.lifecycle_status) == ServerLifecycleStatus.ACTIVE)
 
     await session.flush()
     await session.refresh(server)

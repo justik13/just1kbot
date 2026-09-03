@@ -19,7 +19,7 @@ import os
 import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 
 from aiohttp import web
@@ -174,6 +174,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                     is_active=True,
                     version=1,
                     expected_node_epoch="epoch_20260830_initial123",
+                    idempotency_key=ANY,
                 )
 
         # After reconciliation, state is ACTIVE with aligned epoch
@@ -314,6 +315,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                     is_active=False,
                     version=2,
                     expected_node_epoch="epoch_20260830_initial123",
+                    idempotency_key=ANY,
                 )
                 self.assertEqual(sub.actual_version, 2)
 
@@ -357,6 +359,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                     is_active=True,
                     version=3,
                     expected_node_epoch="epoch_20260830_initial123",
+                    idempotency_key=ANY,
                 )
                 self.assertEqual(sub.actual_version, 3)
 

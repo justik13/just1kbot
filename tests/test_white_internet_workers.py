@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.models import Server, WhiteInternetSubscription
@@ -65,7 +65,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(synced, 1)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=True, version=2, expected_node_epoch="epoch-100"
+                    server.api_url, server.api_key, sub.uuid, is_active=True, version=2, expected_node_epoch="epoch-100", idempotency_key=ANY
                 )
                 self.assertEqual(sub.actual_version, 2)
                 self.assertEqual(sub.last_reconciled_node_epoch, "epoch-100")
@@ -136,6 +136,9 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 # Sub was re-synced and stamped with new epoch
                 self.assertEqual(sub.last_reconciled_node_epoch, "epoch-200")
                 self.assertEqual(sub.actual_version, 2)
+                mock_client.sync_client.assert_awaited_once_with(
+                    server.api_url, server.api_key, sub.uuid, is_active=True, version=2, expected_node_epoch="epoch-200", idempotency_key=ANY
+                )
 
     async def test_reconciliation_inactive_sub_sets_synced_inactive(self):
         """When sub is expired/disabled, sync sets provisioning_status to SYNCED_INACTIVE."""
@@ -190,7 +193,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(synced, 1)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=False, version=2, expected_node_epoch="epoch-100"
+                    server.api_url, server.api_key, sub.uuid, is_active=False, version=2, expected_node_epoch="epoch-100", idempotency_key=ANY
                 )
                 self.assertEqual(sub.actual_version, 2)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
@@ -254,7 +257,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(synced, 1)
                 mock_exp.assert_awaited_once_with(mock_session, sub.id)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=False, version=4, expected_node_epoch="epoch-100"
+                    server.api_url, server.api_key, sub.uuid, is_active=False, version=4, expected_node_epoch="epoch-100", idempotency_key=ANY
                 )
                 self.assertEqual(sub.status, WhiteInternetStatus.EXPIRED)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
@@ -287,6 +290,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "b1", "starttime": 100})
         mock_client.sync_client.return_value = (SyncResult.ALREADY_NEWER, None)
+        mock_client.get_inventory.return_value = (
+            True,
+            {"inventory": {sub.uuid: {"observed_state": "active"}}},
+            None,
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
         mock_session = AsyncMock()
@@ -300,6 +308,56 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(synced, 1)
                 self.assertEqual(sub.actual_version, 3)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.ACTIVE)
+
+    async def test_reconciliation_already_newer_inventory_mismatch_forces_update(self):
+        """When node returns already_newer but runtime inventory is disabled, desired_version is bumped."""
+        server = Server(
+            id=1,
+            name="Origin-MSK",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://origin.just1k.online:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-100",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="token",
+            uuid="11111111-2222-3333-4444-555555555555",
+            status=WhiteInternetStatus.ACTIVE,
+            desired_version=3,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-90",
+            provisioning_status=WhiteInternetProvisioningStatus.PENDING_UPDATE,
+        )
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "b1", "starttime": 100})
+        mock_client.sync_client.return_value = (SyncResult.ALREADY_NEWER, None)
+        mock_client.get_inventory.return_value = (
+            True,
+            {"inventory": {sub.uuid: {"observed_state": "disabled"}}},
+            None,
+        )
+
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = [
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),
+        ]
+        with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
+            with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+                synced = await worker.run_reconciliation_cycle(mock_session)
+                self.assertEqual(synced, 0)
+                # Desired version was bumped to 4 to force convergence
+                self.assertEqual(sub.desired_version, 4)
+                self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.PENDING_UPDATE)
 
     async def test_disabled_or_problematic_node_skipped_from_reconciliation(self):
         """Disabled or unhealthy nodes must be excluded from reconciliation cycle."""
