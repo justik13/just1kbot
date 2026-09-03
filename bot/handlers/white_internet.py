@@ -22,7 +22,7 @@ from config.constants import (
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from config.settings import get_settings
-from database.models import WhiteInternetSubscription
+from database.models import Server, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.tariff_quotes_repo import get_or_create_current_version
@@ -77,11 +77,12 @@ def get_white_internet_overview_keyboard(
         builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
         builder.adjust(1)
     else:
-        if (
+        has_sub_link = bool(
             sub.status == WhiteInternetStatus.ACTIVE
-            and sub.provisioning_status == WhiteInternetProvisioningStatus.ACTIVE
+            and getattr(sub, "token", None)
             and bot_domain
-        ):
+        )
+        if has_sub_link:
             sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
             sub_url = f"https://{bot_domain}{sub_prefix}/{sub.token}"
             builder.button(
@@ -99,7 +100,7 @@ def get_white_internet_overview_keyboard(
             )
         builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
 
-        if sub.status == WhiteInternetStatus.ACTIVE and sub.provisioning_status == WhiteInternetProvisioningStatus.ACTIVE and bot_domain:
+        if has_sub_link:
             builder.adjust(1, 1, 2, 1)
         else:
             builder.adjust(2, 1)
@@ -145,7 +146,11 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         return
 
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-    bot_domain = get_settings().DOMAIN
+    bot_domain = get_settings().DOMAIN or os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
+    if not bot_domain and sub and getattr(sub, "origin_node_id", None):
+        origin_node = await session.get(Server, sub.origin_node_id)
+        if origin_node and origin_node.domain:
+            bot_domain = origin_node.domain
     now = now_utc()
 
     _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
@@ -326,7 +331,11 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
     if user is None:
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-    bot_domain = get_settings().DOMAIN
+    bot_domain = get_settings().DOMAIN or os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
+    if not bot_domain and sub and getattr(sub, "origin_node_id", None):
+        origin_node = await session.get(Server, sub.origin_node_id)
+        if origin_node and origin_node.domain:
+            bot_domain = origin_node.domain
     if sub is None or sub.status != WhiteInternetStatus.ACTIVE:
         await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, bot_domain))
         return
