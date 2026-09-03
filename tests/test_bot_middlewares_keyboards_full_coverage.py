@@ -146,7 +146,7 @@ class TestBotKeyboardsFullCoverage(unittest.TestCase):
             for button in row
             if button.callback_data
         ]
-        self.assertNotIn("white_internet", user_callbacks)
+        self.assertIn("white_internet", user_callbacks)
         self.assertEqual(len(user_callbacks), len(set(user_callbacks)))
 
         hub_admin = common_kb.get_hub_keyboard(is_admin=True)

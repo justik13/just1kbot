@@ -50,12 +50,12 @@ def get_hub_keyboard(
             url=mtproto_url,
         )
 
+    builder.button(
+        text=texts.BTN_WHITE_INTERNET,
+        callback_data="white_internet",
+    )
+
     if is_admin:
-        # TODO(prod): Перед публичным релизом снять проверку 'if is_admin', открыв раздел всем пользователям
-        builder.button(
-            text=texts.BTN_WHITE_INTERNET,
-            callback_data="white_internet",
-        )
         builder.button(
             text=texts.BTN_ADMIN,
             callback_data="menu_admin",
@@ -64,8 +64,8 @@ def get_hub_keyboard(
     sizes = [1, 2, 2]
     if mtproto_url:
         sizes.append(1)
+    sizes.append(1)  # White Internet (all users)
     if is_admin:
-        sizes.append(1)  # White Internet (admin only)
         sizes.append(1)  # Admin
 
     builder.adjust(*sizes)
