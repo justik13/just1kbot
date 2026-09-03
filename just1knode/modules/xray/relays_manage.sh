@@ -469,38 +469,54 @@ rename_relay_node() {
     local updated
     updated=$(python3 -c "
 import json, os, sys
-rf = '$RELAYS_FILE'
-target = sys.argv[1].lower()
-new_name = sys.argv[2]
+rf = sys.argv[1]
+target = sys.argv[2].strip().lower()
+new_name = sys.argv[3].strip()
+
+if not os.path.exists(rf):
+    print('no_file')
+    sys.exit(0)
+
+try:
+    with open(rf, 'r', encoding='utf-8') as f:
+        relays = json.load(f)
+except Exception as e:
+    print(f'read_error: {e}')
+    sys.exit(0)
+
 found = False
-if os.path.exists(rf):
-    try:
-        with open(rf, 'r', encoding='utf-8') as f:
-            relays = json.load(f)
-        for r in relays:
-            if r.get('code', '').lower() == target or r.get('name', '').lower() == target:
-                r['name'] = new_name
-                found = True
-                break
-        if found:
-            with open(rf, 'w', encoding='utf-8') as f:
-                json.dump(relays, f, ensure_ascii=False, indent=2)
-            print('ok')
-    except:
-        pass
+for r in relays:
+    if not isinstance(r, dict):
+        continue
+    c = str(r.get('code') or '').strip().lower()
+    n = str(r.get('name') or '').strip().lower()
+    if c == target or n == target:
+        r['name'] = new_name
+        found = True
+        break
+
 if not found:
     print('not_found')
-" "$target" "$new_name")
+    sys.exit(0)
 
-    if [[ "$updated" != "ok" ]]; then
-        error "Relay с кодом или именем '$target' не найден."
+try:
+    with open(rf, 'w', encoding='utf-8') as f:
+        json.dump(relays, f, ensure_ascii=False, indent=2)
+    print('ok')
+except Exception as e:
+    print(f'write_error: {e}')
+" "$RELAYS_FILE" "$target" "$new_name")
+
+    if [[ "$updated" == "ok" ]]; then
+        if systemctl is-active --quiet xray-api; then
+            systemctl restart xray-api
+        fi
+        log "Релей '$target' успешно переименован в '$new_name'."
+    elif [[ "$updated" == "not_found" ]]; then
+        error "Relay с кодом или именем '$target' не найден в реестре."
+    else
+        error "Ошибка переименования: $updated (цель: '$target')."
     fi
-
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api
-    fi
-
-    log "Релей '$target' успешно переименован в '$new_name'."
 }
 
 get_relays_tsv() {
