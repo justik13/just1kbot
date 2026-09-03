@@ -130,7 +130,35 @@ EOF
     set_state_val "short_id" "$short_id"
     set_state_val "sni" "$dest_server"
 
+    local detected_country="Зарубежный шлюз"
+    local detected_code="exit"
+    local geo_json
+    geo_json="$(curl -s --max-time 3 "https://ipinfo.io/${my_ip}/json" 2>/dev/null || true)"
+    if [[ -n "$geo_json" ]]; then
+        local c_code
+        c_code="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('country','').lower())" "$geo_json" 2>/dev/null || true)"
+        if [[ -n "$c_code" && "$c_code" != "ru" ]]; then
+            detected_code="$c_code"
+            case "$c_code" in
+                de) detected_country="Германия" ;;
+                nl) detected_country="Нидерланды" ;;
+                fi) detected_country="Финляндия" ;;
+                se) detected_country="Швеция" ;;
+                us) detected_country="США" ;;
+                gb|uk) detected_country="Великобритания" ;;
+                fr) detected_country="Франция" ;;
+                tr) detected_country="Турция" ;;
+                kz) detected_country="Казахстан" ;;
+                pl) detected_country="Польша" ;;
+                at) detected_country="Австрия" ;;
+                ch) detected_country="Швейцария" ;;
+                *) detected_country="${c_code^^}" ;;
+            esac
+        fi
+    fi
+
     title "УСТАНОВКА RELAY УЗЛА УСПЕШНО ЗАВЕРШЕНА!"
     echo -e "${BOLD}Команда для добавления этого Relay на вашем Origin-сервере:${NC}"
-    echo -e "${GREEN}just1knode relay add \"Германия\" ${my_ip} ${relay_port} ${tunnel_uuid} \"de\" \"reality\" \"${public_key}\" \"${short_id}\" \"${dest_server}\"${NC}\n"
+    echo -e "${GREEN}just1knode relay add \"${detected_country}\" ${my_ip} ${relay_port} ${tunnel_uuid} \"${detected_code}\" \"reality\" \"${public_key}\" \"${short_id}\" \"${dest_server}\"${NC}\n"
+    echo -e "${YELLOW}Примечание: вы можете заменить название \"${detected_country}\" на любое удобное вам.${NC}\n"
 }

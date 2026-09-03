@@ -160,7 +160,7 @@ if not any(ob.get('tag') == 'just1k-wl-direct' for ob in outbounds):
     outbounds.append({
         'tag': 'just1k-wl-direct',
         'protocol': 'freedom',
-        'settings': {'domainStrategy': 'UseIP'}
+        'settings': {'domainStrategy': 'UseIPv4'}
     })
 
 if not any(ob.get('tag') == 'just1k-wl-block' for ob in outbounds):
@@ -221,6 +221,11 @@ level_0['statsUserDownlink'] = True
 policy_levels['0'] = level_0
 policy_conf['levels'] = policy_levels
 final_config['policy'] = policy_conf
+
+dns_conf = dict(existing.get('dns', {}))
+dns_conf['servers'] = ['77.88.8.8', '77.88.8.1', '1.1.1.1', 'localhost']
+dns_conf['queryStrategy'] = 'UseIPv4'
+final_config['dns'] = dns_conf
 
 final_config['inbounds'] = inbounds
 final_config['outbounds'] = outbounds
