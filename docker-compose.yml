@@ -31,7 +31,6 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
           memory: "1G"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -59,7 +58,6 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
           memory: "512M"
     volumes:
       - redis_data:/data
@@ -125,7 +123,6 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
           memory: "2G"
     depends_on:
       migrate:

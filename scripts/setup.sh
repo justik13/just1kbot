@@ -134,12 +134,36 @@ check_root() {
 check_existing_install() {
     if [[ -f "${PROJECT_DIR}/.env" ]]; then
         warn "Обнаружен существующий файл конфигурации ${PROJECT_DIR}/.env."
-        read -r -p "Перезаписать конфигурацию и перенастроить проект заново? (y/N): " confirm_reinstall
-        if [[ ! "$confirm_reinstall" =~ ^[Yy]$ ]]; then
-            info "Установка прервана по запросу пользователя. Существующий .env сохранен."
-            exit 0
-        fi
-        log "Будет создана новая конфигурация .env."
+        echo -e "Выберите действие:"
+        echo -e "  ${BOLD}[1] Использовать существующий .env и продолжить запуск контейнеров (Рекомендуется)${NC}"
+        echo -e "  [2] Настроить проект заново (перезаписать .env)"
+        echo -e "  [0] Выход"
+        read -r -p "Ваш выбор [1/2/0] (по умолчанию: 1): " choice_env
+        choice_env="${choice_env:-1}"
+        case "$choice_env" in
+            1)
+                log "Используем существующую конфигурацию .env."
+                SKIP_WIZARD=true
+                if [[ -f "${PROJECT_DIR}/.env" ]]; then
+                    DOMAIN="$(grep -E '^DOMAIN=' "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d \"\' || echo '')"
+                    local raw_token
+                    raw_token="$(grep -E '^BOT_TOKEN=' "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d \"\' || echo '')"
+                    if [[ -n "$raw_token" ]]; then
+                        local me_resp
+                        me_resp=$(curl -s --max-time 5 "https://api.telegram.org/bot${raw_token}/getMe" 2>/dev/null || true)
+                        BOT_USERNAME=$(echo "$me_resp" | grep -o '"username":"[^"]*' | cut -d'"' -f4 2>/dev/null || echo "bot")
+                    fi
+                fi
+                ;;
+            2)
+                log "Будет создана новая конфигурация .env."
+                SKIP_WIZARD=false
+                ;;
+            *)
+                info "Установка прервана по запросу пользователя. Существующий .env сохранен."
+                exit 0
+                ;;
+        esac
     fi
 }
 
@@ -753,12 +777,14 @@ main() {
     check_root
     check_existing_install
     install_dependencies
-    run_interactive_wizard
-    generate_secrets
-    save_configuration
+    if [[ "${SKIP_WIZARD:-false}" != "true" ]]; then
+        run_interactive_wizard
+        generate_secrets
+        save_configuration
+    fi
     start_project
 }
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
     main "$@"
 fi
