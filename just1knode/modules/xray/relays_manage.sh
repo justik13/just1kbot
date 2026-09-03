@@ -292,31 +292,58 @@ EOF
         error "Ошибка тестирования Xray при добавлении релея $name ($code). Изменения полностью отменены."
     fi
 
-    # Обновление relays.json
+    # Обновление relays.json (Durable-by-Default: атомарная запись через tempfile)
     python3 -c "
-import json, os
-rf = '$RELAYS_FILE'
+import json, os, sys, tempfile
+rf = sys.argv[1]
+code = sys.argv[2]
+name = sys.argv[3]
+ip = sys.argv[4]
+port = int(sys.argv[5])
+in_path = sys.argv[6]
+in_tag = sys.argv[7]
+out_tag = sys.argv[8]
+sec = sys.argv[9]
+sni = sys.argv[10]
+
 relays = []
 if os.path.exists(rf):
     try:
         with open(rf, 'r', encoding='utf-8') as f:
-            relays = json.load(f)
-    except: relays = []
-relays = [r for r in relays if r.get('code') != '$code']
+            data = json.load(f)
+            if isinstance(data, list):
+                relays = data
+    except Exception:
+        relays = []
+
+relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
 relays.append({
-    'name': '$name',
-    'code': '$code',
-    'ip': '$ip',
-    'port': int('$port'),
-    'path': '$relay_inbound_path',
-    'inbound_tag': '$relay_inbound_tag',
-    'outbound_tag': '$relay_outbound_tag',
-    'security': '$security_type',
-    'sni': '$sni'
+    'name': name,
+    'code': code,
+    'ip': ip,
+    'port': port,
+    'path': in_path,
+    'inbound_tag': in_tag,
+    'outbound_tag': out_tag,
+    'security': sec,
+    'sni': sni
 })
-with open(rf, 'w', encoding='utf-8') as f:
-    json.dump(relays, f, ensure_ascii=False, indent=2)
-"
+
+d = os.path.dirname(os.path.abspath(rf))
+os.makedirs(d, exist_ok=True)
+t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+    json.dump(relays, fp, ensure_ascii=False, indent=2)
+    fp.flush()
+    os.fsync(fp.fileno())
+os.replace(t_path, rf)
+try:
+    import shutil
+    shutil.chown(rf, user='root', group='xrayapi')
+    os.chmod(rf, 0o644)
+except Exception:
+    pass
+" "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni"
 
     nginx -t && systemctl reload nginx
     set +e
@@ -416,14 +443,36 @@ with open(cfg_file, 'w') as f: json.dump(cfg, f, indent=2)
     # Удаление Nginx конфига
     rm -f "${NGINX_RELAYS_DIR}/${code}.conf"
 
-    # Удаление из relays.json
+    # Удаление из relays.json (Durable-by-Default: атомарная запись через tempfile)
     python3 -c "
-import json
-rf = '$RELAYS_FILE'
-with open(rf) as f: relays = json.load(f)
-relays = [r for r in relays if r.get('code') != '$code']
-with open(rf, 'w') as f: json.dump(relays, f, indent=2)
-"
+import json, os, sys, tempfile
+rf = sys.argv[1]
+code = sys.argv[2]
+relays = []
+if os.path.exists(rf):
+    try:
+        with open(rf, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                relays = data
+    except Exception:
+        relays = []
+relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
+d = os.path.dirname(os.path.abspath(rf))
+os.makedirs(d, exist_ok=True)
+t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+    json.dump(relays, fp, ensure_ascii=False, indent=2)
+    fp.flush()
+    os.fsync(fp.fileno())
+os.replace(t_path, rf)
+try:
+    import shutil
+    shutil.chown(rf, user='root', group='xrayapi')
+    os.chmod(rf, 0o644)
+except Exception:
+    pass
+" "$RELAYS_FILE" "$code"
 
     if ! nginx -t; then
         manifest_rollback
@@ -468,7 +517,7 @@ rename_relay_node() {
     init_state_dir
     local updated
     updated=$(python3 -c "
-import json, os, sys
+import json, os, sys, tempfile
 rf = sys.argv[1]
 target = sys.argv[2].strip().lower()
 new_name = sys.argv[3].strip()
@@ -500,8 +549,20 @@ if not found:
     sys.exit(0)
 
 try:
-    with open(rf, 'w', encoding='utf-8') as f:
-        json.dump(relays, f, ensure_ascii=False, indent=2)
+    d = os.path.dirname(os.path.abspath(rf))
+    os.makedirs(d, exist_ok=True)
+    t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+    with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+        json.dump(relays, fp, ensure_ascii=False, indent=2)
+        fp.flush()
+        os.fsync(fp.fileno())
+    os.replace(t_path, rf)
+    try:
+        import shutil
+        shutil.chown(rf, user='root', group='xrayapi')
+        os.chmod(rf, 0o644)
+    except Exception:
+        pass
     print('ok')
 except Exception as e:
     print(f'write_error: {e}')
