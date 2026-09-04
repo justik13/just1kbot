@@ -197,7 +197,13 @@ update_node() {
             if [[ -x /opt/xray-api/venv/bin/pip && -f /opt/xray-api/requirements.txt ]]; then
                 /opt/xray-api/venv/bin/pip install -q -r /opt/xray-api/requirements.txt --no-cache-dir 2>/dev/null || true
             fi
-            log "Компоненты /opt/xray-api успешно обновлены с синхронизацией Python-зависимостей."
+            ensure_xrayapi_user
+            chown -R xrayapi:xrayapi /opt/xray-api 2>/dev/null || true
+            chmod -R 750 /opt/xray-api 2>/dev/null || true
+            if systemctl is-active --quiet xray-api 2>/dev/null; then
+                systemctl restart xray-api 2>/dev/null || true
+            fi
+            log "Компоненты /opt/xray-api успешно обновлены с синхронизацией Python-зависимостей и перезапуском службы."
         fi
 
         rm -rf "$tmp_tar" "$tmp_dir"

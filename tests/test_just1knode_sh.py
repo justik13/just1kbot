@@ -941,6 +941,50 @@ rm -f "{sites_enabled}/default" 2>/dev/null || true
         self.assertTrue((sites_enabled / "default.user.bak").exists(), "Custom default site must be backed up as default.user.bak")
         self.assertFalse((sites_enabled / "default").exists())
 
+    def test_ensure_xrayapi_user_creates_group_and_user(self):
+        self._prepare_base_env()
+        mock_bin = self.bin_dir
+        group_log = Path(self.temp_dir) / "groupadd.log"
+        user_log = Path(self.temp_dir) / "useradd.log"
+        (mock_bin / "groupadd").write_text(f"#!/bin/bash\necho \"$@\" >> '{group_log}'\nexit 0\n", encoding="utf-8")
+        (mock_bin / "groupadd").chmod(0o755)
+        (mock_bin / "useradd").write_text(f"#!/bin/bash\necho \"$@\" >> '{user_log}'\nexit 0\n", encoding="utf-8")
+        (mock_bin / "useradd").chmod(0o755)
+        (mock_bin / "getent").write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")
+        (mock_bin / "getent").chmod(0o755)
+        (mock_bin / "id").write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")
+        (mock_bin / "id").chmod(0o755)
+
+        api_sh = REPO_ROOT / "just1knode" / "modules" / "xray" / "api.sh"
+        res = self._run_shell_snippet(f"""
+unset -f ensure_xrayapi_user
+source '{api_sh.as_posix()}'
+ensure_xrayapi_user
+""")
+        self.assertEqual(res.returncode, 0, f"ensure_xrayapi_user failed: {res.stderr}")
+        self.assertTrue(group_log.exists(), "groupadd must be called when group does not exist")
+        self.assertIn("-r xrayapi", group_log.read_text(encoding="utf-8"))
+        self.assertTrue(user_log.exists(), "useradd must be called when user does not exist")
+        self.assertIn("xrayapi", user_log.read_text(encoding="utf-8"))
+
+    def test_heal_and_update_relay_config_atomic_and_chmod_640(self):
+        self._prepare_base_env()
+        (self.state_dir / "state.json").write_text('{"role": "relay"}', encoding="utf-8")
+        xray_config = self.xray_config_dir / "config.json"
+        initial_cfg = {
+            "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+            "inbounds": [],
+        }
+        xray_config.write_text(json.dumps(initial_cfg), encoding="utf-8")
+
+        res = self._run_shell_snippet("heal_and_update_relay_config")
+        self.assertEqual(res.returncode, 0, f"heal_and_update_relay_config failed: stderr={res.stderr}")
+        updated_cfg = json.loads(xray_config.read_text(encoding="utf-8"))
+        self.assertIn("dns", updated_cfg)
+        self.assertEqual(updated_cfg["dns"]["queryStrategy"], "UseIPv4")
+        st = xray_config.stat().st_mode & 0o777
+        self.assertEqual(st, 0o640, f"Expected 0640, got {oct(st)}")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -772,12 +772,24 @@ cmd_update() {
         warn "Обнаружены незакоммиченные локальные изменения:"
         git status -s
         echo ""
-        read -r -p "Временно спрятать изменения (git stash) и продолжить обновление? (y/N): " stash_confirm
+        local stash_confirm="n"
+        if ! read -r -t 60 -p "Временно спрятать изменения (git stash) и продолжить обновление? (y/N): " stash_confirm 2>/dev/null; then
+            stash_confirm="n"
+        fi
         if [[ "$stash_confirm" =~ ^[Yy]$ ]]; then
             git stash
             did_stash=true
             log "Локальные изменения сохранены в git stash."
         else
+            if [[ ! -t 0 ]]; then
+                print_ai_diagnostic_report \
+                    "Git Working Tree" \
+                    "Обнаружены незакоммиченные локальные изменения в non-interactive режиме" \
+                    "Обновление отменено для защиты пользовательских файлов (Fail-Closed)" \
+                    "$(git status -s)" \
+                    "1. Проверьте изменения: git status\n2. Сохраните их: git stash или закоммитьте: git commit -am 'local fixes'\n3. Повторите: just1kbot update"
+                return 1
+            fi
             info "Обновление отменено пользователем."
             return 0
         fi
@@ -796,6 +808,12 @@ cmd_update() {
 
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    if [[ "$current_branch" == "HEAD" ]] || [[ -z "$current_branch" ]]; then
+        warn "Обнаружено состояние detached HEAD. Переключаемся на основную ветку main..."
+        current_branch="main"
+        git checkout "$current_branch" 2>/dev/null || true
+    fi
+
     info "Шаг 3/6. Получение обновлений из Git (ветка: $current_branch)..."
     if ! git fetch origin "$current_branch"; then
         error "Обновление остановлено: не удалось связаться с origin/$current_branch."
@@ -809,7 +827,10 @@ cmd_update() {
 
     if [[ "$local_hash" == "$remote_hash" ]]; then
         info "Установлена актуальная версия ($local_hash). Новых коммитов в origin/$current_branch нет."
-        read -r -p "Пересобрать образы и перезапустить контейнеры без обновления кода? (y/N): " force_rebuild
+        local force_rebuild="n"
+        if ! read -r -t 60 -p "Пересобрать образы и перезапустить контейнеры без обновления кода? (y/N): " force_rebuild 2>/dev/null; then
+            force_rebuild="n"
+        fi
         if [[ ! "$force_rebuild" =~ ^[Yy]$ ]]; then
             log "Обновление завершено (код уже актуален)."
             if [ "$did_stash" = "true" ]; then
@@ -832,7 +853,10 @@ cmd_update() {
         warn "Локальная ветка опережает origin/$current_branch на $ahead_count коммит(ов)."
         warn "Автоматическая перезапись отменена во избежание потери локальных коммитов или hotfix."
         echo ""
-        read -r -p "Принудительно перезаписать локальные коммиты версией из origin/$current_branch? (y/N): " force_overwrite
+        local force_overwrite="n"
+        if ! read -r -t 60 -p "Принудительно перезаписать локальные коммиты версией из origin/$current_branch? (y/N): " force_overwrite 2>/dev/null; then
+            force_overwrite="n"
+        fi
         if [[ "$force_overwrite" =~ ^[Yy]$ ]]; then
             local backup_branch
             backup_branch="backup-local-ahead-$(date +%Y%m%d_%H%M%S)"
@@ -843,13 +867,25 @@ cmd_update() {
                 return 1
             fi
         else
+            if [[ ! -t 0 ]]; then
+                print_ai_diagnostic_report \
+                    "Git Synchronization" \
+                    "Локальная ветка опережает origin/$current_branch на $ahead_count коммит(ов)" \
+                    "Обновление отменено в non-interactive режиме для защиты локальных коммитов" \
+                    "$(git log -n 3 --oneline "origin/$current_branch..HEAD" 2>/dev/null || true)" \
+                    "1. Проверьте локальные коммиты: git log origin/$current_branch..HEAD\n2. Если хотите принудительно обновить: git branch backup-local && git reset --hard origin/$current_branch"
+                return 1
+            fi
             info "Обновление отменено пользователем."
             return 0
         fi
     else
         warn "Обнаружено расхождение истории коммитов между локальной версией и origin/$current_branch."
         echo ""
-        read -r -p "Создать резервную ветку и синхронизировать с origin/$current_branch? (y/N): " confirm_diverge
+        local confirm_diverge="n"
+        if ! read -r -t 60 -p "Создать резервную ветку и синхронизировать с origin/$current_branch? (y/N): " confirm_diverge 2>/dev/null; then
+            confirm_diverge="n"
+        fi
         if [[ "$confirm_diverge" =~ ^[Yy]$ ]]; then
             local backup_branch
             backup_branch="backup-diverged-$(date +%Y%m%d_%H%M%S)"
@@ -860,6 +896,15 @@ cmd_update() {
                 return 1
             fi
         else
+            if [[ ! -t 0 ]]; then
+                print_ai_diagnostic_report \
+                    "Git Synchronization" \
+                    "История коммитов локальной ветки разошлась с origin/$current_branch (Diverged)" \
+                    "Обновление отменено в non-interactive режиме во избежание потери данных" \
+                    "Локальный HEAD: $local_hash, Remote: $remote_hash, Base: $base_hash" \
+                    "1. Проверьте различия: git log --graph --oneline HEAD...origin/$current_branch\n2. Синхронизируйте ветку вручную: git reset --hard origin/$current_branch"
+                return 1
+            fi
             info "Обновление отменено пользователем."
             return 0
         fi
@@ -989,10 +1034,28 @@ cmd_update() {
     echo ""
     if [ "$update_ok" = "true" ]; then
         log "Все сервисы успешно обновлены и работают (Healthy)!"
+
+        # Закрепление безопасных прав доступа на хосте
+        chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
+        chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
+
+        if is_external_nginx_enabled; then
+            info "Проверка внешнего Nginx после обновления контейнеров..."
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
+                if nginx -t >/dev/null 2>&1; then
+                    run_privileged systemctl reload nginx 2>/dev/null || true
+                    log "Nginx успешно перезагружен (systemctl reload nginx)."
+                else
+                    warn "Обнаружена ошибка синтаксиса Nginx после обновления!"
+                fi
+            fi
+        fi
     else
         error "Сервисы не смогли перейти в состояние Healthy после обновления!"
         warn "ВАЖНО: Миграции базы данных уже были применены к PostgreSQL."
-        docker compose logs --tail=50 bot
+        local bot_err_logs=""
+        bot_err_logs="$(docker compose logs --tail=50 bot 2>/dev/null || true)"
+        echo "$bot_err_logs"
         if [[ -n "$rollback_commit" ]]; then
             echo ""
             warn "🚨 Выполняем возврат исходного кода к предыдущему коммиту ($rollback_commit)..."
@@ -1035,6 +1098,12 @@ cmd_update() {
                     warn "Для полного возврата схемы БД к исходному состоянию перед обновлением выполните:"
                     echo -e "${BOLD}${YELLOW}    just1kbot restore $pre_update_backup${NC}"
                 fi
+                print_ai_diagnostic_report \
+                    "Just1kBot Update Rollback" \
+                    "Новая версия не прошла healthcheck. Выполнен откат кода к $rollback_commit" \
+                    "Контейнеры возвращены к предыдущей версии, но схема БД могла обновиться" \
+                    "$bot_err_logs" \
+                    "1. Проверьте логи бота: just1kbot logs bot\n2. При необходимости восстановите БД: just1kbot restore $pre_update_backup"
             else
                 error "КРИТИЧЕСКАЯ ОШИБКА: Сервисы не смогли подняться после отката кода!"
                 warn "Вероятная причина: применённая миграция изменила схему БД и несовместима со старой версией кода."
@@ -1044,7 +1113,12 @@ cmd_update() {
                 else
                     warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
                 fi
-                docker compose logs --tail=50 bot
+                print_ai_diagnostic_report \
+                    "Just1kBot Critical Rollback Failure" \
+                    "Сервисы старой версии не смогли подняться после отката кода" \
+                    "Схема БД несовместима со старой версией кода" \
+                    "$(docker compose ps 2>/dev/null || true)\n\n$bot_err_logs" \
+                    "1. Немедленно восстановите рабочую базу данных: just1kbot restore $pre_update_backup\n2. Проверьте логи: just1kbot logs bot"
             fi
         fi
         return 1
@@ -1057,9 +1131,11 @@ cmd_update() {
         info "Для применения изменений поверх новой версии: git stash pop"
     fi
 
-    info "Просмотр последних логов бота:"
-    echo -e "${CYAN}Нажмите Ctrl+C для возврата в меню...${NC}\n"
-    cmd_logs "bot"
+    if [[ -t 0 ]]; then
+        info "Просмотр последних логов бота:"
+        echo -e "${CYAN}Нажмите Ctrl+C для возврата в меню...${NC}\n"
+        cmd_logs "bot"
+    fi
 }
 
 # Вспомогательная функция ротации бэкапов
@@ -1088,6 +1164,7 @@ rotate_backups() {
 cmd_backup() {
     echo -e "\n${BOLD}${BLUE}=== 💾 СОЗДАНИЕ ЗАШИФРОВАННОГО БЭКАПА БД ===${NC}\n"
     mkdir -p backups
+    chmod 700 backups 2>/dev/null || true
 
     # Способ 1: Прямой дамп из работающего контейнера db + шифрование age (быстро и надежно)
     if command -v age >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/.env" ]]; then
@@ -1114,6 +1191,7 @@ cmd_backup() {
             if [[ "${dump_status[0]}" -eq 0 ]] && [[ "${dump_status[1]}" -eq 0 ]]; then
                 if [[ -s "$tmp_gz" ]] && gzip -t "$tmp_gz" 2>/dev/null; then
                     if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
+                        chmod 600 "$backup_file" 2>/dev/null || true
                         rm -rf "$tmp_backup_dir"
                         log "Бэкап успешно создан: ${BOLD}${backup_file}${NC}"
                         # shellcheck disable=SC2012
@@ -1143,6 +1221,7 @@ cmd_backup() {
         local latest_backup
         latest_backup=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f -exec stat -c "%Y %n" {} + 2>/dev/null | sort -rn | awk '{print $2}' | head -1 || find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | sort -r | head -1 || echo "")
         if [[ -n "$latest_backup" ]] && [[ -f "$latest_backup" ]] && [[ -s "$latest_backup" ]]; then
+            chmod 600 "$latest_backup" 2>/dev/null || true
             log "Бэкап успешно создан: ${BOLD}${latest_backup}${NC}"
             # shellcheck disable=SC2012
             ls -lh "$latest_backup" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'

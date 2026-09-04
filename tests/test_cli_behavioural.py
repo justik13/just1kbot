@@ -620,6 +620,162 @@ setup_external_nginx_integration "{nginx_dir.as_posix()}"
         self.assertEqual(proc.returncode, 0, f"Stdout: {proc.stdout}\nStderr: {proc.stderr}")
         self.assertIn("Режим внешнего Nginx активен (USE_EXTERNAL_NGINX=true)", proc.stdout)
 
+    def test_cmd_backup_creates_restricted_permissions(self):
+        """cmd_backup ensures 0700 on backups/ directory and 0600 on created backup files."""
+        # Mock docker compose profile tools run --rm backup
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            '#!/bin/bash\n'
+            'if [[ "$1" == "compose" ]] && [[ "$*" =~ "backup" ]]; then\n'
+            '    mkdir -p backups\n'
+            '    echo "dummy-encrypted-backup-content" > backups/just1kbot_test_backup.sql.gz.age\n'
+            '    exit 0\n'
+            'fi\n'
+            'exit 0\n',
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        test_script = f"""
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
+cd "{self.project_dir.as_posix()}"
+cmd_backup
+"""
+        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 0, f"cmd_backup failed: {proc.stderr}")
+        backups_dir = self.project_dir / "backups"
+        self.assertTrue(backups_dir.exists())
+        dir_mode = backups_dir.stat().st_mode & 0o777
+        self.assertEqual(dir_mode, 0o700, f"Expected 0700 for backups dir, got {oct(dir_mode)}")
+        backup_file = backups_dir / "just1kbot_test_backup.sql.gz.age"
+        file_mode = backup_file.stat().st_mode & 0o777
+        self.assertEqual(file_mode, 0o600, f"Expected 0600 for backup file, got {oct(file_mode)}")
+
+    def test_cmd_update_detached_head_recovers_to_main(self):
+        """cmd_update detects detached HEAD and checks out main instead of failing on fetch."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+
+        # Detach HEAD to latest commit
+        subprocess.run(["git", "checkout", "--detach", "HEAD"], cwd=work_dir, check=True, capture_output=True)
+
+        test_script = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 0, f"cmd_update failed on detached head: {proc.stdout}\n{proc.stderr}")
+        self.assertIn("detached HEAD", proc.stdout)
+        self.assertIn("Установлена актуальная версия", proc.stdout)
+
+    def test_cmd_update_non_interactive_dirty_working_tree_fails_closed(self):
+        """In non-interactive mode without TTY, dirty working tree outputs AI diagnostic report and exits with code 1."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+
+        # Make local dirty modification
+        (work_dir / "uncommitted.txt").write_text("dirty content", encoding="utf-8")
+        subprocess.run(["git", "add", "uncommitted.txt"], cwd=work_dir, check=True)
+
+        test_script = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_update
+"""
+        # Execute without stdin to simulate non-interactive cron/headless
+        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stdout + proc.stderr)
+        self.assertIn("Git Working Tree", proc.stdout + proc.stderr)
+
+    def test_cmd_update_non_interactive_local_ahead_fails_closed(self):
+        """In non-interactive mode without input, unpushed commits produce AI diagnostic report and exit code 1."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+        (work_dir / "local_change.txt").write_text("local only", encoding="utf-8")
+        subprocess.run(["git", "add", "local_change.txt"], cwd=work_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Unpushed commit"], cwd=work_dir, check=True)
+
+        test_script = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stdout + proc.stderr)
+        self.assertIn("Git Synchronization", proc.stdout + proc.stderr)
+        self.assertIn("опережает", proc.stdout + proc.stderr)
+
+    def test_cmd_update_non_interactive_diverged_fails_closed(self):
+        """In non-interactive mode without input, diverged branch produces AI diagnostic report and exit code 1."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+
+        other_dir = self.root / "other2"
+        upstream_dir = self.root / "upstream.git"
+        subprocess.run(["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)], check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "audit3@test.local"], cwd=other_dir, check=True)
+        subprocess.run(["git", "config", "user.name", "Audit Runner 3"], cwd=other_dir, check=True)
+
+        (other_dir / "remote_change.txt").write_text("remote change", encoding="utf-8")
+        subprocess.run(["git", "add", "remote_change.txt"], cwd=other_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Remote change"], cwd=other_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=other_dir, check=True)
+
+        (work_dir / "diverged_local.txt").write_text("diverged local", encoding="utf-8")
+        subprocess.run(["git", "add", "diverged_local.txt"], cwd=work_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Local diverged commit"], cwd=work_dir, check=True)
+
+        test_script = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stdout + proc.stderr)
+        self.assertIn("Diverged", proc.stdout + proc.stderr)
+
+
 
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
     """Regression guard: `error()` in scripts/setup.sh must abort the whole

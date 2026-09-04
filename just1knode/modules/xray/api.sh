@@ -13,8 +13,11 @@ JUST1KBOT_REPO_URL="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}
 JUST1KBOT_REF="${JUST1KBOT_REF:-${JUST1KBOT_BRANCH:-main}}"
 
 ensure_xrayapi_user() {
+    if ! getent group xrayapi >/dev/null 2>&1; then
+        groupadd -r xrayapi 2>/dev/null || true
+    fi
     if ! id -u xrayapi >/dev/null 2>&1; then
-        useradd -r -s /usr/sbin/nologin -d /opt/xray-api -M xrayapi
+        useradd -r -g xrayapi -s /usr/sbin/nologin -d /opt/xray-api -M xrayapi 2>/dev/null || useradd -r -s /usr/sbin/nologin -d /opt/xray-api -M xrayapi
     fi
 }
 

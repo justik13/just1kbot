@@ -215,7 +215,7 @@ heal_and_update_relay_config() {
     manifest_begin
 
     if ! python3 -c "
-import json, sys
+import json, os, sys, tempfile
 cfg_file = sys.argv[1]
 with open(cfg_file, 'r', encoding='utf-8') as f:
     cfg = json.load(f)
@@ -229,8 +229,17 @@ cfg['dns'] = {
     'queryStrategy': 'UseIPv4'
 }
 
-with open(cfg_file, 'w', encoding='utf-8') as f:
+d = os.path.dirname(os.path.abspath(cfg_file))
+t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+with os.fdopen(t_fd, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(t_path, cfg_file)
+try:
+    os.chmod(cfg_file, 0o640)
+except Exception:
+    pass
 
 print('[+] Xray Relay config успешно оптимизирован (UseIPv4 + Независимый DNS)')
 " "$XRAY_CONFIG"; then

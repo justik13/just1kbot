@@ -748,6 +748,10 @@ EOF
     chmod 600 "${PROJECT_DIR}/.env"
     log "Конфигурация успешно сохранена в ${PROJECT_DIR}/.env (chmod 600)."
 
+    mkdir -p "${PROJECT_DIR}/backups"
+    chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
+    log "Директория бэкапов ${PROJECT_DIR}/backups защищена (chmod 700)."
+
     # Настройка cron для ночных бэкапов
     log "Настройка расписания автоматических бэкапов (cron)..."
     local cron_job="0 2 * * * flock -n /tmp/just1kbot-backup.lock sh -c 'cd ${PROJECT_DIR} && docker compose --profile tools run --rm backup >> ${PROJECT_DIR}/backups/backup.log 2>&1'"
