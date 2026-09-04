@@ -43,10 +43,10 @@ class CliBehaviouralTests(unittest.TestCase):
         self.bin_dir.mkdir(parents=True, exist_ok=True)
         docker_stub = self.bin_dir / "docker"
         docker_stub.write_text(
-            '#!/bin/bash\n'
+            "#!/bin/bash\n"
             'if [[ "$1" == "info" ]]; then exit 0; fi\n'
             'if [[ "$1" == "compose" && "$2" == "version" ]]; then echo "Docker Compose version v2.27.0"; exit 0; fi\n'
-            'exit 1\n',
+            "exit 1\n",
             encoding="utf-8",
         )
         docker_stub.chmod(0o755)
@@ -54,7 +54,9 @@ class CliBehaviouralTests(unittest.TestCase):
     def tearDown(self):
         self.test_dir.cleanup()
 
-    def _run_cli_command(self, *args: str, env_vars: dict[str, str] | None = None, input_text: str | None = None) -> subprocess.CompletedProcess:
+    def _run_cli_command(
+        self, *args: str, env_vars: dict[str, str] | None = None, input_text: str | None = None
+    ) -> subprocess.CompletedProcess:
         """Run cli.sh directly with args inside isolated test project directory."""
         proc_env = os.environ.copy()
         proc_env["PROJECT_DIR"] = self.project_dir.as_posix()
@@ -104,16 +106,15 @@ class CliBehaviouralTests(unittest.TestCase):
 
     def test_preflight_fails_when_required_vars_missing(self):
         """cmd_preflight fails if required keys are missing or empty."""
-        env_content = (
-            "BOT_TOKEN=\n"
-            "POSTGRES_USER=user\n"
-        )
+        env_content = "BOT_TOKEN=\nPOSTGRES_USER=user\n"
         (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
         (self.project_dir / ".env").chmod(0o600)
 
         proc = self._run_cli_command("preflight")
         self.assertEqual(proc.returncode, 1)
-        self.assertIn("отсутствует или пуста обязательная переменная: BOT_TOKEN", proc.stdout + proc.stderr)
+        self.assertIn(
+            "отсутствует или пуста обязательная переменная: BOT_TOKEN", proc.stdout + proc.stderr
+        )
 
     def test_preflight_fails_when_ssl_email_malformed(self):
         """cmd_preflight rejects invalid email format in SSL_EMAIL."""
@@ -163,13 +164,19 @@ class CliBehaviouralTests(unittest.TestCase):
             self.skipTest("git is not installed in test environment")
 
         upstream_dir = self.root / "upstream.git"
-        subprocess.run(["git", "init", "--bare", str(upstream_dir)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "init", "--bare", str(upstream_dir)], check=True, capture_output=True
+        )
 
         # Clone repo
         work_dir = self.root / "work"
-        subprocess.run(["git", "clone", str(upstream_dir), str(work_dir)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "clone", str(upstream_dir), str(work_dir)], check=True, capture_output=True
+        )
 
-        subprocess.run(["git", "config", "user.email", "audit@test.local"], cwd=work_dir, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "audit@test.local"], cwd=work_dir, check=True
+        )
         subprocess.run(["git", "config", "user.name", "Audit Runner"], cwd=work_dir, check=True)
 
         (work_dir / "README.md").write_text("# Initial", encoding="utf-8")
@@ -204,7 +211,9 @@ class CliBehaviouralTests(unittest.TestCase):
         )
         (work_dir / ".env").write_text(env_content, encoding="utf-8")
         (work_dir / ".env").chmod(0o600)
-        subprocess.run(["git", "add", "scripts", "docker-compose.yml", ".gitignore"], cwd=work_dir, check=True)
+        subprocess.run(
+            ["git", "add", "scripts", "docker-compose.yml", ".gitignore"], cwd=work_dir, check=True
+        )
         subprocess.run(["git", "commit", "-m", "Add project files"], cwd=work_dir, check=True)
         subprocess.run(["git", "push", "origin", "main"], cwd=work_dir, check=True)
 
@@ -235,11 +244,23 @@ cmd_backup() {{
 
 cmd_update
 """
-        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), input="y\n", capture_output=True, text=True, check=False)
-        self.assertIn("Локальные коммиты сохранены в резервной ветке: backup-local-ahead-", proc.stdout + proc.stderr)
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            input="y\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertIn(
+            "Локальные коммиты сохранены в резервной ветке: backup-local-ahead-",
+            proc.stdout + proc.stderr,
+        )
 
         # Verify branch exists
-        branches = subprocess.run(["git", "branch"], cwd=work_dir, capture_output=True, text=True, check=True).stdout
+        branches = subprocess.run(
+            ["git", "branch"], cwd=work_dir, capture_output=True, text=True, check=True
+        ).stdout
         self.assertIn("backup-local-ahead-", branches)
 
     def test_git_sync_diverged_creates_backup_branch(self):
@@ -250,8 +271,14 @@ cmd_update
         # Clone another working copy to push upstream change
         other_dir = self.root / "other"
         upstream_dir = self.root / "upstream.git"
-        subprocess.run(["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)], check=True, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "audit2@test.local"], cwd=other_dir, check=True)
+        subprocess.run(
+            ["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "audit2@test.local"], cwd=other_dir, check=True
+        )
         subprocess.run(["git", "config", "user.name", "Audit Runner 2"], cwd=other_dir, check=True)
 
         (other_dir / "remote_change.txt").write_text("remote change", encoding="utf-8")
@@ -281,11 +308,22 @@ cmd_backup() {{
 
 cmd_update
 """
-        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), input="y\n", capture_output=True, text=True, check=False)
-        self.assertIn("Локальная история сохранена в ветке backup-diverged-", proc.stdout + proc.stderr)
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            input="y\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertIn(
+            "Локальная история сохранена в ветке backup-diverged-", proc.stdout + proc.stderr
+        )
 
         # Verify branch exists
-        branches = subprocess.run(["git", "branch"], cwd=work_dir, capture_output=True, text=True, check=True).stdout
+        branches = subprocess.run(
+            ["git", "branch"], cwd=work_dir, capture_output=True, text=True, check=True
+        ).stdout
         self.assertIn("backup-diverged-", branches)
 
     def test_preflight_fails_when_admin_ids_non_numeric(self):
@@ -359,7 +397,9 @@ check_apt_locked() {{
 
 wait_for_apt_locks 1
 """
-        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["bash", "-c", test_script], capture_output=True, text=True, check=False
+        )
         self.assertEqual(proc.returncode, 1)
         self.assertIn("Не удалось дождаться освобождения apt/dpkg lock", proc.stdout + proc.stderr)
 
@@ -438,7 +478,9 @@ main --uninstall
 
         # Shared rate limit zone
         rate_limit_conf = conf_d / "just1kbot_amnezia_api_limit.conf"
-        rate_limit_conf.write_text("limit_req_zone $binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;")
+        rate_limit_conf.write_text(
+            "limit_req_zone $binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;"
+        )
 
         test_script = f"""
 source "{amnezia_script.as_posix()}"
@@ -502,17 +544,25 @@ main "$@"
         sites_enabled.mkdir(parents=True, exist_ok=True)
 
         # 1. Default stock placeholder with '_'
-        (sites_enabled / "default").write_text("server { listen 80; server_name _; }\n", encoding="utf-8")
+        (sites_enabled / "default").write_text(
+            "server { listen 80; server_name _; }\n", encoding="utf-8"
+        )
         # 2. just1kbot own config (ignored)
-        (sites_enabled / "just1kbot.conf").write_text("server { listen 80; server_name bot.example.com; }\n", encoding="utf-8")
+        (sites_enabled / "just1kbot.conf").write_text(
+            "server { listen 80; server_name bot.example.com; }\n", encoding="utf-8"
+        )
         # 3. User custom website
-        (sites_enabled / "my-shop.conf").write_text("server { listen 80; server_name myshop.com www.myshop.com; }\n", encoding="utf-8")
+        (sites_enabled / "my-shop.conf").write_text(
+            "server { listen 80; server_name myshop.com www.myshop.com; }\n", encoding="utf-8"
+        )
 
         test_script = f"""
 source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
 detect_existing_nginx_sites "{nginx_dir.as_posix()}"
 """
-        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["bash", "-c", test_script], capture_output=True, text=True, check=False
+        )
         self.assertEqual(proc.returncode, 0)
         output = proc.stdout
         self.assertIn("my-shop.conf", output)
@@ -533,8 +583,15 @@ detect_existing_nginx_sites "{nginx_dir.as_posix()}"
         nginx_bin.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
         nginx_bin.chmod(0o755)
 
+        systemctl_bin = self.bin_dir / "systemctl"
+        systemctl_bin.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        systemctl_bin.chmod(0o755)
+
         env_file = self.project_dir / ".env"
-        env_file.write_text("DOMAIN=bot.test.com\nSSL_EMAIL=test@test.com\nBOT_PORT=8080\n", encoding="utf-8")
+        env_file.write_text(
+            "DOMAIN=bot.test.com\nSSL_EMAIL=test@test.com\nBOT_PORT=8080\nALLOW_LOCAL_HTTP=true\n",
+            encoding="utf-8",
+        )
         env_file.chmod(0o600)
 
         test_script = f"""
@@ -544,7 +601,9 @@ export PATH="{self.bin_dir.as_posix()}:$PATH"
 source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
 setup_external_nginx_integration "{nginx_dir.as_posix()}"
 """
-        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["bash", "-c", test_script], capture_output=True, text=True, check=False
+        )
         self.assertEqual(proc.returncode, 0)
         self.assertTrue((sites_avail / "just1kbot.conf").exists())
         self.assertTrue((sites_enb / "just1kbot.conf").exists())
@@ -566,11 +625,17 @@ setup_external_nginx_integration "{nginx_dir.as_posix()}"
 
         # Mock nginx to simulate syntax error
         nginx_bin = self.bin_dir / "nginx"
-        nginx_bin.write_text('#!/bin/bash\necho "nginx syntax error: invalid directive" >&2; exit 1\n', encoding="utf-8")
+        nginx_bin.write_text(
+            '#!/bin/bash\necho "nginx syntax error: invalid directive" >&2; exit 1\n',
+            encoding="utf-8",
+        )
         nginx_bin.chmod(0o755)
 
         env_file = self.project_dir / ".env"
-        env_file.write_text("DOMAIN=bot.test.com\nSSL_EMAIL=test@test.com\nBOT_PORT=8080\n", encoding="utf-8")
+        env_file.write_text(
+            "DOMAIN=bot.test.com\nSSL_EMAIL=test@test.com\nBOT_PORT=8080\nALLOW_LOCAL_HTTP=true\n",
+            encoding="utf-8",
+        )
         env_file.chmod(0o600)
 
         test_script = f"""
@@ -580,7 +645,9 @@ export PATH="{self.bin_dir.as_posix()}:$PATH"
 source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
 setup_external_nginx_integration "{nginx_dir.as_posix()}"
 """
-        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["bash", "-c", test_script], capture_output=True, text=True, check=False
+        )
         self.assertEqual(proc.returncode, 1)
         # Symlink in sites-enabled must be removed to avoid breaking existing sites
         self.assertFalse((sites_enb / "just1kbot.conf").exists())
@@ -595,7 +662,10 @@ setup_external_nginx_integration "{nginx_dir.as_posix()}"
 
         # Mock systemctl so nginx is active
         sys_bin = self.bin_dir / "systemctl"
-        sys_bin.write_text('#!/bin/bash\nif [[ "$1" == "is-active" && "$3" == "nginx" ]]; then exit 0; fi\nexit 0\n', encoding="utf-8")
+        sys_bin.write_text(
+            '#!/bin/bash\nif [[ "$1" == "is-active" && "$3" == "nginx" ]]; then exit 0; fi\nexit 0\n',
+            encoding="utf-8",
+        )
         sys_bin.chmod(0o755)
 
         env_content = (
@@ -625,13 +695,13 @@ setup_external_nginx_integration "{nginx_dir.as_posix()}"
         # Mock docker compose profile tools run --rm backup
         docker_stub = self.bin_dir / "docker"
         docker_stub.write_text(
-            '#!/bin/bash\n'
+            "#!/bin/bash\n"
             'if [[ "$1" == "compose" ]] && [[ "$*" =~ "backup" ]]; then\n'
-            '    mkdir -p backups\n'
+            "    mkdir -p backups\n"
             '    echo "dummy-encrypted-backup-content" > backups/just1kbot_test_backup.sql.gz.age\n'
-            '    exit 0\n'
-            'fi\n'
-            'exit 0\n',
+            "    exit 0\n"
+            "fi\n"
+            "exit 0\n",
             encoding="utf-8",
         )
         docker_stub.chmod(0o755)
@@ -644,7 +714,9 @@ source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
 cd "{self.project_dir.as_posix()}"
 cmd_backup
 """
-        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["bash", "-c", test_script], capture_output=True, text=True, check=False
+        )
         self.assertEqual(proc.returncode, 0, f"cmd_backup failed: {proc.stderr}")
         backups_dir = self.project_dir / "backups"
         self.assertTrue(backups_dir.exists())
@@ -660,7 +732,9 @@ cmd_backup
         self._setup_git_work_dir_project(work_dir)
 
         # Detach HEAD to latest commit
-        subprocess.run(["git", "checkout", "--detach", "HEAD"], cwd=work_dir, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "checkout", "--detach", "HEAD"], cwd=work_dir, check=True, capture_output=True
+        )
 
         test_script = f"""
 export PROJECT_DIR="{work_dir.as_posix()}"
@@ -677,8 +751,16 @@ cmd_backup() {{
 
 cmd_update
 """
-        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), capture_output=True, text=True, check=False)
-        self.assertEqual(proc.returncode, 0, f"cmd_update failed on detached head: {proc.stdout}\n{proc.stderr}")
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            proc.returncode, 0, f"cmd_update failed on detached head: {proc.stdout}\n{proc.stderr}"
+        )
         self.assertIn("detached HEAD", proc.stdout)
         self.assertIn("Установлена актуальная версия", proc.stdout)
 
@@ -701,7 +783,13 @@ source scripts/cli.sh >/dev/null 2>&1 || true
 cmd_update
 """
         # Execute without stdin to simulate non-interactive cron/headless
-        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         self.assertEqual(proc.returncode, 1)
         self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stdout + proc.stderr)
         self.assertIn("Git Working Tree", proc.stdout + proc.stderr)
@@ -729,7 +817,13 @@ cmd_backup() {{
 
 cmd_update
 """
-        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         self.assertEqual(proc.returncode, 1)
         self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stdout + proc.stderr)
         self.assertIn("Git Synchronization", proc.stdout + proc.stderr)
@@ -742,8 +836,14 @@ cmd_update
 
         other_dir = self.root / "other2"
         upstream_dir = self.root / "upstream.git"
-        subprocess.run(["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)], check=True, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "audit3@test.local"], cwd=other_dir, check=True)
+        subprocess.run(
+            ["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "audit3@test.local"], cwd=other_dir, check=True
+        )
         subprocess.run(["git", "config", "user.name", "Audit Runner 3"], cwd=other_dir, check=True)
 
         (other_dir / "remote_change.txt").write_text("remote change", encoding="utf-8")
@@ -770,11 +870,16 @@ cmd_backup() {{
 
 cmd_update
 """
-        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         self.assertEqual(proc.returncode, 1)
         self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stdout + proc.stderr)
         self.assertIn("Diverged", proc.stdout + proc.stderr)
-
 
 
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
@@ -841,8 +946,7 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
             # Relative paths only: the subprocess cwd maps into the WSL/interop
             # filesystem, absolute Windows paths would be invisible there.
             shim.write_text(
-                "#!/bin/bash\necho called >> ./sysctl_calls\n"
-                f"exit {fake_sysctl_exit}\n",
+                f"#!/bin/bash\necho called >> ./sysctl_calls\nexit {fake_sysctl_exit}\n",
                 encoding="utf-8",
             )
             shim.chmod(0o755)
@@ -904,9 +1008,7 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         matches = [
-            line
-            for line in content.splitlines()
-            if line.strip().startswith("vm.overcommit_memory")
+            line for line in content.splitlines() if line.strip().startswith("vm.overcommit_memory")
         ]
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].strip(), "vm.overcommit_memory = 1")
@@ -927,7 +1029,206 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
         self.assertEqual(d_content, "")
 
 
+class ExternalNginxAndSetupReadinessTests(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.test_dir.name)
+        self.project_dir = self.root / "just1kbot"
+        self.project_dir.mkdir(parents=True, exist_ok=True)
+        scripts_dir = self.project_dir / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(CLI_PATH, scripts_dir / "cli.sh")
+        shutil.copy(SETUP_PATH, scripts_dir / "setup.sh")
+        (scripts_dir / "cli.sh").chmod(0o755)
+        (scripts_dir / "setup.sh").chmod(0o755)
+        (self.project_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+
+        self.bin_dir = self.root / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.test_dir.cleanup()
+
+    def test_check_existing_install_preserves_use_external_nginx(self):
+        """Selecting option 1 in check_existing_install must preserve USE_EXTERNAL_NGINX=true from .env."""
+        env_content = "DOMAIN=bot.test\nUSE_EXTERNAL_NGINX=true\nBOT_TOKEN=123456:abcdef\n"
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        script = f"""
+PROJECT_DIR="{self.project_dir.as_posix()}"
+source "{self.project_dir.as_posix()}/scripts/setup.sh"
+check_existing_install
+echo "LOADED_USE_EXTERNAL_NGINX=$USE_EXTERNAL_NGINX"
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            input="1\n",
+            text=True,
+            capture_output=True,
+            cwd=str(self.project_dir),
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"check_existing_install failed: {proc.stderr}")
+        self.assertIn("LOADED_USE_EXTERNAL_NGINX=true", proc.stdout)
+
+    def test_setup_external_nginx_fails_closed_when_ssl_missing(self):
+        """setup_external_nginx_integration must fail closed when SSL is absent and ALLOW_LOCAL_HTTP is not true."""
+        env_content = "DOMAIN=bot.test\nSSL_EMAIL=admin@bot.test\nALLOW_LOCAL_HTTP=false\n"
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        nginx_dir = self.root / "etc_nginx"
+        nginx_dir.mkdir(parents=True, exist_ok=True)
+
+        proc = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'export PROJECT_DIR="{self.project_dir.as_posix()}"; '
+                f'export JUST1KBOT_DIR="{self.project_dir.as_posix()}"; '
+                f'source "{self.project_dir.as_posix()}/scripts/cli.sh"; '
+                f'setup_external_nginx_integration "{nginx_dir.as_posix()}"',
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Let's Encrypt SSL Issuance", proc.stdout + proc.stderr)
+        self.assertIn("Отсутствует SSL-сертификат", proc.stdout + proc.stderr)
+
+    def test_setup_external_nginx_fails_closed_and_rolls_back_on_reload_failure(self):
+        """When systemctl reload nginx fails, symlink must be removed and USE_EXTERNAL_NGINX must not be set."""
+        env_content = "DOMAIN=bot.test\nALLOW_LOCAL_HTTP=true\n"
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        nginx_dir = self.root / "etc_nginx"
+        (nginx_dir / "sites-available").mkdir(parents=True, exist_ok=True)
+        (nginx_dir / "sites-enabled").mkdir(parents=True, exist_ok=True)
+
+        # Mock nginx and systemctl
+        (self.bin_dir / "nginx").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        (self.bin_dir / "nginx").chmod(0o755)
+        (self.bin_dir / "systemctl").write_text(
+            '#!/bin/bash\nif [[ "$1" == "reload" && "$2" == "nginx" ]]; then echo "systemctl reload simulated error" >&2; exit 1; fi\nexit 0\n',
+            encoding="utf-8",
+        )
+        (self.bin_dir / "systemctl").chmod(0o755)
+
+        proc_env = os.environ.copy()
+        proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
+        proc_env["PROJECT_DIR"] = self.project_dir.as_posix()
+
+        proc = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'source "{self.project_dir.as_posix()}/scripts/cli.sh"; '
+                f'setup_external_nginx_integration "{nginx_dir.as_posix()}"',
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env=proc_env,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        # Symlink must be cleaned up
+        symlink = nginx_dir / "sites-enabled" / "just1kbot.conf"
+        self.assertFalse(symlink.exists(), "Symlink must be deleted if reload fails")
+        # USE_EXTERNAL_NGINX must not be true in .env
+        env_text = (self.project_dir / ".env").read_text(encoding="utf-8")
+        self.assertNotIn("USE_EXTERNAL_NGINX=true", env_text)
+
+    def test_start_project_fails_closed_when_nginx_config_fails(self):
+        """start_project must abort without running docker compose when nginx-config fails in USE_EXTERNAL_NGINX=true mode."""
+        env_content = "DOMAIN=bot.test\nUSE_EXTERNAL_NGINX=true\n"
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+
+        # Mock cli.sh to return failure for nginx-config
+        failing_cli = self.bin_dir / "just1kbot_cli_fail"
+        failing_cli.write_text(
+            '#!/bin/bash\nif [[ "$1" == "nginx-config" ]]; then exit 1; fi\nexit 0\n',
+            encoding="utf-8",
+        )
+        failing_cli.chmod(0o755)
+
+        docker_compose_log = self.root / "docker_compose.log"
+        (self.bin_dir / "docker").write_text(
+            f'#!/bin/bash\necho "$@" >> "{docker_compose_log.as_posix()}"\nexit 0\n',
+            encoding="utf-8",
+        )
+        (self.bin_dir / "docker").chmod(0o755)
+
+        script = f"""
+PROJECT_DIR="{self.project_dir.as_posix()}"
+source "{self.project_dir.as_posix()}/scripts/setup.sh"
+start_project_test() {{
+    USE_EXTERNAL_NGINX="true"
+    if ! "{failing_cli.as_posix()}" nginx-config; then
+        error "Не удалось настроить Nginx для Just1kBot. Установка прервана."
+    fi
+    docker compose up -d
+}}
+start_project_test
+"""
+        proc_env = os.environ.copy()
+        proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
+
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env=proc_env,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Не удалось настроить Nginx для Just1kBot", proc.stderr)
+        self.assertFalse(
+            docker_compose_log.exists(),
+            "docker compose up must not be called if nginx-config failed",
+        )
+
+    def test_cmd_update_healthcheck_validates_external_nginx(self):
+        """In USE_EXTERNAL_NGINX=true mode, healthcheck logic fails if systemctl is-active nginx is false."""
+        env_content = "DOMAIN=bot.test\nUSE_EXTERNAL_NGINX=true\n"
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+
+        # Mock systemctl to report nginx inactive
+        (self.bin_dir / "systemctl").write_text(
+            '#!/bin/bash\nif [[ "$1" == "is-active" && "$3" == "nginx" ]]; then exit 3; fi\nexit 0\n',
+            encoding="utf-8",
+        )
+        (self.bin_dir / "systemctl").chmod(0o755)
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+
+caddy_ok=false
+if is_external_nginx_enabled; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
+        caddy_ok=true
+    else
+        caddy_ok=false
+    fi
+fi
+echo "CADDY_OK=$caddy_ok"
+"""
+        proc_env = os.environ.copy()
+        proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
+
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env=proc_env,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("CADDY_OK=false", proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
-
-

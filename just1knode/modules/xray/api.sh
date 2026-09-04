@@ -17,7 +17,14 @@ ensure_xrayapi_user() {
         groupadd -r xrayapi 2>/dev/null || true
     fi
     if ! id -u xrayapi >/dev/null 2>&1; then
-        useradd -r -g xrayapi -s /usr/sbin/nologin -d /opt/xray-api -M xrayapi 2>/dev/null || useradd -r -s /usr/sbin/nologin -d /opt/xray-api -M xrayapi
+        if getent group xrayapi >/dev/null 2>&1; then
+            useradd -r -g xrayapi -s /usr/sbin/nologin -d "${XRAY_API_DIR}" -M xrayapi 2>/dev/null || useradd -r -s /usr/sbin/nologin -d "${XRAY_API_DIR}" -M xrayapi
+        else
+            useradd -r -s /usr/sbin/nologin -d "${XRAY_API_DIR}" -M xrayapi
+        fi
+    fi
+    if ! id -u xrayapi >/dev/null 2>&1; then
+        error "Не удалось создать системного пользователя xrayapi"
     fi
 }
 
@@ -55,7 +62,7 @@ deploy_xray_api_sources() {
             rm -rf "$tmp_tar" /tmp/just1k_extracted_$$
         fi
     fi
-    chown -R xrayapi:xrayapi "${XRAY_API_DIR}" 2>/dev/null || true
+    chown -R root:xrayapi "${XRAY_API_DIR}" 2>/dev/null || true
     chmod -R 750 "${XRAY_API_DIR}" 2>/dev/null || true
 }
 
@@ -103,16 +110,16 @@ EOF
     # Права на чтение конфигурации Xray для пользователя xrayapi
     chmod 755 /usr/local/etc/xray 2>/dev/null || true
     chown root:xrayapi /usr/local/etc/xray/config.json 2>/dev/null || true
-    chmod 644 /usr/local/etc/xray/config.json 2>/dev/null || true
+    chmod 640 /usr/local/etc/xray/config.json 2>/dev/null || true
 
-    # Права на каталог состояния для пользователя xrayapi (SGID 2775)
+    # Права на каталог состояния для пользователя xrayapi (SGID 2770)
     chown -R root:xrayapi "${STATE_DIR}" 2>/dev/null || true
-    chmod 2775 "${STATE_DIR}"
-    [[ -f "${CLIENTS_FILE}" ]] && { chown root:xrayapi "${CLIENTS_FILE}" 2>/dev/null || true; chmod 664 "${CLIENTS_FILE}"; }
-    [[ -f "${RELAYS_FILE}" ]] && { chown root:xrayapi "${RELAYS_FILE}" 2>/dev/null || true; chmod 664 "${RELAYS_FILE}"; }
-    [[ -f "${STATE_FILE}" ]] && { chown root:xrayapi "${STATE_FILE}" 2>/dev/null || true; chmod 664 "${STATE_FILE}"; }
+    chmod 2770 "${STATE_DIR}"
+    [[ -f "${CLIENTS_FILE}" ]] && { chown root:xrayapi "${CLIENTS_FILE}" 2>/dev/null || true; chmod 660 "${CLIENTS_FILE}"; }
+    [[ -f "${RELAYS_FILE}" ]] && { chown root:xrayapi "${RELAYS_FILE}" 2>/dev/null || true; chmod 660 "${RELAYS_FILE}"; }
+    [[ -f "${STATE_FILE}" ]] && { chown root:xrayapi "${STATE_FILE}" 2>/dev/null || true; chmod 660 "${STATE_FILE}"; }
     find "${STATE_DIR}" -name "*.lock" -exec chown root:xrayapi {} + 2>/dev/null || true
-    find "${STATE_DIR}" -name "*.lock" -exec chmod 664 {} + 2>/dev/null || true
+    find "${STATE_DIR}" -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
 
     cat > "${SYSTEMD_SYSTEM_DIR}/xray-api.service" <<EOF
 [Unit]
@@ -124,7 +131,7 @@ Wants=xray.service
 Type=simple
 User=xrayapi
 Group=xrayapi
-UMask=0002
+UMask=0007
 WorkingDirectory=${XRAY_API_DIR}
 EnvironmentFile=${XRAY_API_CONFIG_ENV}
 ExecStart=${XRAY_API_DIR}/venv/bin/uvicorn app:app --host 127.0.0.1 --port 5001 --workers 1 --log-level info
@@ -135,7 +142,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
-ReadWritePaths=${XRAY_API_DIR} ${STATE_DIR} ${XRAY_API_LIB}
+ReadWritePaths=${STATE_DIR} ${XRAY_API_LIB}
 
 [Install]
 WantedBy=multi-user.target

@@ -16,6 +16,7 @@ logger = logging.getLogger("xray_api.client_store")
 
 class ClientStoreCorruptedError(RuntimeError):
     """Raised when clients.json exists but is unparseable or corrupted."""
+
     pass
 
 
@@ -56,7 +57,9 @@ class ClientStore:
                                 u: {"is_active": True, "version": 1, "updated_at": time.time()}
                                 for u in clients_val
                             }
-                        raise ClientStoreCorruptedError(f"Unexpected clients field in {self.file_path}: {type(clients_val)}")
+                        raise ClientStoreCorruptedError(
+                            f"Unexpected clients field in {self.file_path}: {type(clients_val)}"
+                        )
                     if all(isinstance(v, dict) for v in data.values()):
                         return data
                 elif isinstance(data, list):
@@ -64,7 +67,9 @@ class ClientStore:
                         u: {"is_active": True, "version": 1, "updated_at": time.time()}
                         for u in data
                     }
-                raise ClientStoreCorruptedError(f"Unexpected JSON structure in {self.file_path}: {type(data)}")
+                raise ClientStoreCorruptedError(
+                    f"Unexpected JSON structure in {self.file_path}: {type(data)}"
+                )
         except json.JSONDecodeError as jde:
             logger.critical("Corruption detected in %s: %s", self.file_path, jde)
             raise ClientStoreCorruptedError(f"Corrupted JSON in {self.file_path}: {jde}") from jde
@@ -77,15 +82,27 @@ class ClientStore:
     def load_clients(self) -> Set[str]:
         """Returns set of currently active client UUIDs, excluding tombstones."""
         entries = self.load_client_entries()
-        return {u for u, meta in entries.items() if meta.get("is_active", True) is True and not meta.get("tombstone", False)}
+        return {
+            u
+            for u, meta in entries.items()
+            if meta.get("is_active", True) is True and not meta.get("tombstone", False)
+        }
 
     def save_client_entries(self, entries: Dict[str, Dict[str, Any]]) -> bool:
         self._ensure_dir()
-        temp_path = self.file_path.with_name(f"{self.file_path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp")
+        temp_path = self.file_path.with_name(
+            f"{self.file_path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp"
+        )
         data = {
             "clients": entries,
             "updated_at": time.time(),
-            "count": len([u for u, m in entries.items() if m.get("is_active", True) is True and not m.get("tombstone", False)]),
+            "count": len(
+                [
+                    u
+                    for u, m in entries.items()
+                    if m.get("is_active", True) is True and not m.get("tombstone", False)
+                ]
+            ),
         }
         try:
             with open(temp_path, "w", encoding="utf-8") as f:
@@ -98,7 +115,9 @@ class ClientStore:
             except Exception:
                 pass
             try:
-                dir_fd = os.open(str(self.file_path.parent), getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY)
+                dir_fd = os.open(
+                    str(self.file_path.parent), getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY
+                )
                 try:
                     os.fsync(dir_fd)
                 finally:
@@ -126,7 +145,7 @@ class ClientStore:
         try:
             lock_fd = open(self.lock_path, "a")
             try:
-                os.chmod(self.lock_path, 0o664)
+                os.chmod(self.lock_path, 0o660)
             except Exception:
                 pass
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
@@ -153,7 +172,9 @@ class ClientStore:
         lock_fd = self._acquire_lock()
         try:
             entries = self.load_client_entries()
-            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            curr_ver = (
+                entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            )
             new_ver = version if version is not None else max(curr_ver + 1, 1)
             entry: Dict[str, Any] = {
                 "is_active": True,
@@ -173,7 +194,9 @@ class ClientStore:
         lock_fd = self._acquire_lock()
         try:
             entries = self.load_client_entries()
-            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            curr_ver = (
+                entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            )
             new_ver = version if version is not None else max(curr_ver + 1, 1)
             entries[client_uuid] = {
                 "is_active": False,
@@ -190,7 +213,9 @@ class ClientStore:
         lock_fd = self._acquire_lock()
         try:
             entries = self.load_client_entries()
-            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            curr_ver = (
+                entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            )
             new_ver = version if version is not None else max(curr_ver + 1, 1)
             entries[client_uuid] = {
                 "is_active": False,

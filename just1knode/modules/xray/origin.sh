@@ -22,6 +22,12 @@ deploy_subscription_proxy_conf() {
     fi
     target_host="$(normalize_domain "$target_host")"
 
+    local ssl_verify_directives=""
+    if [[ ! "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$target_host" != "localhost" && -f /etc/ssl/certs/ca-certificates.crt ]]; then
+        ssl_verify_directives="        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;"
+    fi
+
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
@@ -30,6 +36,7 @@ deploy_subscription_proxy_conf() {
         set \$bot_upstream "https://${target_host}";
         proxy_pass \$bot_upstream;
         proxy_ssl_server_name on;
+${ssl_verify_directives}
         proxy_set_header Host ${target_host};
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -165,16 +172,28 @@ server {
     }
 }
 EOF
-    if [[ -f "${NGINX_CONF_DIR}/sites-enabled/default" ]] && grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
-        warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak."
-        cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-enabled/default.user.bak"
+    local default_was_linked=0
+    if [[ -f "${NGINX_CONF_DIR}/sites-enabled/default" ]]; then
+        default_was_linked=1
+        if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
+            warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak в sites-available."
+            cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
+        fi
+        rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
-    rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
-    if nginx -t 2>/dev/null; then
-        systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
-    else
-        warn "Ошибка синтаксиса Nginx (nginx -t) до применения сертификата. Перезагрузка Nginx отложена."
+    if ! nginx -t 2>/dev/null; then
+        warn "Ошибка синтаксиса Nginx (nginx -t) с bootstrap-конфигурацией. Откат изменений..."
+        rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" 2>/dev/null || true
+        if [[ $default_was_linked -eq 1 ]]; then
+            if [[ -f "${NGINX_CONF_DIR}/sites-available/default.user.bak" ]]; then
+                cp -a "${NGINX_CONF_DIR}/sites-available/default.user.bak" "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+            elif [[ -f "${NGINX_CONF_DIR}/sites-available/default" ]]; then
+                ln -sf "${NGINX_CONF_DIR}/sites-available/default" "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+            fi
+        fi
+        error "Ошибка синтаксиса Nginx (nginx -t) до применения сертификата. Установка Origin прервана."
     fi
+    systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
 
     obtain_ssl_certificate "$domain" "$email"
     rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" 2>/dev/null || true
@@ -341,7 +360,7 @@ with open(config_file, 'w', encoding='utf-8') as f:
 " "$XRAY_CONFIG" "$secret_path"
 
     chown root:xrayapi "$XRAY_CONFIG" 2>/dev/null || true
-    chmod 644 "$XRAY_CONFIG" 2>/dev/null || true
+    chmod 640 "$XRAY_CONFIG" 2>/dev/null || true
     chmod 755 "$(dirname "$XRAY_CONFIG")" 2>/dev/null || true
 
     if [[ $EUID -eq 0 ]]; then
@@ -411,11 +430,15 @@ EOF
     fi
 
     rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" "${NGINX_CONF_DIR}/conf.d/just1k-origin.conf" "${NGINX_CONF_DIR}/conf.d/origin.conf" 2>/dev/null || true
-    if [[ -f "${NGINX_CONF_DIR}/sites-enabled/default" ]] && grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
-        warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak."
-        cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-enabled/default.user.bak"
+    local default_was_linked_origin=0
+    if [[ -f "${NGINX_CONF_DIR}/sites-enabled/default" ]]; then
+        default_was_linked_origin=1
+        if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
+            warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak в sites-available."
+            cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
+        fi
+        rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
-    rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
 
     cat > "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" <<EOF
 server {
@@ -486,6 +509,11 @@ EOF
     ln -sf "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" "${NGINX_CONF_DIR}/sites-enabled/"
     if ! nginx -t 2>/dev/null; then
         rm -f "${NGINX_CONF_DIR}/sites-enabled/just1k-origin.conf" 2>/dev/null || true
+        if [[ -f "${NGINX_CONF_DIR}/sites-available/default.user.bak" ]]; then
+            cp -a "${NGINX_CONF_DIR}/sites-available/default.user.bak" "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+        elif [[ $default_was_linked_origin -eq 1 && -f "${NGINX_CONF_DIR}/sites-available/default" && ! -f "${NGINX_CONF_DIR}/sites-enabled/default" ]]; then
+            ln -sf "${NGINX_CONF_DIR}/sites-available/default" "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+        fi
         error "Ошибка валидации синтаксиса Nginx (nginx -t)! Перезагрузка Nginx отменена для сохранения доступности работающих сайтов."
     fi
     systemctl reload nginx
@@ -775,7 +803,7 @@ os.replace(t_path, cfg_file)
 try:
     import shutil
     shutil.chown(cfg_file, user='root', group='xrayapi')
-    os.chmod(cfg_file, 0o644)
+    os.chmod(cfg_file, 0o640)
     os.chmod(d, 0o755)
 except Exception:
     pass
@@ -787,7 +815,7 @@ print('[+] Xray Origin config успешно согласован с этало�
     fi
 
     chown root:xrayapi "$XRAY_CONFIG" 2>/dev/null || true
-    chmod 644 "$XRAY_CONFIG" 2>/dev/null || true
+    chmod 640 "$XRAY_CONFIG" 2>/dev/null || true
     chmod 755 "$(dirname "$XRAY_CONFIG")" 2>/dev/null || true
 
     # Авто-восстановление Nginx location файлов для всех релеев

@@ -179,6 +179,21 @@ is_external_nginx_enabled() {
     return 1
 }
 
+get_env_var() {
+    local key="$1"
+    local default_val="${2:-}"
+    local env_file="${PROJECT_DIR}/.env"
+    if [[ -f "$env_file" ]]; then
+        local val
+        val=$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n1 | cut -d'=' -f2- | tr -d " '\"" || echo "")
+        if [[ -n "$val" ]]; then
+            echo "$val"
+            return 0
+        fi
+    fi
+    echo "$default_val"
+}
+
 set_env_var() {
     local key="$1"
     local val="$2"
@@ -255,7 +270,7 @@ EOF
         run_privileged cp /tmp/just1kbot-bootstrap.tmp "$bootstrap_conf" 2>/dev/null || true
         rm -f /tmp/just1kbot-bootstrap.tmp
         run_privileged ln -sf "$bootstrap_conf" "$sites_enb/" 2>/dev/null || true
-        if nginx -t 2>/dev/null; then
+        if run_privileged nginx -t 2>/dev/null; then
             run_privileged systemctl reload nginx 2>/dev/null || true
             if run_privileged certbot certonly --webroot -w "$certbot_webroot" -d "$domain" --non-interactive --agree-tos --email "$ssl_email" 2>/dev/null; then
                 if [[ -f "${cert_dir}/fullchain.pem" ]]; then
@@ -267,6 +282,21 @@ EOF
             fi
         fi
         run_privileged rm -f "$bootstrap_conf" "$sites_enb/just1kbot-bootstrap.conf" 2>/dev/null || true
+    fi
+
+    if [[ "$has_ssl" != "true" ]]; then
+        local allow_http
+        allow_http=$(get_env_var "ALLOW_LOCAL_HTTP" "false")
+        if [[ "$allow_http" != "true" ]]; then
+            print_ai_diagnostic_report \
+                "Let's Encrypt SSL Issuance" \
+                "Отсутствует SSL-сертификат для домена ${domain}" \
+                "Настройка внешнего Nginx прервана, откат к незащищенному HTTP заблокирован" \
+                "Сертификаты Let's Encrypt не обнаружены в ${cert_dir} и certbot не смог выпустить сертификат. Telegram Bot API и ЮKassa требуют HTTPS webhook." \
+                "1. Проверьте A-запись DNS для ${domain}\n2. Убедитесь, что порт 80 открыт извне для ACME challenge\n3. Получите сертификат вручную: certbot certonly --webroot -w ${certbot_webroot} -d ${domain}\n4. Повторите: just1kbot nginx-config"
+            return 1
+        fi
+        warn "ВНИМАНИЕ: Активирован режим ALLOW_LOCAL_HTTP=true. Будет создан HTTP-прокси без SSL (только для локальной разработки)."
     fi
 
     local tmp_conf
@@ -369,10 +399,13 @@ EOF
     rm -f "$tmp_conf"
     run_privileged chmod 644 "$config_file" 2>/dev/null || true
 
-    run_privileged ln -sf "$config_file" "$sites_enb/" 2>/dev/null || true
+    if ! run_privileged ln -sf "$config_file" "$sites_enb/" 2>/dev/null; then
+        error "Не удалось создать символическую ссылку для $config_file в $sites_enb!"
+        return 1
+    fi
 
     local nginx_err=""
-    if ! nginx_err=$(nginx -t 2>&1); then
+    if ! nginx_err=$(run_privileged nginx -t 2>&1); then
         run_privileged rm -f "$sites_enb/$(basename "$config_file")" 2>/dev/null || true
         print_ai_diagnostic_report \
             "Host Nginx Configuration" \
@@ -383,12 +416,20 @@ EOF
         return 1
     fi
 
-    if ! run_privileged systemctl reload nginx 2>/dev/null; then
-        warn "Не удалось выполнить reload Nginx. Проверьте статус: systemctl status nginx"
-    else
-        log "Nginx успешно перезагружен (systemctl reload nginx). Существующие сайты работают параллельно без даунтайма."
+    local reload_err=""
+    if ! reload_err=$(run_privileged systemctl reload nginx 2>&1); then
+        run_privileged rm -f "$sites_enb/$(basename "$config_file")" 2>/dev/null || true
+        run_privileged systemctl reload nginx 2>/dev/null || true
+        print_ai_diagnostic_report \
+            "Host Nginx Reload" \
+            "Ошибка перезагрузки Nginx (systemctl reload nginx)" \
+            "Активация Just1kBot виртуального хоста отменена, Nginx возвращен в исходное состояние" \
+            "$reload_err" \
+            "1. Проверьте журнал Nginx: sudo journalctl -u nginx -n 50\n2. Проверьте статус: sudo systemctl status nginx\n3. Повторите: just1kbot nginx-config"
+        return 1
     fi
 
+    log "Nginx успешно перезагружен (systemctl reload nginx). Существующие сайты работают параллельно без даунтайма."
     set_env_var "USE_EXTERNAL_NGINX" "true"
     log "Интеграция с Nginx активирована: USE_EXTERNAL_NGINX=true закреплено в .env."
     return 0
@@ -810,8 +851,11 @@ cmd_update() {
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     if [[ "$current_branch" == "HEAD" ]] || [[ -z "$current_branch" ]]; then
         warn "Обнаружено состояние detached HEAD. Переключаемся на основную ветку main..."
+        if ! git checkout main 2>/dev/null; then
+            error "Не удалось переключиться на ветку main из detached HEAD."
+            return 1
+        fi
         current_branch="main"
-        git checkout "$current_branch" 2>/dev/null || true
     fi
 
     info "Шаг 3/6. Получение обновлений из Git (ветка: $current_branch)..."
@@ -954,7 +998,11 @@ cmd_update() {
 
                 local m_caddy_ok=false
                 if is_external_nginx_enabled; then
-                    m_caddy_ok=true
+                    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
+                        m_caddy_ok=true
+                    else
+                        m_caddy_ok=false
+                    fi
                 elif [ "$m_caddy" = "running" ]; then
                     m_caddy_ok=true
                 fi
@@ -1008,7 +1056,11 @@ cmd_update() {
 
         local caddy_ok=false
         if is_external_nginx_enabled; then
-            caddy_ok=true
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
+                caddy_ok=true
+            else
+                caddy_ok=false
+            fi
         elif [ "$caddy_s" = "running" ]; then
             caddy_ok=true
         fi
@@ -1042,12 +1094,22 @@ cmd_update() {
         if is_external_nginx_enabled; then
             info "Проверка внешнего Nginx после обновления контейнеров..."
             if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
-                if nginx -t >/dev/null 2>&1; then
-                    run_privileged systemctl reload nginx 2>/dev/null || true
-                    log "Nginx успешно перезагружен (systemctl reload nginx)."
+                local nginx_post_err=""
+                if nginx_post_err=$(run_privileged nginx -t 2>&1); then
+                    local reload_post_err=""
+                    if ! reload_post_err=$(run_privileged systemctl reload nginx 2>&1); then
+                        error "Не удалось перезагрузить Nginx после обновления: $reload_post_err"
+                        return 1
+                    else
+                        log "Nginx успешно перезагружен (systemctl reload nginx)."
+                    fi
                 else
-                    warn "Обнаружена ошибка синтаксиса Nginx после обновления!"
+                    error "Обнаружена ошибка синтаксиса Nginx после обновления: $nginx_post_err"
+                    return 1
                 fi
+            else
+                error "Служба системного Nginx неактивна после обновления!"
+                return 1
             fi
         fi
     else

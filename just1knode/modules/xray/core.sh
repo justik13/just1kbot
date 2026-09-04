@@ -195,13 +195,19 @@ update_node() {
         if [[ -d "${tmp_dir}/scripts/xray_api" && -d /opt/xray-api ]]; then
             cp -r "${tmp_dir}/scripts/xray_api"/* /opt/xray-api/
             if [[ -x /opt/xray-api/venv/bin/pip && -f /opt/xray-api/requirements.txt ]]; then
-                /opt/xray-api/venv/bin/pip install -q -r /opt/xray-api/requirements.txt --no-cache-dir 2>/dev/null || true
+                if ! /opt/xray-api/venv/bin/pip install -q -r /opt/xray-api/requirements.txt --no-cache-dir; then
+                    rm -rf "$tmp_tar" "$tmp_dir"
+                    error "Ошибка обновления зависимостей Python для xray-api. Обновление прервано."
+                fi
             fi
             ensure_xrayapi_user
-            chown -R xrayapi:xrayapi /opt/xray-api 2>/dev/null || true
+            chown -R root:xrayapi /opt/xray-api 2>/dev/null || true
             chmod -R 750 /opt/xray-api 2>/dev/null || true
             if systemctl is-active --quiet xray-api 2>/dev/null; then
-                systemctl restart xray-api 2>/dev/null || true
+                if ! systemctl restart xray-api 2>/dev/null || ! systemctl is-active --quiet xray-api 2>/dev/null; then
+                    rm -rf "$tmp_tar" "$tmp_dir"
+                    error "Служба xray-api не смогла перезапуститься после обновления."
+                fi
             fi
             log "Компоненты /opt/xray-api успешно обновлены с синхронизацией Python-зависимостей и перезапуском службы."
         fi
