@@ -1030,6 +1030,73 @@ cmd_update
         )
         self.assertIn("Выполняем откат исходного кода к коммиту", proc.stdout + proc.stderr)
 
+    def test_cmd_update_aborts_and_rolls_back_when_stop_bot_fails(self):
+        """cmd_update aborts rollout and rolls back if stopping bot fails during Cold Deploy."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+
+        # Clone another copy to push an update upstream
+        other_dir = self.root / "other"
+        upstream_dir = self.root / "upstream.git"
+        subprocess.run(
+            ["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "config", "user.email", "dev@test.local"], cwd=other_dir, check=True)
+        subprocess.run(["git", "config", "user.name", "Developer"], cwd=other_dir, check=True)
+        (other_dir / "app_version.txt").write_text("v2.0.0", encoding="utf-8")
+        subprocess.run(["git", "add", "app_version.txt"], cwd=other_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Release v2.0.0"], cwd=other_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=other_dir, check=True)
+
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            "#!/bin/bash\n"
+            'if [[ "$*" == *"compose stop bot"* ]]; then\n'
+            '    echo "Simulated docker compose stop bot failure" >&2\n'
+            '    exit 1\n'
+            'fi\n'
+            'if [[ "$1" == "inspect" ]]; then\n'
+            '    if [[ "$*" == *"just1kbot_caddy"* ]]; then echo "running"; elif [[ "$*" == *"just1kbot_migrate"* ]]; then echo "exited/0"; else echo "healthy"; fi\n'
+            '    exit 0\n'
+            'fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        test_script = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn(
+            "Ошибка при остановке сервиса бота перед миграциями (Cold Deploy)! Развёртывание прервано.",
+            proc.stdout + proc.stderr,
+        )
+        self.assertIn("Отменяем обновление и возвращаем исходный код к коммиту", proc.stdout + proc.stderr)
+
+
 
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
     """Regression guard: `error()` in scripts/setup.sh must abort the whole

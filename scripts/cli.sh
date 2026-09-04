@@ -1037,7 +1037,15 @@ cmd_update() {
     fi
 
     info "Остановка сервиса бота перед миграциями (Cold Deploy)..."
-    docker compose stop bot
+    if ! docker compose stop bot; then
+        error "Ошибка при остановке сервиса бота перед миграциями (Cold Deploy)! Развёртывание прервано."
+        if [[ -n "$rollback_commit" ]]; then
+            warn "🚨 Отменяем обновление и возвращаем исходный код к коммиту $rollback_commit..."
+            git reset --hard "$rollback_commit"
+            dc_up
+        fi
+        return 1
+    fi
 
     info "Применение миграций базы данных..."
     if ! docker compose run --rm migrate; then
@@ -1158,7 +1166,11 @@ cmd_update() {
 
                 local rb_caddy_ok=false
                 if is_external_nginx_enabled; then
-                    rb_caddy_ok=true
+                    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
+                        rb_caddy_ok=true
+                    else
+                        rb_caddy_ok=false
+                    fi
                 elif [ "$rb_caddy" = "running" ]; then
                     rb_caddy_ok=true
                 fi

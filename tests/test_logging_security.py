@@ -527,6 +527,11 @@ class LoggingSecurityTests(unittest.TestCase):
             ("DATABASE_URL='postgresql://user:p;ass@host:5432/db'", "p;ass"),
             ('password="escaped\\"quote;and;semi"', 'escaped\\"quote;and;semi'),
             ("passwd='single\\'escaped;semi'", "single\\'escaped;semi"),
+            ('secret="value:with:colons,and,commas;and;semi"', "value:with:colons,and,commas;and;semi"),
+            ('access_token="tok_12345;special#@!"', "tok_12345;special#@!"),
+            ('{"token": "secret token with spaces"}', "secret token with spaces"),
+            ('{ "password" : "secret;123" }', "secret;123"),
+            ('token=abc_123-xyz', "abc_123-xyz"),
             ('secret=""', None),
             ("secret=''", None),
         )
@@ -545,6 +550,14 @@ class LoggingSecurityTests(unittest.TestCase):
         self.assertIn("host=auth.local", output)
         self.assertIn("user=alice", output)
         self.assertIn("status=ok", output)
+
+        # Verify multiple quoted secrets on one line
+        output_multi = self._capture(
+            lambda logger: logger.info('data: password="foo;bar" token=\'tok en;123\'')
+        )
+        self.assertNotIn("foo;bar", output_multi)
+        self.assertNotIn("tok en;123", output_multi)
+        self.assertEqual(output_multi.count("[REDACTED]"), 2)
 
 
 class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
