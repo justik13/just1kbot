@@ -137,6 +137,48 @@ async def _get_effective_base_price(session: AsyncSession) -> tuple[Decimal, int
     return base_price, int(base_price), duration_days
 
 
+async def _resolve_subscription_domain(
+    session: AsyncSession,
+    sub: WhiteInternetSubscription | None,
+) -> str | None:
+    """Resolve the optimal public domain for subscription delivery.
+
+    Priority:
+    1. Origin server CDN domain (server.extra_data['cdn_domain']) - whitelisted by RU ISPs via Yandex CDN Anycast.
+    2. WHITE_INTERNET_CDN_DOMAIN environment variable fallback.
+    3. Primary bot public domain (settings.DOMAIN / DOMAIN / BOT_DOMAIN).
+    4. Origin server primary hostname (server.domain).
+    """
+    if sub and getattr(sub, "origin_node_id", None):
+        origin_node = await session.get(Server, sub.origin_node_id)
+        if origin_node and isinstance(origin_node.extra_data, dict):
+            cdn_domain = origin_node.extra_data.get("cdn_domain")
+            if cdn_domain and isinstance(cdn_domain, str) and cdn_domain.strip():
+                return cdn_domain.strip()
+
+    env_cdn = os.getenv("WHITE_INTERNET_CDN_DOMAIN")
+    if env_cdn and env_cdn.strip():
+        return env_cdn.strip()
+
+    bot_domain = get_settings().DOMAIN or os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
+    if bot_domain and bot_domain.strip():
+        return bot_domain.strip()
+
+    if sub and getattr(sub, "origin_node_id", None):
+        origin_node = await session.get(Server, sub.origin_node_id)
+        if origin_node:
+            node_domain = getattr(origin_node, "domain", None)
+            if node_domain and isinstance(node_domain, str) and node_domain.strip():
+                return node_domain.strip()
+            if getattr(origin_node, "api_url", None):
+                from urllib.parse import urlsplit
+                parsed = urlsplit(origin_node.api_url)
+                if parsed.hostname:
+                    return parsed.hostname.strip()
+
+    return None
+
+
 @router.callback_query(F.data == "white_internet")
 async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
     await query.answer()
@@ -146,11 +188,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         return
 
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-    bot_domain = get_settings().DOMAIN or os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
-    if not bot_domain and sub and getattr(sub, "origin_node_id", None):
-        origin_node = await session.get(Server, sub.origin_node_id)
-        if origin_node and origin_node.domain:
-            bot_domain = origin_node.domain
+    sub_domain = await _resolve_subscription_domain(session, sub)
     now = now_utc()
 
     _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
@@ -185,7 +223,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             progress=progress_bar,
         )
 
-    kb = get_white_internet_overview_keyboard(sub, bot_domain, base_price=base_price_int)
+    kb = get_white_internet_overview_keyboard(sub, sub_domain, base_price=base_price_int)
     try:
         await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
@@ -331,22 +369,18 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
     if user is None:
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-    bot_domain = get_settings().DOMAIN or os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
-    if not bot_domain and sub and getattr(sub, "origin_node_id", None):
-        origin_node = await session.get(Server, sub.origin_node_id)
-        if origin_node and origin_node.domain:
-            bot_domain = origin_node.domain
+    sub_domain = await _resolve_subscription_domain(session, sub)
     if sub is None or sub.status != WhiteInternetStatus.ACTIVE:
-        await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, bot_domain))
+        await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, sub_domain))
         return
-    if not bot_domain:
+    if not sub_domain:
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         await query.message.edit_text(texts.WL_DOMAIN_UNCONFIGURED, reply_markup=kb.as_markup())
         return
 
     sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
-    sub_url = f"https://{bot_domain}{sub_prefix}/{sub.token}"
+    sub_url = f"https://{sub_domain}{sub_prefix}/{sub.token}"
 
     kb = InlineKeyboardBuilder()
     kb.button(

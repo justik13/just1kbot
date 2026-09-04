@@ -861,7 +861,25 @@ run_doctor
         self.assertEqual(healed[0]["code"], "de")
         self.assertEqual(healed[0]["ip"], "217.60.183.229")
 
+    def test_deploy_subscription_proxy_conf_generates_valid_proxy(self):
+        self._prepare_base_env()
+        # Set bot_domain in state
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "origin", "domain": "origin.example.com", "bot_domain": "just1k.best"}, f)
+
+        res = self._run_shell_snippet("deploy_subscription_proxy_conf")
+        self.assertEqual(res.returncode, 0, f"deploy_subscription_proxy_conf failed: {res.stderr + res.stdout}")
+
+        sub_conf = self.nginx_relays_d / "sub-wl.conf"
+        self.assertTrue(sub_conf.exists(), "sub-wl.conf must be created in NGINX_RELAYS_DIR")
+        content = sub_conf.read_text(encoding="utf-8")
+        self.assertIn("location ^~ /sub/wl", content)
+        self.assertIn("proxy_pass https://just1k.best;", content)
+        self.assertIn("proxy_ssl_server_name on;", content)
+        self.assertIn("proxy_set_header Host just1k.best;", content)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

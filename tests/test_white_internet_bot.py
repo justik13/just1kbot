@@ -283,3 +283,106 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(len(copy_btns) >= 1, "Copy subscription link button must be present")
                 self.assertTrue(any("sub-secret-token" in b.copy_text.text for b in copy_btns))
                 self.assertIsNotNone(back_btn, "Back button must be present")
+
+    async def test_resolve_subscription_domain_priority(self):
+        """Domain resolution prioritizes server cdn_domain, then env var, then bot domain, then server domain."""
+        import os
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from bot.handlers.white_internet import _resolve_subscription_domain
+        from database.models import Server, WhiteInternetSubscription
+
+        sub = WhiteInternetSubscription(id=1, user_id=1, origin_node_id=10)
+        server_with_cdn = Server(
+            id=10,
+            name="Origin",
+            api_url="https://origin.example.com:8444",
+            api_key="key",
+            extra_data={"cdn_domain": "cdn.example.com"},
+        )
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = server_with_cdn
+
+        # 1. Server extra_data['cdn_domain'] has highest priority
+        domain = await _resolve_subscription_domain(mock_session, sub)
+        self.assertEqual(domain, "cdn.example.com")
+
+        # 2. Env fallback when server extra_data lacks cdn_domain
+        server_no_cdn = Server(
+            id=10,
+            name="Origin",
+            api_url="https://origin.example.com:8444",
+            api_key="key",
+            extra_data={},
+        )
+        mock_session.get.return_value = server_no_cdn
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "envcdn.example.com"}):
+            domain = await _resolve_subscription_domain(mock_session, sub)
+            self.assertEqual(domain, "envcdn.example.com")
+
+        # 3. Bot domain fallback when no CDN domain configured
+        mock_settings = MagicMock(DOMAIN="bot.example.com")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("WHITE_INTERNET_CDN_DOMAIN", None)
+            with patch("bot.handlers.white_internet.get_settings", return_value=mock_settings):
+                domain = await _resolve_subscription_domain(mock_session, sub)
+                self.assertEqual(domain, "bot.example.com")
+
+        # 4. Server primary domain fallback when bot domain missing
+        mock_settings_empty = MagicMock(DOMAIN="")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("WHITE_INTERNET_CDN_DOMAIN", None)
+            os.environ.pop("DOMAIN", None)
+            os.environ.pop("BOT_DOMAIN", None)
+            with patch("bot.handlers.white_internet.get_settings", return_value=mock_settings_empty):
+                domain = await _resolve_subscription_domain(mock_session, sub)
+                self.assertEqual(domain, "origin.example.com")
+
+    async def test_show_subscription_link_uses_cdn_domain_when_available(self):
+        """When origin node has cdn_domain, wl_show_link button text uses cdn_domain."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from aiogram.types import CallbackQuery, User as TgUser, Message
+        from database.models import User, Server, WhiteInternetSubscription
+        from config.enums import WhiteInternetStatus
+        from bot.handlers.white_internet import show_subscription_link
+
+        user = User(id=1, telegram_id=123456789)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=1,
+            origin_node_id=10,
+            token="sub-secret-token",
+            status=WhiteInternetStatus.ACTIVE,
+        )
+        origin_node = Server(
+            id=10,
+            name="Origin",
+            api_url="https://origin.just1k.best:8444",
+            api_key="key",
+            extra_data={"cdn_domain": "cdn.just1k.best"},
+        )
+
+        mock_query = AsyncMock(spec=CallbackQuery)
+        mock_query.answer = AsyncMock()
+        mock_query.from_user = TgUser(id=123456789, is_bot=False, first_name="Tester")
+        mock_query.message = AsyncMock(spec=Message)
+        mock_query.message.edit_text = AsyncMock()
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = origin_node
+
+        mock_settings = MagicMock(DOMAIN="just1k.best")
+        with patch("bot.handlers.white_internet.get_settings", return_value=mock_settings):
+            with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=user):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub):
+                    await show_subscription_link(mock_query, mock_session)
+
+        mock_query.message.edit_text.assert_awaited_once()
+        call_args = mock_query.message.edit_text.call_args
+        text = call_args[0][0]
+        reply_markup = call_args[1]["reply_markup"]
+
+        self.assertIn("https://cdn.just1k.best/sub/wl/sub-secret-token", text)
+        copy_btn = next((btn for row in reply_markup.inline_keyboard for btn in row if btn.copy_text), None)
+        self.assertIsNotNone(copy_btn)
+        self.assertEqual(copy_btn.copy_text.text, "https://cdn.just1k.best/sub/wl/sub-secret-token")

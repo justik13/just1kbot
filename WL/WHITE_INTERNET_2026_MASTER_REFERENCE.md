@@ -63,6 +63,10 @@ Provisioning links utilize the `incy://crypt1/...` format, processed via `@incy/
 
 ### 3.2 HTTP Subscription Feed
 Subscriptions are served over a high-entropy, randomized path (e.g., `/sub/wl/{token}`).
+Under strict ISP whitelisting (ТСПУ "Белые списки"), direct connections to foreign VPS or unapproved domestic bot IPs are dropped. Therefore, subscription links are served through the whitelisted Yandex Cloud CDN domain:
+`Client (INCY) -> Yandex CDN (https://cdn.domain.com/sub/wl/{token}) -> Origin Nginx (port 443) -> Bot Server (https://domain.com/sub/wl/{token})`
+This guarantees that clients (INCY, Happ, v2rayNG) can refresh their subscription and receive live routing updates even when the VPN tunnel is currently disconnected.
+
 The HTTP response strictly enforces these headers:
 - `Subscription-Userinfo: upload=<bytes>; download=<bytes>; total=<bytes>; expire=<epoch_time>`
 - `Profile-Update-Interval: <hours>`

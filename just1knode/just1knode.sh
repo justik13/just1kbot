@@ -165,18 +165,20 @@ show_bot_credentials() {
         return
     fi
 
-    local domain cdn_domain api_url api_key secret_path bot_ip
+    local domain cdn_domain api_url api_key secret_path bot_ip bot_domain
     domain="$(get_state_val "domain" "-")"
     cdn_domain="$(get_state_val "cdn_domain" "-")"
     api_url="$(get_state_val "api_url" "-")"
     api_key="$(get_state_val "api_key" "-")"
     secret_path="$(get_state_val "secret_base_path" "-")"
     bot_ip="$(get_state_val "bot_ip" "-")"
+    bot_domain="$(get_state_val "bot_domain" "-")"
 
     echo -e "  🌐 Origin Домен:      ${CYAN}${domain}${NC}"
     echo -e "  ☁️ CDN Домен:         ${CYAN}${cdn_domain}${NC}"
     echo -e "  🔗 API URL бота:      ${CYAN}${api_url}${NC}"
     echo -e "  🤖 BOT IP:            ${CYAN}${bot_ip}${NC}"
+    echo -e "  🤖 BOT Домен:         ${CYAN}${bot_domain}${NC}"
     echo -e "  🔑 API Ключ:          ${YELLOW}${api_key}${NC}"
     echo -e "  🛡️ Секретный префикс: ${MAGENTA}${secret_path}${NC}"
     echo -e "  🩺 Проверка CDN:      curl -X OPTIONS https://${cdn_domain}/cdn-check\n"
@@ -505,7 +507,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
         case "$1" in
             install)
                 case "${2:-}" in
-                    origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}" ;;
+                    origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}" "${9:-}" ;;
                     relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-www.google.com}" ;;
                     amnezia) install_amnezia_node ;;
                     *) error "Неизвестный тип установки: $2. Доступно: origin, relay, amnezia" ;;

@@ -3,6 +3,36 @@
 # JUST1KNODE - Установка Origin Узла (modules/xray/origin.sh)
 # =============================================================================
 
+deploy_subscription_proxy_conf() {
+    local target_host="${1:-}"
+    if [[ -z "$target_host" ]]; then
+        target_host="$(get_state_val "bot_domain" 2>/dev/null || true)"
+    fi
+    if [[ -z "$target_host" ]]; then
+        target_host="$(get_state_val "bot_ip" 2>/dev/null || true)"
+    fi
+    if [[ -z "$target_host" ]]; then
+        target_host="127.0.0.1"
+    fi
+
+    mkdir -p "$NGINX_RELAYS_DIR"
+    create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
+    cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
+    location ^~ /sub/wl {
+        proxy_pass https://${target_host};
+        proxy_ssl_server_name on;
+        proxy_set_header Host ${target_host};
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_buffering off;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+EOF
+    info "Сконфигурировано Nginx-проксирование подписок (/sub/wl -> ${target_host})"
+}
+
 install_xray_origin_node() {
     title "УСТАНОВКА ORIGIN УЗЛА (Белый Интернет — Входной шлюз в РФ)"
     check_root
@@ -15,6 +45,7 @@ install_xray_origin_node() {
     local secret_path="${4:-}"
     local bot_ip="${5:-${BOT_IP:-}}"
     local cdn_domain="${6:-}"
+    local bot_domain="${7:-${BOT_DOMAIN:-}}"
 
     # Интерактивный опросник параметров
     if [[ -z "$domain" ]]; then
@@ -42,6 +73,19 @@ install_xray_origin_node() {
     fi
     if [[ -z "$bot_ip" ]]; then
         error "BOT_IP обязателен для безопасной настройки порта 8444."
+    fi
+
+    if [[ -z "$bot_domain" ]]; then
+        local existing_bot_domain
+        existing_bot_domain="$(get_state_val "bot_domain" 2>/dev/null || true)"
+        if [[ -n "$existing_bot_domain" ]]; then
+            bot_domain="$existing_bot_domain"
+        elif [[ $# -eq 0 ]]; then
+            read -rp "Введите домен Telegram-бота (например: just1k.best) [по умолчанию: ${bot_ip}]: " input_bot_domain || true
+            bot_domain="${input_bot_domain:-$bot_ip}"
+        else
+            bot_domain="${bot_ip:-}"
+        fi
     fi
 
     if [[ -z "$secret_path" ]]; then
@@ -303,6 +347,8 @@ EOF
     }
 EOF
 
+    deploy_subscription_proxy_conf "$bot_domain"
+
     local server_name_str="${domain}"
     if [[ -n "$cdn_domain" && "$cdn_domain" != "$domain" ]]; then
         server_name_str="${domain} ${cdn_domain}"
@@ -395,6 +441,7 @@ EOF
     set_state_val "domain" "$domain"
     set_state_val "cdn_domain" "$cdn_domain"
     set_state_val "bot_ip" "$bot_ip"
+    set_state_val "bot_domain" "$bot_domain"
     set_state_val "secret_base_path" "$secret_path"
     set_state_val "api_url" "https://${domain}:8444"
     set_state_val "api_key" "$api_key"
@@ -405,6 +452,7 @@ EOF
     echo -e "  ☁️ CDN Домен:         ${CYAN}${cdn_domain}${NC}"
     echo -e "  🔗 API URL бота:      ${CYAN}https://${domain}:8444${NC}"
     echo -e "  🤖 BOT IP:            ${CYAN}${bot_ip}${NC}"
+    echo -e "  🤖 BOT Домен:         ${CYAN}${bot_domain}${NC}"
     echo -e "  🔑 API Ключ:          ${YELLOW}${api_key}${NC}"
     echo -e "  🛡️ Секретный префикс: ${MAGENTA}${secret_path}${NC}"
     echo -e "  🩺 Проверка CDN:      curl -X OPTIONS https://${cdn_domain}/cdn-check\n"
@@ -706,6 +754,9 @@ except Exception:
     pass
 " "$RELAYS_FILE" "$NGINX_RELAYS_DIR" 2>/dev/null || true
     fi
+
+    # Авто-восстановление Nginx-проксирования подписок Белого Интернета (/sub/wl)
+    deploy_subscription_proxy_conf
 
     # Системное отключение IPv6
     if [[ $EUID -eq 0 ]]; then
