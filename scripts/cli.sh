@@ -95,10 +95,10 @@ info() {
 }
 
 run_privileged() {
-    if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    if [[ -n "${JUST1KBOT_NO_SUDO:-}" ]] || [[ ${EUID:-$(id -u)} -eq 0 ]]; then
         "$@"
     elif command -v sudo >/dev/null 2>&1; then
-        sudo "$@"
+        sudo env "PATH=$PATH" "$@"
     else
         "$@"
     fi

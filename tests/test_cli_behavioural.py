@@ -50,8 +50,10 @@ class CliBehaviouralTests(unittest.TestCase):
             encoding="utf-8",
         )
         docker_stub.chmod(0o755)
+        os.environ["JUST1KBOT_NO_SUDO"] = "1"
 
     def tearDown(self):
+        os.environ.pop("JUST1KBOT_NO_SUDO", None)
         self.test_dir.cleanup()
 
     def _run_cli_command(
@@ -61,6 +63,7 @@ class CliBehaviouralTests(unittest.TestCase):
         proc_env = os.environ.copy()
         proc_env["PROJECT_DIR"] = self.project_dir.as_posix()
         proc_env["JUST1KBOT_DIR"] = self.project_dir.as_posix()
+        proc_env["JUST1KBOT_NO_SUDO"] = "1"
         proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
         if env_vars:
             proc_env.update(env_vars)
@@ -597,6 +600,7 @@ detect_existing_nginx_sites "{nginx_dir.as_posix()}"
         test_script = f"""
 export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
 export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
 export PATH="{self.bin_dir.as_posix()}:$PATH"
 source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
 setup_external_nginx_integration "{nginx_dir.as_posix()}"
@@ -604,7 +608,11 @@ setup_external_nginx_integration "{nginx_dir.as_posix()}"
         proc = subprocess.run(
             ["bash", "-c", test_script], capture_output=True, text=True, check=False
         )
-        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(
+            proc.returncode,
+            0,
+            f"setup_external_nginx_integration failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}",
+        )
         self.assertTrue((sites_avail / "just1kbot.conf").exists())
         self.assertTrue((sites_enb / "just1kbot.conf").exists())
 
@@ -641,6 +649,7 @@ setup_external_nginx_integration "{nginx_dir.as_posix()}"
         test_script = f"""
 export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
 export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
 export PATH="{self.bin_dir.as_posix()}:$PATH"
 source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
 setup_external_nginx_integration "{nginx_dir.as_posix()}"
@@ -1045,8 +1054,10 @@ class ExternalNginxAndSetupReadinessTests(unittest.TestCase):
 
         self.bin_dir = self.root / "bin"
         self.bin_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["JUST1KBOT_NO_SUDO"] = "1"
 
     def tearDown(self):
+        os.environ.pop("JUST1KBOT_NO_SUDO", None)
         self.test_dir.cleanup()
 
     def test_check_existing_install_preserves_use_external_nginx(self):
@@ -1083,6 +1094,7 @@ echo "LOADED_USE_EXTERNAL_NGINX=$USE_EXTERNAL_NGINX"
                 "-c",
                 f'export PROJECT_DIR="{self.project_dir.as_posix()}"; '
                 f'export JUST1KBOT_DIR="{self.project_dir.as_posix()}"; '
+                f'export JUST1KBOT_NO_SUDO="1"; '
                 f'source "{self.project_dir.as_posix()}/scripts/cli.sh"; '
                 f'setup_external_nginx_integration "{nginx_dir.as_posix()}"',
             ],
@@ -1115,6 +1127,7 @@ echo "LOADED_USE_EXTERNAL_NGINX=$USE_EXTERNAL_NGINX"
         proc_env = os.environ.copy()
         proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
         proc_env["PROJECT_DIR"] = self.project_dir.as_posix()
+        proc_env["JUST1KBOT_NO_SUDO"] = "1"
 
         proc = subprocess.run(
             [
@@ -1202,6 +1215,7 @@ start_project_test
         script = f"""
 export PROJECT_DIR="{self.project_dir.as_posix()}"
 export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
 export PATH="{self.bin_dir.as_posix()}:$PATH"
 source "{self.project_dir.as_posix()}/scripts/cli.sh"
 
@@ -1217,6 +1231,7 @@ echo "CADDY_OK=$caddy_ok"
 """
         proc_env = os.environ.copy()
         proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
+        proc_env["JUST1KBOT_NO_SUDO"] = "1"
 
         proc = subprocess.run(
             ["bash", "-c", script],
