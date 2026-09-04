@@ -1349,8 +1349,12 @@ class SafeUninstallationBehaviouralTests(unittest.TestCase):
         crontab_mock.write_text(
             f"""#!/bin/bash
 if [[ "$1" == "-l" ]]; then
-    echo "0 2 * * * flock -n /tmp/just1kbot-backup.lock sh -c 'cd {self.project_dir.as_posix()}'"
-    echo "0 5 * * * other_job"
+    if [[ -f "{cron_log.as_posix()}" ]]; then
+        cat "{cron_log.as_posix()}"
+    else
+        echo "0 2 * * * flock -n /tmp/just1kbot-backup.lock sh -c 'cd {self.project_dir.as_posix()}'"
+        echo "0 5 * * * other_job"
+    fi
     exit 0
 fi
 if [[ "$1" == "-" ]]; then
@@ -1373,9 +1377,18 @@ exit 0
             f"""#!/bin/bash
 echo "$@" >> "{docker_log.as_posix()}"
 if [[ "$1" == "compose" && "$2" == "down" ]]; then exit 0; fi
-if [[ "$1" == "rm" ]]; then exit 0; fi
+if [[ "$1" == "ps" ]]; then exit 0; fi
+if [[ "$1" == "volume" && "$2" == "ls" ]]; then
+    echo "test_project_vol"
+    exit 0
+fi
+if [[ "$1" == "volume" && "$2" == "inspect" ]]; then
+    echo "just1kbot"
+    exit 0
+fi
 if [[ "$1" == "volume" ]]; then exit 0; fi
 if [[ "$1" == "network" ]]; then exit 0; fi
+if [[ "$1" == "images" ]]; then exit 0; fi
 if [[ "$1" == "image" ]]; then exit 0; fi
 exit 0
 """,
@@ -1388,10 +1401,10 @@ export PROJECT_DIR="{self.project_dir.as_posix()}"
 export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
 export JUST1KBOT_NO_SUDO="1"
 export JUST1KBOT_SYSCTL_D_CONF="{fake_sysctl.as_posix()}"
+export JUST1KBOT_GLOBAL_WRAPPER="{fake_wrapper.as_posix()}"
 export PATH="{self.bin_dir.as_posix()}:$PATH"
 source "{self.project_dir.as_posix()}/scripts/cli.sh"
 
-rm -f "{fake_wrapper.as_posix()}"
 cmd_uninstall --confirm=DELETE
 """
         proc = subprocess.run(
@@ -1406,11 +1419,108 @@ cmd_uninstall --confirm=DELETE
         self.assertIn("Just1kBot успешно и полностью удален с сервера без остатков", proc.stdout)
         self.assertFalse(self.project_dir.exists(), "PROJECT_DIR must be deleted completely")
         self.assertFalse(fake_sysctl.exists(), "sysctl configuration must be deleted")
-        self.assertFalse(fake_wrapper.exists(), "global wrapper must be deleted")
+        self.assertFalse(fake_wrapper.exists(), "global wrapper must be deleted by cmd_uninstall")
         if cron_log.exists():
             remaining_cron = cron_log.read_text(encoding="utf-8")
             self.assertNotIn("just1kbot-backup.lock", remaining_cron)
             self.assertIn("other_job", remaining_cron)
+
+    def test_uninstall_trailing_confirm_flag_fails_closed_without_parser_crash(self):
+        """cmd_uninstall --confirm without value must fail-closed (code 1) and not crash on shift."""
+        proc = self._run_cli("uninstall", "--confirm")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("В неинтерактивном режиме для удаления требуется явный флаг", proc.stdout + proc.stderr)
+        self.assertNotIn("shift: shift count out of range", proc.stdout + proc.stderr)
+
+    def test_uninstall_backup_copy_failure_aborts_fail_closed(self):
+        """When backup copy to safe destination fails, uninstall must abort (code 1) and preserve PROJECT_DIR."""
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        (backups_dir / "critical_data.sql.gz.age").write_text("precious_data", encoding="utf-8")
+
+        # Create a file at save path so mkdir -p fails
+        conflict_file = self.root / "blocked_dest"
+        conflict_file.write_text("blocker", encoding="utf-8")
+        invalid_save_dest = conflict_file / "sub_backups"
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export JUST1KBOT_BACKUP_SAVE_DIR="{invalid_save_dest.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+
+cmd_uninstall --confirm=DELETE
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}", "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1, "Uninstall must exit 1 when backup preservation fails")
+        self.assertIn("Fail-Closed", proc.stdout + proc.stderr)
+        self.assertTrue(self.project_dir.exists(), "PROJECT_DIR must NOT be deleted when backup copy fails")
+        self.assertTrue((backups_dir / "critical_data.sql.gz.age").exists(), "Original backups must remain intact")
+
+    def test_uninstall_preserves_foreign_docker_volumes(self):
+        """cmd_uninstall must only remove volumes belonging to just1kbot compose project."""
+        docker_log = self.root / "docker_volumes_tested.log"
+        (self.bin_dir / "docker").write_text(
+            f"""#!/bin/bash
+if [[ "$1" == "compose" ]]; then exit 0; fi
+if [[ "$1" == "ps" ]]; then exit 0; fi
+if [[ "$1" == "volume" && "$2" == "ls" ]]; then
+    echo "just1kbot_postgres_data"
+    echo "other_app_postgres_data"
+    exit 0
+fi
+if [[ "$1" == "volume" && "$2" == "inspect" ]]; then
+    vol="$5"
+    if [[ "$vol" == "just1kbot_postgres_data" ]]; then
+        echo "just1kbot"
+    else
+        echo "unrelated_app"
+    fi
+    exit 0
+fi
+if [[ "$1" == "volume" && "$2" == "rm" ]]; then
+    echo "RM_VOLUME: $@" >> "{docker_log.as_posix()}"
+    exit 0
+fi
+if [[ "$1" == "network" ]]; then exit 0; fi
+if [[ "$1" == "images" ]]; then exit 0; fi
+exit 0
+""",
+            encoding="utf-8",
+        )
+        (self.bin_dir / "docker").chmod(0o755)
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+
+cmd_uninstall --confirm=DELETE --purge-backups
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}", "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertTrue(docker_log.exists())
+        log_content = docker_log.read_text(encoding="utf-8")
+        self.assertIn("just1kbot_postgres_data", log_content)
+        self.assertNotIn("other_app_postgres_data", log_content, "Foreign docker volume must NEVER be removed!")
 
     def test_uninstall_preserves_backups_when_keep_backups_specified(self):
         """cmd_uninstall preserves backup directory when --keep-backups is given."""

@@ -45,6 +45,8 @@ class TestJust1kNodeScript(unittest.TestCase):
         self.letsencrypt_dir.mkdir(parents=True, exist_ok=True)
         self.www_html_dir = Path(self.temp_dir) / "var" / "www" / "html"
         self.www_html_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_dir = Path(self.temp_dir) / "var" / "backups" / "just1knode"
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.bin_dir = Path(self.temp_dir) / "bin"
         self.bin_dir.mkdir(parents=True, exist_ok=True)
 
@@ -131,7 +133,7 @@ exit 0
         env["XRAY_CONFIG"] = str(self.xray_config_dir / "config.json")
         env["XRAY_SHARE_DIR"] = str(self.xray_share_dir)
         env["XRAY_BIN"] = str(self.bin_dir / "xray")
-        env["BACKUP_DIR"] = str(Path(self.temp_dir) / "backups")
+        env["BACKUP_DIR"] = str(self.backup_dir)
         env["NGINX_CONF_DIR"] = str(self.nginx_conf_dir)
         env["NGINX_RELAYS_DIR"] = str(self.nginx_relays_d)
         env["XRAY_API_DIR"] = str(self.xray_api_dir)
@@ -145,6 +147,8 @@ exit 0
         if extra_env:
             env.update(extra_env)
 
+        backup_dir_val = extra_env.get("BACKUP_DIR", str(self.backup_dir)) if extra_env else str(self.backup_dir)
+
         # Source just1knode.sh functions and run snippet with root bypass for testing
         full_script = f"""
 export STATE_DIR='{self.state_dir}'
@@ -155,7 +159,7 @@ export XRAY_CONFIG_DIR='{self.xray_config_dir}'
 export XRAY_CONFIG='{self.xray_config_dir / "config.json"}'
 export XRAY_SHARE_DIR='{self.xray_share_dir}'
 export XRAY_BIN='{self.bin_dir / "xray"}'
-export BACKUP_DIR='{Path(self.temp_dir) / "backups"}'
+export BACKUP_DIR='{backup_dir_val}'
 export NGINX_CONF_DIR='{self.nginx_conf_dir}'
 export NGINX_RELAYS_DIR='{self.nginx_relays_d}'
 export XRAY_API_DIR='{self.xray_api_dir}'
@@ -1259,7 +1263,7 @@ ensure_xrayapi_user
         self.assertTrue(self.state_dir.exists())
 
     def test_uninstall_node_complete_cleanup_lifecycle(self):
-        """just1knode uninstall --confirm=DELETE removes services, binaries, configs, nginx sites, user, and state."""
+        """just1knode uninstall --confirm=DELETE --purge-backups removes services, binaries, configs, nginx sites, user, and state."""
         self._prepare_base_env()
 
         # 1. Setup mock services and files
@@ -1294,10 +1298,14 @@ ensure_xrayapi_user
         hook_dir.mkdir(parents=True, exist_ok=True)
         (hook_dir / "restart-xray-nginx.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
 
-        # Fake install dir
+        # Fake install dir & global bin
         fake_install_dir = Path(self.temp_dir) / "opt" / "just1knode"
         fake_install_dir.mkdir(parents=True, exist_ok=True)
         (fake_install_dir / "marker.txt").write_text("just1knode", encoding="utf-8")
+
+        fake_global_bin = Path(self.temp_dir) / "usr_local_bin" / "just1knode"
+        fake_global_bin.parent.mkdir(parents=True, exist_ok=True)
+        fake_global_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
 
         # Mock userdel, groupdel, pkill
         self._create_mock_script("userdel", "#!/bin/sh\nexit 0\n")
@@ -1306,10 +1314,12 @@ ensure_xrayapi_user
 
         extra_env = {
             "INSTALL_DIR": str(fake_install_dir),
+            "JUST1KNODE_GLOBAL_BIN": str(fake_global_bin),
+            "BACKUP_DIR": str(self.backup_dir),
             "JUST1KNODE_ALLOW_CUSTOM_INSTALL_RM": "1",
         }
 
-        res = self._run_shell_snippet("uninstall_node --confirm=DELETE", extra_env=extra_env)
+        res = self._run_shell_snippet("uninstall_node --confirm=DELETE --purge-backups", extra_env=extra_env)
         self.assertEqual(res.returncode, 0, f"uninstall_node failed: {res.stderr}\nOutput: {res.stdout}")
         self.assertIn("just1knode успешно и полностью удален с сервера без остатков", res.stdout)
 
@@ -1325,9 +1335,36 @@ ensure_xrayapi_user
         self.assertFalse((nginx_sites_enabled / "just1k-origin.conf").exists(), "origin nginx link must be removed")
         self.assertFalse((nginx_conf_d / "xhttp-map.conf").exists(), "xhttp-map.conf must be removed")
         self.assertTrue((nginx_sites_avail / "default").exists(), "default site must be restored from default.user.bak")
+        self.assertFalse((nginx_sites_avail / "default.user.bak").exists(), "default.user.bak must be removed after restore")
         self.assertFalse((self.www_html_dir / "index.html").exists(), "camouflage index.html must be removed")
         self.assertFalse((hook_dir / "restart-xray-nginx.sh").exists(), "certbot hook must be removed")
         self.assertFalse(fake_install_dir.exists(), "INSTALL_DIR must be removed")
+        self.assertFalse(fake_global_bin.exists(), "JUST1KNODE_GLOBAL_BIN must be removed")
+        self.assertFalse(self.backup_dir.exists(), "BACKUP_DIR must be removed when --purge-backups is passed")
+
+    def test_uninstall_node_preserves_backups_without_purge_flag(self):
+        """uninstall_node preserves BACKUP_DIR unless --purge-backups is explicitly given."""
+        self._prepare_base_env()
+        (self.backup_dir / "xray_state.tar.gz").write_text("backup_content", encoding="utf-8")
+
+        extra_env = {
+            "BACKUP_DIR": str(self.backup_dir),
+            "JUST1KNODE_ALLOW_CUSTOM_INSTALL_RM": "1",
+        }
+
+        res = self._run_shell_snippet("uninstall_node --confirm=DELETE", extra_env=extra_env)
+        self.assertEqual(res.returncode, 0, f"uninstall_node failed: {res.stderr}\nOutput: {res.stdout}")
+        self.assertTrue(self.backup_dir.exists(), "BACKUP_DIR must remain when --purge-backups is omitted")
+        self.assertTrue((self.backup_dir / "xray_state.tar.gz").exists(), "Backup archive must remain intact")
+        self.assertIn("Каталог бэкапов сохранен", res.stdout)
+
+    def test_uninstall_node_trailing_confirm_flag_fails_closed(self):
+        """uninstall_node with trailing --confirm flag must fail-closed (code 1) without crashing."""
+        self._prepare_base_env()
+        res = self._run_shell_snippet("uninstall_node --confirm")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("В неинтерактивном режиме для удаления требуется явный флаг", res.stdout + res.stderr)
+        self.assertNotIn("shift: shift count out of range", res.stdout + res.stderr)
 
 
 if __name__ == "__main__":

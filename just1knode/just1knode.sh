@@ -410,6 +410,7 @@ uninstall_node() {
 
     local force=false
     local confirm_code=""
+    local purge_backups=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -422,8 +423,19 @@ uninstall_node() {
                 shift
                 ;;
             --confirm)
-                confirm_code="${2:-}"
-                shift 2
+                if [[ $# -ge 2 && "$2" != --* ]]; then
+                    confirm_code="$2"
+                    shift 2
+                else
+                    shift
+                fi
+                ;;
+            --purge-backups)
+                purge_backups=true
+                shift
+                ;;
+            --uninstall)
+                shift
                 ;;
             --yes|-y)
                 force=true
@@ -443,20 +455,21 @@ uninstall_node() {
     echo ""
     echo -e "${BOLD}Что будет остановлено и удалено без остатка:${NC}"
     echo -e "  1. ${BOLD}Системные службы systemd:${NC} остановка и отключение xray.service, xray-api.service"
-    echo -e "  2. ${BOLD}Юниты systemd:${NC} /etc/systemd/system/xray*.service (daemon-reload)"
+    echo -e "  2. ${BOLD}Юниты systemd:${NC} /etc/systemd/system/xray*.service (целевой reset-failed)"
     echo -e "  3. ${BOLD}Процессы:${NC} завершение всех активных фоновых процессов Xray и Uvicorn API"
     echo -e "  4. ${BOLD}Пользователь и группа:${NC} системная учетная запись 'xrayapi'"
     echo -e "  5. ${BOLD}Исполняемые файлы и базы:${NC} ${XRAY_BIN:-/usr/local/bin/xray}, ${XRAY_SHARE_DIR:-/usr/local/share/xray} (geoip/geosite)"
     echo -e "  6. ${BOLD}Конфигурации Xray:${NC} ${XRAY_CONFIG_DIR:-/usr/local/etc/xray}"
     echo -e "  7. ${BOLD}Агент Xray-API:${NC} ${XRAY_API_DIR:-/opt/xray-api}, ${XRAY_API_ETC:-/etc/xray-api}, ${XRAY_API_LIB:-/var/lib/xray-api}"
     echo -e "  8. ${BOLD}Веб-сервер Nginx:${NC} виртуальный хост just1k-origin.conf, conf.d/xhttp-map.conf, just1k_relays.d"
-    echo -e "     (восстановление default сайта, если создавалась резервная копия default.user.bak)"
+    echo -e "     (атомарное восстановление default сайта, если создавалась резервная копия default.user.bak)"
     echo -e "  9. ${BOLD}Let's Encrypt renewal hook:${NC} deploy-скрипт перезапуска служб"
     echo -e "  10. ${BOLD}Камуфляжный сайт:${NC} /var/www/html/index.html (если создан just1knode)"
-    echo -e "  11. ${BOLD}Конфигурация ядра:${NC} /etc/sysctl.d/99-disable-ipv6.conf"
-    echo -e "  12. ${BOLD}Каталог состояния и бэкапов:${NC} ${STATE_DIR:-/etc/just1knode}, ${BACKUP_DIR:-/var/backups/just1knode}"
-    echo -e "  13. ${BOLD}Глобальная команда:${NC} /usr/local/bin/just1knode"
-    echo -e "  14. ${BOLD}Директория утилиты:${NC} ${INSTALL_DIR:-/opt/just1knode}"
+    echo -e "  11. ${BOLD}Конфигурация ядра:${NC} /etc/sysctl.d/99-disable-ipv6.conf (восстановление IPv6 в runtime)"
+    echo -e "  12. ${BOLD}Фаервол UFW:${NC} удаление открытых портов (8444, Relay tunnel)"
+    echo -e "  13. ${BOLD}Каталог состояния и бэкапов:${NC} ${STATE_DIR:-/etc/just1knode} (бэкапы в ${BACKUP_DIR:-/var/backups/just1knode} сохраняются без --purge-backups)"
+    echo -e "  14. ${BOLD}Глобальная команда:${NC} /usr/local/bin/just1knode"
+    echo -e "  15. ${BOLD}Директория утилиты:${NC} ${INSTALL_DIR:-/opt/just1knode}"
     echo ""
     echo -e "${BOLD}${RED}⚠️  ВНИМАНИЕ: СЕРВЕР ПЕРЕСТАНЕТ ПРИНИМАТЬ VPN-ТРАФИК И ОБСЛУЖИВАТЬ КЛИЕНТОВ!${NC}"
     echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}"
@@ -492,36 +505,38 @@ uninstall_node() {
         fi
     fi
 
-    info "1/10. Остановка и отключение системных служб systemd..."
+    local node_cleanup_errors=()
+
+    info "1/11. Остановка и отключение системных служб systemd..."
     systemctl stop xray xray-api 2>/dev/null || true
     systemctl disable xray xray-api 2>/dev/null || true
     rm -f "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray.service" "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray-api.service" 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
-    systemctl reset-failed 2>/dev/null || true
+    systemctl reset-failed xray xray-api 2>/dev/null || true
 
-    info "2/10. Завершение активных процессов ядра и API..."
+    info "2/11. Завершение активных процессов ядра и API..."
     pkill -9 -f "${XRAY_BIN:-/usr/local/bin/xray}" 2>/dev/null || true
     pkill -9 -u xrayapi 2>/dev/null || true
 
-    info "3/10. Удаление пользователя и группы xrayapi..."
+    info "3/11. Удаление пользователя и группы xrayapi..."
     if id -u xrayapi >/dev/null 2>&1; then
-        userdel -f xrayapi 2>/dev/null || userdel xrayapi 2>/dev/null || true
+        userdel -f xrayapi 2>/dev/null || userdel xrayapi 2>/dev/null || node_cleanup_errors+=("Не удалось удалить системного пользователя xrayapi")
     fi
     if getent group xrayapi >/dev/null 2>&1; then
         groupdel xrayapi 2>/dev/null || true
     fi
 
-    info "4/10. Удаление бинарных файлов и конфигураций Xray..."
+    info "4/11. Удаление бинарных файлов и конфигураций Xray..."
     rm -f "${XRAY_BIN:-/usr/local/bin/xray}" 2>/dev/null || true
     rm -rf "${XRAY_CONFIG_DIR:-/usr/local/etc/xray}" 2>/dev/null || true
     rm -rf "${XRAY_SHARE_DIR:-/usr/local/share/xray}" 2>/dev/null || true
 
-    info "5/10. Удаление агента Xray-API и виртуального окружения..."
+    info "5/11. Удаление агента Xray-API и виртуального окружения..."
     rm -rf "${XRAY_API_DIR:-/opt/xray-api}" 2>/dev/null || true
     rm -rf "${XRAY_API_ETC:-/etc/xray-api}" 2>/dev/null || true
     rm -rf "${XRAY_API_LIB:-/var/lib/xray-api}" 2>/dev/null || true
 
-    info "6/10. Очистка конфигурации Nginx..."
+    info "6/11. Очистка конфигурации Nginx..."
     local nginx_conf_dir="${NGINX_CONF_DIR:-/etc/nginx}"
     rm -f "${nginx_conf_dir}/sites-enabled/just1k-origin.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/sites-available/just1k-origin.conf" 2>/dev/null || true
@@ -533,16 +548,21 @@ uninstall_node() {
 
     if [[ -f "${nginx_conf_dir}/sites-available/default.user.bak" ]]; then
         info "Восстановление исходного default сайта в Nginx..."
-        cp -a "${nginx_conf_dir}/sites-available/default.user.bak" "${nginx_conf_dir}/sites-available/default" 2>/dev/null || true
-        ln -sf "${nginx_conf_dir}/sites-available/default" "${nginx_conf_dir}/sites-enabled/default" 2>/dev/null || true
-        rm -f "${nginx_conf_dir}/sites-available/default.user.bak" 2>/dev/null || true
+        if cp -a "${nginx_conf_dir}/sites-available/default.user.bak" "${nginx_conf_dir}/sites-available/default" 2>/dev/null; then
+            ln -sf "${nginx_conf_dir}/sites-available/default" "${nginx_conf_dir}/sites-enabled/default" 2>/dev/null || true
+            rm -f "${nginx_conf_dir}/sites-available/default.user.bak" 2>/dev/null || true
+        else
+            node_cleanup_errors+=("Не удалось восстановить default.user.bak в Nginx")
+        fi
     fi
 
-    if command -v nginx >/dev/null 2>&1 && nginx -t 2>/dev/null; then
-        systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+    if command -v nginx >/dev/null 2>&1; then
+        if nginx -t >/dev/null 2>&1; then
+            systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+        fi
     fi
 
-    info "7/10. Удаление камуфляжного сайта и хуков Let's Encrypt..."
+    info "7/11. Удаление камуфляжного сайта и хуков Let's Encrypt..."
     local www_index="${WWW_HTML_DIR:-/var/www/html}/index.html"
     if [[ -f "$www_index" ]] && grep -q "Cloud Ingress Network Node" "$www_index" 2>/dev/null; then
         rm -f "$www_index" 2>/dev/null || true
@@ -553,21 +573,51 @@ uninstall_node() {
     fi
     rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" 2>/dev/null || true
 
-    info "8/10. Удаление конфигурации ядра sysctl..."
+    info "8/11. Удаление конфигурации ядра sysctl и восстановление IPv6..."
     if [[ -f /etc/sysctl.d/99-disable-ipv6.conf ]]; then
         rm -f /etc/sysctl.d/99-disable-ipv6.conf 2>/dev/null || true
         if command -v sysctl >/dev/null 2>&1; then
+            sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
+            sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1 || true
+            sysctl -w net.ipv6.conf.lo.disable_ipv6=0 >/dev/null 2>&1 || true
             sysctl --system >/dev/null 2>&1 || true
         fi
     fi
 
-    info "9/10. Удаление состояния, бэкапов и блокировок..."
+    info "9/11. Очистка правил фаервола (UFW)..."
+    if command -v ufw >/dev/null 2>&1; then
+        local st_relay_port st_origin_ip st_bot_ip
+        st_relay_port="$(get_state_val "relay_port" 2>/dev/null || true)"
+        st_origin_ip="$(get_state_val "origin_ip" 2>/dev/null || true)"
+        st_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+
+        if [[ -n "$st_relay_port" ]]; then
+            if [[ -n "$st_origin_ip" ]]; then
+                ufw delete allow from "$st_origin_ip" to any port "$st_relay_port" proto tcp 2>/dev/null || true
+            fi
+            ufw delete allow "$st_relay_port"/tcp 2>/dev/null || true
+            ufw delete allow "$st_relay_port" 2>/dev/null || true
+        fi
+        if [[ -n "$st_bot_ip" ]]; then
+            ufw delete allow from "$st_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+        fi
+        ufw delete allow 8444/tcp 2>/dev/null || true
+        ufw delete allow 8444 2>/dev/null || true
+    fi
+
+    info "10/11. Удаление состояния, бэкапов и блокировок..."
     rm -rf "${STATE_DIR:-/etc/just1knode}" 2>/dev/null || true
-    rm -rf "${BACKUP_DIR:-/var/backups/just1knode}" 2>/dev/null || true
+    if [[ "$purge_backups" == "true" ]]; then
+        rm -rf "${BACKUP_DIR:-/var/backups/just1knode}" 2>/dev/null || true
+        log "Каталог бэкапов ${BACKUP_DIR:-/var/backups/just1knode} удален (--purge-backups)."
+    else
+        log "Каталог бэкапов сохранен: ${BACKUP_DIR:-/var/backups/just1knode} (используйте --purge-backups для удаления)."
+    fi
     rm -rf /run/lock/just1knode /tmp/just1knode* 2>/dev/null || true
 
-    info "10/10. Удаление глобальной команды и каталога установки..."
-    rm -f /usr/local/bin/just1knode 2>/dev/null || true
+    info "11/11. Удаление глобальной команды и каталога установки..."
+    local global_bin="${JUST1KNODE_GLOBAL_BIN:-/usr/local/bin/just1knode}"
+    rm -f "$global_bin" 2>/dev/null || true
 
     local install_dir="${INSTALL_DIR:-/opt/just1knode}"
     cd /tmp || cd /
@@ -577,8 +627,35 @@ uninstall_node() {
         fi
     fi
 
+    # Post-Uninstall Verification & Fail-Closed Reporting
+    info "Верификация чистоты системы после удаления (Post-Verification)..."
+    if [[ -d "$install_dir" && "$install_dir" == "/opt/just1knode" ]]; then
+        node_cleanup_errors+=("Директория установки все еще существует: $install_dir")
+    fi
+    if [[ -e "$global_bin" || -L "$global_bin" ]]; then
+        node_cleanup_errors+=("Глобальный исполняемый файл все еще существует: $global_bin")
+    fi
+    if [[ -f /etc/sysctl.d/99-disable-ipv6.conf ]]; then
+        node_cleanup_errors+=("Файл sysctl 99-disable-ipv6.conf все еще существует")
+    fi
+    if [[ -e "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray.service" ]]; then
+        node_cleanup_errors+=("Служба systemd xray.service все еще существует")
+    fi
+    if [[ -e "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray-api.service" ]]; then
+        node_cleanup_errors+=("Служба systemd xray-api.service все еще существует")
+    fi
+
     echo ""
-    log "✨ just1knode успешно и полностью удален с сервера без остатков."
+    if [[ ${#node_cleanup_errors[@]} -gt 0 ]]; then
+        warn "Внимание: удаление just1knode завершено с ошибками (обнаружены остаточные ресурсы)!"
+        for err in "${node_cleanup_errors[@]}"; do
+            echo -e "  ${RED}• $err${NC}"
+        done
+        error "Процедура удаления завершилась со статусом FAIL-CLOSED (код 1). Устраните указанные остатки вручную."
+        return 1
+    fi
+
+    log "✨ just1knode успешно и полностью удален с сервера без остатков (верификация пройдена)."
     exit 0
 }
 
