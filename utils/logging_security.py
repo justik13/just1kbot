@@ -42,8 +42,8 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
             r"database[_-]?url|redis[_-]?url|redis[_-]?password|postgres[_-]?password|"
             r"db[_-]?password|db[_-]?encryption[_-]?keys?|yookassa[_-]?secret[_-]?key|"
             r"age[_-]?secret[_-]?key|secret[_-]?key|private[_-]?key|preshared[_-]?key|"
-            r"password|passwd|secret)['\"]?\s*[:=]\s*)"
-            r"(['\"]?)[^\s,;'\"}\]]+\2"
+            r"password|passwd|secret|token)['\"]?\s*[:=]\s*)"
+            r"(?:\"(?:\\.|[^\r\n\"\\])*\"|'(?:\\.|[^\r\n'\\])*'|[^\s,;'\"}\]]+)"
         ),
         rf"\1{REDACTED}",
     ),

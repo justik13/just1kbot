@@ -890,6 +890,146 @@ cmd_update
         self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stdout + proc.stderr)
         self.assertIn("Diverged", proc.stdout + proc.stderr)
 
+    def test_cmd_update_cold_deploy_stops_bot_before_migrate_and_audits_invariants(self):
+        """cmd_update performs Cold Deploy (stops bot before migrate) and audits invariants post-migration."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+
+        # Clone another copy to push an update upstream
+        other_dir = self.root / "other"
+        upstream_dir = self.root / "upstream.git"
+        subprocess.run(
+            ["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "config", "user.email", "dev@test.local"], cwd=other_dir, check=True)
+        subprocess.run(["git", "config", "user.name", "Developer"], cwd=other_dir, check=True)
+        (other_dir / "app_version.txt").write_text("v2.0.0", encoding="utf-8")
+        subprocess.run(["git", "add", "app_version.txt"], cwd=other_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Release v2.0.0"], cwd=other_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=other_dir, check=True)
+
+        docker_log = self.root / "docker_calls.log"
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            f"#!/bin/bash\n"
+            f'echo "$*" >> "{docker_log.as_posix()}"\n'
+            f'if [[ "$1" == "inspect" ]]; then\n'
+            f'    if [[ "$*" == *"just1kbot_caddy"* ]]; then echo "running"; elif [[ "$*" == *"just1kbot_migrate"* ]]; then echo "exited/0"; else echo "healthy"; fi\n'
+            f'    exit 0\n'
+            f'fi\n'
+            f"exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        test_script = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"cmd_update failed: {proc.stdout}\n{proc.stderr}")
+        self.assertIn("Остановка сервиса бота перед миграциями (Cold Deploy)", proc.stdout)
+        self.assertIn("Применение миграций базы данных", proc.stdout)
+        self.assertIn("Проверка инвариантов базы данных", proc.stdout)
+
+        # Check call sequence in docker log
+        calls = docker_log.read_text(encoding="utf-8").splitlines()
+        stop_idx = next((i for i, line in enumerate(calls) if "compose stop bot" in line), -1)
+        migrate_idx = next((i for i, line in enumerate(calls) if "compose run --rm migrate" in line), -1)
+        audit_idx = next((i for i, line in enumerate(calls) if "scripts/audit_invariants.py" in line), -1)
+
+        self.assertNotEqual(stop_idx, -1, "docker compose stop bot must be called")
+        self.assertNotEqual(migrate_idx, -1, "docker compose run --rm migrate must be called")
+        self.assertNotEqual(audit_idx, -1, "scripts/audit_invariants.py must be called")
+        self.assertLess(stop_idx, migrate_idx, "Cold Deploy: bot must be stopped before running migrate")
+        self.assertLess(migrate_idx, audit_idx, "Invariant check must run after migrate")
+
+    def test_cmd_update_aborts_and_rolls_back_when_invariant_audit_fails(self):
+        """cmd_update aborts rollout and initiates rollback if invariant audit fails."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+
+        # Clone another copy to push an update upstream
+        other_dir = self.root / "other"
+        upstream_dir = self.root / "upstream.git"
+        subprocess.run(
+            ["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "config", "user.email", "dev@test.local"], cwd=other_dir, check=True)
+        subprocess.run(["git", "config", "user.name", "Developer"], cwd=other_dir, check=True)
+        (other_dir / "app_version.txt").write_text("v2.0.0", encoding="utf-8")
+        subprocess.run(["git", "add", "app_version.txt"], cwd=other_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Release v2.0.0"], cwd=other_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=other_dir, check=True)
+
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            "#!/bin/bash\n"
+            'if [[ "$*" == *"scripts/audit_invariants.py"* ]]; then\n'
+            '    echo "Invariant check violation simulated" >&2\n'
+            '    exit 1\n'
+            'fi\n'
+            'if [[ "$1" == "inspect" ]]; then\n'
+            '    if [[ "$*" == *"just1kbot_caddy"* ]]; then echo "running"; elif [[ "$*" == *"just1kbot_migrate"* ]]; then echo "exited/0"; else echo "healthy"; fi\n'
+            '    exit 0\n'
+            'fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        test_script = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn(
+            "Нарушение инвариантов базы данных после применения миграций! Развёртывание прервано.",
+            proc.stdout + proc.stderr,
+        )
+        self.assertIn("Выполняем откат исходного кода к коммиту", proc.stdout + proc.stderr)
+
 
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
     """Regression guard: `error()` in scripts/setup.sh must abort the whole
@@ -1294,7 +1434,7 @@ class SafeUninstallationBehaviouralTests(unittest.TestCase):
         return subprocess.run(
             ["bash", (self.project_dir / "scripts" / "cli.sh").as_posix(), *args],
             cwd=str(self.project_dir),
-            input=input_text,
+            input=input_text if input_text is not None else "",
             capture_output=True,
             text=True,
             env=proc_env,
