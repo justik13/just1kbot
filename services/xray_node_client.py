@@ -12,6 +12,8 @@ from typing import Any
 
 import aiohttp
 
+from utils.logging_security import sanitize_short
+
 logger = logging.getLogger(__name__)
 
 
@@ -140,7 +142,7 @@ class XrayNodeClient:
                         )
                         await asyncio.sleep(0.5 * (2**attempt))
                         continue
-                    return status_code, None, f"HTTP {status_code}: {text}"
+                    return status_code, None, f"HTTP {status_code}: {sanitize_short(text, limit=200)}"
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 if attempt < self.max_retries:
                     logger.warning(
