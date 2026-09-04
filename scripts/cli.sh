@@ -265,21 +265,42 @@ cmd_preflight() {
         fi
     done
 
-    # Проверка доступности портов 80 и 443 через Python socket bind (если Caddy еще не запущен)
+    # Проверка доступности портов 80 и 443 (если Caddy еще не запущен)
     local caddy_running
     caddy_running=$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo "")
     if [[ "$caddy_running" != "running" ]] && command -v python3 >/dev/null 2>&1; then
         local port_conflict
         port_conflict=$(python3 -c "
-import socket
+import socket, errno
+
 for p in [80, 443]:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # 1. Проверяем, слушает ли кто-то порт локально
+    s_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s_conn.settimeout(0.3)
     try:
-        s.bind(('0.0.0.0', p))
-        s.close()
-    except Exception as e:
-        print(f'{p}:{e}')
-        break
+        if s_conn.connect_ex(('127.0.0.1', p)) == 0:
+            print(f'{p}:Port already in use by active listener on 127.0.0.1:{p}')
+            break
+    except Exception:
+        pass
+    finally:
+        s_conn.close()
+
+    # 2. Проверяем через bind на EADDRINUSE (игнорируем EACCES для непривилегированных пользователей)
+    s_bind = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s_bind.bind(('0.0.0.0', p))
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            print(f'{p}:Address already in use ({e})')
+            break
+    except Exception:
+        pass
+    finally:
+        try:
+            s_bind.close()
+        except Exception:
+            pass
 " 2>/dev/null || echo "")
         if [[ -n "$port_conflict" ]]; then
             error "Порт для Caddy недоступен ($port_conflict). Убедитесь, что порты 80 и 443 свободны на хосте."
