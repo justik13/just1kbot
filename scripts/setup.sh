@@ -900,6 +900,10 @@ start_project() {
 }
 
 main() {
+    if [[ "${1:-}" == "--uninstall" || "${1:-}" == "uninstall" ]]; then
+        shift
+        exec "${PROJECT_DIR}/scripts/cli.sh" uninstall "$@"
+    fi
     check_root
     check_existing_install
     install_dependencies

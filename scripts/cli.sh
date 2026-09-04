@@ -15,6 +15,7 @@
 #   just1kbot stop          - Остановить сервисы
 #   just1kbot doctor        - Диагностика сети, SSL, портов и Telegram API
 #   just1kbot clean         - Очистить старые слои Docker
+#   just1kbot uninstall     - Полное безопасное удаление Just1kBot с сервера
 #
 # =============================================================================
 
@@ -1616,6 +1617,307 @@ cmd_clean() {
     log "Неиспользуемые образы и слои Docker успешно удалены."
 }
 
+# --- 10. Полное удаление проекта (Uninstall) ---
+cmd_uninstall() {
+    local force=false
+    local confirm_code=""
+    local keep_backups=""
+    local purge_backups=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force|-f)
+                force=true
+                shift
+                ;;
+            --confirm=*)
+                confirm_code="${1#*=}"
+                shift
+                ;;
+            --confirm)
+                if [[ $# -ge 2 && "$2" != --* ]]; then
+                    confirm_code="$2"
+                    shift 2
+                else
+                    shift
+                fi
+                ;;
+            --keep-backups)
+                keep_backups=true
+                shift
+                ;;
+            --purge-backups)
+                purge_backups=true
+                keep_backups=false
+                shift
+                ;;
+            --yes|-y)
+                force=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$PROJECT_DIR" || "$PROJECT_DIR" == "/" || "$PROJECT_DIR" == "/root" || "$PROJECT_DIR" == "/home" || "$PROJECT_DIR" == "/var" || "$PROJECT_DIR" == "/usr" || "$PROJECT_DIR" == "/etc" ]]; then
+        error "Критическая ошибка: недопустимый или небезопасный путь PROJECT_DIR='$PROJECT_DIR' для удаления!"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}${RED}🚨 ВНИМАНИЕ: ПОЛНОЕ И БЕЗВОЗВРАТНОЕ УДАЛЕНИЕ JUST1KBOT (UNINSTALL)${NC}"
+    echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "Вы собираетесь полностью удалить Just1kBot с сервера (${BOLD}${PROJECT_DIR}${NC})."
+    echo ""
+    echo -e "${BOLD}Что будет остановлено и удалено без остатка:${NC}"
+    echo -e "  1. ${BOLD}Docker-контейнеры:${NC} just1kbot_app, just1kbot_db, just1kbot_redis, just1kbot_caddy, just1kbot_migrate, just1kbot_backup"
+    echo -e "  2. ${BOLD}Docker-тома (Volumes):${NC} постоянные хранилища БД PostgreSQL, кэш Redis, сертификаты Caddy (только проекта Just1kBot)"
+    echo -e "  3. ${BOLD}Docker-сети:${NC} изолированные сети проекта (backend_net, frontend_net)"
+    echo -e "  4. ${BOLD}Планировщик crontab:${NC} автозадачи резервного копирования базы данных"
+    echo -e "  5. ${BOLD}Веб-сервер Nginx:${NC} виртуальные хосты /etc/nginx/sites-*/just1kbot.conf (если настраивались)"
+    echo -e "  6. ${BOLD}Конфигурация ядра:${NC} /etc/sysctl.d/99-just1kbot.conf (vm.overcommit_memory)"
+    echo -e "  7. ${BOLD}Глобальная команда:${NC} исполняемый скрипт /usr/local/bin/just1kbot"
+    echo -e "  8. ${BOLD}Временные файлы:${NC} блокировки и временные дампы /tmp/just1kbot*"
+    echo -e "  9. ${BOLD}Бэкапы БД:${NC} каталог ${PROJECT_DIR}/backups (по умолчанию защищаются сохранением в /root/just1kbot_backups_saved)"
+    echo -e "  10. ${BOLD}Директория проекта:${NC} ${PROJECT_DIR} (исходный код, .env с ключами, конфиги)"
+    echo ""
+    echo -e "${BOLD}${RED}⚠️  ВНИМАНИЕ: ВСЕ ДАННЫЕ ПОЛЬЗОВАТЕЛЕЙ, БАЛАНСЫ, ТАРИФЫ И КЛЮЧИ БУДУТ УНИЧТОЖЕНЫ!${NC}"
+    echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    if [[ "$confirm_code" == "DELETE" || "$confirm_code" == "УДАЛИТЬ" ]]; then
+        info "Подтверждение удаления получено через аргумент командной строки (--confirm)."
+    elif [[ "$force" == "true" ]]; then
+        error "Для удаления с флагом --force / --yes требуется явное подтверждение: --confirm=DELETE (или --confirm=УДАЛИТЬ). Процедура прервана (Fail-Closed)."
+        return 1
+    else
+        # Confirmation step 1
+        local c1="n"
+        if ! read -r -p "Вы действительно хотите начать процедуру полного удаления Just1kBot? [y/N]: " c1 2>/dev/null; then
+            error "В неинтерактивном режиме для удаления требуется явный флаг: --confirm=DELETE (или --confirm=УДАЛИТЬ). Процедура прервана (Fail-Closed)."
+            return 1
+        fi
+        if [[ ! "$c1" =~ ^[Yy]$ ]]; then
+            info "Удаление отменено пользователем."
+            return 0
+        fi
+
+        # Backups handling prompt
+        local backups_dir="${PROJECT_DIR}/backups"
+        if [[ -d "$backups_dir" ]] && [[ -n "$(ls -A "$backups_dir" 2>/dev/null)" ]] && [[ -z "$keep_backups" && "$purge_backups" == "false" ]]; then
+            echo ""
+            echo -e "${YELLOW}Обнаружены файлы резервных копий базы данных в ${backups_dir}:${NC}"
+            # shellcheck disable=SC2012
+            ls -lh "$backups_dir" 2>/dev/null | head -n 10
+            echo ""
+            echo -e "  [${BOLD}1${NC}] ${GREEN}Сохранить бэкапы в /root/just1kbot_backups_saved перед удалением (Рекомендуется)${NC}"
+            echo -e "  [${BOLD}2${NC}] ${RED}Удалить бэкапы безвозвратно вместе со всем проектом${NC}"
+            local b_choice="1"
+            if ! read -r -p "Выберите действие [1/2] (по умолчанию: 1): " b_choice 2>/dev/null; then
+                b_choice="1"
+            fi
+            b_choice="${b_choice:-1}"
+            if [[ "$b_choice" == "2" ]]; then
+                keep_backups=false
+                purge_backups=true
+            else
+                keep_backups=true
+            fi
+        fi
+
+        # Confirmation step 2 (strict keyword match)
+        echo ""
+        echo -e "${BOLD}${RED}ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ! Это действие необратимо.${NC}"
+        local c2=""
+        if ! read -r -p "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2 2>/dev/null; then
+            c2=""
+        fi
+        if [[ "$c2" != "DELETE" && "$c2" != "УДАЛИТЬ" ]]; then
+            warn "Подтверждение не совпало (введено: '$c2'). Удаление отменено!"
+            return 0
+        fi
+    fi
+
+    # 1. Backups handling before directory deletion (Fail-Closed copy & verify)
+    local backups_dir="${PROJECT_DIR}/backups"
+    if [[ "$keep_backups" == "true" ]] || { [[ "$purge_backups" != "true" ]] && [[ -d "$backups_dir" ]] && [[ -n "$(ls -A "$backups_dir" 2>/dev/null)" ]]; }; then
+        local safe_backup_dest="${JUST1KBOT_BACKUP_SAVE_DIR:-/root/just1kbot_backups_saved}"
+        info "Сохранение резервных копий в $safe_backup_dest..."
+        if ! (run_privileged mkdir -p "$safe_backup_dest" 2>/dev/null || mkdir -p "$safe_backup_dest" 2>/dev/null); then
+            error "Не удалось создать каталог для сохранения бэкапов: $safe_backup_dest! Процедура удаления прервана (Fail-Closed)."
+            return 1
+        fi
+        if ! (run_privileged cp -a "$backups_dir"/* "$safe_backup_dest/" 2>/dev/null || cp -a "$backups_dir"/* "$safe_backup_dest/" 2>/dev/null); then
+            error "Критическая ошибка при копировании резервных копий в $safe_backup_dest! Процедура удаления прервана (Fail-Closed) во избежание потери данных."
+            return 1
+        fi
+        local src_count dst_count
+        src_count=$(find "$backups_dir" -mindepth 1 | wc -l)
+        dst_count=$(find "$safe_backup_dest" -mindepth 1 | wc -l)
+        if [[ "$src_count" -gt "$dst_count" ]]; then
+            error "Несоответствие количества сохраненных файлов резервных копий ($src_count vs $dst_count)! Процедура удаления прервана (Fail-Closed)."
+            return 1
+        fi
+        run_privileged chmod 700 "$safe_backup_dest" 2>/dev/null || chmod 700 "$safe_backup_dest" 2>/dev/null || true
+        log "Резервные копии сохранены и проверены в: $safe_backup_dest"
+    elif [[ "$purge_backups" == "true" ]]; then
+        info "Резервные копии будут удалены вместе с директорией проекта (--purge-backups)."
+    fi
+
+    local cleanup_errors=()
+
+    # 2. Docker resources cleanup (Scoped to Just1kBot project volumes only)
+    info "1/8. Остановка и удаление Docker-контейнеров, сетей и томов..."
+    if command -v docker >/dev/null 2>&1; then
+        if [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
+            (cd "$PROJECT_DIR" && docker compose down -v --remove-orphans --rmi local 2>/dev/null) || \
+            (cd "$PROJECT_DIR" && docker compose down -v --remove-orphans 2>/dev/null) || true
+        fi
+        local containers=(just1kbot_app just1kbot_db just1kbot_redis just1kbot_caddy just1kbot_migrate just1kbot_backup)
+        for c in "${containers[@]}"; do
+            if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$c"; then
+                docker rm -f "$c" 2>/dev/null || cleanup_errors+=("Не удалось удалить контейнер: $c")
+            fi
+        done
+        local project_basename
+        project_basename="$(basename "$PROJECT_DIR")"
+        # Safe volume removal: ONLY delete volumes confirmed to belong to this compose project
+        for v in $(docker volume ls -q 2>/dev/null || true); do
+            local v_proj
+            v_proj="$(docker volume inspect --format '{{ index .Labels "com.docker.compose.project" }}' "$v" 2>/dev/null || echo "")"
+            if [[ "$v_proj" == "$project_basename" || "$v_proj" == "just1kbot" ]]; then
+                docker volume rm -f "$v" 2>/dev/null || cleanup_errors+=("Не удалось удалить Docker volume: $v")
+            fi
+        done
+        local networks=(
+            "${project_basename}_backend_net" "${project_basename}_frontend_net" "${project_basename}_default"
+            just1kbot_backend_net just1kbot_frontend_net
+        )
+        for n in "${networks[@]}"; do
+            if docker network inspect "$n" >/dev/null 2>&1; then
+                docker network rm "$n" 2>/dev/null || cleanup_errors+=("Не удалось удалить Docker network: $n")
+            fi
+        done
+        # Targeted image removal (avoid global prune)
+        for img in $(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^(just1kbot[-_]|just1kbot:)' || true); do
+            docker rmi -f "$img" 2>/dev/null || true
+        done
+        log "Docker-ресурсы проекта удалены."
+    fi
+
+    # 3. Crontab cleanup (Fixed string matching to prevent regex injection)
+    info "2/8. Удаление задач из планировщика crontab..."
+    if crontab -l 2>/dev/null | grep -Fq "just1kbot-backup.lock" || crontab -l 2>/dev/null | grep -Fq "${PROJECT_DIR}"; then
+        local current_cron updated_cron
+        current_cron="$(crontab -l 2>/dev/null || true)"
+        updated_cron="$(echo "$current_cron" | grep -Fv "just1kbot-backup.lock" | grep -Fv "${PROJECT_DIR}" || true)"
+        if [[ -n "$(echo "$updated_cron" | tr -d '[:space:]')" ]]; then
+            echo "$updated_cron" | crontab - 2>/dev/null || cleanup_errors+=("Не удалось обновить crontab")
+        else
+            crontab -r 2>/dev/null || true
+        fi
+        log "Задачи Just1kBot удалены из crontab."
+    fi
+
+    # 4. Nginx cleanup
+    info "3/8. Удаление виртуальных хостов Nginx..."
+    local nginx_dirs=("/etc/nginx/sites-enabled" "/etc/nginx/sites-available" "/etc/nginx/conf.d")
+    local nginx_changed=false
+    for nd in "${nginx_dirs[@]}"; do
+        if [[ -d "$nd" ]]; then
+            for conf_file in "$nd"/just1kbot*.conf; do
+                if [[ -e "$conf_file" || -L "$conf_file" ]]; then
+                    if ! (run_privileged rm -f "$conf_file" 2>/dev/null); then
+                        cleanup_errors+=("Не удалось удалить Nginx конфиг: $conf_file")
+                    else
+                        nginx_changed=true
+                    fi
+                fi
+            done
+        fi
+    done
+    if [[ "$nginx_changed" == "true" ]]; then
+        if command -v nginx >/dev/null 2>&1 && run_privileged nginx -t 2>/dev/null; then
+            run_privileged systemctl reload nginx 2>/dev/null || run_privileged service nginx reload 2>/dev/null || true
+            log "Виртуальный хост Nginx удален, веб-сервер перезагружен."
+        fi
+    fi
+
+    # 5. Sysctl cleanup
+    info "4/8. Удаление системной конфигурации sysctl..."
+    local sysctl_file="${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}"
+    if [[ -f "$sysctl_file" ]]; then
+        if ! (run_privileged rm -f "$sysctl_file" 2>/dev/null); then
+            cleanup_errors+=("Не удалось удалить файл конфигурации $sysctl_file")
+        else
+            log "Конфигурация $sysctl_file удалена."
+        fi
+    fi
+
+    # 6. Global command wrapper cleanup
+    local global_wrapper="${JUST1KBOT_GLOBAL_WRAPPER:-/usr/local/bin/just1kbot}"
+    info "5/8. Удаление глобальной команды $global_wrapper..."
+    if [[ -e "$global_wrapper" || -L "$global_wrapper" ]]; then
+        if ! (run_privileged rm -f "$global_wrapper" 2>/dev/null); then
+            cleanup_errors+=("Не удалось удалить исполняемый файл $global_wrapper")
+        else
+            log "Глобальная команда $global_wrapper удалена."
+        fi
+    fi
+
+    # 7. Temporary files cleanup
+    info "6/8. Очистка временных файлов и блокировок..."
+    rm -f /tmp/just1kbot-backup.lock /tmp/just1kbot* 2>/dev/null || true
+
+    # 8. Project directory cleanup
+    info "7/8. Удаление директории проекта ($PROJECT_DIR)..."
+    local target_dir="$PROJECT_DIR"
+    cd /tmp || cd /
+    if [[ -d "$target_dir" ]]; then
+        if ! (run_privileged rm -rf "$target_dir" 2>/dev/null || rm -rf "$target_dir" 2>/dev/null); then
+            cleanup_errors+=("Не удалось удалить директорию проекта: $target_dir")
+        fi
+    fi
+
+    # 9. Post-Uninstall Verification & Fail-Closed Reporting
+    info "8/8. Верификация чистоты системы после удаления (Post-Verification)..."
+    if [[ -d "$target_dir" ]]; then
+        cleanup_errors+=("Директория проекта все еще существует: $target_dir")
+    fi
+    if [[ -e "$global_wrapper" || -L "$global_wrapper" ]]; then
+        cleanup_errors+=("Глобальная команда все еще существует: $global_wrapper")
+    fi
+    if [[ -f "$sysctl_file" ]]; then
+        cleanup_errors+=("Файл sysctl все еще существует: $sysctl_file")
+    fi
+    if crontab -l 2>/dev/null | grep -Fq "just1kbot-backup.lock"; then
+        cleanup_errors+=("В crontab остались записи резервного копирования Just1kBot")
+    fi
+    if command -v docker >/dev/null 2>&1; then
+        local residual_containers
+        residual_containers="$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E '^just1kbot_' || true)"
+        if [[ -n "$residual_containers" ]]; then
+            cleanup_errors+=("Остались активные Docker-контейнеры: $residual_containers")
+        fi
+    fi
+
+    echo ""
+    if [[ ${#cleanup_errors[@]} -gt 0 ]]; then
+        warn "Внимание: удаление завершено с ошибками (обнаружены остаточные ресурсы)!"
+        for err in "${cleanup_errors[@]}"; do
+            echo -e "  ${RED}• $err${NC}"
+        done
+        error "Процедура удаления завершилась со статусом FAIL-CLOSED (код 1). Устраните указанные остатки вручную."
+        return 1
+    fi
+
+    log "✨ Just1kBot успешно и полностью удален с сервера без остатков (верификация пройдена)."
+    exit 0
+}
+
 # --- Интерактивное меню ---
 interactive_menu() {
     while true; do
@@ -1634,10 +1936,11 @@ interactive_menu() {
         echo -e "  [${BOLD}7${NC}] 🩺 ${BOLD}Диагностика (Doctor)${NC} (Проверка DNS, SSL, портов и Telegram API)"
         echo -e "  [${BOLD}8${NC}] 🧹 ${BOLD}Очистить дисковый кэш${NC} (Docker image prune)"
         echo -e "  [${BOLD}9${NC}] 🌐 ${BOLD}Интеграция с Nginx${NC} (Настроить совместную работу / Reverse Proxy)"
+        echo -e "  [${BOLD}10${NC}] 🗑️  ${BOLD}Полное удаление${NC} (Uninstall Just1kBot с сервера)"
         echo -e "  [${BOLD}0${NC}] ❌ ${BOLD}Выход${NC}"
         echo ""
         echo -e "${CYAN}────────────────────────────────────────────────────────────────────────────────${NC}"
-        read -r -p "Выберите действие [0-9]: " choice
+        read -r -p "Выберите действие [0-10]: " choice
 
         case "$choice" in
             1)
@@ -1713,6 +2016,12 @@ interactive_menu() {
                 cmd_nginx_config || true
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
+            10|uninstall)
+                if ! cmd_uninstall; then
+                    warn "Операция удаления отменена или завершилась с ошибкой."
+                fi
+                read -r -p "Нажмите Enter для возврата в меню..."
+                ;;
             0|q|exit)
                 echo -e "\n${GREEN}До свидания!${NC}\n"
                 exit 0
@@ -1770,8 +2079,12 @@ main() {
             clean|prune)
                 cmd_clean
                 ;;
+            uninstall|remove|purge)
+                shift
+                cmd_uninstall "$@"
+                ;;
             help|-h|--help)
-                echo -e "Использование: just1kbot [status|logs|update|preflight|backup|restore|restart|start|stop|config|nginx-config|doctor|clean]"
+                echo -e "Использование: just1kbot [status|logs|update|preflight|backup|restore|restart|start|stop|config|nginx-config|doctor|clean|uninstall]"
                 ;;
             *)
                 error "Неизвестная команда: $1. Используйте 'just1kbot help'."
