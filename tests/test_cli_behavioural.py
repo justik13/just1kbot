@@ -1096,6 +1096,66 @@ cmd_update
         )
         self.assertIn("Отменяем обновление и возвращаем исходный код к коммиту", proc.stdout + proc.stderr)
 
+    def test_update_force_rebuild_prompt_handling(self):
+        """When local_hash == remote_hash, force_rebuild accepts 'y' to proceed or 'n' to exit cleanly."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+
+        # Test answering 'n': should exit 0 with "код уже актуален"
+        test_script_n = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc_n = subprocess.run(
+            ["bash", "-c", test_script_n],
+            cwd=str(work_dir),
+            input="n\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc_n.returncode, 0)
+        self.assertIn("Обновление завершено (код уже актуален).", proc_n.stdout + proc_n.stderr)
+
+        # Test answering 'y': should proceed to Step 4/6 (docker build)
+        test_script_y = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc_y = subprocess.run(
+            ["bash", "-c", test_script_y],
+            cwd=str(work_dir),
+            input="y\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertIn(
+            "Шаг 4/6. Сборка образов, валидация конфигурации и применение миграций...",
+            proc_y.stdout + proc_y.stderr,
+        )
 
 
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
@@ -1804,6 +1864,22 @@ cmd_uninstall --confirm=DELETE --keep-backups
         self.assertEqual(proc.returncode, 1)
         self.assertIn("требуется явное подтверждение: --confirm=DELETE", proc.stdout + proc.stderr)
 
+    def test_read_commands_do_not_redirect_stderr_to_devnull(self):
+        """Invariant: No read -p command in cli.sh or setup.sh may redirect stderr to /dev/null, which silences prompts."""
+        for script_name in ["cli.sh", "setup.sh"]:
+            script_path = CLI_PATH.parent / script_name
+            with open(script_path, "r", encoding="utf-8") as f:
+                for idx, line in enumerate(f, 1):
+                    stripped = line.strip()
+                    if stripped.startswith("#"):
+                        continue
+                    if "read " in stripped and "2>/dev/null" in stripped:
+                        self.fail(
+                            f"Silent prompt anti-pattern found in {script_name}:{idx}: '{stripped}'. "
+                            f"Bash 'read -p' writes prompts to stderr; '2>/dev/null' silences the prompt completely."
+                        )
+
 
 if __name__ == "__main__":
     unittest.main()
+

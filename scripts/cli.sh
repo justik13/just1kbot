@@ -874,7 +874,8 @@ cmd_update() {
         git status -s
         echo ""
         local stash_confirm="n"
-        if ! read -r -t 60 -p "Временно спрятать изменения (git stash) и продолжить обновление? (y/N): " stash_confirm 2>/dev/null; then
+        if ! read -r -t 60 -p "Временно спрятать изменения (git stash) и продолжить обновление? (y/N): " stash_confirm; then
+            echo ""
             stash_confirm="n"
         fi
         if [[ "$stash_confirm" =~ ^[Yy]$ ]]; then
@@ -932,7 +933,8 @@ cmd_update() {
     if [[ "$local_hash" == "$remote_hash" ]]; then
         info "Установлена актуальная версия ($local_hash). Новых коммитов в origin/$current_branch нет."
         local force_rebuild="n"
-        if ! read -r -t 60 -p "Пересобрать образы и перезапустить контейнеры без обновления кода? (y/N): " force_rebuild 2>/dev/null; then
+        if ! read -r -t 60 -p "Пересобрать образы и перезапустить контейнеры без обновления кода? (y/N): " force_rebuild; then
+            echo ""
             force_rebuild="n"
         fi
         if [[ ! "$force_rebuild" =~ ^[Yy]$ ]]; then
@@ -958,7 +960,8 @@ cmd_update() {
         warn "Автоматическая перезапись отменена во избежание потери локальных коммитов или hotfix."
         echo ""
         local force_overwrite="n"
-        if ! read -r -t 60 -p "Принудительно перезаписать локальные коммиты версией из origin/$current_branch? (y/N): " force_overwrite 2>/dev/null; then
+        if ! read -r -t 60 -p "Принудительно перезаписать локальные коммиты версией из origin/$current_branch? (y/N): " force_overwrite; then
+            echo ""
             force_overwrite="n"
         fi
         if [[ "$force_overwrite" =~ ^[Yy]$ ]]; then
@@ -987,7 +990,8 @@ cmd_update() {
         warn "Обнаружено расхождение истории коммитов между локальной версией и origin/$current_branch."
         echo ""
         local confirm_diverge="n"
-        if ! read -r -t 60 -p "Создать резервную ветку и синхронизировать с origin/$current_branch? (y/N): " confirm_diverge 2>/dev/null; then
+        if ! read -r -t 60 -p "Создать резервную ветку и синхронизировать с origin/$current_branch? (y/N): " confirm_diverge; then
+            echo ""
             confirm_diverge="n"
         fi
         if [[ "$confirm_diverge" =~ ^[Yy]$ ]]; then
@@ -1727,7 +1731,8 @@ cmd_uninstall() {
     else
         # Confirmation step 1
         local c1="n"
-        if ! read -r -t 60 -p "Вы действительно хотите начать процедуру полного удаления Just1kBot? [y/N]: " c1 2>/dev/null; then
+        if ! read -r -t 60 -p "Вы действительно хотите начать процедуру полного удаления Just1kBot? [y/N]: " c1; then
+            echo ""
             error "В неинтерактивном режиме для удаления требуется явный флаг: --confirm=DELETE (или --confirm=УДАЛИТЬ). Процедура прервана (Fail-Closed)."
             return 1
         fi
@@ -1747,7 +1752,8 @@ cmd_uninstall() {
             echo -e "  [${BOLD}1${NC}] ${GREEN}Сохранить бэкапы в /root/just1kbot_backups_saved перед удалением (Рекомендуется)${NC}"
             echo -e "  [${BOLD}2${NC}] ${RED}Удалить бэкапы безвозвратно вместе со всем проектом${NC}"
             local b_choice="1"
-            if ! read -r -t 60 -p "Выберите действие [1/2] (по умолчанию: 1): " b_choice 2>/dev/null; then
+            if ! read -r -t 60 -p "Выберите действие [1/2] (по умолчанию: 1): " b_choice; then
+                echo ""
                 b_choice="1"
             fi
             b_choice="${b_choice:-1}"
@@ -1763,7 +1769,8 @@ cmd_uninstall() {
         echo ""
         echo -e "${BOLD}${RED}ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ! Это действие необратимо.${NC}"
         local c2=""
-        if ! read -r -t 60 -p "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2 2>/dev/null; then
+        if ! read -r -t 60 -p "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2; then
+            echo ""
             c2=""
         fi
         if [[ "$c2" != "DELETE" && "$c2" != "УДАЛИТЬ" ]]; then
