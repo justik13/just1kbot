@@ -559,6 +559,15 @@ class LoggingSecurityTests(unittest.TestCase):
         self.assertNotIn("tok en;123", output_multi)
         self.assertEqual(output_multi.count("[REDACTED]"), 2)
 
+    def test_key_overmatching_is_prevented_by_boundary(self):
+        # Keys like 'token' or 'secret' should not match inside longer words
+        output = self._capture(
+            lambda logger: logger.info("safe_mytoken=allowed_value item_not_secret=visible")
+        )
+        self.assertIn("allowed_value", output)
+        self.assertIn("visible", output)
+        self.assertNotIn("[REDACTED]", output)
+
 
 class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
     """Prevent Settings secret values from being passed to logging calls."""

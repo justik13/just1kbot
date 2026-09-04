@@ -805,8 +805,8 @@ _rollback_services_after_db_failure() {
     fi
 
     warn "🚨 Выполняем откат исходного кода к коммиту $rollback_commit..."
-    git reset --hard "$rollback_commit"
-    dc_up --build
+    git reset --hard "$rollback_commit" 2>/dev/null || true
+    dc_up --build 2>/dev/null || true
 
     info "Проверка работоспособности сервисов старой версии..."
     local mig_timeout=60
@@ -896,17 +896,6 @@ cmd_update() {
         fi
     fi
 
-    local rollback_commit=""
-    rollback_commit="$(git rev-parse HEAD 2>/dev/null || true)"
-
-    info "Шаг 2/6. Создание страховочного бэкапа базы данных..."
-    LAST_BACKUP_FILE=""
-    if ! cmd_backup || [[ -z "$LAST_BACKUP_FILE" ]] || [[ ! -f "$LAST_BACKUP_FILE" ]]; then
-        error "Обновление остановлено: не удалось создать страховочный бэкап базы данных."
-        return 1
-    fi
-    local pre_update_backup="$LAST_BACKUP_FILE"
-
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     if [[ "$current_branch" == "HEAD" ]] || [[ -z "$current_branch" ]]; then
@@ -917,6 +906,17 @@ cmd_update() {
         fi
         current_branch="main"
     fi
+
+    local rollback_commit=""
+    rollback_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+
+    info "Шаг 2/6. Создание страховочного бэкапа базы данных..."
+    LAST_BACKUP_FILE=""
+    if ! cmd_backup || [[ -z "$LAST_BACKUP_FILE" ]] || [[ ! -f "$LAST_BACKUP_FILE" ]]; then
+        error "Обновление остановлено: не удалось создать страховочный бэкап базы данных."
+        return 1
+    fi
+    local pre_update_backup="$LAST_BACKUP_FILE"
 
     info "Шаг 3/6. Получение обновлений из Git (ветка: $current_branch)..."
     if ! git fetch origin "$current_branch"; then

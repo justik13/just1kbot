@@ -37,7 +37,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         re.compile(
-            r"(?i)(['\"]?(?:x[_-]?api[_-]?key|api[_-]?key|access[_-]?token|bot[_-]?token|"
+            r"(?i)((?<![A-Za-z0-9_-])['\"]?(?:x[_-]?api[_-]?key|api[_-]?key|access[_-]?token|bot[_-]?token|"
             r"subscription[_-]?token|sub[_-]?token|client[_-]?secret|"
             r"database[_-]?url|redis[_-]?url|redis[_-]?password|postgres[_-]?password|"
             r"db[_-]?password|db[_-]?encryption[_-]?keys?|yookassa[_-]?secret[_-]?key|"
