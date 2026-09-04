@@ -119,7 +119,7 @@ exit 0
             f.write("XRAY_API_KEY=testkey\nXRAY_INBOUND_TAGS=just1k-wl-default\n")
 
     def _run_shell_snippet(
-        self, snippet: str, extra_env: dict = None
+        self, snippet: str, extra_env: dict = None, input_text: str | None = None
     ) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["PATH"] = f"{self.bin_dir}:{env['PATH']}"
@@ -181,6 +181,7 @@ ensure_xrayapi_user() {{ return 0; }}
 """
         return subprocess.run(
             ["bash", "-c", full_script],
+            input=input_text,
             capture_output=True,
             text=True,
             env=env,
@@ -1244,45 +1245,17 @@ ensure_xrayapi_user
     def test_uninstall_node_aborts_on_first_prompt_cancellation(self):
         """just1knode uninstall must abort when user responds 'n' to first prompt."""
         self._prepare_base_env()
-        env = os.environ.copy()
-        env["PATH"] = f"{self.bin_dir}:{env['PATH']}"
-        script = f"""
-source '{JUST1KNODE_SH}'
-check_root() {{ return 0; }}
-uninstall_node
-"""
-        proc = subprocess.run(
-            ["bash", "-c", script],
-            input="n\n",
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
-        self.assertEqual(proc.returncode, 0)
-        self.assertIn("Удаление отменено пользователем", proc.stdout + proc.stderr)
+        res = self._run_shell_snippet("uninstall_node", input_text="n\n")
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Удаление отменено пользователем", res.stdout + res.stderr)
         self.assertTrue(self.state_dir.exists())
 
     def test_uninstall_node_aborts_on_keyword_mismatch(self):
         """just1knode uninstall must abort when user enters incorrect confirmation keyword."""
         self._prepare_base_env()
-        env = os.environ.copy()
-        env["PATH"] = f"{self.bin_dir}:{env['PATH']}"
-        script = f"""
-source '{JUST1KNODE_SH}'
-check_root() {{ return 0; }}
-uninstall_node
-"""
-        proc = subprocess.run(
-            ["bash", "-c", script],
-            input="y\nABORT\n",
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
-        self.assertEqual(proc.returncode, 0)
-        self.assertIn("Подтверждение не совпало", proc.stdout + proc.stderr)
+        res = self._run_shell_snippet("uninstall_node", input_text="y\nABORT\n")
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Подтверждение не совпало", res.stdout + res.stderr)
         self.assertTrue(self.state_dir.exists())
 
     def test_uninstall_node_complete_cleanup_lifecycle(self):
