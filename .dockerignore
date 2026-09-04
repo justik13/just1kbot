@@ -47,3 +47,11 @@ Caddyfile.ci
 backup_private_key.txt
 backup.agekey
 *.agekey
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.cer
+*.der
+

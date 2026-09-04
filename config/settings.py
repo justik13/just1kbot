@@ -50,13 +50,13 @@ class Settings(BaseSettings):
     SUPPORT_USERNAME: str
 
     # ── Database ──
-    DATABASE_URL: str
+    DATABASE_URL: str = Field(repr=False)
     DB_ENCRYPTION_KEY: str = Field(repr=False)
     DB_ENCRYPTION_KEYS: str = Field(default="", repr=False)
 
     # ── Redis ──
-    REDIS_URL: str
-    REDIS_PASSWORD: str
+    REDIS_URL: str = Field(repr=False)
+    REDIS_PASSWORD: str = Field(repr=False)
 
     # ── YooKassa ──
     YOOKASSA_SHOP_ID: str

@@ -19,10 +19,10 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
             traffic_down=1024,
             traffic_up=2048,
         )
-        user = SimpleNamespace(id=7, telegram_id=872658825)
+        user = SimpleNamespace(id=7, telegram_id=123456789)
         callback = MagicMock()
         callback.from_user.id = 100
-        callback.data = "admin_user_devices:872658825"
+        callback.data = "admin_user_devices:123456789"
         callback.answer = AsyncMock()
         callback.message.edit_text = AsyncMock()
         session = MagicMock()
@@ -49,10 +49,10 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
             traffic_down=0,
             traffic_up=0,
         )
-        user = SimpleNamespace(id=7, telegram_id=872658825)
+        user = SimpleNamespace(id=7, telegram_id=123456789)
         callback = MagicMock()
         callback.from_user.id = 100
-        callback.data = "admin_user_devices:872658825"
+        callback.data = "admin_user_devices:123456789"
         callback.answer = AsyncMock()
         callback.message.edit_text = AsyncMock()
         session = MagicMock()
@@ -77,10 +77,10 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
             traffic_down=0,
             traffic_up=0,
         )
-        user = SimpleNamespace(id=7, telegram_id=872658825)
+        user = SimpleNamespace(id=7, telegram_id=123456789)
         callback = MagicMock()
         callback.from_user.id = 100
-        callback.data = "admin_user_devices:872658825"
+        callback.data = "admin_user_devices:123456789"
         callback.answer = AsyncMock()
         callback.message.edit_text = AsyncMock()
         session = MagicMock()
@@ -112,10 +112,10 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_confirm_rejects_profile_from_another_user(self):
         profile = SimpleNamespace(id=36, user_id=999, device_name="Pixel 9", server=None)
-        user = SimpleNamespace(id=7, telegram_id=872658825)
+        user = SimpleNamespace(id=7, telegram_id=123456789)
         callback = MagicMock()
         callback.from_user.id = 100
-        callback.data = "admin_delete_device:872658825:36"
+        callback.data = "admin_delete_device:123456789:36"
         callback.answer = AsyncMock()
         callback.message.edit_text = AsyncMock()
         session = MagicMock()
@@ -132,10 +132,10 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_apply_rechecks_profile_ownership_before_destructive_action(self):
         profile = SimpleNamespace(id=36, user_id=999, device_name="Pixel 9")
-        user = SimpleNamespace(id=7, telegram_id=872658825)
+        user = SimpleNamespace(id=7, telegram_id=123456789)
         callback = MagicMock()
         callback.from_user.id = 100
-        callback.data = "admin_delete_device_apply:872658825:36"
+        callback.data = "admin_delete_device_apply:123456789:36"
         callback.answer = AsyncMock()
         callback.message.edit_text = AsyncMock()
         session = MagicMock()

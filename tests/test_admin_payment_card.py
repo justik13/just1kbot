@@ -25,7 +25,7 @@ class AdminPaymentCardTests(unittest.IsolatedAsyncioTestCase):
 
         dummy_user = User(
             id=1,
-            telegram_id=872658825,
+            telegram_id=123456789,
             username="testuser",
         )
         dummy_payment = Payment(
@@ -48,7 +48,7 @@ class AdminPaymentCardTests(unittest.IsolatedAsyncioTestCase):
 
         callback = AsyncMock(spec=CallbackQuery)
         callback.data = "admin_payment_card:42"
-        callback.from_user = TelegramUser(id=872658825, is_bot=False, first_name="Admin")
+        callback.from_user = TelegramUser(id=123456789, is_bot=False, first_name="Admin")
         callback.message = MagicMock(spec=Message)
         callback.message.edit_text = AsyncMock()
         callback.answer = AsyncMock()

@@ -51,6 +51,12 @@ CLIENTS_FILE_PATH = Path(os.getenv("CLIENTS_FILE_PATH", "/etc/just1knode/clients
 STATE_FILE_PATH = Path(os.getenv("STATE_FILE_PATH", "/etc/just1knode/state.json"))
 
 
+def _mask_uuid(val: str) -> str:
+    if not val or len(val) < 8:
+        return "***"
+    return f"{val[:8]}...masked"
+
+
 def get_secret_base_path() -> str:
     """Discovers canonical secret XHTTP base path configured for this Origin node.
 
@@ -231,7 +237,7 @@ def restore_persisted_clients_to_xray() -> int:
                 restored += 1
             except Exception as e:
                 logger.warning(
-                    "Failed to restore client %s on inbound %s: %s", client_uuid[:8], tag, e
+                    "Failed to restore client %s on inbound %s: %s", _mask_uuid(client_uuid), tag, e
                 )
     logger.info(
         "Restored %d active client registrations across inbounds %s as ephemeral hints.",
@@ -340,12 +346,6 @@ class InventoryRequest(BaseModel):
     client_ids: Optional[List[str]] = Field(
         None, description="Optional list of client UUIDs to probe"
     )
-
-
-def _mask_uuid(val: str) -> str:
-    if not val or len(val) < 8:
-        return "***"
-    return f"{val[:8]}...masked"
 
 
 # Endpoints

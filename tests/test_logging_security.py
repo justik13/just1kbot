@@ -376,6 +376,146 @@ class LoggingSecurityTests(unittest.TestCase):
             child_logger.setLevel(old_child_level)
             child_logger.propagate = old_child_propagate
 
+    def test_white_internet_and_vpn_uris_are_redacted(self):
+        cases = (
+            "incy://add/https://cdn.example.com/sub/TOKEN_CANARY_123",
+            "incy://crypt1/SECRET_PAYLOAD_CANARY_456",
+            "clash://install-config?url=https://example.com/canary",
+            "sing-box://import-remote?url=https://example.com/canary",
+            "shadowrocket://add/sub?url=https://example.com/canary",
+            "vless://user@host:443?encryption=none",
+        )
+        for uri in cases:
+            with self.subTest(uri=uri):
+                output = self._capture(lambda logger, val=uri: logger.info("vpn=%s", val))
+                self.assertNotIn("TOKEN_CANARY_123", output)
+                self.assertNotIn("SECRET_PAYLOAD_CANARY_456", output)
+                self.assertIn("[VPN_URI_REDACTED]", output)
+
+    def test_age_and_yookassa_keys_are_redacted(self):
+        age_key = "AGE-SECRET-KEY-1" + "A" * 58
+        yoo_live = "live_" + "B" * 35
+        yoo_test = "test_" + "C" * 35
+        output = self._capture(
+            lambda logger: logger.warning(
+                "age=%s yoo_live=%s yoo_test=%s req=req-safe-123",
+                age_key,
+                yoo_live,
+                yoo_test,
+            )
+        )
+        self.assertNotIn(age_key, output)
+        self.assertNotIn(yoo_live, output)
+        self.assertNotIn(yoo_test, output)
+        self.assertIn("[AGE_KEY_REDACTED]", output)
+        self.assertIn("[YOOKASSA_KEY_REDACTED]", output)
+        self.assertIn("req=req-safe-123", output)
+
+    def test_settings_repr_masks_database_and_redis_passwords(self):
+        from config.settings import Settings
+        settings = Settings(
+            BOT_TOKEN="123456:FAKE_TOKEN",
+            ADMIN_IDS=[123456789],
+            SUPPORT_USERNAME="fake_support",
+            DATABASE_URL="postgresql+asyncpg://super_user:SUPER_SECRET_DB_PASS@127.0.0.1:5432/db",
+            DB_ENCRYPTION_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+            REDIS_URL="redis://:SUPER_SECRET_REDIS_PASS@127.0.0.1:6379/0",
+            REDIS_PASSWORD="SUPER_SECRET_REDIS_PASS",
+            YOOKASSA_SHOP_ID="123456",
+            YOOKASSA_SECRET_KEY="test_secret_key_long_enough_val",
+            YOOKASSA_RETURN_URL="https://t.me/{bot_username}",
+            YOOKASSA_WEBHOOK_PORT=8080,
+            DOMAIN="vpn.example.test",
+            SSL_EMAIL="admin@realdomain.test",
+        )
+        rendered = repr(settings)
+        self.assertNotIn("SUPER_SECRET_DB_PASS", rendered)
+        self.assertNotIn("SUPER_SECRET_REDIS_PASS", rendered)
+        self.assertNotIn("DATABASE_URL", rendered)
+        self.assertNotIn("REDIS_URL", rendered)
+        self.assertNotIn("REDIS_PASSWORD", rendered)
+
+    def test_camel_and_kebab_case_secret_keys_are_redacted(self):
+        cases = (
+            ("secretKey: SECRET_VAL_1", "SECRET_VAL_1"),
+            ("secret_key: SECRET_VAL_2", "SECRET_VAL_2"),
+            ("privateKey: PRIV_VAL_1", "PRIV_VAL_1"),
+            ("private_key: PRIV_VAL_2", "PRIV_VAL_2"),
+            ("clientSecret: CLIENT_SEC_1", "CLIENT_SEC_1"),
+            ("client_secret: CLIENT_SEC_2", "CLIENT_SEC_2"),
+            ("redisPassword: REDIS_PASS_1", "REDIS_PASS_1"),
+            ("redis_password: REDIS_PASS_2", "REDIS_PASS_2"),
+            ("dbPassword: DB_PASS_1", "DB_PASS_1"),
+            ("db_password: DB_PASS_2", "DB_PASS_2"),
+            ("presharedKey: PSK_VAL_1", "PSK_VAL_1"),
+            ("preshared_key: PSK_VAL_2", "PSK_VAL_2"),
+            ("xApiKey: X_API_KEY_1", "X_API_KEY_1"),
+            ("x-api-key: X_API_KEY_2", "X_API_KEY_2"),
+            ("x_api_key: X_API_KEY_3", "X_API_KEY_3"),
+            ("databaseUrl: DB_URL_1", "DB_URL_1"),
+            ("database_url: DB_URL_2", "DB_URL_2"),
+        )
+        for text, secret in cases:
+            with self.subTest(text=text):
+                output = self._capture(lambda logger, val=text: logger.info(val))
+                self.assertNotIn(secret, output)
+
+    def test_post_quantum_age_secret_keys_are_redacted(self):
+        pq_age_key = "AGE-SECRET-KEY-PQ-1" + "Z" * 65
+        classical_age_key = "AGE-SECRET-KEY-1" + "X" * 58
+        output = self._capture(
+            lambda logger: logger.warning(
+                "classical=%s pq=%s status=ok",
+                classical_age_key,
+                pq_age_key,
+            )
+        )
+        self.assertNotIn(pq_age_key, output)
+        self.assertNotIn(classical_age_key, output)
+        self.assertIn("status=ok", output)
+
+    def test_extra_attributes_are_sanitized_by_filter(self):
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+
+        class CustomFormatter(logging.Formatter):
+            def format(self, record):
+                return (
+                    f"{record.getMessage()} extra_token={getattr(record, 'extra_token', None)} "
+                    f"payload={getattr(record, 'payload', None)}"
+                )
+
+        handler.setFormatter(CustomFormatter())
+        handler.addFilter(SensitiveDataFilter())
+        logger = logging.getLogger(f"tests.extra.{id(stream)}")
+        logger.handlers = [handler]
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+
+        raw_token = "123456:TELEGRAM_EXTRA_CANARY_TOKEN_abcdefghijklmnopqrstuvwxyz"
+        raw_key = "AGE-SECRET-KEY-PQ-1" + "W" * 60
+
+        logger.info(
+            "event=test",
+            extra={
+                "extra_token": raw_token,
+                "payload": {"apiKey": raw_key, "safe_id": 42},
+            },
+        )
+        output = stream.getvalue()
+        self.assertNotIn(raw_token, output)
+        self.assertNotIn(raw_key, output)
+        self.assertIn("safe_id", output)
+        self.assertIn("42", output)
+
+    def test_xray_node_client_error_response_is_sanitized_and_truncated(self):
+        from utils.logging_security import sanitize_short
+        long_secret_text = "Error detail: " + "AGE-SECRET-KEY-1" + "K" * 58 + " " + "x" * 300
+        result = f"HTTP 500: {sanitize_short(long_secret_text, limit=200)}"
+        self.assertNotIn("AGE-SECRET-KEY-1", result)
+        self.assertTrue(len(result) <= 250)
+        self.assertTrue(result.endswith("..."))
+
 
 class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
     """Prevent Settings secret values from being passed to logging calls."""
@@ -384,7 +524,9 @@ class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
         "BOT_TOKEN",
         "DATABASE_URL",
         "REDIS_URL",
+        "REDIS_PASSWORD",
         "DB_ENCRYPTION_KEY",
+        "DB_ENCRYPTION_KEYS",
         "YOOKASSA_SECRET_KEY",
     }
     LOG_METHODS = {

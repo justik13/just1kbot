@@ -37,9 +37,12 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         re.compile(
-            r"(?i)(['\"]?(?:x-api-key|api[_-]?key|access[_-]?token|bot[_-]?token|"
-            r"database_url|redis_url|db_encryption_key|yookassa_secret_key|password|"
-            r"passwd|privatekey|presharedkey|secret)['\"]?\s*[:=]\s*)"
+            r"(?i)(['\"]?(?:x[_-]?api[_-]?key|api[_-]?key|access[_-]?token|bot[_-]?token|"
+            r"subscription[_-]?token|sub[_-]?token|client[_-]?secret|"
+            r"database[_-]?url|redis[_-]?url|redis[_-]?password|postgres[_-]?password|"
+            r"db[_-]?password|db[_-]?encryption[_-]?keys?|yookassa[_-]?secret[_-]?key|"
+            r"age[_-]?secret[_-]?key|secret[_-]?key|private[_-]?key|preshared[_-]?key|"
+            r"password|passwd|secret)['\"]?\s*[:=]\s*)"
             r"(['\"]?)[^\s,;'\"}\]]+\2"
         ),
         rf"\1{REDACTED}",
@@ -47,9 +50,14 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b"), "[TELEGRAM_TOKEN_REDACTED]"),
     (
         re.compile(
-            r"(?i)\b(?:vpn|amnezia|vless|vmess|trojan|ss|wg|wireguard)://[^\s<>'\"]+"
+            r"(?i)\b(?:vpn|amnezia|vless|vmess|trojan|ss|wg|wireguard|incy|clash|sing-box|shadowrocket)://[^\s<>'\"]+"
         ),
         "[VPN_URI_REDACTED]",
+    ),
+    (re.compile(r"\bAGE-SECRET-KEY-(?:PQ-)?1[A-Z0-9]{58,}\b"), "[AGE_KEY_REDACTED]"),
+    (
+        re.compile(r"\b(?:live|test)_[A-Za-z0-9_-]{25,}\b"),
+        "[YOOKASSA_KEY_REDACTED]",
     ),
     (re.compile(r"(?i)Fernet\([^\)]*\)"), "Fernet([REDACTED])"),
     (
@@ -92,8 +100,44 @@ def safe_url_target(value: Any) -> str:
         return "<invalid-host>"
 
 
+_STANDARD_LOG_RECORD_ATTRS = frozenset({
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "taskName",
+    "message",
+})
+
+
+def _sanitize_extra_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if isinstance(value, dict):
+        return {k: _sanitize_extra_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return type(value)(_sanitize_extra_value(v) for v in value)
+    return value
+
+
 class SensitiveDataFilter(logging.Filter):
-    """Sanitize the final log message and any rendered exception traceback."""
+    """Sanitize the final log message, rendered exception traceback, and extra fields."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
@@ -105,6 +149,13 @@ class SensitiveDataFilter(logging.Filter):
                 record.exc_info = None
             elif record.exc_text:
                 record.exc_text = sanitize_text(record.exc_text)
+
+            for key, val in list(record.__dict__.items()):
+                if key not in _STANDARD_LOG_RECORD_ATTRS and not key.startswith("_"):
+                    try:
+                        record.__dict__[key] = _sanitize_extra_value(val)
+                    except Exception:
+                        pass
         except Exception:
             record.msg = "Log message redaction failed"
             record.args = ()

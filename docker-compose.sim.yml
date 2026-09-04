@@ -50,7 +50,7 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       BOT_TOKEN: "${BOT_TOKEN}"
-      ADMIN_IDS: "872658825"
+      ADMIN_IDS: "${ADMIN_IDS:-[123456789]}"
       SUPPORT_USERNAME: "just1k_support"
       DATABASE_URL: "postgresql+asyncpg://just1kbot:sim_postgres_password_123@db:5432/just1kbot_bot"
       DB_ENCRYPTION_KEY: "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg="

@@ -26,12 +26,12 @@ class AdminDirectMessageCleanChatTests(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         state.get_data = AsyncMock(return_value={
-            "target_telegram_id": 902161217,
+            "target_telegram_id": 987654321,
             "target_user_db_id": 4,
         })
         state.clear = AsyncMock()
 
-        target_user = DBUser(id=4, telegram_id=902161217, username="test_target")
+        target_user = DBUser(id=4, telegram_id=987654321, username="test_target")
 
         session = AsyncMock()
 
@@ -47,7 +47,7 @@ class AdminDirectMessageCleanChatTests(unittest.IsolatedAsyncioTestCase):
 
             # 2. Target user received the message via bot.send_message
             message.bot.send_message.assert_called_once_with(
-                902161217,
+                987654321,
                 "📨 <b>Сообщение от администрации:</b>\n\nTest admin direct message content",
                 reply_markup=unittest.mock.ANY,
                 parse_mode="HTML",
@@ -58,5 +58,5 @@ class AdminDirectMessageCleanChatTests(unittest.IsolatedAsyncioTestCase):
             _, kwargs = mock_show_card.call_args
             notice = kwargs.get("notice") or (mock_show_card.call_args[0][3] if len(mock_show_card.call_args[0]) > 3 else None)
             self.assertIsNotNone(notice)
-            self.assertIn("902161217", notice)
+            self.assertIn("987654321", notice)
             self.assertIn("успешно отправлено", notice)
