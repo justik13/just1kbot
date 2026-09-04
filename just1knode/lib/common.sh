@@ -101,3 +101,46 @@ configure_safe_ufw() {
         log "Фаервол UFW успешно активирован (SSH порт ${ssh_port} защищен от блокировки)."
     fi
 }
+
+# Обнаружение активных пользовательских сайтов в Nginx (для предотвращения случайного даунтайма)
+detect_existing_nginx_sites() {
+    local base_dir="${1:-/etc/nginx}"
+    local sites_found=()
+    local conf_dirs=("$base_dir/sites-enabled" "$base_dir/conf.d")
+
+    for cdir in "${conf_dirs[@]}"; do
+        [[ ! -d "$cdir" ]] && continue
+        while IFS= read -r -d '' f; do
+            local fname
+            fname="$(basename "$f")"
+            [[ "$fname" =~ ^(just1k|sub-wl|xhttp).* ]] && continue
+            [[ "$fname" =~ .*\.(bak|old|tmp|disabled)$ ]] && continue
+
+            if [[ "$fname" == "default" ]]; then
+                if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "$f" 2>/dev/null; then
+                    local sname
+                    sname="$(grep -E '(^|[[:space:]])server_name[[:space:]]+' "$f" 2>/dev/null | head -n1 | sed -E 's/.*server_name[[:space:]]+//; s/;.*//')"
+                    sites_found+=("$fname ($sname)")
+                fi
+                continue
+            fi
+
+            if grep -Eq '(server_name|listen|proxy_pass)[[:space:]]+' "$f" 2>/dev/null; then
+                local sname
+                sname="$(grep -E '(^|[[:space:]])server_name[[:space:]]+' "$f" 2>/dev/null | head -n1 | sed -E 's/.*server_name[[:space:]]+//; s/;.*//' || echo "")"
+                if [[ -n "$sname" && "$sname" != "_" ]]; then
+                    sites_found+=("$fname ($sname)")
+                else
+                    sites_found+=("$fname")
+                fi
+            fi
+        done < <(find "$cdir" -maxdepth 1 \( -type f -o -type l \) -print0 2>/dev/null)
+    done
+
+    if [[ ${#sites_found[@]} -gt 0 ]]; then
+        printf '%s\n' "${sites_found[@]}"
+        return 0
+    fi
+    return 1
+}
+

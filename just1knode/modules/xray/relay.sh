@@ -37,6 +37,15 @@ install_xray_relay_node() {
         log "Zero-Collateral: порт 51820/udp и Amnezia-контейнеры НЕ затрагиваются!"
     fi
 
+    # Проверка доступности порта туннеля Relay
+    if ss -tlnp 2>/dev/null | grep -q ":${relay_port} " || netstat -tlnp 2>/dev/null | grep -q ":${relay_port} "; then
+        local conflict_proc
+        conflict_proc=$(ss -tlnp 2>/dev/null | grep ":${relay_port} " || true)
+        if ! echo "$conflict_proc" | grep -q "xray"; then
+            error "Порт Relay ${relay_port}/tcp уже занят другим процессом на хосте:\n$conflict_proc\nВыберите свободный порт для Relay (например: 10443)."
+        fi
+    fi
+
     install_xray_binaries
     create_backup "$XRAY_CONFIG"
 

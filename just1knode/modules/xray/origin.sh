@@ -140,6 +140,19 @@ install_xray_origin_node() {
     chmod 755 "${CERTBOT_DIR}" 2>/dev/null || true
     configure_safe_ufw "80/tcp"
 
+    # Проверка наличия существующих сайтов до настройки Nginx
+    local pre_existing_sites=()
+    while IFS= read -r s; do
+        [[ -n "$s" ]] && pre_existing_sites+=("$s")
+    done < <(detect_existing_nginx_sites 2>/dev/null || true)
+    if [[ ${#pre_existing_sites[@]} -gt 0 ]]; then
+        info "В системном Nginx обнаружены существующие сайты:"
+        for s in "${pre_existing_sites[@]}"; do
+            echo -e "    ${BOLD}• $s${NC}"
+        done
+        log "Настройка Origin выполняется без остановки Nginx и с сохранением всех существующих сайтов."
+    fi
+
     # Bootstrap HTTP block для ACME challenge в Nginx
     cat > "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" <<EOF
 server {
@@ -152,8 +165,16 @@ server {
     }
 }
 EOF
+    if [[ -f "${NGINX_CONF_DIR}/sites-enabled/default" ]] && grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
+        warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak."
+        cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-enabled/default.user.bak"
+    fi
     rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
-    systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+    if nginx -t 2>/dev/null; then
+        systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+    else
+        warn "Ошибка синтаксиса Nginx (nginx -t) до применения сертификата. Перезагрузка Nginx отложена."
+    fi
 
     obtain_ssl_certificate "$domain" "$email"
     rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" 2>/dev/null || true
@@ -377,7 +398,23 @@ EOF
         server_name_str="${domain} ${cdn_domain}"
     fi
 
+    local existing_sites=()
+    while IFS= read -r s; do
+        [[ -n "$s" ]] && existing_sites+=("$s")
+    done < <(detect_existing_nginx_sites 2>/dev/null || true)
+    if [[ ${#existing_sites[@]} -gt 0 ]]; then
+        info "В системном Nginx обнаружены существующие сайты:"
+        for s in "${existing_sites[@]}"; do
+            echo -e "    ${BOLD}• $s${NC}"
+        done
+        log "Настройка Origin узла выполняется в изолированном виртуальном хосте (just1k-origin.conf). Ваши существующие сайты продолжат работать параллельно."
+    fi
+
     rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" "${NGINX_CONF_DIR}/conf.d/just1k-origin.conf" "${NGINX_CONF_DIR}/conf.d/origin.conf" 2>/dev/null || true
+    if [[ -f "${NGINX_CONF_DIR}/sites-enabled/default" ]] && grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
+        warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak."
+        cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-enabled/default.user.bak"
+    fi
     rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
 
     cat > "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" <<EOF
@@ -447,7 +484,11 @@ server {
 EOF
 
     ln -sf "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" "${NGINX_CONF_DIR}/sites-enabled/"
-    nginx -t && systemctl reload nginx
+    if ! nginx -t 2>/dev/null; then
+        rm -f "${NGINX_CONF_DIR}/sites-enabled/just1k-origin.conf" 2>/dev/null || true
+        error "Ошибка валидации синтаксиса Nginx (nginx -t)! Перезагрузка Nginx отменена для сохранения доступности работающих сайтов."
+    fi
+    systemctl reload nginx
 
     # Фаервол: порт 8444 открывается СТРОГО для BOT_IP
     configure_safe_ufw "80/tcp" "443/tcp"

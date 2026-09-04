@@ -46,6 +46,49 @@ title() {
     echo -e "\n${BOLD}${BLUE}=== $1 ===${NC}\n"
 }
 
+USE_EXTERNAL_NGINX="${USE_EXTERNAL_NGINX:-false}"
+
+detect_existing_nginx_sites() {
+    local base_dir="${1:-/etc/nginx}"
+    local sites_found=()
+    local conf_dirs=("$base_dir/sites-enabled" "$base_dir/conf.d")
+
+    for cdir in "${conf_dirs[@]}"; do
+        [[ ! -d "$cdir" ]] && continue
+        while IFS= read -r -d '' f; do
+            local fname
+            fname="$(basename "$f")"
+            [[ "$fname" =~ ^(just1k|sub-wl|xhttp).* ]] && continue
+            [[ "$fname" =~ .*\.(bak|old|tmp|disabled)$ ]] && continue
+
+            if [[ "$fname" == "default" ]]; then
+                if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "$f" 2>/dev/null; then
+                    local sname
+                    sname="$(grep -E '(^|[[:space:]])server_name[[:space:]]+' "$f" 2>/dev/null | head -n1 | sed -E 's/.*server_name[[:space:]]+//; s/;.*//')"
+                    sites_found+=("$fname ($sname)")
+                fi
+                continue
+            fi
+
+            if grep -Eq '(server_name|listen|proxy_pass)[[:space:]]+' "$f" 2>/dev/null; then
+                local sname
+                sname="$(grep -E '(^|[[:space:]])server_name[[:space:]]+' "$f" 2>/dev/null | head -n1 | sed -E 's/.*server_name[[:space:]]+//; s/;.*//' || echo "")"
+                if [[ -n "$sname" && "$sname" != "_" ]]; then
+                    sites_found+=("$fname ($sname)")
+                else
+                    sites_found+=("$fname")
+                fi
+            fi
+        done < <(find "$cdir" -maxdepth 1 \( -type f -o -type l \) -print0 2>/dev/null)
+    done
+
+    if [[ ${#sites_found[@]} -gt 0 ]]; then
+        printf '%s\n' "${sites_found[@]}"
+        return 0
+    fi
+    return 1
+}
+
 # --- Гарантия персистентного значения vm.overcommit_memory=1 ---
 # Boot-time источник для systemd: /etc/sysctl.d/*.conf (sysctl.d(5)); файлы
 # упорядочиваются лексикографически и более позднее имя побеждает, поэтому
@@ -335,13 +378,55 @@ install_dependencies() {
             local proc
             proc=$(ss -tlnp 2>/dev/null | grep ":${port} " || true)
             if echo "$proc" | grep -qv "docker"; then
-                warn "Порт $port занят сторонним процессом:"
-                echo "$proc"
-                read -r -p "Остановить конфликтующие сервисы (например, apache2/nginx) перед запуском? (y/N): " stop_conflicts
-                if [[ "$stop_conflicts" =~ ^[Yy]$ ]]; then
-                    systemctl stop apache2 2>/dev/null || true
-                    systemctl stop nginx 2>/dev/null || true
-                    log "Сервисы apache2/nginx остановлены."
+                if echo "$proc" | grep -q "nginx" && systemctl is-active --quiet nginx 2>/dev/null; then
+                    local existing_sites=()
+                    while IFS= read -r s; do
+                        [[ -n "$s" ]] && existing_sites+=("$s")
+                    done < <(detect_existing_nginx_sites 2>/dev/null || true)
+
+                    if [[ ${#existing_sites[@]} -gt 0 ]]; then
+                        warn "Порт $port занят системным Nginx со следующими работающими сайтами:"
+                        for s in "${existing_sites[@]}"; do
+                            echo -e "    ${BOLD}• $s${NC}"
+                        done
+                        info "Just1kBot может работать параллельно с вашим Nginx без остановки существующих сайтов (через обратный прокси на 127.0.0.1:8080)."
+                        read -r -p "Настроить совместную работу Just1kBot с вашим Nginx (рекомендуется)? (Y/n): " confirm_coexist
+                        if [[ ! "$confirm_coexist" =~ ^[Nn]$ ]]; then
+                            USE_EXTERNAL_NGINX=true
+                            log "Выбрана совместная работа с Nginx (Caddy будет отключен, ваши сайты продолжат работу)."
+                            break
+                        else
+                            read -r -p "Вы уверены, что хотите остановить Nginx? Ваши существующие сайты станут НЕДОСТУПНЫ! (y/N): " confirm_kill
+                            if [[ "$confirm_kill" =~ ^[Yy]$ ]]; then
+                                systemctl stop nginx 2>/dev/null || true
+                                systemctl disable nginx 2>/dev/null || true
+                                log "Служба Nginx остановлена."
+                            else
+                                error "Установка отменена: Nginx занимает порты 80/443 и совместная работа отклонена."
+                            fi
+                        fi
+                    else
+                        # Nginx без пользовательских сайтов
+                        warn "Порт $port занят системным Nginx (без настроенных сайтов)."
+                        read -r -p "Остановить системный Nginx для работы Just1kBot Caddy? (Y/n): " stop_nginx
+                        if [[ ! "$stop_nginx" =~ ^[Nn]$ ]]; then
+                            systemctl stop nginx 2>/dev/null || true
+                            systemctl disable nginx 2>/dev/null || true
+                            log "Служба Nginx остановлена."
+                        else
+                            error "Установка отменена: Nginx продолжает занимать порт $port."
+                        fi
+                    fi
+                else
+                    warn "Порт $port занят сторонним процессом:"
+                    echo "$proc"
+                    read -r -p "Остановить конфликтующие сервисы (например, apache2) перед запуском? (y/N): " stop_conflicts
+                    if [[ "$stop_conflicts" =~ ^[Yy]$ ]]; then
+                        systemctl stop apache2 2>/dev/null || true
+                        log "Сервисы остановлены."
+                    else
+                        error "Порт $port занят сторонним процессом. Освободите порт перед установкой."
+                    fi
                 fi
             fi
         fi
@@ -653,10 +738,11 @@ BALANCE_MAX_TOPUP_CREATIONS_24H=10
 BALANCE_MAX_PRESET_OPTIONS=6
 
 # ------------------------------------------------------------
-# Безопасность
+# Безопасность и Режим веб-сервера
 # ------------------------------------------------------------
 ALLOW_LOCAL_HTTP=false
 ALLOW_LOCAL_HTTPS=false
+USE_EXTERNAL_NGINX=${USE_EXTERNAL_NGINX:-false}
 EOF
 
     chmod 600 "${PROJECT_DIR}/.env"
@@ -691,20 +777,27 @@ EOF
 start_project() {
     title "6/6. Сборка и запуск проекта в Docker"
 
-    # Проверка конфликтов портов 80 и 443 (сторонние веб-серверы на хосте)
-    local host_webservers=(nginx apache2 caddy lighttpd)
-    for svc in "${host_webservers[@]}"; do
-        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$svc" 2>/dev/null; then
-            warn "Обнаружена активная системная служба '$svc' на хосте, которая блокирует порты 80/443 для Caddy!"
-            info "Остановка и отключение конфликтующей службы '$svc'..."
-            sudo systemctl stop "$svc" 2>/dev/null || systemctl stop "$svc" 2>/dev/null || true
-            sudo systemctl disable "$svc" 2>/dev/null || systemctl disable "$svc" 2>/dev/null || true
-            log "Служба $svc успешно остановлена и отключена."
-        fi
-    done
+    local scale_args=()
+    if [[ "$USE_EXTERNAL_NGINX" == "true" ]]; then
+        info "Режим совместной работы с системным Nginx (USE_EXTERNAL_NGINX=true)..."
+        "${PROJECT_DIR}/scripts/cli.sh" nginx-config || true
+        scale_args=(--scale caddy=0)
+    else
+        # Проверка конфликтов портов 80 и 443 (сторонние веб-серверы на хосте)
+        local host_webservers=(nginx apache2 caddy lighttpd)
+        for svc in "${host_webservers[@]}"; do
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$svc" 2>/dev/null; then
+                warn "Обнаружена активная системная служба '$svc' на хосте, которая блокирует порты 80/443 для Caddy!"
+                info "Остановка и отключение конфликтующей службы '$svc'..."
+                sudo systemctl stop "$svc" 2>/dev/null || systemctl stop "$svc" 2>/dev/null || true
+                sudo systemctl disable "$svc" 2>/dev/null || systemctl disable "$svc" 2>/dev/null || true
+                log "Служба $svc успешно остановлена и отключена."
+            fi
+        done
+    fi
 
-    log "Запуск сборки контейнеров (docker compose up -d --build)..."
-    docker compose up -d --build
+    log "Запуск сборки контейнеров (docker compose up -d --build ${scale_args[*]})..."
+    docker compose up -d --build "${scale_args[@]}"
 
     echo ""
     info "Ожидание готовности сервисов (healthcheck)..."
@@ -726,6 +819,13 @@ start_project() {
         caddy_status="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo starting)"
         migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
 
+        local caddy_ok=false
+        if [[ "$USE_EXTERNAL_NGINX" == "true" ]]; then
+            caddy_ok=true
+        elif [ "$caddy_status" = "running" ]; then
+            caddy_ok=true
+        fi
+
         # Проверка на ошибку миграции
         if [[ "$migrate_state" == "exited/"* ]] && [[ "$migrate_state" != "exited/0" ]]; then
             echo ""
@@ -733,7 +833,12 @@ start_project() {
         fi
 
         # Проверка на падение постоянных сервисов
-        if [ "$db_health" = "unhealthy" ] || [ "$redis_health" = "unhealthy" ] || [ "$bot_health" = "unhealthy" ] || [ "$caddy_status" = "exited" ] || [ "$caddy_status" = "dead" ]; then
+        local caddy_failed=false
+        if [[ "$USE_EXTERNAL_NGINX" != "true" ]] && ([ "$caddy_status" = "exited" ] || [ "$caddy_status" = "dead" ]); then
+            caddy_failed=true
+        fi
+
+        if [ "$db_health" = "unhealthy" ] || [ "$redis_health" = "unhealthy" ] || [ "$bot_health" = "unhealthy" ] || [ "$caddy_failed" = "true" ]; then
             echo ""
             docker compose ps
             echo ""
@@ -741,7 +846,7 @@ start_project() {
             error "Один из ключевых сервисов завершился аварийно или не прошел healthcheck."
         fi
 
-        if [ "$db_health" = "healthy" ] && [ "$redis_health" = "healthy" ] && [ "$bot_health" = "healthy" ] && [ "$caddy_status" = "running" ]; then
+        if [ "$db_health" = "healthy" ] && [ "$redis_health" = "healthy" ] && [ "$bot_health" = "healthy" ] && [ "$caddy_ok" = "true" ]; then
             echo ""
             log "Все сервисы успешно запущены и находятся в статусе Healthy!"
             success=true

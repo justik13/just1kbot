@@ -103,6 +103,8 @@ services:
     networks:
       - frontend_net
       - backend_net
+    ports:
+      - "127.0.0.1:${BOT_PORT:-8080}:8080"
     env_file:
       - .env
     environment:

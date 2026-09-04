@@ -491,6 +491,135 @@ main "$@"
         # Now rate limit file MUST be cleaned up!
         self.assertFalse(rate_limit_conf.exists())
 
+    # -------------------------------------------------------------------------
+    # 7. Nginx Coexistence and Dual-Mode Reverse Proxy Tests
+    # -------------------------------------------------------------------------
+
+    def test_detect_existing_nginx_sites(self):
+        """detect_existing_nginx_sites finds user domains, ignores just1k/stock configs."""
+        nginx_dir = self.root / "fake_nginx"
+        sites_enabled = nginx_dir / "sites-enabled"
+        sites_enabled.mkdir(parents=True, exist_ok=True)
+
+        # 1. Default stock placeholder with '_'
+        (sites_enabled / "default").write_text("server { listen 80; server_name _; }\n", encoding="utf-8")
+        # 2. just1kbot own config (ignored)
+        (sites_enabled / "just1kbot.conf").write_text("server { listen 80; server_name bot.example.com; }\n", encoding="utf-8")
+        # 3. User custom website
+        (sites_enabled / "my-shop.conf").write_text("server { listen 80; server_name myshop.com www.myshop.com; }\n", encoding="utf-8")
+
+        test_script = f"""
+source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
+detect_existing_nginx_sites "{nginx_dir.as_posix()}"
+"""
+        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 0)
+        output = proc.stdout
+        self.assertIn("my-shop.conf", output)
+        self.assertIn("myshop.com", output)
+        self.assertNotIn("just1kbot.conf", output)
+        self.assertNotIn("default", output)
+
+    def test_setup_external_nginx_integration_creates_config_and_sets_env(self):
+        """setup_external_nginx_integration generates vhost, symlinks to sites-enabled, and updates .env."""
+        nginx_dir = self.root / "fake_nginx_setup"
+        sites_avail = nginx_dir / "sites-available"
+        sites_enb = nginx_dir / "sites-enabled"
+        sites_avail.mkdir(parents=True, exist_ok=True)
+        sites_enb.mkdir(parents=True, exist_ok=True)
+
+        # Mock nginx executable so nginx -t returns 0
+        nginx_bin = self.bin_dir / "nginx"
+        nginx_bin.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        nginx_bin.chmod(0o755)
+
+        env_file = self.project_dir / ".env"
+        env_file.write_text("DOMAIN=bot.test.com\nSSL_EMAIL=test@test.com\nBOT_PORT=8080\n", encoding="utf-8")
+        env_file.chmod(0o600)
+
+        test_script = f"""
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
+setup_external_nginx_integration "{nginx_dir.as_posix()}"
+"""
+        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 0)
+        self.assertTrue((sites_avail / "just1kbot.conf").exists())
+        self.assertTrue((sites_enb / "just1kbot.conf").exists())
+
+        vhost_content = (sites_avail / "just1kbot.conf").read_text(encoding="utf-8")
+        self.assertIn("bot.test.com", vhost_content)
+        self.assertIn("proxy_pass http://127.0.0.1:8080", vhost_content)
+
+        updated_env = env_file.read_text(encoding="utf-8")
+        self.assertIn("USE_EXTERNAL_NGINX=true", updated_env)
+
+    def test_setup_external_nginx_integration_rollback_on_nginx_syntax_error(self):
+        """setup_external_nginx_integration removes symlink if nginx -t fails."""
+        nginx_dir = self.root / "fake_nginx_fail"
+        sites_avail = nginx_dir / "sites-available"
+        sites_enb = nginx_dir / "sites-enabled"
+        sites_avail.mkdir(parents=True, exist_ok=True)
+        sites_enb.mkdir(parents=True, exist_ok=True)
+
+        # Mock nginx to simulate syntax error
+        nginx_bin = self.bin_dir / "nginx"
+        nginx_bin.write_text('#!/bin/bash\necho "nginx syntax error: invalid directive" >&2; exit 1\n', encoding="utf-8")
+        nginx_bin.chmod(0o755)
+
+        env_file = self.project_dir / ".env"
+        env_file.write_text("DOMAIN=bot.test.com\nSSL_EMAIL=test@test.com\nBOT_PORT=8080\n", encoding="utf-8")
+        env_file.chmod(0o600)
+
+        test_script = f"""
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
+setup_external_nginx_integration "{nginx_dir.as_posix()}"
+"""
+        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 1)
+        # Symlink in sites-enabled must be removed to avoid breaking existing sites
+        self.assertFalse((sites_enb / "just1kbot.conf").exists())
+        self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stderr + proc.stdout)
+
+    def test_preflight_external_nginx_mode_skips_caddy_ports(self):
+        """When USE_EXTERNAL_NGINX=true, cmd_preflight does not check port 80/443 for Caddy."""
+        # Mock nginx executable so nginx -t returns 0
+        nginx_bin = self.bin_dir / "nginx"
+        nginx_bin.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        nginx_bin.chmod(0o755)
+
+        # Mock systemctl so nginx is active
+        sys_bin = self.bin_dir / "systemctl"
+        sys_bin.write_text('#!/bin/bash\nif [[ "$1" == "is-active" && "$3" == "nginx" ]]; then exit 0; fi\nexit 0\n', encoding="utf-8")
+        sys_bin.chmod(0o755)
+
+        env_content = (
+            "BOT_TOKEN=token123\n"
+            "POSTGRES_USER=user\n"
+            "POSTGRES_PASSWORD=pass\n"
+            "POSTGRES_DB=db\n"
+            "DB_ENCRYPTION_KEY=key\n"
+            "BACKUP_AGE_RECIPIENT=age1test\n"
+            "ADMIN_IDS=[123]\n"
+            "DOMAIN=vpn.example.com\n"
+            "SSL_EMAIL=admin@example.com\n"
+            "SUPPORT_USERNAME=support\n"
+            "YOOKASSA_SHOP_ID=123\n"
+            "YOOKASSA_SECRET_KEY=sec\n"
+            "USE_EXTERNAL_NGINX=true\n"
+        )
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        (self.project_dir / ".env").chmod(0o600)
+
+        proc = self._run_cli_command("preflight")
+        self.assertEqual(proc.returncode, 0, f"Stdout: {proc.stdout}\nStderr: {proc.stderr}")
+        self.assertIn("Режим внешнего Nginx активен (USE_EXTERNAL_NGINX=true)", proc.stdout)
+
 
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
     """Regression guard: `error()` in scripts/setup.sh must abort the whole
@@ -644,3 +773,5 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+

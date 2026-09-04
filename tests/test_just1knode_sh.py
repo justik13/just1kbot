@@ -905,6 +905,42 @@ run_doctor
             st_file = os.stat(state_file)
             self.assertTrue(bool(st_file.st_mode & 0o0660), "State file must have rw permissions for owner and group")
 
+    def test_detect_existing_nginx_sites_in_just1knode(self):
+        self._prepare_base_env()
+        sites_enabled = self.nginx_conf_dir / "sites-enabled"
+        sites_enabled.mkdir(parents=True, exist_ok=True)
+
+        # Default stock
+        (sites_enabled / "default").write_text("server { listen 80; server_name _; }\n", encoding="utf-8")
+        # User site
+        (sites_enabled / "my-blog.conf").write_text("server {\n    listen 80;\n    server_name myblog.org;\n}\n", encoding="utf-8")
+
+        res = self._run_shell_snippet(f'detect_existing_nginx_sites "{self.nginx_conf_dir}"')
+        self.assertEqual(res.returncode, 0, f"detect_existing_nginx_sites failed: stderr={res.stderr}")
+        self.assertIn("my-blog.conf", res.stdout)
+        self.assertIn("myblog.org", res.stdout)
+        self.assertNotIn("default", res.stdout)
+
+    def test_origin_nginx_backs_up_custom_default_site(self):
+        self._prepare_base_env()
+        sites_enabled = self.nginx_conf_dir / "sites-enabled"
+        sites_enabled.mkdir(parents=True, exist_ok=True)
+
+        # User has a custom domain inside default
+        (sites_enabled / "default").write_text("server {\n    listen 80;\n    server_name custom-site.com;\n}\n", encoding="utf-8")
+
+        # Simulate default backup check snippet from origin.sh
+        snippet = f"""
+if [[ -f "{sites_enabled}/default" ]] && grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "{sites_enabled}/default" 2>/dev/null; then
+    cp -a "{sites_enabled}/default" "{sites_enabled}/default.user.bak"
+fi
+rm -f "{sites_enabled}/default" 2>/dev/null || true
+"""
+        res = self._run_shell_snippet(snippet)
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue((sites_enabled / "default.user.bak").exists(), "Custom default site must be backed up as default.user.bak")
+        self.assertFalse((sites_enabled / "default").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
