@@ -26,6 +26,13 @@ class TestAdminBroadcastFilters(unittest.TestCase):
                 ],
                 "never": ["users.subscription_end IS NULL"],
                 "test_12345": ["users.telegram_id ="],
+                "server_1": [
+                    "servers.protocol",
+                    "vpn_profiles.server_id =",
+                    "vpn_profiles.is_active",
+                    "vpn_profiles.desired_is_active",
+                    "white_internet_subscriptions.origin_node_id =",
+                ],
             }
 
             for audience, fragments in expected_fragments.items():
@@ -59,6 +66,65 @@ class TestAdminBroadcastFilters(unittest.TestCase):
             self.assertNotIn("users.telegram_id =", compiled)
 
         asyncio.run(_test())
+
+    def test_invalid_server_audience_fails_closed(self):
+        async def _test():
+            session = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            session.execute.return_value = mock_result
+
+            await _get_next_batch(session, "server_not_an_int", last_id=100, limit=10)
+            statement = session.execute.await_args.args[0]
+            compiled = str(statement.compile(compile_kwargs={"literal_binds": False}))
+
+            self.assertIn("users.id >", compiled)
+            self.assertIn("servers.protocol", compiled)
+
+        asyncio.run(_test())
+
+    def test_server_audience_strict_protocol_decoupling_predicates(self):
+        async def _test():
+            session = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            session.execute.return_value = mock_result
+
+            await _get_next_batch(session, "server_42", last_id=0, limit=50)
+            statement = session.execute.await_args.args[0]
+            compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+
+            # AmneziaWG branch invariants
+            self.assertIn("SELECT servers.protocol", compiled)
+            self.assertIn("WHERE servers.id = 42) = 'amneziawg2'", compiled)
+            self.assertIn("vpn_profiles.server_id = 42", compiled)
+            self.assertIn("vpn_profiles.is_active IS true", compiled)
+            self.assertIn("vpn_profiles.desired_is_active IS true", compiled)
+            self.assertIn("vpn_profiles.provisioning_status NOT IN ('deleting')", compiled)
+            self.assertIn("users.subscription_end >", compiled)
+
+            # White Internet branch invariants
+            self.assertIn("WHERE servers.id = 42) = 'xray'", compiled)
+            self.assertIn("white_internet_subscriptions.origin_node_id = 42", compiled)
+            self.assertIn("white_internet_subscriptions.status IN ('ACTIVE', 'PENDING', 'EXHAUSTED')", compiled)
+            self.assertIn("white_internet_subscriptions.provisioning_status != 'PENDING_DELETE'", compiled)
+
+        asyncio.run(_test())
+
+    def test_server_audience_html_escaping(self):
+        from bot import texts
+        from utils.telegram import safe
+
+        raw_server_name = "Poland <Main> & Node"
+        escaped_name = safe(raw_server_name)
+        self.assertEqual(escaped_name, "Poland &lt;Main&gt; &amp; Node")
+
+        label = texts.BROADCAST_AUDIENCE_SERVER_LABEL.format(
+            flag="🇵🇱", proto="[AWG]", name=escaped_name
+        )
+        self.assertIn("&lt;Main&gt;", label)
+        self.assertIn("&amp;", label)
+        self.assertNotIn("<Main>", label)
 
     def test_broadcast_resume_durable_checkpoint(self):
         from unittest.mock import patch

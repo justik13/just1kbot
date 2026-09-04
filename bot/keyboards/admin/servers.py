@@ -28,6 +28,10 @@ def get_admin_server_card_keyboard(
         callback_data=f"admin_users_filter:server:{server_id}:1",
     )
     builder.button(
+        text=texts.ADMIN_SERVER_BTN_BROADCAST,
+        callback_data=f"admin_server_broadcast:{server_id}",
+    )
+    builder.button(
         text=texts.BTN_ADMIN_SERVER_PING,
         callback_data=f"admin_server_ping:{server_id}",
     )

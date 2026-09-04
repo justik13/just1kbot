@@ -2,6 +2,8 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
+from config.constants import XRAY_PROTOCOL
+from config.enums import ServerLifecycleStatus
 
 
 def get_broadcast_audience_keyboard() -> InlineKeyboardMarkup:
@@ -28,6 +30,10 @@ def get_broadcast_audience_keyboard() -> InlineKeyboardMarkup:
         callback_data="broadcast_aud:never",
     )
     builder.button(
+        text=texts.BROADCAST_AUDIENCE_BTN_SERVER,
+        callback_data="broadcast_aud_select_server",
+    )
+    builder.button(
         text=texts.BTN_BROADCAST_TEST_ADMIN,
         callback_data="broadcast_aud:test",
     )
@@ -36,7 +42,37 @@ def get_broadcast_audience_keyboard() -> InlineKeyboardMarkup:
         callback_data="admin_menu",
     )
 
-    builder.adjust(2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2)
+
+    return builder.as_markup()
+
+
+def get_broadcast_server_selection_keyboard(servers) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    for s in servers:
+        flag = s.country_flag or "🌐"
+        is_server_active = (
+            getattr(s, "is_active", True)
+            and getattr(s, "lifecycle_status", ServerLifecycleStatus.ACTIVE) == ServerLifecycleStatus.ACTIVE
+        )
+        is_xray = (
+            getattr(s, "protocol", None) == XRAY_PROTOCOL
+            or "xray_origin" in (getattr(s, "capabilities", None) or [])
+        )
+        proto = "[Xray]" if is_xray else "[AWG]"
+        status = "" if is_server_active else texts.BROADCAST_SERVER_STATUS_DISABLED
+        builder.button(
+            text=f"{flag} {proto} {s.name}{status}",
+            callback_data=f"broadcast_aud:server_{s.id}",
+        )
+
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="admin_broadcast",
+    )
+
+    builder.adjust(1)
 
     return builder.as_markup()
 

@@ -39,7 +39,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", max_clients=240)
         session = AsyncMock()
 
-        with patch("database.repositories.servers_repo.get_active_servers", AsyncMock(return_value=[server1])), \
+        with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server1])), \
              patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={1: 21})), \
              patch("services.slots_cache.get_cached_peer_count", return_value=23):
             summary = await _get_servers_capacity_summary(session)
@@ -53,13 +53,40 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", max_clients=240)
         session = AsyncMock()
 
-        with patch("database.repositories.servers_repo.get_active_servers", AsyncMock(return_value=[server1])), \
+        with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server1])), \
              patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={1: 21})), \
              patch("services.slots_cache.get_cached_peer_count", return_value=21):
             summary = await _get_servers_capacity_summary(session)
 
             self.assertIn("21/240", summary)
             self.assertNotIn("в БД:", summary)
+
+    async def test_dashboard_server_capacity_summary_shows_inactive_servers(self):
+        server_active = SimpleNamespace(
+            id=1, name="Netherlands", country_flag="🇳🇱", max_clients=240, is_active=True, lifecycle_status="ACTIVE"
+        )
+        server_inactive = SimpleNamespace(
+            id=2, name="Poland", country_flag="🇵🇱", max_clients=240, is_active=False, lifecycle_status="ACTIVE", disabled_reason="MANUAL"
+        )
+        server_auto = SimpleNamespace(
+            id=3, name="Germany", country_flag="🇩🇪", max_clients=240, is_active=False, lifecycle_status="ACTIVE", disabled_reason="AUTO_UNAVAILABLE"
+        )
+        session = AsyncMock()
+
+        with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server_active, server_inactive, server_auto])), \
+             patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={1: 22, 2: 20, 3: 5})), \
+             patch("services.slots_cache.get_cached_peer_count", side_effect=lambda sid: 22 if sid == 1 else None):
+            summary = await _get_servers_capacity_summary(session)
+
+            self.assertIn("Netherlands", summary)
+            self.assertIn("22/240", summary)
+            self.assertIn("Выключенные серверы:", summary)
+            self.assertIn("Poland", summary)
+            self.assertIn("выключен (вручную)", summary)
+            self.assertIn("в БД: 20", summary)
+            self.assertIn("Germany", summary)
+            self.assertIn("выключен (автоматически)", summary)
+            self.assertIn("в БД: 5", summary)
 
     async def test_server_list_buttons_include_capacity(self):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", is_active=True, max_clients=240)
@@ -82,6 +109,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("admin_server_peers:1:1", callbacks)
         self.assertIn("admin_users_filter:server:1:1", callbacks)
+        self.assertIn("admin_server_broadcast:1", callbacks)
         self.assertTrue(any("23/240" in t for t in texts_list))
 
     async def test_user_card_keyboard_back_callback_navigation(self):

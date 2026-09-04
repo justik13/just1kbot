@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.constants import AdminAuditAction
+from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
+from bot.states import AdminStates
 from database.repositories.servers_repo import (
     get_server_by_id,
     update_server,
@@ -283,3 +285,37 @@ async def dismiss_admin_alert(callback: CallbackQuery):
         await callback.message.delete()
     except Exception as e:
         logger.debug(f"Failed to delete alert message: {e}")
+
+
+@router.callback_query(F.data.startswith("admin_server_broadcast:"))
+async def admin_server_broadcast_start(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    server_id = parse_callback_id(callback.data, 1)
+    if server_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    server = await get_server_by_id(session, server_id)
+    if not server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    await callback.answer(show_alert=False)
+    await state.clear()
+    await state.update_data(target_audience=f"server_{server_id}")
+    await state.set_state(AdminStates.entering_broadcast_message)
+
+    try:
+        await callback.message.edit_text(
+            texts.BROADCAST_PROMPT,
+            reply_markup=get_back_button(f"admin_server_card:{server_id}"),
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"admin_server_broadcast_start edit_text failed: {e}")
