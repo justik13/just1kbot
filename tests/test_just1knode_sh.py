@@ -152,10 +152,11 @@ exit 0
             env.update(extra_env)
 
         backup_dir_val = extra_env.get("BACKUP_DIR", str(self.backup_dir)) if extra_env else str(self.backup_dir)
+        state_dir_val = extra_env.get("STATE_DIR", str(self.state_dir)) if extra_env else str(self.state_dir)
 
         # Source just1knode.sh functions and run snippet with root bypass for testing
         full_script = f"""
-export STATE_DIR='{self.state_dir}'
+export STATE_DIR='{state_dir_val}'
 export STATE_FILE='{self.state_dir / "state.json"}'
 export CLIENTS_FILE='{self.state_dir / "clients.json"}'
 export RELAYS_FILE='{self.state_dir / "relays.json"}'
