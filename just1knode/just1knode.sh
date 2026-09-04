@@ -515,7 +515,9 @@ uninstall_node() {
     systemctl reset-failed xray xray-api 2>/dev/null || true
 
     info "2/11. Завершение активных процессов ядра и API..."
-    pkill -9 -f "${XRAY_BIN:-/usr/local/bin/xray}" 2>/dev/null || true
+    local xray_proc_name
+    xray_proc_name="$(basename "${XRAY_BIN:-xray}")"
+    pkill -9 -x "$xray_proc_name" 2>/dev/null || true
     pkill -9 -u xrayapi 2>/dev/null || true
 
     info "3/11. Удаление пользователя и группы xrayapi..."

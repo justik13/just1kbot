@@ -68,6 +68,10 @@ class TestJust1kNodeScript(unittest.TestCase):
         self._create_mock_script("ufw", "#!/bin/sh\nexit 0\n")
         self._create_mock_script("certbot", "#!/bin/sh\nexit 0\n")
         self._create_mock_script("apt-get", "#!/bin/sh\nexit 0\n")
+        self._create_mock_script("pkill", "#!/bin/sh\nexit 0\n")
+        self._create_mock_script("userdel", "#!/bin/sh\nexit 0\n")
+        self._create_mock_script("groupdel", "#!/bin/sh\nexit 0\n")
+        self._create_mock_script("sysctl", "#!/bin/sh\nexit 0\n")
         self._create_mock_script(
             "unzip",
             """#!/bin/sh
