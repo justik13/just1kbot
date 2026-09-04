@@ -257,6 +257,8 @@ PAGE_INDEX_FORMAT = "Стр {page}/{total_pages}"
 
 ADMIN_DASHBOARD_PROXY_TAB_LABEL = "MTProto Proxy"
 ADMIN_DASHBOARD_SERVER_ROW_FORMAT = "{status_icon} {flag} <b>{name}</b>: {used}/{total} ({pct}%){extra_info}"
+DASHBOARD_INACTIVE_SERVERS_HEADER = "⏸️ <b>Выключенные серверы:</b>"
+DASHBOARD_INACTIVE_SERVER_ROW = "⚪ {flag} <b>{name}</b>: выключен{reason_text} (в БД: {db_used})"
 
 
 AUDIT_DETAIL_CURRENCY_SUFFIX = " ₽"

@@ -26,6 +26,10 @@ class TestAdminBroadcastFilters(unittest.TestCase):
                 ],
                 "never": ["users.subscription_end IS NULL"],
                 "test_12345": ["users.telegram_id ="],
+                "server_1": [
+                    "vpn_profiles.server_id =",
+                    "white_internet_subscriptions.origin_node_id =",
+                ],
             }
 
             for audience, fragments in expected_fragments.items():
@@ -57,6 +61,22 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
             self.assertIn("users.id >", compiled)
             self.assertNotIn("users.telegram_id =", compiled)
+
+        asyncio.run(_test())
+
+    def test_invalid_server_audience_fails_closed(self):
+        async def _test():
+            session = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            session.execute.return_value = mock_result
+
+            await _get_next_batch(session, "server_not_an_int", last_id=100, limit=10)
+            statement = session.execute.await_args.args[0]
+            compiled = str(statement.compile(compile_kwargs={"literal_binds": False}))
+
+            self.assertIn("users.id >", compiled)
+            self.assertIn("vpn_profiles.server_id =", compiled)
 
         asyncio.run(_test())
 

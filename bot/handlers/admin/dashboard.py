@@ -106,37 +106,62 @@ async def _get_dead_queues_count(session: AsyncSession) -> int:
 
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
+    from config.enums import ServerLifecycleStatus
     from database.repositories.servers_repo import (
-        get_active_servers,
+        get_all_servers,
         get_server_peer_counts,
     )
     from services.slots_cache import get_cached_peer_count
 
-    servers = await get_active_servers(session)
+    servers = await get_all_servers(session)
     if not servers:
         return texts.DASHBOARD_SERVEROV_POKA_NET
 
     db_counts = await get_server_peer_counts(session)
-    lines = []
+    active_lines = []
+    inactive_lines = []
+
     for s in servers:
         flag = s.country_flag or "🌐"
         db_used = db_counts.get(s.id, 0)
-        cached_used = get_cached_peer_count(s.id)
-        effective_used = max(cached_used, db_used) if cached_used is not None else db_used
-        if cached_used is not None and cached_used != db_used:
-            extra_info = texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
-                cached_used=cached_used, db_used=db_used
-            )
-        else:
-            extra_info = ""
+        is_server_active = (
+            getattr(s, "is_active", True)
+            and getattr(s, "lifecycle_status", ServerLifecycleStatus.ACTIVE) == ServerLifecycleStatus.ACTIVE
+        )
 
-        total = s.max_clients or 240
-        pct = int((effective_used / total) * 100) if total > 0 else 0
-        status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
-        lines.append(texts.ADMIN_DASHBOARD_SERVER_ROW_FORMAT.format(
-            status_icon=status_icon, flag=flag, name=safe(s.name), used=effective_used, total=total, pct=pct, extra_info=extra_info
-        ))
-    return "\n".join(lines)
+        if is_server_active:
+            cached_used = get_cached_peer_count(s.id)
+            effective_used = max(cached_used, db_used) if cached_used is not None else db_used
+            if cached_used is not None and cached_used != db_used:
+                extra_info = texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
+                    cached_used=cached_used, db_used=db_used
+                )
+            else:
+                extra_info = ""
+
+            total = s.max_clients or 240
+            pct = int((effective_used / total) * 100) if total > 0 else 0
+            status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
+            active_lines.append(texts.ADMIN_DASHBOARD_SERVER_ROW_FORMAT.format(
+                status_icon=status_icon, flag=flag, name=safe(s.name), used=effective_used, total=total, pct=pct, extra_info=extra_info
+            ))
+        else:
+            reason = getattr(s, "disabled_reason", None)
+            reason_text = f" ({safe(reason)})" if reason else ""
+            inactive_lines.append(texts.DASHBOARD_INACTIVE_SERVER_ROW.format(
+                flag=flag, name=safe(s.name), reason_text=reason_text, db_used=db_used
+            ))
+
+    result_parts = []
+    if active_lines:
+        result_parts.extend(active_lines)
+    if inactive_lines:
+        if active_lines:
+            result_parts.append("")
+        result_parts.append(texts.DASHBOARD_INACTIVE_SERVERS_HEADER)
+        result_parts.extend(inactive_lines)
+
+    return "\n".join(result_parts)
 
 
 

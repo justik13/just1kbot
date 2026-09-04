@@ -132,6 +132,7 @@ ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"
 ADMIN_SERVER_BTN_PEERS = "👥 Пиры на узле ({used}/{total})"
 ADMIN_SERVER_BTN_PEERS_NO_COUNT = "👥 Пиры на узле"
 ADMIN_SERVER_BTN_SERVER_USERS = "👥 Все пользователи этого сервера"
+ADMIN_SERVER_BTN_BROADCAST = "📢 Рассылка пользователям"
 ADMIN_SERVER_PEERS_AWG_ONLY = "Управление пирами доступно только для серверов AmneziaWG."
 ADMIN_SERVER_PEERS_HEADER = """{header}👥 <b>Пиры сервера {flag} {server_name}</b>{status_banner}
 • На узле: <b>{live_peers}</b> (Бот: {bot_peers}, Внешние: {external_peers}){deleting_note}{missing_note}{pending_note}

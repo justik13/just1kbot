@@ -79,3 +79,13 @@ BROADCAST_TEST_SENT_NOTICE = """✅ <b>Тестовое сообщение от�
 """
 
 BROADCAST_BTN_TEST_ME = "🧪 Тест мне (Админу)"
+BROADCAST_AUDIENCE_BTN_SERVER = "🌐 По серверу..."
+BROADCAST_SERVER_STATUS_DISABLED = " (выкл)"
+BROADCAST_SERVERS_NOT_FOUND = "Серверы не найдены"
+BROADCAST_BREADCRUMB_SERVER_SELECTION = "Выбор сервера"
+BROADCAST_SELECT_SERVER_PROMPT = """{header}🌐 <b>Выберите сервер для рассылки:</b>
+
+Сообщение будет отправлено только пользователям, у которых есть активное подключение к выбранному серверу."""
+BROADCAST_AUDIENCE_SERVER_LABEL = "Сервер {flag} {proto} {name}"
+BROADCAST_AUDIENCE_SERVER_ID_LABEL = "Сервер #{server_id}"
+BROADCAST_PROGRESS_SERVER_LABEL = "Сервер {flag} {name}"
