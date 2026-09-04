@@ -8,8 +8,9 @@ import logging
 
 from aiogram import Bot
 from sqlalchemy import func, nulls_first, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from config.constants import XRAY_PROTOCOL
 from config.enums import (
     ServerHealthState,
     ServerLifecycleStatus,
@@ -82,42 +83,41 @@ class WhiteInternetReconciliationWorker:
             expected_inbound_tags.add("just1k-wl-default")
 
         async with self._get_sub_lock(sub_id):
-            # 1. Distributed lock BEFORE mutation (Rule 9.4 Lock-Before-Mutation)
-            is_pg = False
-            async with sf() as sess:
-                bind = getattr(sess, "bind", None)
-                if not bind and hasattr(sess, "sync_session"):
-                    bind = getattr(sess.sync_session, "bind", None)
+            # Hold a single dedicated AsyncSession for the entire reconciliation of this subscription
+            async with sf() as lock_session:
+                is_pg = False
+                bind = getattr(lock_session, "bind", None)
+                if not bind and hasattr(lock_session, "sync_session"):
+                    bind = getattr(lock_session.sync_session, "bind", None)
                 if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
                     is_pg = True
-                    locked = await sess.scalar(
+                    locked = await lock_session.scalar(
                         select(func.pg_try_advisory_lock(sub_id + 7_000_000_000))
                     )
                     if not locked:
                         logger.debug("Subscription %d locked by peer worker process. Skipping.", sub_id)
                         return False
 
-            try:
-                # 2. External network mutation on Xray node
-                async with self._semaphore:
-                    resp = await self.client.sync_client(
-                        api_url,
-                        api_key,
-                        sub_uuid,
-                        is_active=desired_active,
-                        version=target_version,
-                        expected_node_epoch=target_epoch,
-                        idempotency_key=f"reconcile:{sub_id}:{target_version}:{desired_active}",
-                    )
+                try:
+                    # 2. External network mutation on Xray node
+                    async with self._semaphore:
+                        resp = await self.client.sync_client(
+                            api_url,
+                            api_key,
+                            sub_uuid,
+                            is_active=desired_active,
+                            version=target_version,
+                            expected_node_epoch=target_epoch,
+                            idempotency_key=f"reconcile:{sub_id}:{target_version}:{desired_active}",
+                        )
 
-                sync_result = resp.result if hasattr(resp, "result") else resp[0]
-                err_msg = resp.error if hasattr(resp, "error") else resp[1]
-                verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
-                verified_inbounds = getattr(resp, "verified_inbounds", None) or []
+                    sync_result = resp.result if hasattr(resp, "result") else resp[0]
+                    err_msg = resp.error if hasattr(resp, "error") else resp[1]
+                    verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
+                    verified_inbounds = getattr(resp, "verified_inbounds", None) or []
 
-                # 3. Persist result in short transaction under row lock
-                async with sf() as sess:
-                    sub = await white_internet_repo.get_subscription_with_lock(sess, sub_id)
+                    # 3. Persist result under row lock on the same session
+                    sub = await white_internet_repo.get_subscription_with_lock(lock_session, sub_id)
                     if sub is None:
                         return False
 
@@ -134,7 +134,7 @@ class WhiteInternetReconciliationWorker:
                             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                             sub.last_sync_error = f"missing_inbounds:{','.join(sorted(missing))}"
                             sub.last_synced_at = now_utc()
-                            await sess.commit()
+                            await lock_session.commit()
                             return False
 
                         if verified_epoch != target_epoch:
@@ -147,7 +147,7 @@ class WhiteInternetReconciliationWorker:
                             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                             sub.last_sync_error = "epoch_drift_detected"
                             sub.last_synced_at = now_utc()
-                            await sess.commit()
+                            await lock_session.commit()
                             return False
 
                         sub.actual_version = target_version
@@ -162,7 +162,7 @@ class WhiteInternetReconciliationWorker:
                         )
                         sub.last_synced_at = now_utc()
                         sub.last_sync_error = None
-                        await sess.commit()
+                        await lock_session.commit()
                         return True
                     elif sync_result == SyncResult.ALREADY_NEWER:
                         # Check real observed runtime inventory before trusting ALREADY_NEWER
@@ -192,7 +192,7 @@ class WhiteInternetReconciliationWorker:
                                     )
                                     sub.last_synced_at = now_utc()
                                     sub.last_sync_error = None
-                                    await sess.commit()
+                                    await lock_session.commit()
                                     return True
 
                         # Observed state does not match desired state: force convergence by bumping desired_version
@@ -206,7 +206,7 @@ class WhiteInternetReconciliationWorker:
                             server_id,
                             sub.desired_version,
                         )
-                        await sess.commit()
+                        await lock_session.commit()
                         return False
                     elif sync_result == SyncResult.FENCED:
                         sub.desired_version = max(sub.desired_version, target_version) + 1
@@ -221,7 +221,7 @@ class WhiteInternetReconciliationWorker:
                             sub.desired_version,
                             err_msg,
                         )
-                        await sess.commit()
+                        await lock_session.commit()
                         return False
                     elif sync_result == SyncResult.FAILED:
                         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
@@ -233,7 +233,7 @@ class WhiteInternetReconciliationWorker:
                             server_id,
                             err_msg,
                         )
-                        await sess.commit()
+                        await lock_session.commit()
                         return False
                     else:
                         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
@@ -247,13 +247,15 @@ class WhiteInternetReconciliationWorker:
                             sync_result,
                             err_msg,
                         )
-                        await sess.commit()
+                        await lock_session.commit()
                         return False
-            finally:
-                if is_pg:
-                    async with sf() as sess:
+                finally:
+                    if is_pg:
                         try:
-                            await sess.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
+                            if lock_session.in_transaction():
+                                await lock_session.rollback()
+                            await lock_session.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
+                            await lock_session.commit()
                         except Exception as exc:
                             logger.debug("Error releasing advisory lock for sub_id %d: %s", sub_id, exc)
 
@@ -261,16 +263,30 @@ class WhiteInternetReconciliationWorker:
         now = now_utc()
         sf = self.session_factory
         if session is not None:
-            @asynccontextmanager
-            async def _session_ctx():
-                yield session
+            bind = getattr(session, "bind", None)
+            if not bind and hasattr(session, "sync_session"):
+                bind = getattr(session.sync_session, "bind", None)
+            if isinstance(bind, AsyncEngine):
+                task_maker = async_sessionmaker(bind, expire_on_commit=False)
 
-            sf = _session_ctx
+                @asynccontextmanager
+                async def _task_session_ctx():
+                    async with task_maker() as s:
+                        yield s
+
+                sf = _task_session_ctx
+            else:
+                @asynccontextmanager
+                async def _session_ctx():
+                    yield session
+
+                sf = _session_ctx
 
         async with sf() as sess:
             stmt_servers = (
                 select(Server)
                 .where(
+                    Server.protocol == XRAY_PROTOCOL,
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
@@ -359,6 +375,7 @@ class WhiteInternetReconciliationWorker:
                         WhiteInternetStatus.EXHAUSTED,
                     ):
                         await white_internet_repo.expire_subscription_atomic(sess, sub.id)
+                        await sess.commit()
 
                     desired_active = (
                         sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)

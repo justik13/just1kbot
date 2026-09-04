@@ -94,7 +94,9 @@ class DeviceService:
         ).scalar_one()
         server = (
             await session.execute(
-                select(Server).where(Server.id == server_id).with_for_update()
+                select(Server)
+                .where(Server.id == server_id, Server.protocol == AMNEZIA_PROTOCOL)
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if not server or server.protocol != AMNEZIA_PROTOCOL or not server.is_active:

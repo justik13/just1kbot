@@ -16,6 +16,7 @@ logger = logging.getLogger("xray_api.client_store")
 
 class ClientStoreCorruptedError(RuntimeError):
     """Raised when clients.json exists but is unparseable or corrupted."""
+
     pass
 
 
@@ -56,7 +57,9 @@ class ClientStore:
                                 u: {"is_active": True, "version": 1, "updated_at": time.time()}
                                 for u in clients_val
                             }
-                        raise ClientStoreCorruptedError(f"Unexpected clients field in {self.file_path}: {type(clients_val)}")
+                        raise ClientStoreCorruptedError(
+                            f"Unexpected clients field in {self.file_path}: {type(clients_val)}"
+                        )
                     if all(isinstance(v, dict) for v in data.values()):
                         return data
                 elif isinstance(data, list):
@@ -64,7 +67,9 @@ class ClientStore:
                         u: {"is_active": True, "version": 1, "updated_at": time.time()}
                         for u in data
                     }
-                raise ClientStoreCorruptedError(f"Unexpected JSON structure in {self.file_path}: {type(data)}")
+                raise ClientStoreCorruptedError(
+                    f"Unexpected JSON structure in {self.file_path}: {type(data)}"
+                )
         except json.JSONDecodeError as jde:
             logger.critical("Corruption detected in %s: %s", self.file_path, jde)
             raise ClientStoreCorruptedError(f"Corrupted JSON in {self.file_path}: {jde}") from jde
@@ -77,15 +82,27 @@ class ClientStore:
     def load_clients(self) -> Set[str]:
         """Returns set of currently active client UUIDs, excluding tombstones."""
         entries = self.load_client_entries()
-        return {u for u, meta in entries.items() if meta.get("is_active", True) is True and not meta.get("tombstone", False)}
+        return {
+            u
+            for u, meta in entries.items()
+            if meta.get("is_active", True) is True and not meta.get("tombstone", False)
+        }
 
     def save_client_entries(self, entries: Dict[str, Dict[str, Any]]) -> bool:
         self._ensure_dir()
-        temp_path = self.file_path.with_name(f"{self.file_path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp")
+        temp_path = self.file_path.with_name(
+            f"{self.file_path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp"
+        )
         data = {
             "clients": entries,
             "updated_at": time.time(),
-            "count": len([u for u, m in entries.items() if m.get("is_active", True) is True and not m.get("tombstone", False)]),
+            "count": len(
+                [
+                    u
+                    for u, m in entries.items()
+                    if m.get("is_active", True) is True and not m.get("tombstone", False)
+                ]
+            ),
         }
         try:
             with open(temp_path, "w", encoding="utf-8") as f:
@@ -98,7 +115,9 @@ class ClientStore:
             except Exception:
                 pass
             try:
-                dir_fd = os.open(str(self.file_path.parent), getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY)
+                dir_fd = os.open(
+                    str(self.file_path.parent), getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY
+                )
                 try:
                     os.fsync(dir_fd)
                 finally:
@@ -120,6 +139,29 @@ class ClientStore:
         entries = {u: {"is_active": True, "version": 1, "updated_at": time.time()} for u in clients}
         return self.save_client_entries(entries)
 
+    def _acquire_lock(self):
+        if fcntl is None:
+            return None
+        try:
+            lock_fd = open(self.lock_path, "a")
+            try:
+                os.chmod(self.lock_path, 0o660)
+            except Exception:
+                pass
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            return lock_fd
+        except Exception as e:
+            logger.debug("Could not acquire client store lock: %s", e)
+            return None
+
+    def _release_lock(self, lock_fd):
+        if fcntl is not None and lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                lock_fd.close()
+            except Exception:
+                pass
+
     def add_client(
         self,
         client_uuid: str,
@@ -127,16 +169,12 @@ class ClientStore:
         email: Optional[str] = None,
     ) -> None:
         self._ensure_dir()
-        lock_fd = None
-        if fcntl is not None:
-            try:
-                lock_fd = open(self.lock_path, "a")
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except Exception as e:
-                logger.debug("Could not acquire client store lock: %s", e)
+        lock_fd = self._acquire_lock()
         try:
             entries = self.load_client_entries()
-            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            curr_ver = (
+                entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            )
             new_ver = version if version is not None else max(curr_ver + 1, 1)
             entry: Dict[str, Any] = {
                 "is_active": True,
@@ -149,25 +187,16 @@ class ClientStore:
             if not self.save_client_entries(entries):
                 raise IOError(f"Failed to persist client addition to disk: {client_uuid}")
         finally:
-            if fcntl is not None and lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
+            self._release_lock(lock_fd)
 
     def remove_client(self, client_uuid: str, version: Optional[int] = None) -> None:
         self._ensure_dir()
-        lock_fd = None
-        if fcntl is not None:
-            try:
-                lock_fd = open(self.lock_path, "a")
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except Exception as e:
-                logger.debug("Could not acquire client store lock: %s", e)
+        lock_fd = self._acquire_lock()
         try:
             entries = self.load_client_entries()
-            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            curr_ver = (
+                entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            )
             new_ver = version if version is not None else max(curr_ver + 1, 1)
             entries[client_uuid] = {
                 "is_active": False,
@@ -177,25 +206,16 @@ class ClientStore:
             if not self.save_client_entries(entries):
                 raise IOError(f"Failed to persist client deactivation to disk: {client_uuid}")
         finally:
-            if fcntl is not None and lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
+            self._release_lock(lock_fd)
 
     def delete_client(self, client_uuid: str, version: Optional[int] = None) -> None:
         self._ensure_dir()
-        lock_fd = None
-        if fcntl is not None:
-            try:
-                lock_fd = open(self.lock_path, "a")
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except Exception as e:
-                logger.debug("Could not acquire client store lock: %s", e)
+        lock_fd = self._acquire_lock()
         try:
             entries = self.load_client_entries()
-            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            curr_ver = (
+                entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            )
             new_ver = version if version is not None else max(curr_ver + 1, 1)
             entries[client_uuid] = {
                 "is_active": False,
@@ -206,9 +226,4 @@ class ClientStore:
             if not self.save_client_entries(entries):
                 raise IOError(f"Failed to persist client deletion tombstone to disk: {client_uuid}")
         finally:
-            if fcntl is not None and lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
+            self._release_lock(lock_fd)

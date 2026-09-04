@@ -3,6 +3,12 @@
 # JUST1KNODE - Установка Origin Узла (modules/xray/origin.sh)
 # =============================================================================
 
+normalize_domain() {
+    local raw="${1:-}"
+    raw="$(echo "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's|^https\?://||' -e 's|/.*$||')"
+    echo "$raw"
+}
+
 deploy_subscription_proxy_conf() {
     local target_host="${1:-}"
     if [[ -z "$target_host" ]]; then
@@ -14,13 +20,23 @@ deploy_subscription_proxy_conf() {
     if [[ -z "$target_host" ]]; then
         target_host="127.0.0.1"
     fi
+    target_host="$(normalize_domain "$target_host")"
+
+    local ssl_verify_directives=""
+    if [[ ! "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$target_host" != "localhost" && -f /etc/ssl/certs/ca-certificates.crt ]]; then
+        ssl_verify_directives="        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;"
+    fi
 
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
     location ^~ /sub/wl {
-        proxy_pass https://${target_host};
+        resolver 1.1.1.1 8.8.8.8 77.88.8.8 valid=30s ipv6=off;
+        set \$bot_upstream "https://${target_host}";
+        proxy_pass \$bot_upstream;
         proxy_ssl_server_name on;
+${ssl_verify_directives}
         proxy_set_header Host ${target_host};
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -30,7 +46,7 @@ deploy_subscription_proxy_conf() {
         proxy_send_timeout 30s;
     }
 EOF
-    info "Сконфигурировано Nginx-проксирование подписок (/sub/wl -> ${target_host})"
+    info "Сконфигурировано Nginx-проксирование подписок (/sub/wl -> dynamic resolver -> https://${target_host})"
 }
 
 install_xray_origin_node() {
@@ -88,6 +104,19 @@ install_xray_origin_node() {
         fi
     fi
 
+    bot_domain="$(normalize_domain "$bot_domain")"
+
+    if [[ -n "$bot_domain" ]]; then
+        info "Проверка связи с ботом через эндпоинт https://${bot_domain}/health..."
+        local health_code
+        health_code="$(curl -skL --max-time 5 -o /dev/null -w "%{http_code}" "https://${bot_domain}/health" 2>/dev/null || echo "000")"
+        if [[ "$health_code" == "200" ]]; then
+            log "Эндпоинт бота https://${bot_domain}/health доступен (HTTP 200)."
+        else
+            warn "Эндпоинт бота https://${bot_domain}/health вернул код: $health_code (или недоступен). Проверьте DNS и статус бота (динамический resolver защитит Nginx от сбоя)."
+        fi
+    fi
+
     if [[ -z "$secret_path" ]]; then
         local existing_secret_path
         existing_secret_path="$(get_state_val "secret_base_path" 2>/dev/null || true)"
@@ -118,6 +147,19 @@ install_xray_origin_node() {
     chmod 755 "${CERTBOT_DIR}" 2>/dev/null || true
     configure_safe_ufw "80/tcp"
 
+    # Проверка наличия существующих сайтов до настройки Nginx
+    local pre_existing_sites=()
+    while IFS= read -r s; do
+        [[ -n "$s" ]] && pre_existing_sites+=("$s")
+    done < <(detect_existing_nginx_sites 2>/dev/null || true)
+    if [[ ${#pre_existing_sites[@]} -gt 0 ]]; then
+        info "В системном Nginx обнаружены существующие сайты:"
+        for s in "${pre_existing_sites[@]}"; do
+            echo -e "    ${BOLD}• $s${NC}"
+        done
+        log "Настройка Origin выполняется без остановки Nginx и с сохранением всех существующих сайтов."
+    fi
+
     # Bootstrap HTTP block для ACME challenge в Nginx
     cat > "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" <<EOF
 server {
@@ -130,7 +172,27 @@ server {
     }
 }
 EOF
-    rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+    local default_was_linked=0
+    if [[ -f "${NGINX_CONF_DIR}/sites-enabled/default" ]]; then
+        default_was_linked=1
+        if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
+            warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak в sites-available."
+            cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
+        fi
+        rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+    fi
+    if ! nginx -t 2>/dev/null; then
+        warn "Ошибка синтаксиса Nginx (nginx -t) с bootstrap-конфигурацией. Откат изменений..."
+        rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" 2>/dev/null || true
+        if [[ $default_was_linked -eq 1 ]]; then
+            if [[ -f "${NGINX_CONF_DIR}/sites-available/default.user.bak" ]]; then
+                cp -a "${NGINX_CONF_DIR}/sites-available/default.user.bak" "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+            elif [[ -f "${NGINX_CONF_DIR}/sites-available/default" ]]; then
+                ln -sf "${NGINX_CONF_DIR}/sites-available/default" "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+            fi
+        fi
+        error "Ошибка синтаксиса Nginx (nginx -t) до применения сертификата. Установка Origin прервана."
+    fi
     systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
 
     obtain_ssl_certificate "$domain" "$email"
@@ -298,7 +360,8 @@ with open(config_file, 'w', encoding='utf-8') as f:
 " "$XRAY_CONFIG" "$secret_path"
 
     chown root:xrayapi "$XRAY_CONFIG" 2>/dev/null || true
-    chmod 640 "$XRAY_CONFIG"
+    chmod 640 "$XRAY_CONFIG" 2>/dev/null || true
+    chmod 755 "$(dirname "$XRAY_CONFIG")" 2>/dev/null || true
 
     if [[ $EUID -eq 0 ]]; then
         mkdir -p /etc/sysctl.d 2>/dev/null || true
@@ -354,8 +417,28 @@ EOF
         server_name_str="${domain} ${cdn_domain}"
     fi
 
+    local existing_sites=()
+    while IFS= read -r s; do
+        [[ -n "$s" ]] && existing_sites+=("$s")
+    done < <(detect_existing_nginx_sites 2>/dev/null || true)
+    if [[ ${#existing_sites[@]} -gt 0 ]]; then
+        info "В системном Nginx обнаружены существующие сайты:"
+        for s in "${existing_sites[@]}"; do
+            echo -e "    ${BOLD}• $s${NC}"
+        done
+        log "Настройка Origin узла выполняется в изолированном виртуальном хосте (just1k-origin.conf). Ваши существующие сайты продолжат работать параллельно."
+    fi
+
     rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" "${NGINX_CONF_DIR}/conf.d/just1k-origin.conf" "${NGINX_CONF_DIR}/conf.d/origin.conf" 2>/dev/null || true
-    rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+    local default_was_linked_origin=0
+    if [[ -f "${NGINX_CONF_DIR}/sites-enabled/default" ]]; then
+        default_was_linked_origin=1
+        if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
+            warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak в sites-available."
+            cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
+        fi
+        rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+    fi
 
     cat > "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" <<EOF
 server {
@@ -424,7 +507,16 @@ server {
 EOF
 
     ln -sf "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" "${NGINX_CONF_DIR}/sites-enabled/"
-    nginx -t && systemctl reload nginx
+    if ! nginx -t 2>/dev/null; then
+        rm -f "${NGINX_CONF_DIR}/sites-enabled/just1k-origin.conf" 2>/dev/null || true
+        if [[ -f "${NGINX_CONF_DIR}/sites-available/default.user.bak" ]]; then
+            cp -a "${NGINX_CONF_DIR}/sites-available/default.user.bak" "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+        elif [[ $default_was_linked_origin -eq 1 && -f "${NGINX_CONF_DIR}/sites-available/default" && ! -f "${NGINX_CONF_DIR}/sites-enabled/default" ]]; then
+            ln -sf "${NGINX_CONF_DIR}/sites-available/default" "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
+        fi
+        error "Ошибка валидации синтаксиса Nginx (nginx -t)! Перезагрузка Nginx отменена для сохранения доступности работающих сайтов."
+    fi
+    systemctl reload nginx
 
     # Фаервол: порт 8444 открывается СТРОГО для BOT_IP
     configure_safe_ufw "80/tcp" "443/tcp"
@@ -708,12 +800,23 @@ with os.fdopen(t_fd, 'w', encoding='utf-8') as f:
     f.flush()
     os.fsync(f.fileno())
 os.replace(t_path, cfg_file)
+try:
+    import shutil
+    shutil.chown(cfg_file, user='root', group='xrayapi')
+    os.chmod(cfg_file, 0o640)
+    os.chmod(d, 0o755)
+except Exception:
+    pass
 
 print('[+] Xray Origin config успешно согласован с эталоном (Desired-State Reconciliation)')
 " "$XRAY_CONFIG" "$RELAYS_FILE" "${STATE_DIR}/state.json"; then
         manifest_rollback
         error "Ошибка выполнения Python-скрипта реконсиляции Origin."
     fi
+
+    chown root:xrayapi "$XRAY_CONFIG" 2>/dev/null || true
+    chmod 640 "$XRAY_CONFIG" 2>/dev/null || true
+    chmod 755 "$(dirname "$XRAY_CONFIG")" 2>/dev/null || true
 
     # Авто-восстановление Nginx location файлов для всех релеев
     if [[ -f "$RELAYS_FILE" ]]; then

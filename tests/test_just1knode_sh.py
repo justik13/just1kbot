@@ -66,7 +66,9 @@ class TestJust1kNodeScript(unittest.TestCase):
         self._create_mock_script("ufw", "#!/bin/sh\nexit 0\n")
         self._create_mock_script("certbot", "#!/bin/sh\nexit 0\n")
         self._create_mock_script("apt-get", "#!/bin/sh\nexit 0\n")
-        self._create_mock_script("unzip", """#!/bin/sh
+        self._create_mock_script(
+            "unzip",
+            """#!/bin/sh
 dest="."
 prev=""
 for arg in "$@"; do
@@ -82,12 +84,15 @@ for arg in "$@"; do
     fi
 done
 exit 0
-""")
+""",
+        )
 
         # Initial files
         state_file = self.state_dir / "state.json"
         with open(state_file, "w", encoding="utf-8") as f:
-            json.dump({"role": "origin", "domain": "origin.example.com", "secret_base_path": "/stream"}, f)
+            json.dump(
+                {"role": "origin", "domain": "origin.example.com", "secret_base_path": "/stream"}, f
+            )
 
         relays_file = self.state_dir / "relays.json"
         with open(relays_file, "w", encoding="utf-8") as f:
@@ -95,22 +100,27 @@ exit 0
 
         xray_config = self.xray_config_dir / "config.json"
         with open(xray_config, "w", encoding="utf-8") as f:
-            json.dump({
-                "inbounds": [{"tag": "just1k-wl-default", "port": 8003, "protocol": "vless"}],
-                "outbounds": [
-                    {"tag": "just1k-wl-direct", "protocol": "freedom"},
-                    {"tag": "just1k-wl-block", "protocol": "blackhole"},
-                    {"tag": "direct", "protocol": "freedom"},
-                    {"tag": "block", "protocol": "blackhole"},
-                ],
-                "routing": {"rules": []}
-            }, f)
+            json.dump(
+                {
+                    "inbounds": [{"tag": "just1k-wl-default", "port": 8003, "protocol": "vless"}],
+                    "outbounds": [
+                        {"tag": "just1k-wl-direct", "protocol": "freedom"},
+                        {"tag": "just1k-wl-block", "protocol": "blackhole"},
+                        {"tag": "direct", "protocol": "freedom"},
+                        {"tag": "block", "protocol": "blackhole"},
+                    ],
+                    "routing": {"rules": []},
+                },
+                f,
+            )
 
         env_file = self.xray_api_etc / "config.env"
         with open(env_file, "w", encoding="utf-8") as f:
             f.write("XRAY_API_KEY=testkey\nXRAY_INBOUND_TAGS=just1k-wl-default\n")
 
-    def _run_shell_snippet(self, snippet: str, extra_env: dict = None) -> subprocess.CompletedProcess:
+    def _run_shell_snippet(
+        self, snippet: str, extra_env: dict = None
+    ) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["PATH"] = f"{self.bin_dir}:{env['PATH']}"
         env["STATE_DIR"] = str(self.state_dir)
@@ -188,18 +198,28 @@ ensure_xrayapi_user() {{ return 0; }}
         with open(de_conf, "w", encoding="utf-8") as f:
             f.write(original_de_content)
 
-        original_relays = [{"code": "de", "name": "Old Germany", "inbound_port": 8004, "inbound_tag": "just1k-wl-inbound-de"}]
+        original_relays = [
+            {
+                "code": "de",
+                "name": "Old Germany",
+                "inbound_port": 8004,
+                "inbound_tag": "just1k-wl-inbound-de",
+            }
+        ]
         with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
             json.dump(original_relays, f)
 
         # Make nginx fail on validation
-        self._create_mock_script("nginx", """#!/bin/sh
+        self._create_mock_script(
+            "nginx",
+            """#!/bin/sh
 if [ "$1" = "-t" ]; then
     echo "nginx: configuration syntax error test" >&2
     exit 1
 fi
 exit 0
-""")
+""",
+        )
 
         cmd = 'add_relay_node "Germany" "1.2.3.4" "10443" "new-uuid" "de" "tls" "" "" "relay.example.com"'
         res = self._run_shell_snippet(cmd)
@@ -226,31 +246,53 @@ exit 0
         with open(de_conf, "w", encoding="utf-8") as f:
             f.write(de_content)
 
-        relays_data = [{"code": "de", "name": "Germany", "inbound_port": 8004, "inbound_tag": "just1k-wl-inbound-de"}]
+        relays_data = [
+            {
+                "code": "de",
+                "name": "Germany",
+                "inbound_port": 8004,
+                "inbound_tag": "just1k-wl-inbound-de",
+            }
+        ]
         with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
             json.dump(relays_data, f)
 
         xray_config_file = self.xray_config_dir / "config.json"
         with open(xray_config_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "inbounds": [{"tag": "just1k-wl-default"}, {"tag": "just1k-wl-inbound-de"}],
-                "outbounds": [{"tag": "just1k-wl-outbound-de"}, {"tag": "just1k-wl-direct"}],
-                "routing": {"rules": [{"inboundTag": ["just1k-wl-inbound-de"], "outboundTag": "just1k-wl-outbound-de"}]}
-            }, f)
+            json.dump(
+                {
+                    "inbounds": [{"tag": "just1k-wl-default"}, {"tag": "just1k-wl-inbound-de"}],
+                    "outbounds": [{"tag": "just1k-wl-outbound-de"}, {"tag": "just1k-wl-direct"}],
+                    "routing": {
+                        "rules": [
+                            {
+                                "inboundTag": ["just1k-wl-inbound-de"],
+                                "outboundTag": "just1k-wl-outbound-de",
+                            }
+                        ]
+                    },
+                },
+                f,
+            )
 
         # Mock xray to fail test
-        self._create_mock_script("xray", """#!/bin/sh
+        self._create_mock_script(
+            "xray",
+            """#!/bin/sh
 if [ "$1" = "run" ] && [ "$2" = "-test" ]; then
     echo "xray: config test failed" >&2
     exit 1
 fi
 exit 0
-""")
+""",
+        )
 
         cmd = 'remove_relay_node "de"'
         res = self._run_shell_snippet(cmd)
 
-        self.assertNotEqual(res.returncode, 0, "remove_relay_node must fail closed when xray test fails")
+        self.assertNotEqual(
+            res.returncode, 0, "remove_relay_node must fail closed when xray test fails"
+        )
         self.assertIn("Ошибка тестирования Xray", res.stderr + res.stdout)
 
         # Ensure deleted de.conf was restored
@@ -287,30 +329,39 @@ exit 0
 
         xray_config_file = self.xray_config_dir / "config.json"
         with open(xray_config_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "inbounds": [
-                    {"tag": "just1k-wl-default", "port": 8003, "protocol": "vless"},
-                    {"tag": "just1k-wl-inbound-de", "port": 8004, "protocol": "vless"},
-                    {"tag": "just1k-wl-api-grpc", "port": 10085, "protocol": "dokodemo-door"}
-                ],
-                "outbounds": [
-                    {"tag": "just1k-wl-direct", "protocol": "freedom", "settings": {"domainStrategy": "UseIP"}}
-                ],
-                "routing": {
-                    "rules": [
+            json.dump(
+                {
+                    "inbounds": [
+                        {"tag": "just1k-wl-default", "port": 8003, "protocol": "vless"},
+                        {"tag": "just1k-wl-inbound-de", "port": 8004, "protocol": "vless"},
+                        {"tag": "just1k-wl-api-grpc", "port": 10085, "protocol": "dokodemo-door"},
+                    ],
+                    "outbounds": [
                         {
-                            "type": "field",
-                            "inboundTag": ["just1k-wl-default"],
-                            "domain": ["domain:ru"],
-                            "outboundTag": "just1k-wl-direct"
+                            "tag": "just1k-wl-direct",
+                            "protocol": "freedom",
+                            "settings": {"domainStrategy": "UseIP"},
                         }
-                    ]
-                }
-            }, f)
+                    ],
+                    "routing": {
+                        "rules": [
+                            {
+                                "type": "field",
+                                "inboundTag": ["just1k-wl-default"],
+                                "domain": ["domain:ru"],
+                                "outboundTag": "just1k-wl-direct",
+                            }
+                        ]
+                    },
+                },
+                f,
+            )
 
-        cmd = 'heal_and_update_origin_config'
+        cmd = "heal_and_update_origin_config"
         res = self._run_shell_snippet(cmd)
-        self.assertEqual(res.returncode, 0, f"heal_and_update_origin_config failed: {res.stderr + res.stdout}")
+        self.assertEqual(
+            res.returncode, 0, f"heal_and_update_origin_config failed: {res.stderr + res.stdout}"
+        )
 
         with open(xray_config_file, "r", encoding="utf-8") as f:
             updated = json.load(f)
@@ -320,7 +371,9 @@ exit 0
         self.assertEqual(direct_ob["settings"]["domainStrategy"], "UseIPv4")
 
         # 2. Check direct routing rule updated with domain:2ip.ru and inbound-de
-        direct_rule = next(r for r in updated["routing"]["rules"] if r.get("outboundTag") == "just1k-wl-direct")
+        direct_rule = next(
+            r for r in updated["routing"]["rules"] if r.get("outboundTag") == "just1k-wl-direct"
+        )
         self.assertIn("domain:2ip.ru", direct_rule["domain"])
         self.assertIn("just1k-wl-inbound-de", direct_rule["inboundTag"])
 
@@ -349,14 +402,15 @@ exit 0
         xray_config_file = self.xray_config_dir / "config.json"
         # Config completely lacking outbounds and routing rules
         with open(xray_config_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "inbounds": [],
-                "outbounds": []
-            }, f)
+            json.dump({"inbounds": [], "outbounds": []}, f)
 
-        cmd = 'heal_and_update_origin_config'
+        cmd = "heal_and_update_origin_config"
         res = self._run_shell_snippet(cmd)
-        self.assertEqual(res.returncode, 0, f"heal_and_update_origin_config failed on broken config: {res.stderr + res.stdout}")
+        self.assertEqual(
+            res.returncode,
+            0,
+            f"heal_and_update_origin_config failed on broken config: {res.stderr + res.stdout}",
+        )
 
         with open(xray_config_file, "r", encoding="utf-8") as f:
             reconciled = json.load(f)
@@ -388,7 +442,9 @@ exit 0
         '''
         res = self._run_shell_snippet(cmd)
         self.assertEqual(res.returncode, 0, f"rollback snippet failed: {res.stderr + res.stdout}")
-        self.assertFalse(new_conf.exists(), "Rollback failed to remove newly created relay nginx config file!")
+        self.assertFalse(
+            new_conf.exists(), "Rollback failed to remove newly created relay nginx config file!"
+        )
 
     # -------------------------------------------------------------------------
     # F04: Zero-Collateral Preservation of Custom Outbounds
@@ -400,19 +456,21 @@ exit 0
             {"tag": "direct", "protocol": "freedom", "settings": {"domainStrategy": "UseIP"}},
             {"tag": "block", "protocol": "blackhole"},
             {"tag": "custom-wireguard", "protocol": "wireguard", "settings": {"secret": "abc"}},
-            {"tag": "warp-exit", "protocol": "socks", "settings": {"servers": [{"address": "127.0.0.1", "port": 40000}]}}
+            {
+                "tag": "warp-exit",
+                "protocol": "socks",
+                "settings": {"servers": [{"address": "127.0.0.1", "port": 40000}]},
+            },
         ]
         with open(xray_config_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "inbounds": [],
-                "outbounds": custom_outbounds,
-                "routing": {"rules": []}
-            }, f)
+            json.dump({"inbounds": [], "outbounds": custom_outbounds, "routing": {"rules": []}}, f)
 
         # Run origin installer with surgical merge
         cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4"'
         res = self._run_shell_snippet(cmd)
-        self.assertEqual(res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}")
+        self.assertEqual(
+            res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}"
+        )
 
         with open(xray_config_file, "r", encoding="utf-8") as f:
             cfg = json.load(f)
@@ -420,9 +478,13 @@ exit 0
         tags = [ob["tag"] for ob in cfg["outbounds"]]
         self.assertIn("direct", tags, "Custom 'direct' outbound must be preserved")
         self.assertIn("block", tags, "Custom 'block' outbound must be preserved")
-        self.assertIn("custom-wireguard", tags, "Custom 'custom-wireguard' outbound must be preserved")
+        self.assertIn(
+            "custom-wireguard", tags, "Custom 'custom-wireguard' outbound must be preserved"
+        )
         self.assertIn("warp-exit", tags, "Custom 'warp-exit' outbound must be preserved")
-        self.assertIn("just1k-wl-direct", tags, "Namespaced just1k-wl-direct outbound must be added")
+        self.assertIn(
+            "just1k-wl-direct", tags, "Namespaced just1k-wl-direct outbound must be added"
+        )
         self.assertIn("just1k-wl-block", tags, "Namespaced just1k-wl-block outbound must be added")
 
     # -------------------------------------------------------------------------
@@ -434,27 +496,31 @@ exit 0
         custom_inbounds = [
             {"tag": "api-grpc", "port": 9090, "protocol": "dokodemo-door"},
             {"tag": "inbound-default", "port": 7000, "protocol": "vless"},
-            {"tag": "custom-socks", "port": 1080, "protocol": "socks"}
+            {"tag": "custom-socks", "port": 1080, "protocol": "socks"},
         ]
         with open(xray_config_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "inbounds": custom_inbounds,
-                "outbounds": [],
-                "routing": {"rules": []}
-            }, f)
+            json.dump({"inbounds": custom_inbounds, "outbounds": [], "routing": {"rules": []}}, f)
 
         # Run origin installer with surgical merge
         cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4"'
         res = self._run_shell_snippet(cmd)
-        self.assertEqual(res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}")
+        self.assertEqual(
+            res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}"
+        )
 
         with open(xray_config_file, "r", encoding="utf-8") as f:
             cfg = json.load(f)
 
         inbound_tags = [ib["tag"] for ib in cfg["inbounds"]]
-        self.assertIn("custom-socks", inbound_tags, "Third party custom-socks inbound must be preserved")
-        self.assertIn("just1k-wl-api-grpc", inbound_tags, "Namespaced just1k-wl-api-grpc must be present")
-        self.assertIn("just1k-wl-default", inbound_tags, "Namespaced just1k-wl-default must be present")
+        self.assertIn(
+            "custom-socks", inbound_tags, "Third party custom-socks inbound must be preserved"
+        )
+        self.assertIn(
+            "just1k-wl-api-grpc", inbound_tags, "Namespaced just1k-wl-api-grpc must be present"
+        )
+        self.assertIn(
+            "just1k-wl-default", inbound_tags, "Namespaced just1k-wl-default must be present"
+        )
 
     # -------------------------------------------------------------------------
     # F19: Fail-Closed UFW Firewall & Doctor ACL Validation
@@ -463,7 +529,9 @@ exit 0
         self._prepare_base_env()
 
         # Case 1: Insecure UFW with 8444 open to 0.0.0.0/0
-        self._create_mock_script("ufw", """#!/bin/sh
+        self._create_mock_script(
+            "ufw",
+            """#!/bin/sh
 if [ "$1" = "status" ] || [ "$1" = "status verbose" ]; then
     echo "Status: active"
     echo "To                         Action      From"
@@ -473,15 +541,20 @@ if [ "$1" = "status" ] || [ "$1" = "status verbose" ]; then
     exit 0
 fi
 exit 0
-""")
+""",
+        )
         res_vuln = self._run_shell_snippet("run_doctor")
         self.assertIn("УЯЗВИМОСТЬ: Порт 8444 открыт для всех", res_vuln.stdout + res_vuln.stderr)
 
         # Case 2: Secure UFW with BOT_IP restriction
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
-            json.dump({"role": "origin", "domain": "origin.example.com", "bot_ip": "198.51.100.42"}, f)
+            json.dump(
+                {"role": "origin", "domain": "origin.example.com", "bot_ip": "198.51.100.42"}, f
+            )
 
-        self._create_mock_script("ufw", """#!/bin/sh
+        self._create_mock_script(
+            "ufw",
+            """#!/bin/sh
 if [ "$1" = "status" ] || [ "$1" = "status verbose" ]; then
     echo "Status: active"
     echo "To                         Action      From"
@@ -491,7 +564,8 @@ if [ "$1" = "status" ] || [ "$1" = "status verbose" ]; then
     exit 0
 fi
 exit 0
-""")
+""",
+        )
         res_sec = self._run_shell_snippet("run_doctor")
         self.assertIn("Порт 8444 защищен и доступен только с BOT_IP", res_sec.stdout)
 
@@ -540,9 +614,13 @@ systemctl() {
 update_xray
 """
         res = self._run_shell_snippet(cmd)
-        self.assertNotEqual(res.returncode, 0, "update_xray must exit with error on service restart failure")
+        self.assertNotEqual(
+            res.returncode, 0, "update_xray must exit with error on service restart failure"
+        )
         self.assertIn("Xray не запустился после обновления", res.stdout + res.stderr)
-        self.assertIn("Откат на предыдущую версию успешно выполнен и подтвержден", res.stdout + res.stderr)
+        self.assertIn(
+            "Откат на предыдущую версию успешно выполнен и подтвержден", res.stdout + res.stderr
+        )
 
     # -------------------------------------------------------------------------
     # F21: Certificate Expiration & SAN Check in Doctor
@@ -556,12 +634,28 @@ update_xray
         key_file = cert_dir / "privkey.pem"
 
         # Generate test valid certificate with correct SAN
-        subprocess.run([
-            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", str(key_file),
-            "-out", str(cert_file), "-days", "90", "-nodes",
-            "-subj", f"/CN={domain}",
-            "-addext", f"subjectAltName=DNS:{domain}"
-        ], check=True, capture_output=True)
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-keyout",
+                str(key_file),
+                "-out",
+                str(cert_file),
+                "-days",
+                "90",
+                "-nodes",
+                "-subj",
+                f"/CN={domain}",
+                "-addext",
+                f"subjectAltName=DNS:{domain}",
+            ],
+            check=True,
+            capture_output=True,
+        )
 
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
             json.dump({"role": "origin", "domain": domain, "bot_ip": "1.2.3.4"}, f)
@@ -602,12 +696,28 @@ run_doctor
         self.assertIn("SAN match confirmed", res_valid.stdout)
 
         # Generate cert with domain mismatch
-        subprocess.run([
-            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", str(key_file),
-            "-out", str(cert_file), "-days", "90", "-nodes",
-            "-subj", "/CN=wrong.example.com",
-            "-addext", "subjectAltName=DNS:wrong.example.com"
-        ], check=True, capture_output=True)
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-keyout",
+                str(key_file),
+                "-out",
+                str(cert_file),
+                "-days",
+                "90",
+                "-nodes",
+                "-subj",
+                "/CN=wrong.example.com",
+                "-addext",
+                "subjectAltName=DNS:wrong.example.com",
+            ],
+            check=True,
+            capture_output=True,
+        )
 
         res_mismatch = self._run_shell_snippet(doctor_snippet)
         self.assertNotEqual(res_mismatch.returncode, 0)
@@ -619,11 +729,17 @@ run_doctor
     def test_installer_immutable_dependencies(self):
         # 1. Check requirements.txt
         req_content = REQUIREMENTS_TXT.read_text(encoding="utf-8")
-        req_lines = [line.strip() for line in req_content.splitlines() if line.strip() and not line.startswith("#")]
+        req_lines = [
+            line.strip()
+            for line in req_content.splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
 
         for line in req_lines:
             self.assertIn("==", line, f"Requirement {line} must be strictly pinned with ==")
-            self.assertFalse(re.search(r"[><~]=?", line.split("==")[0]), f"Range specifiers forbidden in {line}")
+            self.assertFalse(
+                re.search(r"[><~]=?", line.split("==")[0]), f"Range specifiers forbidden in {line}"
+            )
 
         pinned_packages = {}
         for item in req_lines:
@@ -647,11 +763,23 @@ run_doctor
                     sh_content += p.read_text(encoding="utf-8", errors="ignore") + "\n"
         if JUST1KNODE_SH.exists():
             sh_content += JUST1KNODE_SH.read_text(encoding="utf-8", errors="ignore")
-        self.assertNotIn("pip install --upgrade pip", sh_content, "Unpinned pip self-upgrade is forbidden")
-        self.assertNotIn("JUST1KBOT_RELEASE_COMMIT", sh_content, "Hallucinated release commit must be removed")
-        self.assertNotIn("AMNEZIA_API_COMMIT", sh_content, "Hallucinated Amnezia API commit must be removed")
-        self.assertNotIn("install_amnezia_api_node", sh_content, "Third-party amnezia-api installer must be purged")
-        self.assertIn("setup_xray_api_venv", sh_content, "Virtualenv setup function must be present")
+        self.assertNotIn(
+            "pip install --upgrade pip", sh_content, "Unpinned pip self-upgrade is forbidden"
+        )
+        self.assertNotIn(
+            "JUST1KBOT_RELEASE_COMMIT", sh_content, "Hallucinated release commit must be removed"
+        )
+        self.assertNotIn(
+            "AMNEZIA_API_COMMIT", sh_content, "Hallucinated Amnezia API commit must be removed"
+        )
+        self.assertNotIn(
+            "install_amnezia_api_node",
+            sh_content,
+            "Third-party amnezia-api installer must be purged",
+        )
+        self.assertIn(
+            "setup_xray_api_venv", sh_content, "Virtualenv setup function must be present"
+        )
         self.assertIn("useradd -r", sh_content, "System user creation must be present")
         self.assertIn("xrayapi", sh_content, "Non-root xrayapi user must be configured")
         self.assertIn("JUST1KBOT_REF", sh_content, "Dynamic ref resolution must be configured")
@@ -666,7 +794,9 @@ run_doctor
 
         cmd = f'install_xray_origin_node "{domain}" "admin@example.com" "test_api_key_123" "{secret_path}" "198.51.100.1"'
         res = self._run_shell_snippet(cmd)
-        self.assertEqual(res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}")
+        self.assertEqual(
+            res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}"
+        )
 
         # 1. Verify Xray config.json
         xray_conf_file = self.xray_config_dir / "config.json"
@@ -680,8 +810,12 @@ run_doctor
 
         default_ib = next(ib for ib in xray_conf["inbounds"] if ib["tag"] == "just1k-wl-default")
         self.assertEqual(default_ib["streamSettings"]["network"], "xhttp")
-        self.assertEqual(default_ib["streamSettings"]["xhttpSettings"]["xPaddingPlacement"], "queryInHeader")
-        self.assertEqual(default_ib["streamSettings"]["xhttpSettings"]["path"], f"{secret_path}/default")
+        self.assertEqual(
+            default_ib["streamSettings"]["xhttpSettings"]["xPaddingPlacement"], "queryInHeader"
+        )
+        self.assertEqual(
+            default_ib["streamSettings"]["xhttpSettings"]["path"], f"{secret_path}/default"
+        )
 
         outbound_tags = [ob["tag"] for ob in xray_conf["outbounds"]]
         self.assertIn("just1k-wl-direct", outbound_tags)
@@ -689,7 +823,9 @@ run_doctor
 
         # Standalone origin routing must route default traffic to block (no Russian ISP exit)
         rules = xray_conf["routing"]["rules"]
-        default_rule = next((r for r in rules if r.get("inboundTag") == ["just1k-wl-default"]), None)
+        default_rule = next(
+            (r for r in rules if r.get("inboundTag") == ["just1k-wl-default"]), None
+        )
         self.assertIsNotNone(default_rule)
         self.assertEqual(default_rule["outboundTag"], "just1k-wl-block")
 
@@ -756,7 +892,9 @@ run_doctor
         inbound_tags = [ib["tag"] for ib in xray_conf["inbounds"]]
         self.assertIn("just1k-wl-inbound-de", inbound_tags)
         de_ib = next(ib for ib in xray_conf["inbounds"] if ib["tag"] == "just1k-wl-inbound-de")
-        self.assertEqual(de_ib["streamSettings"]["xhttpSettings"]["xPaddingPlacement"], "queryInHeader")
+        self.assertEqual(
+            de_ib["streamSettings"]["xhttpSettings"]["xPaddingPlacement"], "queryInHeader"
+        )
         self.assertEqual(de_ib["streamSettings"]["xhttpSettings"]["path"], "/stream/de")
 
         outbound_tags = [ob["tag"] for ob in xray_conf["outbounds"]]
@@ -768,7 +906,9 @@ run_doctor
 
         # Verify default traffic is routed through the relay outbound (anti-Russian exit)
         rules = xray_conf["routing"]["rules"]
-        default_rule = next((r for r in rules if r.get("inboundTag") == ["just1k-wl-default"]), None)
+        default_rule = next(
+            (r for r in rules if r.get("inboundTag") == ["just1k-wl-default"]), None
+        )
         self.assertIsNotNone(default_rule)
         self.assertEqual(default_rule["outboundTag"], "just1k-wl-outbound-de")
 
@@ -820,8 +960,20 @@ run_doctor
     def test_heal_and_update_origin_config_with_relays(self):
         self._prepare_base_env()
         relays = [
-            {"name": "Германия", "code": "de", "ip": "217.60.183.229", "port": 10443, "path": "/stream/de"},
-            {"name": "Эстония", "code": "ee", "ip": "217.60.182.33", "port": 10443, "path": "/stream/ee"}
+            {
+                "name": "Германия",
+                "code": "de",
+                "ip": "217.60.183.229",
+                "port": 10443,
+                "path": "/stream/de",
+            },
+            {
+                "name": "Эстония",
+                "code": "ee",
+                "ip": "217.60.182.33",
+                "port": 10443,
+                "path": "/stream/ee",
+            },
         ]
         with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
             json.dump(relays, f)
@@ -840,17 +992,40 @@ run_doctor
         self._prepare_base_env()
         # Create corrupted relays.json simulating the exact issue
         with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
-            f.write("[\n  {\n    \"name\": \n")
+            f.write('[\n  {\n    "name": \n')
 
         with open(self.xray_config_dir / "config.json", "w", encoding="utf-8") as f:
-            json.dump({
-                "inbounds": [{"tag": "just1k-wl-inbound-de", "port": 8005, "protocol": "vless", "streamSettings": {"xhttpSettings": {"path": "/stream/de"}}}],
-                "outbounds": [{
-                    "tag": "just1k-wl-outbound-de",
-                    "settings": {"vnext": [{"address": "217.60.183.229", "port": 10443, "users": [{"id": "test-uuid"}]}]},
-                    "streamSettings": {"security": "reality", "realitySettings": {"serverName": "www.google.com"}}
-                }]
-            }, f)
+            json.dump(
+                {
+                    "inbounds": [
+                        {
+                            "tag": "just1k-wl-inbound-de",
+                            "port": 8005,
+                            "protocol": "vless",
+                            "streamSettings": {"xhttpSettings": {"path": "/stream/de"}},
+                        }
+                    ],
+                    "outbounds": [
+                        {
+                            "tag": "just1k-wl-outbound-de",
+                            "settings": {
+                                "vnext": [
+                                    {
+                                        "address": "217.60.183.229",
+                                        "port": 10443,
+                                        "users": [{"id": "test-uuid"}],
+                                    }
+                                ]
+                            },
+                            "streamSettings": {
+                                "security": "reality",
+                                "realitySettings": {"serverName": "www.google.com"},
+                            },
+                        }
+                    ],
+                },
+                f,
+            )
 
         res = self._run_shell_snippet("auto_heal_relays_registry")
         self.assertEqual(res.returncode, 0, f"STDOUT: {res.stdout}\nSTDERR: {res.stderr}")
@@ -865,21 +1040,195 @@ run_doctor
         self._prepare_base_env()
         # Set bot_domain in state
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
-            json.dump({"role": "origin", "domain": "origin.example.com", "bot_domain": "just1k.best"}, f)
+            json.dump(
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "just1k.best"}, f
+            )
 
         res = self._run_shell_snippet("deploy_subscription_proxy_conf")
-        self.assertEqual(res.returncode, 0, f"deploy_subscription_proxy_conf failed: {res.stderr + res.stdout}")
+        self.assertEqual(
+            res.returncode, 0, f"deploy_subscription_proxy_conf failed: {res.stderr + res.stdout}"
+        )
 
         sub_conf = self.nginx_relays_d / "sub-wl.conf"
         self.assertTrue(sub_conf.exists(), "sub-wl.conf must be created in NGINX_RELAYS_DIR")
         content = sub_conf.read_text(encoding="utf-8")
         self.assertIn("location ^~ /sub/wl", content)
-        self.assertIn("proxy_pass https://just1k.best;", content)
+        self.assertIn("resolver 1.1.1.1", content)
+        self.assertIn('set $bot_upstream "https://just1k.best";', content)
+        self.assertIn("proxy_pass $bot_upstream;", content)
         self.assertIn("proxy_ssl_server_name on;", content)
         self.assertIn("proxy_set_header Host just1k.best;", content)
+
+    def test_normalize_domain_strips_protocols_and_slashes(self):
+        self._prepare_base_env()
+        res = self._run_shell_snippet('normalize_domain "  https://mybot.just1k.best/some/path/  "')
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.stdout.strip(), "mybot.just1k.best")
+
+        res_http = self._run_shell_snippet('normalize_domain "http://test.domain.com:8443/"')
+        self.assertEqual(res_http.returncode, 0)
+        self.assertEqual(res_http.stdout.strip(), "test.domain.com:8443")
+
+    def test_init_state_dir_sets_sgid_and_permissions(self):
+        self._prepare_base_env()
+        res = self._run_shell_snippet("init_state_dir")
+        self.assertEqual(res.returncode, 0)
+        st = os.stat(self.state_dir)
+        # Check SGID and permissions (2770 or 0o2770)
+        self.assertTrue(bool(st.st_mode & 0o2000), "SGID bit must be set on STATE_DIR")
+        self.assertTrue(bool(st.st_mode & 0o0070), "Group must have rwx permissions on STATE_DIR")
+        self.assertEqual(st.st_mode & 0o0007, 0, "Others must have zero permissions on STATE_DIR")
+
+        # Check state file permissions 660
+        state_file = self.state_dir / "state.json"
+        if state_file.exists():
+            st_file = os.stat(state_file)
+            self.assertTrue(
+                bool(st_file.st_mode & 0o0660),
+                "State file must have rw permissions for owner and group",
+            )
+            self.assertEqual(
+                st_file.st_mode & 0o0007, 0, "State file must have zero permissions for others"
+            )
+
+    def test_detect_existing_nginx_sites_in_just1knode(self):
+        self._prepare_base_env()
+        sites_enabled = self.nginx_conf_dir / "sites-enabled"
+        sites_enabled.mkdir(parents=True, exist_ok=True)
+
+        # Default stock
+        (sites_enabled / "default").write_text(
+            "server { listen 80; server_name _; }\n", encoding="utf-8"
+        )
+        # User site
+        (sites_enabled / "my-blog.conf").write_text(
+            "server {\n    listen 80;\n    server_name myblog.org;\n}\n", encoding="utf-8"
+        )
+
+        res = self._run_shell_snippet(f'detect_existing_nginx_sites "{self.nginx_conf_dir}"')
+        self.assertEqual(
+            res.returncode, 0, f"detect_existing_nginx_sites failed: stderr={res.stderr}"
+        )
+        self.assertIn("my-blog.conf", res.stdout)
+        self.assertIn("myblog.org", res.stdout)
+        self.assertNotIn("default", res.stdout)
+
+    def test_origin_nginx_backs_up_custom_default_site(self):
+        self._prepare_base_env()
+        sites_enabled = self.nginx_conf_dir / "sites-enabled"
+        sites_available = self.nginx_conf_dir / "sites-available"
+        sites_enabled.mkdir(parents=True, exist_ok=True)
+        sites_available.mkdir(parents=True, exist_ok=True)
+
+        # User has a custom domain inside default
+        (sites_enabled / "default").write_text(
+            "server {\n    listen 80;\n    server_name custom-site.com;\n}\n", encoding="utf-8"
+        )
+
+        # Simulate default backup check snippet from origin.sh
+        snippet = f"""
+NGINX_CONF_DIR="{self.nginx_conf_dir}"
+if [[ -f "${{NGINX_CONF_DIR}}/sites-enabled/default" ]] && grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${{NGINX_CONF_DIR}}/sites-enabled/default" 2>/dev/null; then
+    cp -a "${{NGINX_CONF_DIR}}/sites-enabled/default" "${{NGINX_CONF_DIR}}/sites-available/default.user.bak"
+fi
+rm -f "${{NGINX_CONF_DIR}}/sites-enabled/default" 2>/dev/null || true
+"""
+        res = self._run_shell_snippet(snippet)
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(
+            (sites_available / "default.user.bak").exists(),
+            "Custom default site must be backed up as default.user.bak in sites-available",
+        )
+        self.assertFalse(
+            (sites_enabled / "default.user.bak").exists(), "Backup must never be in sites-enabled"
+        )
+        self.assertFalse((sites_enabled / "default").exists())
+
+    def test_origin_nginx_restores_default_on_validation_failure(self):
+        self._prepare_base_env()
+        sites_enabled = self.nginx_conf_dir / "sites-enabled"
+        sites_available = self.nginx_conf_dir / "sites-available"
+        sites_enabled.mkdir(parents=True, exist_ok=True)
+        sites_available.mkdir(parents=True, exist_ok=True)
+
+        (sites_available / "default").write_text(
+            "server {\n    listen 80;\n    server_name default.test;\n}\n", encoding="utf-8"
+        )
+        (sites_enabled / "default").symlink_to(sites_available / "default")
+
+        snippet = f"""
+NGINX_CONF_DIR="{self.nginx_conf_dir}"
+default_was_linked_origin=0
+if [[ -f "${{NGINX_CONF_DIR}}/sites-enabled/default" ]]; then
+    default_was_linked_origin=1
+    rm -f "${{NGINX_CONF_DIR}}/sites-enabled/default"
+fi
+# Simulate validation failure rollback
+if [[ $default_was_linked_origin -eq 1 && -f "${{NGINX_CONF_DIR}}/sites-available/default" ]]; then
+    ln -sf "${{NGINX_CONF_DIR}}/sites-available/default" "${{NGINX_CONF_DIR}}/sites-enabled/default"
+fi
+"""
+        res = self._run_shell_snippet(snippet)
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(
+            (sites_enabled / "default").exists(),
+            "default site must be restored after validation failure",
+        )
+
+    def test_ensure_xrayapi_user_creates_group_and_user(self):
+        self._prepare_base_env()
+        mock_bin = self.bin_dir
+        group_log = Path(self.temp_dir) / "groupadd.log"
+        user_log = Path(self.temp_dir) / "useradd.log"
+        user_log_posix = user_log.as_posix()
+        (mock_bin / "groupadd").write_text(
+            f"#!/bin/bash\necho \"$@\" >> '{group_log}'\nexit 0\n", encoding="utf-8"
+        )
+        (mock_bin / "groupadd").chmod(0o755)
+        (mock_bin / "useradd").write_text(
+            f"#!/bin/bash\necho \"$@\" >> '{user_log}'\nexit 0\n", encoding="utf-8"
+        )
+        (mock_bin / "useradd").chmod(0o755)
+        (mock_bin / "getent").write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")
+        (mock_bin / "getent").chmod(0o755)
+        (mock_bin / "id").write_text(
+            f'#!/bin/bash\nif [[ -f "{user_log_posix}" ]]; then echo 1001; exit 0; fi\nexit 1\n',
+            encoding="utf-8",
+        )
+        (mock_bin / "id").chmod(0o755)
+
+        api_sh = REPO_ROOT / "just1knode" / "modules" / "xray" / "api.sh"
+        res = self._run_shell_snippet(f"""
+unset -f ensure_xrayapi_user
+source '{api_sh.as_posix()}'
+ensure_xrayapi_user
+""")
+        self.assertEqual(res.returncode, 0, f"ensure_xrayapi_user failed: {res.stderr}")
+        self.assertTrue(group_log.exists(), "groupadd must be called when group does not exist")
+        self.assertIn("-r xrayapi", group_log.read_text(encoding="utf-8"))
+        self.assertTrue(user_log.exists(), "useradd must be called when user does not exist")
+        self.assertIn("xrayapi", user_log.read_text(encoding="utf-8"))
+
+    def test_heal_and_update_relay_config_atomic_and_chmod_640(self):
+        self._prepare_base_env()
+        (self.state_dir / "state.json").write_text('{"role": "relay"}', encoding="utf-8")
+        xray_config = self.xray_config_dir / "config.json"
+        initial_cfg = {
+            "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+            "inbounds": [],
+        }
+        xray_config.write_text(json.dumps(initial_cfg), encoding="utf-8")
+
+        res = self._run_shell_snippet("heal_and_update_relay_config")
+        self.assertEqual(
+            res.returncode, 0, f"heal_and_update_relay_config failed: stderr={res.stderr}"
+        )
+        updated_cfg = json.loads(xray_config.read_text(encoding="utf-8"))
+        self.assertIn("dns", updated_cfg)
+        self.assertEqual(updated_cfg["dns"]["queryStrategy"], "UseIPv4")
+        st = xray_config.stat().st_mode & 0o777
+        self.assertEqual(st, 0o640, f"Expected 0640, got {oct(st)}")
 
 
 if __name__ == "__main__":
     unittest.main()
-
-

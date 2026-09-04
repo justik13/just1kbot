@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from cachetools import TTLCache
 
+from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
 from database.models import Server
 from services.amnezia_client import AmneziaClient
 
@@ -25,16 +26,24 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         server = await session.get(Server, server_id)
         if not server:
             raise LookupError("server not found")
-        server_proto = getattr(server, "protocol", None)
+        server_proto = getattr(server, "protocol", None) or AMNEZIA_PROTOCOL
         server_caps = getattr(server, "capabilities", None) or []
-        is_xray = (server_proto == "xray" or "xray_origin" in server_caps)
+        is_xray = (server_proto == XRAY_PROTOCOL or "xray_origin" in server_caps)
         if is_xray:
             return ServerPeerSnapshot(
                 server_id,
                 frozenset(),
                 datetime.now(timezone.utc),
             )
-        endpoint = (server.api_url, server.api_key)
+        elif server_proto == AMNEZIA_PROTOCOL:
+            endpoint = (server.api_url, server.api_key)
+        else:
+            logger.error(
+                "Refusing to invoke AmneziaClient for server %s with unsupported protocol: %r",
+                server_id,
+                server_proto,
+            )
+            raise ServerUnavailable(f"Unsupported protocol {server_proto!r} for server {server_id}")
     clients = await AmneziaClient(*endpoint).get_all_clients()
     if clients is None:
         raise ServerUnavailable("server peer snapshot unavailable")
@@ -138,9 +147,9 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
 
         gen = get_server_generation(server.id)
 
-        server_proto = getattr(server, "protocol", None)
+        server_proto = getattr(server, "protocol", None) or AMNEZIA_PROTOCOL
         server_caps = getattr(server, "capabilities", None) or []
-        is_xray = (server_proto == "xray" or "xray_origin" in server_caps)
+        is_xray = (server_proto == XRAY_PROTOCOL or "xray_origin" in server_caps)
         if is_xray:
             from database.connection import session_scope
             from database.models import WhiteInternetSubscription
@@ -161,32 +170,41 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             )
             return count
 
-        client = AmneziaClient(server.api_url, server.api_key)
-        try:
-            clients = await client.get_all_clients()
-            t_done = time.monotonic()
-        except Exception as e:
+        elif server_proto == AMNEZIA_PROTOCOL:
+            client = AmneziaClient(server.api_url, server.api_key)
+            try:
+                clients = await client.get_all_clients()
+                t_done = time.monotonic()
+            except Exception as e:
+                logger.error(
+                    "Failed to get real peer count for server %s (%s): %s",
+                    server.id, server.name, e,
+                )
+                return -1
+
+            if clients is None:
+                logger.warning(
+                    "API returned no data for server %s (%s). "
+                    "Peer count is unknown, returning -1.",
+                    server.id, server.name,
+                )
+                return -1
+
+            count = len(clients)
+            update_cached_peer_count(server.id, count, timestamp=t_done, generation=gen)
+            logger.info(
+                "Cached real peer count for server %s (%s): %s/%s",
+                server.id, server.name, count, server.max_clients,
+            )
+            return count
+        else:
             logger.error(
-                "Failed to get real peer count for server %s (%s): %s",
-                server.id, server.name, e,
+                "Refusing to invoke AmneziaClient for server %s (%s) with unsupported protocol: %r",
+                server.id,
+                server.name,
+                server_proto,
             )
             return -1
-
-        if clients is None:
-            logger.warning(
-                "API returned no data for server %s (%s). "
-                "Peer count is unknown, returning -1.",
-                server.id, server.name,
-            )
-            return -1
-
-        count = len(clients)
-        update_cached_peer_count(server.id, count, timestamp=t_done, generation=gen)
-        logger.info(
-            "Cached real peer count for server %s (%s): %s/%s",
-            server.id, server.name, count, server.max_clients,
-        )
-        return count
 
 
 def _cleanup_old_locks(now: float) -> None:

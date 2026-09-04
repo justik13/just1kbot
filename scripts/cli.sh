@@ -21,11 +21,15 @@
 set -euo pipefail
 
 # Определение рабочей директории проекта
-PROJECT_DIR=""
+PROJECT_DIR="${PROJECT_DIR:-}"
 
-# 1. Проверяем переменную окружения JUST1KBOT_DIR
+# 1. Проверяем переменную окружения JUST1KBOT_DIR или PROJECT_DIR
 if [[ -n "${JUST1KBOT_DIR:-}" ]] && [[ -f "${JUST1KBOT_DIR}/docker-compose.yml" ]]; then
     PROJECT_DIR="${JUST1KBOT_DIR}"
+elif [[ -n "${PROJECT_DIR:-}" ]] && [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
+    PROJECT_DIR="${PROJECT_DIR}"
+else
+    PROJECT_DIR=""
 fi
 
 # 2. Если не найдено, определяем реальный путь к скрипту с раскрытием всех симлинков
@@ -88,6 +92,359 @@ error() {
 
 info() {
     echo -e "${CYAN}[i]${NC} $1"
+}
+
+run_privileged() {
+    if [[ -n "${JUST1KBOT_NO_SUDO:-}" ]] || [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo env "PATH=$PATH" "$@"
+    else
+        "$@"
+    fi
+}
+
+print_ai_diagnostic_report() {
+    local component="$1"
+    local issue="$2"
+    local action="$3"
+    local error_details="$4"
+    local resolution="$5"
+
+    echo "" >&2
+    echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}" >&2
+    echo -e "${BOLD}${RED}🚨 JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT (AI-FRIENDLY)${NC}" >&2
+    echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}" >&2
+    echo -e "${BOLD}Компонент:${NC}          $component" >&2
+    echo -e "${BOLD}Обнаруженная проблема:${NC} $issue" >&2
+    echo -e "${BOLD}Действие:${NC}            $action" >&2
+    echo -e "${BOLD}Детали ошибки:${NC}" >&2
+    echo "$error_details" | sed 's/^/    /' >&2
+    echo -e "${BOLD}Решение (скопируйте этот блок для отправки AI):${NC}" >&2
+    echo "$resolution" | sed 's/^/    /' >&2
+    echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}" >&2
+    echo "" >&2
+}
+
+# Обнаружение активных пользовательских сайтов в Nginx (для предотвращения случайного даунтайма)
+detect_existing_nginx_sites() {
+    local base_dir="${1:-/etc/nginx}"
+    local sites_found=()
+    local conf_dirs=("$base_dir/sites-enabled" "$base_dir/conf.d")
+
+    for cdir in "${conf_dirs[@]}"; do
+        [[ ! -d "$cdir" ]] && continue
+        while IFS= read -r -d '' f; do
+            local fname
+            fname="$(basename "$f")"
+            [[ "$fname" =~ ^(just1k|sub-wl|xhttp).* ]] && continue
+            [[ "$fname" =~ .*\.(bak|old|tmp|disabled)$ ]] && continue
+
+            if [[ "$fname" == "default" ]]; then
+                if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "$f" 2>/dev/null; then
+                    local sname
+                    sname="$(grep -E '(^|[[:space:]])server_name[[:space:]]+' "$f" 2>/dev/null | head -n1 | sed -E 's/.*server_name[[:space:]]+//; s/;.*//')"
+                    sites_found+=("$fname ($sname)")
+                fi
+                continue
+            fi
+
+            if grep -Eq '(server_name|listen|proxy_pass)[[:space:]]+' "$f" 2>/dev/null; then
+                local sname
+                sname="$(grep -E '(^|[[:space:]])server_name[[:space:]]+' "$f" 2>/dev/null | head -n1 | sed -E 's/.*server_name[[:space:]]+//; s/;.*//' || echo "")"
+                if [[ -n "$sname" && "$sname" != "_" ]]; then
+                    sites_found+=("$fname ($sname)")
+                else
+                    sites_found+=("$fname")
+                fi
+            fi
+        done < <(find "$cdir" -maxdepth 1 \( -type f -o -type l \) -print0 2>/dev/null)
+    done
+
+    if [[ ${#sites_found[@]} -gt 0 ]]; then
+        printf '%s\n' "${sites_found[@]}"
+        return 0
+    fi
+    return 1
+}
+
+is_external_nginx_enabled() {
+    local val=""
+    if [[ -f "${PROJECT_DIR}/.env" ]]; then
+        val=$(grep -E "^USE_EXTERNAL_NGINX=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    fi
+    if [[ "$val" == "true" || "$val" == "1" || "${USE_EXTERNAL_NGINX:-}" == "true" || "${USE_EXTERNAL_NGINX:-}" == "1" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+get_env_var() {
+    local key="$1"
+    local default_val="${2:-}"
+    local env_file="${PROJECT_DIR}/.env"
+    if [[ -f "$env_file" ]]; then
+        local val
+        val=$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n1 | cut -d'=' -f2- | tr -d " '\"" || echo "")
+        if [[ -n "$val" ]]; then
+            echo "$val"
+            return 0
+        fi
+    fi
+    echo "$default_val"
+}
+
+set_env_var() {
+    local key="$1"
+    local val="$2"
+    local env_file="${PROJECT_DIR}/.env"
+    [[ ! -f "$env_file" ]] && return 1
+
+    if grep -Eq "^${key}=" "$env_file" 2>/dev/null; then
+        sed -i -E "s|^${key}=.*|${key}=${val}|" "$env_file"
+    else
+        echo "${key}=${val}" >> "$env_file"
+    fi
+}
+
+dc_up() {
+    local scale_args=()
+    if is_external_nginx_enabled; then
+        scale_args=(--scale caddy=0)
+    fi
+    docker compose up -d "${scale_args[@]}" "$@"
+}
+
+setup_external_nginx_integration() {
+    local base_dir="${1:-/etc/nginx}"
+    local domain ssl_email bot_port
+    domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    ssl_email=$(grep -E "^SSL_EMAIL=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    bot_port=$(grep -E "^BOT_PORT=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "8080")
+    bot_port="${bot_port:-8080}"
+
+    if [[ -z "$domain" ]]; then
+        error "DOMAIN не задан в .env! Невозможно настроить виртуальный хост Nginx."
+        return 1
+    fi
+
+    info "Настройка совместной работы Just1kBot с системным Nginx (домен: $domain, порт бота: $bot_port)..."
+
+    local sites_avail="$base_dir/sites-available"
+    local sites_enb="$base_dir/sites-enabled"
+    local certbot_webroot="/var/www/certbot"
+    local config_file="$sites_avail/just1kbot.conf"
+
+    if ! command -v nginx >/dev/null 2>&1 && [[ ! -d "$base_dir" ]]; then
+        print_ai_diagnostic_report \
+            "Host Nginx" \
+            "Команда nginx не найдена в системе" \
+            "Настройка Nginx reverse proxy для Just1kBot" \
+            "Директория $base_dir не существует, команда 'nginx' отсутствует в PATH." \
+            "Установите Nginx (sudo apt update && sudo apt install -y nginx) или используйте Caddy (USE_EXTERNAL_NGINX=false)."
+        return 1
+    fi
+
+    run_privileged mkdir -p "$sites_avail" "$sites_enb" "$certbot_webroot" 2>/dev/null || true
+    run_privileged chmod 755 "$certbot_webroot" 2>/dev/null || true
+
+    local cert_dir="/etc/letsencrypt/live/${domain}"
+    local has_ssl=false
+
+    if [[ -f "${cert_dir}/fullchain.pem" ]] && [[ -f "${cert_dir}/privkey.pem" ]]; then
+        has_ssl=true
+    elif command -v certbot >/dev/null 2>&1 && [[ -n "$ssl_email" ]]; then
+        info "Попытка запроса SSL-сертификата Let's Encrypt для ${domain} через certbot webroot..."
+        local bootstrap_conf="$sites_avail/just1kbot-bootstrap.conf"
+        cat <<EOF > /tmp/just1kbot-bootstrap.tmp
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+    location ^~ /.well-known/acme-challenge/ {
+        root ${certbot_webroot};
+        default_type "text/plain";
+    }
+}
+EOF
+        run_privileged cp /tmp/just1kbot-bootstrap.tmp "$bootstrap_conf" 2>/dev/null || true
+        rm -f /tmp/just1kbot-bootstrap.tmp
+        run_privileged ln -sf "$bootstrap_conf" "$sites_enb/" 2>/dev/null || true
+        if run_privileged nginx -t 2>/dev/null; then
+            run_privileged systemctl reload nginx 2>/dev/null || true
+            if run_privileged certbot certonly --webroot -w "$certbot_webroot" -d "$domain" --non-interactive --agree-tos --email "$ssl_email" 2>/dev/null; then
+                if [[ -f "${cert_dir}/fullchain.pem" ]]; then
+                    has_ssl=true
+                    log "SSL-сертификат Let's Encrypt успешно получен."
+                fi
+            else
+                warn "Не удалось выпустить сертификат через certbot webroot (DNS еще не обновился или порт 80 недоступен извне)."
+            fi
+        fi
+        run_privileged rm -f "$bootstrap_conf" "$sites_enb/just1kbot-bootstrap.conf" 2>/dev/null || true
+    fi
+
+    if [[ "$has_ssl" != "true" ]]; then
+        local allow_http
+        allow_http=$(get_env_var "ALLOW_LOCAL_HTTP" "false")
+        if [[ "$allow_http" != "true" ]]; then
+            print_ai_diagnostic_report \
+                "Let's Encrypt SSL Issuance" \
+                "Отсутствует SSL-сертификат для домена ${domain}" \
+                "Настройка внешнего Nginx прервана, откат к незащищенному HTTP заблокирован" \
+                "Сертификаты Let's Encrypt не обнаружены в ${cert_dir} и certbot не смог выпустить сертификат. Telegram Bot API и ЮKassa требуют HTTPS webhook." \
+                "1. Проверьте A-запись DNS для ${domain}\n2. Убедитесь, что порт 80 открыт извне для ACME challenge\n3. Получите сертификат вручную: certbot certonly --webroot -w ${certbot_webroot} -d ${domain}\n4. Повторите: just1kbot nginx-config"
+            return 1
+        fi
+        warn "ВНИМАНИЕ: Активирован режим ALLOW_LOCAL_HTTP=true. Будет создан HTTP-прокси без SSL (только для локальной разработки)."
+    fi
+
+    local tmp_conf
+    tmp_conf=$(mktemp)
+
+    if [[ "$has_ssl" == "true" ]]; then
+        cat <<EOF > "$tmp_conf"
+# Just1kBot Reverse Proxy Configuration (Managed by Just1kBot)
+# Domain: ${domain} -> 127.0.0.1:${bot_port}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${certbot_webroot};
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${domain};
+
+    ssl_certificate ${cert_dir}/fullchain.pem;
+    ssl_certificate_key ${cert_dir}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
+
+    client_max_body_size 20M;
+
+    location / {
+        proxy_pass http://127.0.0.1:${bot_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+EOF
+    else
+        cat <<EOF > "$tmp_conf"
+# Just1kBot Reverse Proxy Configuration (Managed by Just1kBot - HTTP mode)
+# Domain: ${domain} -> 127.0.0.1:${bot_port}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${certbot_webroot};
+        default_type "text/plain";
+    }
+
+    client_max_body_size 20M;
+
+    location / {
+        proxy_pass http://127.0.0.1:${bot_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+EOF
+    fi
+
+    if ! run_privileged cp "$tmp_conf" "$config_file" 2>/dev/null; then
+        rm -f "$tmp_conf"
+        error "Не удалось записать конфигурационный файл $config_file (проверьте права доступа)!"
+        return 1
+    fi
+    rm -f "$tmp_conf"
+    run_privileged chmod 644 "$config_file" 2>/dev/null || true
+
+    if ! run_privileged ln -sf "$config_file" "$sites_enb/" 2>/dev/null; then
+        error "Не удалось создать символическую ссылку для $config_file в $sites_enb!"
+        return 1
+    fi
+
+    local nginx_err=""
+    if ! nginx_err=$(run_privileged nginx -t 2>&1); then
+        run_privileged rm -f "$sites_enb/$(basename "$config_file")" 2>/dev/null || true
+        print_ai_diagnostic_report \
+            "Host Nginx Configuration" \
+            "Ошибка валидации синтаксиса Nginx (nginx -t)" \
+            "Активация виртуального хоста $config_file отменена для защиты работающих сайтов" \
+            "$nginx_err" \
+            "1. Проверьте синтаксис ваших существующих сайтов: sudo nginx -t\n2. Исправьте ошибки в конфигурациях /etc/nginx/sites-enabled/\n3. Повторите: just1kbot nginx-config"
+        return 1
+    fi
+
+    local reload_err=""
+    if ! reload_err=$(run_privileged systemctl reload nginx 2>&1); then
+        run_privileged rm -f "$sites_enb/$(basename "$config_file")" 2>/dev/null || true
+        run_privileged systemctl reload nginx 2>/dev/null || true
+        print_ai_diagnostic_report \
+            "Host Nginx Reload" \
+            "Ошибка перезагрузки Nginx (systemctl reload nginx)" \
+            "Активация Just1kBot виртуального хоста отменена, Nginx возвращен в исходное состояние" \
+            "$reload_err" \
+            "1. Проверьте журнал Nginx: sudo journalctl -u nginx -n 50\n2. Проверьте статус: sudo systemctl status nginx\n3. Повторите: just1kbot nginx-config"
+        return 1
+    fi
+
+    log "Nginx успешно перезагружен (systemctl reload nginx). Существующие сайты работают параллельно без даунтайма."
+    set_env_var "USE_EXTERNAL_NGINX" "true"
+    log "Интеграция с Nginx активирована: USE_EXTERNAL_NGINX=true закреплено в .env."
+    return 0
+}
+
+cmd_nginx_config() {
+    echo -e "\n${BOLD}${BLUE}=== 🌐 НАСТРОЙКА ИНТЕГРАЦИИ С СИСТЕМНЫМ NGINX ===${NC}\n"
+    if setup_external_nginx_integration; then
+        log "Конфигурация Nginx для Just1kBot успешно настроена."
+        info "Перезапуск контейнеров с отключением Caddy (dc_up)..."
+        dc_up --force-recreate bot
+    else
+        error "Настройка интеграции с Nginx завершилась с ошибкой."
+        return 1
+    fi
 }
 
 # --- 1. Статус системы ---
@@ -235,6 +592,200 @@ cmd_preflight() {
         has_errors=true
     fi
 
+    # 9. Проверка портов и веб-серверов
+    if is_external_nginx_enabled; then
+        info "Режим внешнего Nginx активен (USE_EXTERNAL_NGINX=true). Контейнер Caddy отключен."
+        if command -v systemctl >/dev/null 2>&1 && ! systemctl is-active --quiet nginx 2>/dev/null; then
+            warn "Системная служба Nginx не активна! Пытаемся запустить Nginx..."
+            run_privileged systemctl start nginx 2>/dev/null || true
+            if ! systemctl is-active --quiet nginx 2>/dev/null; then
+                print_ai_diagnostic_report \
+                    "System Nginx" \
+                    "Служба Nginx не запущена на хосте" \
+                    "Проверка готовности хостового веб-сервера" \
+                    "systemctl is-active nginx вернул статус 'inactive' или 'failed'." \
+                    "Запустите Nginx вручную: sudo systemctl start nginx && sudo systemctl status nginx"
+                has_errors=true
+            fi
+        fi
+
+        # Проверка синтаксиса Nginx
+        local ng_err=""
+        if command -v nginx >/dev/null 2>&1; then
+            if ! ng_err=$(nginx -t 2>&1); then
+                print_ai_diagnostic_report \
+                    "System Nginx" \
+                    "Конфигурация Nginx содержит синтаксические ошибки" \
+                    "nginx -t" \
+                    "$ng_err" \
+                    "Исправьте ошибки в файлах /etc/nginx/ и перезапустите: just1kbot preflight"
+                has_errors=true
+            else
+                log "Конфигурация системного Nginx проверена (nginx -t: OK)."
+            fi
+        fi
+
+        # Проверка доступности локального порта бота (BOT_PORT на 127.0.0.1)
+        local bot_port
+        bot_port=$(grep -E "^BOT_PORT=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "8080")
+        bot_port="${bot_port:-8080}"
+        local bot_running
+        bot_running=$(docker inspect --format='{{.State.Status}}' just1kbot_app 2>/dev/null || echo "")
+        if [[ "$bot_running" != "running" ]] && command -v python3 >/dev/null 2>&1; then
+            local port_in_use
+            port_in_use=$(python3 -c "
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(0.3)
+try:
+    if s.connect_ex(('127.0.0.1', int('$bot_port'))) == 0:
+        print('used')
+except Exception:
+    pass
+finally:
+    s.close()
+" 2>/dev/null || echo "")
+            if [[ "$port_in_use" == "used" ]]; then
+                print_ai_diagnostic_report \
+                    "Bot Loopback Port" \
+                    "Локальный порт 127.0.0.1:${bot_port} уже занят другим процессом" \
+                    "Проверка сокета для контейнера Just1kBot" \
+                    "Порт 127.0.0.1:${bot_port} слушается активным процессом." \
+                    "1. Задайте другой порт в .env, например: BOT_PORT=8081\n2. Обновите конфигурацию Nginx: just1kbot nginx-config"
+                has_errors=true
+            fi
+        fi
+    else
+        # Стандартный режим Caddy (проверка конфликтов с системными веб-серверами)
+        local host_webservers=(nginx apache2 caddy lighttpd)
+        for svc in "${host_webservers[@]}"; do
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$svc" 2>/dev/null; then
+                if [[ "$svc" == "nginx" ]]; then
+                    local existing_sites=()
+                    while IFS= read -r s; do
+                        [[ -n "$s" ]] && existing_sites+=("$s")
+                    done < <(detect_existing_nginx_sites 2>/dev/null || true)
+
+                    if [[ ${#existing_sites[@]} -gt 0 ]]; then
+                        warn "Обнаружена активная системная служба Nginx со следующими работающими сайтами:"
+                        for s in "${existing_sites[@]}"; do
+                            echo -e "    ${BOLD}• $s${NC}"
+                        done
+                        info "Just1kBot может работать параллельно с вашими сайтами, настроив проксирование через Nginx."
+
+                        if [[ -t 0 ]]; then
+                            read -r -p "Настроить совместную работу (Nginx будет проксировать Just1kBot, сайты НЕ пострадают)? (Y/n): " confirm_coexist
+                            if [[ ! "$confirm_coexist" =~ ^[Nn]$ ]]; then
+                                if setup_external_nginx_integration; then
+                                    log "Совместная работа с Nginx успешно сконфигурирована."
+                                else
+                                    has_errors=true
+                                fi
+                            else
+                                read -r -p "Вы уверены, что хотите остановить Nginx? Ваши существующие сайты станут НЕДОСТУПНЫ! (y/N): " confirm_kill
+                                if [[ "$confirm_kill" =~ ^[Yy]$ ]]; then
+                                    info "Остановка и отключение nginx..."
+                                    run_privileged systemctl stop nginx 2>/dev/null || true
+                                    run_privileged systemctl disable nginx 2>/dev/null || true
+                                    log "Служба nginx остановлена."
+                                else
+                                    error "Служба Nginx продолжает занимать порты 80/443. Запуск Just1kBot отменён."
+                                    has_errors=true
+                                fi
+                            fi
+                        else
+                            # Non-interactive mode with active user sites
+                            local auto_domain
+                            auto_domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+                            if [[ -n "$auto_domain" ]] && (nginx -t >/dev/null 2>&1); then
+                                info "Non-interactive режим: на хосте обнаружены сайты в Nginx. Выполняем безопасную совместную настройку (USE_EXTERNAL_NGINX=true)..."
+                                if setup_external_nginx_integration; then
+                                    log "Совместная работа с Nginx успешно настроена."
+                                else
+                                    has_errors=true
+                                fi
+                            else
+                                print_ai_diagnostic_report \
+                                    "Host Nginx / Port 80,443 Conflict" \
+                                    "Обнаружены активные пользовательские сайты в системном Nginx" \
+                                    "Защита существующих сайтов от даунтайма в non-interactive режиме (Fail-Closed)" \
+                                    "Nginx обслуживает сайты: $(printf '%s, ' "${existing_sites[@]}")" \
+                                    "1. Для совместной работы укажите в .env: USE_EXTERNAL_NGINX=true\n2. Выполните: just1kbot nginx-config"
+                                has_errors=true
+                            fi
+                        fi
+                    else
+                        # Другие веб-серверы (apache2, lighttpd)
+                        warn "Обнаружена активная системная служба '$svc' на хосте, которая блокирует порты 80/443 для Just1kBot Caddy!"
+                        if [[ -t 0 ]]; then
+                            read -r -p "Остановить и отключить системную службу '$svc' для нормальной работы Just1kBot? (Y/n): " confirm_svc
+                            if [[ ! "$confirm_svc" =~ ^[Nn]$ ]]; then
+                                run_privileged systemctl stop "$svc" 2>/dev/null || true
+                                run_privileged systemctl disable "$svc" 2>/dev/null || true
+                                log "Служба $svc успешно остановлена и отключена."
+                            else
+                                error "Служба '$svc' продолжает занимать порт 80/443. Обновление не может быть продолжено."
+                                has_errors=true
+                            fi
+                        else
+                            run_privileged systemctl stop "$svc" 2>/dev/null || true
+                            run_privileged systemctl disable "$svc" 2>/dev/null || true
+                            log "Служба $svc успешно остановлена и отключена."
+                        fi
+                    fi
+                fi
+            fi
+        done
+
+        # Проверка доступности портов 80 и 443 для Caddy (только если не переключились на внешний Nginx)
+        if ! is_external_nginx_enabled; then
+            local caddy_running
+            caddy_running=$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo "")
+            if [[ "$caddy_running" != "running" ]] && command -v python3 >/dev/null 2>&1; then
+                local port_conflict
+                port_conflict=$(python3 -c "
+import socket, errno
+
+for p in [80, 443]:
+    s_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s_conn.settimeout(0.3)
+    try:
+        if s_conn.connect_ex(('127.0.0.1', p)) == 0:
+            print(f'{p}:Port already in use by active listener on 127.0.0.1:{p}')
+            break
+    except Exception:
+        pass
+    finally:
+        s_conn.close()
+
+    s_bind = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s_bind.bind(('0.0.0.0', p))
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            print(f'{p}:Address already in use ({e})')
+            break
+    except Exception:
+        pass
+    finally:
+        try:
+            s_bind.close()
+        except Exception:
+            pass
+" 2>/dev/null || echo "")
+                if [[ -n "$port_conflict" ]]; then
+                    print_ai_diagnostic_report \
+                        "Ports 80/443" \
+                        "Порт для Caddy недоступен ($port_conflict)" \
+                        "Проверка привязки портов 80 и 443" \
+                        "Порт занят другим процессом на хосте." \
+                        "1. Проверьте занятость портов: sudo ss -tulpn | grep -E ':80|:443'\n2. Если у вас уже работает Nginx с сайтами, выполните: just1kbot nginx-config"
+                    has_errors=true
+                fi
+            fi
+        fi
+    fi
+
     if [ "$has_errors" = "true" ]; then
         error "Предварительная проверка окружения завершилась с ошибками. Исправьте конфигурацию перед продолжением."
         return 1
@@ -262,12 +813,24 @@ cmd_update() {
         warn "Обнаружены незакоммиченные локальные изменения:"
         git status -s
         echo ""
-        read -r -p "Временно спрятать изменения (git stash) и продолжить обновление? (y/N): " stash_confirm
+        local stash_confirm="n"
+        if ! read -r -t 60 -p "Временно спрятать изменения (git stash) и продолжить обновление? (y/N): " stash_confirm 2>/dev/null; then
+            stash_confirm="n"
+        fi
         if [[ "$stash_confirm" =~ ^[Yy]$ ]]; then
             git stash
             did_stash=true
             log "Локальные изменения сохранены в git stash."
         else
+            if [[ ! -t 0 ]]; then
+                print_ai_diagnostic_report \
+                    "Git Working Tree" \
+                    "Обнаружены незакоммиченные локальные изменения в non-interactive режиме" \
+                    "Обновление отменено для защиты пользовательских файлов (Fail-Closed)" \
+                    "$(git status -s)" \
+                    "1. Проверьте изменения: git status\n2. Сохраните их: git stash или закоммитьте: git commit -am 'local fixes'\n3. Повторите: just1kbot update"
+                return 1
+            fi
             info "Обновление отменено пользователем."
             return 0
         fi
@@ -286,6 +849,15 @@ cmd_update() {
 
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    if [[ "$current_branch" == "HEAD" ]] || [[ -z "$current_branch" ]]; then
+        warn "Обнаружено состояние detached HEAD. Переключаемся на основную ветку main..."
+        if ! git checkout main 2>/dev/null; then
+            error "Не удалось переключиться на ветку main из detached HEAD."
+            return 1
+        fi
+        current_branch="main"
+    fi
+
     info "Шаг 3/6. Получение обновлений из Git (ветка: $current_branch)..."
     if ! git fetch origin "$current_branch"; then
         error "Обновление остановлено: не удалось связаться с origin/$current_branch."
@@ -299,7 +871,10 @@ cmd_update() {
 
     if [[ "$local_hash" == "$remote_hash" ]]; then
         info "Установлена актуальная версия ($local_hash). Новых коммитов в origin/$current_branch нет."
-        read -r -p "Пересобрать образы и перезапустить контейнеры без обновления кода? (y/N): " force_rebuild
+        local force_rebuild="n"
+        if ! read -r -t 60 -p "Пересобрать образы и перезапустить контейнеры без обновления кода? (y/N): " force_rebuild 2>/dev/null; then
+            force_rebuild="n"
+        fi
         if [[ ! "$force_rebuild" =~ ^[Yy]$ ]]; then
             log "Обновление завершено (код уже актуален)."
             if [ "$did_stash" = "true" ]; then
@@ -322,7 +897,10 @@ cmd_update() {
         warn "Локальная ветка опережает origin/$current_branch на $ahead_count коммит(ов)."
         warn "Автоматическая перезапись отменена во избежание потери локальных коммитов или hotfix."
         echo ""
-        read -r -p "Принудительно перезаписать локальные коммиты версией из origin/$current_branch? (y/N): " force_overwrite
+        local force_overwrite="n"
+        if ! read -r -t 60 -p "Принудительно перезаписать локальные коммиты версией из origin/$current_branch? (y/N): " force_overwrite 2>/dev/null; then
+            force_overwrite="n"
+        fi
         if [[ "$force_overwrite" =~ ^[Yy]$ ]]; then
             local backup_branch
             backup_branch="backup-local-ahead-$(date +%Y%m%d_%H%M%S)"
@@ -333,13 +911,25 @@ cmd_update() {
                 return 1
             fi
         else
+            if [[ ! -t 0 ]]; then
+                print_ai_diagnostic_report \
+                    "Git Synchronization" \
+                    "Локальная ветка опережает origin/$current_branch на $ahead_count коммит(ов)" \
+                    "Обновление отменено в non-interactive режиме для защиты локальных коммитов" \
+                    "$(git log -n 3 --oneline "origin/$current_branch..HEAD" 2>/dev/null || true)" \
+                    "1. Проверьте локальные коммиты: git log origin/$current_branch..HEAD\n2. Если хотите принудительно обновить: git branch backup-local && git reset --hard origin/$current_branch"
+                return 1
+            fi
             info "Обновление отменено пользователем."
             return 0
         fi
     else
         warn "Обнаружено расхождение истории коммитов между локальной версией и origin/$current_branch."
         echo ""
-        read -r -p "Создать резервную ветку и синхронизировать с origin/$current_branch? (y/N): " confirm_diverge
+        local confirm_diverge="n"
+        if ! read -r -t 60 -p "Создать резервную ветку и синхронизировать с origin/$current_branch? (y/N): " confirm_diverge 2>/dev/null; then
+            confirm_diverge="n"
+        fi
         if [[ "$confirm_diverge" =~ ^[Yy]$ ]]; then
             local backup_branch
             backup_branch="backup-diverged-$(date +%Y%m%d_%H%M%S)"
@@ -350,6 +940,15 @@ cmd_update() {
                 return 1
             fi
         else
+            if [[ ! -t 0 ]]; then
+                print_ai_diagnostic_report \
+                    "Git Synchronization" \
+                    "История коммитов локальной ветки разошлась с origin/$current_branch (Diverged)" \
+                    "Обновление отменено в non-interactive режиме во избежание потери данных" \
+                    "Локальный HEAD: $local_hash, Remote: $remote_hash, Base: $base_hash" \
+                    "1. Проверьте различия: git log --graph --oneline HEAD...origin/$current_branch\n2. Синхронизируйте ветку вручную: git reset --hard origin/$current_branch"
+                return 1
+            fi
             info "Обновление отменено пользователем."
             return 0
         fi
@@ -383,7 +982,7 @@ cmd_update() {
         if [[ -n "$rollback_commit" ]]; then
             warn "🚨 Выполняем откат исходного кода к коммиту $rollback_commit..."
             git reset --hard "$rollback_commit"
-            docker compose up -d --build
+            dc_up --build
 
             info "Проверка работоспособности сервисов старой версии..."
             local mig_timeout=60
@@ -397,7 +996,18 @@ cmd_update() {
                 m_bot="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
                 m_caddy="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo starting)"
 
-                if [ "$m_db" = "healthy" ] && [ "$m_redis" = "healthy" ] && [ "$m_bot" = "healthy" ] && [ "$m_caddy" = "running" ]; then
+                local m_caddy_ok=false
+                if is_external_nginx_enabled; then
+                    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
+                        m_caddy_ok=true
+                    else
+                        m_caddy_ok=false
+                    fi
+                elif [ "$m_caddy" = "running" ]; then
+                    m_caddy_ok=true
+                fi
+
+                if [ "$m_db" = "healthy" ] && [ "$m_redis" = "healthy" ] && [ "$m_bot" = "healthy" ] && [ "$m_caddy_ok" = "true" ]; then
                     mig_healthy=true
                     break
                 fi
@@ -424,7 +1034,7 @@ cmd_update() {
     fi
 
     info "Шаг 5/6. Запуск обновлённых сервисов..."
-    docker compose up -d
+    dc_up
 
     info "Шаг 6/6. Проверка статуса здоровья сервисов (Healthcheck)..."
     local timeout=60
@@ -444,6 +1054,17 @@ cmd_update() {
         caddy_s="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo starting)"
         migrate_s="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
 
+        local caddy_ok=false
+        if is_external_nginx_enabled; then
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
+                caddy_ok=true
+            else
+                caddy_ok=false
+            fi
+        elif [ "$caddy_s" = "running" ]; then
+            caddy_ok=true
+        fi
+
         if [[ "$migrate_s" == "exited/"* ]] && [[ "$migrate_s" != "exited/0" ]]; then
             echo ""
             error "Ошибка миграции базы данных после обновления: $migrate_s"
@@ -452,7 +1073,7 @@ cmd_update() {
             break
         fi
 
-        if [ "$db_h" = "healthy" ] && [ "$redis_h" = "healthy" ] && [ "$bot_h" = "healthy" ] && [ "$caddy_s" = "running" ]; then
+        if [ "$db_h" = "healthy" ] && [ "$redis_h" = "healthy" ] && [ "$bot_h" = "healthy" ] && [ "$caddy_ok" = "true" ]; then
             update_ok=true
             break
         fi
@@ -465,15 +1086,43 @@ cmd_update() {
     echo ""
     if [ "$update_ok" = "true" ]; then
         log "Все сервисы успешно обновлены и работают (Healthy)!"
+
+        # Закрепление безопасных прав доступа на хосте
+        chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
+        chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
+
+        if is_external_nginx_enabled; then
+            info "Проверка внешнего Nginx после обновления контейнеров..."
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
+                local nginx_post_err=""
+                if nginx_post_err=$(run_privileged nginx -t 2>&1); then
+                    local reload_post_err=""
+                    if ! reload_post_err=$(run_privileged systemctl reload nginx 2>&1); then
+                        error "Не удалось перезагрузить Nginx после обновления: $reload_post_err"
+                        return 1
+                    else
+                        log "Nginx успешно перезагружен (systemctl reload nginx)."
+                    fi
+                else
+                    error "Обнаружена ошибка синтаксиса Nginx после обновления: $nginx_post_err"
+                    return 1
+                fi
+            else
+                error "Служба системного Nginx неактивна после обновления!"
+                return 1
+            fi
+        fi
     else
         error "Сервисы не смогли перейти в состояние Healthy после обновления!"
         warn "ВАЖНО: Миграции базы данных уже были применены к PostgreSQL."
-        docker compose logs --tail=50 bot
+        local bot_err_logs=""
+        bot_err_logs="$(docker compose logs --tail=50 bot 2>/dev/null || true)"
+        echo "$bot_err_logs"
         if [[ -n "$rollback_commit" ]]; then
             echo ""
             warn "🚨 Выполняем возврат исходного кода к предыдущему коммиту ($rollback_commit)..."
             git reset --hard "$rollback_commit"
-            docker compose up -d --build
+            dc_up --build
 
             info "Проверка работоспособности сервисов после отката кода..."
             local rb_timeout=60
@@ -487,7 +1136,14 @@ cmd_update() {
                 rb_bot="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
                 rb_caddy="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo starting)"
 
-                if [ "$rb_db" = "healthy" ] && [ "$rb_redis" = "healthy" ] && [ "$rb_bot" = "healthy" ] && [ "$rb_caddy" = "running" ]; then
+                local rb_caddy_ok=false
+                if is_external_nginx_enabled; then
+                    rb_caddy_ok=true
+                elif [ "$rb_caddy" = "running" ]; then
+                    rb_caddy_ok=true
+                fi
+
+                if [ "$rb_db" = "healthy" ] && [ "$rb_redis" = "healthy" ] && [ "$rb_bot" = "healthy" ] && [ "$rb_caddy_ok" = "true" ]; then
                     rb_healthy=true
                     break
                 fi
@@ -504,6 +1160,12 @@ cmd_update() {
                     warn "Для полного возврата схемы БД к исходному состоянию перед обновлением выполните:"
                     echo -e "${BOLD}${YELLOW}    just1kbot restore $pre_update_backup${NC}"
                 fi
+                print_ai_diagnostic_report \
+                    "Just1kBot Update Rollback" \
+                    "Новая версия не прошла healthcheck. Выполнен откат кода к $rollback_commit" \
+                    "Контейнеры возвращены к предыдущей версии, но схема БД могла обновиться" \
+                    "$bot_err_logs" \
+                    "1. Проверьте логи бота: just1kbot logs bot\n2. При необходимости восстановите БД: just1kbot restore $pre_update_backup"
             else
                 error "КРИТИЧЕСКАЯ ОШИБКА: Сервисы не смогли подняться после отката кода!"
                 warn "Вероятная причина: применённая миграция изменила схему БД и несовместима со старой версией кода."
@@ -513,7 +1175,12 @@ cmd_update() {
                 else
                     warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
                 fi
-                docker compose logs --tail=50 bot
+                print_ai_diagnostic_report \
+                    "Just1kBot Critical Rollback Failure" \
+                    "Сервисы старой версии не смогли подняться после отката кода" \
+                    "Схема БД несовместима со старой версией кода" \
+                    "$(docker compose ps 2>/dev/null || true)\n\n$bot_err_logs" \
+                    "1. Немедленно восстановите рабочую базу данных: just1kbot restore $pre_update_backup\n2. Проверьте логи: just1kbot logs bot"
             fi
         fi
         return 1
@@ -526,9 +1193,11 @@ cmd_update() {
         info "Для применения изменений поверх новой версии: git stash pop"
     fi
 
-    info "Просмотр последних логов бота:"
-    echo -e "${CYAN}Нажмите Ctrl+C для возврата в меню...${NC}\n"
-    cmd_logs "bot"
+    if [[ -t 0 ]]; then
+        info "Просмотр последних логов бота:"
+        echo -e "${CYAN}Нажмите Ctrl+C для возврата в меню...${NC}\n"
+        cmd_logs "bot"
+    fi
 }
 
 # Вспомогательная функция ротации бэкапов
@@ -557,6 +1226,7 @@ rotate_backups() {
 cmd_backup() {
     echo -e "\n${BOLD}${BLUE}=== 💾 СОЗДАНИЕ ЗАШИФРОВАННОГО БЭКАПА БД ===${NC}\n"
     mkdir -p backups
+    chmod 700 backups 2>/dev/null || true
 
     # Способ 1: Прямой дамп из работающего контейнера db + шифрование age (быстро и надежно)
     if command -v age >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/.env" ]]; then
@@ -583,6 +1253,7 @@ cmd_backup() {
             if [[ "${dump_status[0]}" -eq 0 ]] && [[ "${dump_status[1]}" -eq 0 ]]; then
                 if [[ -s "$tmp_gz" ]] && gzip -t "$tmp_gz" 2>/dev/null; then
                     if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
+                        chmod 600 "$backup_file" 2>/dev/null || true
                         rm -rf "$tmp_backup_dir"
                         log "Бэкап успешно создан: ${BOLD}${backup_file}${NC}"
                         # shellcheck disable=SC2012
@@ -612,6 +1283,7 @@ cmd_backup() {
         local latest_backup
         latest_backup=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f -exec stat -c "%Y %n" {} + 2>/dev/null | sort -rn | awk '{print $2}' | head -1 || find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | sort -r | head -1 || echo "")
         if [[ -n "$latest_backup" ]] && [[ -f "$latest_backup" ]] && [[ -s "$latest_backup" ]]; then
+            chmod 600 "$latest_backup" 2>/dev/null || true
             log "Бэкап успешно создан: ${BOLD}${latest_backup}${NC}"
             # shellcheck disable=SC2012
             ls -lh "$latest_backup" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
@@ -815,7 +1487,7 @@ cmd_restart() {
 
 cmd_start() {
     echo -e "\n${BOLD}${BLUE}=== 🚀 ЗАПУСК ВСЕХ СЕРВИСОВ ===${NC}\n"
-    docker compose up -d
+    dc_up
     log "Сервисы запущены."
 }
 
@@ -838,7 +1510,7 @@ cmd_config() {
     read -r -p "Применить изменения и пересоздать контейнеры (docker compose up -d --force-recreate)? (Y/n): " apply_restart
     if [[ ! "$apply_restart" =~ ^[Nn]$ ]]; then
         info "Пересоздание контейнеров с новыми переменными окружения..."
-        docker compose up -d --force-recreate
+        dc_up --force-recreate
         log "Конфигурация успешно применена ко всем контейнерам."
     fi
 }
@@ -883,9 +1555,17 @@ cmd_doctor() {
     # 2. Прослушивание портов
     for port in 80 443; do
         if ss -tlnp 2>/dev/null | grep -q ":${port} " || netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
-            log "Порт $port слушается веб-сервером (Caddy)."
+            if is_external_nginx_enabled; then
+                log "Порт $port слушается системным Nginx (Reverse Proxy)."
+            else
+                log "Порт $port слушается веб-сервером (Caddy)."
+            fi
         else
-            warn "Порт $port не слушается. Проверьте статус контейнера Caddy."
+            if is_external_nginx_enabled; then
+                warn "Порт $port не слушается. Проверьте статус Nginx: systemctl status nginx"
+            else
+                warn "Порт $port не слушается. Проверьте статус контейнера Caddy."
+            fi
         fi
     done
 
@@ -953,10 +1633,11 @@ interactive_menu() {
         echo -e "  [${BOLD}6${NC}] 🔑 ${BOLD}Конфигурация${NC} (Редактировать .env файл с reload)"
         echo -e "  [${BOLD}7${NC}] 🩺 ${BOLD}Диагностика (Doctor)${NC} (Проверка DNS, SSL, портов и Telegram API)"
         echo -e "  [${BOLD}8${NC}] 🧹 ${BOLD}Очистить дисковый кэш${NC} (Docker image prune)"
+        echo -e "  [${BOLD}9${NC}] 🌐 ${BOLD}Интеграция с Nginx${NC} (Настроить совместную работу / Reverse Proxy)"
         echo -e "  [${BOLD}0${NC}] ❌ ${BOLD}Выход${NC}"
         echo ""
         echo -e "${CYAN}────────────────────────────────────────────────────────────────────────────────${NC}"
-        read -r -p "Выберите действие [0-8]: " choice
+        read -r -p "Выберите действие [0-9]: " choice
 
         case "$choice" in
             1)
@@ -1028,6 +1709,10 @@ interactive_menu() {
                 cmd_clean || true
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
+            9)
+                cmd_nginx_config || true
+                read -r -p "Нажмите Enter для возврата в меню..."
+                ;;
             0|q|exit)
                 echo -e "\n${GREEN}До свидания!${NC}\n"
                 exit 0
@@ -1073,6 +1758,9 @@ main() {
             config|env)
                 cmd_config
                 ;;
+            nginx-config|nginx)
+                cmd_nginx_config
+                ;;
             doctor|check)
                 cmd_doctor
                 ;;
@@ -1083,7 +1771,7 @@ main() {
                 cmd_clean
                 ;;
             help|-h|--help)
-                echo -e "Использование: just1kbot [status|logs|update|preflight|backup|restore|restart|start|stop|config|doctor|clean]"
+                echo -e "Использование: just1kbot [status|logs|update|preflight|backup|restore|restart|start|stop|config|nginx-config|doctor|clean]"
                 ;;
             *)
                 error "Неизвестная команда: $1. Используйте 'just1kbot help'."

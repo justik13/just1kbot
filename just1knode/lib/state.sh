@@ -10,20 +10,23 @@ RELAYS_FILE="${RELAYS_FILE:-${STATE_DIR}/relays.json}"
 
 init_state_dir() {
     mkdir -p "$STATE_DIR"
-    chmod 750 "$STATE_DIR"
+    chown root:xrayapi "$STATE_DIR" 2>/dev/null || true
+    chmod 2770 "$STATE_DIR" 2>/dev/null || true
 
     if [[ ! -f "$STATE_FILE" ]]; then
         echo "{}" > "$STATE_FILE"
-        chmod 640 "$STATE_FILE"
     fi
     if [[ ! -f "$CLIENTS_FILE" ]]; then
         echo "{}" > "$CLIENTS_FILE"
-        chmod 660 "$CLIENTS_FILE"
     fi
     if [[ ! -f "$RELAYS_FILE" ]]; then
         echo "[]" > "$RELAYS_FILE"
-        chmod 640 "$RELAYS_FILE"
     fi
+
+    chown root:xrayapi "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
+    chmod 660 "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
+    find "$STATE_DIR" -name "*.lock" -exec chown root:xrayapi {} + 2>/dev/null || true
+    find "$STATE_DIR" -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
 }
 
 set_state_val() {
@@ -37,9 +40,16 @@ try:
 except ImportError:
     fcntl = None
 
+os.umask(0o007)
 f, k, v = sys.argv[1], sys.argv[2], sys.argv[3]
 lock_file = f + '.lock'
-lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR)
+lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o660)
+try:
+    import shutil
+    shutil.chown(lock_file, user='root', group='xrayapi')
+    os.chmod(lock_file, 0o660)
+except Exception:
+    pass
 if fcntl:
     fcntl.flock(lock_fd, fcntl.LOCK_EX)
 try:
@@ -59,7 +69,7 @@ try:
     try:
         import shutil
         shutil.chown(f, user='root', group='xrayapi')
-        os.chmod(f, 0o640)
+        os.chmod(f, 0o660)
     except Exception:
         pass
 finally:

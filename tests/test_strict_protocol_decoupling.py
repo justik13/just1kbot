@@ -180,3 +180,61 @@ class StrictProtocolDecouplingTests(unittest.IsolatedAsyncioTestCase):
             client = await _client(op)
             self.assertIsNone(client)
             mock_amnezia_cls.assert_not_called()
+
+    async def test_get_total_free_ips_strictly_filters_amnezia_protocol(self):
+        from database.repositories.servers_repo import get_total_free_ips
+
+        s_awg = Server(
+            id=1,
+            name="AWG Server",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            max_clients=100,
+            capabilities=[],
+        )
+        s_xray = Server(
+            id=2,
+            name="Xray Server",
+            protocol=XRAY_PROTOCOL,
+            is_active=True,
+            max_clients=500,
+            capabilities=["xray_origin"],
+        )
+
+        session = AsyncMock()
+        with patch("database.repositories.servers_repo.get_active_servers", return_value=[s_awg, s_xray]), \
+             patch("database.repositories.servers_repo.get_server_peer_counts", return_value={1: 20, 2: 50}), \
+             patch("database.repositories.servers_repo.get_cached_peer_count", return_value=20):
+
+            free_ips = await get_total_free_ips(session)
+            # Only AWG server should be counted: 100 - 20 = 80 (Xray's 500 - 50 = 450 should NOT be added)
+            self.assertEqual(free_ips, 80)
+
+    async def test_slots_cache_fails_closed_on_unknown_protocol(self):
+        from services.device_service import ServerUnavailable
+        from services.slots_cache import capture_server_peer_snapshot, get_real_peer_count
+
+        s_invalid = Server(
+            id=99,
+            name="Invalid Proto Server",
+            protocol="wireguard",  # Unsupported
+            capabilities=[],
+            is_active=True,
+            max_clients=100,
+        )
+
+        with patch("services.slots_cache.AmneziaClient") as mock_amnezia_cls, \
+             patch("database.connection.session_scope") as mock_scope:
+            mock_session = AsyncMock()
+            mock_session.get.return_value = s_invalid
+            mock_scope.return_value.__aenter__.return_value = mock_session
+
+            # 1. capture_server_peer_snapshot must raise ServerUnavailable
+            with self.assertRaises(ServerUnavailable):
+                await capture_server_peer_snapshot(99)
+            mock_amnezia_cls.assert_not_called()
+
+            # 2. get_real_peer_count must return -1
+            count = await get_real_peer_count(s_invalid, force_refresh=True)
+            self.assertEqual(count, -1)
+            mock_amnezia_cls.assert_not_called()

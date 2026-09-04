@@ -4,7 +4,7 @@ from typing import TypedDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import AMNEZIA_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
@@ -175,6 +175,7 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
         await session.scalars(
             select(Server.id)
             .where(
+                Server.protocol == XRAY_PROTOCOL,
                 Server.is_active.is_(True),
                 Server.health_state == ServerHealthState.ONLINE,
                 Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
@@ -188,7 +189,7 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
     for srv_id in candidate_ids:
         server = await session.scalar(
             select(Server)
-            .where(Server.id == srv_id)
+            .where(Server.id == srv_id, Server.protocol == XRAY_PROTOCOL)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -361,10 +362,17 @@ async def get_total_free_ips(session: AsyncSession) -> int:
     if not active_servers:
         return 0
 
+    awg_servers = [
+        s for s in active_servers
+        if s.protocol == AMNEZIA_PROTOCOL and "xray_origin" not in (s.capabilities or [])
+    ]
+    if not awg_servers:
+        return 0
+
     db_counts = await get_server_peer_counts(session)
 
     total_free = 0
-    for server in active_servers:
+    for server in awg_servers:
         cached_count = get_cached_peer_count(server.id)
         db_count = db_counts.get(server.id, 0)
         effective_count = max(cached_count, db_count) if cached_count is not None else db_count

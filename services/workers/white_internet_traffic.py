@@ -6,10 +6,13 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 
+from typing import Any
+
 from aiogram import Bot
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.constants import XRAY_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.connection import session_scope
 from database.models import Server, User, WhiteInternetSubscription
@@ -22,6 +25,12 @@ import enum
 logger = logging.getLogger("WhiteInternetTraffic")
 
 TRAFFIC_SYNC_INTERVAL_SECONDS = 60.0
+
+
+def _mask_uuid(val: Any) -> str:
+    if not val or not isinstance(val, str):
+        return "***"
+    return f"{val[:8]}***"
 
 
 class TrafficCounterState(str, enum.Enum):
@@ -59,6 +68,7 @@ class WhiteInternetTrafficWorker:
             stmt = (
                 select(Server)
                 .where(
+                    Server.protocol == XRAY_PROTOCOL,
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
@@ -132,9 +142,9 @@ class WhiteInternetTrafficWorker:
                     or not isinstance(stats, dict)
                 ):
                     logger.warning(
-                        "Invalid client record on server %d: uuid=%r, stats=%r",
+                        "Invalid client record on server %d: uuid=%s, stats=%r",
                         server_id,
-                        client_uuid,
+                        _mask_uuid(client_uuid),
                         stats,
                     )
                     continue
@@ -147,7 +157,7 @@ class WhiteInternetTrafficWorker:
                 except (ValueError, TypeError) as parse_err:
                     logger.warning(
                         "Malformed uplink/downlink counters for client %s on server %d: %s",
-                        client_uuid,
+                        _mask_uuid(client_uuid),
                         server_id,
                         parse_err,
                     )
@@ -250,7 +260,7 @@ class WhiteInternetTrafficWorker:
                 except Exception as client_exc:
                     logger.error(
                         "Error processing traffic deduction for client %s on server %d: %s",
-                        client_uuid[:8] if isinstance(client_uuid, str) else "unknown",
+                        _mask_uuid(client_uuid),
                         server_id,
                         client_exc,
                         exc_info=True,

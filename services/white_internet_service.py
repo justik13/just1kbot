@@ -24,6 +24,7 @@ from config.constants import (
     WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
+    XRAY_PROTOCOL,
 )
 from config.enums import (
     ServerHealthState,
@@ -262,7 +263,12 @@ class WhiteInternetService:
             return False, texts.WL_SUB_NOT_READY, None
 
         # Validate origin node health & availability before debiting funds
-        origin_node = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
+        origin_node = await session.scalar(
+            select(Server).where(
+                Server.id == sub.origin_node_id,
+                Server.protocol == XRAY_PROTOCOL,
+            )
+        )
         needs_migration = (
             not origin_node
             or not origin_node.is_active
