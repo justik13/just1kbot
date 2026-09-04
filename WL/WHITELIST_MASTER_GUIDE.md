@@ -928,3 +928,8 @@ x-origin-content-length: 4
    - [XTLS/Xray-core PR #5414: Добавление uplinkHTTPMethod](https://github.com/XTLS/Xray-core/pull/5414)
    - [INCY-DEV Platforms & Docs](https://github.com/INCY-DEV)
    - [OpenLibreCommunity TWL](https://github.com/openlibrecommunity/twl)
+https://habr.com/ru/articles/1027276/
+https://habr.com/ru/articles/1007570/
+https://habr.com/ru/articles/1014038/
+https://github.com/igareck/vpn-configs-for-russia
+https://4pda.to/forum/index.php?showtopic=1110469&st=8940
