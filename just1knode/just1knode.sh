@@ -465,7 +465,7 @@ uninstall_node() {
     echo -e "     (атомарное восстановление default сайта, если создавалась резервная копия default.user.bak)"
     echo -e "  9. ${BOLD}Let's Encrypt renewal hook:${NC} deploy-скрипт перезапуска служб"
     echo -e "  10. ${BOLD}Камуфляжный сайт:${NC} /var/www/html/index.html (если создан just1knode)"
-    echo -e "  11. ${BOLD}Конфигурация ядра:${NC} /etc/sysctl.d/99-disable-ipv6.conf (восстановление IPv6 в runtime)"
+    echo -e "  11. ${BOLD}Конфигурация ядра:${NC} ${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf} (восстановление IPv6 в runtime)"
     echo -e "  12. ${BOLD}Фаервол UFW:${NC} удаление открытых портов (8444, Relay tunnel)"
     echo -e "  13. ${BOLD}Каталог состояния и бэкапов:${NC} ${STATE_DIR:-/etc/just1knode} (бэкапы в ${BACKUP_DIR:-/var/backups/just1knode} сохраняются без --purge-backups)"
     echo -e "  14. ${BOLD}Глобальная команда:${NC} /usr/local/bin/just1knode"
@@ -506,6 +506,24 @@ uninstall_node() {
     fi
 
     local node_cleanup_errors=()
+
+    # Валидация системных путей (Defense-in-Depth защита от удаления критических каталогов ОС)
+    local protected_node_paths=(
+        "${XRAY_CONFIG_DIR:-/usr/local/etc/xray}"
+        "${XRAY_SHARE_DIR:-/usr/local/share/xray}"
+        "${XRAY_API_DIR:-/opt/xray-api}"
+        "${XRAY_API_ETC:-/etc/xray-api}"
+        "${XRAY_API_LIB:-/var/lib/xray-api}"
+        "${STATE_DIR:-/etc/just1knode}"
+        "${BACKUP_DIR:-/var/backups/just1knode}"
+    )
+    for p in "${protected_node_paths[@]}"; do
+        local norm_p="${p%/}"
+        if [[ -z "$norm_p" || "$norm_p" =~ ^(/|/etc|/var|/usr|/usr/local|/root|/home|/tmp|/opt)$ ]]; then
+            error "Попытка удаления защищенного системного каталога ($p)! Процедура удаления прервана (Fail-Closed)."
+            return 1
+        fi
+    done
 
     info "1/11. Остановка и отключение системных служб systemd..."
     systemctl stop xray xray-api 2>/dev/null || true
@@ -559,8 +577,10 @@ uninstall_node() {
     fi
 
     if command -v nginx >/dev/null 2>&1; then
-        if nginx -t >/dev/null 2>&1; then
-            systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+        if systemctl is-active --quiet nginx 2>/dev/null; then
+            if nginx -t >/dev/null 2>&1; then
+                systemctl reload nginx 2>/dev/null || true
+            fi
         fi
     fi
 
@@ -576,8 +596,9 @@ uninstall_node() {
     rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" 2>/dev/null || true
 
     info "8/11. Удаление конфигурации ядра sysctl и восстановление IPv6..."
-    if [[ -f /etc/sysctl.d/99-disable-ipv6.conf ]]; then
-        rm -f /etc/sysctl.d/99-disable-ipv6.conf 2>/dev/null || true
+    local sysctl_ipv6_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
+    if [[ -f "$sysctl_ipv6_conf" ]]; then
+        rm -f "$sysctl_ipv6_conf" 2>/dev/null || true
         if command -v sysctl >/dev/null 2>&1; then
             sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
             sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1 || true
@@ -637,8 +658,8 @@ uninstall_node() {
     if [[ -e "$global_bin" || -L "$global_bin" ]]; then
         node_cleanup_errors+=("Глобальный исполняемый файл все еще существует: $global_bin")
     fi
-    if [[ -f /etc/sysctl.d/99-disable-ipv6.conf ]]; then
-        node_cleanup_errors+=("Файл sysctl 99-disable-ipv6.conf все еще существует")
+    if [[ -f "$sysctl_ipv6_conf" ]]; then
+        node_cleanup_errors+=("Файл sysctl $sysctl_ipv6_conf все еще существует")
     fi
     if [[ -e "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray.service" ]]; then
         node_cleanup_errors+=("Служба systemd xray.service все еще существует")

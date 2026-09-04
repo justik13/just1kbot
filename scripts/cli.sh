@@ -1750,7 +1750,7 @@ cmd_uninstall() {
             error "Не удалось создать каталог для сохранения бэкапов: $safe_backup_dest! Процедура удаления прервана (Fail-Closed)."
             return 1
         fi
-        if ! (run_privileged cp -a "$backups_dir"/* "$safe_backup_dest/" 2>/dev/null || cp -a "$backups_dir"/* "$safe_backup_dest/" 2>/dev/null); then
+        if ! (run_privileged cp -a "$backups_dir/." "$safe_backup_dest/" 2>/dev/null || cp -a "$backups_dir/." "$safe_backup_dest/" 2>/dev/null); then
             error "Критическая ошибка при копировании резервных копий в $safe_backup_dest! Процедура удаления прервана (Fail-Closed) во избежание потери данных."
             return 1
         fi
