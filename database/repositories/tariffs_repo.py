@@ -50,14 +50,6 @@ async def update_tariff(
     return tariff
 
 
-async def delete_tariff(
-    session: AsyncSession,
-    tariff: Tariff,
-) -> None:
-    await session.delete(tariff)
-    await session.flush()
-
-
 async def get_tariff_count(session: AsyncSession) -> int:
     stmt = select(func.count(Tariff.id))
     result = await session.execute(stmt)

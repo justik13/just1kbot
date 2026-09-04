@@ -132,16 +132,6 @@ async def get_active_subscriptions_count(session: AsyncSession) -> int:
     return result.scalar_one()
 
 
-async def get_new_users_count_24h(session: AsyncSession) -> int:
-    now = now_utc()
-    stmt = select(func.count(User.id)).where(
-        User.created_at > now - timedelta(hours=24),
-        User.is_deleted.is_(False),
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one()
-
-
 async def get_dashboard_stats(session: AsyncSession) -> dict:
     now = now_utc()
     stmt = select(
@@ -154,36 +144,6 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
     result = await session.execute(stmt)
     row = result.one()
     return {"total": row.total, "active": row.active, "new_24h": row.new_24h}
-
-
-async def get_users_paginated(
-    session: AsyncSession, page: int = 1, per_page: int = 10
-) -> list[User]:
-    offset = (page - 1) * per_page
-    result = await session.execute(
-        select(User)
-        .where(User.is_deleted.is_(False))
-        .order_by(User.created_at.desc())
-        .offset(offset)
-        .limit(per_page)
-    )
-    return result.scalars().all()
-
-
-async def get_users_paginated_with_profiles(
-    session: AsyncSession, page: int = 1, per_page: int = 10
-) -> list[User]:
-    offset = (page - 1) * per_page
-    stmt = (
-        select(User)
-        .where(User.is_deleted.is_(False))
-        .options(selectinload(User.profiles))
-        .order_by(User.created_at.desc())
-        .offset(offset)
-        .limit(per_page)
-    )
-    result = await session.execute(stmt)
-    return result.scalars().unique().all()
 
 
 async def get_user_referrals_count(session: AsyncSession, telegram_id: int) -> int:
@@ -220,32 +180,6 @@ async def get_user_referrals_paginated(
     )
     result = await session.execute(stmt)
     return result.scalars().all(), count, page
-
-
-async def get_user_referrals(session: AsyncSession, telegram_id: int) -> list[User]:
-    stmt = (
-        select(User)
-        .where(User.referred_by == telegram_id, User.is_deleted.is_(False))
-        .order_by(User.created_at.desc(), User.id.desc())
-    )
-    result = await session.execute(stmt)
-    return result.scalars().all()
-
-
-async def get_user_with_referrals(
-    session: AsyncSession, telegram_id: int
-) -> tuple[User | None, list[User]]:
-    stmt = (
-        select(User)
-        .options(selectinload(User.profiles))
-        .where(User.telegram_id == telegram_id, User.is_deleted.is_(False))
-    )
-    result = await session.execute(stmt)
-    user = result.scalar_one_or_none()
-    referrals: list[User] = []
-    if user:
-        referrals = await get_user_referrals(session, telegram_id)
-    return user, referrals
 
 
 async def mark_user_bot_blocked(session: AsyncSession, telegram_id: int) -> None:
@@ -367,10 +301,6 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     return stmt
 
 
-async def get_filtered_user_count(session: AsyncSession, filter_type: str = "all") -> int:
-    return await get_filtered_users_count(session, filter_type=filter_type)
-
-
 async def get_filtered_users_count(
     session: AsyncSession,
     filter_type: str = "all",
@@ -406,18 +336,6 @@ async def get_filtered_users_paginated(
     )
     result = await session.execute(stmt)
     return list(result.scalars().unique().all())
-
-
-async def get_filtered_users_paginated_with_profiles(
-    session: AsyncSession,
-    filter_type: str = "all",
-    page: int = 1,
-    per_page: int = 10,
-    filter_param=None,
-) -> list[User]:
-    return await get_filtered_users_paginated(
-        session, filter_type=filter_type, page=page, per_page=per_page, filter_param=filter_param
-    )
 
 
 async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
