@@ -1362,13 +1362,50 @@ ensure_xrayapi_user
         self.assertTrue((self.backup_dir / "xray_state.tar.gz").exists(), "Backup archive must remain intact")
         self.assertIn("Каталог бэкапов сохранен", res.stdout)
 
-    def test_uninstall_node_trailing_confirm_flag_fails_closed(self):
-        """uninstall_node with trailing --confirm flag must fail-closed (code 1) without crashing."""
+    def test_uninstall_node_rejects_protected_system_directories(self):
+        """uninstall_node must fail-closed (code 1) when STATE_DIR or BACKUP_DIR is a protected root/system directory."""
         self._prepare_base_env()
-        res = self._run_shell_snippet("uninstall_node --confirm")
-        self.assertEqual(res.returncode, 1)
-        self.assertIn("В неинтерактивном режиме для удаления требуется явный флаг", res.stdout + res.stderr)
-        self.assertNotIn("shift: shift count out of range", res.stdout + res.stderr)
+        for dangerous_dir in ["/etc", "/var", "/usr", "/root", "/"]:
+            res = self._run_shell_snippet("uninstall_node --confirm=DELETE", extra_env={"STATE_DIR": dangerous_dir})
+            self.assertEqual(res.returncode, 1, f"Expected code 1 for dangerous STATE_DIR={dangerous_dir}")
+            self.assertIn("Попытка удаления защищенного системного каталога", res.stdout + res.stderr)
+
+    def test_uninstall_node_safe_nginx_reload_skips_when_inactive(self):
+        """uninstall_node must not restart Nginx when systemctl is-active returns non-zero."""
+        self._prepare_base_env()
+        nginx_log = Path(self.temp_dir) / "nginx_cmd.log"
+        self._create_mock_script(
+            "systemctl",
+            f"""#!/bin/sh
+if [ "$1" = "is-active" ] && [ "$3" = "nginx" ]; then
+    exit 3
+fi
+if [ "$1" = "restart" ] && [ "$2" = "nginx" ]; then
+    echo "RESTART_NGINX" >> "{nginx_log}"
+fi
+if [ "$1" = "reload" ] && [ "$2" = "nginx" ]; then
+    echo "RELOAD_NGINX" >> "{nginx_log}"
+fi
+exit 0
+""",
+        )
+
+        fake_install_dir = Path(self.temp_dir) / "opt" / "just1knode"
+        fake_install_dir.mkdir(parents=True, exist_ok=True)
+        fake_global_bin = Path(self.temp_dir) / "usr_local_bin" / "just1knode"
+        fake_global_bin.parent.mkdir(parents=True, exist_ok=True)
+        fake_global_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+        extra_env = {
+            "INSTALL_DIR": str(fake_install_dir),
+            "JUST1KNODE_GLOBAL_BIN": str(fake_global_bin),
+            "JUST1KNODE_ALLOW_CUSTOM_INSTALL_RM": "1",
+        }
+        res = self._run_shell_snippet("uninstall_node --confirm=DELETE", extra_env=extra_env)
+        self.assertEqual(res.returncode, 0, f"uninstall_node failed: {res.stderr}\n{res.stdout}")
+        if nginx_log.exists():
+            log_content = nginx_log.read_text(encoding="utf-8")
+            self.assertNotIn("RESTART_NGINX", log_content, "Inactive Nginx must NEVER be restarted during uninstall!")
 
 
 if __name__ == "__main__":

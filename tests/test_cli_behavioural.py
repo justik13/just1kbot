@@ -1553,6 +1553,37 @@ cmd_uninstall --confirm=DELETE --keep-backups
         self.assertTrue(saved_dir.exists(), "Saved backups directory must exist")
         self.assertTrue((saved_dir / "dump1.sql.gz.age").exists(), "Backup files must be preserved in save location")
 
+    def test_uninstall_empty_backups_with_keep_backups_succeeds(self):
+        """cmd_uninstall --keep-backups must succeed without fail-closed error when backups/ is empty or contains dotfiles."""
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        (backups_dir / ".gitkeep").write_text("", encoding="utf-8")
+
+        saved_dir = self.root / "saved_backups_empty"
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export JUST1KBOT_BACKUP_SAVE_DIR="{saved_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+
+cmd_uninstall --confirm=DELETE --keep-backups
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}", "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"Uninstall failed: {proc.stderr}\n{proc.stdout}")
+        self.assertFalse(self.project_dir.exists(), "PROJECT_DIR must be deleted")
+        self.assertTrue(saved_dir.exists(), "Saved backups directory must exist")
+        self.assertTrue((saved_dir / ".gitkeep").exists(), ".gitkeep must be copied to save location")
+
     def test_setup_sh_delegates_to_uninstall(self):
         """scripts/setup.sh --uninstall delegates to cli.sh uninstall."""
         proc = subprocess.run(
