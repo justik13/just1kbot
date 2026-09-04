@@ -14,7 +14,7 @@ fi
 # Если скрипт запущен через pipe (curl | bash) или модули не найдены локально:
 # выполняем автономную загрузку модулей в /opt/just1knode и перезапускаем
 if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
-    INSTALL_DIR="/opt/just1knode"
+    INSTALL_DIR="${INSTALL_DIR:-/opt/just1knode}"
     mkdir -p "$INSTALL_DIR"
     
     echo -e "\033[1;34m==>\033[0m \033[1mJUST1KNODE: Инициализация и развертывание модулей в ${INSTALL_DIR}...\033[0m"
@@ -401,6 +401,188 @@ reset_node() {
 }
 
 # =============================================================================
+# ПОЛНОЕ БЕЗВОЗВРАТНОЕ УДАЛЕНИЕ JUST1KNODE (UNINSTALL)
+# =============================================================================
+uninstall_node() {
+    title "ПОЛНОЕ БЕЗВОЗВРАТНОЕ УДАЛЕНИЕ JUST1KNODE (UNINSTALL)"
+    check_root
+    init_state_dir
+
+    local force=false
+    local confirm_code=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force|-f)
+                force=true
+                shift
+                ;;
+            --confirm=*)
+                confirm_code="${1#*=}"
+                shift
+                ;;
+            --confirm)
+                confirm_code="${2:-}"
+                shift 2
+                ;;
+            --yes|-y)
+                force=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    echo ""
+    echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}${RED}🚨 ВНИМАНИЕ: ПОЛНОЕ И БЕЗВОЗВРАТНОЕ УДАЛЕНИЕ JUST1KNODE (UNINSTALL)${NC}"
+    echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "Вы собираетесь полностью удалить узел just1knode с данного сервера."
+    echo ""
+    echo -e "${BOLD}Что будет остановлено и удалено без остатка:${NC}"
+    echo -e "  1. ${BOLD}Системные службы systemd:${NC} остановка и отключение xray.service, xray-api.service"
+    echo -e "  2. ${BOLD}Юниты systemd:${NC} /etc/systemd/system/xray*.service (daemon-reload)"
+    echo -e "  3. ${BOLD}Процессы:${NC} завершение всех активных фоновых процессов Xray и Uvicorn API"
+    echo -e "  4. ${BOLD}Пользователь и группа:${NC} системная учетная запись 'xrayapi'"
+    echo -e "  5. ${BOLD}Исполняемые файлы и базы:${NC} ${XRAY_BIN:-/usr/local/bin/xray}, ${XRAY_SHARE_DIR:-/usr/local/share/xray} (geoip/geosite)"
+    echo -e "  6. ${BOLD}Конфигурации Xray:${NC} ${XRAY_CONFIG_DIR:-/usr/local/etc/xray}"
+    echo -e "  7. ${BOLD}Агент Xray-API:${NC} ${XRAY_API_DIR:-/opt/xray-api}, ${XRAY_API_ETC:-/etc/xray-api}, ${XRAY_API_LIB:-/var/lib/xray-api}"
+    echo -e "  8. ${BOLD}Веб-сервер Nginx:${NC} виртуальный хост just1k-origin.conf, conf.d/xhttp-map.conf, just1k_relays.d"
+    echo -e "     (восстановление default сайта, если создавалась резервная копия default.user.bak)"
+    echo -e "  9. ${BOLD}Let's Encrypt renewal hook:${NC} deploy-скрипт перезапуска служб"
+    echo -e "  10. ${BOLD}Камуфляжный сайт:${NC} /var/www/html/index.html (если создан just1knode)"
+    echo -e "  11. ${BOLD}Конфигурация ядра:${NC} /etc/sysctl.d/99-disable-ipv6.conf"
+    echo -e "  12. ${BOLD}Каталог состояния и бэкапов:${NC} ${STATE_DIR:-/etc/just1knode}, ${BACKUP_DIR:-/var/backups/just1knode}"
+    echo -e "  13. ${BOLD}Глобальная команда:${NC} /usr/local/bin/just1knode"
+    echo -e "  14. ${BOLD}Директория утилиты:${NC} ${INSTALL_DIR:-/opt/just1knode}"
+    echo ""
+    echo -e "${BOLD}${RED}⚠️  ВНИМАНИЕ: СЕРВЕР ПЕРЕСТАНЕТ ПРИНИМАТЬ VPN-ТРАФИК И ОБСЛУЖИВАТЬ КЛИЕНТОВ!${NC}"
+    echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    if [[ "$confirm_code" == "DELETE" || "$confirm_code" == "УДАЛИТЬ" ]]; then
+        info "Подтверждение удаления получено через аргумент командной строки (--confirm)."
+    elif [[ "$force" == "true" ]]; then
+        error "Для удаления с флагом --force / --yes требуется явное подтверждение: --confirm=DELETE (или --confirm=УДАЛИТЬ). Процедура прервана (Fail-Closed)."
+        return 1
+    else
+        # Confirmation step 1
+        local c1="n"
+        if ! read -rp "Вы действительно хотите начать процедуру полного удаления just1knode? [y/N]: " c1 2>/dev/null; then
+            error "В неинтерактивном режиме для удаления требуется явный флаг: --confirm=DELETE (или --confirm=УДАЛИТЬ). Процедура прервана (Fail-Closed)."
+            return 1
+        fi
+        if [[ ! "$c1" =~ ^[Yy]$ ]]; then
+            info "Удаление отменено пользователем."
+            return 0
+        fi
+
+        # Confirmation step 2 (strict keyword match)
+        echo ""
+        echo -e "${BOLD}${RED}ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ! Это действие необратимо.${NC}"
+        local c2=""
+        if ! read -rp "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2 2>/dev/null; then
+            c2=""
+        fi
+        if [[ "$c2" != "DELETE" && "$c2" != "УДАЛИТЬ" ]]; then
+            warn "Подтверждение не совпало (введено: '$c2'). Удаление отменено!"
+            return 0
+        fi
+    fi
+
+    info "1/10. Остановка и отключение системных служб systemd..."
+    systemctl stop xray xray-api 2>/dev/null || true
+    systemctl disable xray xray-api 2>/dev/null || true
+    rm -f "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray.service" "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray-api.service" 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl reset-failed 2>/dev/null || true
+
+    info "2/10. Завершение активных процессов ядра и API..."
+    pkill -9 -f "${XRAY_BIN:-/usr/local/bin/xray}" 2>/dev/null || true
+    pkill -9 -u xrayapi 2>/dev/null || true
+
+    info "3/10. Удаление пользователя и группы xrayapi..."
+    if id -u xrayapi >/dev/null 2>&1; then
+        userdel -f xrayapi 2>/dev/null || userdel xrayapi 2>/dev/null || true
+    fi
+    if getent group xrayapi >/dev/null 2>&1; then
+        groupdel xrayapi 2>/dev/null || true
+    fi
+
+    info "4/10. Удаление бинарных файлов и конфигураций Xray..."
+    rm -f "${XRAY_BIN:-/usr/local/bin/xray}" 2>/dev/null || true
+    rm -rf "${XRAY_CONFIG_DIR:-/usr/local/etc/xray}" 2>/dev/null || true
+    rm -rf "${XRAY_SHARE_DIR:-/usr/local/share/xray}" 2>/dev/null || true
+
+    info "5/10. Удаление агента Xray-API и виртуального окружения..."
+    rm -rf "${XRAY_API_DIR:-/opt/xray-api}" 2>/dev/null || true
+    rm -rf "${XRAY_API_ETC:-/etc/xray-api}" 2>/dev/null || true
+    rm -rf "${XRAY_API_LIB:-/var/lib/xray-api}" 2>/dev/null || true
+
+    info "6/10. Очистка конфигурации Nginx..."
+    local nginx_conf_dir="${NGINX_CONF_DIR:-/etc/nginx}"
+    rm -f "${nginx_conf_dir}/sites-enabled/just1k-origin.conf" 2>/dev/null || true
+    rm -f "${nginx_conf_dir}/sites-available/just1k-origin.conf" 2>/dev/null || true
+    rm -f "${nginx_conf_dir}/conf.d/just1k-origin.conf" 2>/dev/null || true
+    rm -f "${nginx_conf_dir}/conf.d/origin.conf" 2>/dev/null || true
+    rm -f "${nginx_conf_dir}/conf.d/just1k-bootstrap.conf" 2>/dev/null || true
+    rm -f "${nginx_conf_dir}/conf.d/xhttp-map.conf" 2>/dev/null || true
+    rm -rf "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" 2>/dev/null || true
+
+    if [[ -f "${nginx_conf_dir}/sites-available/default.user.bak" ]]; then
+        info "Восстановление исходного default сайта в Nginx..."
+        cp -a "${nginx_conf_dir}/sites-available/default.user.bak" "${nginx_conf_dir}/sites-available/default" 2>/dev/null || true
+        ln -sf "${nginx_conf_dir}/sites-available/default" "${nginx_conf_dir}/sites-enabled/default" 2>/dev/null || true
+        rm -f "${nginx_conf_dir}/sites-available/default.user.bak" 2>/dev/null || true
+    fi
+
+    if command -v nginx >/dev/null 2>&1 && nginx -t 2>/dev/null; then
+        systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+    fi
+
+    info "7/10. Удаление камуфляжного сайта и хуков Let's Encrypt..."
+    local www_index="${WWW_HTML_DIR:-/var/www/html}/index.html"
+    if [[ -f "$www_index" ]] && grep -q "Cloud Ingress Network Node" "$www_index" 2>/dev/null; then
+        rm -f "$www_index" 2>/dev/null || true
+    fi
+    local certbot_dir="${CERTBOT_DIR:-/var/www/certbot}"
+    if [[ -d "$certbot_dir" ]] && [[ -z "$(ls -A "$certbot_dir" 2>/dev/null)" ]]; then
+        rmdir "$certbot_dir" 2>/dev/null || true
+    fi
+    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" 2>/dev/null || true
+
+    info "8/10. Удаление конфигурации ядра sysctl..."
+    if [[ -f /etc/sysctl.d/99-disable-ipv6.conf ]]; then
+        rm -f /etc/sysctl.d/99-disable-ipv6.conf 2>/dev/null || true
+        if command -v sysctl >/dev/null 2>&1; then
+            sysctl --system >/dev/null 2>&1 || true
+        fi
+    fi
+
+    info "9/10. Удаление состояния, бэкапов и блокировок..."
+    rm -rf "${STATE_DIR:-/etc/just1knode}" 2>/dev/null || true
+    rm -rf "${BACKUP_DIR:-/var/backups/just1knode}" 2>/dev/null || true
+    rm -rf /run/lock/just1knode /tmp/just1knode* 2>/dev/null || true
+
+    info "10/10. Удаление глобальной команды и каталога установки..."
+    rm -f /usr/local/bin/just1knode 2>/dev/null || true
+
+    local install_dir="${INSTALL_DIR:-/opt/just1knode}"
+    cd /tmp || cd /
+    if [[ "$install_dir" == "/opt/just1knode" || -n "${JUST1KNODE_ALLOW_CUSTOM_INSTALL_RM:-}" ]]; then
+        if [[ -d "$install_dir" ]]; then
+            rm -rf "$install_dir" 2>/dev/null || true
+        fi
+    fi
+
+    echo ""
+    log "✨ just1knode успешно и полностью удален с сервера без остатков."
+    exit 0
+}
+
+# =============================================================================
 # ДИНАМИЧЕСКОЕ КОНТЕКСТНОЕ МЕНЮ
 # =============================================================================
 main_menu() {
@@ -425,13 +607,15 @@ main_menu() {
             echo -e "  Статус текущего сервера: ${BOLD}${YELLOW}⚪ НЕ НАСТРОЕН${NC}\n"
             echo -e "  ${BOLD}[1]${NC} 🌐 Установить Origin узел (Белый Интернет — Входной шлюз в РФ)"
             echo -e "  ${BOLD}[2]${NC} 🛡️  Установить Relay узел (Белый Интернет — Зарубежный выход VLESS REALITY)"
+            echo -e "  ${BOLD}[3]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-2]: " choice
+            read -rp "Выберите действие [0-3]: " choice
 
             case "$choice" in
                 1) install_xray_origin_node; read -rp "Нажмите Enter для продолжения...";;
                 2) install_xray_relay_node; read -rp "Нажмите Enter для продолжения...";;
+                3) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -451,9 +635,10 @@ main_menu() {
             echo -e "  ${BOLD}[5]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
             echo -e "  ${BOLD}[6]${NC} ⚡ Обновить ядро Xray-core"
             echo -e "  ${BOLD}[7]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[8]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-7]: " choice
+            read -rp "Выберите действие [0-8]: " choice
 
             case "$choice" in
                 1) manage_relays_menu; read -rp "Нажмите Enter для продолжения...";;
@@ -463,6 +648,7 @@ main_menu() {
                 5) update_node; read -rp "Нажмите Enter для продолжения...";;
                 6) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
                 7) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                8) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -481,9 +667,10 @@ main_menu() {
             echo -e "  ${BOLD}[4]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
             echo -e "  ${BOLD}[5]${NC} ⚡ Обновить ядро Xray-core"
             echo -e "  ${BOLD}[6]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[7]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-6]: " choice
+            read -rp "Выберите действие [0-7]: " choice
 
             case "$choice" in
                 1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
@@ -492,6 +679,7 @@ main_menu() {
                 4) update_node; read -rp "Нажмите Enter для продолжения...";;
                 5) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
                 6) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                7) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -541,6 +729,10 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 esac
                 ;;
             reset) reset_node ;;
+            uninstall|remove|purge)
+                shift
+                uninstall_node "$@"
+                ;;
             *) error "Неизвестная команда: $1. Запустите 'just1knode' без аргументов для входа в меню." ;;
         esac
     fi

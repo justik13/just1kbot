@@ -1244,6 +1244,218 @@ echo "CADDY_OK=$caddy_ok"
         self.assertEqual(proc.returncode, 0)
         self.assertIn("CADDY_OK=false", proc.stdout)
 
+    # -------------------------------------------------------------------------
+    # 8. Safe Complete Uninstallation Lifecycle Tests
+    # -------------------------------------------------------------------------
+
+
+@unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
+class SafeUninstallationBehaviouralTests(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.test_dir.name)
+        self.project_dir = self.root / "just1kbot"
+        self.project_dir.mkdir(parents=True, exist_ok=True)
+
+        scripts_dir = self.project_dir / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(CLI_PATH, scripts_dir / "cli.sh")
+        shutil.copy(SETUP_PATH, scripts_dir / "setup.sh")
+        (scripts_dir / "cli.sh").chmod(0o755)
+        (scripts_dir / "setup.sh").chmod(0o755)
+
+        (self.project_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+
+        self.bin_dir = self.root / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            "#!/bin/bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ "$1" == "compose" && "$2" == "version" ]]; then echo "Docker Compose version v2.27.0"; exit 0; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+        os.environ["JUST1KBOT_NO_SUDO"] = "1"
+
+    def tearDown(self):
+        os.environ.pop("JUST1KBOT_NO_SUDO", None)
+        self.test_dir.cleanup()
+
+    def _run_cli(self, *args: str, input_text: str | None = None) -> subprocess.CompletedProcess:
+        proc_env = os.environ.copy()
+        proc_env["PROJECT_DIR"] = self.project_dir.as_posix()
+        proc_env["JUST1KBOT_DIR"] = self.project_dir.as_posix()
+        proc_env["JUST1KBOT_NO_SUDO"] = "1"
+        proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
+
+        return subprocess.run(
+            ["bash", (self.project_dir / "scripts" / "cli.sh").as_posix(), *args],
+            cwd=str(self.project_dir),
+            input=input_text,
+            capture_output=True,
+            text=True,
+            env=proc_env,
+            check=False,
+        )
+
+    def test_uninstall_fails_closed_in_non_interactive_mode_without_confirm(self):
+        """cmd_uninstall must exit with code 1 when invoked non-interactively without --confirm=DELETE."""
+        proc = self._run_cli("uninstall")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("В неинтерактивном режиме для удаления требуется явный флаг", proc.stdout + proc.stderr)
+        self.assertTrue(self.project_dir.exists(), "Project directory must not be deleted on fail-closed exit")
+
+    def test_uninstall_fails_when_force_without_confirm_code(self):
+        """cmd_uninstall must exit with code 1 when --force is passed without --confirm=DELETE."""
+        proc = self._run_cli("uninstall", "--force")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("требуется явное подтверждение: --confirm=DELETE", proc.stdout + proc.stderr)
+        self.assertTrue(self.project_dir.exists(), "Project directory must not be deleted on fail-closed exit")
+
+    def test_uninstall_aborts_on_first_confirmation_prompt_refusal(self):
+        """cmd_uninstall must abort and exit 0 without removing files when user enters 'n'."""
+        proc = self._run_cli("uninstall", input_text="n\n")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Удаление отменено пользователем", proc.stdout + proc.stderr)
+        self.assertTrue(self.project_dir.exists(), "Project directory must not be touched")
+
+    def test_uninstall_aborts_on_second_confirmation_keyword_mismatch(self):
+        """cmd_uninstall must abort and exit 0 when the confirmation keyword does not match DELETE or УДАЛИТЬ."""
+        proc = self._run_cli("uninstall", input_text="y\nNO\n")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Подтверждение не совпало", proc.stdout + proc.stderr)
+        self.assertTrue(self.project_dir.exists(), "Project directory must not be touched")
+
+    def test_uninstall_full_lifecycle_with_confirm_flag(self):
+        """cmd_uninstall with --confirm=DELETE removes all docker resources, crontab, sysctl, wrappers, and project dir."""
+        # 1. Prepare fake sysctl file
+        sysctl_dir = self.root / "etc" / "sysctl.d"
+        sysctl_dir.mkdir(parents=True, exist_ok=True)
+        fake_sysctl = sysctl_dir / "99-just1kbot.conf"
+        fake_sysctl.write_text("vm.overcommit_memory = 1\n", encoding="utf-8")
+
+        # 2. Prepare fake wrapper
+        fake_bin_dir = self.root / "usr" / "local" / "bin"
+        fake_bin_dir.mkdir(parents=True, exist_ok=True)
+        fake_wrapper = fake_bin_dir / "just1kbot"
+        fake_wrapper.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+
+        # 3. Prepare fake crontab
+        cron_log = self.root / "crontab.log"
+        crontab_mock = self.bin_dir / "crontab"
+        crontab_mock.write_text(
+            f"""#!/bin/bash
+if [[ "$1" == "-l" ]]; then
+    echo "0 2 * * * flock -n /tmp/just1kbot-backup.lock sh -c 'cd {self.project_dir.as_posix()}'"
+    echo "0 5 * * * other_job"
+    exit 0
+fi
+if [[ "$1" == "-" ]]; then
+    cat > "{cron_log.as_posix()}"
+    exit 0
+fi
+if [[ "$1" == "-r" ]]; then
+    rm -f "{cron_log.as_posix()}"
+    exit 0
+fi
+exit 0
+""",
+            encoding="utf-8",
+        )
+        crontab_mock.chmod(0o755)
+
+        # 4. Prepare fake docker command that tracks invocation
+        docker_log = self.root / "docker_invocations.log"
+        (self.bin_dir / "docker").write_text(
+            f"""#!/bin/bash
+echo "$@" >> "{docker_log.as_posix()}"
+if [[ "$1" == "compose" && "$2" == "down" ]]; then exit 0; fi
+if [[ "$1" == "rm" ]]; then exit 0; fi
+if [[ "$1" == "volume" ]]; then exit 0; fi
+if [[ "$1" == "network" ]]; then exit 0; fi
+if [[ "$1" == "image" ]]; then exit 0; fi
+exit 0
+""",
+            encoding="utf-8",
+        )
+        (self.bin_dir / "docker").chmod(0o755)
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export JUST1KBOT_SYSCTL_D_CONF="{fake_sysctl.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+
+rm -f "{fake_wrapper.as_posix()}"
+cmd_uninstall --confirm=DELETE
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}", "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Just1kBot успешно и полностью удален с сервера без остатков", proc.stdout)
+        self.assertFalse(self.project_dir.exists(), "PROJECT_DIR must be deleted completely")
+        self.assertFalse(fake_sysctl.exists(), "sysctl configuration must be deleted")
+        self.assertFalse(fake_wrapper.exists(), "global wrapper must be deleted")
+        if cron_log.exists():
+            remaining_cron = cron_log.read_text(encoding="utf-8")
+            self.assertNotIn("just1kbot-backup.lock", remaining_cron)
+            self.assertIn("other_job", remaining_cron)
+
+    def test_uninstall_preserves_backups_when_keep_backups_specified(self):
+        """cmd_uninstall preserves backup directory when --keep-backups is given."""
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        (backups_dir / "dump1.sql.gz.age").write_text("encrypted_backup_payload", encoding="utf-8")
+
+        saved_dir = self.root / "saved_backups"
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export JUST1KBOT_BACKUP_SAVE_DIR="{saved_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+
+cmd_uninstall --confirm=DELETE --keep-backups
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}", "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertFalse(self.project_dir.exists(), "PROJECT_DIR must be deleted")
+        self.assertTrue(saved_dir.exists(), "Saved backups directory must exist")
+        self.assertTrue((saved_dir / "dump1.sql.gz.age").exists(), "Backup files must be preserved in save location")
+
+    def test_setup_sh_delegates_to_uninstall(self):
+        """scripts/setup.sh --uninstall delegates to cli.sh uninstall."""
+        proc = subprocess.run(
+            ["bash", (self.project_dir / "scripts" / "setup.sh").as_posix(), "--uninstall", "--force"],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "PROJECT_DIR": self.project_dir.as_posix(), "JUST1KBOT_DIR": self.project_dir.as_posix(), "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}", "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("требуется явное подтверждение: --confirm=DELETE", proc.stdout + proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1229,6 +1229,133 @@ ensure_xrayapi_user
         st = xray_config.stat().st_mode & 0o777
         self.assertEqual(st, 0o640, f"Expected 0640, got {oct(st)}")
 
+    # -------------------------------------------------------------------------
+    # Safe Complete Uninstallation Lifecycle Tests
+    # -------------------------------------------------------------------------
+
+    def test_uninstall_node_fails_closed_without_confirmation(self):
+        """just1knode uninstall in non-interactive mode without --confirm=DELETE must exit 1."""
+        self._prepare_base_env()
+        res = self._run_shell_snippet("uninstall_node")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("В неинтерактивном режиме для удаления требуется явный флаг", res.stdout + res.stderr)
+        self.assertTrue(self.state_dir.exists(), "state_dir must remain untouched")
+
+    def test_uninstall_node_aborts_on_first_prompt_cancellation(self):
+        """just1knode uninstall must abort when user responds 'n' to first prompt."""
+        self._prepare_base_env()
+        env = os.environ.copy()
+        env["PATH"] = f"{self.bin_dir}:{env['PATH']}"
+        script = f"""
+source '{JUST1KNODE_SH}'
+check_root() {{ return 0; }}
+uninstall_node
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            input="n\n",
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Удаление отменено пользователем", proc.stdout + proc.stderr)
+        self.assertTrue(self.state_dir.exists())
+
+    def test_uninstall_node_aborts_on_keyword_mismatch(self):
+        """just1knode uninstall must abort when user enters incorrect confirmation keyword."""
+        self._prepare_base_env()
+        env = os.environ.copy()
+        env["PATH"] = f"{self.bin_dir}:{env['PATH']}"
+        script = f"""
+source '{JUST1KNODE_SH}'
+check_root() {{ return 0; }}
+uninstall_node
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            input="y\nABORT\n",
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Подтверждение не совпало", proc.stdout + proc.stderr)
+        self.assertTrue(self.state_dir.exists())
+
+    def test_uninstall_node_complete_cleanup_lifecycle(self):
+        """just1knode uninstall --confirm=DELETE removes services, binaries, configs, nginx sites, user, and state."""
+        self._prepare_base_env()
+
+        # 1. Setup mock services and files
+        (self.systemd_dir / "xray.service").write_text("[Unit]\nDescription=Xray\n", encoding="utf-8")
+        (self.systemd_dir / "xray-api.service").write_text("[Unit]\nDescription=API\n", encoding="utf-8")
+        (self.xray_config_dir / "config.json").write_text("{}", encoding="utf-8")
+        (self.xray_api_etc / "config.env").write_text("API_KEY=test\n", encoding="utf-8")
+        (self.xray_api_dir / "app.py").write_text("# app\n", encoding="utf-8")
+        (self.xray_api_lib / "epoch.json").write_text("{}", encoding="utf-8")
+
+        # Nginx configs
+        nginx_sites_avail = self.nginx_conf_dir / "sites-available"
+        nginx_sites_enabled = self.nginx_conf_dir / "sites-enabled"
+        nginx_conf_d = self.nginx_conf_dir / "conf.d"
+        nginx_sites_avail.mkdir(parents=True, exist_ok=True)
+        nginx_sites_enabled.mkdir(parents=True, exist_ok=True)
+        nginx_conf_d.mkdir(parents=True, exist_ok=True)
+
+        origin_conf = nginx_sites_avail / "just1k-origin.conf"
+        origin_conf.write_text("server { listen 80; }", encoding="utf-8")
+        (nginx_sites_enabled / "just1k-origin.conf").symlink_to(origin_conf)
+        (nginx_conf_d / "xhttp-map.conf").write_text("map $request_method $xhttp { }", encoding="utf-8")
+
+        # Backup of user default site
+        (nginx_sites_avail / "default.user.bak").write_text("server { server_name user.com; }", encoding="utf-8")
+
+        # Fake camouflage site
+        (self.www_html_dir / "index.html").write_text("<h1>Cloud Ingress Network Node</h1>", encoding="utf-8")
+
+        # Fake certbot hook
+        hook_dir = self.letsencrypt_dir / "renewal-hooks" / "deploy"
+        hook_dir.mkdir(parents=True, exist_ok=True)
+        (hook_dir / "restart-xray-nginx.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+        # Fake install dir
+        fake_install_dir = Path(self.temp_dir) / "opt" / "just1knode"
+        fake_install_dir.mkdir(parents=True, exist_ok=True)
+        (fake_install_dir / "marker.txt").write_text("just1knode", encoding="utf-8")
+
+        # Mock userdel, groupdel, pkill
+        self._create_mock_script("userdel", "#!/bin/sh\nexit 0\n")
+        self._create_mock_script("groupdel", "#!/bin/sh\nexit 0\n")
+        self._create_mock_script("pkill", "#!/bin/sh\nexit 0\n")
+
+        extra_env = {
+            "INSTALL_DIR": str(fake_install_dir),
+            "JUST1KNODE_ALLOW_CUSTOM_INSTALL_RM": "1",
+        }
+
+        res = self._run_shell_snippet("uninstall_node --confirm=DELETE", extra_env=extra_env)
+        self.assertEqual(res.returncode, 0, f"uninstall_node failed: {res.stderr}\nOutput: {res.stdout}")
+        self.assertIn("just1knode успешно и полностью удален с сервера без остатков", res.stdout)
+
+        # Assertions
+        self.assertFalse((self.systemd_dir / "xray.service").exists(), "xray.service must be removed")
+        self.assertFalse((self.systemd_dir / "xray-api.service").exists(), "xray-api.service must be removed")
+        self.assertFalse(self.xray_config_dir.exists(), "xray config dir must be removed")
+        self.assertFalse(self.xray_api_dir.exists(), "xray-api dir must be removed")
+        self.assertFalse(self.xray_api_etc.exists(), "xray-api etc must be removed")
+        self.assertFalse(self.xray_api_lib.exists(), "xray-api lib must be removed")
+        self.assertFalse(self.state_dir.exists(), "state_dir must be removed")
+        self.assertFalse((nginx_sites_avail / "just1k-origin.conf").exists(), "origin nginx site must be removed")
+        self.assertFalse((nginx_sites_enabled / "just1k-origin.conf").exists(), "origin nginx link must be removed")
+        self.assertFalse((nginx_conf_d / "xhttp-map.conf").exists(), "xhttp-map.conf must be removed")
+        self.assertTrue((nginx_sites_avail / "default").exists(), "default site must be restored from default.user.bak")
+        self.assertFalse((self.www_html_dir / "index.html").exists(), "camouflage index.html must be removed")
+        self.assertFalse((hook_dir / "restart-xray-nginx.sh").exists(), "certbot hook must be removed")
+        self.assertFalse(fake_install_dir.exists(), "INSTALL_DIR must be removed")
+
 
 if __name__ == "__main__":
     unittest.main()
