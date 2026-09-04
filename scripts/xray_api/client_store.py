@@ -120,6 +120,29 @@ class ClientStore:
         entries = {u: {"is_active": True, "version": 1, "updated_at": time.time()} for u in clients}
         return self.save_client_entries(entries)
 
+    def _acquire_lock(self):
+        if fcntl is None:
+            return None
+        try:
+            lock_fd = open(self.lock_path, "a")
+            try:
+                os.chmod(self.lock_path, 0o664)
+            except Exception:
+                pass
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            return lock_fd
+        except Exception as e:
+            logger.debug("Could not acquire client store lock: %s", e)
+            return None
+
+    def _release_lock(self, lock_fd):
+        if fcntl is not None and lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                lock_fd.close()
+            except Exception:
+                pass
+
     def add_client(
         self,
         client_uuid: str,
@@ -127,13 +150,7 @@ class ClientStore:
         email: Optional[str] = None,
     ) -> None:
         self._ensure_dir()
-        lock_fd = None
-        if fcntl is not None:
-            try:
-                lock_fd = open(self.lock_path, "a")
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except Exception as e:
-                logger.debug("Could not acquire client store lock: %s", e)
+        lock_fd = self._acquire_lock()
         try:
             entries = self.load_client_entries()
             curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
@@ -149,22 +166,11 @@ class ClientStore:
             if not self.save_client_entries(entries):
                 raise IOError(f"Failed to persist client addition to disk: {client_uuid}")
         finally:
-            if fcntl is not None and lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
+            self._release_lock(lock_fd)
 
     def remove_client(self, client_uuid: str, version: Optional[int] = None) -> None:
         self._ensure_dir()
-        lock_fd = None
-        if fcntl is not None:
-            try:
-                lock_fd = open(self.lock_path, "a")
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except Exception as e:
-                logger.debug("Could not acquire client store lock: %s", e)
+        lock_fd = self._acquire_lock()
         try:
             entries = self.load_client_entries()
             curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
@@ -177,22 +183,11 @@ class ClientStore:
             if not self.save_client_entries(entries):
                 raise IOError(f"Failed to persist client deactivation to disk: {client_uuid}")
         finally:
-            if fcntl is not None and lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
+            self._release_lock(lock_fd)
 
     def delete_client(self, client_uuid: str, version: Optional[int] = None) -> None:
         self._ensure_dir()
-        lock_fd = None
-        if fcntl is not None:
-            try:
-                lock_fd = open(self.lock_path, "a")
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            except Exception as e:
-                logger.debug("Could not acquire client store lock: %s", e)
+        lock_fd = self._acquire_lock()
         try:
             entries = self.load_client_entries()
             curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
@@ -206,9 +201,4 @@ class ClientStore:
             if not self.save_client_entries(entries):
                 raise IOError(f"Failed to persist client deletion tombstone to disk: {client_uuid}")
         finally:
-            if fcntl is not None and lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
+            self._release_lock(lock_fd)

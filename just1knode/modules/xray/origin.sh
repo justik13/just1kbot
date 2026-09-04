@@ -3,6 +3,12 @@
 # JUST1KNODE - Установка Origin Узла (modules/xray/origin.sh)
 # =============================================================================
 
+normalize_domain() {
+    local raw="${1:-}"
+    raw="$(echo "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's|^https\?://||' -e 's|/.*$||')"
+    echo "$raw"
+}
+
 deploy_subscription_proxy_conf() {
     local target_host="${1:-}"
     if [[ -z "$target_host" ]]; then
@@ -14,12 +20,15 @@ deploy_subscription_proxy_conf() {
     if [[ -z "$target_host" ]]; then
         target_host="127.0.0.1"
     fi
+    target_host="$(normalize_domain "$target_host")"
 
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
     location ^~ /sub/wl {
-        proxy_pass https://${target_host};
+        resolver 1.1.1.1 8.8.8.8 77.88.8.8 valid=30s ipv6=off;
+        set \$bot_upstream "https://${target_host}";
+        proxy_pass \$bot_upstream;
         proxy_ssl_server_name on;
         proxy_set_header Host ${target_host};
         proxy_set_header X-Real-IP \$remote_addr;
@@ -30,7 +39,7 @@ deploy_subscription_proxy_conf() {
         proxy_send_timeout 30s;
     }
 EOF
-    info "Сконфигурировано Nginx-проксирование подписок (/sub/wl -> ${target_host})"
+    info "Сконфигурировано Nginx-проксирование подписок (/sub/wl -> dynamic resolver -> https://${target_host})"
 }
 
 install_xray_origin_node() {
@@ -85,6 +94,19 @@ install_xray_origin_node() {
             bot_domain="${input_bot_domain:-$bot_ip}"
         else
             bot_domain="${bot_ip:-}"
+        fi
+    fi
+
+    bot_domain="$(normalize_domain "$bot_domain")"
+
+    if [[ -n "$bot_domain" ]]; then
+        info "Проверка связи с ботом через эндпоинт https://${bot_domain}/health..."
+        local health_code
+        health_code="$(curl -skL --max-time 5 -o /dev/null -w "%{http_code}" "https://${bot_domain}/health" 2>/dev/null || echo "000")"
+        if [[ "$health_code" == "200" ]]; then
+            log "Эндпоинт бота https://${bot_domain}/health доступен (HTTP 200)."
+        else
+            warn "Эндпоинт бота https://${bot_domain}/health вернул код: $health_code (или недоступен). Проверьте DNS и статус бота (динамический resolver защитит Nginx от сбоя)."
         fi
     fi
 
@@ -298,7 +320,8 @@ with open(config_file, 'w', encoding='utf-8') as f:
 " "$XRAY_CONFIG" "$secret_path"
 
     chown root:xrayapi "$XRAY_CONFIG" 2>/dev/null || true
-    chmod 640 "$XRAY_CONFIG"
+    chmod 644 "$XRAY_CONFIG" 2>/dev/null || true
+    chmod 755 "$(dirname "$XRAY_CONFIG")" 2>/dev/null || true
 
     if [[ $EUID -eq 0 ]]; then
         mkdir -p /etc/sysctl.d 2>/dev/null || true
@@ -708,12 +731,23 @@ with os.fdopen(t_fd, 'w', encoding='utf-8') as f:
     f.flush()
     os.fsync(f.fileno())
 os.replace(t_path, cfg_file)
+try:
+    import shutil
+    shutil.chown(cfg_file, user='root', group='xrayapi')
+    os.chmod(cfg_file, 0o644)
+    os.chmod(d, 0o755)
+except Exception:
+    pass
 
 print('[+] Xray Origin config успешно согласован с эталоном (Desired-State Reconciliation)')
 " "$XRAY_CONFIG" "$RELAYS_FILE" "${STATE_DIR}/state.json"; then
         manifest_rollback
         error "Ошибка выполнения Python-скрипта реконсиляции Origin."
     fi
+
+    chown root:xrayapi "$XRAY_CONFIG" 2>/dev/null || true
+    chmod 644 "$XRAY_CONFIG" 2>/dev/null || true
+    chmod 755 "$(dirname "$XRAY_CONFIG")" 2>/dev/null || true
 
     # Авто-восстановление Nginx location файлов для всех релеев
     if [[ -f "$RELAYS_FILE" ]]; then

@@ -874,9 +874,36 @@ run_doctor
         self.assertTrue(sub_conf.exists(), "sub-wl.conf must be created in NGINX_RELAYS_DIR")
         content = sub_conf.read_text(encoding="utf-8")
         self.assertIn("location ^~ /sub/wl", content)
-        self.assertIn("proxy_pass https://just1k.best;", content)
+        self.assertIn("resolver 1.1.1.1", content)
+        self.assertIn('set $bot_upstream "https://just1k.best";', content)
+        self.assertIn("proxy_pass $bot_upstream;", content)
         self.assertIn("proxy_ssl_server_name on;", content)
         self.assertIn("proxy_set_header Host just1k.best;", content)
+
+    def test_normalize_domain_strips_protocols_and_slashes(self):
+        self._prepare_base_env()
+        res = self._run_shell_snippet('normalize_domain "  https://mybot.just1k.best/some/path/  "')
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.stdout.strip(), "mybot.just1k.best")
+
+        res_http = self._run_shell_snippet('normalize_domain "http://test.domain.com:8443/"')
+        self.assertEqual(res_http.returncode, 0)
+        self.assertEqual(res_http.stdout.strip(), "test.domain.com:8443")
+
+    def test_init_state_dir_sets_sgid_and_permissions(self):
+        self._prepare_base_env()
+        res = self._run_shell_snippet("init_state_dir")
+        self.assertEqual(res.returncode, 0)
+        st = os.stat(self.state_dir)
+        # Check SGID and permissions (2775 or 0o2775)
+        self.assertTrue(bool(st.st_mode & 0o2000), "SGID bit must be set on STATE_DIR")
+        self.assertTrue(bool(st.st_mode & 0o0070), "Group must have rwx permissions on STATE_DIR")
+
+        # Check state file permissions 664
+        state_file = self.state_dir / "state.json"
+        if state_file.exists():
+            st_file = os.stat(state_file)
+            self.assertTrue(bool(st_file.st_mode & 0o0660), "State file must have rw permissions for owner and group")
 
 
 if __name__ == "__main__":

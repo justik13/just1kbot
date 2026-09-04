@@ -9,27 +9,32 @@ CLIENTS_FILE="${CLIENTS_FILE:-${STATE_DIR}/clients.json}"
 RELAYS_FILE="${RELAYS_FILE:-${STATE_DIR}/relays.json}"
 
 init_state_dir() {
+    umask 0002
     mkdir -p "$STATE_DIR"
-    chmod 750 "$STATE_DIR"
+    chown root:xrayapi "$STATE_DIR" 2>/dev/null || true
+    chmod 2775 "$STATE_DIR" 2>/dev/null || true
 
     if [[ ! -f "$STATE_FILE" ]]; then
         echo "{}" > "$STATE_FILE"
-        chmod 640 "$STATE_FILE"
     fi
     if [[ ! -f "$CLIENTS_FILE" ]]; then
         echo "{}" > "$CLIENTS_FILE"
-        chmod 660 "$CLIENTS_FILE"
     fi
     if [[ ! -f "$RELAYS_FILE" ]]; then
         echo "[]" > "$RELAYS_FILE"
-        chmod 640 "$RELAYS_FILE"
     fi
+
+    chown root:xrayapi "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
+    chmod 664 "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
+    find "$STATE_DIR" -name "*.lock" -exec chown root:xrayapi {} + 2>/dev/null || true
+    find "$STATE_DIR" -name "*.lock" -exec chmod 664 {} + 2>/dev/null || true
 }
 
 set_state_val() {
     local key="$1"
     local val="$2"
     init_state_dir
+    umask 0002
     python3 -c "
 import sys, json, os, tempfile
 try:
@@ -37,9 +42,16 @@ try:
 except ImportError:
     fcntl = None
 
+os.umask(0o002)
 f, k, v = sys.argv[1], sys.argv[2], sys.argv[3]
 lock_file = f + '.lock'
-lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR)
+lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o664)
+try:
+    import shutil
+    shutil.chown(lock_file, user='root', group='xrayapi')
+    os.chmod(lock_file, 0o664)
+except Exception:
+    pass
 if fcntl:
     fcntl.flock(lock_fd, fcntl.LOCK_EX)
 try:
@@ -59,7 +71,7 @@ try:
     try:
         import shutil
         shutil.chown(f, user='root', group='xrayapi')
-        os.chmod(f, 0o640)
+        os.chmod(f, 0o664)
     except Exception:
         pass
 finally:

@@ -101,7 +101,7 @@ if relays is not None:
     try:
         import shutil
         shutil.chown(rf, user='root', group='xrayapi')
-        os.chmod(rf, 0o644)
+        os.chmod(rf, 0o664)
     except Exception:
         pass
     print('HEALED')
@@ -451,7 +451,7 @@ os.replace(t_path, rf)
 try:
     import shutil
     shutil.chown(rf, user='root', group='xrayapi')
-    os.chmod(rf, 0o644)
+    os.chmod(rf, 0o664)
 except Exception:
     pass
 " "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni"
@@ -580,7 +580,7 @@ os.replace(t_path, rf)
 try:
     import shutil
     shutil.chown(rf, user='root', group='xrayapi')
-    os.chmod(rf, 0o644)
+    os.chmod(rf, 0o664)
 except Exception:
     pass
 " "$RELAYS_FILE" "$code"
@@ -671,7 +671,7 @@ try:
     try:
         import shutil
         shutil.chown(rf, user='root', group='xrayapi')
-        os.chmod(rf, 0o644)
+        os.chmod(rf, 0o664)
     except Exception:
         pass
     print('ok')

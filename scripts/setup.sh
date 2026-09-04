@@ -691,7 +691,17 @@ EOF
 start_project() {
     title "6/6. Сборка и запуск проекта в Docker"
 
-    cd "$PROJECT_DIR"
+    # Проверка конфликтов портов 80 и 443 (сторонние веб-серверы на хосте)
+    local host_webservers=(nginx apache2 caddy lighttpd)
+    for svc in "${host_webservers[@]}"; do
+        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$svc" 2>/dev/null; then
+            warn "Обнаружена активная системная служба '$svc' на хосте, которая блокирует порты 80/443 для Caddy!"
+            info "Остановка и отключение конфликтующей службы '$svc'..."
+            sudo systemctl stop "$svc" 2>/dev/null || systemctl stop "$svc" 2>/dev/null || true
+            sudo systemctl disable "$svc" 2>/dev/null || systemctl disable "$svc" 2>/dev/null || true
+            log "Служба $svc успешно остановлена и отключена."
+        fi
+    done
 
     log "Запуск сборки контейнеров (docker compose up -d --build)..."
     docker compose up -d --build

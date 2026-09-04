@@ -99,14 +99,17 @@ EOF
 
     # Права на чтение конфигурации Xray для пользователя xrayapi
     chmod 755 /usr/local/etc/xray 2>/dev/null || true
+    chown root:xrayapi /usr/local/etc/xray/config.json 2>/dev/null || true
     chmod 644 /usr/local/etc/xray/config.json 2>/dev/null || true
 
-    # Права на каталог состояния для пользователя xrayapi
+    # Права на каталог состояния для пользователя xrayapi (SGID 2775)
     chown -R root:xrayapi "${STATE_DIR}" 2>/dev/null || true
-    chmod 775 "${STATE_DIR}"
+    chmod 2775 "${STATE_DIR}"
     [[ -f "${CLIENTS_FILE}" ]] && { chown root:xrayapi "${CLIENTS_FILE}" 2>/dev/null || true; chmod 664 "${CLIENTS_FILE}"; }
-    [[ -f "${RELAYS_FILE}" ]] && { chown root:xrayapi "${RELAYS_FILE}" 2>/dev/null || true; chmod 644 "${RELAYS_FILE}"; }
-    [[ -f "${STATE_FILE}" ]] && { chown root:xrayapi "${STATE_FILE}" 2>/dev/null || true; chmod 644 "${STATE_FILE}"; }
+    [[ -f "${RELAYS_FILE}" ]] && { chown root:xrayapi "${RELAYS_FILE}" 2>/dev/null || true; chmod 664 "${RELAYS_FILE}"; }
+    [[ -f "${STATE_FILE}" ]] && { chown root:xrayapi "${STATE_FILE}" 2>/dev/null || true; chmod 664 "${STATE_FILE}"; }
+    find "${STATE_DIR}" -name "*.lock" -exec chown root:xrayapi {} + 2>/dev/null || true
+    find "${STATE_DIR}" -name "*.lock" -exec chmod 664 {} + 2>/dev/null || true
 
     cat > "${SYSTEMD_SYSTEM_DIR}/xray-api.service" <<EOF
 [Unit]
@@ -118,6 +121,7 @@ Wants=xray.service
 Type=simple
 User=xrayapi
 Group=xrayapi
+UMask=0002
 WorkingDirectory=${XRAY_API_DIR}
 EnvironmentFile=${XRAY_API_CONFIG_ENV}
 ExecStart=${XRAY_API_DIR}/venv/bin/uvicorn app:app --host 127.0.0.1 --port 5001 --workers 1 --log-level info

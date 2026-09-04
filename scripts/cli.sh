@@ -235,6 +235,58 @@ cmd_preflight() {
         has_errors=true
     fi
 
+    # 9. Проверка конфликтов портов 80 и 443 (сторонние веб-серверы на хосте)
+    local host_webservers=(nginx apache2 caddy lighttpd)
+    for svc in "${host_webservers[@]}"; do
+        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$svc" 2>/dev/null; then
+            warn "Обнаружена активная системная служба '$svc' на хосте, которая блокирует порты 80/443 для Just1kBot Caddy!"
+            if [[ -t 0 ]]; then
+                read -r -p "Остановить и отключить системную службу '$svc' для нормальной работы Just1kBot? (Y/n): " confirm_svc
+                if [[ ! "$confirm_svc" =~ ^[Nn]$ ]]; then
+                    info "Остановка и отключение $svc..."
+                    sudo systemctl stop "$svc" 2>/dev/null || systemctl stop "$svc" 2>/dev/null || true
+                    sudo systemctl disable "$svc" 2>/dev/null || systemctl disable "$svc" 2>/dev/null || true
+                    log "Служба $svc успешно остановлена и отключена."
+                else
+                    error "Служба '$svc' продолжает занимать порт 80/443. Обновление не может быть продолжено."
+                    has_errors=true
+                fi
+            else
+                info "Автоматическая остановка и отключение конфликтующей службы '$svc' (non-interactive mode)..."
+                sudo systemctl stop "$svc" 2>/dev/null || systemctl stop "$svc" 2>/dev/null || true
+                sudo systemctl disable "$svc" 2>/dev/null || systemctl disable "$svc" 2>/dev/null || true
+                if systemctl is-active --quiet "$svc" 2>/dev/null; then
+                    error "Не удалось остановить службу '$svc'. Она блокирует порты 80/443 для Caddy."
+                    has_errors=true
+                else
+                    log "Служба $svc успешно остановлена и отключена."
+                fi
+            fi
+        fi
+    done
+
+    # Проверка доступности портов 80 и 443 через Python socket bind (если Caddy еще не запущен)
+    local caddy_running
+    caddy_running=$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo "")
+    if [[ "$caddy_running" != "running" ]] && command -v python3 >/dev/null 2>&1; then
+        local port_conflict
+        port_conflict=$(python3 -c "
+import socket
+for p in [80, 443]:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(('0.0.0.0', p))
+        s.close()
+    except Exception as e:
+        print(f'{p}:{e}')
+        break
+" 2>/dev/null || echo "")
+        if [[ -n "$port_conflict" ]]; then
+            error "Порт для Caddy недоступен ($port_conflict). Убедитесь, что порты 80 и 443 свободны на хосте."
+            has_errors=true
+        fi
+    fi
+
     if [ "$has_errors" = "true" ]; then
         error "Предварительная проверка окружения завершилась с ошибками. Исправьте конфигурацию перед продолжением."
         return 1

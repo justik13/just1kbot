@@ -287,8 +287,11 @@ class TestXrayApiAdversarial(unittest.TestCase):
         """Comprehensive version fencing: stale syncs, stale deletes, tombstone protections."""
         uuid_test = "e1111111-2222-3333-4444-555555555555"
 
-        with patch.object(self.app_module.grpc_client, "add_user", return_value=True):
-            with patch.object(self.app_module.grpc_client, "remove_user", return_value=True):
+        self.epoch_mgr.save_state("adv-epoch-fixture", 100, 1000, "boot-test")
+        with patch.object(self.app_module.grpc_client, "add_user", return_value=True), \
+             patch.object(self.app_module.grpc_client, "remove_user", return_value=True), \
+             patch.object(self.app_module.grpc_client, "probe_user_presence", return_value=True), \
+             patch.object(self.app_module.grpc_client, "verify_user_absent", return_value=True):
                 # 1. Sync v10
                 r1 = self.client.post("/v1/clients/sync", json={"client_id": uuid_test, "version": 10}, headers=self.headers)
                 self.assertEqual(r1.status_code, 200)
