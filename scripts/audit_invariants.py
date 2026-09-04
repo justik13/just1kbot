@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """
 Comprehensive Invariant Scanner for just1kbot Subsystems.
 
@@ -24,8 +25,13 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from pathlib import Path
 import sys
 from typing import NamedTuple
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -408,23 +414,22 @@ async def assert_inv_14_origin_server_capacity(session: AsyncSession) -> Invaria
 
 
 def _inspect_alembic_head() -> list[str]:
-    from pathlib import Path
-
-    config_path = "alembic.ini" if Path("alembic.ini").is_file() else "../alembic.ini"
+    ini_path = _PROJECT_ROOT / "alembic.ini"
+    config_path = str(ini_path) if ini_path.is_file() else "alembic.ini"
     scripts = ScriptDirectory.from_config(Config(config_path))
     return scripts.get_heads()
 
 
 async def assert_inv_15_alembic_single_head(session: AsyncSession | None = None) -> InvariantResult:
-    """Inv 15: Alembic migration graph has exactly one head at '0019_wi_server_set_null'."""
+    """Inv 15: Alembic migration graph has exactly one head."""
     try:
         heads = await asyncio.to_thread(_inspect_alembic_head)
-        if len(heads) != 1 or heads[0] != "0019_wi_server_set_null":
+        if len(heads) != 1:
             return InvariantResult(
                 15,
                 "Alembic Single Head Invariant",
                 False,
-                f"Expected ['0019_wi_server_set_null'], got {heads}",
+                f"Expected exactly 1 migration head, got {len(heads)}: {heads}",
             )
         return InvariantResult(
             15, "Alembic Single Head Invariant", True, f"Single head verified: {heads[0]}"

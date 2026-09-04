@@ -483,7 +483,7 @@ uninstall_node() {
     else
         # Confirmation step 1
         local c1="n"
-        if ! read -rp "Вы действительно хотите начать процедуру полного удаления just1knode? [y/N]: " c1 2>/dev/null; then
+        if ! read -r -t 60 -p "Вы действительно хотите начать процедуру полного удаления just1knode? [y/N]: " c1 2>/dev/null; then
             error "В неинтерактивном режиме для удаления требуется явный флаг: --confirm=DELETE (или --confirm=УДАЛИТЬ). Процедура прервана (Fail-Closed)."
             return 1
         fi
@@ -496,7 +496,7 @@ uninstall_node() {
         echo ""
         echo -e "${BOLD}${RED}ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ! Это действие необратимо.${NC}"
         local c2=""
-        if ! read -rp "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2 2>/dev/null; then
+        if ! read -r -t 60 -p "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2 2>/dev/null; then
             c2=""
         fi
         if [[ "$c2" != "DELETE" && "$c2" != "УДАЛИТЬ" ]]; then

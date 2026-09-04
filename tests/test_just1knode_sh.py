@@ -190,7 +190,7 @@ ensure_xrayapi_user() {{ return 0; }}
 """
         return subprocess.run(
             ["bash", "-c", full_script],
-            input=input_text,
+            input=input_text if input_text is not None else "",
             capture_output=True,
             text=True,
             env=env,

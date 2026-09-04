@@ -796,6 +796,65 @@ for p in [80, 443]:
     return 0
 }
 
+_rollback_services_after_db_failure() {
+    local rollback_commit="$1"
+    local pre_update_backup="${2:-}"
+
+    if [[ -z "$rollback_commit" ]]; then
+        return 0
+    fi
+
+    warn "🚨 Выполняем откат исходного кода к коммиту $rollback_commit..."
+    git reset --hard "$rollback_commit" 2>/dev/null || true
+    dc_up --build 2>/dev/null || true
+
+    info "Проверка работоспособности сервисов старой версии..."
+    local mig_timeout=60
+    local mig_elapsed=0
+    local mig_healthy=false
+
+    while [ "$mig_elapsed" -lt "$mig_timeout" ]; do
+        local m_db m_redis m_bot m_caddy
+        m_db="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo starting)"
+        m_redis="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo starting)"
+        m_bot="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
+        m_caddy="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo starting)"
+
+        local m_caddy_ok=false
+        if is_external_nginx_enabled; then
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
+                m_caddy_ok=true
+            else
+                m_caddy_ok=false
+            fi
+        elif [ "$m_caddy" = "running" ]; then
+            m_caddy_ok=true
+        fi
+
+        if [ "$m_db" = "healthy" ] && [ "$m_redis" = "healthy" ] && [ "$m_bot" = "healthy" ] && [ "$m_caddy_ok" = "true" ]; then
+            mig_healthy=true
+            break
+        fi
+        printf "."
+        sleep 2
+        mig_elapsed=$((mig_elapsed + 2))
+    done
+    echo ""
+
+    if [ "$mig_healthy" = "true" ]; then
+        log "Старая версия сервисов восстановлена и работает в штатном режиме."
+    else
+        error "КРИТИЧЕСКАЯ ОШИБКА: Старая версия сервисов не смогла запуститься (возможно, из-за частично применённых миграций)!"
+        if [[ -n "$pre_update_backup" ]] && [[ -f "$pre_update_backup" ]]; then
+            warn "Для полного восстановления базы данных к исходному состоянию перед обновлением выполните:"
+            echo -e "${BOLD}${YELLOW}    just1kbot restore $pre_update_backup${NC}"
+        else
+            warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
+        fi
+        docker compose logs --tail=50 bot
+    fi
+}
+
 # --- 3. Безопасное обновление ---
 cmd_update() {
     echo -e "\n${BOLD}${BLUE}=== 🔄 БЕЗОПАСНОЕ ОБНОВЛЕНИЕ JUST1KBOT ===${NC}\n"
@@ -837,17 +896,6 @@ cmd_update() {
         fi
     fi
 
-    local rollback_commit=""
-    rollback_commit="$(git rev-parse HEAD 2>/dev/null || true)"
-
-    info "Шаг 2/6. Создание страховочного бэкапа базы данных..."
-    LAST_BACKUP_FILE=""
-    if ! cmd_backup || [[ -z "$LAST_BACKUP_FILE" ]] || [[ ! -f "$LAST_BACKUP_FILE" ]]; then
-        error "Обновление остановлено: не удалось создать страховочный бэкап базы данных."
-        return 1
-    fi
-    local pre_update_backup="$LAST_BACKUP_FILE"
-
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     if [[ "$current_branch" == "HEAD" ]] || [[ -z "$current_branch" ]]; then
@@ -858,6 +906,17 @@ cmd_update() {
         fi
         current_branch="main"
     fi
+
+    local rollback_commit=""
+    rollback_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+
+    info "Шаг 2/6. Создание страховочного бэкапа базы данных..."
+    LAST_BACKUP_FILE=""
+    if ! cmd_backup || [[ -z "$LAST_BACKUP_FILE" ]] || [[ ! -f "$LAST_BACKUP_FILE" ]]; then
+        error "Обновление остановлено: не удалось создать страховочный бэкап базы данных."
+        return 1
+    fi
+    local pre_update_backup="$LAST_BACKUP_FILE"
 
     info "Шаг 3/6. Получение обновлений из Git (ветка: $current_branch)..."
     if ! git fetch origin "$current_branch"; then
@@ -977,60 +1036,28 @@ cmd_update() {
         return 1
     fi
 
+    info "Остановка сервиса бота перед миграциями (Cold Deploy)..."
+    if ! docker compose stop bot; then
+        error "Ошибка при остановке сервиса бота перед миграциями (Cold Deploy)! Развёртывание прервано."
+        if [[ -n "$rollback_commit" ]]; then
+            warn "🚨 Отменяем обновление и возвращаем исходный код к коммиту $rollback_commit..."
+            git reset --hard "$rollback_commit"
+            dc_up
+        fi
+        return 1
+    fi
+
     info "Применение миграций базы данных..."
     if ! docker compose run --rm migrate; then
         error "Ошибка при применении миграций базы данных! Запуск новых контейнеров отменён."
-        if [[ -n "$rollback_commit" ]]; then
-            warn "🚨 Выполняем откат исходного кода к коммиту $rollback_commit..."
-            git reset --hard "$rollback_commit"
-            dc_up --build
+        _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        return 1
+    fi
 
-            info "Проверка работоспособности сервисов старой версии..."
-            local mig_timeout=60
-            local mig_elapsed=0
-            local mig_healthy=false
-
-            while [ "$mig_elapsed" -lt "$mig_timeout" ]; do
-                local m_db m_redis m_bot m_caddy
-                m_db="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo starting)"
-                m_redis="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo starting)"
-                m_bot="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
-                m_caddy="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo starting)"
-
-                local m_caddy_ok=false
-                if is_external_nginx_enabled; then
-                    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
-                        m_caddy_ok=true
-                    else
-                        m_caddy_ok=false
-                    fi
-                elif [ "$m_caddy" = "running" ]; then
-                    m_caddy_ok=true
-                fi
-
-                if [ "$m_db" = "healthy" ] && [ "$m_redis" = "healthy" ] && [ "$m_bot" = "healthy" ] && [ "$m_caddy_ok" = "true" ]; then
-                    mig_healthy=true
-                    break
-                fi
-                printf "."
-                sleep 2
-                mig_elapsed=$((mig_elapsed + 2))
-            done
-            echo ""
-
-            if [ "$mig_healthy" = "true" ]; then
-                log "Старая версия сервисов восстановлена и работает в штатном режиме."
-            else
-                error "КРИТИЧЕСКАЯ ОШИБКА: Старая версия сервисов не смогла запуститься (возможно, из-за частично применённых миграций)!"
-                if [[ -n "$pre_update_backup" ]] && [[ -f "$pre_update_backup" ]]; then
-                    warn "Для полного восстановления базы данных к исходному состоянию перед обновлением выполните:"
-                    echo -e "${BOLD}${YELLOW}    just1kbot restore $pre_update_backup${NC}"
-                else
-                    warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
-                fi
-                docker compose logs --tail=50 bot
-            fi
-        fi
+    info "Проверка инвариантов базы данных (Invariant Integrity Audit)..."
+    if ! docker compose run --rm --no-deps bot python scripts/audit_invariants.py; then
+        error "Нарушение инвариантов базы данных после применения миграций! Развёртывание прервано."
+        _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
         return 1
     fi
 
@@ -1139,7 +1166,11 @@ cmd_update() {
 
                 local rb_caddy_ok=false
                 if is_external_nginx_enabled; then
-                    rb_caddy_ok=true
+                    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
+                        rb_caddy_ok=true
+                    else
+                        rb_caddy_ok=false
+                    fi
                 elif [ "$rb_caddy" = "running" ]; then
                     rb_caddy_ok=true
                 fi
@@ -1696,7 +1727,7 @@ cmd_uninstall() {
     else
         # Confirmation step 1
         local c1="n"
-        if ! read -r -p "Вы действительно хотите начать процедуру полного удаления Just1kBot? [y/N]: " c1 2>/dev/null; then
+        if ! read -r -t 60 -p "Вы действительно хотите начать процедуру полного удаления Just1kBot? [y/N]: " c1 2>/dev/null; then
             error "В неинтерактивном режиме для удаления требуется явный флаг: --confirm=DELETE (или --confirm=УДАЛИТЬ). Процедура прервана (Fail-Closed)."
             return 1
         fi
@@ -1716,7 +1747,7 @@ cmd_uninstall() {
             echo -e "  [${BOLD}1${NC}] ${GREEN}Сохранить бэкапы в /root/just1kbot_backups_saved перед удалением (Рекомендуется)${NC}"
             echo -e "  [${BOLD}2${NC}] ${RED}Удалить бэкапы безвозвратно вместе со всем проектом${NC}"
             local b_choice="1"
-            if ! read -r -p "Выберите действие [1/2] (по умолчанию: 1): " b_choice 2>/dev/null; then
+            if ! read -r -t 60 -p "Выберите действие [1/2] (по умолчанию: 1): " b_choice 2>/dev/null; then
                 b_choice="1"
             fi
             b_choice="${b_choice:-1}"
@@ -1732,7 +1763,7 @@ cmd_uninstall() {
         echo ""
         echo -e "${BOLD}${RED}ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ! Это действие необратимо.${NC}"
         local c2=""
-        if ! read -r -p "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2 2>/dev/null; then
+        if ! read -r -t 60 -p "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2 2>/dev/null; then
             c2=""
         fi
         if [[ "$c2" != "DELETE" && "$c2" != "УДАЛИТЬ" ]]; then

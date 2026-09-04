@@ -37,13 +37,13 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         re.compile(
-            r"(?i)(['\"]?(?:x[_-]?api[_-]?key|api[_-]?key|access[_-]?token|bot[_-]?token|"
+            r"(?i)((?<![A-Za-z0-9_-])['\"]?(?:x[_-]?api[_-]?key|api[_-]?key|access[_-]?token|bot[_-]?token|"
             r"subscription[_-]?token|sub[_-]?token|client[_-]?secret|"
             r"database[_-]?url|redis[_-]?url|redis[_-]?password|postgres[_-]?password|"
             r"db[_-]?password|db[_-]?encryption[_-]?keys?|yookassa[_-]?secret[_-]?key|"
             r"age[_-]?secret[_-]?key|secret[_-]?key|private[_-]?key|preshared[_-]?key|"
-            r"password|passwd|secret)['\"]?\s*[:=]\s*)"
-            r"(['\"]?)[^\s,;'\"}\]]+\2"
+            r"password|passwd|secret|token)['\"]?\s*[:=]\s*)"
+            r"(?:\"(?:\\.|[^\r\n\"\\])*\"|'(?:\\.|[^\r\n'\\])*'|[^\s,;'\"}\]]+)"
         ),
         rf"\1{REDACTED}",
     ),

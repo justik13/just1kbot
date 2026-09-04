@@ -516,6 +516,58 @@ class LoggingSecurityTests(unittest.TestCase):
         self.assertTrue(len(result) <= 250)
         self.assertTrue(result.endswith("..."))
 
+    def test_quoted_secrets_with_special_characters_and_spaces_are_redacted(self):
+        cases = (
+            ('password="secret;123"', "secret;123"),
+            ("token='my token'", "my token"),
+            ('password="complex ; & $ pass"', "complex ; & $ pass"),
+            ("client_secret='secret;with;semicolons'", "secret;with;semicolons"),
+            ('api_key="key with spaces and = ; signs"', "key with spaces and = ; signs"),
+            ('{"password": "secret;123", "user": "safe_user"}', "secret;123"),
+            ("DATABASE_URL='postgresql://user:p;ass@host:5432/db'", "p;ass"),
+            ('password="escaped\\"quote;and;semi"', 'escaped\\"quote;and;semi'),
+            ("passwd='single\\'escaped;semi'", "single\\'escaped;semi"),
+            ('secret="value:with:colons,and,commas;and;semi"', "value:with:colons,and,commas;and;semi"),
+            ('access_token="tok_12345;special#@!"', "tok_12345;special#@!"),
+            ('{"token": "secret token with spaces"}', "secret token with spaces"),
+            ('{ "password" : "secret;123" }', "secret;123"),
+            ('token=abc_123-xyz', "abc_123-xyz"),
+            ('secret=""', None),
+            ("secret=''", None),
+        )
+        for text, secret in cases:
+            with self.subTest(text=text):
+                output = self._capture(lambda logger, val=text: logger.info("data: %s", val))
+                if secret:
+                    self.assertNotIn(secret, output)
+                self.assertIn("[REDACTED]", output)
+
+        # Verify safe context is preserved around quoted secrets
+        output = self._capture(
+            lambda logger: logger.info('host=auth.local password="secret;123" user=alice status=ok')
+        )
+        self.assertNotIn("secret;123", output)
+        self.assertIn("host=auth.local", output)
+        self.assertIn("user=alice", output)
+        self.assertIn("status=ok", output)
+
+        # Verify multiple quoted secrets on one line
+        output_multi = self._capture(
+            lambda logger: logger.info('data: password="foo;bar" token=\'tok en;123\'')
+        )
+        self.assertNotIn("foo;bar", output_multi)
+        self.assertNotIn("tok en;123", output_multi)
+        self.assertEqual(output_multi.count("[REDACTED]"), 2)
+
+    def test_key_overmatching_is_prevented_by_boundary(self):
+        # Keys like 'token' or 'secret' should not match inside longer words
+        output = self._capture(
+            lambda logger: logger.info("safe_mytoken=allowed_value item_not_secret=visible")
+        )
+        self.assertIn("allowed_value", output)
+        self.assertIn("visible", output)
+        self.assertNotIn("[REDACTED]", output)
+
 
 class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
     """Prevent Settings secret values from being passed to logging calls."""

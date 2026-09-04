@@ -1345,9 +1345,7 @@ class WhiteInternetSubscription(Base):
         ),
         CheckConstraint(
             "base_traffic_bytes >= 0 AND extra_traffic_bytes >= 0 AND traffic_used_bytes >= 0 "
-            "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0 "
-            "AND last_uplink_snapshot >= 0 AND last_downlink_snapshot >= 0 "
-            "AND traffic_overage_bytes >= 0",
+            "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0",
             name="ck_white_internet_subscriptions_traffic_nonnegative",
         ),
         Index(

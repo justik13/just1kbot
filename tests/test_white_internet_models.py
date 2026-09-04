@@ -203,6 +203,22 @@ class WhiteInternetModelsTests(unittest.TestCase):
         self.assertEqual(sub.base_traffic_bytes, 100_000_000_000)
         self.assertEqual(sub.extra_traffic_bytes, 0)
 
+    def test_white_internet_subscription_traffic_constraint_expression(self):
+        table = WhiteInternetSubscription.__table__
+        traffic_ck = next(
+            c for c in table.constraints
+            if c.name == "ck_white_internet_subscriptions_traffic_nonnegative"
+        )
+        sql_text = str(traffic_ck.sqltext)
+        self.assertIn("base_traffic_bytes >= 0", sql_text)
+        self.assertIn("extra_traffic_bytes >= 0", sql_text)
+        self.assertIn("traffic_used_bytes >= 0", sql_text)
+        self.assertIn("traffic_uplink_bytes >= 0", sql_text)
+        self.assertIn("traffic_downlink_bytes >= 0", sql_text)
+        self.assertNotIn("last_uplink_snapshot", sql_text)
+        self.assertNotIn("last_downlink_snapshot", sql_text)
+        self.assertNotIn("traffic_overage_bytes", sql_text)
+
 
 if __name__ == "__main__":
     unittest.main()
