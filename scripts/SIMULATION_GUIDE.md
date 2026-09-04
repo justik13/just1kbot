@@ -23,13 +23,13 @@ python scripts/simulate_bot.py --token 123456789:ABCDefGhIjKlMnOpQrStUvWxYz
 
 ### 2. Запуск с передачей токена и ID администратора:
 ```bash
-python scripts/simulate_bot.py --token 123456789:ABCDef... --admin-id 872658825
+python scripts/simulate_bot.py --token 123456789:ABCDef... --admin-id 123456789
 ```
 
 ### 3. Запуск через переменные окружения:
 ```bash
 export BOT_TOKEN="123456789:ABCDef..."
-export ADMIN_IDS="872658825"
+export ADMIN_IDS="123456789"
 python scripts/simulate_bot.py
 ```
 

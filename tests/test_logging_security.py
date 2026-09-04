@@ -376,6 +376,65 @@ class LoggingSecurityTests(unittest.TestCase):
             child_logger.setLevel(old_child_level)
             child_logger.propagate = old_child_propagate
 
+    def test_white_internet_and_vpn_uris_are_redacted(self):
+        cases = (
+            "incy://add/https://cdn.example.com/sub/TOKEN_CANARY_123",
+            "incy://crypt1/SECRET_PAYLOAD_CANARY_456",
+            "clash://install-config?url=https://example.com/canary",
+            "sing-box://import-remote?url=https://example.com/canary",
+            "shadowrocket://add/sub?url=https://example.com/canary",
+            "vless://user@host:443?encryption=none",
+        )
+        for uri in cases:
+            with self.subTest(uri=uri):
+                output = self._capture(lambda logger, val=uri: logger.info("vpn=%s", val))
+                self.assertNotIn("TOKEN_CANARY_123", output)
+                self.assertNotIn("SECRET_PAYLOAD_CANARY_456", output)
+                self.assertIn("[VPN_URI_REDACTED]", output)
+
+    def test_age_and_yookassa_keys_are_redacted(self):
+        age_key = "AGE-SECRET-KEY-1" + "A" * 58
+        yoo_live = "live_" + "B" * 35
+        yoo_test = "test_" + "C" * 35
+        output = self._capture(
+            lambda logger: logger.warning(
+                "age=%s yoo_live=%s yoo_test=%s req=req-safe-123",
+                age_key,
+                yoo_live,
+                yoo_test,
+            )
+        )
+        self.assertNotIn(age_key, output)
+        self.assertNotIn(yoo_live, output)
+        self.assertNotIn(yoo_test, output)
+        self.assertIn("[AGE_KEY_REDACTED]", output)
+        self.assertIn("[YOOKASSA_KEY_REDACTED]", output)
+        self.assertIn("req=req-safe-123", output)
+
+    def test_settings_repr_masks_database_and_redis_passwords(self):
+        from config.settings import Settings
+        settings = Settings(
+            BOT_TOKEN="123456:FAKE_TOKEN",
+            ADMIN_IDS=[123456789],
+            SUPPORT_USERNAME="fake_support",
+            DATABASE_URL="postgresql+asyncpg://super_user:SUPER_SECRET_DB_PASS@127.0.0.1:5432/db",
+            DB_ENCRYPTION_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+            REDIS_URL="redis://:SUPER_SECRET_REDIS_PASS@127.0.0.1:6379/0",
+            REDIS_PASSWORD="SUPER_SECRET_REDIS_PASS",
+            YOOKASSA_SHOP_ID="123456",
+            YOOKASSA_SECRET_KEY="test_secret_key_long_enough_val",
+            YOOKASSA_RETURN_URL="https://t.me/{bot_username}",
+            YOOKASSA_WEBHOOK_PORT=8080,
+            DOMAIN="vpn.example.test",
+            SSL_EMAIL="admin@realdomain.test",
+        )
+        rendered = repr(settings)
+        self.assertNotIn("SUPER_SECRET_DB_PASS", rendered)
+        self.assertNotIn("SUPER_SECRET_REDIS_PASS", rendered)
+        self.assertNotIn("DATABASE_URL", rendered)
+        self.assertNotIn("REDIS_URL", rendered)
+        self.assertNotIn("REDIS_PASSWORD", rendered)
+
 
 class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
     """Prevent Settings secret values from being passed to logging calls."""
@@ -384,7 +443,9 @@ class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
         "BOT_TOKEN",
         "DATABASE_URL",
         "REDIS_URL",
+        "REDIS_PASSWORD",
         "DB_ENCRYPTION_KEY",
+        "DB_ENCRYPTION_KEYS",
         "YOOKASSA_SECRET_KEY",
     }
     LOG_METHODS = {

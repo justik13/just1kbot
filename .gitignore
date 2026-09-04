@@ -40,10 +40,18 @@ build/
 # Runtime backup output
 backups/
 
-# Private keys (age backup key etc.) must never be committed
+# Private keys (age backup key etc.) and certificates must never be committed
 backup_private_key.txt
 backup.agekey
 *.agekey
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.cer
+*.der
+
 
 # Dev scripts and local tools
 find_missing.py

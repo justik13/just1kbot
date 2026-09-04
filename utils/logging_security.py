@@ -38,8 +38,9 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
             r"(?i)(['\"]?(?:x-api-key|api[_-]?key|access[_-]?token|bot[_-]?token|"
-            r"database_url|redis_url|db_encryption_key|yookassa_secret_key|password|"
-            r"passwd|privatekey|presharedkey|secret)['\"]?\s*[:=]\s*)"
+            r"subscription[_-]?token|sub[_-]?token|database_url|redis_url|"
+            r"redis_password|postgres_password|db_encryption_keys?|yookassa_secret_key|"
+            r"age_secret_key|secret_key|password|passwd|privatekey|presharedkey|secret)['\"]?\s*[:=]\s*)"
             r"(['\"]?)[^\s,;'\"}\]]+\2"
         ),
         rf"\1{REDACTED}",
@@ -47,9 +48,14 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b"), "[TELEGRAM_TOKEN_REDACTED]"),
     (
         re.compile(
-            r"(?i)\b(?:vpn|amnezia|vless|vmess|trojan|ss|wg|wireguard)://[^\s<>'\"]+"
+            r"(?i)\b(?:vpn|amnezia|vless|vmess|trojan|ss|wg|wireguard|incy|clash|sing-box|shadowrocket)://[^\s<>'\"]+"
         ),
         "[VPN_URI_REDACTED]",
+    ),
+    (re.compile(r"\bAGE-SECRET-KEY-1[A-Z0-9]{58}\b"), "[AGE_KEY_REDACTED]"),
+    (
+        re.compile(r"\b(?:live|test)_[A-Za-z0-9_-]{25,}\b"),
+        "[YOOKASSA_KEY_REDACTED]",
     ),
     (re.compile(r"(?i)Fernet\([^\)]*\)"), "Fernet([REDACTED])"),
     (
