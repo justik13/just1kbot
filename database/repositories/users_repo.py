@@ -1,11 +1,17 @@
 from datetime import timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
-from database.models import Server, Tariff, User, VPNProfile
+from config.constants import (
+    AMNEZIA_PROTOCOL,
+    PERMANENT_END_DATE,
+    PERMANENT_SUBSCRIPTION_DAYS,
+    XRAY_PROTOCOL,
+)
+from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+from database.models import Server, Tariff, User, VPNProfile, WhiteInternetSubscription
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from utils.datetime_helpers import now_utc
 
@@ -323,10 +329,31 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
             (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
         )
     elif filter_type == "server" and filter_param is not None:
+        target_server_id = int(filter_param)
+        server_proto_subq = select(Server.protocol).where(Server.id == target_server_id).scalar_subquery()
         stmt = stmt.where(
-            User.profiles.any(
-                (VPNProfile.server_id == int(filter_param))
-                & (VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES))
+            or_(
+                and_(
+                    server_proto_subq == AMNEZIA_PROTOCOL,
+                    User.profiles.any(
+                        (VPNProfile.server_id == target_server_id)
+                        & (VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES))
+                    ),
+                ),
+                and_(
+                    server_proto_subq == XRAY_PROTOCOL,
+                    User.id.in_(
+                        select(WhiteInternetSubscription.user_id).where(
+                            WhiteInternetSubscription.origin_node_id == target_server_id,
+                            WhiteInternetSubscription.status.in_([
+                                WhiteInternetStatus.ACTIVE,
+                                WhiteInternetStatus.PENDING,
+                                WhiteInternetStatus.EXHAUSTED,
+                            ]),
+                            WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+                        )
+                    ),
+                ),
             )
         )
     elif filter_type == "country" and filter_param:

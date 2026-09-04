@@ -2,6 +2,8 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
+from config.constants import XRAY_PROTOCOL
+from config.enums import ServerLifecycleStatus
 
 
 def get_broadcast_audience_keyboard() -> InlineKeyboardMarkup:
@@ -50,8 +52,16 @@ def get_broadcast_server_selection_keyboard(servers) -> InlineKeyboardMarkup:
 
     for s in servers:
         flag = s.country_flag or "🌐"
-        proto = "[Xray]" if getattr(s, "protocol", None) == "xray" else "[AWG]"
-        status = "" if getattr(s, "is_active", True) else texts.BROADCAST_SERVER_STATUS_DISABLED
+        is_server_active = (
+            getattr(s, "is_active", True)
+            and getattr(s, "lifecycle_status", ServerLifecycleStatus.ACTIVE) == ServerLifecycleStatus.ACTIVE
+        )
+        is_xray = (
+            getattr(s, "protocol", None) == XRAY_PROTOCOL
+            or "xray_origin" in (getattr(s, "capabilities", None) or [])
+        )
+        proto = "[Xray]" if is_xray else "[AWG]"
+        status = "" if is_server_active else texts.BROADCAST_SERVER_STATUS_DISABLED
         builder.button(
             text=f"{flag} {proto} {s.name}{status}",
             callback_data=f"broadcast_aud:server_{s.id}",

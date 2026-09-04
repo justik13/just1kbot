@@ -147,7 +147,14 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
             ))
         else:
             reason = getattr(s, "disabled_reason", None)
-            reason_text = f" ({safe(reason)})" if reason else ""
+            if reason == "MANUAL":
+                reason_text = texts.DASHBOARD_DISABLED_REASON_MANUAL
+            elif reason == "AUTO_UNAVAILABLE":
+                reason_text = texts.DASHBOARD_DISABLED_REASON_AUTO
+            elif reason:
+                reason_text = f" ({safe(reason)})"
+            else:
+                reason_text = ""
             inactive_lines.append(texts.DASHBOARD_INACTIVE_SERVER_ROW.format(
                 flag=flag, name=safe(s.name), reason_text=reason_text, db_used=db_used
             ))

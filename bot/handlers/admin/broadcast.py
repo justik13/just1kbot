@@ -12,11 +12,14 @@ from aiogram.exceptions import (
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.constants import AdminAuditAction, TELEGRAM_MESSAGE_LIMIT
+from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.broadcast import (
     get_broadcast_audience_keyboard,
@@ -255,9 +258,13 @@ async def process_broadcast_message(
                     server = await s_sess.get(Server, server_id)
             if server:
                 flag = server.country_flag or "🌐"
-                proto = "[Xray]" if getattr(server, "protocol", None) == "xray" else "[AWG]"
+                is_xray = (
+                    getattr(server, "protocol", None) == XRAY_PROTOCOL
+                    or "xray_origin" in (getattr(server, "capabilities", None) or [])
+                )
+                proto = "[Xray]" if is_xray else "[AWG]"
                 aud_label = texts.BROADCAST_AUDIENCE_SERVER_LABEL.format(
-                    flag=flag, proto=proto, name=server.name
+                    flag=flag, proto=proto, name=safe(server.name)
                 )
             else:
                 aud_label = texts.BROADCAST_AUDIENCE_SERVER_ID_LABEL.format(server_id=server_id)
@@ -338,25 +345,45 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
             target_server_id = int(audience.split("_", 1)[1])
         except (IndexError, ValueError):
             target_server_id = -1
-        stmt = stmt.where(
-            or_(
-                User.id.in_(
-                    select(VPNProfile.user_id).where(
-                        VPNProfile.server_id == target_server_id,
-                        or_(
-                            VPNProfile.peer_id.is_not(None),
-                            VPNProfile.provisioning_status.in_(["active", "pending_update", "update_failed"]),
-                        ),
-                    )
-                ),
-                User.id.in_(
-                    select(WhiteInternetSubscription.user_id).where(
-                        WhiteInternetSubscription.origin_node_id == target_server_id,
-                        WhiteInternetSubscription.status.in_(["ACTIVE", "PENDING", "active", "pending"]),
-                    )
-                ),
-            )
+
+        # Strict Protocol Decoupling:
+        # AWG and Xray contours are strictly decoupled.
+        # Target server protocol determines which contour and domain table is queried.
+        server_proto_subq = select(Server.protocol).where(Server.id == target_server_id).scalar_subquery()
+
+        # AmneziaWG (awg) condition:
+        # Target users with active subscription and active profile on this AWG node.
+        # Strict Fail-Closed: excludes profiles in hidden/deleting states and inactive profiles.
+        awg_user_condition = and_(
+            server_proto_subq == AMNEZIA_PROTOCOL,
+            User.subscription_end > current_time,
+            User.profiles.any(
+                (VPNProfile.server_id == target_server_id)
+                & (VPNProfile.is_active.is_(True))
+                & (VPNProfile.desired_is_active.is_(True))
+                & (VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES))
+            ),
         )
+
+        # White Internet (xray) condition:
+        # Target users with active/pending/exhausted subscriptions on this Origin node.
+        # Strict Fail-Closed: excludes deprovisioning subscriptions ('PENDING_DELETE').
+        xray_user_condition = and_(
+            server_proto_subq == XRAY_PROTOCOL,
+            User.id.in_(
+                select(WhiteInternetSubscription.user_id).where(
+                    WhiteInternetSubscription.origin_node_id == target_server_id,
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.EXHAUSTED,
+                    ]),
+                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+                )
+            ),
+        )
+
+        stmt = stmt.where(or_(awg_user_condition, xray_user_condition))
     return stmt
 
 
@@ -824,7 +851,7 @@ async def _start_broadcast_process(
                         server = await s_sess.get(Server, server_id)
                 if server:
                     flag = server.country_flag or "🌐"
-                    label = texts.BROADCAST_PROGRESS_SERVER_LABEL.format(flag=flag, name=server.name)[:50]
+                    label = texts.BROADCAST_PROGRESS_SERVER_LABEL.format(flag=flag, name=safe(server.name))[:50]
                 else:
                     label = texts.BROADCAST_AUDIENCE_SERVER_ID_LABEL.format(server_id=server_id)[:50]
             except Exception:
