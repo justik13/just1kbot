@@ -11,6 +11,7 @@ normalize_domain() {
 
 deploy_subscription_proxy_conf() {
     local target_host="${1:-}"
+    local custom_prefix="${2:-}"
     if [[ -z "$target_host" ]]; then
         target_host="$(get_state_val "bot_domain" 2>/dev/null || true)"
     fi
@@ -22,6 +23,17 @@ deploy_subscription_proxy_conf() {
     fi
     target_host="$(normalize_domain "$target_host")"
 
+    local sub_prefix="${custom_prefix:-}"
+    if [[ -z "$sub_prefix" ]]; then
+        sub_prefix="$(get_state_val "sub_path_prefix" 2>/dev/null || true)"
+    fi
+    if [[ -z "$sub_prefix" ]]; then
+        sub_prefix="${WHITE_INTERNET_SUB_PATH_PREFIX:-/sub/wl}"
+    fi
+    sub_prefix="${sub_prefix%/}"
+    [[ ! "$sub_prefix" =~ ^/ ]] && sub_prefix="/$sub_prefix"
+    set_state_val "sub_path_prefix" "$sub_prefix" 2>/dev/null || true
+
     local ssl_verify_directives=""
     if [[ ! "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$target_host" != "localhost" ]]; then
         ssl_verify_directives="        proxy_ssl_verify on;
@@ -31,7 +43,7 @@ deploy_subscription_proxy_conf() {
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
-    location ^~ /sub/wl {
+    location ^~ ${sub_prefix} {
         resolver 1.1.1.1 8.8.8.8 77.88.8.8 valid=30s ipv6=off;
         set \$bot_upstream "https://${target_host}";
         proxy_pass \$bot_upstream;
@@ -47,7 +59,7 @@ ${ssl_verify_directives}
         proxy_send_timeout 30s;
     }
 EOF
-    info "Сконфигурировано Nginx-проксирование подписок (/sub/wl -> dynamic resolver -> https://${target_host})"
+    info "Сконфигурировано Nginx-проксирование подписок (${sub_prefix} -> dynamic resolver -> https://${target_host})"
 }
 
 install_xray_origin_node() {
@@ -859,7 +871,7 @@ except Exception:
 " "$RELAYS_FILE" "$NGINX_RELAYS_DIR" 2>/dev/null || true
     fi
 
-    # Авто-восстановление Nginx-проксирования подписок Белого Интернета (/sub/wl)
+    # Авто-восстановление Nginx-проксирования подписок Белого Интернета
     deploy_subscription_proxy_conf
 
     # Системное отключение IPv6

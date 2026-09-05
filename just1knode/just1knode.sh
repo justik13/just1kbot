@@ -372,13 +372,21 @@ if os.path.exists(rf):
     fi
 
     if [[ "$role" == "origin" ]]; then
-        log "8. Проверка Nginx-проксирования подписок (/sub/wl)..."
+        local sub_prefix
+        sub_prefix="$(get_state_val "sub_path_prefix" 2>/dev/null || true)"
+        if [[ -z "$sub_prefix" ]]; then
+            sub_prefix="${WHITE_INTERNET_SUB_PATH_PREFIX:-/sub/wl}"
+        fi
+        sub_prefix="${sub_prefix%/}"
+        [[ ! "$sub_prefix" =~ ^/ ]] && sub_prefix="/$sub_prefix"
+
+        log "8. Проверка Nginx-проксирования подписок (${sub_prefix})..."
         local check_target="${domain:-localhost}"
         local sub_code
         local sub_err=0
-        sub_code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}/sub/wl/ping" 2>/dev/null)" || sub_err=$?
+        sub_code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}${sub_prefix}/ping" 2>/dev/null)" || sub_err=$?
         if [[ "$sub_code" == "200" && $sub_err -eq 0 ]]; then
-            echo -e "  ${GREEN}✔${NC} Nginx прокси подписок (/sub/wl/ping) отвечает 200 OK (TLS валиден)"
+            echo -e "  ${GREEN}✔${NC} Nginx прокси подписок (${sub_prefix}/ping) отвечает 200 OK (TLS валиден)"
         elif [[ $sub_err -eq 60 ]]; then
             echo -e "  ${RED}✗${NC} ОШИБКА TLS: Сертификат для https://${check_target} недействителен или просрочен (curl error 60)!"
             failed=$((failed + 1))
@@ -386,16 +394,16 @@ if os.path.exists(rf):
             echo -e "  ${RED}✗${NC} ОШИБКА 502 Bad Gateway: Nginx не может связаться с ботом (проверьте SSL/upstream в sub-wl.conf)!"
             failed=$((failed + 1))
         elif [[ "$sub_code" == "404" ]]; then
-            echo -e "  ${RED}✗${NC} ОШИБКА 404 Not Found: Nginx прокси отвечает 404 (эндпоинт /sub/wl/ping не найден на боте)!"
+            echo -e "  ${RED}✗${NC} ОШИБКА 404 Not Found: Nginx прокси отвечает 404 (эндпоинт ${sub_prefix}/ping не найден на боте)!"
             failed=$((failed + 1))
         elif [[ "$sub_code" == "000" || $sub_err -ne 0 ]]; then
             local insecure_code
-            insecure_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}/sub/wl/ping" 2>/dev/null || echo "000")"
+            insecure_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}${sub_prefix}/ping" 2>/dev/null || echo "000")"
             if [[ "$insecure_code" == "200" ]]; then
                 echo -e "  ${RED}✗${NC} TLS ОШИБКА: Nginx отвечает 200 OK только без проверки сертификата (curl -k). Проверьте Let's Encrypt / CA!"
                 failed=$((failed + 1))
             else
-                echo -e "  ${RED}✗${NC} Не удалось выполнить запрос к https://${check_target}/sub/wl/ping (Nginx недоступен, код: $sub_code, err: $sub_err)"
+                echo -e "  ${RED}✗${NC} Не удалось выполнить запрос к https://${check_target}${sub_prefix}/ping (Nginx недоступен, код: $sub_code, err: $sub_err)"
                 failed=$((failed + 1))
             fi
         else
@@ -409,9 +417,9 @@ if os.path.exists(rf):
             log "9. Проверка доступности CDN подписок (${cdn_domain})..."
             local cdn_code
             local cdn_err=0
-            cdn_code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "https://${cdn_domain}/sub/wl/ping" 2>/dev/null)" || cdn_err=$?
+            cdn_code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "https://${cdn_domain}${sub_prefix}/ping" 2>/dev/null)" || cdn_err=$?
             if [[ "$cdn_code" == "200" && $cdn_err -eq 0 ]]; then
-                echo -e "  ${GREEN}✔${NC} Публичный CDN прокси (/sub/wl/ping) отвечает 200 OK (TLS валиден)"
+                echo -e "  ${GREEN}✔${NC} Публичный CDN прокси (${sub_prefix}/ping) отвечает 200 OK (TLS валиден)"
             elif [[ $cdn_err -eq 60 ]]; then
                 echo -e "  ${RED}✗${NC} ОШИБКА TLS CDN: Сертификат для https://${cdn_domain} не прошел валидацию (curl error 60)!"
                 failed=$((failed + 1))
@@ -419,11 +427,11 @@ if os.path.exists(rf):
                 echo -e "  ${RED}✗${NC} CDN вернул 502 Bad Gateway (проверьте Origin и CDN кэш)!"
                 failed=$((failed + 1))
             elif [[ "$cdn_code" == "404" ]]; then
-                echo -e "  ${RED}✗${NC} CDN вернул 404 Not Found (эндпоинт /sub/wl/ping не найден на CDN/Origin)!"
+                echo -e "  ${RED}✗${NC} CDN вернул 404 Not Found (эндпоинт ${sub_prefix}/ping не найден на CDN/Origin)!"
                 failed=$((failed + 1))
             elif [[ "$cdn_code" == "000" || $cdn_err -ne 0 ]]; then
                 local cdn_insecure
-                cdn_insecure="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 "https://${cdn_domain}/sub/wl/ping" 2>/dev/null || echo "000")"
+                cdn_insecure="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 "https://${cdn_domain}${sub_prefix}/ping" 2>/dev/null || echo "000")"
                 if [[ "$cdn_insecure" == "200" ]]; then
                     echo -e "  ${RED}✗${NC} TLS ОШИБКА CDN: ${cdn_domain} отвечает 200 OK только без проверки SSL (curl -k)!"
                     failed=$((failed + 1))
