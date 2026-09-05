@@ -78,6 +78,7 @@ def _needs_attention():
         Payment.provider_status.in_(("creating", "pending", "waiting_for_capture", "unknown")),
         Payment.reconciliation_status.in_(("required", "mismatch", "manual_review")),
         Payment.fulfillment_status.in_(("failed", "manual_review")),
+        Payment.topup_context["auto_fulfill_status"].astext == "dead",
     )
 
 
@@ -309,6 +310,8 @@ async def _retry_auto_fulfillment(session, payment: Payment) -> None:
             # Stale durable telemetry must not outlive a successful retry.
             update.pop("auto_fulfill_error", None)
         payment.topup_context = update
+        if status == "dead":
+            payment.fulfillment_status = "manual_review"
 
     # The attempts counter lives in durable JSONB and is written only by this
     # worker as an integer. Anything else (str, float, dict, list, bool) is a
