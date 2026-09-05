@@ -320,7 +320,10 @@ async def back_to_main_menu(
         )
         return
 
-    await callback.answer(show_alert=False)
+    try:
+        await callback.answer(show_alert=False)
+    except Exception:
+        pass
     await _ensure_bot_unblocked(
         session,
         db_user.telegram_id,

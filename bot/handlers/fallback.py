@@ -99,7 +99,10 @@ async def dismiss_notification(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
+    try:
+        await callback.answer(show_alert=False)
+    except Exception:
+        pass
     chat_id = callback.message.chat.id if callback.message and callback.message.chat else callback.from_user.id
     msg_id = callback.message.message_id if callback.message else None
 

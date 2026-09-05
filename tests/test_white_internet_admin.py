@@ -423,6 +423,83 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(callback.answer.await_count, 2)
             callback.message.edit_text.assert_awaited_once()
 
+    async def test_admin_wl_reset_confirm_callback_answer_bad_request(self):
+        """admin_wl_reset_confirm does not crash and edits message when callback.answer fails."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wl_reset_confirm:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock(
+            side_effect=TelegramBadRequest(
+                method=MagicMock(),
+                message="query is too old and response timeout expired or query id is invalid",
+            )
+        )
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True):
+            await admin_wl_reset_confirm(callback, self.session)
+
+            callback.answer.assert_awaited_once_with(show_alert=False)
+            callback.message.edit_text.assert_awaited_once()
+
+    async def test_admin_wl_reset_apply_e2e_with_both_callback_answers_failing(self):
+        """admin_wl_reset_apply proceeds to edit text even if both callback.answer attempts fail with TelegramBadRequest."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wl_reset_apply:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock(
+            side_effect=TelegramBadRequest(
+                method=MagicMock(),
+                message="query is too old and response timeout expired or query id is invalid",
+            )
+        )
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch.object(WhiteInternetService, "reset_user_trial", new=AsyncMock(return_value=(True, "ok"))), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_profiles_count", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.has_user_any_subscription", new=AsyncMock(return_value=False)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=None)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes._get_white_internet_card_info", new=AsyncMock(return_value=None)):
+
+            await admin_wl_reset_apply(callback, self.session)
+
+            self.assertEqual(callback.answer.await_count, 2)
+            callback.message.edit_text.assert_awaited_once()
+
+    async def test_admin_wl_grant_trial_e2e_with_both_callback_answers_failing(self):
+        """admin_wl_grant_trial proceeds to edit text even if both callback.answer attempts fail with TelegramBadRequest."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wl_grant_trial:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock(
+            side_effect=TelegramBadRequest(
+                method=MagicMock(),
+                message="query is too old and response timeout expired or query id is invalid",
+            )
+        )
+        sub = WhiteInternetSubscription(id=99, user_id=self.user.id)
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch.object(WhiteInternetService, "create_trial_subscription", new=AsyncMock(return_value=(True, "ok", sub))), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_profiles_count", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.has_user_any_subscription", new=AsyncMock(return_value=True)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes._get_white_internet_card_info", new=AsyncMock(return_value="WL Active")):
+
+            await admin_wl_grant_trial(callback, self.session)
+
+            self.assertEqual(callback.answer.await_count, 2)
+            callback.message.edit_text.assert_awaited_once()
+
 
 class TestWhiteInternetDashboardMetrics(unittest.IsolatedAsyncioTestCase):
     """Test suite for White Internet metrics on the admin dashboard."""

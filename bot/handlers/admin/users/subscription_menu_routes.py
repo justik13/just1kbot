@@ -63,9 +63,12 @@ async def admin_subscription_menu(
     user = await get_user_by_telegram_id(session, telegram_id)
 
     if not user:
-        await callback.message.edit_text(
-            texts.ERROR_USER_NOT_FOUND
-        )
+        try:
+            await callback.message.edit_text(
+                texts.ERROR_USER_NOT_FOUND
+            )
+        except TelegramBadRequest:
+            pass
         return
 
     has_active = _is_subscription_active(user)
@@ -159,7 +162,10 @@ async def admin_wl_reset_confirm(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    await callback.answer(show_alert=False)
+    try:
+        await callback.answer(show_alert=False)
+    except Exception:
+        pass
 
     text = texts.ADMIN_WL_RESET_CONFIRM.format(telegram_id=telegram_id)
     try:
@@ -208,7 +214,10 @@ async def admin_wl_reset_apply(
         details={"telegram_id": telegram_id},
     )
 
-    await callback.answer(texts.ADMIN_WL_RESET_SUCCESS, show_alert=True)
+    try:
+        await callback.answer(texts.ADMIN_WL_RESET_SUCCESS, show_alert=True)
+    except Exception:
+        pass
     callback.data = f"admin_subscription:{telegram_id}"
     await admin_subscription_menu(callback, session)
 
@@ -246,6 +255,9 @@ async def admin_wl_grant_trial(
         details={"telegram_id": telegram_id, "subscription_id": sub.id if sub else None},
     )
 
-    await callback.answer(texts.ADMIN_WL_GRANT_SUCCESS, show_alert=True)
+    try:
+        await callback.answer(texts.ADMIN_WL_GRANT_SUCCESS, show_alert=True)
+    except Exception:
+        pass
     callback.data = f"admin_subscription:{telegram_id}"
     await admin_subscription_menu(callback, session)
