@@ -32,14 +32,14 @@ from database.repositories.tariff_quotes_repo import get_or_create_current_versi
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
+from utils.formatters import format_traffic
 
 logger = logging.getLogger(__name__)
 router = Router(name="white_internet")
 
 
 def _format_bytes(bytes_count: int) -> str:
-    gib = bytes_count / (1024**3)
-    return f"{gib:.1f}{texts.GIB_SUFFIX}"
+    return format_traffic(bytes_count)
 
 
 def _render_progress_bar(used_bytes: int, total_bytes: int, length: int = 10) -> str:
