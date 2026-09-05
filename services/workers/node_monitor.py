@@ -6,6 +6,7 @@ ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED -> MANUAL_DISABLED
 import asyncio
 import logging
 import os
+import socket
 import time
 from datetime import datetime, timezone
 
@@ -55,6 +56,9 @@ PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения з
 AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими проверками в режиме AUTO_DISABLED
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
+REQUIRED_INGRESS_FAILS = 2  # Требуется 2 цикла сбоя подряд (>= 30с) перед отправкой алерта
+REQUIRED_INGRESS_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
+INGRESS_RETRY_DELAY = 0.2  # Задержка перед повторным запросом зонда при ошибке/таймауте
 # A hung node can hold a healthcheck for tens of seconds; checking servers in
 # bounded parallel batches keeps one degraded node from freezing alerts for
 # every other node in the cycle.
@@ -74,6 +78,8 @@ class ServerMonitorState:
         self.disk_alert_last_sent: float | None = None
         self.recovery_notice_sent: bool = False
         self.ingress_problem: bool = False
+        self.consecutive_ingress_fails: int = 0
+        self.consecutive_ingress_successes: int = 0
 
     def sync_from_db_server(self, db_server: Server):
         if db_server:
@@ -91,8 +97,12 @@ class ServerMonitorState:
             self.last_alert_sent_state = db_server.last_alert_sent_state
             if isinstance(getattr(db_server, "extra_data", None), dict):
                 self.ingress_problem = bool(db_server.extra_data.get("ingress_problem", False))
+                self.consecutive_ingress_fails = int(db_server.extra_data.get("consecutive_ingress_fails", 0) or 0)
+                self.consecutive_ingress_successes = int(db_server.extra_data.get("consecutive_ingress_successes", 0) or 0)
             else:
                 self.ingress_problem = False
+                self.consecutive_ingress_fails = 0
+                self.consecutive_ingress_successes = 0
 
             if db_server.problem_started_at:
                 now_m = time.monotonic()
@@ -137,6 +147,8 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.last_alert_sent_state = None
     st.disk_alert_last_sent = None
     st.ingress_problem = False
+    st.consecutive_ingress_fails = 0
+    st.consecutive_ingress_successes = 0
 
 
 def clear_monitor_states():
@@ -277,29 +289,47 @@ async def check_node_resources_and_alerts(bot: Bot):
                             sub_prefix = f"/{sub_prefix}"
                         probe_url = f"https://{probe_domain}{sub_prefix}/ping"
                         try:
-                            timeout = aiohttp.ClientTimeout(total=5.0)
-                            async with aiohttp.ClientSession(timeout=timeout) as probe_sess:
-                                async with probe_sess.get(
-                                    probe_url,
-                                    allow_redirects=False,
-                                ) as probe_resp:
-                                    if probe_resp.status == 200:
-                                        ingress_probe_result = (True, "200")
-                                    else:
+                            timeout = aiohttp.ClientTimeout(total=10.0, connect=5.0)
+                            connector = aiohttp.TCPConnector(family=socket.AF_INET)
+                            async with aiohttp.ClientSession(timeout=timeout, connector=connector) as probe_sess:
+                                for attempt in range(2):
+                                    try:
+                                        async with probe_sess.get(
+                                            probe_url,
+                                            allow_redirects=False,
+                                        ) as probe_resp:
+                                            if probe_resp.status == 200:
+                                                ingress_probe_result = (True, "200")
+                                                break
+                                            if attempt == 0 and probe_resp.status in (502, 503, 504):
+                                                await asyncio.sleep(INGRESS_RETRY_DELAY)
+                                                continue
+                                            logger.warning(
+                                                "Xray origin node %s (%s) subscription proxy returned HTTP %s on %s",
+                                                server.id, probe_domain, probe_resp.status, probe_url,
+                                            )
+                                            ingress_probe_result = (False, str(probe_resp.status))
+                                            break
+                                    except Exception as probe_exc:
+                                        if attempt == 0:
+                                            await asyncio.sleep(INGRESS_RETRY_DELAY)
+                                            continue
+                                        err_msg = str(probe_exc).strip()
+                                        if not err_msg:
+                                            if isinstance(probe_exc, (asyncio.TimeoutError, TimeoutError)):
+                                                err_msg = ALERT_INGRESS_ERR_TIMEOUT
+                                            else:
+                                                err_msg = type(probe_exc).__name__
                                         logger.warning(
-                                            "Xray origin node %s (%s) subscription proxy returned HTTP %s on %s",
-                                            server.id, probe_domain, probe_resp.status, probe_url,
+                                            "Origin node %s (%s) subscription proxy ping failed on %s: %s",
+                                            server.id, probe_domain, probe_url, err_msg,
                                         )
-                                        ingress_probe_result = (False, str(probe_resp.status))
-                        except Exception as probe_exc:
-                            err_msg = str(probe_exc).strip()
-                            if not err_msg:
-                                if isinstance(probe_exc, (asyncio.TimeoutError, TimeoutError)):
-                                    err_msg = ALERT_INGRESS_ERR_TIMEOUT
-                                else:
-                                    err_msg = type(probe_exc).__name__
+                                        ingress_probe_result = (False, err_msg)
+                                        break
+                        except Exception as probe_outer_exc:
+                            err_msg = str(probe_outer_exc).strip() or type(probe_outer_exc).__name__
                             logger.warning(
-                                "Origin node %s (%s) subscription proxy ping failed on %s: %s",
+                                "Origin node %s (%s) subscription proxy unexpected error on %s: %s",
                                 server.id, probe_domain, probe_url, err_msg,
                             )
                             ingress_probe_result = (False, err_msg)
@@ -338,11 +368,26 @@ async def check_node_resources_and_alerts(bot: Bot):
                         # Durable-by-Default: sync in-memory state with DB
                         if db_ingress_problem:
                             st.ingress_problem = True
+                        if "consecutive_ingress_fails" in db_extra:
+                            st.consecutive_ingress_fails = int(db_extra.get("consecutive_ingress_fails") or 0)
+                        if "consecutive_ingress_successes" in db_extra:
+                            st.consecutive_ingress_successes = int(db_extra.get("consecutive_ingress_successes") or 0)
 
                         has_problem = db_ingress_problem or st.ingress_problem
+                        extra_changed = False
 
                         if not ingress_ok:
-                            if not has_problem:
+                            st.consecutive_ingress_fails += 1
+                            st.consecutive_ingress_successes = 0
+                            if (
+                                db_extra.get("consecutive_ingress_fails") != st.consecutive_ingress_fails
+                                or db_extra.get("consecutive_ingress_successes") != 0
+                            ):
+                                db_extra["consecutive_ingress_fails"] = st.consecutive_ingress_fails
+                                db_extra["consecutive_ingress_successes"] = 0
+                                extra_changed = True
+
+                            if not has_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
                                 sent_ok = False
                                 try:
                                     sent_ok = await _send_admin_alert_msg(
@@ -360,12 +405,20 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     logger.error("Failed to deliver ingress problem alert: %s", e)
                                 if sent_ok:
                                     st.ingress_problem = True
-                                    if fresh_server:
-                                        db_extra["ingress_problem"] = True
-                                        await update_server(session, fresh_server, extra_data=db_extra)
-                                        await session.commit()
+                                    db_extra["ingress_problem"] = True
+                                    extra_changed = True
                         else:
-                            if has_problem:
+                            st.consecutive_ingress_successes += 1
+                            st.consecutive_ingress_fails = 0
+                            if (
+                                db_extra.get("consecutive_ingress_successes") != st.consecutive_ingress_successes
+                                or db_extra.get("consecutive_ingress_fails") != 0
+                            ):
+                                db_extra["consecutive_ingress_successes"] = st.consecutive_ingress_successes
+                                db_extra["consecutive_ingress_fails"] = 0
+                                extra_changed = True
+
+                            if has_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
                                 sent_ok = False
                                 try:
                                     sent_ok = await _send_admin_alert_msg(
@@ -382,10 +435,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     logger.error("Failed to deliver ingress restored alert: %s", e)
                                 if sent_ok:
                                     st.ingress_problem = False
-                                    if fresh_server:
-                                        db_extra.pop("ingress_problem", None)
-                                        await update_server(session, fresh_server, extra_data=db_extra)
-                                        await session.commit()
+                                    db_extra.pop("ingress_problem", None)
+                                    extra_changed = True
+
+                        if extra_changed and fresh_server:
+                            await update_server(session, fresh_server, extra_data=db_extra)
+                            await session.commit()
                     finally:
                         if is_pg and got_lock:
                             try:
