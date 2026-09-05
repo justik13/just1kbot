@@ -13,10 +13,16 @@ ALLOWED_TARIFF_UPDATE_FIELDS = {
 }
 
 
-async def get_active_tariffs(session: AsyncSession) -> list[Tariff]:
+async def get_active_tariffs(
+    session: AsyncSession,
+    service_type: str = "awg",
+) -> list[Tariff]:
     stmt = (
         select(Tariff)
-        .where(Tariff.is_active.is_(True))
+        .where(
+            Tariff.is_active.is_(True),
+            Tariff.service_type == service_type,
+        )
         .order_by(
             Tariff.device_limit,
             Tariff.sort_order,
@@ -48,14 +54,6 @@ async def update_tariff(
     await session.flush()
     await session.refresh(tariff)
     return tariff
-
-
-async def delete_tariff(
-    session: AsyncSession,
-    tariff: Tariff,
-) -> None:
-    await session.delete(tariff)
-    await session.flush()
 
 
 async def get_tariff_count(session: AsyncSession) -> int:

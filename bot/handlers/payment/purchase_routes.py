@@ -267,17 +267,23 @@ async def confirm_purchase(
             await _render_purchase_review(callback, session, db_user, quote_id)
             return
 
-        failed_quote = await session.scalar(
-            select(TariffQuote).where(
-                TariffQuote.public_id == quote_id,
-                TariffQuote.user_id == db_user.id,
-                TariffQuote.status == "active",
+        RETRYABLE_SETTLEMENT_CODES = {
+            "too_many_devices",
+            "account_debt",
+            "financial_hold",
+        }
+        if exc.code not in RETRYABLE_SETTLEMENT_CODES:
+            failed_quote = await session.scalar(
+                select(TariffQuote).where(
+                    TariffQuote.public_id == quote_id,
+                    TariffQuote.user_id == db_user.id,
+                    TariffQuote.status == "active",
+                )
             )
-        )
-        if failed_quote:
-            failed_quote.status = "cancelled"
-            failed_quote.diagnostic_reason = f"settlement_failed:{exc.code}"
-            await session.flush()
+            if failed_quote:
+                failed_quote.status = "cancelled"
+                failed_quote.diagnostic_reason = f"settlement_failed:{exc.code}"
+                await session.flush()
 
         await render_hub(
             callback.bot,

@@ -88,3 +88,40 @@ def test_stats_normalization_via_get_users_stats():
                 "user-1": {"uplink": 1000, "downlink": 2000},
                 "user-2": {"uplink": 3000, "downlink": 4000},
             }
+
+
+def test_probe_user_presence_and_verify_absent_lifecycle():
+    """H2: Non-destructive presence probe and absence verification lifecycle without AlterInbound mutations."""
+    client = XrayGrpcClient()
+    mock_channel = MagicMock()
+    mock_stub = MagicMock()
+
+    tag = "inbound-de"
+    user_uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+
+    # Initially user is not present
+    assert client.probe_user_presence(tag, user_uuid) is False
+    assert client.verify_user_absent(tag, user_uuid) is True
+
+    # Add user
+    with patch.object(client, "_get_channel", return_value=mock_channel):
+        with patch("xray.app.proxyman.command.command_pb2_grpc.HandlerServiceStub", return_value=mock_stub):
+            assert client.add_user(tag, user_uuid) is True
+
+    # After add, probe returns True and verify_absent returns False without ANY AlterInbound calls
+    mock_stub.AlterInbound.reset_mock()
+    assert client.probe_user_presence(tag, user_uuid) is True
+    assert client.verify_user_absent(tag, user_uuid) is False
+    assert not mock_stub.AlterInbound.called
+
+    # Remove user
+    with patch.object(client, "_get_channel", return_value=mock_channel):
+        with patch("xray.app.proxyman.command.command_pb2_grpc.HandlerServiceStub", return_value=mock_stub):
+            assert client.remove_user(tag, user_uuid) is True
+
+    # After remove, probe returns False and verify_absent returns True without AlterInbound calls
+    mock_stub.AlterInbound.reset_mock()
+    assert client.probe_user_presence(tag, user_uuid) is False
+    assert client.verify_user_absent(tag, user_uuid) is True
+    assert not mock_stub.AlterInbound.called
+
