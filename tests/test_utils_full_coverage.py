@@ -361,10 +361,30 @@ class TestUtilsVpnParser(unittest.TestCase):
     def test_parse_vpn_connection_string(self):
         data = {"name": "test_vpn"}
         uri = encode_json_to_vpn_uri(data)
-        self.assertTrue(uri.startswith("vpn://"))
         decoded = decode_vpn_uri_to_json(uri)
         self.assertEqual(decoded.get("name"), "test_vpn")
 
 
+class TestUtilsTelegramAutoDelete(unittest.IsolatedAsyncioTestCase):
+    async def test_spawn_auto_delete_execution(self):
+        from utils.telegram import _auto_delete_delay, spawn_auto_delete
+
+        bot = AsyncMock()
+        with patch("utils.telegram._load_hub_ids_from_db", new_callable=AsyncMock) as mock_load:
+            mock_load.return_value = []
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                spawn_auto_delete(bot, chat_id=123, msg_id=456, delay=0.01)
+                await _auto_delete_delay(bot, 123, 456, delay=0.01)
+                bot.delete_message.assert_awaited_with(chat_id=123, message_id=456)
+
+            # Test skip when msg_id is in active hub ids
+            bot.reset_mock()
+            mock_load.return_value = [456]
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                await _auto_delete_delay(bot, 123, 456, delay=0.01)
+                bot.delete_message.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,5 +1,3 @@
-import asyncio
-
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import StateFilter
@@ -10,18 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.middlewares.action_lock import STALE_ACTION_PREFIXES
 from database.models import User
+from utils.telegram import spawn_auto_delete
 
 router = Router()
-
-_auto_delete_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_auto_delete(bot, chat_id: int, msg_id: int, delay: float = 5.0) -> None:
-    task = asyncio.create_task(
-        _auto_delete_delay(bot, chat_id, msg_id, delay=delay)
-    )
-    _auto_delete_tasks.add(task)
-    task.add_done_callback(_auto_delete_tasks.discard)
 
 
 @router.message(
@@ -49,20 +38,7 @@ async def fsm_media_guard(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
-        _spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
-    except Exception:
-        pass
-
-
-async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 5.0) -> None:
-    import asyncio
-    await asyncio.sleep(delay)
-    try:
-        from utils.telegram import _load_hub_ids_from_db
-        active_ids = await _load_hub_ids_from_db(chat_id)
-        if msg_id in active_ids:
-            return
-        await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
     except Exception:
         pass
 
@@ -87,7 +63,7 @@ async def handle_unknown_text(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
-        _spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
     except Exception:
         pass
 

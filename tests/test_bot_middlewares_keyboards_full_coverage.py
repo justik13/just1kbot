@@ -98,17 +98,36 @@ class TestBotMiddlewaresFullCoverage(unittest.IsolatedAsyncioTestCase):
             self.assertIn("session", data)
 
     async def test_db_session_middleware_error_message(self):
+        from unittest.mock import ANY
         from sqlalchemy.exc import SQLAlchemyError
         middleware = DBSessionMiddleware()
         handler = AsyncMock(side_effect=SQLAlchemyError("DB down"))
         msg = AsyncMock(spec=Message)
-        data = {}
-        with patch("bot.middlewares.db_session.session_scope"):
+        msg.bot = AsyncMock()
+        msg.chat = MagicMock()
+        msg.chat.id = 123
+        err_reply = MagicMock()
+        err_reply.message_id = 456
+        msg.answer = AsyncMock(return_value=err_reply)
+        msg.delete = AsyncMock()
+        state_mock = AsyncMock()
+        data = {"state": state_mock}
+
+        with (
+            patch("bot.middlewares.db_session.session_scope"),
+            patch("utils.telegram.spawn_auto_delete") as mock_spawn_delete,
+        ):
             res = await middleware(handler, msg, data)
             self.assertIsNone(res)
+            msg.delete.assert_called_once()
+            state_mock.clear.assert_called_once()
             msg.answer.assert_called_once_with(
                 texts.ERROR_TECHNICAL_MESSAGE,
+                reply_markup=ANY,
                 parse_mode="HTML",
+            )
+            mock_spawn_delete.assert_called_once_with(
+                msg.bot, 123, 456, delay=7.0
             )
 
     async def test_db_session_middleware_error_callback(self):

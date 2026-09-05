@@ -83,24 +83,6 @@ class WhiteInternetReconciliationWorker:
             expected_inbound_tags.add("just1k-wl-default")
 
         async with self._get_sub_lock(sub_id):
-            # 1. External network mutation on Xray node (executed without holding a DB connection)
-            async with self._semaphore:
-                resp = await self.client.sync_client(
-                    api_url,
-                    api_key,
-                    sub_uuid,
-                    is_active=desired_active,
-                    version=target_version,
-                    expected_node_epoch=target_epoch,
-                    idempotency_key=f"reconcile:{sub_id}:{target_version}:{desired_active}",
-                )
-
-            sync_result = resp.result if hasattr(resp, "result") else resp[0]
-            err_msg = resp.error if hasattr(resp, "error") else resp[1]
-            verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
-            verified_inbounds = getattr(resp, "verified_inbounds", None) or []
-
-            # 2. Persist result under row lock in a short dedicated session
             async with sf() as lock_session:
                 is_pg = False
                 bind = getattr(lock_session, "bind", None)
@@ -116,6 +98,23 @@ class WhiteInternetReconciliationWorker:
                         return False
 
                 try:
+                    # 1. External network mutation on Xray node (executed under distributed advisory lock)
+                    async with self._semaphore:
+                        resp = await self.client.sync_client(
+                            api_url,
+                            api_key,
+                            sub_uuid,
+                            is_active=desired_active,
+                            version=target_version,
+                            expected_node_epoch=target_epoch,
+                            idempotency_key=f"reconcile:{sub_id}:{target_version}:{desired_active}",
+                        )
+
+                    sync_result = resp.result if hasattr(resp, "result") else resp[0]
+                    err_msg = resp.error if hasattr(resp, "error") else resp[1]
+                    verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
+                    verified_inbounds = getattr(resp, "verified_inbounds", None) or []
+
                     sub = await white_internet_repo.get_subscription_with_lock(lock_session, sub_id)
                     if sub is None:
                         return False

@@ -86,16 +86,15 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         ):
             return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
 
+        traffic_limit = getattr(sub, "traffic_limit_bytes", None)
         base_bytes = getattr(sub, "base_traffic_bytes", None)
         extra_bytes = getattr(sub, "extra_traffic_bytes", None)
-        traffic_limit = getattr(sub, "traffic_limit_bytes", None)
-
-        if isinstance(base_bytes, (int, float)) or isinstance(extra_bytes, (int, float)):
-            base_val = int(base_bytes) if isinstance(base_bytes, (int, float)) else 0
-            extra_val = int(extra_bytes) if isinstance(extra_bytes, (int, float)) else 0
-            total_quota = base_val + extra_val
-        elif isinstance(traffic_limit, (int, float)):
+        if isinstance(traffic_limit, (int, float)):
             total_quota = int(traffic_limit)
+        elif isinstance(base_bytes, (int, float)) or isinstance(extra_bytes, (int, float)):
+            total_quota = (int(base_bytes) if isinstance(base_bytes, (int, float)) else 0) + (
+                int(extra_bytes) if isinstance(extra_bytes, (int, float)) else 0
+            )
         else:
             total_quota = WHITE_INTERNET_BASE_TRAFFIC_BYTES
 
@@ -150,14 +149,8 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
 
-        cdn_domain = (
-            (
-                server.extra_data.get("cdn_domain")
-                if isinstance(getattr(server, "extra_data", None), dict)
-                else None
-            )
-            or os.getenv("WHITE_INTERNET_CDN_DOMAIN")
-        )
+        extra = server.extra_data if isinstance(getattr(server, "extra_data", None), dict) else {}
+        cdn_domain = extra.get("cdn_domain") or os.getenv("WHITE_INTERNET_CDN_DOMAIN")
         if not cdn_domain:
             logger.error(
                 "Configuration error: CDN domain is missing from server extra_data and WHITE_INTERNET_CDN_DOMAIN environment variable"
@@ -172,19 +165,13 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
 
         # Determine base path from server extra_data, environment or default
         base_path = (
-            (
-                server.extra_data.get("secret_base_path")
-                if isinstance(getattr(server, "extra_data", None), dict)
-                else None
-            )
+            extra.get("secret_base_path")
             or os.getenv("WHITE_INTERNET_PATH")
             or DEFAULT_WHITE_INTERNET_PATH
         )
 
         # Generate multi-relay configs if available
-        relays = None
-        if isinstance(getattr(server, "extra_data", None), dict) and "relays" in server.extra_data:
-            relays = server.extra_data["relays"]
+        relays = extra.get("relays")
         if relays is None and os.getenv("WHITE_INTERNET_RELAYS"):
             try:
                 relays = json.loads(os.environ["WHITE_INTERNET_RELAYS"])

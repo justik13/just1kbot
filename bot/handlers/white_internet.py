@@ -291,7 +291,10 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "wl_trial_activate")
 async def process_white_internet_trial_activate(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
@@ -317,7 +320,10 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
     if WHITE_INTERNET_TRIAL_MODE_ONLY:
         await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
         return
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
@@ -359,7 +365,10 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
     if WHITE_INTERNET_TRIAL_MODE_ONLY:
         await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
         return
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
@@ -398,13 +407,16 @@ async def show_topup_menu(query: CallbackQuery, session: AsyncSession):
     if WHITE_INTERNET_TRIAL_MODE_ONLY:
         await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
         return
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is not None:
         sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-        bot_domain = get_settings().DOMAIN
+        sub_domain = await _resolve_subscription_domain(session, sub)
         if sub is None or sub.status not in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
-            await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, bot_domain))
+            await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, sub_domain))
             return
     await query.message.edit_text(texts.WL_TOPUP_MENU_TEXT, reply_markup=get_topup_keyboard(), parse_mode="HTML")
 
@@ -414,7 +426,10 @@ async def process_topup_pack(query: CallbackQuery, session: AsyncSession):
     if WHITE_INTERNET_TRIAL_MODE_ONLY:
         await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
         return
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     try:
         pack_gb = int(query.data.replace("wl_topup_pack_", ""))
     except ValueError:

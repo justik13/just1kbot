@@ -292,6 +292,10 @@ async def process_search_user(
 
     if message.text.startswith("/"):
         await state.clear()
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
 
     from database.repositories.users_repo import search_user_flexible
@@ -303,6 +307,7 @@ async def process_search_user(
             message.chat.id,
             texts.ADMIN_USERS_LIST_USER_PO_ZAPROSU_NE_NAYDE.format(safe_message_text=safe(message.text)),
             get_back_button("admin_users"),
+            trigger_message_id=message.message_id,
             parse_mode="HTML",
         )
         await state.clear()
