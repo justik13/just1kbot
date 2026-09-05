@@ -136,6 +136,31 @@ def get_cdn_domain() -> Optional[str]:
     return None
 
 
+def get_sub_path_prefix() -> Optional[str]:
+    """Resolves subscription path prefix configured for this Origin node.
+
+    1. Checks WHITE_INTERNET_SUB_PATH_PREFIX environment variable.
+    2. Reads sub_path_prefix from STATE_FILE_PATH (/etc/just1knode/state.json).
+    3. Fallback to /sub/wl.
+    """
+    env_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX")
+    if env_prefix and env_prefix.strip():
+        val = env_prefix.strip().rstrip("/")
+        return val if val.startswith("/") else f"/{val}"
+
+    if STATE_FILE_PATH.exists():
+        try:
+            with open(STATE_FILE_PATH, "r", encoding="utf-8") as f:
+                st = json.load(f)
+                if isinstance(st, dict) and st.get("sub_path_prefix"):
+                    val = str(st["sub_path_prefix"]).strip().rstrip("/")
+                    return val if val.startswith("/") else f"/{val}"
+        except Exception as e:
+            logger.warning("Could not read sub_path_prefix from %s: %s", STATE_FILE_PATH, e)
+
+    return "/sub/wl"
+
+
 def get_target_inbounds() -> List[str]:
     """Dynamically discover all configured Just1k VLESS inbounds strictly filtering by managed namespaces."""
     discovered_tags: List[str] = []
@@ -394,6 +419,7 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         "relays": relays,
         "secret_base_path": secret_path,
         "cdn_domain": get_cdn_domain(),
+        "sub_path_prefix": get_sub_path_prefix(),
         "node_epoch": running_epoch if is_running else None,
         "boot_id": boot_id if is_running else None,
         "starttime": starttime if is_running else None,

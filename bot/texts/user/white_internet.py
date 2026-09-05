@@ -65,11 +65,15 @@ WL_TOPUP_MENU_TEXT = (
     "Выберите желаемый объем:"
 )
 
+WL_ALERT_TRAFFIC_UP_TO_DATE = "Данные о трафике актуальны."
+WL_ALERT_TRAFFIC_UPDATED = "Данные о трафике обновлены."
+
 WL_INCY_INSTRUCTIONS_TEXT = (
     "📱 <b>Подключение Белого Интернета в приложении INCY</b>\n\n"
     "1️⃣ <b>Установите приложение INCY:</b>\n"
-    "   🍏 <a href=\"https://apps.apple.com/app/incy/id6504289871\">Скачать в App Store (для iPhone / iPad)</a>\n"
-    "   🤖 <a href=\"https://play.google.com/store/apps/details?id=app.incy.client\">Скачать в Google Play (для Android)</a>\n\n"
+    "   🍏 <a href=\"https://apps.apple.com/app/incy/id6756943388\">Скачать в App Store (для iPhone / iPad)</a>\n"
+    "   🤖 <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Скачать в Google Play (для Android)</a>\n"
+    "   📦 <a href=\"https://github.com/INCY-DEV/incy-platforms/releases\">Скачать APK файл напрямую (GitHub)</a>\n\n"
     "2️⃣ <b>Скопируйте вашу ссылку подписки:</b>\n"
     "<code>{url}</code>\n"
     "<i>(нажмите на ссылку выше или на кнопку внизу)</i>\n\n"

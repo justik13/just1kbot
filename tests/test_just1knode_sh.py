@@ -476,7 +476,7 @@ exit 0
             json.dump({"inbounds": [], "outbounds": custom_outbounds, "routing": {"rules": []}}, f)
 
         # Run origin installer with surgical merge
-        cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4"'
+        cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4" "origin.example.com" "just1k.best"'
         res = self._run_shell_snippet(cmd)
         self.assertEqual(
             res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}"
@@ -512,7 +512,7 @@ exit 0
             json.dump({"inbounds": custom_inbounds, "outbounds": [], "routing": {"rules": []}}, f)
 
         # Run origin installer with surgical merge
-        cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4"'
+        cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4" "origin.example.com" "just1k.best"'
         res = self._run_shell_snippet(cmd)
         self.assertEqual(
             res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}"
@@ -585,6 +585,20 @@ exit 0
         )
         self.assertNotEqual(res_install.returncode, 0)
         self.assertIn("BOT_IP обязателен", res_install.stderr + res_install.stdout)
+
+        # Case 4: Fail-closed installation when BOT_DOMAIN is empty
+        res_empty_domain = self._run_shell_snippet(
+            'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/w_test" "1.2.3.4" "origin.example.com" "" < /dev/null'
+        )
+        self.assertNotEqual(res_empty_domain.returncode, 0)
+        self.assertIn("BOT_DOMAIN обязателен", res_empty_domain.stderr + res_empty_domain.stdout)
+
+        # Case 5: Fail-closed installation when BOT_DOMAIN is an IP address
+        res_ip_domain = self._run_shell_snippet(
+            'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/w_test" "1.2.3.4" "origin.example.com" "194.113.106.134" < /dev/null'
+        )
+        self.assertNotEqual(res_ip_domain.returncode, 0)
+        self.assertIn("BOT_DOMAIN должен быть доменным именем (FQDN)", res_ip_domain.stderr + res_ip_domain.stdout)
 
     # -------------------------------------------------------------------------
     # F20: Verified Update Rollback in update_xray
@@ -802,7 +816,7 @@ run_doctor
         domain = "origin.example.com"
         secret_path = "/stream"
 
-        cmd = f'install_xray_origin_node "{domain}" "admin@example.com" "test_api_key_123" "{secret_path}" "198.51.100.1"'
+        cmd = f'install_xray_origin_node "{domain}" "admin@example.com" "test_api_key_123" "{secret_path}" "198.51.100.1" "{domain}" "just1k.best"'
         res = self._run_shell_snippet(cmd)
         self.assertEqual(
             res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}"
@@ -880,8 +894,9 @@ run_doctor
     def test_functional_add_relay_node_reality_and_egress_enforcement(self):
         self._prepare_base_env()
         # Initialize origin config first
-        cmd_init = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "198.51.100.1"'
-        self._run_shell_snippet(cmd_init)
+        cmd_init = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "198.51.100.1" "origin.example.com" "just1k.best"'
+        res_init = self._run_shell_snippet(cmd_init)
+        self.assertEqual(res_init.returncode, 0, f"install_xray_origin_node failed: {res_init.stderr + res_init.stdout}")
 
         # Add Relay with REALITY
         cmd_relay = 'add_relay_node "Germany" "203.0.113.50" "10443" "test-relay-uuid" "de" "reality" "pubkey123" "shortid123" "www.google.com"'
@@ -1067,7 +1082,60 @@ run_doctor
         self.assertIn('set $bot_upstream "https://just1k.best";', content)
         self.assertIn("proxy_pass $bot_upstream;", content)
         self.assertIn("proxy_ssl_server_name on;", content)
+        self.assertIn("proxy_ssl_name just1k.best;", content)
+        self.assertIn("proxy_ssl_verify on;", content)
+        self.assertIn("proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;", content)
+        self.assertNotIn("proxy_ssl_verify off;", content)
         self.assertIn("proxy_set_header Host just1k.best;", content)
+
+    def test_deploy_subscription_proxy_conf_fails_on_ip_target(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "194.113.106.134"}, f
+            )
+
+        res = self._run_shell_snippet("deploy_subscription_proxy_conf")
+        self.assertNotEqual(res.returncode, 0, "deploy_subscription_proxy_conf must fail if target is an IP")
+        self.assertIn("BOT_DOMAIN FQDN", res.stderr + res.stdout)
+
+    def test_deploy_subscription_proxy_conf_fails_on_missing_target(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "origin", "domain": "origin.example.com"}, f)
+
+        res = self._run_shell_snippet("deploy_subscription_proxy_conf")
+        self.assertNotEqual(res.returncode, 0, "deploy_subscription_proxy_conf must fail if target is missing")
+        self.assertIn("BOT_DOMAIN FQDN", res.stderr + res.stdout)
+
+    def test_heal_and_update_origin_config_handles_legacy_ip_without_crashing(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "194.113.106.134"}, f
+            )
+
+        res = self._run_shell_snippet("heal_and_update_origin_config")
+        self.assertEqual(res.returncode, 0, "heal_and_update_origin_config must not crash on legacy IP in bot_domain")
+        self.assertIn("устаревший bot_domain в виде IP", res.stderr + res.stdout)
+
+    def test_heal_and_update_origin_config_migrates_with_env_bot_domain(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "194.113.106.134"}, f
+            )
+
+        res = self._run_shell_snippet("BOT_DOMAIN=just1k.best heal_and_update_origin_config")
+        self.assertEqual(res.returncode, 0)
+        sub_conf = self.nginx_relays_d / "sub-wl.conf"
+        self.assertTrue(sub_conf.exists())
+        self.assertIn("just1k.best", sub_conf.read_text(encoding="utf-8"))
+
+        # Verify state.json was updated with the migrated FQDN
+        with open(self.state_dir / "state.json", "r", encoding="utf-8") as f:
+            st = json.load(f)
+        self.assertEqual(st.get("bot_domain"), "just1k.best")
 
     def test_normalize_domain_strips_protocols_and_slashes(self):
         self._prepare_base_env()

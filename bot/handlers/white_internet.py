@@ -7,7 +7,7 @@ import logging
 import os
 
 from aiogram import F, Router
-
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -225,12 +225,12 @@ async def _resolve_subscription_domain(
 
 @router.callback_query(F.data == "white_internet")
 async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
-    try:
-        await query.answer()
-    except Exception:
-        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
+        try:
+            await query.answer()
+        except Exception:
+            pass
         await query.message.answer(texts.WL_USER_NOT_FOUND)
         return
 
@@ -285,8 +285,28 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
     kb = get_white_internet_overview_keyboard(sub, sub_domain, base_price=base_price_int)
     try:
         await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    except Exception:
-        await query.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        try:
+            await query.answer(texts.WL_ALERT_TRAFFIC_UPDATED, show_alert=False)
+        except Exception:
+            pass
+    except TelegramBadRequest as exc:
+        if "not_modified" in str(exc).lower().replace(" ", "_"):
+            try:
+                await query.answer(texts.WL_ALERT_TRAFFIC_UP_TO_DATE, show_alert=False)
+            except Exception:
+                pass
+        else:
+            logger.warning("TelegramBadRequest editing white internet menu: %s", exc)
+            try:
+                await query.answer()
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.warning("Unexpected error editing white internet menu: %s", exc)
+        try:
+            await query.answer()
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data == "wl_trial_activate")

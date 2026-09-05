@@ -30,6 +30,7 @@ from bot.texts.runtime.notifications import (
     TOPUP_LINK_CARD,
 )
 from config.constants import WORKER_ERROR_SLEEP_INTERVAL
+from config.enums import ServiceType
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, TariffQuote, TariffVersion, User
@@ -64,6 +65,7 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                 )
                 .where(
                     TariffQuote.status == "consumed",
+                    TariffQuote.service_type == ServiceType.AWG.value,
                     TariffQuote.operation_type.in_(
                         ("purchase", "renew", "change")
                     ),

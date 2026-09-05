@@ -1,6 +1,6 @@
 [project]
 name = "just1kbot"
-version = "1.0.0"
+version = "2.3.0"
 description = "Telegram bot for selling VPN access based on AmneziaWG 2.0"
 requires-python = ">=3.12"
 

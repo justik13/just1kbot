@@ -27,6 +27,7 @@ from app import (  # noqa: E402
     client_store,
     epoch_manager,
     get_secret_base_path,
+    get_sub_path_prefix,
     get_target_inbounds,
     grpc_client,
     node_sync_state,
@@ -60,6 +61,27 @@ def test_auth_enforcement():
             assert data["status"] == "ok"
             assert data["xray_running"] is True
             assert data["grpc_ok"] is True
+            assert "sub_path_prefix" in data
+
+
+def test_sub_path_prefix_resolution(tmp_path):
+    # Default fallback
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("WHITE_INTERNET_SUB_PATH_PREFIX", None)
+        with patch("app.STATE_FILE_PATH", tmp_path / "non_existent.json"):
+            assert get_sub_path_prefix() == "/sub/wl"
+
+    # From environment variable
+    with patch.dict(os.environ, {"WHITE_INTERNET_SUB_PATH_PREFIX": "custom/prefix/"}):
+        assert get_sub_path_prefix() == "/custom/prefix"
+
+    # From state file
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps({"sub_path_prefix": "/state_feed"}), encoding="utf-8")
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("WHITE_INTERNET_SUB_PATH_PREFIX", None)
+        with patch("app.STATE_FILE_PATH", state_file):
+            assert get_sub_path_prefix() == "/state_feed"
 
 
 def test_traffic_snapshot():

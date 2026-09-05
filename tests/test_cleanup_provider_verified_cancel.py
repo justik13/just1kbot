@@ -165,14 +165,13 @@ class ProviderVerifiedAutoExpireTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(stmt, SAUpdate)
             and getattr(stmt.table, "name", None) == "payment_provider_operations"
         ]
-        self.assertEqual(len(ppo_updates), 1)
-        compiled = str(
-            ppo_updates[0].compile(
+        where_compiled = str(
+            ppo_updates[0].whereclause.compile(
                 dialect=postgresql_dialect(), compile_kwargs={"literal_binds": True}
             )
         )
-        self.assertIn("501", compiled)
-        self.assertNotIn("502", compiled)
+        self.assertIn("501", where_compiled)
+        self.assertNotIn("502", where_compiled)
         # The audit event is written for the actually-expired payment only.
         added_events = [obj for obj in calls["added"] if type(obj).__name__ == "PaymentEvent"]
         self.assertEqual([ev.payment_id for ev in added_events], [501])

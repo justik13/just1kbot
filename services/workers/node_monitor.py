@@ -5,13 +5,18 @@ ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED -> MANUAL_DISABLED
 """
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
+import aiohttp
 from aiogram import Bot
+from sqlalchemy import func, select
 
 from bot.keyboards.notifications import get_node_monitor_alert_keyboard
 from bot.texts.runtime.alerts import (
+    ALERT_INGRESS_PROBLEM,
+    ALERT_INGRESS_RESTORED,
     ALERT_SERVER_AUTO_DISABLED,
     ALERT_SERVER_AUTO_DISABLED_RECOVERED,
     ALERT_SERVER_DISK_CRITICAL,
@@ -61,6 +66,7 @@ class ServerMonitorState:
         self.last_alert_sent_state: str | None = None
         self.disk_alert_last_sent: float | None = None
         self.recovery_notice_sent: bool = False
+        self.ingress_problem: bool = False
 
     def sync_from_db_server(self, db_server: Server):
         if db_server:
@@ -76,6 +82,10 @@ class ServerMonitorState:
             self.consecutive_successes = db_server.consecutive_successes or 0
             self.recovery_notice_sent = bool(db_server.recovery_notice_sent)
             self.last_alert_sent_state = db_server.last_alert_sent_state
+            if isinstance(getattr(db_server, "extra_data", None), dict):
+                self.ingress_problem = bool(db_server.extra_data.get("ingress_problem", False))
+            else:
+                self.ingress_problem = False
 
             if db_server.problem_started_at:
                 now_m = time.monotonic()
@@ -119,6 +129,7 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.recovery_notice_sent = False
     st.last_alert_sent_state = None
     st.disk_alert_last_sent = None
+    st.ingress_problem = False
 
 
 def clear_monitor_states():
@@ -201,7 +212,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         )
         is_amnezia_node = not is_xray_node and server_proto == AMNEZIA_PROTOCOL
 
-        # 4. Исполнение проверки с гарантированным отловом любых сетевых ошибок/таймаутов
+        # 4a. Исполнение проверки Core Node API с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
         xray_epoch = None
         xray_data = None
@@ -226,7 +237,149 @@ async def check_node_resources_and_alerts(bot: Bot):
             logger.warning("Healthcheck exception for server %s (%s): %s", server.id, server.name, exc)
             is_healthy = False
 
+        # 4b. Изолированная синтетическая проверка Ingress (публичный CDN / Nginx Origin)
+        # Строгое расцепление (AGENTS.md §9.7): сбои на синтетическом эндпоинте не аффектят статус ядра
+        # и выполняются независимо от того, успешен ли был core healthcheck.
+        ingress_probe_result: tuple[bool, str] | None = None
+        probe_domain: str | None = None
+        if is_xray_node:
+            try:
+                is_origin = (
+                    "xray_origin" in (getattr(server, "capabilities", None) or [])
+                    or bool((getattr(server, "extra_data", None) or {}).get("relays"))
+                    or bool((getattr(server, "extra_data", None) or {}).get("cdn_domain"))
+                )
+                if is_origin:
+                    if isinstance(getattr(server, "extra_data", None), dict):
+                        probe_domain = server.extra_data.get("cdn_domain") or server.extra_data.get("domain")
+                    if not probe_domain and server.api_url:
+                        from urllib.parse import urlsplit
+                        parsed = urlsplit(server.api_url)
+                        if parsed.hostname and not parsed.hostname.replace(".", "").isdigit() and parsed.hostname != "localhost":
+                            probe_domain = parsed.hostname
+
+                    if probe_domain:
+                        probe_domain = str(probe_domain).strip()
+                        sub_prefix = (
+                            (server.extra_data or {}).get("sub_path_prefix")
+                            or os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl")
+                        ).strip().rstrip("/")
+                        if not sub_prefix.startswith("/"):
+                            sub_prefix = f"/{sub_prefix}"
+                        probe_url = f"https://{probe_domain}{sub_prefix}/ping"
+                        try:
+                            timeout = aiohttp.ClientTimeout(total=5.0)
+                            async with aiohttp.ClientSession(timeout=timeout) as probe_sess:
+                                async with probe_sess.get(
+                                    probe_url,
+                                    allow_redirects=False,
+                                ) as probe_resp:
+                                    if probe_resp.status == 200:
+                                        ingress_probe_result = (True, "200")
+                                    else:
+                                        logger.warning(
+                                            "Xray origin node %s (%s) subscription proxy returned HTTP %s on %s",
+                                            server.id, probe_domain, probe_resp.status, probe_url,
+                                        )
+                                        ingress_probe_result = (False, str(probe_resp.status))
+                        except Exception as probe_exc:
+                            logger.warning(
+                                "Origin node %s (%s) subscription proxy ping failed on %s: %s",
+                                server.id, probe_domain, probe_url, probe_exc,
+                            )
+                            ingress_probe_result = (False, str(probe_exc))
+            except Exception as outer_probe_exc:
+                logger.warning(
+                    "Unexpected error preparing ingress probe for server %s: %s",
+                    server.id, outer_probe_exc,
+                )
+
         alerts_to_send: list[dict] = []
+
+        # Decoupled ingress alert evaluation and delivery (independent of core server CAS / health state)
+        if ingress_probe_result is not None and probe_domain:
+            ingress_ok, ingress_detail = ingress_probe_result
+            lock_key = 8_000_000_000 + int(server.id)
+
+            async with session_scope() as session:
+                is_pg = False
+                bind = getattr(session, "bind", None)
+                if not bind and hasattr(session, "sync_session"):
+                    bind = getattr(session.sync_session, "bind", None)
+                if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
+                    is_pg = True
+                    got_lock = bool(await session.scalar(select(func.pg_try_advisory_lock(lock_key))))
+                    if not got_lock:
+                        logger.debug("Ingress alert evaluation for server %d locked by peer worker. Skipping alert dispatch.", server.id)
+                else:
+                    got_lock = True
+
+                if got_lock:
+                    try:
+                        fresh_server = await get_server_by_id(session, server.id)
+                        db_extra = dict((fresh_server.extra_data if fresh_server else server.extra_data) or {})
+                        db_ingress_problem = bool(db_extra.get("ingress_problem"))
+
+                        # Durable-by-Default: sync in-memory state with DB
+                        if db_ingress_problem:
+                            st.ingress_problem = True
+
+                        has_problem = db_ingress_problem or st.ingress_problem
+
+                        if not ingress_ok:
+                            if not has_problem:
+                                sent_ok = False
+                                try:
+                                    sent_ok = await _send_admin_alert_msg(
+                                        bot,
+                                        ALERT_INGRESS_PROBLEM.format(
+                                            server_name=safe(server.name),
+                                            server_id=server.id,
+                                            domain=safe(probe_domain),
+                                            status_or_err=safe(ingress_detail),
+                                            endpoint=safe(f"{sub_prefix}/ping"),
+                                        ),
+                                        reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                    )
+                                except Exception as e:
+                                    logger.error("Failed to deliver ingress problem alert: %s", e)
+                                if sent_ok:
+                                    st.ingress_problem = True
+                                    if fresh_server:
+                                        db_extra["ingress_problem"] = True
+                                        await update_server(session, fresh_server, extra_data=db_extra)
+                                        await session.commit()
+                        else:
+                            if has_problem:
+                                sent_ok = False
+                                try:
+                                    sent_ok = await _send_admin_alert_msg(
+                                        bot,
+                                        ALERT_INGRESS_RESTORED.format(
+                                            server_name=safe(server.name),
+                                            server_id=server.id,
+                                            domain=safe(probe_domain),
+                                            endpoint=safe(f"{sub_prefix}/ping"),
+                                        ),
+                                        reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                    )
+                                except Exception as e:
+                                    logger.error("Failed to deliver ingress restored alert: %s", e)
+                                if sent_ok:
+                                    st.ingress_problem = False
+                                    if fresh_server:
+                                        db_extra.pop("ingress_problem", None)
+                                        await update_server(session, fresh_server, extra_data=db_extra)
+                                        await session.commit()
+                    finally:
+                        if is_pg and got_lock:
+                            try:
+                                if session.in_transaction():
+                                    await session.commit()
+                                await session.scalar(select(func.pg_advisory_unlock(lock_key)))
+                                await session.commit()
+                            except Exception as unlock_err:
+                                logger.debug("Error releasing ingress advisory lock %d: %s", lock_key, unlock_err)
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
@@ -403,6 +556,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                     extra_update["relays"] = xray_data["relays"]
                 if "secret_base_path" in xray_data:
                     extra_update["secret_base_path"] = xray_data["secret_base_path"]
+                if "sub_path_prefix" in xray_data and xray_data["sub_path_prefix"]:
+                    extra_update["sub_path_prefix"] = xray_data["sub_path_prefix"]
                 if extra_update:
                     update_kwargs["extra_data"] = extra_update
 

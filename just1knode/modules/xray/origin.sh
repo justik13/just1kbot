@@ -11,32 +11,51 @@ normalize_domain() {
 
 deploy_subscription_proxy_conf() {
     local target_host="${1:-}"
+    local custom_prefix="${2:-}"
     if [[ -z "$target_host" ]]; then
         target_host="$(get_state_val "bot_domain" 2>/dev/null || true)"
     fi
     if [[ -z "$target_host" ]]; then
-        target_host="$(get_state_val "bot_ip" 2>/dev/null || true)"
-    fi
-    if [[ -z "$target_host" ]]; then
-        target_host="127.0.0.1"
+        target_host="${BOT_DOMAIN:-}"
     fi
     target_host="$(normalize_domain "$target_host")"
 
-    local ssl_verify_directives=""
-    if [[ ! "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$target_host" != "localhost" && -f /etc/ssl/certs/ca-certificates.crt ]]; then
-        ssl_verify_directives="        proxy_ssl_verify on;
-        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;"
+    if [[ -z "$target_host" || "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$target_host" == "localhost" ]]; then
+        if [[ -t 0 ]]; then
+            warn "Указан недопустимый хост для проксирования подписок: '${target_host:-<пусто>}' (требуется FQDN с валидным TLS)."
+            read -rp "Введите домен Telegram-бота (например: just1k.best): " prompt_target || true
+            target_host="$(normalize_domain "$prompt_target")"
+        fi
     fi
+
+    if [[ -z "$target_host" || "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$target_host" == "localhost" ]]; then
+        error "Для настройки безопасного Nginx-проксирования подписок требуется валидный домен бота (BOT_DOMAIN FQDN). Указан недопустимый хост: '${target_host:-<пусто>}'. Проксирование HTTPS-upstream по IP без проверки TLS запрещено."
+    fi
+
+    set_state_val "bot_domain" "$target_host" 2>/dev/null || true
+
+    local sub_prefix="${custom_prefix:-}"
+    if [[ -z "$sub_prefix" ]]; then
+        sub_prefix="$(get_state_val "sub_path_prefix" 2>/dev/null || true)"
+    fi
+    if [[ -z "$sub_prefix" ]]; then
+        sub_prefix="${WHITE_INTERNET_SUB_PATH_PREFIX:-/sub/wl}"
+    fi
+    sub_prefix="${sub_prefix%/}"
+    [[ ! "$sub_prefix" =~ ^/ ]] && sub_prefix="/$sub_prefix"
+    set_state_val "sub_path_prefix" "$sub_prefix" 2>/dev/null || true
 
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
-    location ^~ /sub/wl {
+    location ^~ ${sub_prefix} {
         resolver 1.1.1.1 8.8.8.8 77.88.8.8 valid=30s ipv6=off;
         set \$bot_upstream "https://${target_host}";
         proxy_pass \$bot_upstream;
         proxy_ssl_server_name on;
-${ssl_verify_directives}
+        proxy_ssl_name ${target_host};
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
         proxy_set_header Host ${target_host};
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -46,7 +65,7 @@ ${ssl_verify_directives}
         proxy_send_timeout 30s;
     }
 EOF
-    info "Сконфигурировано Nginx-проксирование подписок (/sub/wl -> dynamic resolver -> https://${target_host})"
+    info "Сконфигурировано Nginx-проксирование подписок (${sub_prefix} -> dynamic resolver -> https://${target_host} [TLS verified])"
 }
 
 install_xray_origin_node() {
@@ -94,17 +113,24 @@ install_xray_origin_node() {
     if [[ -z "$bot_domain" ]]; then
         local existing_bot_domain
         existing_bot_domain="$(get_state_val "bot_domain" 2>/dev/null || true)"
-        if [[ -n "$existing_bot_domain" ]]; then
+        if [[ -n "$existing_bot_domain" && ! "$existing_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$existing_bot_domain" != "localhost" ]]; then
             bot_domain="$existing_bot_domain"
-        elif [[ $# -eq 0 ]]; then
-            read -rp "Введите домен Telegram-бота (например: just1k.best) [по умолчанию: ${bot_ip}]: " input_bot_domain || true
-            bot_domain="${input_bot_domain:-$bot_ip}"
         else
-            bot_domain="${bot_ip:-}"
+            if [[ -n "$existing_bot_domain" ]]; then
+                warn "Обнаружено устаревшее значение bot_domain в state.json (IP: '$existing_bot_domain'). Для защищенного TLS-проксирования требуется FQDN."
+            fi
+            read -rp "Введите домен Telegram-бота (например: just1k.best): " input_bot_domain || true
+            bot_domain="${input_bot_domain:-}"
         fi
     fi
 
     bot_domain="$(normalize_domain "$bot_domain")"
+    if [[ -z "$bot_domain" ]]; then
+        error "BOT_DOMAIN обязателен для настройки защищенного TLS-проксирования подписок."
+    fi
+    if [[ "$bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$bot_domain" == "localhost" ]]; then
+        error "BOT_DOMAIN должен быть доменным именем (FQDN) с валидным SSL-сертификатом, а не IP-адресом: '$bot_domain'"
+    fi
 
     if [[ -n "$bot_domain" ]]; then
         info "Проверка связи с ботом через эндпоинт https://${bot_domain}/health..."
@@ -142,7 +168,7 @@ install_xray_origin_node() {
         fi
     fi
 
-    apt-get install -y -qq nginx certbot python3-certbot-nginx
+    apt-get install -y -qq nginx certbot python3-certbot-nginx ca-certificates
     mkdir -p "${CERTBOT_DIR}" "${NGINX_CONF_DIR}/conf.d"
     chmod 755 "${CERTBOT_DIR}" 2>/dev/null || true
     configure_safe_ufw "80/tcp"
@@ -858,8 +884,29 @@ except Exception:
 " "$RELAYS_FILE" "$NGINX_RELAYS_DIR" 2>/dev/null || true
     fi
 
-    # Авто-восстановление Nginx-проксирования подписок Белого Интернета (/sub/wl)
-    deploy_subscription_proxy_conf
+    # Авто-восстановление Nginx-проксирования подписок Белого Интернета
+    local heal_bot_domain
+    heal_bot_domain="$(get_state_val "bot_domain" 2>/dev/null || true)"
+    local env_bot_domain
+    env_bot_domain="$(normalize_domain "${BOT_DOMAIN:-}")"
+
+    # Если в state.json пусто или устаревший IP, но в BOT_DOMAIN передан валидный FQDN — используем его
+    if [[ -z "$heal_bot_domain" || "$heal_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$heal_bot_domain" == "localhost" ]]; then
+        if [[ -n "$env_bot_domain" && ! "$env_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$env_bot_domain" != "localhost" ]]; then
+            heal_bot_domain="$env_bot_domain"
+        fi
+    fi
+
+    heal_bot_domain="$(normalize_domain "$heal_bot_domain")"
+    if [[ -n "$heal_bot_domain" && ! "$heal_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$heal_bot_domain" != "localhost" ]]; then
+        deploy_subscription_proxy_conf "$heal_bot_domain"
+    else
+        if [[ -n "$heal_bot_domain" && "$heal_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            warn "Внимание: в state.json обнаружен устаревший bot_domain в виде IP ($heal_bot_domain). Проксирование подписок с TLS требует FQDN. Авто-восстановление sub-wl.conf пропущено (укажите BOT_DOMAIN для обновления)."
+        else
+            warn "BOT_DOMAIN не настроен в state.json, пропуск авто-восстановления Nginx-проксирования подписок."
+        fi
+    fi
 
     # Системное отключение IPv6
     if [[ $EUID -eq 0 ]]; then
