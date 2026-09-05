@@ -15,13 +15,11 @@ deploy_subscription_proxy_conf() {
     if [[ -z "$target_host" ]]; then
         target_host="$(get_state_val "bot_domain" 2>/dev/null || true)"
     fi
-    if [[ -z "$target_host" ]]; then
-        target_host="$(get_state_val "bot_ip" 2>/dev/null || true)"
-    fi
-    if [[ -z "$target_host" ]]; then
-        target_host="127.0.0.1"
-    fi
     target_host="$(normalize_domain "$target_host")"
+
+    if [[ -z "$target_host" || "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$target_host" == "localhost" ]]; then
+        error "Для настройки безопасного Nginx-проксирования подписок требуется валидный домен бота (BOT_DOMAIN FQDN). Указан недопустимый хост: '${target_host:-<пусто>}'. Проксирование HTTPS-upstream по IP без проверки TLS запрещено."
+    fi
 
     local sub_prefix="${custom_prefix:-}"
     if [[ -z "$sub_prefix" ]]; then
@@ -34,12 +32,6 @@ deploy_subscription_proxy_conf() {
     [[ ! "$sub_prefix" =~ ^/ ]] && sub_prefix="/$sub_prefix"
     set_state_val "sub_path_prefix" "$sub_prefix" 2>/dev/null || true
 
-    local ssl_verify_directives=""
-    if [[ ! "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$target_host" != "localhost" ]]; then
-        ssl_verify_directives="        proxy_ssl_verify on;
-        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;"
-    fi
-
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
@@ -49,7 +41,8 @@ deploy_subscription_proxy_conf() {
         proxy_pass \$bot_upstream;
         proxy_ssl_server_name on;
         proxy_ssl_name ${target_host};
-${ssl_verify_directives}
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
         proxy_set_header Host ${target_host};
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -59,7 +52,7 @@ ${ssl_verify_directives}
         proxy_send_timeout 30s;
     }
 EOF
-    info "Сконфигурировано Nginx-проксирование подписок (${sub_prefix} -> dynamic resolver -> https://${target_host})"
+    info "Сконфигурировано Nginx-проксирование подписок (${sub_prefix} -> dynamic resolver -> https://${target_host} [TLS verified])"
 }
 
 install_xray_origin_node() {
@@ -109,15 +102,19 @@ install_xray_origin_node() {
         existing_bot_domain="$(get_state_val "bot_domain" 2>/dev/null || true)"
         if [[ -n "$existing_bot_domain" ]]; then
             bot_domain="$existing_bot_domain"
-        elif [[ $# -eq 0 ]]; then
-            read -rp "Введите домен Telegram-бота (например: just1k.best) [по умолчанию: ${bot_ip}]: " input_bot_domain || true
-            bot_domain="${input_bot_domain:-$bot_ip}"
         else
-            bot_domain="${bot_ip:-}"
+            read -rp "Введите домен Telegram-бота (например: just1k.best): " input_bot_domain || true
+            bot_domain="${input_bot_domain:-}"
         fi
     fi
 
     bot_domain="$(normalize_domain "$bot_domain")"
+    if [[ -z "$bot_domain" ]]; then
+        error "BOT_DOMAIN обязателен для настройки защищенного TLS-проксирования подписок."
+    fi
+    if [[ "$bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$bot_domain" == "localhost" ]]; then
+        error "BOT_DOMAIN должен быть доменным именем (FQDN) с валидным SSL-сертификатом, а не IP-адресом: '$bot_domain'"
+    fi
 
     if [[ -n "$bot_domain" ]]; then
         info "Проверка связи с ботом через эндпоинт https://${bot_domain}/health..."
@@ -872,7 +869,16 @@ except Exception:
     fi
 
     # Авто-восстановление Nginx-проксирования подписок Белого Интернета
-    deploy_subscription_proxy_conf
+    local heal_bot_domain
+    heal_bot_domain="$(get_state_val "bot_domain" 2>/dev/null || true)"
+    if [[ -z "$heal_bot_domain" ]]; then
+        heal_bot_domain="${BOT_DOMAIN:-}"
+    fi
+    if [[ -n "$heal_bot_domain" ]]; then
+        deploy_subscription_proxy_conf "$heal_bot_domain"
+    else
+        warn "BOT_DOMAIN не настроен в state.json, пропуск авто-восстановления Nginx-проксирования подписок."
+    fi
 
     # Системное отключение IPv6
     if [[ $EUID -eq 0 ]]; then

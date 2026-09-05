@@ -260,7 +260,10 @@ async def check_node_resources_and_alerts(bot: Bot):
 
                     if probe_domain:
                         probe_domain = str(probe_domain).strip()
-                        sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
+                        sub_prefix = (
+                            (server.extra_data or {}).get("sub_path_prefix")
+                            or os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl")
+                        ).strip().rstrip("/")
                         if not sub_prefix.startswith("/"):
                             sub_prefix = f"/{sub_prefix}"
                         probe_url = f"https://{probe_domain}{sub_prefix}/ping"
@@ -551,6 +554,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                     extra_update["relays"] = xray_data["relays"]
                 if "secret_base_path" in xray_data:
                     extra_update["secret_base_path"] = xray_data["secret_base_path"]
+                if "sub_path_prefix" in xray_data and xray_data["sub_path_prefix"]:
+                    extra_update["sub_path_prefix"] = xray_data["sub_path_prefix"]
                 if extra_update:
                     update_kwargs["extra_data"] = extra_update
 

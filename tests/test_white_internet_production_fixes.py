@@ -836,6 +836,84 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             call_url = mock_sess.get.call_args[0][0]
             self.assertEqual(call_url, "https://cdn.just1k.best/custom_feed/ping")
 
+    async def test_node_monitor_ingress_probe_prioritizes_server_extra_data_sub_prefix(self):
+        """Ingress synthetic probe prioritizes server.extra_data['sub_path_prefix'] over env variable."""
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock())
+
+        server = Server(
+            id=170,
+            name="Origin Prefix Priority Test",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={"cdn_domain": "cdn.just1k.best", "sub_path_prefix": "/node_custom_feed"},
+        )
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok", "sub_path_prefix": "/node_custom_feed"}
+
+        class MockProbeResponse:
+            def __init__(self, status):
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession") as mock_http, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings), \
+             patch.dict("os.environ", {"WHITE_INTERNET_SUB_PATH_PREFIX": "/env_fallback_feed"}):
+
+            mock_sess = MagicMock()
+            mock_sess.get.return_value = MockProbeResponse(status=200)
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=None)
+            mock_http.return_value = mock_sess
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            await check_node_resources_and_alerts(bot)
+
+            mock_sess.get.assert_called_once()
+            call_url = mock_sess.get.call_args[0][0]
+            self.assertEqual(call_url, "https://cdn.just1k.best/node_custom_feed/ping")
+
+            # Verify snapshot update persisted sub_path_prefix from xray_data
+            mock_snap.assert_called_once()
+            call_kwargs = mock_snap.call_args[1]
+            self.assertIn("extra_data", call_kwargs)
+            self.assertEqual(call_kwargs["extra_data"].get("sub_path_prefix"), "/node_custom_feed")
+
     async def test_node_monitor_ingress_alert_dedup_against_db_state(self):
         """When DB already marks ingress_problem=True, repeated failures do not dispatch duplicate alerts."""
         clear_monitor_states()
