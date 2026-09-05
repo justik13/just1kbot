@@ -296,7 +296,9 @@ class Server(Base):
     api_url: Mapped[str] = mapped_column(String(500), nullable=False)
     api_key: Mapped[str] = mapped_column(EncryptedString(critical=True), nullable=False)
 
-    protocol: Mapped[str] = mapped_column(String(50), default=AMNEZIA_PROTOCOL)
+    protocol: Mapped[str] = mapped_column(
+        String(50), nullable=False, default=AMNEZIA_PROTOCOL, server_default=AMNEZIA_PROTOCOL
+    )
     max_clients: Mapped[int] = mapped_column(Integer, default=50)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

@@ -142,7 +142,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0021_wi_orphan_cleanups"])
+        self.assertEqual(heads, ["0022_servers_protocol_not_null"])
+        rev = scripts.get_revision("0022_servers_protocol_not_null")
+        self.assertEqual(rev.down_revision, "0021_wi_orphan_cleanups")
         rev = scripts.get_revision("0021_wi_orphan_cleanups")
         self.assertEqual(rev.down_revision, "0020_wi_reset_hard_delete")
         rev = scripts.get_revision("0020_wi_reset_hard_delete")

@@ -130,16 +130,77 @@ class TestUtilsFormatters(unittest.TestCase):
         self.assertEqual(format_traffic(1073741824), "1.0 GiB")
         self.assertEqual(format_traffic(1099511627776), "1.0 TiB")
 
+    def test_normalize_hostname(self):
+        from utils.security import normalize_hostname
+
+        self.assertEqual(normalize_hostname("https://cdn.example.com/"), "cdn.example.com")
+        self.assertEqual(normalize_hostname("http://bot.example.com:8080/sub/wl"), "bot.example.com")
+        self.assertEqual(normalize_hostname("  JUST1K.BEST  "), "just1k.best")
+        self.assertEqual(normalize_hostname("origin.example.com."), "origin.example.com")
+        self.assertEqual(normalize_hostname("cdn.example.com/sub/wl/token"), "cdn.example.com")
+        self.assertEqual(normalize_hostname("https://user:pass@cdn.example.com:443/test"), "cdn.example.com")
+        self.assertEqual(normalize_hostname("http://127.0.0.1:8080"), "127.0.0.1")
+        self.assertEqual(normalize_hostname("foo_bar.com"), "foo_bar.com")
+        self.assertEqual(normalize_hostname("foo"), "foo")
+        self.assertIsNone(normalize_hostname(""))
+        self.assertIsNone(normalize_hostname("   "))
+        self.assertIsNone(normalize_hostname(None))
+        self.assertIsNone(normalize_hostname("evil.com:bad"))
+        self.assertIsNone(normalize_hostname("trusted.com@evil.com"))
+
+    def test_validate_public_fqdn(self):
+        from utils.security import validate_public_fqdn
+
+        self.assertTrue(validate_public_fqdn("cdn.just1k.best"))
+        self.assertTrue(validate_public_fqdn("sub.domain.co.uk"))
+        self.assertTrue(validate_public_fqdn("node-1.origin.cloud"))
+        self.assertTrue(validate_public_fqdn("xn--e1afmkfd.xn--p1ai"))
+
+        self.assertFalse(validate_public_fqdn("foo"))
+        self.assertFalse(validate_public_fqdn("foo_bar.com"))
+        self.assertFalse(validate_public_fqdn("localhost"))
+        self.assertFalse(validate_public_fqdn("app.localhost"))
+        self.assertFalse(validate_public_fqdn("127.0.0.1"))
+        self.assertFalse(validate_public_fqdn("194.113.106.134"))
+        self.assertFalse(validate_public_fqdn("evil.com:bad"))
+        self.assertFalse(validate_public_fqdn("trusted.com@evil.com"))
+        self.assertFalse(validate_public_fqdn("evil.com;rm"))
+        self.assertFalse(validate_public_fqdn("-bad.com"))
+        self.assertFalse(validate_public_fqdn("bad-.com"))
+        self.assertFalse(validate_public_fqdn("foo.123"))
+        self.assertFalse(validate_public_fqdn("foo.c"))
+        self.assertFalse(validate_public_fqdn("foo..com"))
+        self.assertFalse(validate_public_fqdn(""))
+        self.assertFalse(validate_public_fqdn(None))
+
     def test_normalize_public_domain(self):
         from utils.security import normalize_public_domain
+
         self.assertEqual(normalize_public_domain("https://cdn.example.com/"), "cdn.example.com")
         self.assertEqual(normalize_public_domain("http://bot.example.com:8080/sub/wl"), "bot.example.com")
         self.assertEqual(normalize_public_domain("  JUST1K.BEST  "), "just1k.best")
         self.assertEqual(normalize_public_domain("origin.example.com."), "origin.example.com")
         self.assertEqual(normalize_public_domain("cdn.example.com/sub/wl/token"), "cdn.example.com")
+        self.assertEqual(normalize_public_domain("https://user:pass@cdn.example.com:443/test"), "cdn.example.com")
+
         self.assertIsNone(normalize_public_domain(""))
         self.assertIsNone(normalize_public_domain("   "))
         self.assertIsNone(normalize_public_domain(None))
+        self.assertIsNone(normalize_public_domain("foo"))
+        self.assertIsNone(normalize_public_domain("foo_bar.com"))
+        self.assertIsNone(normalize_public_domain("127.0.0.1"))
+        self.assertIsNone(normalize_public_domain("http://127.0.0.1:8080"))
+        self.assertIsNone(normalize_public_domain("evil.com:bad"))
+        self.assertIsNone(normalize_public_domain("trusted.com@evil.com"))
+        self.assertIsNone(normalize_public_domain("evil.com;rm"))
+        self.assertIsNone(normalize_public_domain("-bad.com"))
+        self.assertIsNone(normalize_public_domain("bad-.com"))
+
+        # Optional require_fqdn=False allows raw hostnames/IPs
+        self.assertEqual(
+            normalize_public_domain("http://127.0.0.1:8080", require_fqdn=False),
+            "127.0.0.1",
+        )
 
     def test_format_datetime(self):
         dt = datetime.datetime(2026, 8, 7, 14, 30, 0, tzinfo=datetime.timezone.utc)

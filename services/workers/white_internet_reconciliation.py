@@ -296,9 +296,21 @@ class WhiteInternetReconciliationWorker:
             res_servers = await sess.execute(stmt_servers)
             servers = res_servers.scalars().all()
             server_list = [
-                (s.id, s.name, s.api_url, s.api_key, s.xray_instance_epoch, s.xray_instance_boot_id, s.xray_instance_starttime, (s.extra_data or {}).get("relays", []))
+                (
+                    s.id,
+                    s.name,
+                    s.api_url,
+                    s.api_key,
+                    s.xray_instance_epoch,
+                    s.xray_instance_boot_id,
+                    s.xray_instance_starttime,
+                    (s.extra_data or {}).get("relays", []),
+                )
                 for s in servers
-                if getattr(s, "protocol", None) == XRAY_PROTOCOL
+                if (
+                    getattr(s, "protocol", None) == XRAY_PROTOCOL
+                    or (getattr(s, "protocol", None) is None and "xray_origin" in (s.capabilities or []))
+                )
                 and "xray_origin" in (s.capabilities or [])
                 and s.api_url
                 and s.api_key
@@ -460,8 +472,12 @@ class WhiteInternetReconciliationWorker:
                         await sess.commit()
                         swept += 1
                         continue
+                    server_proto = getattr(server, "protocol", None)
+                    if not server_proto:
+                        caps = getattr(server, "capabilities", None) or []
+                        server_proto = XRAY_PROTOCOL if "xray_origin" in caps else None
                     if (
-                        server.protocol != XRAY_PROTOCOL
+                        server_proto != XRAY_PROTOCOL
                         or not server.is_active
                         or not server.api_url
                         or not server.api_key

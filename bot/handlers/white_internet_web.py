@@ -134,10 +134,15 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             return web.Response(status=403, text=texts.WL_WEB_EXHAUSTED, headers=headers)
 
         server = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
+        server_proto = getattr(server, "protocol", None)
+        if not server_proto and server:
+            caps = getattr(server, "capabilities", None) or []
+            server_proto = XRAY_PROTOCOL if "xray_origin" in caps else None
+
         if (
             server is None
             or not server.is_active
-            or getattr(server, "protocol", None) != XRAY_PROTOCOL
+            or server_proto != XRAY_PROTOCOL
             or server.health_state != ServerHealthState.ONLINE
             or "xray_origin" not in (server.capabilities or [])
         ):

@@ -1,5 +1,6 @@
 import asyncio
 import ipaddress
+import re
 import socket
 from urllib.parse import urlparse
 
@@ -147,27 +148,93 @@ async def is_safe_url(url: str) -> bool:
         return False
 
 
-def normalize_public_domain(raw: str | None) -> str | None:
-    """Normalize domain/hostname by stripping scheme, port, paths, and trailing dots.
+def normalize_hostname(raw: str | None) -> str | None:
+    """Normalize domain/hostname or URL input by extracting cleaned lowercase hostname.
 
-    Returns clean lowercase hostname (e.g. 'cdn.example.com'), or None if input is empty or invalid.
+    Strips scheme, userinfo (user:pass@), port, path, query parameters, fragments,
+    and trailing dots. Returns None if input is empty or invalid.
     """
     if not raw or not isinstance(raw, str):
         return None
     val = raw.strip()
     if not val:
         return None
+    if "://" not in val and "@" in val:
+        return None
     try:
         if "://" in val:
             parsed = urlparse(val)
-            host = parsed.hostname or parsed.netloc.split(":")[0]
         else:
-            dummy = f"https://{val}"
-            parsed = urlparse(dummy)
-            host = parsed.hostname or parsed.netloc.split(":")[0]
+            parsed = urlparse(f"//{val}")
+        _ = parsed.port
+        host = parsed.hostname
+        if not host:
+            netloc = parsed.netloc or val.split("/")[0].split("?")[0].split("#")[0]
+            if "@" in netloc:
+                netloc = netloc.split("@")[-1]
+            if ":" in netloc and not netloc.startswith("["):
+                netloc = netloc.split(":")[0]
+            host = netloc
         if host:
             cleaned = host.strip().rstrip(".").lower()
             return cleaned if cleaned else None
     except Exception:
         pass
     return None
+
+
+def validate_public_fqdn(host: str | None) -> bool:
+    """Validate that host is a syntactically valid public RFC 1123 FQDN.
+
+    Rejects:
+    - Non-strings, empty strings, strings > 253 characters
+    - IP addresses (IPv4 / IPv6)
+    - localhost, .localhost, .local, .internal, .arpa
+    - Control characters, whitespaces, shell metacharacters, semicolons, quotes, etc.
+    - Underscores (_) anywhere in the domain
+    - Single-label hostnames (must have at least 2 labels)
+    - Labels with invalid characters, leading/trailing hyphens, or length > 63
+    - TLDs shorter than 2 characters or containing non-alphabetic characters (except punycode)
+    """
+    if not host or not isinstance(host, str):
+        return False
+    cleaned = host.rstrip(".").strip()
+    if not cleaned or len(cleaned) > 253:
+        return False
+    if not re.fullmatch(r"[a-zA-Z0-9.-]+", cleaned):
+        return False
+    try:
+        ipaddress.ip_address(cleaned)
+        return False
+    except ValueError:
+        pass
+    lower = cleaned.lower()
+    if lower == "localhost" or lower.endswith((".localhost", ".local", ".internal", ".arpa")):
+        return False
+    labels = lower.split(".")
+    if len(labels) < 2:
+        return False
+    for label in labels:
+        if not (1 <= len(label) <= 63):
+            return False
+        if not re.fullmatch(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?", label):
+            return False
+    tld = labels[-1]
+    if not re.fullmatch(r"([a-z]{2,}|xn--[a-z0-9]+)", tld):
+        return False
+    return True
+
+
+def normalize_public_domain(raw: str | None, require_fqdn: bool = True) -> str | None:
+    """Normalize and optionally validate a public domain / hostname.
+
+    1. Extracts cleaned lowercase hostname via normalize_hostname.
+    2. If require_fqdn is True (default), validates via validate_public_fqdn.
+    Returns clean lowercase hostname/domain, or None if invalid.
+    """
+    host = normalize_hostname(raw)
+    if not host:
+        return None
+    if require_fqdn and not validate_public_fqdn(host):
+        return None
+    return host

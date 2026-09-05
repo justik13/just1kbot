@@ -26,7 +26,10 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         server = await session.get(Server, server_id)
         if not server:
             raise LookupError("server not found")
-        server_proto = getattr(server, "protocol", None) or AMNEZIA_PROTOCOL
+        server_proto = getattr(server, "protocol", None)
+        if not server_proto:
+            caps = getattr(server, "capabilities", None) or []
+            server_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
         is_xray = server_proto == XRAY_PROTOCOL
         if is_xray:
             return ServerPeerSnapshot(
@@ -146,7 +149,10 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
 
         gen = get_server_generation(server.id)
 
-        server_proto = getattr(server, "protocol", None) or AMNEZIA_PROTOCOL
+        server_proto = getattr(server, "protocol", None)
+        if not server_proto:
+            caps = getattr(server, "capabilities", None) or []
+            server_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
         is_xray = server_proto == XRAY_PROTOCOL
         if is_xray:
             from database.connection import session_scope
