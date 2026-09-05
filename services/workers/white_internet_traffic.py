@@ -90,7 +90,13 @@ class WhiteInternetTrafficWorker:
                     s.xray_instance_starttime,
                 )
                 for s in servers
-                if "xray_origin" in (s.capabilities or []) and s.api_url and s.api_key
+                if (
+                    getattr(s, "protocol", None) == XRAY_PROTOCOL
+                    or (getattr(s, "protocol", None) is None and "xray_origin" in (s.capabilities or []))
+                )
+                and "xray_origin" in (s.capabilities or [])
+                and s.api_url
+                and s.api_key
             ]
 
         total_processed = 0

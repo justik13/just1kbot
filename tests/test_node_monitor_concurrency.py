@@ -193,6 +193,110 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             send_alert_mock.assert_not_called()
             self.assertEqual(st.health_state, "MANUAL_DISABLED")
 
+    async def test_strict_protocol_decoupling_amnezia_with_stale_xray_origin_capability(self):
+        """AmneziaWG server with stale 'xray_origin' capability must invoke AmneziaClient, NOT XrayNodeClient."""
+        from services.workers.node_monitor import clear_monitor_states
+        clear_monitor_states()
+
+        bot = AsyncMock()
+        server_awg = SimpleNamespace(
+            id=300,
+            name="AWG-Node",
+            protocol="amneziawg2",
+            capabilities=["xray_origin"],  # Stale capability
+            api_url="https://awg.example.com:8443",
+            api_key="secret",
+            is_active=True,
+            disabled_reason=None,
+            health_state="ONLINE",
+            extra_data={},
+            xray_instance_epoch=None,
+            consecutive_fails=0,
+            consecutive_successes=0,
+            problem_started_at=None,
+            next_check_at=None,
+            recovery_notice_sent=False,
+            last_alert_sent_state=None,
+        )
+
+        st = get_server_monitor_state(300, server_awg)
+        mock_scope = AsyncMock()
+        mock_scope.__aenter__.return_value = AsyncMock()
+
+        amnezia_client_mock = AsyncMock()
+        amnezia_client_mock.healthcheck.return_value = True
+
+        with (
+            patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
+            patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server_awg])),
+            patch("services.workers.node_monitor.update_server_health_snapshot", AsyncMock(return_value=(server_awg, True))),
+            patch("services.workers.node_monitor.AmneziaClient", return_value=amnezia_client_mock) as mock_amnezia_cls,
+            patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls,
+        ):
+            await check_node_resources_and_alerts(bot)
+
+            # AmneziaClient must be called
+            mock_amnezia_cls.assert_called_once_with(server_awg.api_url, server_awg.api_key)
+            amnezia_client_mock.healthcheck.assert_awaited_once()
+
+            # XrayNodeClient must NEVER be instantiated or called
+            mock_xray_cls.assert_not_called()
+            self.assertEqual(st.health_state, "ONLINE")
+
+    async def test_unknown_protocol_is_skipped_without_state_mutation(self):
+        """Server with unknown protocol must be SKIPPED without transitioning to PROBLEM or AUTO_DISABLED."""
+        from services.workers.node_monitor import clear_monitor_states
+        clear_monitor_states()
+
+        bot = AsyncMock()
+        server_unknown = SimpleNamespace(
+            id=400,
+            name="Legacy-Node",
+            protocol="unknown_wireguard_legacy",
+            capabilities=[],
+            api_url="https://legacy.example.com:8443",
+            api_key="secret",
+            is_active=True,
+            disabled_reason=None,
+            health_state="ONLINE",
+            extra_data={},
+            xray_instance_epoch=None,
+            consecutive_fails=0,
+            consecutive_successes=0,
+            problem_started_at=None,
+            next_check_at=None,
+            recovery_notice_sent=False,
+            last_alert_sent_state=None,
+        )
+
+        st = get_server_monitor_state(400, server_unknown)
+        mock_scope = AsyncMock()
+        mock_scope.__aenter__.return_value = AsyncMock()
+
+        with (
+            patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
+            patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server_unknown])),
+            patch("services.workers.node_monitor.update_server_health_snapshot") as mock_snapshot_update,
+            patch("services.workers.node_monitor._send_admin_alert_msg") as mock_alert,
+        ):
+            await check_node_resources_and_alerts(bot)
+
+            # No health-state mutation, no failure counter increment, no alert
+            self.assertEqual(st.health_state, "ONLINE")
+            self.assertEqual(st.consecutive_fails, 0)
+            mock_snapshot_update.assert_not_called()
+            mock_alert.assert_not_called()
+
+    async def test_send_admin_alert_msg_returns_false_when_no_admins(self):
+        """_send_admin_alert_msg must return False when no admin IDs are configured."""
+        from services.workers.node_monitor import _send_admin_alert_msg
+        bot = AsyncMock()
+        mock_settings = MagicMock(ADMIN_IDS=[])
+
+        with patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+            sent = await _send_admin_alert_msg(bot, "Test alert")
+            self.assertFalse(sent)
+
 
 if __name__ == "__main__":
     unittest.main()

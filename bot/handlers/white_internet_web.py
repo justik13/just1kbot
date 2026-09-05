@@ -15,6 +15,8 @@ from bot import texts
 from config.constants import (
     DEFAULT_WHITE_INTERNET_PATH,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+    WHITE_INTERNET_SUB_PATH_PREFIX,
+    XRAY_PROTOCOL,
 )
 from config.enums import ServerHealthState, WhiteInternetStatus
 from database.connection import session_scope
@@ -23,6 +25,7 @@ from database.repositories import users_repo, white_internet_repo
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
+from utils.security import normalize_public_domain
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +134,15 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             return web.Response(status=403, text=texts.WL_WEB_EXHAUSTED, headers=headers)
 
         server = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
+        server_proto = getattr(server, "protocol", None)
+        if not server_proto and server:
+            caps = getattr(server, "capabilities", None) or []
+            server_proto = XRAY_PROTOCOL if "xray_origin" in caps else None
+
         if (
             server is None
             or not server.is_active
+            or server_proto != XRAY_PROTOCOL
             or server.health_state != ServerHealthState.ONLINE
             or "xray_origin" not in (server.capabilities or [])
         ):
@@ -150,7 +159,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
 
         extra = server.extra_data if isinstance(getattr(server, "extra_data", None), dict) else {}
-        cdn_domain = extra.get("cdn_domain") or os.getenv("WHITE_INTERNET_CDN_DOMAIN")
+        cdn_domain = normalize_public_domain(extra.get("cdn_domain") or os.getenv("WHITE_INTERNET_CDN_DOMAIN"))
         if not cdn_domain:
             logger.error(
                 "Configuration error: CDN domain is missing from server extra_data and WHITE_INTERNET_CDN_DOMAIN environment variable"
@@ -226,7 +235,11 @@ async def white_internet_ping_handler(_request: web.Request) -> web.Response:
 
 def setup_white_internet_web_routes(app: web.Application) -> None:
     """Register White Internet HTTP subscription feed routes with support for custom prefixes."""
-    sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl/").strip().rstrip("/")
+    sub_prefix = (
+        os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX
+    ).strip().rstrip("/")
+    if not sub_prefix.startswith("/"):
+        sub_prefix = f"/{sub_prefix}"
     app.router.add_get(f"{sub_prefix}/ping", white_internet_ping_handler)
     app.router.add_get(f"{sub_prefix}/{{token}}", white_internet_subscription_feed_handler)
     logger.info("White Internet subscription feed routes registered: %s/{token} and %s/ping", sub_prefix, sub_prefix)

@@ -13,6 +13,7 @@ from aiohttp.test_utils import AioHTTPTestCase
 
 from bot import texts
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
+from config.constants import XRAY_PROTOCOL
 from config.enums import ServerHealthState, WhiteInternetStatus
 from database.models import Server, User, WhiteInternetSubscription
 
@@ -130,6 +131,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         server = Server(
             id=1,
             name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch_xyz",
             capabilities=["xray_origin"],
@@ -164,6 +166,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         server = Server(
             id=1,
             name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch-new",  # Node rebooted / restarted!
             capabilities=["xray_origin"],
@@ -209,6 +212,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         server = Server(
             id=1,
             name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
@@ -273,6 +277,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         server = Server(
             id=1,
             name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
@@ -320,6 +325,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         server = Server(
             id=1,
             name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
             api_url="https://origin.just1k.best:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
@@ -369,6 +375,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         server = Server(
             id=1,
             name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
@@ -450,3 +457,51 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
                     self.assertEqual(resp.status, 403)
                     self.assertEqual(await resp.text(), "Forbidden")
+
+    async def test_awg_server_with_xray_origin_capability_returns_503_and_blocks_vless_feed(self):
+        """Server with protocol='amneziawg2' and capabilities=['xray_origin'] must return 503 and block Xray VLESS generation."""
+        now = datetime.now(timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+        )
+        awg_server = Server(
+            id=1,
+            name="AWG-Node",
+            protocol="amneziawg2",
+            capabilities=["xray_origin"],  # Stale capability on non-xray server
+            api_url="https://awg.example.com:8443",
+            api_key="secret",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={"cdn_domain": "cdn.example.com"},
+            xray_instance_epoch="epoch-xyz",
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = awg_server
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.white_internet_web.session_scope", fake_session_scope),
+            patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub),
+            patch("services.white_internet_service.WhiteInternetService.generate_vless_links") as mock_generate,
+        ):
+            resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+            self.assertEqual(resp.status, 503)
+            self.assertIn("Retry-After", resp.headers)
+            # VLESS link generation must never be invoked for an AWG server!
+            mock_generate.assert_not_called()

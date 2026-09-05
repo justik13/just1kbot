@@ -1084,6 +1084,7 @@ run_doctor
         self.assertIn("proxy_ssl_server_name on;", content)
         self.assertIn("proxy_ssl_name just1k.best;", content)
         self.assertIn("proxy_ssl_verify on;", content)
+        self.assertIn("proxy_ssl_verify_depth 5;", content)
         self.assertIn("proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;", content)
         self.assertNotIn("proxy_ssl_verify off;", content)
         self.assertIn("proxy_set_header Host just1k.best;", content)
@@ -1136,6 +1137,23 @@ run_doctor
         with open(self.state_dir / "state.json", "r", encoding="utf-8") as f:
             st = json.load(f)
         self.assertEqual(st.get("bot_domain"), "just1k.best")
+
+    def test_heal_and_update_origin_config_overrides_existing_fqdn_with_env_bot_domain(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "old.example.com"}, f
+            )
+
+        res = self._run_shell_snippet("BOT_DOMAIN=new.example.com heal_and_update_origin_config")
+        self.assertEqual(res.returncode, 0)
+        sub_conf = self.nginx_relays_d / "sub-wl.conf"
+        self.assertTrue(sub_conf.exists())
+        self.assertIn("new.example.com", sub_conf.read_text(encoding="utf-8"))
+
+        with open(self.state_dir / "state.json", "r", encoding="utf-8") as f:
+            st = json.load(f)
+        self.assertEqual(st.get("bot_domain"), "new.example.com")
 
     def test_normalize_domain_strips_protocols_and_slashes(self):
         self._prepare_base_env()
@@ -1475,6 +1493,90 @@ exit 0
         if nginx_log.exists():
             log_content = nginx_log.read_text(encoding="utf-8")
             self.assertNotIn("RESTART_NGINX", log_content, "Inactive Nginx must NEVER be restarted during uninstall!")
+
+    def test_validate_fqdn_and_sub_prefix(self):
+        """validate_fqdn and validate_sub_prefix reject malicious/hostile inputs and accept valid ones."""
+        self._prepare_base_env()
+
+        # Valid FQDNs
+        valid_fqdns = ["bot.just1k.best", "sub.example.com", "my-node.origin.cloud", "a.bc"]
+        for fqdn in valid_fqdns:
+            res = self._run_shell_snippet(f"validate_fqdn '{fqdn}'")
+            self.assertEqual(res.returncode, 0, f"Expected '{fqdn}' to be valid FQDN")
+
+        # Hostile / Invalid FQDNs
+        invalid_fqdns = [
+            "",
+            "localhost",
+            "127.0.0.1",
+            "192.168.1.1",
+            "bot.just1k.best;rm -rf /",
+            "bot.just1k.best\nset",
+            "bot.just1k.best\r\nset",
+            "bot.just1k.best$(whoami)",
+            "bot.just1k.best`id`",
+            'bot.just1k.best"junk',
+            "bot.just1k.best'junk",
+            "bot.just1k.best/path",
+            "bot just1k best",
+            "-bot.just1k.best",
+            "bot.just1k.best-",
+            "http://bot.just1k.best",
+        ]
+        for fqdn in invalid_fqdns:
+            res = self._run_shell_snippet(f"validate_fqdn '{fqdn}'")
+            self.assertNotEqual(res.returncode, 0, f"Expected '{fqdn}' to be rejected by validate_fqdn")
+
+        # Valid sub prefixes
+        valid_prefixes = ["/sub/wl", "/sub/wl/v1", "/prefix", "/a-b/c_d"]
+        for prefix in valid_prefixes:
+            res = self._run_shell_snippet(f"validate_sub_prefix '{prefix}'")
+            self.assertEqual(res.returncode, 0, f"Expected '{prefix}' to be valid sub_prefix")
+
+        # Hostile / Invalid sub prefixes
+        invalid_prefixes = [
+            "",
+            "sub/wl",
+            "/sub/../wl",
+            "/../secret",
+            "/sub/wl;evil",
+            "/sub/wl\n",
+            "/sub/wl\r\n",
+            "/sub/$(whoami)",
+            "/sub/`id`",
+            '/sub/wl"junk',
+            "/sub/wl'junk",
+            "/sub/wl?arg=1",
+            "/sub/wl#hash",
+            "/sub wl",
+        ]
+        for prefix in invalid_prefixes:
+            res = self._run_shell_snippet(f"validate_sub_prefix '{prefix}'")
+            self.assertNotEqual(res.returncode, 0, f"Expected '{prefix}' to be rejected by validate_sub_prefix")
+
+    def test_deploy_subscription_proxy_conf_validation(self):
+        """deploy_subscription_proxy_conf generates valid Nginx config for valid FQDN and rejects invalid."""
+        self._prepare_base_env()
+
+        # Success case
+        res = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.just1k.best' '/sub/wl'")
+        self.assertEqual(res.returncode, 0, f"deploy_subscription_proxy_conf failed: {res.stderr}\n{res.stdout}")
+        conf_file = self.nginx_relays_d / "sub-wl.conf"
+        self.assertTrue(conf_file.exists())
+        content = conf_file.read_text(encoding="utf-8")
+        self.assertIn("location ^~ /sub/wl {", content)
+        self.assertIn('set $bot_upstream "https://bot.just1k.best";', content)
+        self.assertIn("proxy_ssl_verify on;", content)
+        self.assertIn("proxy_ssl_verify_depth 5;", content)
+        self.assertIn("proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;", content)
+
+        # Failure cases: hostile target host (non-interactive fails closed)
+        res_hostile_host = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.just1k.best;rm -rf /' '/sub/wl'")
+        self.assertNotEqual(res_hostile_host.returncode, 0)
+
+        # Failure cases: hostile sub prefix
+        res_hostile_prefix = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.just1k.best' '/sub/../evil'")
+        self.assertNotEqual(res_hostile_prefix.returncode, 0)
 
 
 if __name__ == "__main__":

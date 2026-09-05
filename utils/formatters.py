@@ -5,7 +5,7 @@ from utils.datetime_helpers import format_datetime_msk
 
 
 def format_traffic(bytes_value: int) -> str:
-    if bytes_value == 0:
+    if bytes_value <= 0:
         return "0 B"
 
     units = ["B", "KiB", "MiB", "GiB", "TiB"]

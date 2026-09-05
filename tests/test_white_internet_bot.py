@@ -391,3 +391,47 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         copy_btn = next((btn for row in reply_markup.inline_keyboard for btn in row if btn.copy_text), None)
         self.assertIsNotNone(copy_btn)
         self.assertEqual(copy_btn.copy_text.text, "https://cdn.just1k.best/sub/wl/sub-secret-token")
+
+    async def test_show_white_internet_menu_formats_adaptive_traffic(self):
+        """Traffic is formatted adaptively (KiB/MiB/GiB), so small usage is not hidden as 0.0 ГБ."""
+        from datetime import datetime, timezone
+        from bot.handlers.white_internet import show_white_internet_menu, _format_bytes
+        from database.models import WhiteInternetSubscription
+        from config.enums import WhiteInternetStatus
+
+        self.assertEqual(_format_bytes(468480), "457.5 KiB")
+        self.assertEqual(_format_bytes(10 * 1024**3), "10.0 GiB")
+
+        used_bytes = 468480  # 457.5 KiB
+        total_bytes = 10 * 1024**3  # 10.0 GiB
+        avail_bytes = total_bytes - used_bytes
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=self.user.id,
+            origin_node_id=1,
+            token="token123",
+            status=WhiteInternetStatus.ACTIVE,
+            traffic_limit_bytes=total_bytes,
+            traffic_used_bytes=used_bytes,
+            expires_at=datetime(2026, 9, 8, 15, 9, tzinfo=timezone.utc),
+        )
+
+        query = MagicMock(spec=CallbackQuery)
+        query.from_user = self.tg_user
+        query.message = MagicMock()
+        query.message.edit_text = AsyncMock()
+        query.answer = AsyncMock()
+
+        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
+             patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=avail_bytes), \
+             patch("bot.handlers.white_internet._resolve_subscription_domain", return_value="cdn.example.com"):
+            await show_white_internet_menu(query, self.session)
+
+        query.message.edit_text.assert_awaited_once()
+        rendered_text = query.message.edit_text.call_args[0][0]
+        self.assertIn("457.5 KiB", rendered_text)
+        self.assertIn("10.0 GiB", rendered_text)
+        self.assertNotIn("0.0 ГБ", rendered_text)
+
