@@ -206,7 +206,7 @@ async def cmd_start(
             telegram_id,
         )
 
-        await message.answer(texts.ERROR_TECHNICAL_MESSAGE)
+        await message.answer(texts.ERROR_TECHNICAL_MESSAGE, parse_mode="HTML")
 
         return
 

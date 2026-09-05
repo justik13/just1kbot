@@ -27,12 +27,13 @@ class DBSessionMiddleware(BaseMiddleware):
             try:
                 if isinstance(event, CallbackQuery):
                     await event.answer(
-                        texts.ERROR_TECHNICAL_MESSAGE,
+                        texts.ERROR_TECHNICAL_ALERT,
                         show_alert=True,
                     )
                 elif isinstance(event, Message):
                     await event.answer(
                         texts.ERROR_TECHNICAL_MESSAGE,
+                        parse_mode="HTML",
                     )
             except Exception:
                 pass

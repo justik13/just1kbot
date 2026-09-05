@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiogram.types import CallbackQuery, Chat, Message
 from aiogram.types import User as TelegramUser
 
+from bot import texts
 from bot.keyboards import common as common_kb
 from bot.keyboards import device as device_kb
 from bot.keyboards import payment as payment_kb
@@ -95,6 +96,34 @@ class TestBotMiddlewaresFullCoverage(unittest.IsolatedAsyncioTestCase):
             res = await middleware(handler, msg, data)
             self.assertEqual(res, "OK")
             self.assertIn("session", data)
+
+    async def test_db_session_middleware_error_message(self):
+        from sqlalchemy.exc import SQLAlchemyError
+        middleware = DBSessionMiddleware()
+        handler = AsyncMock(side_effect=SQLAlchemyError("DB down"))
+        msg = AsyncMock(spec=Message)
+        data = {}
+        with patch("bot.middlewares.db_session.session_scope"):
+            res = await middleware(handler, msg, data)
+            self.assertIsNone(res)
+            msg.answer.assert_called_once_with(
+                texts.ERROR_TECHNICAL_MESSAGE,
+                parse_mode="HTML",
+            )
+
+    async def test_db_session_middleware_error_callback(self):
+        from sqlalchemy.exc import SQLAlchemyError
+        middleware = DBSessionMiddleware()
+        handler = AsyncMock(side_effect=SQLAlchemyError("DB down"))
+        cb = AsyncMock(spec=CallbackQuery)
+        data = {}
+        with patch("bot.middlewares.db_session.session_scope"):
+            res = await middleware(handler, cb, data)
+            self.assertIsNone(res)
+            cb.answer.assert_called_once_with(
+                texts.ERROR_TECHNICAL_ALERT,
+                show_alert=True,
+            )
 
     async def test_private_chat_middleware(self):
         middleware = PrivateChatMiddleware()
