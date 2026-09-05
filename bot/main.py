@@ -301,10 +301,21 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
 
 
 class HealthcheckAccessLogger(AccessLogger):
-    """Suppresses access logging for successful GET /health requests to avoid polluting logs."""
+    """Suppresses access logging for successful GET /health requests and masks secret subscription tokens."""
 
     def log(self, request: web.Request, response: web.StreamResponse, time: float) -> None:
         if request.path == "/health" and response.status == 200:
+            return
+        if request.path.startswith("/sub/wl/"):
+            self.logger.info(
+                '%s "%s %s %s" %s %s',
+                request.remote,
+                request.method,
+                "/sub/wl/***",
+                f"HTTP/{request.version.major}.{request.version.minor}",
+                response.status,
+                response.body_length,
+            )
             return
         super().log(request, response, time)
 

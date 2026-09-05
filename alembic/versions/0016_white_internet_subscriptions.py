@@ -467,62 +467,8 @@ def downgrade() -> None:
     )
     op.drop_table("white_internet_subscriptions")
 
-    # 4. Clean up White Internet tariff quotes, ledger entries, tariff versions and tariffs
-    op.execute(sa.text("ALTER TABLE account_ledger_allocations DISABLE TRIGGER USER"))
-    op.execute(sa.text("ALTER TABLE account_ledger_entries DISABLE TRIGGER USER"))
-    op.execute(sa.text("ALTER TABLE tariff_quotes DISABLE TRIGGER USER"))
-
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM account_ledger_allocations WHERE debit_entry_id IN (
-                SELECT id FROM account_ledger_entries WHERE quote_id IN (
-                    SELECT id FROM tariff_quotes WHERE service_type = 'white_internet'
-                )
-            ) OR credit_entry_id IN (
-                SELECT id FROM account_ledger_entries WHERE quote_id IN (
-                    SELECT id FROM tariff_quotes WHERE service_type = 'white_internet'
-                )
-            )
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM account_ledger_entries WHERE quote_id IN (
-                SELECT id FROM tariff_quotes WHERE service_type = 'white_internet'
-            )
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM tariff_quotes WHERE service_type = 'white_internet'
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM tariff_versions WHERE tariff_id IN (
-                SELECT id FROM tariffs WHERE service_type = 'white_internet'
-            )
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM tariffs WHERE service_type = 'white_internet'
-            """
-        )
-    )
-
-    op.execute(sa.text("ALTER TABLE tariff_quotes ENABLE TRIGGER USER"))
-    op.execute(sa.text("ALTER TABLE account_ledger_entries ENABLE TRIGGER USER"))
-    op.execute(sa.text("ALTER TABLE account_ledger_allocations ENABLE TRIGGER USER"))
+    # 4. Financial ledger entries and allocations are append-only immutable records.
+    # We do NOT delete ledger entries or disable triggers during downgrade to preserve audit integrity.
 
     # 5. servers: drop starttime, boot_id, xray_instance_epoch, extra_data and capabilities
     op.drop_column("servers", "xray_instance_starttime")

@@ -216,8 +216,20 @@ class BanService:
     ) -> tuple:
         # При разбане устройства НЕ восстанавливаются.
         # Пользователь должен создать их заново, если подписка активна.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": -user.id},
+        )
 
-        await update_user(session, user, is_banned=False)
+        locked_user = await session.scalar(
+            select(User)
+            .where(User.id == user.id)
+            .with_for_update()
+        )
+        if locked_user is None or locked_user.is_deleted:
+            return False, BanStatus.USER_NOT_FOUND
+
+        await update_user(session, locked_user, is_banned=False)
 
         await AuditService.log_action(
             session,

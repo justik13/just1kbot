@@ -141,6 +141,9 @@ async def create_balance_topup(
     if user.topup_blocked:
         raise AccountTopupError("topup_blocked")
 
+    if existing is None:
+        existing = await _visible_topup_for_update(session, user_id)
+
     balance = await get_account_balance(
         session, user_id=user.id, locked_user=user
     )

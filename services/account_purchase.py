@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import AdminAuditAction
+from config.enums import AdminAuditAction, ServiceType
 from database.models import (
     AccountLedgerEntry,
     EntitlementEntry,
@@ -92,7 +92,7 @@ async def prepare_account_purchase(
     tariff = await session.scalar(
         select(Tariff).where(Tariff.id == tariff_id).with_for_update()
     )
-    if tariff is None or not tariff.is_active:
+    if tariff is None or not tariff.is_active or tariff.service_type != ServiceType.AWG:
         raise AccountPurchaseError("tariff_unavailable")
     now = now_utc()
     operation_type = "purchase"
@@ -327,7 +327,7 @@ async def _settle_account_purchase(
         .where(Tariff.id == version.tariff_id)
         .with_for_update()
     )
-    if tariff is None or not tariff.is_active:
+    if tariff is None or not tariff.is_active or tariff.service_type != ServiceType.AWG:
         raise AccountPurchaseError("tariff_unavailable")
     current_version = await get_or_create_current_version(session, tariff)
     if current_version.id != version.id:

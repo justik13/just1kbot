@@ -700,3 +700,42 @@ def test_client_store_corrupted_fail_closed():
         f.write("{}")
 
 
+def test_startup_restore_persisted_clients_and_probe_lifecycle():
+    """H2: Verifies startup restore populates _active_users and enables non-destructive presence probe."""
+    uuid1 = "11111111-2222-3333-4444-555555555555"
+    uuid2 = "66666666-7777-8888-9999-000000000000"
+
+    with open(tmp_clients_file.name, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                uuid1: {"inbounds": ["inbound-de", "inbound-nl"]},
+                uuid2: {"inbounds": ["inbound-de", "inbound-nl"]},
+            },
+            f,
+        )
+
+    grpc_client._active_users.clear()
+
+    with patch.object(grpc_client, "add_user", wraps=grpc_client.add_user) as mock_add:
+        with patch.object(grpc_client, "_get_channel"):
+            with patch("xray.app.proxyman.command.command_pb2_grpc.HandlerServiceStub") as mock_stub_cls:
+                mock_stub = mock_stub_cls.return_value
+                restored_count = restore_persisted_clients_to_xray()
+                assert restored_count == 2
+                assert mock_add.call_count == 4  # 2 clients * 2 inbounds
+
+                # All restored clients are now present via strictly non-destructive probe
+                mock_stub.AlterInbound.reset_mock()
+                for cid in (uuid1, uuid2):
+                    for tag in ("inbound-de", "inbound-nl"):
+                        assert grpc_client.probe_user_presence(tag, cid) is True
+                        assert grpc_client.verify_user_absent(tag, cid) is False
+                assert not mock_stub.AlterInbound.called
+
+    # Clean up
+    grpc_client._active_users.clear()
+    with open(tmp_clients_file.name, "w", encoding="utf-8") as f:
+        f.write("{}")
+
+
+

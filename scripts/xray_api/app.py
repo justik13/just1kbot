@@ -881,6 +881,14 @@ async def get_clients_inventory(
                 detail=f"Client store corrupted: {e}",
             ) from e
 
+    if not grpc_client._active_users:
+        try:
+            for active_cid in client_store.load_clients():
+                for tag in target_inbounds:
+                    grpc_client._active_users.add((tag, active_cid))
+        except Exception:
+            pass
+
     inventory: Dict[str, Any] = {}
     for cid in client_ids:
         try:
