@@ -5,6 +5,7 @@ ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED -> MANUAL_DISABLED
 """
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
@@ -269,7 +270,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             raw_sub_prefix = server.extra_data.get("sub_path_prefix")
                         sub_prefix = (
                             raw_sub_prefix if isinstance(raw_sub_prefix, str) and raw_sub_prefix.strip()
-                            else WHITE_INTERNET_SUB_PATH_PREFIX
+                            else (os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX)
                         ).strip().rstrip("/")
                         if not sub_prefix.startswith("/"):
                             sub_prefix = f"/{sub_prefix}"

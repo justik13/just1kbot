@@ -230,7 +230,11 @@ async def white_internet_ping_handler(_request: web.Request) -> web.Response:
 
 def setup_white_internet_web_routes(app: web.Application) -> None:
     """Register White Internet HTTP subscription feed routes with support for custom prefixes."""
-    sub_prefix = WHITE_INTERNET_SUB_PATH_PREFIX
+    sub_prefix = (
+        os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX
+    ).strip().rstrip("/")
+    if not sub_prefix.startswith("/"):
+        sub_prefix = f"/{sub_prefix}"
     app.router.add_get(f"{sub_prefix}/ping", white_internet_ping_handler)
     app.router.add_get(f"{sub_prefix}/{{token}}", white_internet_subscription_feed_handler)
     logger.info("White Internet subscription feed routes registered: %s/{token} and %s/ping", sub_prefix, sub_prefix)
