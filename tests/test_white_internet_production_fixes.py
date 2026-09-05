@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import ssl
+import time
 import unittest
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -244,15 +245,20 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_snap.return_value = (server, True)
 
             # --- Check 1: Ingress fails with 502 on cdn_domain ---
+            # Tick 1: single failure is debounced, no alert sent
             await check_node_resources_and_alerts(bot)
-
-            # 1. Core health MUST stay ONLINE and consecutive_fails MUST remain 0!
             mock_snap.assert_called_once()
             called_kwargs = mock_snap.call_args[1]
             self.assertEqual(called_kwargs["consecutive_fails"], 0)
             self.assertEqual(called_kwargs["health_state"], ServerHealthState.ONLINE)
+            bot.send_message.assert_not_called()
 
-            # 2. Ingress alert MUST be sent to admin with cdn_domain priority
+            # Tick 2: 2nd consecutive failure confirms issue, sends alert!
+            mock_snap.reset_mock()
+            await check_node_resources_and_alerts(bot)
+            mock_snap.assert_called_once()
+            self.assertEqual(mock_snap.call_args[1]["consecutive_fails"], 0)
+            self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertEqual(call_args["chat_id"], 999999)
@@ -276,15 +282,12 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
+            # Tick 1: single success is debounced (waiting for stable recovery), no restored alert yet
             await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
 
-            # Core health remains ONLINE
-            mock_snap.assert_called_once()
-            called_kwargs = mock_snap.call_args[1]
-            self.assertEqual(called_kwargs["consecutive_fails"], 0)
-            self.assertEqual(called_kwargs["health_state"], ServerHealthState.ONLINE)
-
-            # Restored ingress alert sent to admin
+            # Tick 2: 2nd consecutive success confirms stable recovery, sends restored alert!
+            await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertEqual(call_args["chat_id"], 999999)
@@ -355,13 +358,14 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
+            # Tick 1: first failure is debounced
             await check_node_resources_and_alerts(bot)
-
-            # Core health stays ONLINE
             self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
             self.assertEqual(mock_snap.call_args[1]["consecutive_fails"], 0)
+            bot.send_message.assert_not_called()
 
-            # Admin receives alert with 404
+            # Tick 2: 2nd consecutive failure confirms issue, sends alert!
+            await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertIn("404", call_args["text"])
@@ -432,13 +436,19 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
+            # Tick 1: first failure is debounced
+            await check_node_resources_and_alerts(bot)
+            self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
+            bot.send_message.assert_not_called()
+
+            # Tick 2: confirmed failure triggers alert
             await check_node_resources_and_alerts(bot)
 
             # Core health stays ONLINE
             self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
 
             # GET called with allow_redirects=False and ssl!=False
-            mock_sess.get.assert_called_once()
+            self.assertTrue(mock_sess.get.call_count >= 1)
             call_kwargs = mock_sess.get.call_args[1]
             self.assertEqual(call_kwargs.get("allow_redirects"), False)
             self.assertNotEqual(call_kwargs.get("ssl"), False)
@@ -514,6 +524,12 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
+            # Tick 1: first failure is debounced
+            await check_node_resources_and_alerts(bot)
+            self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
+            bot.send_message.assert_not_called()
+
+            # Tick 2: confirmed failure triggers alert
             await check_node_resources_and_alerts(bot)
 
             # Core health stays ONLINE
@@ -579,6 +595,12 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
+            # Tick 1: first failure is debounced
+            await check_node_resources_and_alerts(bot)
+            self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
+            bot.send_message.assert_not_called()
+
+            # Tick 2: confirmed failure triggers alert
             await check_node_resources_and_alerts(bot)
 
             # Core health stays ONLINE
@@ -666,7 +688,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
              patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
              patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
              patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
-             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock) as mock_update, \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
              patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
 
             mock_sess = MagicMock()
@@ -678,14 +700,17 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
-            # Execution must NOT raise an unhandled exception
+            # Tick 1: first failure is debounced
+            await check_node_resources_and_alerts(bot)
+            # Tick 2: second failure attempts delivery, which fails with Exception
             await check_node_resources_and_alerts(bot)
 
-            # Retrieve cached monitor state
+            # Retrieve cached monitor state: ingress_problem must stay False since delivery failed
             from services.workers.node_monitor import get_server_monitor_state
             cached_st = get_server_monitor_state(server.id)
             self.assertFalse(cached_st.ingress_problem)
-            mock_update.assert_not_called()
+            self.assertEqual(cached_st.consecutive_ingress_fails, 2)
+            bot.send_message.assert_called_once()
 
     async def test_node_monitor_ingress_probe_executes_when_xray_client_fails(self):
         """When core Xray client check_health throws an unhandled exception, ingress synthetic probe still executes."""
@@ -751,15 +776,23 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
+            # Tick 1: first failure is debounced
+            await check_node_resources_and_alerts(bot)
+
+            # Fast-forward confirmation delay for Tick 2
+            from services.workers.node_monitor import get_server_monitor_state
+            st = get_server_monitor_state(server.id)
+            st.next_check_at = time.monotonic() - 1.0
+
+            # Tick 2: second failure triggers alert
             await check_node_resources_and_alerts(bot)
 
             # Ingress probe MUST have been called despite FailingXrayClient
-            mock_sess.get.assert_called_once()
+            self.assertTrue(mock_sess.get.call_count >= 1)
             call_url = mock_sess.get.call_args[0][0]
             self.assertTrue(call_url.endswith("/sub/wl/ping"))
 
             # Alert delivered for ingress
-            from services.workers.node_monitor import get_server_monitor_state
             cached_st = get_server_monitor_state(server.id)
             self.assertTrue(cached_st.ingress_problem)
             mock_update.assert_called()
@@ -980,8 +1013,12 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
+            # Tick 1: first failure is debounced
             await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
 
+            # Tick 2: confirmed failure triggers alert
+            await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             alert_text = bot.send_message.call_args[1]["text"]
             self.assertIn("<code>/custom_alert_feed/ping</code>", alert_text)
@@ -1007,8 +1044,12 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
+            # Tick 1: first success is debounced
             await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
 
+            # Tick 2: confirmed success triggers restored alert
+            await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             restored_text = bot.send_message.call_args[1]["text"]
             self.assertIn("<code>/custom_alert_feed/ping</code>", restored_text)
@@ -1068,8 +1109,12 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
+            # Tick 1: first failure is debounced
             await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
 
+            # Tick 2: confirmed failure triggers alert
+            await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             alert_text = bot.send_message.call_args[1]["text"]
             self.assertIn("Timeout", alert_text)
@@ -1128,7 +1173,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
              patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
              patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
              patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
-             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock) as mock_update, \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
              patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
 
             mock_sess = MagicMock()
@@ -1143,10 +1188,160 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(bot)
 
             # Ingress probe was called
-            mock_sess.get.assert_called_once()
+            self.assertTrue(mock_sess.get.call_count >= 1)
             # Bot send_message MUST NOT be called because DB already had ingress_problem=True
             bot.send_message.assert_not_called()
-            mock_update.assert_not_called()
+
+    async def test_ingress_single_timeout_glitch_does_not_alert_and_resets(self):
+        """Single transient timeout/502 does NOT trigger an alert; subsequent 200 OK resets fail streak."""
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock())
+
+        server = Server(
+            id=19,
+            name="Origin Glitch Test",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={"cdn_domain": "cdn.just1k.best"},
+        )
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        class MockProbeResponse:
+            def __init__(self, status):
+                self.status = status
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession") as mock_http, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_sess = MagicMock()
+            mock_sess.get.side_effect = TimeoutError()
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=None)
+            mock_http.return_value = mock_sess
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            # Cycle 1: Transient timeout blip occurs
+            await check_node_resources_and_alerts(bot)
+            from services.workers.node_monitor import get_server_monitor_state
+            cached_st = get_server_monitor_state(server.id)
+            self.assertEqual(cached_st.consecutive_ingress_fails, 1)
+            self.assertFalse(cached_st.ingress_problem)
+            bot.send_message.assert_not_called()
+
+            # Cycle 2: Next cycle succeeds with 200 OK
+            mock_sess.get.side_effect = None
+            mock_sess.get.return_value = MockProbeResponse(status=200)
+            await check_node_resources_and_alerts(bot)
+            self.assertEqual(cached_st.consecutive_ingress_fails, 0)
+            self.assertEqual(cached_st.consecutive_ingress_successes, 1)
+            self.assertFalse(cached_st.ingress_problem)
+            bot.send_message.assert_not_called()
+
+    async def test_ingress_recovery_hysteresis_requires_two_successes(self):
+        """When ingress is in problem state, recovery requires 2 consecutive successes to avoid flapping."""
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock())
+
+        server = Server(
+            id=20,
+            name="Origin Recovery Test",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={"cdn_domain": "cdn.just1k.best", "ingress_problem": True, "consecutive_ingress_fails": 2},
+        )
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        class MockProbeResponse:
+            def __init__(self, status):
+                self.status = status
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession") as mock_http, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_sess = MagicMock()
+            mock_sess.get.return_value = MockProbeResponse(status=200)
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=None)
+            mock_http.return_value = mock_sess
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            # Cycle 1: first success - debounced, no restored alert yet
+            await check_node_resources_and_alerts(bot)
+            from services.workers.node_monitor import get_server_monitor_state
+            cached_st = get_server_monitor_state(server.id)
+            self.assertTrue(cached_st.ingress_problem)
+            self.assertEqual(cached_st.consecutive_ingress_successes, 1)
+            bot.send_message.assert_not_called()
+
+            # Cycle 2: second consecutive success - confirms recovery, restored alert sent!
+            await check_node_resources_and_alerts(bot)
+            self.assertFalse(cached_st.ingress_problem)
+            self.assertEqual(cached_st.consecutive_ingress_successes, 2)
+            bot.send_message.assert_called_once()
+            call_text = bot.send_message.call_args[1]["text"]
+            self.assertIn("восстановлено", call_text)
 
 
 if __name__ == "__main__":
