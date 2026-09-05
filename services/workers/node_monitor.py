@@ -81,6 +81,8 @@ class ServerMonitorState:
             self.consecutive_successes = db_server.consecutive_successes or 0
             self.recovery_notice_sent = bool(db_server.recovery_notice_sent)
             self.last_alert_sent_state = db_server.last_alert_sent_state
+            if isinstance(getattr(db_server, "extra_data", None), dict):
+                self.ingress_problem = bool(db_server.extra_data.get("ingress_problem", False))
 
             if db_server.problem_started_at:
                 now_m = time.monotonic()
@@ -276,32 +278,56 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         alerts_to_send: list[dict] = []
 
-        # Decoupled ingress alert evaluation (does not touch server state machine or is_healthy)
+        # Decoupled ingress alert evaluation and delivery (independent of core server CAS / health state)
         if ingress_probe_result is not None and probe_domain:
             ingress_ok, ingress_detail = ingress_probe_result
             if not ingress_ok:
                 if not st.ingress_problem:
-                    alerts_to_send.append({
-                        "text": ALERT_INGRESS_PROBLEM.format(
-                            server_name=safe(server.name),
-                            server_id=server.id,
-                            domain=safe(probe_domain),
-                            status_or_err=safe(ingress_detail),
-                        ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
-                        "set_ingress_problem": True,
-                    })
+                    st.ingress_problem = True
+                    sent_ok = False
+                    try:
+                        sent_ok = await _send_admin_alert_msg(
+                            bot,
+                            ALERT_INGRESS_PROBLEM.format(
+                                server_name=safe(server.name),
+                                server_id=server.id,
+                                domain=safe(probe_domain),
+                                status_or_err=safe(ingress_detail),
+                            ),
+                            reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        )
+                    except Exception as e:
+                        logger.error("Failed to deliver ingress problem alert: %s", e)
+                    if sent_ok:
+                        async with session_scope() as session:
+                            fresh_server = await get_server_by_id(session, server.id)
+                            if fresh_server:
+                                extra = dict(fresh_server.extra_data or {})
+                                extra["ingress_problem"] = True
+                                await update_server(session, fresh_server, extra_data=extra)
             else:
                 if st.ingress_problem:
-                    alerts_to_send.append({
-                        "text": ALERT_INGRESS_RESTORED.format(
-                            server_name=safe(server.name),
-                            server_id=server.id,
-                            domain=safe(probe_domain),
-                        ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
-                        "set_ingress_problem": False,
-                    })
+                    st.ingress_problem = False
+                    sent_ok = False
+                    try:
+                        sent_ok = await _send_admin_alert_msg(
+                            bot,
+                            ALERT_INGRESS_RESTORED.format(
+                                server_name=safe(server.name),
+                                server_id=server.id,
+                                domain=safe(probe_domain),
+                            ),
+                            reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        )
+                    except Exception as e:
+                        logger.error("Failed to deliver ingress restored alert: %s", e)
+                    if sent_ok:
+                        async with session_scope() as session:
+                            fresh_server = await get_server_by_id(session, server.id)
+                            if fresh_server:
+                                extra = dict(fresh_server.extra_data or {})
+                                extra.pop("ingress_problem", None)
+                                await update_server(session, fresh_server, extra_data=extra)
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
@@ -564,8 +590,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                         st.last_alert_sent_state = target_state
                     if is_rec_notice:
                         st.recovery_notice_sent = True
-                    if "set_ingress_problem" in alert_to_send:
-                        st.ingress_problem = alert_to_send["set_ingress_problem"]
 
                     async with session_scope() as session:
                         fresh_server = await get_server_by_id(session, server.id)

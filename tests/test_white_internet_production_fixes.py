@@ -35,7 +35,11 @@ from config.enums import (
 from database.models import Server, User, WhiteInternetSubscription
 from services.white_internet_service import WhiteInternetService
 from services.workers.account_balance import process_balance_purchase_notifications
-from services.workers.node_monitor import check_node_resources_and_alerts, clear_monitor_states
+from services.workers.node_monitor import (
+    ServerMonitorState,
+    check_node_resources_and_alerts,
+    clear_monitor_states,
+)
 from utils.datetime_helpers import now_utc
 
 
@@ -584,6 +588,29 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertIn("certificate verify failed", call_args["text"])
+
+    def test_server_monitor_state_sync_from_db_restores_ingress_problem(self):
+        """ServerMonitorState restores ingress_problem from db_server.extra_data on worker restart."""
+        server = Server(
+            id=42,
+            name="Origin Extra Test",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            extra_data={"ingress_problem": True, "cdn_domain": "cdn.just1k.best"},
+        )
+        state = ServerMonitorState(server_id=42)
+        state.sync_from_db_server(server)
+        self.assertTrue(state.ingress_problem)
+
+        # And when False or missing, state is False
+        server.extra_data = {"cdn_domain": "cdn.just1k.best"}
+        state2 = ServerMonitorState(server_id=42)
+        state2.sync_from_db_server(server)
+        self.assertFalse(state2.ingress_problem)
 
 
 if __name__ == "__main__":

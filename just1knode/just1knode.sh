@@ -386,7 +386,8 @@ if os.path.exists(rf):
             echo -e "  ${RED}✗${NC} ОШИБКА 502 Bad Gateway: Nginx не может связаться с ботом (проверьте SSL/upstream в sub-wl.conf)!"
             failed=$((failed + 1))
         elif [[ "$sub_code" == "404" ]]; then
-            echo -e "  ${YELLOW}!${NC} Nginx прокси отвечает 404 (соединение с ботом есть, но эндпоинт /ping не найден)"
+            echo -e "  ${RED}✗${NC} ОШИБКА 404 Not Found: Nginx прокси отвечает 404 (эндпоинт /sub/wl/ping не найден на боте)!"
+            failed=$((failed + 1))
         elif [[ "$sub_code" == "000" || $sub_err -ne 0 ]]; then
             local insecure_code
             insecure_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}/sub/wl/ping" 2>/dev/null || echo "000")"
@@ -398,7 +399,8 @@ if os.path.exists(rf):
                 failed=$((failed + 1))
             fi
         else
-            echo -e "  ${YELLOW}!${NC} Nginx прокси вернул HTTP код: $sub_code"
+            echo -e "  ${RED}✗${NC} ОШИБКА: Nginx прокси вернул неожиданный HTTP код: $sub_code (ожидался 200 OK)!"
+            failed=$((failed + 1))
         fi
 
         local cdn_domain
@@ -416,6 +418,9 @@ if os.path.exists(rf):
             elif [[ "$cdn_code" == "502" ]]; then
                 echo -e "  ${RED}✗${NC} CDN вернул 502 Bad Gateway (проверьте Origin и CDN кэш)!"
                 failed=$((failed + 1))
+            elif [[ "$cdn_code" == "404" ]]; then
+                echo -e "  ${RED}✗${NC} CDN вернул 404 Not Found (эндпоинт /sub/wl/ping не найден на CDN/Origin)!"
+                failed=$((failed + 1))
             elif [[ "$cdn_code" == "000" || $cdn_err -ne 0 ]]; then
                 local cdn_insecure
                 cdn_insecure="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 "https://${cdn_domain}/sub/wl/ping" 2>/dev/null || echo "000")"
@@ -423,10 +428,12 @@ if os.path.exists(rf):
                     echo -e "  ${RED}✗${NC} TLS ОШИБКА CDN: ${cdn_domain} отвечает 200 OK только без проверки SSL (curl -k)!"
                     failed=$((failed + 1))
                 else
-                    echo -e "  ${YELLOW}!${NC} CDN ${cdn_domain} недоступен по сети с этого узла (код: $cdn_code, err: $cdn_err)"
+                    echo -e "  ${RED}✗${NC} CDN ${cdn_domain} недоступен по сети с этого узла (код: $cdn_code, err: $cdn_err)"
+                    failed=$((failed + 1))
                 fi
             else
-                echo -e "  ${YELLOW}!${NC} CDN вернул HTTP код: $cdn_code"
+                echo -e "  ${RED}✗${NC} ОШИБКА: CDN вернул неожиданный HTTP код: $cdn_code (ожидался 200 OK)!"
+                failed=$((failed + 1))
             fi
         fi
     fi
