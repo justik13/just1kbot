@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import ssl
 import unittest
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -361,6 +362,228 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             call_args = bot.send_message.call_args[1]
             self.assertIn("404", call_args["text"])
             self.assertIn("cdn.just1k.best", call_args["text"])
+
+    async def test_node_monitor_ingress_probe_redirect_301_fails(self):
+        """Redirect 301 is not followed and is reported as failure with allow_redirects=False."""
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=True)
+
+        server = Server(
+            id=12,
+            name="Origin 301 Check",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={"cdn_domain": "cdn.just1k.best"},
+        )
+
+        class MockProbeResponse:
+            def __init__(self, status):
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession") as mock_http, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_sess = MagicMock()
+            mock_sess.get.return_value = MockProbeResponse(status=301)
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=None)
+            mock_http.return_value = mock_sess
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            await check_node_resources_and_alerts(bot)
+
+            # Core health stays ONLINE
+            self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
+
+            # GET called with allow_redirects=False and ssl!=False
+            mock_sess.get.assert_called_once()
+            call_kwargs = mock_sess.get.call_args[1]
+            self.assertEqual(call_kwargs.get("allow_redirects"), False)
+            self.assertNotEqual(call_kwargs.get("ssl"), False)
+
+            # Admin receives alert with 301
+            bot.send_message.assert_called_once()
+            call_args = bot.send_message.call_args[1]
+            self.assertIn("301", call_args["text"])
+            self.assertIn("cdn.just1k.best", call_args["text"])
+
+    async def test_node_monitor_ingress_probe_redirect_302_fails(self):
+        """Redirect 302 is treated as failure."""
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=True)
+
+        server = Server(
+            id=13,
+            name="Origin 302 Check",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={"cdn_domain": "cdn.just1k.best"},
+        )
+
+        class MockProbeResponse:
+            def __init__(self, status):
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession") as mock_http, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_sess = MagicMock()
+            mock_sess.get.return_value = MockProbeResponse(status=302)
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=None)
+            mock_http.return_value = mock_sess
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            await check_node_resources_and_alerts(bot)
+
+            # Core health stays ONLINE
+            self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
+
+            # Admin receives alert with 302
+            bot.send_message.assert_called_once()
+            call_args = bot.send_message.call_args[1]
+            self.assertIn("302", call_args["text"])
+
+    async def test_node_monitor_ingress_probe_tls_certificate_error_fails(self):
+        """TLS certificate verification failure triggers alert and keeps core node healthy."""
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=True)
+
+        server = Server(
+            id=14,
+            name="Origin TLS Error Check",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={"cdn_domain": "cdn.just1k.best"},
+        )
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession") as mock_http, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_sess = MagicMock()
+            mock_sess.get.side_effect = ssl.SSLCertVerificationError("certificate verify failed: certificate has expired")
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=None)
+            mock_http.return_value = mock_sess
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            await check_node_resources_and_alerts(bot)
+
+            # Core health stays ONLINE
+            self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
+
+            # Alert sent with SSL detail
+            bot.send_message.assert_called_once()
+            call_args = bot.send_message.call_args[1]
+            self.assertIn("certificate verify failed", call_args["text"])
 
 
 if __name__ == "__main__":
