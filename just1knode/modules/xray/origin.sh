@@ -143,7 +143,7 @@ install_xray_origin_node() {
         fi
     fi
 
-    apt-get install -y -qq nginx certbot python3-certbot-nginx
+    apt-get install -y -qq nginx certbot python3-certbot-nginx ca-certificates
     mkdir -p "${CERTBOT_DIR}" "${NGINX_CONF_DIR}/conf.d"
     chmod 755 "${CERTBOT_DIR}" 2>/dev/null || true
     configure_safe_ufw "80/tcp"
