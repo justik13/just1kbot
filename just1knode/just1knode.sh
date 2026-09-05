@@ -391,7 +391,10 @@ if os.path.exists(rf):
             echo -e "  ${RED}✗${NC} ОШИБКА TLS: Сертификат для https://${check_target} недействителен или просрочен (curl error 60)!"
             failed=$((failed + 1))
         elif [[ "$sub_code" == "502" ]]; then
-            echo -e "  ${RED}✗${NC} ОШИБКА 502 Bad Gateway: Nginx не может связаться с ботом (проверьте SSL/upstream в sub-wl.conf)!"
+            local current_bot_domain
+            current_bot_domain="$(get_state_val "bot_domain" "<не задан>")"
+            echo -e "  ${RED}✗${NC} ОШИБКА 502 Bad Gateway: Nginx не может связаться с ботом (bot_domain: '$current_bot_domain')!"
+            echo -e "      ${YELLOW}→${NC} Проверьте цепочку SSL (proxy_ssl_verify_depth), DNS и логи: tail -n 10 /var/log/nginx/error.log"
             failed=$((failed + 1))
         elif [[ "$sub_code" == "404" ]]; then
             echo -e "  ${RED}✗${NC} ОШИБКА 404 Not Found: Nginx прокси отвечает 404 (эндпоинт ${sub_prefix}/ping не найден на боте)!"
@@ -796,12 +799,13 @@ main_menu() {
             esac
 
         elif [[ "$status" == "origin" ]]; then
-            local domain cdn_domain
+            local domain cdn_domain bot_dom
             domain="$(get_state_val "domain" "-")"
             cdn_domain="$(get_state_val "cdn_domain" "-")"
+            bot_dom="$(get_state_val "bot_domain" "-")"
 
             echo -e "  Статус текущего сервера: ${BOLD}${GREEN}🇷🇺 ORIGIN (Шлюз РФ)${NC}"
-            echo -e "  Origin Домен: ${CYAN}${domain}${NC}  |  CDN Домен: ${CYAN}${cdn_domain}${NC}\n"
+            echo -e "  Origin: ${CYAN}${domain}${NC}  |  CDN: ${CYAN}${cdn_domain}${NC}  |  Bot: ${CYAN}${bot_dom}${NC}\n"
 
             echo -e "  ${BOLD}[1]${NC} 🔄 Управление Relay-узлами на Origin (Добавить / Удалить / Список)"
             echo -e "  ${BOLD}[2]${NC} 📊 Статус узла и подключенные клиенты"

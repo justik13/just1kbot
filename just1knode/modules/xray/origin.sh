@@ -55,6 +55,7 @@ deploy_subscription_proxy_conf() {
         proxy_ssl_server_name on;
         proxy_ssl_name ${target_host};
         proxy_ssl_verify on;
+        proxy_ssl_verify_depth 5;
         proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
         proxy_set_header Host ${target_host};
         proxy_set_header X-Real-IP \$remote_addr;
@@ -890,11 +891,9 @@ except Exception:
     local env_bot_domain
     env_bot_domain="$(normalize_domain "${BOT_DOMAIN:-}")"
 
-    # Если в state.json пусто или устаревший IP, но в BOT_DOMAIN передан валидный FQDN — используем его
-    if [[ -z "$heal_bot_domain" || "$heal_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$heal_bot_domain" == "localhost" ]]; then
-        if [[ -n "$env_bot_domain" && ! "$env_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$env_bot_domain" != "localhost" ]]; then
-            heal_bot_domain="$env_bot_domain"
-        fi
+    # Если в BOT_DOMAIN передан валидный FQDN — используем его в приоритете (override оператора)
+    if [[ -n "$env_bot_domain" && ! "$env_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$env_bot_domain" != "localhost" ]]; then
+        heal_bot_domain="$env_bot_domain"
     fi
 
     heal_bot_domain="$(normalize_domain "$heal_bot_domain")"
