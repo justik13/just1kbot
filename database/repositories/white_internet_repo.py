@@ -48,6 +48,8 @@ async def get_subscription_by_token(
 async def get_subscription_by_user_id(
     session: AsyncSession, user_id: int
 ) -> WhiteInternetSubscription | None:
+    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
+        return None
     stmt = (
         select(WhiteInternetSubscription)
         .where(WhiteInternetSubscription.user_id == user_id)
@@ -61,6 +63,8 @@ async def has_user_any_subscription(
     session: AsyncSession, user_id: int
 ) -> bool:
     """Check if user has ever had any White Internet subscription (trial or regular)."""
+    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
+        return False
     stmt = (
         select(WhiteInternetSubscription.id)
         .where(WhiteInternetSubscription.user_id == user_id)

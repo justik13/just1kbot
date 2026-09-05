@@ -23,7 +23,7 @@ from database.repositories.users_repo import (
 from utils.datetime_helpers import is_expired, now_utc
 from utils.formatters import format_datetime, format_traffic
 from bot.formatters import format_days_left
-from utils.telegram import render_hub
+from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_button_text
 
 logger = logging.getLogger(__name__)
@@ -359,7 +359,7 @@ async def _get_white_internet_card_info(
     if sub.origin_node_id:
         origin_server = await session.get(Server, sub.origin_node_id)
         if origin_server:
-            origin_name = origin_server.name
+            origin_name = safe(origin_server.name)
         else:
             origin_name = f"#{sub.origin_node_id}"
 

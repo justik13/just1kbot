@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from aiogram import Bot
-from sqlalchemy import func, nulls_first, or_, select
+from sqlalchemy import and_, func, nulls_first, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from config.constants import XRAY_PROTOCOL
@@ -355,6 +355,14 @@ class WhiteInternetReconciliationWorker:
                                 WhiteInternetProvisioningStatus.PENDING_UPDATE,
                                 WhiteInternetProvisioningStatus.PENDING_DELETE,
                             ]),
+                            and_(
+                                WhiteInternetSubscription.status.in_([
+                                    WhiteInternetStatus.PENDING,
+                                    WhiteInternetStatus.ACTIVE,
+                                    WhiteInternetStatus.EXHAUSTED,
+                                ]),
+                                WhiteInternetSubscription.expires_at <= now,
+                            ),
                         ),
                     )
                     .order_by(

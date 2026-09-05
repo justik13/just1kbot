@@ -276,10 +276,16 @@ class WhiteInternetTrafficWorker:
                 if telegram_id:
                     try:
                         from bot import texts
+                        from config.constants import WHITE_INTERNET_TRIAL_MODE_ONLY
 
+                        alert_text = (
+                            texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT
+                            if WHITE_INTERNET_TRIAL_MODE_ONLY
+                            else texts.WL_TRAFFIC_EXHAUSTED_ALERT
+                        )
                         await self.bot.send_message(
                             chat_id=telegram_id,
-                            text=texts.WL_TRAFFIC_EXHAUSTED_ALERT,
+                            text=alert_text,
                             parse_mode="HTML",
                         )
                     except Exception as exc:
