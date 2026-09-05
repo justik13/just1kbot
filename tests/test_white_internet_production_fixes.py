@@ -1013,6 +1013,68 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             restored_text = bot.send_message.call_args[1]["text"]
             self.assertIn("<code>/custom_alert_feed/ping</code>", restored_text)
 
+    async def test_node_monitor_ingress_alert_displays_timeout_when_str_exc_is_empty(self):
+        """When an exception produces an empty str(e) (like TimeoutError), alert reports Timeout, not empty string."""
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock())
+
+        server = Server(
+            id=172,
+            name="Origin Timeout Alert Test",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={"cdn_domain": "cdn.just1k.best"},
+        )
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession") as mock_http, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_sess = MagicMock()
+            mock_sess.get.side_effect = TimeoutError()  # str(TimeoutError()) is empty string ""
+            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_sess.__aexit__ = AsyncMock(return_value=None)
+            mock_http.return_value = mock_sess
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            await check_node_resources_and_alerts(bot)
+
+            bot.send_message.assert_called_once()
+            alert_text = bot.send_message.call_args[1]["text"]
+            self.assertIn("Timeout", alert_text)
+            self.assertNotIn("вернул статус .", alert_text)
+
     async def test_node_monitor_ingress_alert_dedup_against_db_state(self):
         """When DB already marks ingress_problem=True, repeated failures do not dispatch duplicate alerts."""
         clear_monitor_states()

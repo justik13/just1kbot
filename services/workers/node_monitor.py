@@ -283,11 +283,17 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         )
                                         ingress_probe_result = (False, str(probe_resp.status))
                         except Exception as probe_exc:
+                            err_msg = str(probe_exc).strip()
+                            if not err_msg:
+                                if isinstance(probe_exc, (asyncio.TimeoutError, TimeoutError)):
+                                    err_msg = "Timeout (таймаут соединения)"
+                                else:
+                                    err_msg = type(probe_exc).__name__
                             logger.warning(
                                 "Origin node %s (%s) subscription proxy ping failed on %s: %s",
-                                server.id, probe_domain, probe_url, probe_exc,
+                                server.id, probe_domain, probe_url, err_msg,
                             )
-                            ingress_probe_result = (False, str(probe_exc))
+                            ingress_probe_result = (False, err_msg)
             except Exception as outer_probe_exc:
                 logger.warning(
                     "Unexpected error preparing ingress probe for server %s: %s",
@@ -336,7 +342,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             server_name=safe(server.name),
                                             server_id=server.id,
                                             domain=safe(probe_domain),
-                                            status_or_err=safe(ingress_detail),
+                                            status_or_err=safe(ingress_detail or "недоступен (ошибка сети)"),
                                             endpoint=safe(f"{sub_prefix}/ping"),
                                         ),
                                         reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
