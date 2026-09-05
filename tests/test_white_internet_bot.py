@@ -27,6 +27,11 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.session.add = MagicMock()
         self.user = User(id=42, telegram_id=999888777)
         self.tg_user = TgUser(id=999888777, is_bot=False, first_name="TestUser")
+        self.trial_patcher = patch("bot.handlers.white_internet.WHITE_INTERNET_TRIAL_MODE_ONLY", False)
+        self.trial_patcher.start()
+
+    async def asyncTearDown(self):
+        self.trial_patcher.stop()
 
     async def test_buy_confirm_with_insufficient_balance(self):
         query = MagicMock(spec=CallbackQuery)

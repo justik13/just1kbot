@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import (
@@ -55,6 +55,17 @@ async def get_subscription_by_user_id(
         .limit(1)
     )
     return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def has_user_any_subscription(
+    session: AsyncSession, user_id: int
+) -> bool:
+    """Check if user has ever had any White Internet subscription (trial or regular)."""
+    stmt = select(func.count(WhiteInternetSubscription.id)).where(
+        WhiteInternetSubscription.user_id == user_id
+    )
+    count = await session.scalar(stmt)
+    return bool(count and count > 0)
 
 
 async def get_subscription_by_id(

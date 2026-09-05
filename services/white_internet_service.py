@@ -24,6 +24,8 @@ from config.constants import (
     WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
+    WHITE_INTERNET_TRIAL_DURATION_DAYS,
+    WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
     XRAY_PROTOCOL,
 )
 from config.enums import (
@@ -46,7 +48,7 @@ from database.repositories.tariff_quotes_repo import (
     get_or_create_current_version,
     lock_checkout_user,
 )
-from services.xray_node_client import XrayNodeClient, _sanitize_url
+from services.xray_node_client import SyncResult, XrayNodeClient, _sanitize_url
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -454,11 +456,86 @@ class WhiteInternetService:
 
     @classmethod
     async def create_trial_subscription(cls, session: AsyncSession, user_id: int):
-        """
-        # TODO(trial): Trial period implementation (1-3 days, 5-10 GiB, 0 RUB)
-        # To be enabled in UI after primary White Internet rollout stabilization.
-        """
-        raise NotImplementedError("Trial period feature is planned for a future release.")
+        """Provision a free trial White Internet subscription (3 days / 10 GiB / 0 RUB)."""
+        user = await lock_checkout_user(session, user_id)
+        if user is None:
+            return False, texts.WL_USER_NOT_FOUND, None
+
+        has_sub = await white_internet_repo.has_user_any_subscription(session, user_id)
+        if has_sub:
+            existing = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+            if existing and existing.status in (
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.PENDING,
+            ):
+                return True, texts.WL_ALREADY_ACTIVE, existing
+            return False, texts.WL_TRIAL_ALREADY_USED, existing
+
+        try:
+            origin_node = await cls.select_origin_node(session)
+        except RuntimeError as exc:
+            logger.warning("No available origin node for white internet trial: %s", exc)
+            return False, texts.WL_NO_SERVERS_AVAILABLE, None
+
+        now = now_utc()
+        tariff = await cls.get_or_create_white_internet_tariff(session)
+        tariff_version = await get_or_create_current_version(session, tariff)
+
+        quote = cls._new_quote(
+            user_id=user.id,
+            operation_type=TariffQuoteOperation.PURCHASE,
+            target_version_id=tariff_version.id,
+            amount_due=Decimal("0.00"),
+            expires_at=now + timedelta(minutes=15),
+            resulting_paid_hours=WHITE_INTERNET_TRIAL_DURATION_DAYS * 24,
+            resulting_paid_value=Decimal("0.00"),
+        )
+        quote.status = TariffQuoteStatus.CONSUMED
+        quote.consumed_at = now
+        session.add(quote)
+        await session.flush()
+
+        sub_token = secrets.token_hex(32)
+        sub_uuid = str(uuid.uuid4())
+
+        sub = await white_internet_repo.create_white_internet_subscription(
+            session,
+            user_id=user.id,
+            origin_node_id=origin_node.id,
+            token=sub_token,
+            uuid=sub_uuid,
+            quote_id=quote.id,
+            price_rub=Decimal("0.00"),
+            duration_days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
+            base_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
+        )
+
+        # Zero-Wait UX: Synchronous provisioning on Xray node
+        try:
+            async with XrayNodeClient(timeout=4.0) as xray_client:
+                resp = await xray_client.sync_client(
+                    origin_node.api_url,
+                    origin_node.api_key,
+                    client_uuid=sub_uuid,
+                    is_active=True,
+                    version=1,
+                    expected_node_epoch=origin_node.xray_instance_epoch,
+                    idempotency_key=f"trial:{sub.id}:1:True",
+                )
+                sync_res = resp.result if hasattr(resp, "result") else resp[0]
+                if sync_res in (SyncResult.APPLIED, SyncResult.ALREADY_NEWER):
+                    sub.status = WhiteInternetStatus.ACTIVE
+                    sub.actual_version = 1
+                    sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+                    sub.last_reconciled_node_epoch = origin_node.xray_instance_epoch
+                    sub.last_synced_at = now_utc()
+                    await session.flush()
+        except Exception as exc:
+            logger.warning(
+                "Synchronous trial activation fallback to background worker: %s", exc
+            )
+
+        return True, texts.WL_TRIAL_ACTIVATED_SUCCESS, sub
 
     @staticmethod
     def generate_vless_links(
