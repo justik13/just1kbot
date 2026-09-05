@@ -202,6 +202,7 @@ class WhiteInternetService:
             currency="RUB",
             status=TariffQuoteStatus.ACTIVE,
             expires_at=expires_at,
+            purchase_notified_at=now_utc(),
         )
 
     @classmethod

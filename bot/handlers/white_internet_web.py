@@ -208,8 +208,18 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
 
+async def white_internet_ping_handler(_request: web.Request) -> web.Response:
+    """Lightweight synthetic healthcheck endpoint for subscription proxy verification."""
+    return web.Response(
+        status=200,
+        text="pong",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Content-Type": "text/plain; charset=utf-8"},
+    )
+
+
 def setup_white_internet_web_routes(app: web.Application) -> None:
     """Register White Internet HTTP subscription feed routes with support for custom prefixes."""
     sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl/").strip().rstrip("/")
+    app.router.add_get(f"{sub_prefix}/ping", white_internet_ping_handler)
     app.router.add_get(f"{sub_prefix}/{{token}}", white_internet_subscription_feed_handler)
-    logger.info("White Internet subscription feed routes registered: %s/{token}", sub_prefix)
+    logger.info("White Internet subscription feed routes registered: %s/{token} and %s/ping", sub_prefix, sub_prefix)

@@ -22,12 +22,6 @@ deploy_subscription_proxy_conf() {
     fi
     target_host="$(normalize_domain "$target_host")"
 
-    local ssl_verify_directives=""
-    if [[ ! "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$target_host" != "localhost" && -f /etc/ssl/certs/ca-certificates.crt ]]; then
-        ssl_verify_directives="        proxy_ssl_verify on;
-        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;"
-    fi
-
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
@@ -36,7 +30,8 @@ deploy_subscription_proxy_conf() {
         set \$bot_upstream "https://${target_host}";
         proxy_pass \$bot_upstream;
         proxy_ssl_server_name on;
-${ssl_verify_directives}
+        proxy_ssl_name ${target_host};
+        proxy_ssl_verify off;
         proxy_set_header Host ${target_host};
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;

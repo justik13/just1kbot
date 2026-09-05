@@ -371,6 +371,25 @@ if os.path.exists(rf):
         fi
     fi
 
+    if [[ "$role" == "origin" ]]; then
+        log "8. Проверка Nginx-проксирования подписок (/sub/wl)..."
+        local sub_code
+        sub_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 -H "Host: ${domain:-localhost}" https://127.0.0.1/sub/wl/ping 2>/dev/null || echo "000")"
+        if [[ "$sub_code" == "200" ]]; then
+            echo -e "  ${GREEN}✔${NC} Nginx прокси подписок (/sub/wl/ping) отвечает 200 OK"
+        elif [[ "$sub_code" == "502" ]]; then
+            echo -e "  ${RED}✗${NC} ОШИБКА 502 Bad Gateway: Nginx не может связаться с ботом (проверьте SSL/upstream в sub-wl.conf)!"
+            failed=$((failed + 1))
+        elif [[ "$sub_code" == "404" ]]; then
+            echo -e "  ${YELLOW}!${NC} Nginx прокси отвечает 404 (соединение с ботом есть, но эндпоинт /ping не найден)"
+        elif [[ "$sub_code" == "000" ]]; then
+            echo -e "  ${RED}✗${NC} Не удалось выполнить запрос к https://127.0.0.1/sub/wl/ping (Nginx недоступен)"
+            failed=$((failed + 1))
+        else
+            echo -e "  ${YELLOW}!${NC} Nginx прокси вернул HTTP код: $sub_code"
+        fi
+    fi
+
     if [[ $failed -eq 0 ]]; then
         echo -e "\n${BOLD}${GREEN}Все проверки пройдены успешно! Узел полностью здоров.${NC}\n"
     else

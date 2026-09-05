@@ -8,6 +8,8 @@ import logging
 import time
 from datetime import datetime, timezone
 
+import aiohttp
+
 from aiogram import Bot
 
 from bot.keyboards.notifications import get_node_monitor_alert_keyboard
@@ -213,6 +215,43 @@ async def check_node_resources_and_alerts(bot: Bot):
                     is_healthy, xray_epoch, xray_data = await xray_client.check_health(
                         server.api_url, server.api_key
                     )
+                # Synthetic probe of public subscription endpoint to detect Nginx 502 Bad Gateway
+                probe_domain = None
+                if isinstance(getattr(server, "extra_data", None), dict):
+                    probe_domain = server.extra_data.get("domain") or server.extra_data.get("cdn_domain")
+                if not probe_domain and server.api_url:
+                    from urllib.parse import urlsplit
+                    parsed = urlsplit(server.api_url)
+                    if parsed.hostname and not parsed.hostname.replace(".", "").isdigit() and parsed.hostname != "localhost":
+                        probe_domain = parsed.hostname
+
+                if is_healthy and probe_domain:
+                    probe_domain = str(probe_domain).strip()
+                    try:
+                        timeout = aiohttp.ClientTimeout(total=5.0)
+                        async with aiohttp.ClientSession(timeout=timeout) as probe_sess:
+                            async with probe_sess.get(
+                                f"https://{probe_domain}/sub/wl/ping",
+                                ssl=False,
+                                allow_redirects=True,
+                            ) as probe_resp:
+                                if probe_resp.status >= 500:
+                                    logger.warning(
+                                        "Xray node %s (%s) subscription proxy returned HTTP %s on /sub/wl/ping",
+                                        server.id, probe_domain, probe_resp.status,
+                                    )
+                                    is_healthy = False
+                    except Exception as probe_exc:
+                        is_origin = (
+                            "xray_origin" in (getattr(server, "capabilities", None) or [])
+                            or bool((getattr(server, "extra_data", None) or {}).get("relays"))
+                        )
+                        if is_origin:
+                            logger.warning(
+                                "Origin node %s (%s) subscription proxy ping failed: %s",
+                                server.id, probe_domain, probe_exc,
+                            )
+                            is_healthy = False
             elif is_amnezia_node:
                 client = AmneziaClient(server.api_url, server.api_key)
                 is_healthy = await client.healthcheck()
