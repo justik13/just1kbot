@@ -15,40 +15,41 @@
 
 1. [Введение и фундаментальная разница: Черные vs Белые списки](#1-введение-и-фундаментальная-разница-черные-vs-белые-списки)
 2. [Анатомия блокировок ТСПУ в режиме «Белых списков»](#2-анатомия-блокировок-тспу-в-режиме-белых-списков)
-   - [2.1. Двухуровневая фильтрация L3 (IP/CIDR) + L7 (SNI/DPI)](#21-двухуровневая-фильтрация-l3-ipcidr--l7-snidpi)
-   - [2.1.1. Аппаратная логика EcoFilter (RDP.ru): режим WH List и Silent Drop](#211-аппаратная-логика-ecofilter-rdpru-режим-wh-list-и-silent-drop)
-   - [2.1.2. Эмпирический феномен «Отсечки в 16–20 КБ» (10–14 пакетов) и маски доменов](#212-эмпирический-феномен-отсечки-в-1620-кб-1014-пакетов-и-маски-доменов-хабр-1008164-cheburcheckru)
+   - [2.1. Двухуровневая фильтрация: L3 (IP/CIDR) + L7 (SNI/DPI)](#21-двухуровневая-фильтрация-l3-ipcidr-l7-snidpi)
+   - [2.1.1. Архитектура ТСПУ EcoFilter (RDP.ru): режимы фильтрации и Silent Drop](#211-архитектура-тспу-ecofilter-rdpru-режимы-фильтрации-и-silent-drop)
+   - [2.1.2. Эмпирический феномен «Отсечки в 16–20 КБ» (10–14 пакетов) и маскирование поддоменов (Хабр #1008164, cheburcheck.ru)](#212-эмпирический-феномен-отсечки-в-1620-кб-1014-пакетов-и-маскирование-поддоменов-хабр-1008164-cheburcheckru)
    - [2.2. Тотальная смерть UDP (WireGuard, AmneziaWG, QUIC, DNS)](#22-тотальная-смерть-udp-wireguard-amneziawg-quic-dns)
    - [2.3. Иерархия и приоритеты в белых списках](#23-иерархия-и-приоритеты-в-белых-списках)
    - [2.4. Сравнительный анализ 6 способов пробития белых списков](#24-сравнительный-анализ-6-способов-пробития-белых-списков)
-3. [Архитектура каскадного проксирования VLESS XHTTP + CDN (Multi-Hop)](#3-архитектура-каскадного-проксирования-vless-xhttp--cdn-multi-hop)
+3. [Архитектура каскадного проксирования VLESS XHTTP + CDN (Multi-Hop)](#3-архитектура-каскадного-проксирования-vless-xhttp-cdn-multi-hop)
    - [3.1. Полная топология прохождения трафика](#31-полная-топология-прохождения-трафика)
    - [3.2. Почему именно Yandex Cloud CDN?](#32-почему-именно-yandex-cloud-cdn)
+   - [3.2.1. Альтернативные отечественные CDN (Selectel, Timeweb, VK Cloud, TurboFlare, CDNvideo)](#321-альтернативные-отечественные-cdn-selectel-timeweb-vk-cloud-turboflare-cdnvideo)
    - [3.3. Ключевое открытие: обход блокировки POST через метод OPTIONS (PR #5414)](#33-ключевое-открытие-обход-блокировки-post-через-метод-options-pr-5414)
-   - [3.4. Роль Nginx на Origin: маппинг методов, Zero Buffering и защита префиксов (`^~`)](#34-роль-nginx-на-origin-маппинг-методов-zero-buffering-и-защита-префиксов-)
-   - [3.5. Парадокс первичной доставки подписок (Bootstrap Paradox) и резервный Git-канал](#35-парадокс-первичной-доставки-подписок-bootstrap-paradox-и-резервный-git-канал)
+   - [3.4. Роль Nginx на Origin: маппинг методов, Zero Buffering и защита префиксов (`^~`)](#34-роль-nginx-на-origin-маппинг-методов-zero-buffering-и-защита-префиксов)
+   - [3.5. Парадокс первичной доставки подписок (Bootstrap Paradox) и решение через CDN-проксирование](#35-парадокс-первичной-доставки-подписок-bootstrap-paradox-и-решение-через-cdn-проксирование)
 4. [Подготовка и планирование инфраструктуры](#4-подготовка-и-планирование-инфраструктуры)
    - [4.1. Сводная таблица параметров и плейсхолдеров](#41-сводная-таблица-параметров-и-плейсхолдеров)
    - [4.2. Настройка DNS-записей (DNS-Only)](#42-настройка-dns-записей-dns-only)
 5. [Пошаговое развертывание серверов](#5-пошаговое-развертывание-серверов)
    - [5.1. Настройка Exit-сервера: Вариант A (Domain TLS) и Вариант B (VLESS REALITY)](#51-настройка-exit-сервера-вариант-a-domain-tls-и-вариант-b-vless-reality)
    - [5.1.1. Паттерн Exit-узла: Интеграция Cloudflare WARP (защита от Captcha и блокировок Datacenter IP)](#511-паттерн-exit-узла-интеграция-cloudflare-warp-защита-от-captcha-и-блокировок-datacenter-ip)
-   - [5.2. Настройка Origin-сервера (Россия — Москва / Санкт-Петербург)](#52-настройка-origin-сервера-россия--москва--санкт-петербург)
-   - [5.3. Специфика РФ: отключение IPv6, обход блокировки GitHub, DNS и фаервол](#53-специфика-рф-отключение-ipv6-обход-блокировки-github-dns-и-фаервол)
-6. [Настройка Yandex Cloud: Certificate Manager & Cloud CDN](#6-настройка-yandex-cloud-certificate-manager--cloud-cdn)
+   - [5.2. Настройка Origin-сервера (Россия — Москва / Санкт-Петербург)](#52-настройка-origin-сервера-россия-москва-санкт-петербург)
+   - [5.3. Специфика РФ: проблема Happy Eyeballs (IPv6), DNS и фаервол](#53-специфика-рф-проблема-happy-eyeballs-ipv6-dns-и-фаервол)
+6. [Настройка Yandex Cloud: Certificate Manager & Cloud CDN](#6-настройка-yandex-cloud-certificate-manager-cloud-cdn)
    - [6.1. Выпуск Let's Encrypt сертификата в Certificate Manager](#61-выпуск-lets-encrypt-сертификата-в-certificate-manager)
    - [6.2. Создание Группы источников](#62-создание-группы-источников)
    - [6.3. Конфигурация параметров CDN-ресурса](#63-конфигурация-параметров-cdn-ресурса)
    - [6.4. Привязка CNAME-записи и включение HTTPS-редиректа](#64-привязка-cname-записи-и-включение-https-редиректа)
    - [6.5. Экономика и тарификация Cloud CDN в 2026 году (актуально с 01.07.2026)](#65-экономика-и-тарификация-cloud-cdn-в-2026-году-актуально-с-01072026)
 7. [Двухклиентская стратегия: INCY (Основной) и AmneziaVPN (Второй)](#7-двухклиентская-стратегия-incy-основной-и-amneziavpn-второй)
-   - [7.1. Клиент #1: INCY — интеграция с ядром Xray и Issue #114](#71-клиент-1-incy--интеграция-с-ядром-xray-и-issue-114)
-   - [7.2. INCY Full Xray JSON: гарантированная доставка параметров XHTTP](#72-incy-full-xray-json-гарантированная-доставка-параметров-xhttp)
+   - [7.1. Клиент #1: INCY — интеграция с ядром Xray и Issue #114](#71-клиент-1-incy-интеграция-с-ядром-xray-и-issue-114)
+   - [7.2. INCY Full Xray JSON: передача параметров XHTTP без потерь сериализации](#72-incy-full-xray-json-передача-параметров-xhttp-без-потерь-сериализации)
    - [7.3. INCY HTTP Subscription Feed (`/sub/wl/{token}`) и App Management Headers](#73-incy-http-subscription-feed-subwltoken-и-app-management-headers)
    - [7.4. INCY Deep Links (`incy://add/`, `incy://import/`, `incy://crypt1/`)](#74-incy-deep-links-incyadd-incyimport-incycrypt1)
-   - [7.5. Клиент #2: AmneziaVPN — нативные ключи `vpn://` (контейнер `amnezia-xray`, Issue #2943)](#75-клиент-2-amneziavpn--нативные-ключи-vpn-контейнер-amnezia-xray-issue-2943)
+   - [7.5. Клиент #2: AmneziaVPN — нативные ключи `vpn://` (контейнер `amnezia-xray`, Issue #2943)](#75-клиент-2-amneziavpn-нативные-ключи-vpn-контейнер-amnezia-xray-issue-2943)
    - [7.6. Универсальный Python-генератор для обоих клиентов](#76-универсальный-python-генератор-для-обоих-клиентов)
-   - [7.7. Безопасность клиентов: защита от сканирования локальных портов (Habr #1020080)](#77-безопасность-клиентов-защита-от-сканирования-локальных-портов-habr-1020080)
+   - [7.7. Безопасность клиентов: защита от сканирования локальных портов (Localhost SOCKS5 Leak / Habr #1020080)](#77-безопасность-клиентов-защита-от-сканирования-локальных-портов-localhost-socks5-leak-habr-1020080)
 8. [Диагностика, мониторинг и валидация](#8-диагностика-мониторинг-и-валидация)
    - [8.1. Сквозная проверка через `/cdn-check`](#81-сквозная-проверка-через-cdn-check)
    - [8.2. Анализ логов Nginx и Xray на Origin](#82-анализ-логов-nginx-и-xray-на-origin)
@@ -262,15 +263,60 @@
 > }
 > ```
 
+#### Практические правила настройки профилей альтернативных CDN
+
+1. **Selectel CDN (`*.selcdn.net`):**
+   - **Тип ресурса:** Создается ресурс типа **«Статика»** с источником по протоколу **HTTPS на порту 443**.
+   - **Технический домен:** Выдается системой в виде `xxxx.selcdn.net`. В DNS вашего домена создается CNAME-запись, ведущая на этот хост.
+   - **Специфика метода Uplink (`DELETE`):** Edge-серверы Selectel отбрасывают метод `POST` (возвращая 405 Method Not Allowed) либо буферизируют его, однако **метод `DELETE` беспрепятственно пропускается вместе с телом запроса** без буферизации. В клиентах Xray выставляется: `uplinkHTTPMethod: "DELETE"`.
+   - **Таймауты:** В настройках CDN обязательно увеличиваются `Response timeout` и `Connection timeout` (до 300–600 секунд), чтобы CDN не сбрасывал соединение при кратковременных паузах в потоке данных.
+   - **Отключение сжатия и обработки:** Полностью отключить кеширование, Gzip, Brotli и автоконвертацию изображений в WebP.
+   - **Важное правило FQDN:** Пользовательский CDN-домен (например, `cdn.domain.com`) категорически **не должен совпадать** с доменом источника Origin (`origin.domain.com`), иначе возникает бесконечный цикл перенаправлений.
+   - **Маскировка:** Путь `/api/uploadFile/` (имитация REST API загрузки файлов).
+
+2. **Timeweb CDN (`*.cdn.twcstorage.ru`):**
+   - **Схема источника (HTTP:80):** В отличие от Yandex и Selectel, базовый CDN-профиль Timeweb обращается к Origin по **незашифрованному протоколу HTTP (порт 80)** по IP-адресу сервера. Опция HTTPS до Origin отключается.
+   - **Технический домен:** Timeweb генерирует технический домен `xxxx.cdn.twcstorage.ru`. На него направляется CNAME-запись пользовательского поддомена.
+   - **Критическая опция «Параметры запроса»:** В панели управления Timeweb **строго обязательно выключить** чекбокс *«Игнорировать параметры запроса»* (Ignore Query String). XHTTP передает идентификаторы сессий и параметры стрима в строке запроса; если CDN их отсечет, соединение завершится ошибкой 400 Bad Request.
+   - **Кеширование и компрессия:** Отключить кеширование, Gzip и Brotli.
+   - **Маскировка:** Рекомендуемый путь `/content/media/stream.m3u8` (имитация манифеста HLS-видеопотока).
+
+3. **VK Cloud CDN:**
+   - **Схема Origin:** Подключение к источнику осуществляется по HTTP (порт 80).
+   - **Особенности:** Поддерживает как стандартную схему, так и каскадную цепочку через промежуточный Relay внутри РФ. Требуется привязка CNAME и отключение буферизации/кеширования.
+   - **Маскировка:** Путь `/api/v2/stream`.
+
+4. **TurboFlare CDN:**
+   - **Делегирование DNS-зоны:** TurboFlare требует переноса управления всей DNS-зоной домена на собственные NS-серверы провайдера. Перед сменой NS необходимо перенести все существующие записи зоны.
+   - **Edge TLS:** Сертификат для Edge-нод выпускается и автоматически обновляется на стороне TurboFlare.
+   - **Связь с Origin:** По протоколу **HTTPS на порту 443**.
+   - **Маскировка:** Путь `/static/getFile/video/segment.ts` (маскировка под фрагменты видеопотока MPEG-TS).
+
+5. **Beeline CDNvideo:**
+   - Используется выделенный технический домен платформы CDNvideo.
+   - Поддерживает протоколы HTTP и HTTPS до источника. Требует выбора профиля стриминга с отключенной буферизацией ответов.
+   - **Маскировка:** Путь `/live/stream.flv`.
+
 ### 3.3. Ключевое открытие: обход блокировки POST через метод OPTIONS (PR #5414)
 
-Исторически транспорт XHTTP в ядре Xray использовал метод HTTP `POST` для передачи восходящего потока данных (Uplink). Однако российские CDN-сервисы (Yandex Cloud CDN, EdgeCDN) по умолчанию **блокируют метод POST** для предотвращения атак или буферизируют тело запроса, что делает интерактивный VPN-туннель неработоспособным.
+Исторически транспорт XHTTP (SplitHTTP) в ядре Xray использовал исключительно метод HTTP `POST` для передачи восходящего потока данных (Uplink). Однако при развертывании каскадов через отечественные CDN-сервисы возникли две непреодолимые преграды:
+1. **Блокировка сигнатур XHTTP:** Провайдеры CDN (в частности Beeline CDNvideo) начали блокировать запросы, содержащие стандартные параметры `x_padding=XXXXX` и заголовок `X-Padding`.
+2. **Блокировка метода POST:** Российские CDN-сервисы (Yandex Cloud CDN, Selectel) по умолчанию возвращают `405 Method Not Allowed` на запросы `POST` на edge-серверах либо включают агрессивную буферизацию тела, что полностью парализует двунаправленный VPN-туннель в реальном времени.
 
-- **31 января 2026 года:** В ядро [XTLS/Xray-core был принят PR #5414](https://github.com/XTLS/Xray-core/pull/5414), добавивший параметр `uplinkHTTPMethod`.
-- **Финальное решение:** Выбор метода **`OPTIONS`**.
-  - В Yandex Cloud CDN метод `OPTIONS` разрешен в стандартном профиле работы веб-приложений.
-  - Метод `OPTIONS` не подвергается агрессивной валидации схемы тела запроса на CDN.
-  - ТСПУ полностью игнорирует запросы `OPTIONS`, считая их легитимными CORS preflight-запросами браузеров.
+- **PR #5414 в XTLS/Xray-core («XHTTP transport: New options for bypassing CDN's potential detection»):**
+  Инженер Дмитрий Махно (`paqx`) разработал патч, специально ориентированный на преодоление белых списков на мобильных сетях РФ:
+  - Добавлена кастомизация заголовка паддинга (`xPaddingHeader`, по умолчанию заменен на легитимный `X-Signature`, либо `X-Cache`).
+  - Рандомизирована энтропия паддинга (символы X/Z и режим `tokenish`).
+  - **Добавлен параметр `uplinkHTTPMethod`:** возможность переопределения метода восходящего потока (`OPTIONS`, `DELETE`, `GET`).
+
+- **Почему именно метод `OPTIONS` для Yandex Cloud CDN?**
+  - В архитектуре Yandex Cloud CDN метод `OPTIONS` разрешен в стандартном профиле веб-приложений и транслируется на Origin без буферизации тела.
+  - Запросы `OPTIONS` не подвергаются строгой валидации схемы схемы данных на WAF/CDN.
+  - ТСПУ полностью игнорирует запросы `OPTIONS`, классифицируя их как легитимный служебный CORS preflight-трафик браузера.
+
+- **Специфика других CDN:**
+  - Для **Selectel CDN** метод `POST` блокируется, но метод **`DELETE`** пропускается с полезной нагрузкой (`uplinkHTTPMethod: "DELETE"`).
+  - Для **TurboFlare CDN** разрешен прямой **`POST`**.
 
 ### 3.4. Роль Nginx на Origin: маппинг методов, Zero Buffering и защита префиксов (`^~`)
 
@@ -834,7 +880,7 @@ ufw --force enable
 3. В настройках CDN-ресурса включите опцию **«Перенаправление с HTTP на HTTPS»** (после успешного подтверждения SSL).
 
 ### 6.5. Экономика и тарификация Cloud CDN в 2026 году (актуально с 01.07.2026)
-В соответствии с официальной тарификацией Yandex Cloud (документ `docs.yandex.cloud/ru/cdn/pricing`):
+В соответствии с официальной тарификацией Yandex Cloud (документ `yandex.cloud/ru/docs/cdn/pricing`):
 
 | Статья расходов | Условия и лимиты | Стоимость (с НДС) |
 | :--- | :--- | :--- |
@@ -864,8 +910,9 @@ ufw --force enable
 - На Android / Windows / Linux: через нативный системный сервис.
 
 > [!NOTE]
-> **Issue #114 (INCY-DEV Platforms, август 2026):**
-> В рамках тестов через российские CDN было зафиксировано, что edge-ноды ряда CDN могут возвращать `405 Method Not Allowed` на запросы `POST`, в то время как запросы `OPTIONS` и `GET` беспрепятственно транслируются на Origin без буферизации тела. В трекере INCY Issue #114 ведется доработка и тестирование расширенных параметров `uplinkHTTPMethod: "OPTIONS"`, а также обфускации сессий `sessionIDKey` и `sessionIDPlacement`, что обеспечивает совместимость с отечественными CDN-провайдерами.
+> **Issue #114 ([INCY-DEV/incy-platforms Issue #114](https://github.com/INCY-DEV/incy-platforms/issues/114)):**
+> В трекере INCY Issue #114 зафиксировано поведение мобильных клиентов за отечественными CDN: edge-ноды CDN (в частности Yandex Cloud CDN) возвращают `405 Method Not Allowed` на запросы `POST`, в то время как запросы `OPTIONS` и `GET` беспрепятственно пропускаются на Origin без буферизации. При импорте стандартных URL-подписок клиентский билдер INCY терял вложенные параметры `xhttpSettings.extra` (`uplinkHTTPMethod: "OPTIONS"/"GET"`, `xPaddingKey`, `xPaddingHeader`, `xPaddingMethod`, `xPaddingPlacement`, `xPaddingObfsMode`), приводя к откату на дефолтный метод POST и таймауту сокета.
+> **Решение:** Использование формата **Full Xray JSON Configuration** гарантирует прямую передачу блока `streamSettings.xhttpSettings` во встроенное ядро `xray-core` без потерь параметров при парсинге.
 
 INCY умеет принимать Xray-конфигурации тремя способами:
 1. **Full Xray JSON Configuration** (рекомендуемый способ для полной передачи настроек).
@@ -1034,11 +1081,13 @@ class WhitelistKeyGenerator:
         uuid_str: str,
         path: str = "/api/v3/secure-data",
         padding_key: str = "dc",
+        uplink_method: str = "OPTIONS",  # "OPTIONS" (Yandex/VK/Timeweb), "DELETE" (Selectel), "POST" (TurboFlare)
     ):
         self.domain = domain
         self.uuid = uuid_str
         self.path = path
         self.padding_key = padding_key
+        self.uplink_method = uplink_method
 
     def get_xray_outbound_dict(self) -> dict:
         """Базовый Xray Outbound объект для VLESS XHTTP через CDN."""
@@ -1063,7 +1112,7 @@ class WhitelistKeyGenerator:
                     "scMaxBufferedPosts": 30,
                     "scMaxEachPostBytes": 1000000,
                     "scMinPostsIntervalMs": 30,
-                    "uplinkHTTPMethod": "OPTIONS",
+                    "uplinkHTTPMethod": self.uplink_method,
                     "xPaddingHeader": "X-Cache",
                     "xPaddingKey": self.padding_key,
                     "xPaddingMethod": "tokenish",
@@ -1098,7 +1147,7 @@ class WhitelistKeyGenerator:
             ],
             "outbounds": [
                 {
-                    "tag": "WL-YandexCDN",
+                    "tag": "WL-CDN",
                     **self.get_xray_outbound_dict(),
                 },
                 {"tag": "direct", "protocol": "freedom"},
@@ -1106,7 +1155,7 @@ class WhitelistKeyGenerator:
         }
         return json.dumps(full_cfg, indent=2)
 
-    def generate_incy_vless_url(self, label: str = "WL-YandexCDN") -> str:
+    def generate_incy_vless_url(self, label: str = "WL-CDN") -> str:
         """Генерирует vless:// ссылку с параметром extra для INCY / Happ / v2rayNG."""
         extra_dict = {
             "mode": "packet-up",
@@ -1118,7 +1167,7 @@ class WhitelistKeyGenerator:
             "xPaddingHeader": "X-Cache",
             "xPaddingMethod": "tokenish",
             "xPaddingPlacement": "queryInHeader",
-            "uplinkHTTPMethod": "OPTIONS",
+            "uplinkHTTPMethod": self.uplink_method,
         }
         extra_encoded = urllib.parse.quote(
             json.dumps(extra_dict, separators=(",", ":"))
@@ -1331,7 +1380,7 @@ curl -fsSL https://cheburcheck.ru/install-probe.sh | sudo sh
    - [INCY Developer Documentation](https://docs.incy.cc/)
    - [INCY Full Xray Configuration Specification](https://docs.incy.cc/subscription-format/)
    - [INCY Deep Links Guide](https://docs.incy.cc/deep-links/)
-   - [INCY-DEV Platforms Issue #114: CDN XHTTP OPTIONS & Edge Compatibility (August 2026)](https://github.com/INCY-DEV/platforms/issues/114)
+   - [INCY-DEV incy-platforms Issue #114: VLESS XHTTP with uplinkHTTPMethod/padding-obfuscation extra params fails behind CDN that blocks POST](https://github.com/INCY-DEV/incy-platforms/issues/114)
 2. **Исследования на Хабре и профильных сообществах:**
    - [Хабр #1074940: «У меня ничего не грузится»: приложение для диагностики сетевых сбоев, белых списков, троттлинга и VPN-детекторов (26.08.2026)](https://habr.com/ru/articles/1074940/)
    - [Хабр #1040846: Как я делал VPN-сервис в 2026 году: почему прямые VPS в РФ умирают, хостеры требуют СОРМ/Антифрод 2.0, и почему Anycast CDN — единственный рабочий путь](https://habr.com/ru/articles/1040846/)
@@ -1353,6 +1402,7 @@ curl -fsSL https://cheburcheck.ru/install-probe.sh | sudo sh
    - [LowderPlay/cheburcheck: Платформа сетевой телеметрии, чекер зондов и база белых списков](https://github.com/LowderPlay/cheburcheck)
    - [XTLS/Xray-core PR #5414: Добавление uplinkHTTPMethod](https://github.com/XTLS/Xray-core/pull/5414)
    - [AmneziaVPN Issue #2943 / PR #2339: Serialization bug fix for XHTTP in GUI](https://github.com/amnezia-vpn/desktop-client/issues/2943)
+   - [matrixlegend-code/vpn-cdn-installer: Скрипт автоматизации VLESS XHTTP Packet-Up для 6 CDN-провайдеров РФ (Selectel, Timeweb, VK Cloud, TurboFlare, Beeline CDNvideo, Yandex Cloud)](https://github.com/matrixlegend-code/vpn-cdn-installer)
    - [zieng2/wl: Подписка для обхода белых списков и зеркалирование через Mos.Hub / GitVerse](https://github.com/zieng2/wl)
    - [kort0881/russia-whitelist: Russian IP whitelist database](https://github.com/kort0881/russia-whitelist)
    - [OpenLibreCommunity TWL: Списки и маршрутизация белых списков](https://github.com/openlibrecommunity/twl)
@@ -1360,8 +1410,8 @@ curl -fsSL https://cheburcheck.ru/install-probe.sh | sudo sh
    - [runetfreedom/per-app-split-bypass-poc: PoC утечки локальных портов через 127.0.0.1](https://github.com/runetfreedom/per-app-split-bypass-poc)
    - [cherepavel/VPN-Detector: Библиотека обнаружения VPN в Android-приложениях](https://github.com/cherepavel/VPN-Detector)
 4. **Официальная документация провайдеров:**
-   - [Yandex Cloud CDN: Правила тарификации с 01.07.2026](https://docs.yandex.cloud/ru/cdn/pricing)
-   - [Yandex Certificate Manager: Интеграция с Let's Encrypt](https://docs.yandex.cloud/ru/certificate-manager/)
+   - [Yandex Cloud CDN: Правила тарификации с 01.07.2026](https://yandex.cloud/ru/docs/cdn/pricing)
+   - [Yandex Certificate Manager: Интеграция с Let's Encrypt](https://yandex.cloud/ru/docs/certificate-manager/)
 5. **Примеры конфигураций и фикстуры репозитория:**
    - [docs/WL/examples/xhttp-client.json](file:///d:/project/ag/just1kbot/docs/WL/examples/xhttp-client.json) — пример полной клиентской конфигурации Xray JSON (inbounds + outbounds) для VLESS XHTTP через CDN.
    - [docs/WL/examples/xhttp-amnezia-container.json](file:///d:/project/ag/just1kbot/docs/WL/examples/xhttp-amnezia-container.json) — пример структуры контейнера `amnezia-xray` с флагом `isThirdPartyConfig: true` для Amnezia Client.
