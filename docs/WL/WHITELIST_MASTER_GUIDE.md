@@ -238,6 +238,30 @@
 2. **Легитимный L7:** Клиент подключается к CDN с настоящим валидным сертификатом Let's Encrypt, выпущенным через Yandex Certificate Manager. ТСПУ видит идеальное HTTPS-соединение без каких-либо аномалий.
 3. **Экономичность:** Трафик внутри РФ через Cloud CDN тарифицируется по минимальным ценам, а начального гранта хватает на месяцы работы.
 
+### 3.2.1. Альтернативные отечественные CDN (Selectel, Timeweb, VK Cloud, TurboFlare, CDNvideo)
+
+Хотя **Yandex Cloud CDN** является рекомендуемым индустриальным стандартом (SSOT) благодаря надежной Anycast-инфраструктуре, бесплатному пулу в 150 ГБ и сквозному HTTPS до Origin, на практике (включая исследования репозитория `matrixlegend-code/vpn-cdn-installer`) успешно применяются еще 5 альтернативных CDN-провайдеров РФ:
+
+| CDN-провайдер | Технический домен / Edge | Протокол до Origin | Метод Uplink (`uplinkHTTPMethod`) | Рекомендуемый путь маскировки (Path) | Специфика настройки профиля CDN |
+| :--- | :--- | :---: | :---: | :--- | :--- |
+| **Yandex Cloud CDN** | `*.gslb.yccdn.ru` | **HTTPS:443** | **`OPTIONS`** | `/api/v3/secure-data` | **Эталон (SSOT)**. Zero Buffering, автовыпуск Let's Encrypt через Certificate Manager. |
+| **Selectel CDN** | `*.selcdn.net` | **HTTPS:443** | **`DELETE`** | `/api/uploadFile/` | Ресурс «Статика». Edge блокирует POST, но **пропускает DELETE** с телом! Отключить кеш, Brotli, Gzip и оптимизацию картинок. Увеличить таймауты ответа. |
+| **Timeweb CDN** | `*.cdn.twcstorage.ru` | **HTTP:80** | `OPTIONS` / `POST` | `/content/media/stream.m3u8` | Origin задается IP-адресом на порту 80 (без SSL). Маскировка под HLS-поток. Выключить опцию «Игнорировать параметры запроса». CNAME на техдомен. |
+| **VK Cloud CDN** | `*.vkcloud-cdn.ru` | **HTTP:80** | `OPTIONS` | `/api/v2/stream` | Базовый профиль с Origin по HTTP. Требует привязки CNAME и отключения буферизации. |
+| **TurboFlare CDN** | Собственные NS | **HTTPS:443** | `POST` | `/static/getFile/video/segment.ts` | Управляет всей DNS-зоной домена (делегирование NS). Сертификат edge выпускает сам TurboFlare. Маскировка под сегменты видео MPEG-TS. |
+| **Beeline CDNvideo** | Домен CDNvideo | HTTP / HTTPS | `OPTIONS` | `/live/stream.flv` | Профиль стриминга без буферизации. |
+
+> [!TIP]
+> **Универсальный Nginx-маппинг для любого CDN:**
+> Чтобы ваш Origin-сервер мог прозрачно принимать запросы от любого из перечисленных провайдеров (будь то `OPTIONS` от Яндекса или `DELETE` от Selectel), в маппинг Nginx на Origin добавляются оба метода:
+> ```nginx
+> map $request_method $xhttp_proxy_method {
+>     default  $request_method;
+>     OPTIONS  POST;
+>     DELETE   POST;
+> }
+> ```
+
 ### 3.3. Ключевое открытие: обход блокировки POST через метод OPTIONS (PR #5414)
 
 Исторически транспорт XHTTP в ядре Xray использовал метод HTTP `POST` для передачи восходящего потока данных (Uplink). Однако российские CDN-сервисы (Yandex Cloud CDN, EdgeCDN) по умолчанию **блокируют метод POST** для предотвращения атак или буферизируют тело запроса, что делает интерактивный VPN-туннель неработоспособным.
@@ -255,9 +279,10 @@
    map $request_method $xhttp_proxy_method {
        default  $request_method;
        OPTIONS  POST;
+       DELETE   POST;
    }
    ```
-   Nginx принимает от CDN запрос `OPTIONS` и передает его в Xray как `POST` через директиву `proxy_method $xhttp_proxy_method;`.
+   Nginx принимает от CDN запрос `OPTIONS` (Yandex) или `DELETE` (Selectel) и передает его в Xray как `POST` через директиву `proxy_method $xhttp_proxy_method;`.
 2. **Тотальное отключение буферизации (Zero Buffering):**
    ```nginx
    proxy_buffering off;
@@ -618,6 +643,7 @@ cat > /etc/nginx/conf.d/xhttp-method.conf <<'EOF'
 map $request_method $xhttp_proxy_method {
     default  $request_method;
     OPTIONS  POST;
+    DELETE   POST;
 }
 EOF
 
