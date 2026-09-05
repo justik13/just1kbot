@@ -50,6 +50,11 @@ def _render_progress_bar(used_bytes: int, total_bytes: int, length: int = 10) ->
     return "█" * filled + "░" * (length - filled)
 
 
+def _build_subscription_url(domain: str, token: str) -> str:
+    sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
+    return f"https://{domain}{sub_prefix}/{token}"
+
+
 def get_white_internet_overview_keyboard(
     sub: WhiteInternetSubscription | None,
     bot_domain: str | None,
@@ -80,8 +85,7 @@ def get_white_internet_overview_keyboard(
                 and bot_domain
             )
             if has_sub_link:
-                sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
-                sub_url = f"https://{bot_domain}{sub_prefix}/{sub.token}"
+                sub_url = _build_subscription_url(bot_domain, sub.token)
                 builder.button(
                     text=texts.BTN_WL_COPY_LINK,
                     copy_text=CopyTextButton(text=sub_url),
@@ -125,8 +129,7 @@ def get_white_internet_overview_keyboard(
             and bot_domain
         )
         if has_sub_link:
-            sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
-            sub_url = f"https://{bot_domain}{sub_prefix}/{sub.token}"
+            sub_url = _build_subscription_url(bot_domain, sub.token)
             builder.button(
                 text=texts.BTN_WL_COPY_LINK,
                 copy_text=CopyTextButton(text=sub_url),
@@ -191,6 +194,7 @@ async def _resolve_subscription_domain(
     3. Primary bot public domain (settings.DOMAIN / DOMAIN / BOT_DOMAIN).
     4. Origin server primary hostname (server.domain).
     """
+    origin_node: Server | None = None
     if sub and getattr(sub, "origin_node_id", None):
         origin_node = await session.get(Server, sub.origin_node_id)
         if origin_node and isinstance(origin_node.extra_data, dict):
@@ -206,17 +210,15 @@ async def _resolve_subscription_domain(
     if bot_domain and bot_domain.strip():
         return bot_domain.strip()
 
-    if sub and getattr(sub, "origin_node_id", None):
-        origin_node = await session.get(Server, sub.origin_node_id)
-        if origin_node:
-            node_domain = getattr(origin_node, "domain", None)
-            if node_domain and isinstance(node_domain, str) and node_domain.strip():
-                return node_domain.strip()
-            if getattr(origin_node, "api_url", None):
-                from urllib.parse import urlsplit
-                parsed = urlsplit(origin_node.api_url)
-                if parsed.hostname:
-                    return parsed.hostname.strip()
+    if origin_node:
+        node_domain = getattr(origin_node, "domain", None)
+        if node_domain and isinstance(node_domain, str) and node_domain.strip():
+            return node_domain.strip()
+        if getattr(origin_node, "api_url", None):
+            from urllib.parse import urlsplit
+            parsed = urlsplit(origin_node.api_url)
+            if parsed.hostname:
+                return parsed.hostname.strip()
 
     return None
 
@@ -236,7 +238,11 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
     sub_domain = await _resolve_subscription_domain(session, sub)
     now = now_utc()
 
-    _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
+    if not WHITE_INTERNET_TRIAL_MODE_ONLY:
+        _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
+    else:
+        base_price_int = int(WHITE_INTERNET_BASE_PRICE_RUB)
+        duration_days = WHITE_INTERNET_BASE_DURATION_DAYS
 
     if sub is None:
         if WHITE_INTERNET_TRIAL_MODE_ONLY:
@@ -470,8 +476,7 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         await query.message.edit_text(texts.WL_DOMAIN_UNCONFIGURED, reply_markup=kb.as_markup())
         return
 
-    sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
-    sub_url = f"https://{sub_domain}{sub_prefix}/{sub.token}"
+    sub_url = _build_subscription_url(sub_domain, sub.token)
 
     kb = InlineKeyboardBuilder()
     kb.button(

@@ -127,7 +127,7 @@ async def admin_subscription_menu(
         telegram_id=telegram_id,
         status_block=status_block,
     )
-    wl_info = await _get_white_internet_card_info(session, user.id)
+    wl_info = await _get_white_internet_card_info(session, user.id, sub=wl_sub)
     if wl_info:
         text = f"{text}\n\n{wl_info}"
 

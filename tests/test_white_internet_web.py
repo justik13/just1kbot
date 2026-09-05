@@ -9,7 +9,7 @@ from urllib.parse import unquote
 
 
 from aiohttp import web
-from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
+from aiohttp.test_utils import AioHTTPTestCase
 
 from bot import texts
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
@@ -44,7 +44,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         setup_white_internet_web_routes(app)
         return app
 
-    @unittest_run_loop
     async def test_invalid_token_returns_404(self):
         resp = await self.client.get("/sub/wl/short")
         self.assertEqual(resp.status, 404)
@@ -59,7 +58,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 resp2 = await self.client.get("/sub/wl/nonexistent-token-1234567890abcdef")
                 self.assertEqual(resp2.status, 404)
 
-    @unittest_run_loop
     async def test_pending_status_returns_503(self):
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.status = WhiteInternetStatus.PENDING
@@ -75,7 +73,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
-    @unittest_run_loop
     async def test_exhausted_status_returns_403(self):
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
@@ -97,7 +94,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertIn("upload=1000", resp.headers.get("Subscription-Userinfo", ""))
                 self.assertIn("download=2000", resp.headers.get("Subscription-Userinfo", ""))
 
-    @unittest_run_loop
     async def test_expired_status_returns_403(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = MagicMock(spec=WhiteInternetSubscription)
@@ -121,7 +117,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 text = await resp.text()
                 self.assertEqual(text, texts.WL_WEB_EXPIRED)
 
-    @unittest_run_loop
     async def test_runtime_out_of_sync_returns_503(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = MagicMock(spec=WhiteInternetSubscription)
@@ -155,7 +150,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
-    @unittest_run_loop
     async def test_epoch_mismatch_returns_503(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = MagicMock(spec=WhiteInternetSubscription)
@@ -190,7 +184,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
-    @unittest_run_loop
     async def test_active_and_synced_returns_base64_vless_feed(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = WhiteInternetSubscription(
@@ -255,7 +248,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertIn("OPTIONS", unquote(wl_url))
 
 
-    @unittest_run_loop
     async def test_missing_cdn_domain_returns_503_fail_closed(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = WhiteInternetSubscription(
@@ -303,7 +295,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.status, 503)
                     self.assertEqual(resp.headers.get("Retry-After"), "60")
 
-    @unittest_run_loop
     async def test_cdn_domain_from_server_extra_data_succeeds_without_env(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = WhiteInternetSubscription(
@@ -357,7 +348,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertTrue(wl_url.startswith(f"vless://{sub.uuid}@cdn.db-origin.best:443"))
                     self.assertIn("/w_custom/default", unquote(wl_url))
 
-    @unittest_run_loop
     async def test_offline_server_returns_503_fail_closed(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = WhiteInternetSubscription(
@@ -399,7 +389,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
-    @unittest_run_loop
     async def test_banned_user_returns_403_forbidden(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = WhiteInternetSubscription(
@@ -431,7 +420,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.status, 403)
                     self.assertEqual(await resp.text(), "Forbidden")
 
-    @unittest_run_loop
     async def test_deleted_user_returns_403_forbidden(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = WhiteInternetSubscription(

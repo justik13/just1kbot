@@ -117,7 +117,7 @@ def get_admin_subscription_keyboard(
             text=texts.ADMIN_BTN_RESET_WL_TRIAL,
             callback_data=f"admin_wl_reset_confirm:{telegram_id}",
         )
-    elif not wl_is_active:
+    else:
         builder.button(
             text=texts.ADMIN_BTN_GRANT_WL_TRIAL,
             callback_data=f"admin_wl_grant_trial:{telegram_id}",

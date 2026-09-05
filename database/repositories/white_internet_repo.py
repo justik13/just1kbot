@@ -61,11 +61,12 @@ async def has_user_any_subscription(
     session: AsyncSession, user_id: int
 ) -> bool:
     """Check if user has ever had any White Internet subscription (trial or regular)."""
-    stmt = select(func.count(WhiteInternetSubscription.id)).where(
-        WhiteInternetSubscription.user_id == user_id
+    stmt = (
+        select(WhiteInternetSubscription.id)
+        .where(WhiteInternetSubscription.user_id == user_id)
+        .limit(1)
     )
-    count = await session.scalar(stmt)
-    return bool(count and count > 0)
+    return await session.scalar(stmt) is not None
 
 
 async def get_subscription_by_id(
@@ -246,27 +247,6 @@ async def topup_quota_atomic(
     return pack_bytes
 
 
-async def record_traffic_event_atomic(
-    session: AsyncSession,
-    *,
-    subscription_id: int,
-    node_epoch: str,
-    node_boot_id: str | None,
-    node_starttime: int | None,
-    snapshot_uplink_before: int,
-    snapshot_uplink_after: int,
-    snapshot_downlink_before: int,
-    snapshot_downlink_after: int,
-    delta_uplink: int,
-    delta_downlink: int,
-    allocated_bytes: int,
-    overage_bytes: int,
-    now: datetime | None = None,
-) -> None:
-    """Compatibility no-op."""
-    return None
-
-
 async def deduct_traffic_atomic(
     session: AsyncSession,
     *,
@@ -382,25 +362,6 @@ async def record_and_deduct_traffic_atomic(
 
     await session.flush()
     return total_delta, became_exhausted, available_after, None
-
-
-async def disable_subscription_atomic(
-    session: AsyncSession,
-    subscription_id: int,
-    *,
-    reason: str = "user_banned",
-) -> WhiteInternetSubscription:
-    """Transition subscription to DISABLED and mark PENDING_DELETE."""
-    sub = await get_subscription_with_lock(session, subscription_id)
-    if sub is None:
-        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-    if sub.status != WhiteInternetStatus.DISABLED:
-        sub.status = WhiteInternetStatus.DISABLED
-        sub.status_reason = reason
-        sub.desired_version += 1
-        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
-    await session.flush()
-    return sub
 
 
 async def get_white_internet_dashboard_stats(session: AsyncSession) -> dict:

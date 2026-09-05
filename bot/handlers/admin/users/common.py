@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
-from database.models import Server, Tariff, User
+from database.models import Server, Tariff, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
@@ -345,8 +345,13 @@ async def _get_user_card_details(session: AsyncSession, user: User) -> tuple[str
     return tariff_info, referrer_info
 
 
-async def _get_white_internet_card_info(session: AsyncSession, user_id: int) -> str | None:
-    sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+async def _get_white_internet_card_info(
+    session: AsyncSession,
+    user_id: int,
+    sub: WhiteInternetSubscription | None = None,
+) -> str | None:
+    if sub is None:
+        sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
     if not sub:
         return None
 

@@ -74,6 +74,30 @@ async def _deprovision_old_node_safe(
         logger.warning("Failed to deprovision old origin node %s: %s", _sanitize_url(api_url), exc)
 
 
+def _dispatch_deprovision(
+    server: Server | None,
+    client_uuid: str,
+    version: int,
+    *,
+    context: str = "",
+) -> None:
+    if not server or not server.api_url or not server.api_key:
+        return
+    try:
+        task = asyncio.create_task(
+            _deprovision_old_node_safe(
+                server.api_url,
+                server.api_key,
+                client_uuid=client_uuid,
+                version=version,
+            )
+        )
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
+    except Exception as exc:
+        logger.warning("Failed to schedule deprovision task (%s): %s", context, exc)
+
+
 def _normalize_base_path(path: str | None) -> str:
     cleaned = (path or "").strip().rstrip("/")
     if cleaned.endswith("/default"):
@@ -367,28 +391,13 @@ class WhiteInternetService:
         )
 
         # Best-effort deprovisioning of UUID on old origin node to prevent orphaned credentials
-        if (
-            old_origin_for_cleanup
-            and old_origin_for_cleanup.api_url
-            and old_origin_for_cleanup.api_key
-        ):
-            try:
-                task = asyncio.create_task(
-                    _deprovision_old_node_safe(
-                        old_origin_for_cleanup.api_url,
-                        old_origin_for_cleanup.api_key,
-                        client_uuid=sub.uuid,
-                        version=sub.desired_version + 1,
-                    )
-                )
-                _BACKGROUND_TASKS.add(task)
-                task.add_done_callback(_BACKGROUND_TASKS.discard)
-            except Exception as deprov_err:
-                logger.warning(
-                    "Failed to dispatch async deprovision on old origin %s: %s",
-                    old_origin_for_cleanup.id,
-                    deprov_err,
-                )
+        if old_origin_for_cleanup:
+            _dispatch_deprovision(
+                old_origin_for_cleanup,
+                client_uuid=sub.uuid,
+                version=sub.desired_version + 1,
+                context=f"renew sub {sub.id}",
+            )
 
         return True, texts.WL_RENEW_SUCCESS, renewed
 
@@ -586,24 +595,12 @@ class WhiteInternetService:
         for sub in deactivated:
             if sub.origin_node_id:
                 origin_server = await session.get(Server, sub.origin_node_id)
-                if origin_server and origin_server.api_url and origin_server.api_key:
-                    try:
-                        task = asyncio.create_task(
-                            _deprovision_old_node_safe(
-                                origin_server.api_url,
-                                origin_server.api_key,
-                                client_uuid=sub.uuid,
-                                version=sub.desired_version,
-                            )
-                        )
-                        _BACKGROUND_TASKS.add(task)
-                        task.add_done_callback(_BACKGROUND_TASKS.discard)
-                    except Exception as exc:
-                        logger.warning(
-                            "Failed to schedule deprovision task for sub %d: %s",
-                            sub.id,
-                            exc,
-                        )
+                _dispatch_deprovision(
+                    origin_server,
+                    client_uuid=sub.uuid,
+                    version=sub.desired_version,
+                    context=f"deactivate sub {sub.id}",
+                )
 
         return deactivated
 
@@ -632,24 +629,12 @@ class WhiteInternetService:
         for sub in subs:
             if sub.origin_node_id:
                 origin_server = await session.get(Server, sub.origin_node_id)
-                if origin_server and origin_server.api_url and origin_server.api_key:
-                    try:
-                        task = asyncio.create_task(
-                            _deprovision_old_node_safe(
-                                origin_server.api_url,
-                                origin_server.api_key,
-                                client_uuid=sub.uuid,
-                                version=sub.desired_version + 1,
-                            )
-                        )
-                        _BACKGROUND_TASKS.add(task)
-                        task.add_done_callback(_BACKGROUND_TASKS.discard)
-                    except Exception as exc:
-                        logger.warning(
-                            "Failed to schedule deprovision task on trial reset for sub %d: %s",
-                            sub.id,
-                            exc,
-                        )
+                _dispatch_deprovision(
+                    origin_server,
+                    client_uuid=sub.uuid,
+                    version=sub.desired_version + 1,
+                    context=f"reset sub {sub.id}",
+                )
             await session.delete(sub)
 
         await session.flush()
