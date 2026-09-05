@@ -1108,6 +1108,35 @@ run_doctor
         self.assertNotEqual(res.returncode, 0, "deploy_subscription_proxy_conf must fail if target is missing")
         self.assertIn("BOT_DOMAIN FQDN", res.stderr + res.stdout)
 
+    def test_heal_and_update_origin_config_handles_legacy_ip_without_crashing(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "194.113.106.134"}, f
+            )
+
+        res = self._run_shell_snippet("heal_and_update_origin_config")
+        self.assertEqual(res.returncode, 0, "heal_and_update_origin_config must not crash on legacy IP in bot_domain")
+        self.assertIn("устаревший bot_domain в виде IP", res.stderr + res.stdout)
+
+    def test_heal_and_update_origin_config_migrates_with_env_bot_domain(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "194.113.106.134"}, f
+            )
+
+        res = self._run_shell_snippet("BOT_DOMAIN=just1k.best heal_and_update_origin_config")
+        self.assertEqual(res.returncode, 0)
+        sub_conf = self.nginx_relays_d / "sub-wl.conf"
+        self.assertTrue(sub_conf.exists())
+        self.assertIn("just1k.best", sub_conf.read_text(encoding="utf-8"))
+
+        # Verify state.json was updated with the migrated FQDN
+        with open(self.state_dir / "state.json", "r", encoding="utf-8") as f:
+            st = json.load(f)
+        self.assertEqual(st.get("bot_domain"), "just1k.best")
+
     def test_normalize_domain_strips_protocols_and_slashes(self):
         self._prepare_base_env()
         res = self._run_shell_snippet('normalize_domain "  https://mybot.just1k.best/some/path/  "')

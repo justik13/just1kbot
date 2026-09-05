@@ -337,6 +337,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             server_id=server.id,
                                             domain=safe(probe_domain),
                                             status_or_err=safe(ingress_detail),
+                                            endpoint=safe(f"{sub_prefix}/ping"),
                                         ),
                                         reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
                                     )
@@ -358,6 +359,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             server_name=safe(server.name),
                                             server_id=server.id,
                                             domain=safe(probe_domain),
+                                            endpoint=safe(f"{sub_prefix}/ping"),
                                         ),
                                         reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
                                     )

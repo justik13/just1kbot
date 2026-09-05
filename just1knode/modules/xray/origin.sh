@@ -15,11 +15,24 @@ deploy_subscription_proxy_conf() {
     if [[ -z "$target_host" ]]; then
         target_host="$(get_state_val "bot_domain" 2>/dev/null || true)"
     fi
+    if [[ -z "$target_host" ]]; then
+        target_host="${BOT_DOMAIN:-}"
+    fi
     target_host="$(normalize_domain "$target_host")"
+
+    if [[ -z "$target_host" || "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$target_host" == "localhost" ]]; then
+        if [[ -t 0 ]]; then
+            warn "Указан недопустимый хост для проксирования подписок: '${target_host:-<пусто>}' (требуется FQDN с валидным TLS)."
+            read -rp "Введите домен Telegram-бота (например: just1k.best): " prompt_target || true
+            target_host="$(normalize_domain "$prompt_target")"
+        fi
+    fi
 
     if [[ -z "$target_host" || "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$target_host" == "localhost" ]]; then
         error "Для настройки безопасного Nginx-проксирования подписок требуется валидный домен бота (BOT_DOMAIN FQDN). Указан недопустимый хост: '${target_host:-<пусто>}'. Проксирование HTTPS-upstream по IP без проверки TLS запрещено."
     fi
+
+    set_state_val "bot_domain" "$target_host" 2>/dev/null || true
 
     local sub_prefix="${custom_prefix:-}"
     if [[ -z "$sub_prefix" ]]; then
@@ -100,9 +113,12 @@ install_xray_origin_node() {
     if [[ -z "$bot_domain" ]]; then
         local existing_bot_domain
         existing_bot_domain="$(get_state_val "bot_domain" 2>/dev/null || true)"
-        if [[ -n "$existing_bot_domain" ]]; then
+        if [[ -n "$existing_bot_domain" && ! "$existing_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$existing_bot_domain" != "localhost" ]]; then
             bot_domain="$existing_bot_domain"
         else
+            if [[ -n "$existing_bot_domain" ]]; then
+                warn "Обнаружено устаревшее значение bot_domain в state.json (IP: '$existing_bot_domain'). Для защищенного TLS-проксирования требуется FQDN."
+            fi
             read -rp "Введите домен Telegram-бота (например: just1k.best): " input_bot_domain || true
             bot_domain="${input_bot_domain:-}"
         fi
@@ -871,13 +887,25 @@ except Exception:
     # Авто-восстановление Nginx-проксирования подписок Белого Интернета
     local heal_bot_domain
     heal_bot_domain="$(get_state_val "bot_domain" 2>/dev/null || true)"
-    if [[ -z "$heal_bot_domain" ]]; then
-        heal_bot_domain="${BOT_DOMAIN:-}"
+    local env_bot_domain
+    env_bot_domain="$(normalize_domain "${BOT_DOMAIN:-}")"
+
+    # Если в state.json пусто или устаревший IP, но в BOT_DOMAIN передан валидный FQDN — используем его
+    if [[ -z "$heal_bot_domain" || "$heal_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$heal_bot_domain" == "localhost" ]]; then
+        if [[ -n "$env_bot_domain" && ! "$env_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$env_bot_domain" != "localhost" ]]; then
+            heal_bot_domain="$env_bot_domain"
+        fi
     fi
-    if [[ -n "$heal_bot_domain" ]]; then
+
+    heal_bot_domain="$(normalize_domain "$heal_bot_domain")"
+    if [[ -n "$heal_bot_domain" && ! "$heal_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$heal_bot_domain" != "localhost" ]]; then
         deploy_subscription_proxy_conf "$heal_bot_domain"
     else
-        warn "BOT_DOMAIN не настроен в state.json, пропуск авто-восстановления Nginx-проксирования подписок."
+        if [[ -n "$heal_bot_domain" && "$heal_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            warn "Внимание: в state.json обнаружен устаревший bot_domain в виде IP ($heal_bot_domain). Проксирование подписок с TLS требует FQDN. Авто-восстановление sub-wl.conf пропущено (укажите BOT_DOMAIN для обновления)."
+        else
+            warn "BOT_DOMAIN не настроен в state.json, пропуск авто-восстановления Nginx-проксирования подписок."
+        fi
     fi
 
     # Системное отключение IPv6

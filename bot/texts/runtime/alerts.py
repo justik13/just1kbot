@@ -99,7 +99,7 @@ ALERT_INGRESS_PROBLEM = """⚠️ <b>Проблема с проксирован�
 
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
 🌐 Домен: <code>{domain}</code>
-Ошибка: Эндпоинт <code>/sub/wl/ping</code> вернул статус {status_or_err}.
+Ошибка: Эндпоинт <code>{endpoint}</code> вернул статус {status_or_err}.
 
 ⚠️ VPN-ядро Xray работает в штатном режиме, но выдача подписок через Nginx может быть недоступна (ошибка 502 / SSL).
 🔍 <b>Проверьте настройки Nginx и сертификаты на Origin.</b>"""
@@ -108,7 +108,7 @@ ALERT_INGRESS_RESTORED = """✅ <b>Проксирование подписок �
 
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
 🌐 Домен: <code>{domain}</code>
-Эндпоинт <code>/sub/wl/ping</code> снова отвечает 200 OK."""
+Эндпоинт <code>{endpoint}</code> снова отвечает 200 OK."""
 
 
 
