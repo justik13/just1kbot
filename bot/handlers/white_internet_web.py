@@ -19,7 +19,7 @@ from config.constants import (
 from config.enums import ServerHealthState, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server
-from database.repositories import white_internet_repo
+from database.repositories import users_repo, white_internet_repo
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
@@ -66,6 +66,14 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         sub = await white_internet_repo.get_subscription_by_token(session, token)
         if sub is None:
             return web.Response(status=404, text="Not Found", headers=common_headers)
+
+        user = await users_repo.get_user_by_id(session, sub.user_id)
+        if (
+            user is None
+            or getattr(user, "is_banned", False) is True
+            or getattr(user, "is_deleted", False) is True
+        ):
+            return web.Response(status=403, text="Forbidden", headers=common_headers)
 
         if sub.status == WhiteInternetStatus.PENDING:
             headers = dict(common_headers)

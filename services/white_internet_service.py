@@ -475,6 +475,8 @@ class WhiteInternetService:
         user = await lock_checkout_user(session, user_id)
         if user is None:
             return False, texts.WL_USER_NOT_FOUND, None
+        if user.is_banned or user.is_deleted:
+            return False, texts.ERROR_ACCESS_DENIED, None
 
         has_sub = await white_internet_repo.has_user_any_subscription(session, user_id)
         if has_sub:
@@ -551,6 +553,107 @@ class WhiteInternetService:
             )
 
         return True, texts.WL_TRIAL_ACTIVATED_SUCCESS, sub
+
+    @classmethod
+    async def deactivate_user_subscriptions(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        reason: str = "user_banned",
+    ) -> list[WhiteInternetSubscription]:
+        """Deactivate and deprovision all White Internet subscriptions for a user (e.g. on ban)."""
+        stmt = (
+            select(WhiteInternetSubscription)
+            .where(
+                WhiteInternetSubscription.user_id == user_id,
+                WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
+            )
+            .with_for_update()
+        )
+        res = await session.execute(stmt)
+        subs = list(res.scalars().all())
+
+        deactivated: list[WhiteInternetSubscription] = []
+        for sub in subs:
+            sub.status = WhiteInternetStatus.DISABLED
+            sub.status_reason = reason
+            sub.desired_version += 1
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+            deactivated.append(sub)
+
+        await session.flush()
+
+        for sub in deactivated:
+            if sub.origin_node_id:
+                origin_server = await session.get(Server, sub.origin_node_id)
+                if origin_server and origin_server.api_url and origin_server.api_key:
+                    try:
+                        task = asyncio.create_task(
+                            _deprovision_old_node_safe(
+                                origin_server.api_url,
+                                origin_server.api_key,
+                                client_uuid=sub.uuid,
+                                version=sub.desired_version,
+                            )
+                        )
+                        _BACKGROUND_TASKS.add(task)
+                        task.add_done_callback(_BACKGROUND_TASKS.discard)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to schedule deprovision task for sub %d: %s",
+                            sub.id,
+                            exc,
+                        )
+
+        return deactivated
+
+    @classmethod
+    async def reset_user_trial(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+    ) -> tuple[bool, str]:
+        """Reset trial history for a user, allowing a new trial to be issued."""
+        user = await lock_checkout_user(session, user_id)
+        if user is None:
+            return False, texts.WL_USER_NOT_FOUND
+
+        stmt = (
+            select(WhiteInternetSubscription)
+            .where(WhiteInternetSubscription.user_id == user_id)
+            .with_for_update()
+        )
+        res = await session.execute(stmt)
+        subs = list(res.scalars().all())
+
+        if not subs:
+            return False, texts.WL_SUB_NOT_FOUND
+
+        for sub in subs:
+            if sub.origin_node_id:
+                origin_server = await session.get(Server, sub.origin_node_id)
+                if origin_server and origin_server.api_url and origin_server.api_key:
+                    try:
+                        task = asyncio.create_task(
+                            _deprovision_old_node_safe(
+                                origin_server.api_url,
+                                origin_server.api_key,
+                                client_uuid=sub.uuid,
+                                version=sub.desired_version + 1,
+                            )
+                        )
+                        _BACKGROUND_TASKS.add(task)
+                        task.add_done_callback(_BACKGROUND_TASKS.discard)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to schedule deprovision task on trial reset for sub %d: %s",
+                            sub.id,
+                            exc,
+                        )
+            await session.delete(sub)
+
+        await session.flush()
+        return True, texts.ADMIN_WL_RESET_SUCCESS
 
     @staticmethod
     def generate_vless_links(

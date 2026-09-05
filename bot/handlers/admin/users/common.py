@@ -9,7 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
-from database.models import Tariff, User
+from database.models import Server, Tariff, User
+from database.repositories import white_internet_repo
 from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
@@ -20,7 +21,7 @@ from database.repositories.users_repo import (
     get_user_referrals_count,
 )
 from utils.datetime_helpers import is_expired, now_utc
-from utils.formatters import format_datetime
+from utils.formatters import format_datetime, format_traffic
 from bot.formatters import format_days_left
 from utils.telegram import render_hub
 from utils.text_limits import truncate_button_text
@@ -37,6 +38,7 @@ def format_user_card_text(
     bonus_balance: int = 0,
     tariff_info: str = "—",
     referrer_info: str = "—",
+    white_internet_info: str | None = None,
 ) -> str:
     from datetime import timezone
     from utils.telegram import safe
@@ -50,7 +52,7 @@ def format_user_card_text(
     status_str = texts.STATUS_ACTIVE_BADGE if has_access else texts.STATUS_INACTIVE_BADGE
     ban_str = texts.STATUS_BANNED_BADGE if user.is_banned else texts.STATUS_NOT_BANNED_BADGE
 
-    return texts.ADMIN_USER_CARD.format(
+    card_text = texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,
         username=safe(user.username),
         first_name=safe(user.first_name),
@@ -67,6 +69,9 @@ def format_user_card_text(
         referrals_count=referrals_count,
         created_at=format_datetime(user.created_at),
     )
+    if white_internet_info:
+        card_text = f"{card_text}\n\n{white_internet_info}"
+    return card_text
 
 USERS_PER_PAGE = 10
 
@@ -340,6 +345,41 @@ async def _get_user_card_details(session: AsyncSession, user: User) -> tuple[str
     return tariff_info, referrer_info
 
 
+async def _get_white_internet_card_info(session: AsyncSession, user_id: int) -> str | None:
+    sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+    if not sub:
+        return None
+
+    origin_name = "—"
+    if sub.origin_node_id:
+        origin_server = await session.get(Server, sub.origin_node_id)
+        if origin_server:
+            origin_name = origin_server.name
+        else:
+            origin_name = f"#{sub.origin_node_id}"
+
+    used_str = format_traffic(sub.traffic_used_bytes or 0)
+    total_str = format_traffic(sub.traffic_limit_bytes)
+    expires_str = format_datetime(sub.expires_at) if sub.expires_at else "—"
+
+    status_badge_map = {
+        "ACTIVE": texts.ADMIN_USER_CARD_WL_BADGE_ACTIVE,
+        "PENDING": texts.ADMIN_USER_CARD_WL_BADGE_PENDING,
+        "EXHAUSTED": texts.ADMIN_USER_CARD_WL_BADGE_EXHAUSTED,
+        "EXPIRED": texts.ADMIN_USER_CARD_WL_BADGE_EXPIRED,
+        "DISABLED": texts.ADMIN_USER_CARD_WL_BADGE_DISABLED,
+    }
+    status_badge = status_badge_map.get(sub.status, sub.status)
+
+    return texts.ADMIN_USER_CARD_WHITE_INTERNET_BLOCK.format(
+        status_badge=status_badge,
+        used_str=used_str,
+        total_str=total_str,
+        expires_str=expires_str,
+        origin_name=origin_name,
+    )
+
+
 async def _render_user_card(
     callback: CallbackQuery,
     user: User,
@@ -355,6 +395,7 @@ async def _render_user_card(
     )
     balance = await get_account_balance(session, user_id=user.id)
     tariff_info, referrer_info = await _get_user_card_details(session, user)
+    wl_info = await _get_white_internet_card_info(session, user.id)
 
     current_time = now_utc()
 
@@ -367,6 +408,7 @@ async def _render_user_card(
         bonus_balance=int(balance.bonus_available),
         tariff_info=tariff_info,
         referrer_info=referrer_info,
+        white_internet_info=wl_info,
     )
 
     try:
@@ -398,6 +440,7 @@ async def _show_user_card_edit(
     )
     balance = await get_account_balance(session, user_id=user.id)
     tariff_info, referrer_info = await _get_user_card_details(session, user)
+    wl_info = await _get_white_internet_card_info(session, user.id)
 
     current_time = now_utc()
 
@@ -410,6 +453,7 @@ async def _show_user_card_edit(
         bonus_balance=int(balance.bonus_available),
         tariff_info=tariff_info,
         referrer_info=referrer_info,
+        white_internet_info=wl_info,
     )
 
     if notice:

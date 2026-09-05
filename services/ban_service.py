@@ -14,6 +14,7 @@ from database.repositories.users_repo import (
 from services.audit_service import AuditService
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.profile_deletion_service import ProfileDeletionService
+from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,14 @@ class BanService:
             )
         )
 
+        disabled_wl_subs = (
+            await WhiteInternetService.deactivate_user_subscriptions(
+                session,
+                locked_user.id,
+                reason="user_banned",
+            )
+        )
+
         await AuditService.log_action(
             session,
             admin_id=admin_id,
@@ -189,20 +198,22 @@ class BanService:
                 "profiles_deleted": deleted_profiles,
                 "payments_closed": payments_closed,
                 "reconciliations_queued": reconciliations_queued,
+                "white_internet_disabled": len(disabled_wl_subs),
             },
         )
 
         invalidate_user_cache(telegram_id)
 
         logger.info(
-            "User %s banned by admin %s. "+
-            "Deleted profiles: %s, closed top-ups: %s, "+
-            "queued reconciliations: %s",
+            "User %s banned by admin %s. "
+            "Deleted profiles: %s, closed top-ups: %s, "
+            "queued reconciliations: %s, white internet disabled: %s",
             telegram_id,
             admin_id,
             deleted_profiles,
             payments_closed,
             reconciliations_queued,
+            len(disabled_wl_subs),
         )
 
         return True, BanStatus.BANNED

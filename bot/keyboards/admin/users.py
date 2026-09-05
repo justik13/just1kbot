@@ -86,6 +86,8 @@ def get_admin_user_balance_keyboard(
 def get_admin_subscription_keyboard(
     telegram_id: int,
     has_active_sub: bool,
+    has_wl_sub: bool = False,
+    wl_is_active: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -108,6 +110,17 @@ def get_admin_subscription_keyboard(
         builder.button(
             text=texts.ADMIN_BTN_GRANT_SUBSCRIPTION,
             callback_data=f"admin_sub_grant:{telegram_id}",
+        )
+
+    if has_wl_sub:
+        builder.button(
+            text=texts.ADMIN_BTN_RESET_WL_TRIAL,
+            callback_data=f"admin_wl_reset_confirm:{telegram_id}",
+        )
+    elif not wl_is_active:
+        builder.button(
+            text=texts.ADMIN_BTN_GRANT_WL_TRIAL,
+            callback_data=f"admin_wl_grant_trial:{telegram_id}",
         )
 
     builder.button(

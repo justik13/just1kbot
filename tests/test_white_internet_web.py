@@ -14,11 +14,30 @@ from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 from bot import texts
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
 from config.enums import ServerHealthState, WhiteInternetStatus
-from database.models import Server, WhiteInternetSubscription
+from database.models import Server, User, WhiteInternetSubscription
 
 
 class TestWhiteInternetWebFeed(AioHTTPTestCase):
     """Test suite for /sub/wl/{token} HTTP subscription feed."""
+
+    def setUp(self):
+        super().setUp()
+        from bot.handlers import white_internet_web
+        white_internet_web._ip_rate_limiter.buckets.clear()
+        white_internet_web._token_rate_limiter.buckets.clear()
+        self.default_user = User(id=10, telegram_id=777, is_banned=False, is_deleted=False)
+        self.user_patcher = patch(
+            "database.repositories.users_repo.get_user_by_id",
+            new=AsyncMock(return_value=self.default_user),
+        )
+        self.user_patcher.start()
+
+    def tearDown(self):
+        self.user_patcher.stop()
+        from bot.handlers import white_internet_web
+        white_internet_web._ip_rate_limiter.buckets.clear()
+        white_internet_web._token_rate_limiter.buckets.clear()
+        super().tearDown()
 
     async def get_application(self):
         app = web.Application()
@@ -379,3 +398,67 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
+
+    @unittest_run_loop
+    async def test_banned_user_returns_403_forbidden(self):
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+        )
+        banned_user = User(id=10, telegram_id=777, is_banned=True, is_deleted=False)
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                with patch("database.repositories.users_repo.get_user_by_id", new=AsyncMock(return_value=banned_user)):
+                    resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+                    self.assertEqual(resp.status, 403)
+                    self.assertEqual(await resp.text(), "Forbidden")
+
+    @unittest_run_loop
+    async def test_deleted_user_returns_403_forbidden(self):
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+        )
+        deleted_user = User(id=10, telegram_id=777, is_banned=False, is_deleted=True)
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                with patch("database.repositories.users_repo.get_user_by_id", new=AsyncMock(return_value=deleted_user)):
+                    resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+                    self.assertEqual(resp.status, 403)
+                    self.assertEqual(await resp.text(), "Forbidden")

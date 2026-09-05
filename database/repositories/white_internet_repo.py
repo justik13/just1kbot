@@ -382,3 +382,40 @@ async def record_and_deduct_traffic_atomic(
 
     await session.flush()
     return total_delta, became_exhausted, available_after, None
+
+
+async def disable_subscription_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+    *,
+    reason: str = "user_banned",
+) -> WhiteInternetSubscription:
+    """Transition subscription to DISABLED and mark PENDING_DELETE."""
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+    if sub.status != WhiteInternetStatus.DISABLED:
+        sub.status = WhiteInternetStatus.DISABLED
+        sub.status_reason = reason
+        sub.desired_version += 1
+        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+    await session.flush()
+    return sub
+
+
+async def get_white_internet_dashboard_stats(session: AsyncSession) -> dict:
+    """Return dashboard metrics for White Internet (active subscriptions, total traffic)."""
+    now = now_utc()
+    stmt = select(
+        func.count(WhiteInternetSubscription.id).filter(
+            WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE,
+            WhiteInternetSubscription.expires_at > now,
+        ).label("active_count"),
+        func.coalesce(func.sum(WhiteInternetSubscription.traffic_used_bytes), 0).label("total_traffic_bytes"),
+    )
+    result = await session.execute(stmt)
+    row = result.one()
+    return {
+        "active_count": row.active_count or 0,
+        "total_traffic_bytes": int(row.total_traffic_bytes or 0),
+    }
