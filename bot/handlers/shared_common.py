@@ -8,11 +8,7 @@ from services.subscription import SubscriptionService
 from utils.telegram import render_hub
 
 
-async def get_effective_device_limit(
-    session: AsyncSession,
-    user,
-) -> int:
-    return await SubscriptionService.get_effective_device_limit(session, user)
+get_effective_device_limit = SubscriptionService.get_effective_device_limit
 
 
 async def render_maintenance(

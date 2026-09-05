@@ -1,9 +1,8 @@
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from config.enums import PaymentProviderStatus
 from database.models import Payment, PaymentEvent
 
 
@@ -55,44 +54,6 @@ async def get_payment_by_id(
     return result.scalar_one_or_none()
 
 
-async def get_payment_by_id_for_update(
-    session: AsyncSession, payment_id: int
-) -> Payment | None:
-    stmt = (
-        select(Payment)
-        .options(
-            selectinload(Payment.user),
-        )
-        .where(Payment.id == payment_id)
-        .with_for_update()
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
-
-
-async def get_payment_by_id_simple(
-    session: AsyncSession, payment_id: int
-) -> Payment | None:
-    stmt = select(Payment).where(Payment.id == payment_id)
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
-
-
-async def mark_payment_as_cancelled(
-    session: AsyncSession, payment_id: int
-) -> bool:
-    result = await session.execute(
-        update(Payment)
-        .where(
-            Payment.id == payment_id,
-            Payment.provider_status == PaymentProviderStatus.PENDING,
-        )
-        .values(provider_status=PaymentProviderStatus.CANCELED)
-    )
-    await session.flush()
-    return result.rowcount > 0
-
-
 async def log_payment_event(
     session: AsyncSession,
     payment_id: int,
@@ -120,8 +81,6 @@ async def get_pending_payments_count_for_tariff(
     session: AsyncSession,
     tariff_id: int,
 ) -> int:
-    from sqlalchemy import func, select
-
     from database.models import TariffQuote, TariffVersion
     return int(
         await session.scalar(
