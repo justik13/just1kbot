@@ -96,6 +96,42 @@ class AuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                 await _settle_account_purchase(session, user_id=1, quote_public_id="mock-uuid")
             self.assertEqual(ctx.exception.code, "tariff_unavailable")
 
+    def test_xray_presence_probe_non_destructive_lifecycle(self):
+        """H2: probe_user_presence and verify_user_absent must be strictly non-destructive (zero AlterInbound calls)."""
+        from scripts.xray_api.xray_grpc import XrayGrpcClient
+
+        client = XrayGrpcClient()
+        mock_channel = MagicMock()
+        mock_stub = MagicMock()
+        tag = "inbound-de"
+        user_uuid = "00000000-1111-2222-3333-444444444444"
+
+        # Initially not present
+        self.assertFalse(client.probe_user_presence(tag, user_uuid))
+        self.assertTrue(client.verify_user_absent(tag, user_uuid))
+
+        # Add user
+        with patch.object(client, "_get_channel", return_value=mock_channel):
+            with patch("scripts.xray_api.xray_grpc.proxyman_grpc.HandlerServiceStub", return_value=mock_stub):
+                self.assertTrue(client.add_user(tag, user_uuid))
+
+        # Verification must NOT call AlterInbound
+        mock_stub.AlterInbound.reset_mock()
+        self.assertTrue(client.probe_user_presence(tag, user_uuid))
+        self.assertFalse(client.verify_user_absent(tag, user_uuid))
+        self.assertFalse(mock_stub.AlterInbound.called)
+
+        # Remove user
+        with patch.object(client, "_get_channel", return_value=mock_channel):
+            with patch("scripts.xray_api.xray_grpc.proxyman_grpc.HandlerServiceStub", return_value=mock_stub):
+                self.assertTrue(client.remove_user(tag, user_uuid))
+
+        # Verification must NOT call AlterInbound
+        mock_stub.AlterInbound.reset_mock()
+        self.assertFalse(client.probe_user_presence(tag, user_uuid))
+        self.assertTrue(client.verify_user_absent(tag, user_uuid))
+        self.assertFalse(mock_stub.AlterInbound.called)
+
     async def test_unban_user_executes_advisory_lock_and_row_lock(self):
         """M3: _unban_user must take pg_advisory_xact_lock and with_for_update."""
         session = AsyncMock()
