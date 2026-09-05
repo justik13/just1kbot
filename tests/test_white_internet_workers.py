@@ -462,6 +462,107 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(s.actual_version, 2)
                     self.assertEqual(s.provisioning_status, WhiteInternetProvisioningStatus.ACTIVE)
 
+    async def test_finalize_hard_deletes_removes_only_confirmed_rows(self):
+        """Two-phase reset finalizer deletes node-confirmed rows, keeps unconfirmed ones."""
+        from contextlib import asynccontextmanager
+
+        from database.repositories import white_internet_repo
+
+        worker = WhiteInternetReconciliationWorker(node_client=AsyncMock(spec=XrayNodeClient))
+        sess = AsyncMock()
+        sess.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [11, 12])
+        )
+
+        @asynccontextmanager
+        async def sf():
+            yield sess
+
+        async def fake_finalize(session, sub_id):
+            return sub_id == 11
+
+        with patch.object(
+            white_internet_repo, "finalize_hard_delete_subscription", side_effect=fake_finalize
+        ):
+            finalized = await worker._finalize_hard_deletes(sf)
+
+        self.assertEqual(finalized, 1)
+
+    async def test_sweep_orphan_cleanups_disables_and_marks_done(self):
+        """Orphan sweep converges the former origin to disabled and marks the row done."""
+        from contextlib import asynccontextmanager
+
+        from database.models import WhiteInternetOrphanCleanup
+        from database.repositories import white_internet_repo
+
+        server = Server(
+            id=7,
+            name="Old-Origin",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://old.just1k.online:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-5",
+        )
+        row = WhiteInternetOrphanCleanup(
+            id=3, server_id=7, client_uuid="orphan-uuid-1", desired_version=4, status="pending"
+        )
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+        sess = AsyncMock()
+        sess.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [3])
+        )
+        sess.get.side_effect = [row, server]
+
+        @asynccontextmanager
+        async def sf():
+            yield sess
+
+        with patch.object(
+            white_internet_repo, "mark_orphan_cleanup_done", new=AsyncMock()
+        ) as mock_done:
+            swept = await worker._sweep_orphan_cleanups(sf)
+
+        self.assertEqual(swept, 1)
+        mock_done.assert_awaited_once_with(sess, 3)
+        mock_client.sync_client.assert_awaited_once()
+
+    async def test_sweep_orphan_cleanups_completes_when_origin_gone(self):
+        """Orphan row with a deleted origin server completes without node calls."""
+        from contextlib import asynccontextmanager
+
+        from database.models import WhiteInternetOrphanCleanup
+        from database.repositories import white_internet_repo
+
+        row = WhiteInternetOrphanCleanup(
+            id=4, server_id=None, client_uuid="orphan-uuid-2", desired_version=4, status="pending"
+        )
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+        sess = AsyncMock()
+        sess.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [4])
+        )
+        sess.get.return_value = row
+
+        @asynccontextmanager
+        async def sf():
+            yield sess
+
+        with patch.object(
+            white_internet_repo, "mark_orphan_cleanup_done", new=AsyncMock()
+        ) as mock_done:
+            swept = await worker._sweep_orphan_cleanups(sf)
+
+        self.assertEqual(swept, 1)
+        mock_done.assert_awaited_once_with(sess, 4)
+        mock_client.sync_client.assert_not_called()
+
 
 class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
     """Test monotonic traffic delta computation and grant ledger deduction."""

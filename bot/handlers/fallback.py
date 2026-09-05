@@ -22,11 +22,29 @@ router = Router()
 async def fsm_media_guard(message: Message, state: FSMContext):
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-    await state.clear()
+    try:
+        current_state = await state.get_state()
+    except Exception:
+        current_state = None
+
     try:
         await message.delete()
     except Exception:
         pass
+
+    if current_state is not None:
+        # Same as stray text: never wipe an in-progress flow on media input.
+        try:
+            temp_msg = await message.answer(
+                texts.FALLBACK_FLOW_IN_PROGRESS,
+                parse_mode="HTML",
+            )
+            spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        except Exception:
+            pass
+        return
+
+    await state.clear()
 
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
@@ -46,6 +64,29 @@ async def fsm_media_guard(message: Message, state: FSMContext):
 @router.message()
 async def handle_unknown_text(message: Message, state: FSMContext):
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    try:
+        current_state = await state.get_state()
+    except Exception:
+        current_state = None
+
+    if current_state is not None:
+        # A wizard/confirmation flow is in progress: stray text must not wipe
+        # it (that would lose drafts like broadcast/bonus/grant confirmations).
+        # Keep the FSM state and hint instead.
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        try:
+            temp_msg = await message.answer(
+                texts.FALLBACK_FLOW_IN_PROGRESS,
+                parse_mode="HTML",
+            )
+            spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        except Exception:
+            pass
+        return
 
     await state.clear()
     try:

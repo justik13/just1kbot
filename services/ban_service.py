@@ -111,16 +111,12 @@ class BanService:
         user,
         telegram_id: int,
     ) -> tuple:
-        # Используем тот же per-user advisory lock, что и checkout.
-        # Новый платёж не сможет появиться между чтением платежей и баном.
-        await session.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"),
-            {"key": -user.id},
-        )
-
-        # Блокируем платежи в стабильном порядке до блокировки User.
-        # Fulfillment использует порядок Payment -> User, поэтому обратного
-        # порядка блокировок здесь быть не должно.
+        # Global lock order Payment -> advisory -> User, same as the ledger
+        # (credit_succeeded_topup) and checkout paths. Taking the advisory
+        # lock before Payment would deadlock against a concurrent credit that
+        # holds Payment and waits for the advisory lock of the same user.
+        # Новый платёж не сможет появиться между чтением платежей и баном,
+        # т.к. fulfillment берёт те же локи в том же порядке.
         payment_ids = list(
             (
                 await session.scalars(
@@ -130,6 +126,12 @@ class BanService:
                     .with_for_update()
                 )
             ).all()
+        )
+
+        # Используем тот же per-user advisory lock, что и checkout.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": -user.id},
         )
 
         locked_user = await session.scalar(
@@ -227,6 +229,8 @@ class BanService:
     ) -> tuple:
         # При разбане устройства НЕ восстанавливаются.
         # Пользователь должен создать их заново, если подписка активна.
+        # Порядок advisory -> User здесь безопасен: Payment-лок не берётся,
+        # поэтому цикла с путями Payment -> advisory -> User быть не может.
         await session.execute(
             text("SELECT pg_advisory_xact_lock(:key)"),
             {"key": -user.id},

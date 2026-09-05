@@ -16,8 +16,14 @@ from database.models import (
 
 
 class WhiteInternetModelsTests(unittest.TestCase):
-    def test_alembic_migration_0019_revision_chain(self):
+    def test_alembic_migration_0021_revision_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+        rev_0021 = scripts.get_revision("0021_wi_orphan_cleanups")
+        self.assertIsNotNone(rev_0021)
+        self.assertEqual(rev_0021.down_revision, "0020_wi_reset_hard_delete")
+        rev_0020 = scripts.get_revision("0020_wi_reset_hard_delete")
+        self.assertIsNotNone(rev_0020)
+        self.assertEqual(rev_0020.down_revision, "0019_wi_server_set_null")
         rev_0019 = scripts.get_revision("0019_wi_server_set_null")
         self.assertIsNotNone(rev_0019)
         self.assertEqual(rev_0019.down_revision, "0018_simplify_wi_traffic")
@@ -27,7 +33,7 @@ class WhiteInternetModelsTests(unittest.TestCase):
         rev_0017 = scripts.get_revision("0017_white_internet_durations")
         self.assertIsNotNone(rev_0017)
         self.assertEqual(rev_0017.down_revision, "0016_white_internet")
-        self.assertEqual(scripts.get_heads(), ["0019_wi_server_set_null"])
+        self.assertEqual(scripts.get_heads(), ["0021_wi_orphan_cleanups"])
 
     def test_server_lifecycle_status_field_and_constraints(self):
         self.assertEqual(ServerLifecycleStatus.ACTIVE, "ACTIVE")

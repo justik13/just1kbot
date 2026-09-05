@@ -236,9 +236,15 @@ async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
 
 async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
     clean = username.lstrip("@").strip()
+    # Escape LIKE wildcards: without this, an admin typing "%" or "_" in user
+    # search would match arbitrary users (ilike treats them as wildcards),
+    # risking bans/bonuses applied to the wrong account.
+    escaped = (
+        clean.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
     stmt = (
         select(User)
-        .where(User.username.ilike(clean), User.is_deleted.is_(False))
+        .where(User.username.ilike(escaped, escape="\\"), User.is_deleted.is_(False))
         .options(selectinload(User.profiles))
     )
     result = await session.execute(stmt)

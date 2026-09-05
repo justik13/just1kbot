@@ -22,10 +22,13 @@ async def hub_menu_connections(
     await state.clear()
 
     if not db_user:
-        await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
-        )
+        try:
+            await callback.answer(
+                texts.ERROR_USER_NOT_FOUND,
+                show_alert=True,
+            )
+        except Exception:
+            pass
         return
 
     await _render_connections(
@@ -46,10 +49,13 @@ async def back_to_connections(
     await state.clear()
 
     if not db_user:
-        await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
-        )
+        try:
+            await callback.answer(
+                texts.ERROR_USER_NOT_FOUND,
+                show_alert=True,
+            )
+        except Exception:
+            pass
         return
 
     await _render_connections(

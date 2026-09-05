@@ -162,6 +162,94 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sub.status, WhiteInternetStatus.PENDING)
             self.assertEqual(sub.actual_version, 0)
 
+    async def test_trial_already_newer_without_inventory_stays_pending(self):
+        """ALREADY_NEWER without a confirming active inventory must NOT mark ACTIVE (fail-closed)."""
+        now = datetime(2026, 9, 5, 12, 0, 0, tzinfo=timezone.utc)
+        created_sub = WhiteInternetSubscription(
+            id=102,
+            user_id=self.user.id,
+            origin_node_id=self.origin_server.id,
+            token="token-xyz",
+            uuid="uuid-xyz",
+            status=WhiteInternetStatus.PENDING,
+            base_traffic_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
+            traffic_limit_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
+            started_at=now,
+            expires_at=now + timedelta(days=WHITE_INTERNET_TRIAL_DURATION_DAYS),
+            desired_version=1,
+            actual_version=0,
+        )
+        mock_sync_resp = SyncResponse(
+            result=SyncResult.ALREADY_NEWER,
+            error="state=unknown",
+            verified_epoch=1,
+        )
+
+        with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
+             patch("database.repositories.white_internet_repo.has_user_any_subscription", return_value=False), \
+             patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
+             patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
+             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
+             patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
+             patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
+
+            mock_client_instance = AsyncMock()
+            mock_client_instance.sync_client.return_value = mock_sync_resp
+            mock_client_instance.get_inventory.return_value = (
+                True,
+                {"inventory": {"uuid-xyz": {"observed_state": "disabled"}}},
+                None,
+            )
+            mock_xray_client_cls.return_value.__aenter__.return_value = mock_client_instance
+
+            success, msg, sub = await WhiteInternetService.create_trial_subscription(self.session, self.user.id)
+
+            self.assertTrue(success)
+            self.assertEqual(sub.status, WhiteInternetStatus.PENDING)
+            self.assertEqual(sub.actual_version, 0)
+            mock_client_instance.get_inventory.assert_awaited_once()
+
+    async def test_trial_epoch_drift_stays_pending(self):
+        """APPLIED with a drifted verified_epoch must NOT mark ACTIVE (fail-closed)."""
+        now = datetime(2026, 9, 5, 12, 0, 0, tzinfo=timezone.utc)
+        created_sub = WhiteInternetSubscription(
+            id=103,
+            user_id=self.user.id,
+            origin_node_id=self.origin_server.id,
+            token="token-xyz",
+            uuid="uuid-xyz",
+            status=WhiteInternetStatus.PENDING,
+            base_traffic_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
+            traffic_limit_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
+            started_at=now,
+            expires_at=now + timedelta(days=WHITE_INTERNET_TRIAL_DURATION_DAYS),
+            desired_version=1,
+            actual_version=0,
+        )
+        mock_sync_resp = SyncResponse(
+            result=SyncResult.APPLIED,
+            error=None,
+            verified_epoch="epoch-after-restart",
+        )
+
+        with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
+             patch("database.repositories.white_internet_repo.has_user_any_subscription", return_value=False), \
+             patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
+             patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
+             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
+             patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
+             patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
+
+            mock_client_instance = AsyncMock()
+            mock_client_instance.sync_client.return_value = mock_sync_resp
+            mock_xray_client_cls.return_value.__aenter__.return_value = mock_client_instance
+
+            success, msg, sub = await WhiteInternetService.create_trial_subscription(self.session, self.user.id)
+
+            self.assertTrue(success)
+            self.assertEqual(sub.status, WhiteInternetStatus.PENDING)
+            self.assertEqual(sub.actual_version, 0)
+
     async def test_service_level_protection_blocks_paid_operations(self):
         """WhiteInternetService must reject purchase, renew, and topup in trial mode."""
         # 1. Purchase

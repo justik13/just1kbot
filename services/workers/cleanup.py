@@ -32,6 +32,7 @@ from database.models import (
 from database.repositories.audit_repo import clear_audit_logs
 from services.amnezia_client import AmneziaClient
 from services.profile_deletion_service import ProfileDeletionService
+from services.subscription import SubscriptionService
 from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
 
@@ -165,6 +166,18 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                 if is_permanent_subscription(user.subscription_end):
                     continue
                 if not user.financial_hold and user.subscription_end >= threshold:
+                    continue
+
+                if user.financial_hold and user.subscription_end >= threshold:
+                    # Active subscription under financial hold (dispute/chargeback):
+                    # disable access via desired-state sync, NEVER delete paid devices.
+                    # Deletion is reserved for actually expired subscriptions.
+                    await SubscriptionService.sync_access_state(session, user)
+                    logger.info(
+                        "Grace cleanup disabled (not deleted) profiles for user %s "
+                        "with active subscription under financial_hold",
+                        _safe_log_value(user.id),
+                    )
                     continue
 
                 profiles_stmt = select(VPNProfile).where(

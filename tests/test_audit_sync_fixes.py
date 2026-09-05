@@ -13,9 +13,17 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_head_is_0019_wi_server_set_null(self):
+    def test_alembic_head_is_0021_wi_orphan_cleanups(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0019_wi_server_set_null"])
+        self.assertEqual(scripts.get_heads(), ["0021_wi_orphan_cleanups"])
+        self.assertEqual(
+            scripts.get_revision("0021_wi_orphan_cleanups").down_revision,
+            "0020_wi_reset_hard_delete",
+        )
+        self.assertEqual(
+            scripts.get_revision("0020_wi_reset_hard_delete").down_revision,
+            "0019_wi_server_set_null",
+        )
         self.assertEqual(
             scripts.get_revision("0019_wi_server_set_null").down_revision,
             "0018_simplify_wi_traffic",

@@ -213,6 +213,16 @@ async def admin_sub_apply_reduce(
             )
             return
 
+        if user.is_banned:
+            try:
+                await callback.answer(
+                    texts.ADMIN_MANUAL_GRANT_USER_BANNED,
+                    show_alert=True,
+                )
+            except Exception:
+                pass
+            return
+
         new_end = user.subscription_end - timedelta(days=days)
 
         user.subscription_end = new_end
