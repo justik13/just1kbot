@@ -83,6 +83,13 @@ def _dispatch_deprovision(
 ) -> None:
     if not server or not server.api_url or not server.api_key:
         return
+    if getattr(server, "protocol", None) != XRAY_PROTOCOL:
+        logger.warning(
+            "Refusing cross-protocol deprovision dispatch (%s): server %s is not xray",
+            context,
+            getattr(server, "id", "?"),
+        )
+        return
     try:
         task = asyncio.create_task(
             _deprovision_old_node_safe(
@@ -390,8 +397,17 @@ class WhiteInternetService:
             base_bytes=tariff_version.base_quota_bytes,
         )
 
-        # Best-effort deprovisioning of UUID on old origin node to prevent orphaned credentials
+        # Durable deprovisioning of UUID on old origin node: record the cleanup
+        # in the same transaction (survives crashes/restarts), then accelerate
+        # with a best-effort background dispatch. The reconciliation worker
+        # sweeps any row the dispatch misses, so no active credential orphans.
         if old_origin_for_cleanup:
+            await white_internet_repo.enqueue_orphan_cleanup(
+                session,
+                server_id=old_origin_for_cleanup.id,
+                client_uuid=sub.uuid,
+                desired_version=sub.desired_version + 1,
+            )
             _dispatch_deprovision(
                 old_origin_for_cleanup,
                 client_uuid=sub.uuid,
@@ -536,7 +552,18 @@ class WhiteInternetService:
             base_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
         )
 
-        # Zero-Wait UX: Synchronous provisioning on Xray node
+        # Zero-Wait UX: Synchronous provisioning on Xray node.
+        # Fail-closed like the reconciliation worker: mark ACTIVE only when the
+        # node confirms the expected epoch and full inbound coverage; verify
+        # ALREADY_NEWER against runtime inventory. Anything unconfirmed stays
+        # PENDING_CREATE for the background worker to converge.
+        expected_inbound_tags: set[str] = set()
+        for relay in (origin_node.extra_data or {}).get("relays", []) or []:
+            code = (relay or {}).get("code")
+            if code:
+                expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
+        if not expected_inbound_tags:
+            expected_inbound_tags.add("just1k-wl-default")
         try:
             async with XrayNodeClient(timeout=4.0) as xray_client:
                 resp = await xray_client.sync_client(
@@ -549,13 +576,46 @@ class WhiteInternetService:
                     idempotency_key=f"trial:{sub.id}:1:True",
                 )
                 sync_res = resp.result if hasattr(resp, "result") else resp[0]
-                if sync_res in (SyncResult.APPLIED, SyncResult.ALREADY_NEWER):
+                verified_epoch = (
+                    getattr(resp, "verified_epoch", None) or origin_node.xray_instance_epoch
+                )
+                verified_inbounds = set(getattr(resp, "verified_inbounds", None) or [])
+                epoch_ok = verified_epoch == origin_node.xray_instance_epoch
+                inbounds_ok = (
+                    not verified_inbounds
+                    or expected_inbound_tags.issubset(verified_inbounds)
+                )
+                confirmed = False
+                if sync_res == SyncResult.APPLIED and epoch_ok and inbounds_ok:
+                    confirmed = True
+                elif sync_res == SyncResult.ALREADY_NEWER and epoch_ok:
+                    inv_ok, inv_data, _ = await xray_client.get_inventory(
+                        origin_node.api_url,
+                        origin_node.api_key,
+                        client_ids=[sub_uuid],
+                    )
+                    observed = None
+                    if inv_ok and inv_data and "inventory" in inv_data:
+                        observed = (inv_data["inventory"].get(sub_uuid) or {}).get(
+                            "observed_state"
+                        )
+                    confirmed = inv_ok and observed == "active" and inbounds_ok
+                if confirmed:
                     sub.status = WhiteInternetStatus.ACTIVE
                     sub.actual_version = 1
                     sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
-                    sub.last_reconciled_node_epoch = origin_node.xray_instance_epoch
+                    sub.last_reconciled_node_epoch = verified_epoch
                     sub.last_synced_at = now_utc()
                     await session.flush()
+                else:
+                    logger.warning(
+                        "Trial sync unconfirmed (result=%s epoch_ok=%s inbounds_ok=%s), "
+                        "leaving subscription %d PENDING_CREATE for worker",
+                        sync_res,
+                        epoch_ok,
+                        inbounds_ok,
+                        sub.id,
+                    )
         except Exception as exc:
             logger.warning(
                 "Synchronous trial activation fallback to background worker: %s", exc
@@ -626,16 +686,24 @@ class WhiteInternetService:
         if not subs:
             return False, texts.WL_SUB_NOT_FOUND
 
+        # Two-phase reset (durable-by-default): mark DISABLED+PENDING_DELETE and
+        # let the reconciliation worker hard-delete the row only after the node
+        # confirms the client disabled. Immediate delete would orphan an active
+        # credential on the node if the deprovision task is lost on restart.
         for sub in subs:
+            sub.status = WhiteInternetStatus.DISABLED
+            sub.status_reason = "trial_reset"
+            sub.desired_version += 1
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+            sub.pending_hard_delete = True
             if sub.origin_node_id:
                 origin_server = await session.get(Server, sub.origin_node_id)
                 _dispatch_deprovision(
                     origin_server,
                     client_uuid=sub.uuid,
-                    version=sub.desired_version + 1,
+                    version=sub.desired_version,
                     context=f"reset sub {sub.id}",
                 )
-            await session.delete(sub)
 
         await session.flush()
         return True, texts.ADMIN_WL_RESET_SUCCESS

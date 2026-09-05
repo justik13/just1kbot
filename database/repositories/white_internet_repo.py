@@ -15,7 +15,7 @@ from config.constants import (
     WHITE_INTERNET_MAX_QUOTA_BYTES,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import WhiteInternetSubscription
+from database.models import WhiteInternetOrphanCleanup, WhiteInternetSubscription
 from utils.datetime_helpers import now_utc
 
 
@@ -370,6 +370,99 @@ async def record_and_deduct_traffic_atomic(
 
     await session.flush()
     return total_delta, became_exhausted, available_after, None
+
+
+async def finalize_hard_delete_subscription(
+    session: AsyncSession,
+    subscription_id: int,
+) -> bool:
+    """Hard-delete a reset subscription only after node-confirmed disable.
+
+    Returns True when the row was deleted. Returns False (fail-closed, row kept)
+    unless ALL hold: pending_hard_delete flag, DISABLED status, SYNCED_INACTIVE
+    provisioning with matching versions (node confirmed the client disabled),
+    or the origin server is gone entirely (origin_node_id NULL — nothing left
+    to clean on any node).
+    """
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        return False
+    if not sub.pending_hard_delete:
+        return False
+    if sub.status != WhiteInternetStatus.DISABLED:
+        return False
+    node_confirmed = (
+        sub.provisioning_status == WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+        and (sub.actual_version or 0) == (sub.desired_version or 0)
+    )
+    origin_gone = sub.origin_node_id is None
+    if not (node_confirmed or origin_gone):
+        return False
+    await session.delete(sub)
+    await session.flush()
+    return True
+
+
+async def enqueue_orphan_cleanup(
+    session: AsyncSession,
+    server_id: int | None,
+    client_uuid: str,
+    desired_version: int,
+) -> WhiteInternetOrphanCleanup:
+    """Durably record that a client UUID must be disabled on a former origin.
+
+    Called in the same transaction as the renew migration, so the record
+    survives any crash or restart that would lose a fire-and-forget task.
+    """
+    row = WhiteInternetOrphanCleanup(
+        server_id=server_id,
+        client_uuid=client_uuid,
+        desired_version=desired_version,
+        status="pending",
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def claim_orphan_cleanups(
+    session: AsyncSession,
+    limit: int = 20,
+) -> list[WhiteInternetOrphanCleanup]:
+    """Claim pending orphan rows for this worker (FOR UPDATE SKIP LOCKED)."""
+    stmt = (
+        select(WhiteInternetOrphanCleanup)
+        .where(WhiteInternetOrphanCleanup.status == "pending")
+        .order_by(WhiteInternetOrphanCleanup.id.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def mark_orphan_cleanup_done(
+    session: AsyncSession,
+    cleanup_id: int,
+) -> None:
+    row = await session.get(WhiteInternetOrphanCleanup, cleanup_id, with_for_update=True)
+    if row is None or row.status != "pending":
+        return
+    row.status = "done"
+    row.last_error = None
+    await session.flush()
+
+
+async def mark_orphan_cleanup_failed(
+    session: AsyncSession,
+    cleanup_id: int,
+    error: str,
+) -> None:
+    row = await session.get(WhiteInternetOrphanCleanup, cleanup_id, with_for_update=True)
+    if row is None or row.status != "pending":
+        return
+    row.attempts = (row.attempts or 0) + 1
+    row.last_error = error[:500]
+    await session.flush()
 
 
 async def get_white_internet_dashboard_stats(session: AsyncSession) -> dict:

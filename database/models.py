@@ -1444,6 +1444,14 @@ class WhiteInternetSubscription(Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Two-phase trial reset: True means the row must be hard-deleted by the
+    # reconciliation worker only after the node confirms the client disabled
+    # (SYNCED_INACTIVE with matching versions). Never delete rows that still
+    # have an unconfirmed presence on the node — that would orphan credentials.
+    pending_hard_delete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
     )
@@ -1457,3 +1465,54 @@ class WhiteInternetSubscription(Base):
 
     user = relationship("User", foreign_keys=[user_id])
     origin_node = relationship("Server", foreign_keys=[origin_node_id])
+
+
+class WhiteInternetOrphanCleanup(Base):
+    """Durable outbox for disabling a client UUID on a former origin node.
+
+    Inserted in the same transaction as a renew migration that moves a
+    subscription to a new origin. The reconciliation worker claims pending rows
+    (FOR UPDATE SKIP LOCKED) and converges the old node to disabled, so a lost
+    fire-and-forget task or a process restart can never silently orphan an
+    active credential on the old node.
+    """
+
+    __tablename__ = "white_internet_orphan_cleanups"
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'done')",
+            name="ck_white_internet_orphan_cleanups_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    server_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("servers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    client_uuid: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    desired_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=now_utc,
+        onupdate=now_utc,
+        server_default=text("now()"),
+    )
+
+    server = relationship("Server", foreign_keys=[server_id])

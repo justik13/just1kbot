@@ -31,6 +31,7 @@ from bot.handlers.admin.users.subscription_menu_routes import (
     admin_wl_reset_confirm,
 )
 from bot.keyboards.admin.users import get_admin_subscription_keyboard
+from config.constants import XRAY_PROTOCOL
 from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
@@ -58,6 +59,7 @@ class TestBanServiceWhiteInternet(unittest.IsolatedAsyncioTestCase):
         self.origin_server = Server(
             id=1,
             name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
             api_url="https://origin.example.test:8444",
             api_key="secret-api-key",
             capabilities=["xray_origin"],
@@ -557,15 +559,24 @@ class TestWhiteInternetTrialProtectionAndReset(unittest.IsolatedAsyncioTestCase)
             self.assertFalse(ok)
             self.assertIsNone(sub)
 
-    async def test_reset_user_trial_deletes_subscriptions_and_deprovisions(self):
-        """reset_user_trial deletes subscriptions and schedules deprovisioning on node."""
+    async def test_reset_user_trial_marks_two_phase_delete_and_deprovisions(self):
+        """reset_user_trial marks DISABLED+PENDING_DELETE+pending_hard_delete instead of deleting rows."""
+        from config.constants import XRAY_PROTOCOL
+
         user = User(id=1, telegram_id=555, is_banned=False, is_deleted=False)
-        server = Server(id=2, name="Origin", api_url="https://node.example.test:8444", api_key="test-key")
+        server = Server(
+            id=2,
+            name="Origin",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://node.example.test:8444",
+            api_key="test-key",
+        )
         sub = WhiteInternetSubscription(
             id=10,
             user_id=user.id,
             origin_node_id=2,
             uuid="client-uuid-123",
+            status=WhiteInternetStatus.ACTIVE,
             desired_version=1,
         )
 
@@ -575,14 +586,57 @@ class TestWhiteInternetTrialProtectionAndReset(unittest.IsolatedAsyncioTestCase)
         self.session.get = AsyncMock(return_value=server)
 
         with patch("services.white_internet_service.lock_checkout_user", new=AsyncMock(return_value=user)), \
-             patch("services.white_internet_service._deprovision_old_node_safe", new_callable=AsyncMock) as mock_deprovision:
+             patch("services.white_internet_service._dispatch_deprovision") as mock_dispatch:
 
             ok, msg = await WhiteInternetService.reset_user_trial(self.session, user.id)
             self.assertTrue(ok)
             self.assertEqual(msg, texts.ADMIN_WL_RESET_SUCCESS)
-            self.session.delete.assert_called_once_with(sub)
+            self.assertEqual(sub.status, WhiteInternetStatus.DISABLED)
+            self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.PENDING_DELETE)
+            self.assertTrue(sub.pending_hard_delete)
+            self.assertEqual(sub.desired_version, 2)
+            self.session.delete.assert_not_called()
             self.session.flush.assert_awaited_once()
-            mock_deprovision.assert_called_once()
+            mock_dispatch.assert_called_once()
+
+    async def test_finalize_hard_delete_only_after_node_confirmed_disable(self):
+        """finalize_hard_delete_subscription deletes only confirmed-disabled rows, keeps pending ones."""
+        confirmed = WhiteInternetSubscription(
+            id=11,
+            user_id=1,
+            origin_node_id=2,
+            status=WhiteInternetStatus.DISABLED,
+            provisioning_status=WhiteInternetProvisioningStatus.SYNCED_INACTIVE,
+            desired_version=3,
+            actual_version=3,
+            pending_hard_delete=True,
+        )
+        unconfirmed = WhiteInternetSubscription(
+            id=12,
+            user_id=1,
+            origin_node_id=2,
+            status=WhiteInternetStatus.DISABLED,
+            provisioning_status=WhiteInternetProvisioningStatus.PENDING_DELETE,
+            desired_version=3,
+            actual_version=1,
+            pending_hard_delete=True,
+        )
+        real_session = AsyncMock(spec=AsyncSession)
+
+        with patch.object(
+            white_internet_repo,
+            "get_subscription_with_lock",
+            new=AsyncMock(side_effect=[confirmed, unconfirmed]),
+        ):
+            self.assertTrue(
+                await white_internet_repo.finalize_hard_delete_subscription(real_session, 11)
+            )
+            real_session.delete.assert_awaited_once_with(confirmed)
+            real_session.reset_mock()
+            self.assertFalse(
+                await white_internet_repo.finalize_hard_delete_subscription(real_session, 12)
+            )
+            real_session.delete.assert_not_called()
 
     async def test_reset_user_trial_returns_error_when_no_subscriptions(self):
         """reset_user_trial returns WL_SUB_NOT_FOUND when user has no subscriptions."""

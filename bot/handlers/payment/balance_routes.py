@@ -268,7 +268,10 @@ async def show_balance(
     await callback.answer(show_alert=False)
     await state.clear()
     if db_user is None:
-        await callback.answer(texts.BALANCE_HISTORY_LIMIT_REACHED_NOTE, show_alert=True)
+        try:
+            await callback.answer(texts.BALANCE_HISTORY_LIMIT_REACHED_NOTE, show_alert=True)
+        except Exception:
+            pass
         return
     await _render_balance(
         callback.bot,
@@ -569,14 +572,21 @@ async def check_topup(
         return
     payment = await _owned_topup(session, db_user, payment_id)
     if payment is None:
-        await callback.answer(texts.TOPUP_NOT_FOUND_ALERT, show_alert=True)
+        # Already answered above: never let a second answer bubble up.
+        try:
+            await callback.answer(texts.TOPUP_NOT_FOUND_ALERT, show_alert=True)
+        except Exception:
+            pass
         return
     try:
         payment = await request_topup_status_refresh(
             session, payment_id=payment.id, bot=callback.bot
         )
     except AccountTopupError:
-        await callback.answer(texts.TOPUP_NOT_FOUND_ALERT, show_alert=True)
+        try:
+            await callback.answer(texts.TOPUP_NOT_FOUND_ALERT, show_alert=True)
+        except Exception:
+            pass
         return
     if payment.fulfillment_status == "succeeded":
         ctx = payment.topup_context or {}

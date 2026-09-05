@@ -55,10 +55,15 @@ async def show_history(
     await state.clear()
 
     if not db_user:
-        await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
-        )
+        # Already answered above: a second answer on the same query raises
+        # TelegramBadRequest, which must not bubble into the error handler.
+        try:
+            await callback.answer(
+                texts.ERROR_USER_NOT_FOUND,
+                show_alert=True,
+            )
+        except Exception:
+            pass
         return
 
     payments = await get_user_payments(session, db_user.id, limit=10)
@@ -103,7 +108,10 @@ async def show_referral(
     await state.clear()
 
     if not db_user:
-        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        try:
+            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
         return
 
     invited_count = await get_user_referrals_count(session, db_user.telegram_id)
@@ -143,7 +151,10 @@ async def show_referrals_list(
     await state.clear()
 
     if not db_user:
-        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        try:
+            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
         return
 
     page = 1
