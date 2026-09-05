@@ -110,5 +110,8 @@ ALERT_INGRESS_RESTORED = """✅ <b>Проксирование подписок �
 🌐 Домен: <code>{domain}</code>
 Эндпоинт <code>{endpoint}</code> снова отвечает 200 OK."""
 
+ALERT_INGRESS_ERR_TIMEOUT = "Timeout (таймаут соединения)"
+ALERT_INGRESS_ERR_NETWORK = "недоступен (ошибка сети)"
+
 
 

@@ -15,6 +15,8 @@ from sqlalchemy import func, select
 
 from bot.keyboards.notifications import get_node_monitor_alert_keyboard
 from bot.texts.runtime.alerts import (
+    ALERT_INGRESS_ERR_NETWORK,
+    ALERT_INGRESS_ERR_TIMEOUT,
     ALERT_INGRESS_PROBLEM,
     ALERT_INGRESS_RESTORED,
     ALERT_SERVER_AUTO_DISABLED,
@@ -286,7 +288,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             err_msg = str(probe_exc).strip()
                             if not err_msg:
                                 if isinstance(probe_exc, (asyncio.TimeoutError, TimeoutError)):
-                                    err_msg = "Timeout (таймаут соединения)"
+                                    err_msg = ALERT_INGRESS_ERR_TIMEOUT
                                 else:
                                     err_msg = type(probe_exc).__name__
                             logger.warning(
@@ -342,7 +344,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             server_name=safe(server.name),
                                             server_id=server.id,
                                             domain=safe(probe_domain),
-                                            status_or_err=safe(ingress_detail or "недоступен (ошибка сети)"),
+                                            status_or_err=safe(ingress_detail or ALERT_INGRESS_ERR_NETWORK),
                                             endpoint=safe(f"{sub_prefix}/ping"),
                                         ),
                                         reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
