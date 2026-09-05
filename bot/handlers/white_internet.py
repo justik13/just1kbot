@@ -18,6 +18,7 @@ from bot import texts
 from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
+    WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_TOPUP_PACKS,
     WHITE_INTERNET_TRIAL_DURATION_DAYS,
     WHITE_INTERNET_TRIAL_MODE_ONLY,
@@ -33,6 +34,7 @@ from database.repositories.users_repo import get_user_by_telegram_id
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
+from utils.security import normalize_public_domain
 
 logger = logging.getLogger(__name__)
 router = Router(name="white_internet")
@@ -51,7 +53,7 @@ def _render_progress_bar(used_bytes: int, total_bytes: int, length: int = 10) ->
 
 
 def _build_subscription_url(domain: str, token: str) -> str:
-    sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
+    sub_prefix = WHITE_INTERNET_SUB_PATH_PREFIX
     return f"https://{domain}{sub_prefix}/{token}"
 
 
@@ -198,27 +200,26 @@ async def _resolve_subscription_domain(
     if sub and getattr(sub, "origin_node_id", None):
         origin_node = await session.get(Server, sub.origin_node_id)
         if origin_node and isinstance(origin_node.extra_data, dict):
-            cdn_domain = origin_node.extra_data.get("cdn_domain")
-            if cdn_domain and isinstance(cdn_domain, str) and cdn_domain.strip():
-                return cdn_domain.strip()
+            cdn_domain = normalize_public_domain(origin_node.extra_data.get("cdn_domain"))
+            if cdn_domain:
+                return cdn_domain
 
-    env_cdn = os.getenv("WHITE_INTERNET_CDN_DOMAIN")
-    if env_cdn and env_cdn.strip():
-        return env_cdn.strip()
+    env_cdn = normalize_public_domain(os.getenv("WHITE_INTERNET_CDN_DOMAIN"))
+    if env_cdn:
+        return env_cdn
 
-    bot_domain = get_settings().DOMAIN or os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
-    if bot_domain and bot_domain.strip():
-        return bot_domain.strip()
+    bot_domain = normalize_public_domain(get_settings().DOMAIN or os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN"))
+    if bot_domain:
+        return bot_domain
 
     if origin_node:
-        node_domain = getattr(origin_node, "domain", None)
-        if node_domain and isinstance(node_domain, str) and node_domain.strip():
-            return node_domain.strip()
+        node_domain = normalize_public_domain(getattr(origin_node, "domain", None))
+        if node_domain:
+            return node_domain
         if getattr(origin_node, "api_url", None):
-            from urllib.parse import urlsplit
-            parsed = urlsplit(origin_node.api_url)
-            if parsed.hostname:
-                return parsed.hostname.strip()
+            node_api_domain = normalize_public_domain(origin_node.api_url)
+            if node_api_domain:
+                return node_api_domain
 
     return None
 

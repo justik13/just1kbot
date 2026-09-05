@@ -145,3 +145,29 @@ async def is_safe_url(url: str) -> bool:
         return await _resolved_ips_are_safe(hostname, allow_local=allow_local_https)
     except Exception:
         return False
+
+
+def normalize_public_domain(raw: str | None) -> str | None:
+    """Normalize domain/hostname by stripping scheme, port, paths, and trailing dots.
+
+    Returns clean lowercase hostname (e.g. 'cdn.example.com'), or None if input is empty or invalid.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    val = raw.strip()
+    if not val:
+        return None
+    try:
+        if "://" in val:
+            parsed = urlparse(val)
+            host = parsed.hostname or parsed.netloc.split(":")[0]
+        else:
+            dummy = f"https://{val}"
+            parsed = urlparse(dummy)
+            host = parsed.hostname or parsed.netloc.split(":")[0]
+        if host:
+            cleaned = host.strip().rstrip(".").lower()
+            return cleaned if cleaned else None
+    except Exception:
+        pass
+    return None

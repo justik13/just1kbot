@@ -5,7 +5,6 @@ ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED -> MANUAL_DISABLED
 """
 import asyncio
 import logging
-import os
 import time
 from datetime import datetime, timezone
 
@@ -25,7 +24,12 @@ from bot.texts.runtime.alerts import (
     ALERT_SERVER_PROBLEM,
     ALERT_SERVER_RESTORED,
 )
-from config.constants import AMNEZIA_PROTOCOL, ServerHealthState, XRAY_PROTOCOL
+from config.constants import (
+    AMNEZIA_PROTOCOL,
+    ServerHealthState,
+    WHITE_INTERNET_SUB_PATH_PREFIX,
+    XRAY_PROTOCOL,
+)
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server
@@ -142,7 +146,7 @@ async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
     settings = get_settings()
     admin_ids = settings.ADMIN_IDS
     if not admin_ids:
-        return True
+        return False
 
     success = False
     for admin_id in admin_ids:
@@ -208,11 +212,15 @@ async def check_node_resources_and_alerts(bot: Bot):
         if not isinstance(server_proto, str):
             server_proto = AMNEZIA_PROTOCOL
 
-        is_xray_node = (
-            server_proto in (XRAY_PROTOCOL, "xray")
-            or "xray_origin" in (getattr(server, "capabilities", None) or [])
-        )
-        is_amnezia_node = not is_xray_node and server_proto == AMNEZIA_PROTOCOL
+        is_xray_node = server_proto == XRAY_PROTOCOL
+        is_amnezia_node = server_proto == AMNEZIA_PROTOCOL
+
+        if not is_xray_node and not is_amnezia_node:
+            logger.warning(
+                "Server %s (%s) has unsupported or unassigned protocol '%s', skipping healthcheck",
+                server.id, server.name, server.protocol,
+            )
+            return
 
         # 4a. Исполнение проверки Core Node API с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
@@ -229,12 +237,6 @@ async def check_node_resources_and_alerts(bot: Bot):
             elif is_amnezia_node:
                 client = AmneziaClient(server.api_url, server.api_key)
                 is_healthy = await client.healthcheck()
-            else:
-                logger.warning(
-                    "Server %s (%s) has unsupported or unassigned protocol '%s', skipping healthcheck",
-                    server.id, server.name, server.protocol,
-                )
-                is_healthy = False
         except Exception as exc:
             logger.warning("Healthcheck exception for server %s (%s): %s", server.id, server.name, exc)
             is_healthy = False
@@ -262,9 +264,12 @@ async def check_node_resources_and_alerts(bot: Bot):
 
                     if probe_domain:
                         probe_domain = str(probe_domain).strip()
+                        raw_sub_prefix = None
+                        if isinstance(getattr(server, "extra_data", None), dict):
+                            raw_sub_prefix = server.extra_data.get("sub_path_prefix")
                         sub_prefix = (
-                            (server.extra_data or {}).get("sub_path_prefix")
-                            or os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl")
+                            raw_sub_prefix if isinstance(raw_sub_prefix, str) and raw_sub_prefix.strip()
+                            else WHITE_INTERNET_SUB_PATH_PREFIX
                         ).strip().rstrip("/")
                         if not sub_prefix.startswith("/"):
                             sub_prefix = f"/{sub_prefix}"

@@ -119,9 +119,27 @@ class TestUtilsEncryption(unittest.TestCase):
 
 class TestUtilsFormatters(unittest.TestCase):
     def test_format_traffic(self):
+        # Boundary cases and negative protection
+        self.assertEqual(format_traffic(-100), "0 B")
         self.assertEqual(format_traffic(0), "0 B")
+        self.assertEqual(format_traffic(1), "1 B")
+        self.assertEqual(format_traffic(1023), "1023 B")
         self.assertEqual(format_traffic(1024), "1.0 KiB")
+        self.assertEqual(format_traffic(1025), "1.0 KiB")
         self.assertEqual(format_traffic(1048576), "1.0 MiB")
+        self.assertEqual(format_traffic(1073741824), "1.0 GiB")
+        self.assertEqual(format_traffic(1099511627776), "1.0 TiB")
+
+    def test_normalize_public_domain(self):
+        from utils.security import normalize_public_domain
+        self.assertEqual(normalize_public_domain("https://cdn.example.com/"), "cdn.example.com")
+        self.assertEqual(normalize_public_domain("http://bot.example.com:8080/sub/wl"), "bot.example.com")
+        self.assertEqual(normalize_public_domain("  JUST1K.BEST  "), "just1k.best")
+        self.assertEqual(normalize_public_domain("origin.example.com."), "origin.example.com")
+        self.assertEqual(normalize_public_domain("cdn.example.com/sub/wl/token"), "cdn.example.com")
+        self.assertIsNone(normalize_public_domain(""))
+        self.assertIsNone(normalize_public_domain("   "))
+        self.assertIsNone(normalize_public_domain(None))
 
     def test_format_datetime(self):
         dt = datetime.datetime(2026, 8, 7, 14, 30, 0, tzinfo=datetime.timezone.utc)

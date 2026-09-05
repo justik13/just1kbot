@@ -298,7 +298,10 @@ class WhiteInternetReconciliationWorker:
             server_list = [
                 (s.id, s.name, s.api_url, s.api_key, s.xray_instance_epoch, s.xray_instance_boot_id, s.xray_instance_starttime, (s.extra_data or {}).get("relays", []))
                 for s in servers
-                if "xray_origin" in (s.capabilities or []) and s.api_url and s.api_key
+                if getattr(s, "protocol", None) == XRAY_PROTOCOL
+                and "xray_origin" in (s.capabilities or [])
+                and s.api_url
+                and s.api_key
             ]
 
         # Check health outside DB transaction

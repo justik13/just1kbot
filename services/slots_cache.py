@@ -27,8 +27,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         if not server:
             raise LookupError("server not found")
         server_proto = getattr(server, "protocol", None) or AMNEZIA_PROTOCOL
-        server_caps = getattr(server, "capabilities", None) or []
-        is_xray = (server_proto == XRAY_PROTOCOL or "xray_origin" in server_caps)
+        is_xray = server_proto == XRAY_PROTOCOL
         if is_xray:
             return ServerPeerSnapshot(
                 server_id,
@@ -148,8 +147,7 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         gen = get_server_generation(server.id)
 
         server_proto = getattr(server, "protocol", None) or AMNEZIA_PROTOCOL
-        server_caps = getattr(server, "capabilities", None) or []
-        is_xray = (server_proto == XRAY_PROTOCOL or "xray_origin" in server_caps)
+        is_xray = server_proto == XRAY_PROTOCOL
         if is_xray:
             from database.connection import session_scope
             from database.models import WhiteInternetSubscription

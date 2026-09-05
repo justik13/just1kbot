@@ -9,6 +9,38 @@ normalize_domain() {
     echo "$raw"
 }
 
+validate_fqdn() {
+    local host="${1:-}"
+    [[ -z "$host" ]] && return 1
+    # Reject forbidden characters: spaces, control characters, quotes, semicolons, dollar, backticks, braces, slashes
+    if [[ "$host" =~ [[:space:]\;\"\'\$\`\{\}\\\<\>\?\&\*\/] ]]; then
+        return 1
+    fi
+    # Reject localhost or pure IPv4
+    if [[ "$host" == "localhost" || "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        return 1
+    fi
+    # Must match valid FQDN structure: labels separated by dots, only alphanumeric and hyphen
+    if [[ ! "$host" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+validate_sub_prefix() {
+    local prefix="${1:-}"
+    [[ -z "$prefix" ]] && return 1
+    # Reject forbidden characters or .. (path traversal)
+    if [[ "$prefix" =~ [[:space:]\;\"\'\$\`\{\}\\\<\>\?\&\*] || "$prefix" =~ \.\. ]]; then
+        return 1
+    fi
+    # Must start with / and contain only safe URI path characters
+    if [[ ! "$prefix" =~ ^/[a-zA-Z0-9_/-]+$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
 deploy_subscription_proxy_conf() {
     local target_host="${1:-}"
     local custom_prefix="${2:-}"
@@ -20,7 +52,7 @@ deploy_subscription_proxy_conf() {
     fi
     target_host="$(normalize_domain "$target_host")"
 
-    if [[ -z "$target_host" || "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$target_host" == "localhost" ]]; then
+    if ! validate_fqdn "$target_host"; then
         if [[ -t 0 ]]; then
             warn "Указан недопустимый хост для проксирования подписок: '${target_host:-<пусто>}' (требуется FQDN с валидным TLS)."
             read -rp "Введите домен Telegram-бота (например: just1k.best): " prompt_target || true
@@ -28,7 +60,7 @@ deploy_subscription_proxy_conf() {
         fi
     fi
 
-    if [[ -z "$target_host" || "$target_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$target_host" == "localhost" ]]; then
+    if ! validate_fqdn "$target_host"; then
         error "Для настройки безопасного Nginx-проксирования подписок требуется валидный домен бота (BOT_DOMAIN FQDN). Указан недопустимый хост: '${target_host:-<пусто>}'. Проксирование HTTPS-upstream по IP без проверки TLS запрещено."
     fi
 
@@ -43,6 +75,11 @@ deploy_subscription_proxy_conf() {
     fi
     sub_prefix="${sub_prefix%/}"
     [[ ! "$sub_prefix" =~ ^/ ]] && sub_prefix="/$sub_prefix"
+
+    if ! validate_sub_prefix "$sub_prefix"; then
+        error "Указан недопустимый префикс пути подписок: '$sub_prefix' (должен начинаться с / и содержать только безопасные URI-символы)."
+    fi
+
     set_state_val "sub_path_prefix" "$sub_prefix" 2>/dev/null || true
 
     mkdir -p "$NGINX_RELAYS_DIR"
@@ -126,21 +163,23 @@ install_xray_origin_node() {
     fi
 
     bot_domain="$(normalize_domain "$bot_domain")"
+
     if [[ -z "$bot_domain" ]]; then
-        error "BOT_DOMAIN обязателен для настройки защищенного TLS-проксирования подписок."
+        error "BOT_DOMAIN обязателен для настройки безопасного проксирования подписок."
     fi
-    if [[ "$bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$bot_domain" == "localhost" ]]; then
-        error "BOT_DOMAIN должен быть доменным именем (FQDN) с валидным SSL-сертификатом, а не IP-адресом: '$bot_domain'"
+
+    if ! validate_fqdn "$bot_domain"; then
+        error "BOT_DOMAIN должен быть доменным именем (FQDN) с доверенным SSL-сертификатом, а не IP-адресом или недопустимым хостом: '$bot_domain'"
     fi
 
     if [[ -n "$bot_domain" ]]; then
         info "Проверка связи с ботом через эндпоинт https://${bot_domain}/health..."
         local health_code
-        health_code="$(curl -skL --max-time 5 -o /dev/null -w "%{http_code}" "https://${bot_domain}/health" 2>/dev/null || echo "000")"
+        health_code="$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "https://${bot_domain}/health" 2>/dev/null || echo "000")"
         if [[ "$health_code" == "200" ]]; then
             log "Эндпоинт бота https://${bot_domain}/health доступен (HTTP 200)."
         else
-            warn "Эндпоинт бота https://${bot_domain}/health вернул код: $health_code (или недоступен). Проверьте DNS и статус бота (динамический resolver защитит Nginx от сбоя)."
+            warn "Эндпоинт бота https://${bot_domain}/health вернул код: $health_code (или недоступен). Проверьте DNS, валидность TLS-сертификата (редиректы запрещены) и статус бота."
         fi
     fi
 
@@ -892,18 +931,18 @@ except Exception:
     env_bot_domain="$(normalize_domain "${BOT_DOMAIN:-}")"
 
     # Если в BOT_DOMAIN передан валидный FQDN — используем его в приоритете (override оператора)
-    if [[ -n "$env_bot_domain" && ! "$env_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$env_bot_domain" != "localhost" ]]; then
+    if validate_fqdn "$env_bot_domain"; then
         heal_bot_domain="$env_bot_domain"
     fi
 
     heal_bot_domain="$(normalize_domain "$heal_bot_domain")"
-    if [[ -n "$heal_bot_domain" && ! "$heal_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$heal_bot_domain" != "localhost" ]]; then
+    if validate_fqdn "$heal_bot_domain"; then
         deploy_subscription_proxy_conf "$heal_bot_domain"
     else
         if [[ -n "$heal_bot_domain" && "$heal_bot_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             warn "Внимание: в state.json обнаружен устаревший bot_domain в виде IP ($heal_bot_domain). Проксирование подписок с TLS требует FQDN. Авто-восстановление sub-wl.conf пропущено (укажите BOT_DOMAIN для обновления)."
         else
-            warn "BOT_DOMAIN не настроен в state.json, пропуск авто-восстановления Nginx-проксирования подписок."
+            warn "BOT_DOMAIN не настроен или не является валидным FQDN, пропуск авто-восстановления Nginx-проксирования подписок."
         fi
     fi
 
