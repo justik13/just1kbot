@@ -223,7 +223,10 @@ async def _resolve_subscription_domain(
 
 @router.callback_query(F.data == "white_internet")
 async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         await query.message.answer(texts.WL_USER_NOT_FOUND)
@@ -449,7 +452,10 @@ async def process_topup_pack(query: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "wl_show_link")
 async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
