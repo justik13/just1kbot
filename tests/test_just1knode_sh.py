@@ -1068,7 +1068,9 @@ run_doctor
         self.assertIn("proxy_pass $bot_upstream;", content)
         self.assertIn("proxy_ssl_server_name on;", content)
         self.assertIn("proxy_ssl_name just1k.best;", content)
-        self.assertIn("proxy_ssl_verify off;", content)
+        self.assertIn("proxy_ssl_verify on;", content)
+        self.assertIn("proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;", content)
+        self.assertNotIn("proxy_ssl_verify off;", content)
         self.assertIn("proxy_set_header Host just1k.best;", content)
 
     def test_normalize_domain_strips_protocols_and_slashes(self):

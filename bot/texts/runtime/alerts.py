@@ -95,4 +95,20 @@ QUEUE_HEALTH_DEAD_PROBLEM = "{count} dead (oldest {oldest_age}s)"
 QUEUE_HEALTH_OVERDUE_PROBLEM = "{count} overdue (oldest {oldest_age}s)"
 QUEUE_HEALTH_STALE_PROBLEM = "{count} stale (oldest {oldest_age}s)"
 
+ALERT_INGRESS_PROBLEM = """⚠️ <b>Проблема с проксированием подписок (Ingress / Nginx)</b>
+
+🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
+🌐 Домен: <code>{domain}</code>
+Ошибка: Эндпоинт <code>/sub/wl/ping</code> вернул статус {status_or_err}.
+
+⚠️ VPN-ядро Xray работает в штатном режиме, но выдача подписок через Nginx может быть недоступна (ошибка 502 / SSL).
+🔍 <b>Проверьте настройки Nginx и сертификаты на Origin.</b>"""
+
+ALERT_INGRESS_RESTORED = """✅ <b>Проксирование подписок восстановлено</b>
+
+🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
+🌐 Домен: <code>{domain}</code>
+Эндпоинт <code>/sub/wl/ping</code> снова отвечает 200 OK."""
+
+
 

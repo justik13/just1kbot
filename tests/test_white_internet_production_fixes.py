@@ -159,10 +159,14 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         clear_monitor_states()
 
-    async def test_node_monitor_flags_502_on_sub_ping(self):
-        """When origin Nginx returns 502 on /sub/wl/ping, node_monitor treats node as unhealthy."""
+    async def test_node_monitor_ingress_probe_decoupled_from_core_health(self):
+        """When origin Nginx returns 502 on /sub/wl/ping:
+        1. Core health remains healthy (ONLINE, 0 consecutive fails, not auto-disabled).
+        2. Ingress alert (ALERT_INGRESS_PROBLEM) is sent to admins.
+        3. When /sub/wl/ping recovers with 200 OK, ALERT_INGRESS_RESTORED is sent.
+        """
         bot = MagicMock()
-        bot.send_message = AsyncMock()
+        bot.send_message = AsyncMock(return_value=True)
 
         server = Server(
             id=10,
@@ -188,8 +192,8 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
                 pass
 
         class MockSession:
-            def __init__(self, *args, **kwargs):
-                pass
+            def __init__(self, status=502):
+                self.status = status
 
             async def __aenter__(self):
                 return self
@@ -198,7 +202,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
                 pass
 
             def get(self, url, **kwargs):
-                return MockProbeResponse(status=502)
+                return MockProbeResponse(status=self.status)
 
         class MockXrayClient:
             def __init__(self, *args, **kwargs):
@@ -214,24 +218,71 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
                 return True, 1, {"status": "ok"}
 
         session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
              patch("services.workers.node_monitor.session_scope") as mock_scope, \
              patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
-             patch("services.workers.node_monitor.aiohttp.ClientSession", MockSession), \
-             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap:
+             patch("services.workers.node_monitor.aiohttp.ClientSession", lambda **kw: MockSession(status=502)), \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            # --- Check 1: Ingress fails with 502 ---
+            await check_node_resources_and_alerts(bot)
+
+            # 1. Core health MUST stay ONLINE and consecutive_fails MUST remain 0!
+            mock_snap.assert_called_once()
+            called_kwargs = mock_snap.call_args[1]
+            self.assertEqual(called_kwargs["consecutive_fails"], 0)
+            self.assertEqual(called_kwargs["health_state"], ServerHealthState.ONLINE)
+
+            # 2. Ingress alert MUST be sent to admin
+            bot.send_message.assert_called_once()
+            call_args = bot.send_message.call_args[1]
+            self.assertEqual(call_args["chat_id"], 999999)
+            self.assertIn("origin.just1k.best", call_args["text"])
+            self.assertIn("502", call_args["text"])
+
+        # Reset bot mock for Check 2
+        bot.send_message.reset_mock()
+
+        # --- Check 2: Ingress recovers with 200 OK ---
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession", lambda **kw: MockSession(status=200)), \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
 
             mock_scope.return_value.__aenter__.return_value = session_mock
             mock_snap.return_value = (server, True)
 
             await check_node_resources_and_alerts(bot)
 
-            # Node monitor must have marked check as failed because ping returned 502
+            # Core health remains ONLINE
             mock_snap.assert_called_once()
             called_kwargs = mock_snap.call_args[1]
-            # When an ONLINE server fails its first check, it moves to WAITING_CONFIRMATION with consecutive_fails = 1
-            self.assertEqual(called_kwargs["consecutive_fails"], 1)
-            self.assertEqual(called_kwargs["health_state"], ServerHealthState.WAITING_CONFIRMATION)
+            self.assertEqual(called_kwargs["consecutive_fails"], 0)
+            self.assertEqual(called_kwargs["health_state"], ServerHealthState.ONLINE)
+
+            # Restored ingress alert sent to admin
+            bot.send_message.assert_called_once()
+            call_args = bot.send_message.call_args[1]
+            self.assertEqual(call_args["chat_id"], 999999)
+            self.assertIn("origin.just1k.best", call_args["text"])
+            self.assertIn("восстановлено", call_args["text"])
 
 
 if __name__ == "__main__":
     unittest.main()
+

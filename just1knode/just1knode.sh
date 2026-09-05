@@ -373,8 +373,9 @@ if os.path.exists(rf):
 
     if [[ "$role" == "origin" ]]; then
         log "8. Проверка Nginx-проксирования подписок (/sub/wl)..."
+        local check_target="${domain:-localhost}"
         local sub_code
-        sub_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 -H "Host: ${domain:-localhost}" https://127.0.0.1/sub/wl/ping 2>/dev/null || echo "000")"
+        sub_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}/sub/wl/ping" 2>/dev/null || echo "000")"
         if [[ "$sub_code" == "200" ]]; then
             echo -e "  ${GREEN}✔${NC} Nginx прокси подписок (/sub/wl/ping) отвечает 200 OK"
         elif [[ "$sub_code" == "502" ]]; then
@@ -383,10 +384,28 @@ if os.path.exists(rf):
         elif [[ "$sub_code" == "404" ]]; then
             echo -e "  ${YELLOW}!${NC} Nginx прокси отвечает 404 (соединение с ботом есть, но эндпоинт /ping не найден)"
         elif [[ "$sub_code" == "000" ]]; then
-            echo -e "  ${RED}✗${NC} Не удалось выполнить запрос к https://127.0.0.1/sub/wl/ping (Nginx недоступен)"
+            echo -e "  ${RED}✗${NC} Не удалось выполнить запрос к https://${check_target}/sub/wl/ping (Nginx недоступен)"
             failed=$((failed + 1))
         else
             echo -e "  ${YELLOW}!${NC} Nginx прокси вернул HTTP код: $sub_code"
+        fi
+
+        local cdn_domain
+        cdn_domain="$(get_state_val "cdn_domain" "")"
+        if [[ -n "$cdn_domain" && "$cdn_domain" != "$check_target" && "$cdn_domain" != "-" ]]; then
+            log "9. Проверка доступности CDN подписок (${cdn_domain})..."
+            local cdn_code
+            cdn_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 "https://${cdn_domain}/sub/wl/ping" 2>/dev/null || echo "000")"
+            if [[ "$cdn_code" == "200" ]]; then
+                echo -e "  ${GREEN}✔${NC} Публичный CDN прокси (/sub/wl/ping) отвечает 200 OK"
+            elif [[ "$cdn_code" == "502" ]]; then
+                echo -e "  ${RED}✗${NC} CDN вернул 502 Bad Gateway (проверьте Origin и CDN кэш)!"
+                failed=$((failed + 1))
+            elif [[ "$cdn_code" == "000" ]]; then
+                echo -e "  ${YELLOW}!${NC} CDN ${cdn_domain} недоступен по сети с этого узла"
+            else
+                echo -e "  ${YELLOW}!${NC} CDN вернул HTTP код: $cdn_code"
+            fi
         fi
     fi
 

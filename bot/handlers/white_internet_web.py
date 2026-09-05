@@ -208,12 +208,19 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
 
+PING_HEADERS = {
+    "Cache-Control": "no-store,no-cache,must-revalidate",
+    "Pragma": "no-cache",
+    "Content-Type": "text/plain;charset=utf-8",
+}
+
+
 async def white_internet_ping_handler(_request: web.Request) -> web.Response:
     """Lightweight synthetic healthcheck endpoint for subscription proxy verification."""
     return web.Response(
         status=200,
         text="pong",
-        headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Content-Type": "text/plain; charset=utf-8"},
+        headers=PING_HEADERS,
     )
 
 

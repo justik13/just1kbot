@@ -14,6 +14,8 @@ from aiogram import Bot
 
 from bot.keyboards.notifications import get_node_monitor_alert_keyboard
 from bot.texts.runtime.alerts import (
+    ALERT_INGRESS_PROBLEM,
+    ALERT_INGRESS_RESTORED,
     ALERT_SERVER_AUTO_DISABLED,
     ALERT_SERVER_AUTO_DISABLED_RECOVERED,
     ALERT_SERVER_DISK_CRITICAL,
@@ -63,6 +65,7 @@ class ServerMonitorState:
         self.last_alert_sent_state: str | None = None
         self.disk_alert_last_sent: float | None = None
         self.recovery_notice_sent: bool = False
+        self.ingress_problem: bool = False
 
     def sync_from_db_server(self, db_server: Server):
         if db_server:
@@ -121,6 +124,7 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.recovery_notice_sent = False
     st.last_alert_sent_state = None
     st.disk_alert_last_sent = None
+    st.ingress_problem = False
 
 
 def clear_monitor_states():
@@ -208,6 +212,8 @@ async def check_node_resources_and_alerts(bot: Bot):
         xray_epoch = None
         xray_data = None
         client = None
+        ingress_probe_result: tuple[bool, str] | None = None
+        probe_domain: str | None = None
         try:
             if is_xray_node:
                 from services.xray_node_client import XrayNodeClient
@@ -215,7 +221,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                     is_healthy, xray_epoch, xray_data = await xray_client.check_health(
                         server.api_url, server.api_key
                     )
-                # Synthetic probe of public subscription endpoint to detect Nginx 502 Bad Gateway
+                # Decoupled synthetic probe of public subscription endpoint to detect Nginx 502 / SSL errors.
+                # Strictly decoupled: failures on /sub/wl/ping NEVER mutate core is_healthy or ServerHealthState.
                 probe_domain = None
                 if isinstance(getattr(server, "extra_data", None), dict):
                     probe_domain = server.extra_data.get("domain") or server.extra_data.get("cdn_domain")
@@ -225,7 +232,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if parsed.hostname and not parsed.hostname.replace(".", "").isdigit() and parsed.hostname != "localhost":
                         probe_domain = parsed.hostname
 
-                if is_healthy and probe_domain:
+                if probe_domain:
                     probe_domain = str(probe_domain).strip()
                     try:
                         timeout = aiohttp.ClientTimeout(total=5.0)
@@ -240,7 +247,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         "Xray node %s (%s) subscription proxy returned HTTP %s on /sub/wl/ping",
                                         server.id, probe_domain, probe_resp.status,
                                     )
-                                    is_healthy = False
+                                    ingress_probe_result = (False, str(probe_resp.status))
+                                elif probe_resp.status == 200:
+                                    ingress_probe_result = (True, "200")
                     except Exception as probe_exc:
                         is_origin = (
                             "xray_origin" in (getattr(server, "capabilities", None) or [])
@@ -251,7 +260,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 "Origin node %s (%s) subscription proxy ping failed: %s",
                                 server.id, probe_domain, probe_exc,
                             )
-                            is_healthy = False
+                            ingress_probe_result = (False, str(probe_exc))
             elif is_amnezia_node:
                 client = AmneziaClient(server.api_url, server.api_key)
                 is_healthy = await client.healthcheck()
@@ -266,6 +275,33 @@ async def check_node_resources_and_alerts(bot: Bot):
             is_healthy = False
 
         alerts_to_send: list[dict] = []
+
+        # Decoupled ingress alert evaluation (does not touch server state machine or is_healthy)
+        if ingress_probe_result is not None and probe_domain:
+            ingress_ok, ingress_detail = ingress_probe_result
+            if not ingress_ok:
+                if not st.ingress_problem:
+                    alerts_to_send.append({
+                        "text": ALERT_INGRESS_PROBLEM.format(
+                            server_name=safe(server.name),
+                            server_id=server.id,
+                            domain=safe(probe_domain),
+                            status_or_err=safe(ingress_detail),
+                        ),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        "set_ingress_problem": True,
+                    })
+            else:
+                if st.ingress_problem:
+                    alerts_to_send.append({
+                        "text": ALERT_INGRESS_RESTORED.format(
+                            server_name=safe(server.name),
+                            server_id=server.id,
+                            domain=safe(probe_domain),
+                        ),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        "set_ingress_problem": False,
+                    })
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
@@ -528,6 +564,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                         st.last_alert_sent_state = target_state
                     if is_rec_notice:
                         st.recovery_notice_sent = True
+                    if "set_ingress_problem" in alert_to_send:
+                        st.ingress_problem = alert_to_send["set_ingress_problem"]
 
                     async with session_scope() as session:
                         fresh_server = await get_server_by_id(session, server.id)

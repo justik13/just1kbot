@@ -286,31 +286,23 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
     try:
         await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
         try:
-            await query.answer()
+            await query.answer(texts.WL_ALERT_TRAFFIC_UPDATED, show_alert=False)
         except Exception:
             pass
     except TelegramBadRequest as exc:
-        if "message is not modified" in str(exc).lower():
+        if "not_modified" in str(exc).lower().replace(" ", "_"):
             try:
                 await query.answer(texts.WL_ALERT_TRAFFIC_UP_TO_DATE, show_alert=False)
             except Exception:
                 pass
-            return
-        logger.warning("TelegramBadRequest editing white internet menu: %s", exc)
-        try:
-            await query.message.answer(text, reply_markup=kb, parse_mode="HTML")
-        except Exception:
-            pass
-        try:
-            await query.answer()
-        except Exception:
-            pass
+        else:
+            logger.warning("TelegramBadRequest editing white internet menu: %s", exc)
+            try:
+                await query.answer()
+            except Exception:
+                pass
     except Exception as exc:
         logger.warning("Unexpected error editing white internet menu: %s", exc)
-        try:
-            await query.message.answer(text, reply_markup=kb, parse_mode="HTML")
-        except Exception:
-            pass
         try:
             await query.answer()
         except Exception:
