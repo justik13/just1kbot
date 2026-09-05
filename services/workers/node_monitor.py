@@ -221,11 +221,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                     is_healthy, xray_epoch, xray_data = await xray_client.check_health(
                         server.api_url, server.api_key
                     )
-                # Decoupled synthetic probe of public subscription endpoint to detect Nginx 502 / SSL errors.
+                # Decoupled synthetic probe of public subscription endpoint to detect CDN/Nginx errors.
                 # Strictly decoupled: failures on /sub/wl/ping NEVER mutate core is_healthy or ServerHealthState.
                 probe_domain = None
                 if isinstance(getattr(server, "extra_data", None), dict):
-                    probe_domain = server.extra_data.get("domain") or server.extra_data.get("cdn_domain")
+                    probe_domain = server.extra_data.get("cdn_domain") or server.extra_data.get("domain")
                 if not probe_domain and server.api_url:
                     from urllib.parse import urlsplit
                     parsed = urlsplit(server.api_url)
@@ -242,14 +242,14 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 ssl=False,
                                 allow_redirects=True,
                             ) as probe_resp:
-                                if probe_resp.status >= 500:
+                                if probe_resp.status == 200:
+                                    ingress_probe_result = (True, "200")
+                                else:
                                     logger.warning(
                                         "Xray node %s (%s) subscription proxy returned HTTP %s on /sub/wl/ping",
                                         server.id, probe_domain, probe_resp.status,
                                     )
                                     ingress_probe_result = (False, str(probe_resp.status))
-                                elif probe_resp.status == 200:
-                                    ingress_probe_result = (True, "200")
                     except Exception as probe_exc:
                         is_origin = (
                             "xray_origin" in (getattr(server, "capabilities", None) or [])
