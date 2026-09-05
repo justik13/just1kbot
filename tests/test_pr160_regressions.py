@@ -53,16 +53,8 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
             show_alert=True,
         )
 
-    async def test_white_internet_callback_is_alert(self):
-        callback = MagicMock()
-        callback.answer = AsyncMock()
-
-        await fallback.white_internet_callback(callback)
-
-        callback.answer.assert_awaited_once_with(
-            "🔨 Раздел находится в разработке",
-            show_alert=True,
-        )
+    def test_white_internet_callback_removed_from_fallback(self):
+        self.assertFalse(hasattr(fallback, "white_internet_callback"))
 
     def test_hub_keyboard_admin_and_non_admin_access(self):
         for is_active in (False, True):

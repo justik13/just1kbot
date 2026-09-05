@@ -55,7 +55,10 @@ async def admin_subscription_menu(
         )
         return
 
-    await callback.answer(show_alert=False)
+    try:
+        await callback.answer(show_alert=False)
+    except Exception:
+        pass
 
     user = await get_user_by_telegram_id(session, telegram_id)
 
