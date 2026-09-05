@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from aiogram import Bot
-from sqlalchemy import func, nulls_first, or_, select
+from sqlalchemy import and_, func, nulls_first, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from config.constants import XRAY_PROTOCOL
@@ -83,24 +83,6 @@ class WhiteInternetReconciliationWorker:
             expected_inbound_tags.add("just1k-wl-default")
 
         async with self._get_sub_lock(sub_id):
-            # 1. External network mutation on Xray node (executed without holding a DB connection)
-            async with self._semaphore:
-                resp = await self.client.sync_client(
-                    api_url,
-                    api_key,
-                    sub_uuid,
-                    is_active=desired_active,
-                    version=target_version,
-                    expected_node_epoch=target_epoch,
-                    idempotency_key=f"reconcile:{sub_id}:{target_version}:{desired_active}",
-                )
-
-            sync_result = resp.result if hasattr(resp, "result") else resp[0]
-            err_msg = resp.error if hasattr(resp, "error") else resp[1]
-            verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
-            verified_inbounds = getattr(resp, "verified_inbounds", None) or []
-
-            # 2. Persist result under row lock in a short dedicated session
             async with sf() as lock_session:
                 is_pg = False
                 bind = getattr(lock_session, "bind", None)
@@ -116,6 +98,23 @@ class WhiteInternetReconciliationWorker:
                         return False
 
                 try:
+                    # 1. External network mutation on Xray node (executed under distributed advisory lock)
+                    async with self._semaphore:
+                        resp = await self.client.sync_client(
+                            api_url,
+                            api_key,
+                            sub_uuid,
+                            is_active=desired_active,
+                            version=target_version,
+                            expected_node_epoch=target_epoch,
+                            idempotency_key=f"reconcile:{sub_id}:{target_version}:{desired_active}",
+                        )
+
+                    sync_result = resp.result if hasattr(resp, "result") else resp[0]
+                    err_msg = resp.error if hasattr(resp, "error") else resp[1]
+                    verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
+                    verified_inbounds = getattr(resp, "verified_inbounds", None) or []
+
                     sub = await white_internet_repo.get_subscription_with_lock(lock_session, sub_id)
                     if sub is None:
                         return False
@@ -356,6 +355,14 @@ class WhiteInternetReconciliationWorker:
                                 WhiteInternetProvisioningStatus.PENDING_UPDATE,
                                 WhiteInternetProvisioningStatus.PENDING_DELETE,
                             ]),
+                            and_(
+                                WhiteInternetSubscription.status.in_([
+                                    WhiteInternetStatus.PENDING,
+                                    WhiteInternetStatus.ACTIVE,
+                                    WhiteInternetStatus.EXHAUSTED,
+                                ]),
+                                WhiteInternetSubscription.expires_at <= now,
+                            ),
                         ),
                     )
                     .order_by(
@@ -403,7 +410,154 @@ class WhiteInternetReconciliationWorker:
                     elif r is True:
                         synced_count += 1
 
+        synced_count += await self._finalize_hard_deletes(sf)
+        synced_count += await self._sweep_orphan_cleanups(sf)
+
         return synced_count
+
+    async def _sweep_orphan_cleanups(self, sf) -> int:
+        """Converge former origin nodes to disabled for migrated subscriptions.
+
+        Drains the durable orphan-cleanup outbox written by renew migrations in
+        the same transaction. Fire-and-forget dispatches are only accelerators;
+        this sweep is the guarantee, so restarts can never orphan credentials.
+        """
+        swept = 0
+        try:
+            async with sf() as sess:
+                stmt = (
+                    select(white_internet_repo.WhiteInternetOrphanCleanup.id)
+                    .where(white_internet_repo.WhiteInternetOrphanCleanup.status == "pending")
+                    .order_by(white_internet_repo.WhiteInternetOrphanCleanup.id.asc())
+                    .limit(BATCH_SIZE)
+                )
+                cleanup_ids = list((await sess.execute(stmt)).scalars().all())
+        except Exception as exc:
+            logger.debug("Orphan sweep listing failed: %s", exc)
+            return 0
+        for cleanup_id in cleanup_ids:
+            async with sf() as sess:
+                try:
+                    row = await sess.get(
+                        white_internet_repo.WhiteInternetOrphanCleanup,
+                        cleanup_id,
+                        with_for_update=True,
+                    )
+                    if row is None or row.status != "pending":
+                        continue
+                    server = (
+                        await sess.get(Server, row.server_id)
+                        if row.server_id is not None
+                        else None
+                    )
+                    if server is None:
+                        # Origin row is gone (node decommissioned): the credential
+                        # dies with the node, nothing left to converge.
+                        await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
+                        await sess.commit()
+                        swept += 1
+                        continue
+                    if (
+                        server.protocol != XRAY_PROTOCOL
+                        or not server.is_active
+                        or not server.api_url
+                        or not server.api_key
+                    ):
+                        # Not converged yet and not safe to call: leave pending
+                        # without burning attempts; retried on later cycles.
+                        continue
+                    async with self._semaphore:
+                        resp = await self.client.sync_client(
+                            server.api_url,
+                            server.api_key,
+                            client_uuid=row.client_uuid,
+                            is_active=False,
+                            version=row.desired_version,
+                            expected_node_epoch=server.xray_instance_epoch,
+                            idempotency_key=(
+                                f"orphan:{row.id}:{row.client_uuid}:{row.desired_version}"
+                            ),
+                        )
+                    sync_result = resp.result if hasattr(resp, "result") else resp[0]
+                    err_msg = resp.error if hasattr(resp, "error") else resp[1]
+                    if sync_result == SyncResult.APPLIED:
+                        await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
+                        await sess.commit()
+                        swept += 1
+                        logger.info(
+                            "Swept orphan credential %s on former origin %d.",
+                            row.client_uuid,
+                            server.id,
+                        )
+                    elif sync_result == SyncResult.ALREADY_NEWER:
+                        inv_ok, inv_data, _ = await self.client.get_inventory(
+                            server.api_url, server.api_key, client_ids=[row.client_uuid]
+                        )
+                        observed = None
+                        if inv_ok and inv_data and "inventory" in inv_data:
+                            observed = (inv_data["inventory"].get(row.client_uuid) or {}).get(
+                                "observed_state"
+                            )
+                        if observed == "disabled":
+                            await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
+                            await sess.commit()
+                            swept += 1
+                        else:
+                            await white_internet_repo.mark_orphan_cleanup_failed(
+                                sess, row.id, f"already_newer_unconfirmed:{observed}"
+                            )
+                            await sess.commit()
+                    else:
+                        await white_internet_repo.mark_orphan_cleanup_failed(
+                            sess, row.id, err_msg or str(sync_result)
+                        )
+                        await sess.commit()
+                except Exception as exc:
+                    logger.warning(
+                        "Orphan sweep failed for cleanup %d: %s", cleanup_id, exc
+                    )
+        return swept
+
+    async def _finalize_hard_deletes(self, sf) -> int:
+        """Delete reset rows only after the node confirmed the client disabled.
+
+        Two-phase trial reset (see WhiteInternetService.reset_user_trial):
+        rows stay DISABLED+PENDING_DELETE until the node converges to
+        SYNCED_INACTIVE, then the row is removed so a fresh trial can be issued.
+        Deleting earlier would orphan an active credential on the node.
+        """
+        finalized = 0
+        try:
+            async with sf() as sess:
+                stmt = (
+                    select(WhiteInternetSubscription.id)
+                    .where(
+                        WhiteInternetSubscription.pending_hard_delete.is_(True),
+                        WhiteInternetSubscription.status == WhiteInternetStatus.DISABLED,
+                    )
+                    .order_by(WhiteInternetSubscription.id.asc())
+                    .limit(BATCH_SIZE)
+                )
+                sub_ids = list((await sess.execute(stmt)).scalars().all())
+        except Exception as exc:
+            logger.debug("Hard-delete finalizer listing failed: %s", exc)
+            return 0
+        for sub_id in sub_ids:
+            async with sf() as sess:
+                try:
+                    if await white_internet_repo.finalize_hard_delete_subscription(sess, sub_id):
+                        await sess.commit()
+                        finalized += 1
+                        logger.info(
+                            "Finalized two-phase trial reset: deleted subscription %d "
+                            "after node-confirmed disable.",
+                            sub_id,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "Hard-delete finalizer failed for subscription %d: %s", sub_id, exc
+                    )
+        return finalized
 
 
 async def white_internet_reconciliation_loop(

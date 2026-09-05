@@ -43,6 +43,8 @@ async def get_user_payments(
 async def get_payment_by_id(
     session: AsyncSession, payment_id: int
 ) -> Payment | None:
+    if not isinstance(payment_id, int) or payment_id < 1 or payment_id > 2_147_483_647:
+        return None
     stmt = (
         select(Payment)
         .options(

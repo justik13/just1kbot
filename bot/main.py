@@ -183,8 +183,25 @@ async def global_error_handler(
                 texts.ERROR_TECHNICAL_ALERT, show_alert=True
             )
         elif event.update.message:
-            await event.update.message.answer(
-                texts.ERROR_TECHNICAL_MESSAGE, parse_mode="HTML"
+            msg = event.update.message
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+            from bot.keyboards.common import get_back_button
+            from utils.telegram import spawn_auto_delete
+
+            err_msg = await msg.answer(
+                texts.ERROR_TECHNICAL_MESSAGE,
+                reply_markup=get_back_button("back_to_main_menu"),
+                parse_mode="HTML",
+            )
+            spawn_auto_delete(
+                msg.bot,
+                msg.chat.id,
+                err_msg.message_id,
+                delay=7.0,
             )
     except Exception:
         pass

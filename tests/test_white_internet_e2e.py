@@ -22,7 +22,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 
 from aiohttp import web
-from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
+from aiohttp.test_utils import AioHTTPTestCase
 
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
 from config.enums import (
@@ -49,7 +49,6 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         setup_white_internet_web_routes(app)
         return app
 
-    @unittest_run_loop
     async def test_full_subscription_lifecycle(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         node_epoch = "epoch_20260830_initial123"

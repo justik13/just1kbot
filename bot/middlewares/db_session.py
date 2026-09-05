@@ -25,14 +25,37 @@ class DBSessionMiddleware(BaseMiddleware):
             )
 
             try:
+                state = data.get("state")
+                if state:
+                    await state.clear()
+            except Exception:
+                pass
+
+            try:
                 if isinstance(event, CallbackQuery):
                     await event.answer(
-                        texts.ERROR_TECHNICAL_MESSAGE,
+                        texts.ERROR_TECHNICAL_ALERT,
                         show_alert=True,
                     )
                 elif isinstance(event, Message):
-                    await event.answer(
+                    try:
+                        await event.delete()
+                    except Exception:
+                        pass
+
+                    from bot.keyboards.common import get_back_button
+                    from utils.telegram import spawn_auto_delete
+
+                    err_msg = await event.answer(
                         texts.ERROR_TECHNICAL_MESSAGE,
+                        reply_markup=get_back_button("back_to_main_menu"),
+                        parse_mode="HTML",
+                    )
+                    spawn_auto_delete(
+                        event.bot,
+                        event.chat.id,
+                        err_msg.message_id,
+                        delay=7.0,
                     )
             except Exception:
                 pass

@@ -232,6 +232,8 @@ async def get_server_by_id(
     *,
     for_update: bool = False,
 ) -> Server | None:
+    if not isinstance(server_id, int) or server_id < 1 or server_id > 2_147_483_647:
+        return None
     stmt = select(Server).where(Server.id == server_id)
     if for_update:
         stmt = stmt.with_for_update()

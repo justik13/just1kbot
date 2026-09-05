@@ -1,6 +1,7 @@
 from datetime import timedelta
+import inspect
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -37,9 +38,15 @@ ALLOWED_USER_UPDATE_FIELDS = {
 }
 
 
+MAX_INT32 = 2_147_483_647
+MAX_INT64 = 9_223_372_036_854_775_807
+
+
 async def get_user_by_telegram_id(
     session: AsyncSession, telegram_id: int
 ) -> User | None:
+    if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:
+        return None
     stmt = select(User).where(
         User.telegram_id == telegram_id,
         User.is_deleted.is_(False),
@@ -55,6 +62,8 @@ async def get_user_by_telegram_id_any(
     Ищет пользователя включая soft-deleted.
     Используется для безопасного восстановления и предотвращения unique constraint.
     """
+    if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:
+        return None
     stmt = select(User).where(User.telegram_id == telegram_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -64,9 +73,17 @@ async def get_user_by_id(
     session: AsyncSession, user_id: int
 ) -> User | None:
     """Retrieve user by database primary key ID."""
+    if not isinstance(user_id, int) or user_id < 1 or user_id > MAX_INT32:
+        return None
     stmt = select(User).where(User.id == user_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    scalar_fn = getattr(result, "scalar_one_or_none", None)
+    if callable(scalar_fn):
+        res = scalar_fn()
+        if inspect.isawaitable(res):
+            res = await res
+        return res
+    return None
 
 
 async def create_user(
@@ -147,6 +164,8 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
 
 
 async def get_user_referrals_count(session: AsyncSession, telegram_id: int) -> int:
+    if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:
+        return 0
     stmt = (
         select(func.count(User.id))
         .where(User.referred_by == telegram_id, User.is_deleted.is_(False))
@@ -162,6 +181,8 @@ async def get_user_referrals_paginated(
     per_page: int = 10,
 ) -> tuple[list[User], int, int]:
     """Return (items, total_count, normalized_page)."""
+    if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:
+        return [], 0, 1
     count = await get_user_referrals_count(session, telegram_id)
     if count == 0:
         return [], 0, 1
@@ -183,6 +204,8 @@ async def get_user_referrals_paginated(
 
 
 async def mark_user_bot_blocked(session: AsyncSession, telegram_id: int) -> None:
+    if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:
+        return
     await session.execute(
         update(User).where(User.telegram_id == telegram_id).values(is_bot_blocked=True)
     )
@@ -190,6 +213,8 @@ async def mark_user_bot_blocked(session: AsyncSession, telegram_id: int) -> None
 
 
 async def mark_user_bot_unblocked(session: AsyncSession, telegram_id: int) -> bool:
+    if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:
+        return False
     result = await session.execute(
         update(User)
         .where(User.telegram_id == telegram_id, User.is_bot_blocked.is_(True))
@@ -200,6 +225,8 @@ async def mark_user_bot_unblocked(session: AsyncSession, telegram_id: int) -> bo
 
 
 async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
+    if not isinstance(tariff_id, int) or tariff_id < 1 or tariff_id > MAX_INT32:
+        return 0
     stmt = select(func.count(User.id)).where(
         User.current_tariff_id == tariff_id, User.is_deleted.is_(False)
     )
@@ -209,9 +236,15 @@ async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
 
 async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
     clean = username.lstrip("@").strip()
+    # Escape LIKE wildcards: without this, an admin typing "%" or "_" in user
+    # search would match arbitrary users (ilike treats them as wildcards),
+    # risking bans/bonuses applied to the wrong account.
+    escaped = (
+        clean.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
     stmt = (
         select(User)
-        .where(User.username.ilike(clean), User.is_deleted.is_(False))
+        .where(User.username.ilike(escaped, escape="\\"), User.is_deleted.is_(False))
         .options(selectinload(User.profiles))
     )
     result = await session.execute(stmt)
@@ -225,14 +258,16 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
 
     if query_str.isdigit():
         num_id = int(query_str)
-        user = await get_user_by_telegram_id(session, num_id)
-        if user:
-            return user
-        stmt = select(User).where(User.id == num_id, User.is_deleted.is_(False)).options(selectinload(User.profiles))
-        result = await session.execute(stmt)
-        user = result.scalar_one_or_none()
-        if user:
-            return user
+        if 1 <= num_id <= MAX_INT64:
+            user = await get_user_by_telegram_id(session, num_id)
+            if user:
+                return user
+        if 1 <= num_id <= MAX_INT32:
+            stmt = select(User).where(User.id == num_id, User.is_deleted.is_(False)).options(selectinload(User.profiles))
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            if user:
+                return user
 
     return await get_user_by_username(session, query_str)
 
@@ -263,7 +298,12 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
             (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
         )
     elif filter_type == "server" and filter_param is not None:
-        target_server_id = int(filter_param)
+        try:
+            target_server_id = int(filter_param)
+        except (ValueError, TypeError):
+            return stmt.where(false())
+        if not (1 <= target_server_id <= MAX_INT32):
+            return stmt.where(false())
         server_proto_subq = select(Server.protocol).where(Server.id == target_server_id).scalar_subquery()
         stmt = stmt.where(
             or_(
@@ -293,7 +333,12 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     elif filter_type == "country" and filter_param:
         stmt = stmt.where(User.profiles.any(VPNProfile.server.has(Server.country_flag == str(filter_param))))
     elif filter_type == "tariff" and filter_param is not None:
-        val = int(filter_param)
+        try:
+            val = int(filter_param)
+        except (ValueError, TypeError):
+            return stmt.where(false())
+        if not (1 <= val <= MAX_INT32):
+            return stmt.where(false())
         matching_tariff_ids = select(Tariff.id).where(
             (Tariff.device_limit == val) | (Tariff.id == val)
         )

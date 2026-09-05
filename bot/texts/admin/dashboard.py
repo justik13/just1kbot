@@ -117,6 +117,8 @@ AUDIT_ACTIONS = {
     'USER_REGISTER': '👋 Регистрация',
     'USER_RESTORED': '♻️ Восстановление аккаунта',
     'WELCOME_BONUS_GRANTED': '🎁 Приветственный бонус',
+    'WHITE_INTERNET_GRANT_TRIAL': '🎁 Выдача триала Белого Интернета',
+    'WHITE_INTERNET_RESET_TRIAL': '🔄 Сброс триала Белого Интернета',
     'YOOKASSA_CALLBACK': '📥 Платёжный callback (YooKassa)',
 }
 
@@ -128,6 +130,9 @@ Admin <code>{admin_id}</code>
 AUDIT_LOG_EMPTY = "<i>Лог действий пуст.</i>"
 
 DASHBOARD_ACTIVE_PODPISOK_ACTIVE = """• Активных подписок: <b>{stats__active}</b>
+"""
+
+DASHBOARD_WHITE_INTERNET_STATS = """• Белый Интернет: <b>{active_count}</b> акт. (трафик: <b>{traffic}</b>)
 """
 
 DASHBOARD_ATTENTION_ATTENTION = """⚠️ <b>Требует внимания:</b>

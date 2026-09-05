@@ -4,6 +4,8 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from aiogram.exceptions import TelegramBadRequest
+
 from bot import texts
 from bot.handlers import fallback, start
 from bot.keyboards.common import get_hub_keyboard
@@ -11,6 +13,38 @@ from bot.keyboards.device import get_device_keyboard
 
 
 class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
+    async def test_back_to_main_menu_handles_duplicate_callback_answer(self):
+        callback = MagicMock()
+        callback.answer = AsyncMock(
+            side_effect=TelegramBadRequest(
+                method=MagicMock(),
+                message="query is too old and response timeout expired or query id is invalid",
+            )
+        )
+        callback.message = MagicMock()
+        callback.bot = MagicMock()
+        state = MagicMock()
+        state.clear = AsyncMock()
+        db_user = MagicMock()
+        db_user.telegram_id = 123
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.start._ensure_bot_unblocked", new=AsyncMock()),
+            patch("bot.handlers.start._build_hub_text_and_kb", new=AsyncMock(return_value=("text", MagicMock()))),
+            patch("bot.handlers.start.render_hub", new=AsyncMock()) as mock_render,
+        ):
+            await start.back_to_main_menu(
+                callback,
+                state,
+                db_user=db_user,
+                session=session,
+            )
+
+        state.clear.assert_awaited_once()
+        callback.answer.assert_awaited_once_with(show_alert=False)
+        mock_render.assert_awaited_once()
+
     async def test_legacy_profile_callbacks_redirect_to_hub(self):
         callback = MagicMock()
         state = MagicMock()
@@ -53,16 +87,8 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
             show_alert=True,
         )
 
-    async def test_white_internet_callback_is_alert(self):
-        callback = MagicMock()
-        callback.answer = AsyncMock()
-
-        await fallback.white_internet_callback(callback)
-
-        callback.answer.assert_awaited_once_with(
-            "🔨 Раздел находится в разработке",
-            show_alert=True,
-        )
+    def test_white_internet_callback_removed_from_fallback(self):
+        self.assertFalse(hasattr(fallback, "white_internet_callback"))
 
     def test_hub_keyboard_admin_and_non_admin_access(self):
         for is_active in (False, True):

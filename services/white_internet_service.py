@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
 import urllib.parse
 import uuid
@@ -24,6 +25,9 @@ from config.constants import (
     WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
+    WHITE_INTERNET_TRIAL_DURATION_DAYS,
+    WHITE_INTERNET_TRIAL_MODE_ONLY,
+    WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
     XRAY_PROTOCOL,
 )
 from config.enums import (
@@ -46,7 +50,7 @@ from database.repositories.tariff_quotes_repo import (
     get_or_create_current_version,
     lock_checkout_user,
 )
-from services.xray_node_client import XrayNodeClient, _sanitize_url
+from services.xray_node_client import SyncResult, XrayNodeClient, _sanitize_url
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -70,6 +74,37 @@ async def _deprovision_old_node_safe(
         logger.warning("Failed to deprovision old origin node %s: %s", _sanitize_url(api_url), exc)
 
 
+def _dispatch_deprovision(
+    server: Server | None,
+    client_uuid: str,
+    version: int,
+    *,
+    context: str = "",
+) -> None:
+    if not server or not server.api_url or not server.api_key:
+        return
+    if getattr(server, "protocol", None) != XRAY_PROTOCOL:
+        logger.warning(
+            "Refusing cross-protocol deprovision dispatch (%s): server %s is not xray",
+            context,
+            getattr(server, "id", "?"),
+        )
+        return
+    try:
+        task = asyncio.create_task(
+            _deprovision_old_node_safe(
+                server.api_url,
+                server.api_key,
+                client_uuid=client_uuid,
+                version=version,
+            )
+        )
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
+    except Exception as exc:
+        logger.warning("Failed to schedule deprovision task (%s): %s", context, exc)
+
+
 def _normalize_base_path(path: str | None) -> str:
     cleaned = (path or "").strip().rstrip("/")
     if cleaned.endswith("/default"):
@@ -79,6 +114,13 @@ def _normalize_base_path(path: str | None) -> str:
     if not cleaned.startswith("/"):
         cleaned = "/" + cleaned
     return cleaned
+
+
+def _is_trial_mode_only() -> bool:
+    val = os.getenv("WHITE_INTERNET_TRIAL_MODE_ONLY")
+    if val is not None:
+        return val.strip().lower() in ("true", "1", "yes")
+    return WHITE_INTERNET_TRIAL_MODE_ONLY
 
 
 class WhiteInternetService:
@@ -164,6 +206,8 @@ class WhiteInternetService:
 
     @classmethod
     async def purchase_subscription(cls, session: AsyncSession, user_id: int):
+        if _is_trial_mode_only():
+            return False, texts.WL_PAID_FEATURES_DISABLED_ALERT, None
         user = await lock_checkout_user(session, user_id)
         if user is None:
             return False, texts.WL_USER_NOT_FOUND, None
@@ -251,6 +295,8 @@ class WhiteInternetService:
 
     @classmethod
     async def renew_subscription(cls, session: AsyncSession, user_id: int):
+        if _is_trial_mode_only():
+            return False, texts.WL_PAID_FEATURES_DISABLED_ALERT, None
         user = await lock_checkout_user(session, user_id)
         if user is None:
             return False, texts.WL_USER_NOT_FOUND, None
@@ -351,34 +397,30 @@ class WhiteInternetService:
             base_bytes=tariff_version.base_quota_bytes,
         )
 
-        # Best-effort deprovisioning of UUID on old origin node to prevent orphaned credentials
-        if (
-            old_origin_for_cleanup
-            and old_origin_for_cleanup.api_url
-            and old_origin_for_cleanup.api_key
-        ):
-            try:
-                task = asyncio.create_task(
-                    _deprovision_old_node_safe(
-                        old_origin_for_cleanup.api_url,
-                        old_origin_for_cleanup.api_key,
-                        client_uuid=sub.uuid,
-                        version=sub.desired_version + 1,
-                    )
-                )
-                _BACKGROUND_TASKS.add(task)
-                task.add_done_callback(_BACKGROUND_TASKS.discard)
-            except Exception as deprov_err:
-                logger.warning(
-                    "Failed to dispatch async deprovision on old origin %s: %s",
-                    old_origin_for_cleanup.id,
-                    deprov_err,
-                )
+        # Durable deprovisioning of UUID on old origin node: record the cleanup
+        # in the same transaction (survives crashes/restarts), then accelerate
+        # with a best-effort background dispatch. The reconciliation worker
+        # sweeps any row the dispatch misses, so no active credential orphans.
+        if old_origin_for_cleanup:
+            await white_internet_repo.enqueue_orphan_cleanup(
+                session,
+                server_id=old_origin_for_cleanup.id,
+                client_uuid=sub.uuid,
+                desired_version=sub.desired_version + 1,
+            )
+            _dispatch_deprovision(
+                old_origin_for_cleanup,
+                client_uuid=sub.uuid,
+                version=sub.desired_version + 1,
+                context=f"renew sub {sub.id}",
+            )
 
         return True, texts.WL_RENEW_SUCCESS, renewed
 
     @classmethod
     async def topup_quota(cls, session: AsyncSession, user_id: int, pack_gb: int):
+        if _is_trial_mode_only():
+            return False, texts.WL_PAID_FEATURES_DISABLED_ALERT, None
         if pack_gb not in WHITE_INTERNET_TOPUP_PACKS:
             return False, texts.WL_INVALID_TOPUP_PACK.format(gb=pack_gb), None
         pack_price = WHITE_INTERNET_TOPUP_PACKS[pack_gb]
@@ -454,11 +496,217 @@ class WhiteInternetService:
 
     @classmethod
     async def create_trial_subscription(cls, session: AsyncSession, user_id: int):
-        """
-        # TODO(trial): Trial period implementation (1-3 days, 5-10 GiB, 0 RUB)
-        # To be enabled in UI after primary White Internet rollout stabilization.
-        """
-        raise NotImplementedError("Trial period feature is planned for a future release.")
+        """Provision a free trial White Internet subscription (3 days / 10 GiB / 0 RUB)."""
+        user = await lock_checkout_user(session, user_id)
+        if user is None:
+            return False, texts.WL_USER_NOT_FOUND, None
+        if user.is_banned or user.is_deleted:
+            return False, texts.ERROR_ACCESS_DENIED, None
+
+        has_sub = await white_internet_repo.has_user_any_subscription(session, user_id)
+        if has_sub:
+            existing = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+            if existing and existing.status in (
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.PENDING,
+            ):
+                return True, texts.WL_ALREADY_ACTIVE, existing
+            return False, texts.WL_TRIAL_ALREADY_USED, existing
+
+        try:
+            origin_node = await cls.select_origin_node(session)
+        except RuntimeError as exc:
+            logger.warning("No available origin node for white internet trial: %s", exc)
+            return False, texts.WL_NO_SERVERS_AVAILABLE, None
+
+        now = now_utc()
+        tariff = await cls.get_or_create_white_internet_tariff(session)
+        tariff_version = await get_or_create_current_version(session, tariff)
+
+        quote = cls._new_quote(
+            user_id=user.id,
+            operation_type=TariffQuoteOperation.PURCHASE,
+            target_version_id=tariff_version.id,
+            amount_due=Decimal("0.00"),
+            expires_at=now + timedelta(minutes=15),
+            resulting_paid_hours=WHITE_INTERNET_TRIAL_DURATION_DAYS * 24,
+            resulting_paid_value=Decimal("0.00"),
+        )
+        quote.status = TariffQuoteStatus.CONSUMED
+        quote.consumed_at = now
+        session.add(quote)
+        await session.flush()
+
+        sub_token = secrets.token_hex(32)
+        sub_uuid = str(uuid.uuid4())
+
+        sub = await white_internet_repo.create_white_internet_subscription(
+            session,
+            user_id=user.id,
+            origin_node_id=origin_node.id,
+            token=sub_token,
+            uuid=sub_uuid,
+            quote_id=quote.id,
+            price_rub=Decimal("0.00"),
+            duration_days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
+            base_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
+        )
+
+        # Zero-Wait UX: Synchronous provisioning on Xray node.
+        # Fail-closed like the reconciliation worker: mark ACTIVE only when the
+        # node confirms the expected epoch and full inbound coverage; verify
+        # ALREADY_NEWER against runtime inventory. Anything unconfirmed stays
+        # PENDING_CREATE for the background worker to converge.
+        expected_inbound_tags: set[str] = set()
+        for relay in (origin_node.extra_data or {}).get("relays", []) or []:
+            code = (relay or {}).get("code")
+            if code:
+                expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
+        if not expected_inbound_tags:
+            expected_inbound_tags.add("just1k-wl-default")
+        try:
+            async with XrayNodeClient(timeout=4.0) as xray_client:
+                resp = await xray_client.sync_client(
+                    origin_node.api_url,
+                    origin_node.api_key,
+                    client_uuid=sub_uuid,
+                    is_active=True,
+                    version=1,
+                    expected_node_epoch=origin_node.xray_instance_epoch,
+                    idempotency_key=f"trial:{sub.id}:1:True",
+                )
+                sync_res = resp.result if hasattr(resp, "result") else resp[0]
+                verified_epoch = (
+                    getattr(resp, "verified_epoch", None) or origin_node.xray_instance_epoch
+                )
+                verified_inbounds = set(getattr(resp, "verified_inbounds", None) or [])
+                epoch_ok = verified_epoch == origin_node.xray_instance_epoch
+                inbounds_ok = (
+                    not verified_inbounds
+                    or expected_inbound_tags.issubset(verified_inbounds)
+                )
+                confirmed = False
+                if sync_res == SyncResult.APPLIED and epoch_ok and inbounds_ok:
+                    confirmed = True
+                elif sync_res == SyncResult.ALREADY_NEWER and epoch_ok:
+                    inv_ok, inv_data, _ = await xray_client.get_inventory(
+                        origin_node.api_url,
+                        origin_node.api_key,
+                        client_ids=[sub_uuid],
+                    )
+                    observed = None
+                    if inv_ok and inv_data and "inventory" in inv_data:
+                        observed = (inv_data["inventory"].get(sub_uuid) or {}).get(
+                            "observed_state"
+                        )
+                    confirmed = inv_ok and observed == "active" and inbounds_ok
+                if confirmed:
+                    sub.status = WhiteInternetStatus.ACTIVE
+                    sub.actual_version = 1
+                    sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+                    sub.last_reconciled_node_epoch = verified_epoch
+                    sub.last_synced_at = now_utc()
+                    await session.flush()
+                else:
+                    logger.warning(
+                        "Trial sync unconfirmed (result=%s epoch_ok=%s inbounds_ok=%s), "
+                        "leaving subscription %d PENDING_CREATE for worker",
+                        sync_res,
+                        epoch_ok,
+                        inbounds_ok,
+                        sub.id,
+                    )
+        except Exception as exc:
+            logger.warning(
+                "Synchronous trial activation fallback to background worker: %s", exc
+            )
+
+        return True, texts.WL_TRIAL_ACTIVATED_SUCCESS, sub
+
+    @classmethod
+    async def deactivate_user_subscriptions(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        reason: str = "user_banned",
+    ) -> list[WhiteInternetSubscription]:
+        """Deactivate and deprovision all White Internet subscriptions for a user (e.g. on ban)."""
+        stmt = (
+            select(WhiteInternetSubscription)
+            .where(
+                WhiteInternetSubscription.user_id == user_id,
+                WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
+            )
+            .with_for_update()
+        )
+        res = await session.execute(stmt)
+        subs = list(res.scalars().all())
+
+        deactivated: list[WhiteInternetSubscription] = []
+        for sub in subs:
+            sub.status = WhiteInternetStatus.DISABLED
+            sub.status_reason = reason
+            sub.desired_version += 1
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+            deactivated.append(sub)
+
+        await session.flush()
+
+        for sub in deactivated:
+            if sub.origin_node_id:
+                origin_server = await session.get(Server, sub.origin_node_id)
+                _dispatch_deprovision(
+                    origin_server,
+                    client_uuid=sub.uuid,
+                    version=sub.desired_version,
+                    context=f"deactivate sub {sub.id}",
+                )
+
+        return deactivated
+
+    @classmethod
+    async def reset_user_trial(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+    ) -> tuple[bool, str]:
+        """Reset trial history for a user, allowing a new trial to be issued."""
+        user = await lock_checkout_user(session, user_id)
+        if user is None:
+            return False, texts.WL_USER_NOT_FOUND
+
+        stmt = (
+            select(WhiteInternetSubscription)
+            .where(WhiteInternetSubscription.user_id == user_id)
+            .with_for_update()
+        )
+        res = await session.execute(stmt)
+        subs = list(res.scalars().all())
+
+        if not subs:
+            return False, texts.WL_SUB_NOT_FOUND
+
+        # Two-phase reset (durable-by-default): mark DISABLED+PENDING_DELETE and
+        # let the reconciliation worker hard-delete the row only after the node
+        # confirms the client disabled. Immediate delete would orphan an active
+        # credential on the node if the deprovision task is lost on restart.
+        for sub in subs:
+            sub.status = WhiteInternetStatus.DISABLED
+            sub.status_reason = "trial_reset"
+            sub.desired_version += 1
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+            sub.pending_hard_delete = True
+            if sub.origin_node_id:
+                origin_server = await session.get(Server, sub.origin_node_id)
+                _dispatch_deprovision(
+                    origin_server,
+                    client_uuid=sub.uuid,
+                    version=sub.desired_version,
+                    context=f"reset sub {sub.id}",
+                )
+
+        await session.flush()
+        return True, texts.ADMIN_WL_RESET_SUCCESS
 
     @staticmethod
     def generate_vless_links(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import (
@@ -15,7 +15,7 @@ from config.constants import (
     WHITE_INTERNET_MAX_QUOTA_BYTES,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import WhiteInternetSubscription
+from database.models import WhiteInternetOrphanCleanup, WhiteInternetSubscription
 from utils.datetime_helpers import now_utc
 
 
@@ -48,6 +48,8 @@ async def get_subscription_by_token(
 async def get_subscription_by_user_id(
     session: AsyncSession, user_id: int
 ) -> WhiteInternetSubscription | None:
+    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
+        return None
     stmt = (
         select(WhiteInternetSubscription)
         .where(WhiteInternetSubscription.user_id == user_id)
@@ -57,9 +59,25 @@ async def get_subscription_by_user_id(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def has_user_any_subscription(
+    session: AsyncSession, user_id: int
+) -> bool:
+    """Check if user has ever had any White Internet subscription (trial or regular)."""
+    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
+        return False
+    stmt = (
+        select(WhiteInternetSubscription.id)
+        .where(WhiteInternetSubscription.user_id == user_id)
+        .limit(1)
+    )
+    return await session.scalar(stmt) is not None
+
+
 async def get_subscription_by_id(
     session: AsyncSession, subscription_id: int
 ) -> WhiteInternetSubscription | None:
+    if not isinstance(subscription_id, int) or subscription_id < 1 or subscription_id > 2_147_483_647:
+        return None
     return await session.scalar(
         select(WhiteInternetSubscription).where(WhiteInternetSubscription.id == subscription_id)
     )
@@ -68,6 +86,8 @@ async def get_subscription_by_id(
 async def get_subscription_with_lock(
     session: AsyncSession, subscription_id: int
 ) -> WhiteInternetSubscription | None:
+    if not isinstance(subscription_id, int) or subscription_id < 1 or subscription_id > 2_147_483_647:
+        return None
     stmt = (
         select(WhiteInternetSubscription)
         .where(WhiteInternetSubscription.id == subscription_id)
@@ -235,27 +255,6 @@ async def topup_quota_atomic(
     return pack_bytes
 
 
-async def record_traffic_event_atomic(
-    session: AsyncSession,
-    *,
-    subscription_id: int,
-    node_epoch: str,
-    node_boot_id: str | None,
-    node_starttime: int | None,
-    snapshot_uplink_before: int,
-    snapshot_uplink_after: int,
-    snapshot_downlink_before: int,
-    snapshot_downlink_after: int,
-    delta_uplink: int,
-    delta_downlink: int,
-    allocated_bytes: int,
-    overage_bytes: int,
-    now: datetime | None = None,
-) -> None:
-    """Compatibility no-op."""
-    return None
-
-
 async def deduct_traffic_atomic(
     session: AsyncSession,
     *,
@@ -371,3 +370,114 @@ async def record_and_deduct_traffic_atomic(
 
     await session.flush()
     return total_delta, became_exhausted, available_after, None
+
+
+async def finalize_hard_delete_subscription(
+    session: AsyncSession,
+    subscription_id: int,
+) -> bool:
+    """Hard-delete a reset subscription only after node-confirmed disable.
+
+    Returns True when the row was deleted. Returns False (fail-closed, row kept)
+    unless ALL hold: pending_hard_delete flag, DISABLED status, SYNCED_INACTIVE
+    provisioning with matching versions (node confirmed the client disabled),
+    or the origin server is gone entirely (origin_node_id NULL — nothing left
+    to clean on any node).
+    """
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        return False
+    if not sub.pending_hard_delete:
+        return False
+    if sub.status != WhiteInternetStatus.DISABLED:
+        return False
+    node_confirmed = (
+        sub.provisioning_status == WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+        and (sub.actual_version or 0) == (sub.desired_version or 0)
+    )
+    origin_gone = sub.origin_node_id is None
+    if not (node_confirmed or origin_gone):
+        return False
+    await session.delete(sub)
+    await session.flush()
+    return True
+
+
+async def enqueue_orphan_cleanup(
+    session: AsyncSession,
+    server_id: int | None,
+    client_uuid: str,
+    desired_version: int,
+) -> WhiteInternetOrphanCleanup:
+    """Durably record that a client UUID must be disabled on a former origin.
+
+    Called in the same transaction as the renew migration, so the record
+    survives any crash or restart that would lose a fire-and-forget task.
+    """
+    row = WhiteInternetOrphanCleanup(
+        server_id=server_id,
+        client_uuid=client_uuid,
+        desired_version=desired_version,
+        status="pending",
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def claim_orphan_cleanups(
+    session: AsyncSession,
+    limit: int = 20,
+) -> list[WhiteInternetOrphanCleanup]:
+    """Claim pending orphan rows for this worker (FOR UPDATE SKIP LOCKED)."""
+    stmt = (
+        select(WhiteInternetOrphanCleanup)
+        .where(WhiteInternetOrphanCleanup.status == "pending")
+        .order_by(WhiteInternetOrphanCleanup.id.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def mark_orphan_cleanup_done(
+    session: AsyncSession,
+    cleanup_id: int,
+) -> None:
+    row = await session.get(WhiteInternetOrphanCleanup, cleanup_id, with_for_update=True)
+    if row is None or row.status != "pending":
+        return
+    row.status = "done"
+    row.last_error = None
+    await session.flush()
+
+
+async def mark_orphan_cleanup_failed(
+    session: AsyncSession,
+    cleanup_id: int,
+    error: str,
+) -> None:
+    row = await session.get(WhiteInternetOrphanCleanup, cleanup_id, with_for_update=True)
+    if row is None or row.status != "pending":
+        return
+    row.attempts = (row.attempts or 0) + 1
+    row.last_error = error[:500]
+    await session.flush()
+
+
+async def get_white_internet_dashboard_stats(session: AsyncSession) -> dict:
+    """Return dashboard metrics for White Internet (active subscriptions, total traffic)."""
+    now = now_utc()
+    stmt = select(
+        func.count(WhiteInternetSubscription.id).filter(
+            WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE,
+            WhiteInternetSubscription.expires_at > now,
+        ).label("active_count"),
+        func.coalesce(func.sum(WhiteInternetSubscription.traffic_used_bytes), 0).label("total_traffic_bytes"),
+    )
+    result = await session.execute(stmt)
+    row = result.one()
+    return {
+        "active_count": row.active_count or 0,
+        "total_traffic_bytes": int(row.total_traffic_bytes or 0),
+    }

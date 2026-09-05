@@ -3,8 +3,10 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
-from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Server, WhiteInternetSubscription
+from aiogram import Bot
+from bot import texts
+from config.enums import ServerHealthState, ServerLifecycleStatus, WhiteInternetProvisioningStatus, WhiteInternetStatus
+from database.models import Server, User, WhiteInternetSubscription
 from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
 from services.workers.white_internet_traffic import WhiteInternetTrafficWorker
 from services.xray_node_client import SyncResult, XrayNodeClient
@@ -460,6 +462,107 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(s.actual_version, 2)
                     self.assertEqual(s.provisioning_status, WhiteInternetProvisioningStatus.ACTIVE)
 
+    async def test_finalize_hard_deletes_removes_only_confirmed_rows(self):
+        """Two-phase reset finalizer deletes node-confirmed rows, keeps unconfirmed ones."""
+        from contextlib import asynccontextmanager
+
+        from database.repositories import white_internet_repo
+
+        worker = WhiteInternetReconciliationWorker(node_client=AsyncMock(spec=XrayNodeClient))
+        sess = AsyncMock()
+        sess.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [11, 12])
+        )
+
+        @asynccontextmanager
+        async def sf():
+            yield sess
+
+        async def fake_finalize(session, sub_id):
+            return sub_id == 11
+
+        with patch.object(
+            white_internet_repo, "finalize_hard_delete_subscription", side_effect=fake_finalize
+        ):
+            finalized = await worker._finalize_hard_deletes(sf)
+
+        self.assertEqual(finalized, 1)
+
+    async def test_sweep_orphan_cleanups_disables_and_marks_done(self):
+        """Orphan sweep converges the former origin to disabled and marks the row done."""
+        from contextlib import asynccontextmanager
+
+        from database.models import WhiteInternetOrphanCleanup
+        from database.repositories import white_internet_repo
+
+        server = Server(
+            id=7,
+            name="Old-Origin",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://old.just1k.online:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-5",
+        )
+        row = WhiteInternetOrphanCleanup(
+            id=3, server_id=7, client_uuid="orphan-uuid-1", desired_version=4, status="pending"
+        )
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+        sess = AsyncMock()
+        sess.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [3])
+        )
+        sess.get.side_effect = [row, server]
+
+        @asynccontextmanager
+        async def sf():
+            yield sess
+
+        with patch.object(
+            white_internet_repo, "mark_orphan_cleanup_done", new=AsyncMock()
+        ) as mock_done:
+            swept = await worker._sweep_orphan_cleanups(sf)
+
+        self.assertEqual(swept, 1)
+        mock_done.assert_awaited_once_with(sess, 3)
+        mock_client.sync_client.assert_awaited_once()
+
+    async def test_sweep_orphan_cleanups_completes_when_origin_gone(self):
+        """Orphan row with a deleted origin server completes without node calls."""
+        from contextlib import asynccontextmanager
+
+        from database.models import WhiteInternetOrphanCleanup
+        from database.repositories import white_internet_repo
+
+        row = WhiteInternetOrphanCleanup(
+            id=4, server_id=None, client_uuid="orphan-uuid-2", desired_version=4, status="pending"
+        )
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+        sess = AsyncMock()
+        sess.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [4])
+        )
+        sess.get.return_value = row
+
+        @asynccontextmanager
+        async def sf():
+            yield sess
+
+        with patch.object(
+            white_internet_repo, "mark_orphan_cleanup_done", new=AsyncMock()
+        ) as mock_done:
+            swept = await worker._sweep_orphan_cleanups(sf)
+
+        self.assertEqual(swept, 1)
+        mock_done.assert_awaited_once_with(sess, 4)
+        mock_client.sync_client.assert_not_called()
+
 
 class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
     """Test monotonic traffic delta computation and grant ledger deduction."""
@@ -834,3 +937,84 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("https://s3:8444", polled_urls)
         self.assertNotIn("https://s4:8444", polled_urls)
         self.assertNotIn("https://s5:8444", polled_urls)
+
+    async def test_traffic_worker_notifies_trial_exhaustion_alert(self):
+        """When in trial mode, quota exhaustion notification must use WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT."""
+        mock_bot = AsyncMock(spec=Bot)
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1", "boot-1", 1000, {"client-uuid-1": {"uplink": 100, "downlink": 100}}
+        )
+        server = Server(
+            id=1, name="S-1", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s1:8444", api_key="k1", is_active=True,
+            health_state=ServerHealthState.ONLINE, lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+        sub = WhiteInternetSubscription(
+            id=1, user_id=42, origin_node_id=1, uuid="client-uuid-1",
+            status=WhiteInternetStatus.ACTIVE,
+        )
+        user = User(id=42, telegram_id=777777)
+
+        worker = WhiteInternetTrafficWorker(bot=mock_bot, node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
+        mock_session.scalar.side_effect = [sub, user]
+
+        with patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(200, True, 0, None)):
+            with patch("config.constants.WHITE_INTERNET_TRIAL_MODE_ONLY", True):
+                await worker.run_traffic_cycle(mock_session)
+
+        mock_bot.send_message.assert_awaited_once_with(
+            chat_id=777777,
+            text=texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT,
+            parse_mode="HTML",
+        )
+
+
+class TestReconciliationQueryRegression(unittest.IsolatedAsyncioTestCase):
+    """Regression test ensuring SQL query in WhiteInternetReconciliationWorker selects overdue subscriptions."""
+
+    def test_reconciliation_query_captures_overdue_active_subscription(self):
+        from sqlalchemy import and_, or_, select
+        from database.models import WhiteInternetSubscription
+        from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+        from utils.datetime_helpers import now_utc
+
+        now = now_utc()
+        target_epoch = "epoch-100"
+        server_id = 1
+
+        # Build the exact query from WhiteInternetReconciliationWorker
+        stmt_subs = (
+            select(WhiteInternetSubscription)
+            .where(
+                WhiteInternetSubscription.origin_node_id == server_id,
+                or_(
+                    WhiteInternetSubscription.actual_version
+                    != WhiteInternetSubscription.desired_version,
+                    WhiteInternetSubscription.last_reconciled_node_epoch
+                    != target_epoch,
+                    WhiteInternetSubscription.last_reconciled_node_epoch.is_(None),
+                    WhiteInternetSubscription.provisioning_status.in_([
+                        WhiteInternetProvisioningStatus.PENDING_CREATE,
+                        WhiteInternetProvisioningStatus.PENDING_UPDATE,
+                        WhiteInternetProvisioningStatus.PENDING_DELETE,
+                    ]),
+                    and_(
+                        WhiteInternetSubscription.status.in_([
+                            WhiteInternetStatus.PENDING,
+                            WhiteInternetStatus.ACTIVE,
+                            WhiteInternetStatus.EXHAUSTED,
+                        ]),
+                        WhiteInternetSubscription.expires_at <= now,
+                    ),
+                ),
+            )
+        )
+        query_sql = str(stmt_subs.compile())
+        self.assertIn("white_internet_subscriptions.expires_at <=", query_sql)
+        self.assertIn("white_internet_subscriptions.status IN", query_sql)

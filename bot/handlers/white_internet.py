@@ -19,6 +19,9 @@ from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_TOPUP_PACKS,
+    WHITE_INTERNET_TRIAL_DURATION_DAYS,
+    WHITE_INTERNET_TRIAL_MODE_ONLY,
+    WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
 )
 from config.enums import WhiteInternetStatus
 from config.settings import get_settings
@@ -47,12 +50,55 @@ def _render_progress_bar(used_bytes: int, total_bytes: int, length: int = 10) ->
     return "█" * filled + "░" * (length - filled)
 
 
+def _build_subscription_url(domain: str, token: str) -> str:
+    sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
+    return f"https://{domain}{sub_prefix}/{token}"
+
+
 def get_white_internet_overview_keyboard(
     sub: WhiteInternetSubscription | None,
     bot_domain: str | None,
     base_price: int = int(WHITE_INTERNET_BASE_PRICE_RUB),
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+
+    if WHITE_INTERNET_TRIAL_MODE_ONLY:
+        if sub is None:
+            builder.button(
+                text=texts.BTN_WL_ACTIVATE_TRIAL,
+                callback_data="wl_trial_activate",
+                style="success",
+            )
+            builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+            builder.adjust(1, 1)
+        elif sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED):
+            builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+            builder.adjust(1)
+        elif sub.status == WhiteInternetStatus.PENDING:
+            builder.button(text=texts.BTN_WL_REFRESH_TRAFFIC, callback_data="white_internet")
+            builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+            builder.adjust(1, 1)
+        else:
+            has_sub_link = bool(
+                sub.status == WhiteInternetStatus.ACTIVE
+                and getattr(sub, "token", None)
+                and bot_domain
+            )
+            if has_sub_link:
+                sub_url = _build_subscription_url(bot_domain, sub.token)
+                builder.button(
+                    text=texts.BTN_WL_COPY_LINK,
+                    copy_text=CopyTextButton(text=sub_url),
+                )
+                builder.button(text=texts.BTN_WL_INCY_INSTRUCTIONS, callback_data="wl_show_link")
+            builder.button(text=texts.BTN_WL_REFRESH_TRAFFIC, callback_data="white_internet")
+            builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+
+            if has_sub_link:
+                builder.adjust(1, 1, 1, 1)
+            else:
+                builder.adjust(1, 1)
+        return builder.as_markup()
 
     if sub is None:
         builder.button(
@@ -83,8 +129,7 @@ def get_white_internet_overview_keyboard(
             and bot_domain
         )
         if has_sub_link:
-            sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
-            sub_url = f"https://{bot_domain}{sub_prefix}/{sub.token}"
+            sub_url = _build_subscription_url(bot_domain, sub.token)
             builder.button(
                 text=texts.BTN_WL_COPY_LINK,
                 copy_text=CopyTextButton(text=sub_url),
@@ -149,6 +194,7 @@ async def _resolve_subscription_domain(
     3. Primary bot public domain (settings.DOMAIN / DOMAIN / BOT_DOMAIN).
     4. Origin server primary hostname (server.domain).
     """
+    origin_node: Server | None = None
     if sub and getattr(sub, "origin_node_id", None):
         origin_node = await session.get(Server, sub.origin_node_id)
         if origin_node and isinstance(origin_node.extra_data, dict):
@@ -164,24 +210,25 @@ async def _resolve_subscription_domain(
     if bot_domain and bot_domain.strip():
         return bot_domain.strip()
 
-    if sub and getattr(sub, "origin_node_id", None):
-        origin_node = await session.get(Server, sub.origin_node_id)
-        if origin_node:
-            node_domain = getattr(origin_node, "domain", None)
-            if node_domain and isinstance(node_domain, str) and node_domain.strip():
-                return node_domain.strip()
-            if getattr(origin_node, "api_url", None):
-                from urllib.parse import urlsplit
-                parsed = urlsplit(origin_node.api_url)
-                if parsed.hostname:
-                    return parsed.hostname.strip()
+    if origin_node:
+        node_domain = getattr(origin_node, "domain", None)
+        if node_domain and isinstance(node_domain, str) and node_domain.strip():
+            return node_domain.strip()
+        if getattr(origin_node, "api_url", None):
+            from urllib.parse import urlsplit
+            parsed = urlsplit(origin_node.api_url)
+            if parsed.hostname:
+                return parsed.hostname.strip()
 
     return None
 
 
 @router.callback_query(F.data == "white_internet")
 async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         await query.message.answer(texts.WL_USER_NOT_FOUND)
@@ -191,20 +238,32 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
     sub_domain = await _resolve_subscription_domain(session, sub)
     now = now_utc()
 
-    _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
+    if not WHITE_INTERNET_TRIAL_MODE_ONLY:
+        _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
+    else:
+        base_price_int = int(WHITE_INTERNET_BASE_PRICE_RUB)
+        duration_days = WHITE_INTERNET_BASE_DURATION_DAYS
 
     if sub is None:
-        text = texts.WL_OVERVIEW_NO_SUB.format(
-            price=base_price_int,
-            days=duration_days,
-            traffic=50,
-        )
+        if WHITE_INTERNET_TRIAL_MODE_ONLY:
+            text = texts.WL_OVERVIEW_TRIAL_NO_SUB.format(
+                days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
+                traffic=int(WHITE_INTERNET_TRIAL_TRAFFIC_BYTES / (1024**3)),
+            )
+        else:
+            text = texts.WL_OVERVIEW_NO_SUB.format(
+                price=base_price_int,
+                days=duration_days,
+                traffic=50,
+            )
+    elif sub.status == WhiteInternetStatus.EXPIRED and WHITE_INTERNET_TRIAL_MODE_ONLY:
+        text = texts.WL_TRIAL_FINISHED
     else:
         available_bytes = await white_internet_repo.get_available_quota_bytes(session, sub.id, now)
         total_limit = sub.traffic_limit_bytes
         status_text_map = {
             WhiteInternetStatus.PENDING: texts.WL_STATUS_PENDING,
-            WhiteInternetStatus.ACTIVE: texts.STATUS_SUBSCRIPTION_ACTIVE,
+            WhiteInternetStatus.ACTIVE: texts.WL_STATUS_TRIAL_ACTIVE if WHITE_INTERNET_TRIAL_MODE_ONLY else texts.STATUS_SUBSCRIPTION_ACTIVE,
             WhiteInternetStatus.EXHAUSTED: texts.WL_STATUS_EXHAUSTED,
             WhiteInternetStatus.EXPIRED: texts.WL_STATUS_EXPIRED,
             WhiteInternetStatus.DISABLED: texts.WL_STATUS_DISABLED,
@@ -230,9 +289,41 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         await query.message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
+@router.callback_query(F.data == "wl_trial_activate")
+async def process_white_internet_trial_activate(query: CallbackQuery, session: AsyncSession):
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    user = await get_user_by_telegram_id(session, query.from_user.id)
+    if user is None:
+        return
+
+    try:
+        success, msg, _sub = await WhiteInternetService.create_trial_subscription(session, user.id)
+    except Exception as exc:
+        logger.error("Unexpected error during white internet trial activation: %s", exc)
+        success, msg = False, texts.WL_NO_SERVERS_AVAILABLE
+
+    if not success:
+        kb = InlineKeyboardBuilder()
+        kb.button(text=texts.BTN_BACK, callback_data="white_internet")
+        await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup(), parse_mode="HTML")
+        return
+
+    await session.commit()
+    await show_white_internet_menu(query, session)
+
+
 @router.callback_query(F.data == "wl_buy_confirm")
 async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
+    if WHITE_INTERNET_TRIAL_MODE_ONLY:
+        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
+        return
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
@@ -271,7 +362,13 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
 
 @router.callback_query(F.data == "wl_renew_confirm")
 async def process_white_internet_renew(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
+    if WHITE_INTERNET_TRIAL_MODE_ONLY:
+        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
+        return
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
@@ -307,20 +404,32 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
 
 @router.callback_query(F.data == "wl_topup_menu")
 async def show_topup_menu(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
+    if WHITE_INTERNET_TRIAL_MODE_ONLY:
+        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
+        return
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is not None:
         sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-        bot_domain = get_settings().DOMAIN
+        sub_domain = await _resolve_subscription_domain(session, sub)
         if sub is None or sub.status not in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
-            await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, bot_domain))
+            await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, sub_domain))
             return
     await query.message.edit_text(texts.WL_TOPUP_MENU_TEXT, reply_markup=get_topup_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("wl_topup_pack_"))
 async def process_topup_pack(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
+    if WHITE_INTERNET_TRIAL_MODE_ONLY:
+        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
+        return
+    try:
+        await query.answer()
+    except Exception:
+        pass
     try:
         pack_gb = int(query.data.replace("wl_topup_pack_", ""))
     except ValueError:
@@ -364,7 +473,10 @@ async def process_topup_pack(query: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "wl_show_link")
 async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
@@ -379,8 +491,7 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         await query.message.edit_text(texts.WL_DOMAIN_UNCONFIGURED, reply_markup=kb.as_markup())
         return
 
-    sub_prefix = os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", "/sub/wl").strip().rstrip("/")
-    sub_url = f"https://{sub_domain}{sub_prefix}/{sub.token}"
+    sub_url = _build_subscription_url(sub_domain, sub.token)
 
     kb = InlineKeyboardBuilder()
     kb.button(

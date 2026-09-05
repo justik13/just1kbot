@@ -421,3 +421,25 @@ ADMIN_USER_FILTER_ACTIVE_COUNT = "🟢 {f_name} ({count})"
 ADMIN_USER_FILTER_EXPIRING_COUNT = "⏳ {f_name} ({count})"
 ADMIN_USER_FILTER_EXPIRED_COUNT = "🔴 {f_name} ({count})"
 ADMIN_USER_FILTER_BANNED_COUNT = "🚫 {f_name} ({count})"
+
+ADMIN_BTN_RESET_WL_TRIAL = "🔄 Сбросить триал WL"
+ADMIN_BTN_GRANT_WL_TRIAL = "🎁 Выдать триал WL"
+ADMIN_WL_RESET_CONFIRM = """⚠️ <b>Сброс триала Белого Интернета</b>
+
+Вы уверены, что хотите аннулировать текущий доступ по Белому Интернету и сбросить триал для пользователя <code>{telegram_id}</code>?
+Пользователь сможет активировать бесплатный период заново."""
+ADMIN_WL_RESET_SUCCESS = "✅ Сброс триала принят: доступ будет отключён на узле и запись удалена автоматически."
+ADMIN_WL_GRANT_SUCCESS = "✅ Триал Белого Интернета успешно выдан пользователю."
+ADMIN_WL_GRANT_FAILED = "❌ Не удалось выдать триал: {error}"
+
+ADMIN_USER_CARD_WL_BADGE_ACTIVE = "🟢 ACTIVE"
+ADMIN_USER_CARD_WL_BADGE_PENDING = "⏳ PENDING"
+ADMIN_USER_CARD_WL_BADGE_EXHAUSTED = "⚠️ EXHAUSTED"
+ADMIN_USER_CARD_WL_BADGE_EXPIRED = "🔴 EXPIRED"
+ADMIN_USER_CARD_WL_BADGE_DISABLED = "🚫 DISABLED"
+
+ADMIN_USER_CARD_WHITE_INTERNET_BLOCK = """🌐 <b>Белый Интернет:</b>
+• <b>Статус:</b> {status_badge}
+• <b>Трафик:</b> {used_str} / {total_str}
+• <b>Действует до:</b> {expires_str}
+• <b>Сервер:</b> {origin_name}"""

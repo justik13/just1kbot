@@ -115,6 +115,45 @@ class ServicesWorkersFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                 mock_scope.return_value.__aenter__.return_value = s2
                 await cleanup._cleanup_expired_profiles_grace()
 
+    async def test_grace_cleanup_disables_instead_of_deleting_hold_with_active_sub(self):
+        """H1: financial_hold + active subscription => disable (pending_update), NEVER delete."""
+        async with self.sessions.begin() as session:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            u = User(
+                telegram_id=888112,
+                subscription_end=now + datetime.timedelta(days=10),
+                financial_hold=True,
+            )
+            s = Server(name="CleanupHold", api_url="https://hold.test", api_key="k")
+            session.add_all((u, s))
+            await session.flush()
+
+            p = VPNProfile(
+                user_id=u.id,
+                server_id=s.id,
+                device_name="HoldKey",
+                peer_id="peer-hold",
+                raw_config="ss://hold",
+                provisioning_status="active",
+                desired_is_active=True,
+                is_active=True,
+            )
+            session.add(p)
+            await session.flush()
+            profile_id = p.id
+
+        async with self.sessions.begin() as s2:
+            with patch("services.workers.cleanup.session_scope") as mock_scope:
+                mock_scope.return_value.__aenter__.return_value = s2
+                await cleanup._cleanup_expired_profiles_grace()
+
+        async with self.sessions.begin() as s3:
+            from sqlalchemy import select
+            row = await s3.scalar(select(VPNProfile).where(VPNProfile.id == profile_id))
+            self.assertIsNotNone(row, "profile with active sub under hold must NOT be deleted")
+            self.assertFalse(row.desired_is_active)
+            self.assertEqual(row.provisioning_status, "pending_update")
+
     async def test_heartbeat_worker_single_step(self):
         async with self.sessions.begin() as s2:
             with patch("database.connection.session_scope") as mock_scope:

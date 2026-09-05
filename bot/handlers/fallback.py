@@ -1,5 +1,3 @@
-import asyncio
-
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import StateFilter
@@ -10,18 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.middlewares.action_lock import STALE_ACTION_PREFIXES
 from database.models import User
+from utils.telegram import spawn_auto_delete
 
 router = Router()
-
-_auto_delete_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_auto_delete(bot, chat_id: int, msg_id: int, delay: float = 5.0) -> None:
-    task = asyncio.create_task(
-        _auto_delete_delay(bot, chat_id, msg_id, delay=delay)
-    )
-    _auto_delete_tasks.add(task)
-    task.add_done_callback(_auto_delete_tasks.discard)
 
 
 @router.message(
@@ -33,11 +22,29 @@ def _spawn_auto_delete(bot, chat_id: int, msg_id: int, delay: float = 5.0) -> No
 async def fsm_media_guard(message: Message, state: FSMContext):
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-    await state.clear()
+    try:
+        current_state = await state.get_state()
+    except Exception:
+        current_state = None
+
     try:
         await message.delete()
     except Exception:
         pass
+
+    if current_state is not None:
+        # Same as stray text: never wipe an in-progress flow on media input.
+        try:
+            temp_msg = await message.answer(
+                texts.FALLBACK_FLOW_IN_PROGRESS,
+                parse_mode="HTML",
+            )
+            spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        except Exception:
+            pass
+        return
+
+    await state.clear()
 
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
@@ -49,20 +56,7 @@ async def fsm_media_guard(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
-        _spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
-    except Exception:
-        pass
-
-
-async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 5.0) -> None:
-    import asyncio
-    await asyncio.sleep(delay)
-    try:
-        from utils.telegram import _load_hub_ids_from_db
-        active_ids = await _load_hub_ids_from_db(chat_id)
-        if msg_id in active_ids:
-            return
-        await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
     except Exception:
         pass
 
@@ -70,6 +64,29 @@ async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 5.0)
 @router.message()
 async def handle_unknown_text(message: Message, state: FSMContext):
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    try:
+        current_state = await state.get_state()
+    except Exception:
+        current_state = None
+
+    if current_state is not None:
+        # A wizard/confirmation flow is in progress: stray text must not wipe
+        # it (that would lose drafts like broadcast/bonus/grant confirmations).
+        # Keep the FSM state and hint instead.
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        try:
+            temp_msg = await message.answer(
+                texts.FALLBACK_FLOW_IN_PROGRESS,
+                parse_mode="HTML",
+            )
+            spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        except Exception:
+            pass
+        return
 
     await state.clear()
     try:
@@ -87,7 +104,7 @@ async def handle_unknown_text(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
-        _spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
     except Exception:
         pass
 
@@ -99,7 +116,10 @@ async def dismiss_notification(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
+    try:
+        await callback.answer(show_alert=False)
+    except Exception:
+        pass
     chat_id = callback.message.chat.id if callback.message and callback.message.chat else callback.from_user.id
     msg_id = callback.message.message_id if callback.message else None
 
@@ -143,12 +163,6 @@ async def legacy_profile_callback(
     """Compatibility for old inline keyboards from pre-hub profile versions."""
     from bot.handlers.start import back_to_main_menu
     await back_to_main_menu(callback, state, db_user, session)
-
-
-@router.callback_query(F.data == "white_internet")
-async def white_internet_callback(callback: CallbackQuery):
-    await callback.answer(texts.FALLBACK_SECTION_IN_DEVELOPMENT, show_alert=True)
-
 
 @router.callback_query()
 async def stale_callback_fallback(

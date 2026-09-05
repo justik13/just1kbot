@@ -35,12 +35,13 @@ from database.repositories.system_settings_repo import (
     set_system_setting,
 )
 from database.repositories.users_repo import get_dashboard_stats
+from database.repositories.white_internet_repo import get_white_internet_dashboard_stats
 from services.audit_service import AuditService
 from services.maintenance_service import MaintenanceService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 from bot.formatters import format_admin_breadcrumbs, format_audit_details
-from utils.formatters import format_datetime
+from utils.formatters import format_datetime, format_traffic
 from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_details
 
@@ -177,6 +178,7 @@ async def _show_admin_dashboard(
     session: AsyncSession,
 ) -> None:
     stats = await get_dashboard_stats(session)
+    wl_stats = await get_white_internet_dashboard_stats(session)
     free_ips = await get_total_free_ips(session)
     fin_stats = await _get_financial_stats(session)
     disputes_count = await _get_disputes_count(session)
@@ -184,12 +186,15 @@ async def _show_admin_dashboard(
     servers_summary = await _get_servers_capacity_summary(session)
     maintenance_enabled = await MaintenanceService.is_enabled(session)
 
+    wl_traffic_str = format_traffic(wl_stats["total_traffic_bytes"])
+
     header = format_admin_breadcrumbs(texts.DASHBOARD_MAIN_DASHBOARD)
     text = (
         f"{header}"+
         texts.DASHBOARD_USERS_I_SUBSCRIPTION.format()+
         texts.DASHBOARD_TOTAL_USERS_TOTAL.format(stats__total=stats['total'])+
         texts.DASHBOARD_ACTIVE_PODPISOK_ACTIVE.format(stats__active=stats['active'])+
+        texts.DASHBOARD_WHITE_INTERNET_STATS.format(active_count=wl_stats['active_count'], traffic=wl_traffic_str)+
         texts.DASHBOARD_NEW_ZA_24_HOURS_NEW_24H.format(stats__new_24h=stats['new_24h'])+
         texts.DASHBOARD_FINANCIAL_METRICS.format()+
         texts.ADMIN_DASHBOARD_REVENUE_24H_LINE.format(fin_stats__rev_24h=fin_stats['rev_24h'], fin_stats__count_24h=fin_stats['count_24h'])+

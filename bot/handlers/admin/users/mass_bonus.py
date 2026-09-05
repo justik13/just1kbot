@@ -270,11 +270,15 @@ async def apply_mass_bonus(
     except Exception:
         pass
 
-    import hashlib
+    import uuid
 
-    from utils.datetime_helpers import now_utc
-    batch_str = f"{target_aud}_{amount}_{reason}_{now_utc().strftime('%Y-%m-%d')}"
-    batch_id = hashlib.sha256(batch_str.encode()).hexdigest()[:16]
+    # One logical apply = one unique batch. A day-deterministic batch made any
+    # intentional repeat with the same parameters silently no-op, while a
+    # double apply must behave like any repeated admin grant: credit again.
+    # Same-run retries are still safe: the in-progress guard above blocks a
+    # second apply from the same admin, and each credited user is isolated in
+    # a SAVEPOINT with a unique idempotency key per (batch, user).
+    batch_id = uuid.uuid4().hex[:16]
     try:
         _start_mass_bonus_task(
             _run_mass_bonus_background(

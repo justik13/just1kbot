@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiogram.types import CallbackQuery, Chat, Message
 from aiogram.types import User as TelegramUser
 
+from bot import texts
 from bot.keyboards import common as common_kb
 from bot.keyboards import device as device_kb
 from bot.keyboards import payment as payment_kb
@@ -95,6 +96,53 @@ class TestBotMiddlewaresFullCoverage(unittest.IsolatedAsyncioTestCase):
             res = await middleware(handler, msg, data)
             self.assertEqual(res, "OK")
             self.assertIn("session", data)
+
+    async def test_db_session_middleware_error_message(self):
+        from unittest.mock import ANY
+        from sqlalchemy.exc import SQLAlchemyError
+        middleware = DBSessionMiddleware()
+        handler = AsyncMock(side_effect=SQLAlchemyError("DB down"))
+        msg = AsyncMock(spec=Message)
+        msg.bot = AsyncMock()
+        msg.chat = MagicMock()
+        msg.chat.id = 123
+        err_reply = MagicMock()
+        err_reply.message_id = 456
+        msg.answer = AsyncMock(return_value=err_reply)
+        msg.delete = AsyncMock()
+        state_mock = AsyncMock()
+        data = {"state": state_mock}
+
+        with (
+            patch("bot.middlewares.db_session.session_scope"),
+            patch("utils.telegram.spawn_auto_delete") as mock_spawn_delete,
+        ):
+            res = await middleware(handler, msg, data)
+            self.assertIsNone(res)
+            msg.delete.assert_called_once()
+            state_mock.clear.assert_called_once()
+            msg.answer.assert_called_once_with(
+                texts.ERROR_TECHNICAL_MESSAGE,
+                reply_markup=ANY,
+                parse_mode="HTML",
+            )
+            mock_spawn_delete.assert_called_once_with(
+                msg.bot, 123, 456, delay=7.0
+            )
+
+    async def test_db_session_middleware_error_callback(self):
+        from sqlalchemy.exc import SQLAlchemyError
+        middleware = DBSessionMiddleware()
+        handler = AsyncMock(side_effect=SQLAlchemyError("DB down"))
+        cb = AsyncMock(spec=CallbackQuery)
+        data = {}
+        with patch("bot.middlewares.db_session.session_scope"):
+            res = await middleware(handler, cb, data)
+            self.assertIsNone(res)
+            cb.answer.assert_called_once_with(
+                texts.ERROR_TECHNICAL_ALERT,
+                show_alert=True,
+            )
 
     async def test_private_chat_middleware(self):
         middleware = PrivateChatMiddleware()

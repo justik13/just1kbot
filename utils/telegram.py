@@ -218,6 +218,29 @@ async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = Non
     return list(ids)
 
 
+_auto_delete_tasks: set[asyncio.Task] = set()
+
+
+def spawn_auto_delete(bot, chat_id: int, msg_id: int, delay: float = 7.0) -> None:
+    """Schedule an ephemeral/error message to be auto-deleted after delay, preserving chat cleanliness."""
+    task = asyncio.create_task(
+        _auto_delete_delay(bot, chat_id, msg_id, delay=delay)
+    )
+    _auto_delete_tasks.add(task)
+    task.add_done_callback(_auto_delete_tasks.discard)
+
+
+async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 7.0) -> None:
+    await asyncio.sleep(delay)
+    try:
+        active_ids = await _load_hub_ids_from_db(chat_id)
+        if msg_id in active_ids:
+            return
+        await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+    except Exception:
+        pass
+
+
 async def _store_hub_id_in_db(
     chat_id: int,
     message_id: int,

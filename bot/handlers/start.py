@@ -206,7 +206,7 @@ async def cmd_start(
             telegram_id,
         )
 
-        await message.answer(texts.ERROR_TECHNICAL_MESSAGE)
+        await message.answer(texts.ERROR_TECHNICAL_MESSAGE, parse_mode="HTML")
 
         return
 
@@ -320,7 +320,10 @@ async def back_to_main_menu(
         )
         return
 
-    await callback.answer(show_alert=False)
+    try:
+        await callback.answer(show_alert=False)
+    except Exception:
+        pass
     await _ensure_bot_unblocked(
         session,
         db_user.telegram_id,
