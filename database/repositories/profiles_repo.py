@@ -53,6 +53,8 @@ def sort_profiles_naturally(profiles: list[VPNProfile]) -> list[VPNProfile]:
 async def get_user_profiles(
     session: AsyncSession, user_id: int, include_deleting: bool = False
 ) -> list[VPNProfile]:
+    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
+        return []
     stmt = select(VPNProfile).where(VPNProfile.user_id == user_id)
     if not include_deleting:
         stmt = stmt.where(
@@ -65,6 +67,8 @@ async def get_user_profiles(
 
 
 async def get_profile_by_id(session: AsyncSession, profile_id: int) -> VPNProfile | None:
+    if not isinstance(profile_id, int) or profile_id < 1 or profile_id > 2_147_483_647:
+        return None
     stmt = select(VPNProfile).where(VPNProfile.id == profile_id).options(selectinload(VPNProfile.server))
     result = await session.execute(stmt)
     return result.scalar_one_or_none()

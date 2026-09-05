@@ -72,6 +72,8 @@ async def has_user_any_subscription(
 async def get_subscription_by_id(
     session: AsyncSession, subscription_id: int
 ) -> WhiteInternetSubscription | None:
+    if not isinstance(subscription_id, int) or subscription_id < 1 or subscription_id > 2_147_483_647:
+        return None
     return await session.scalar(
         select(WhiteInternetSubscription).where(WhiteInternetSubscription.id == subscription_id)
     )
@@ -80,6 +82,8 @@ async def get_subscription_by_id(
 async def get_subscription_with_lock(
     session: AsyncSession, subscription_id: int
 ) -> WhiteInternetSubscription | None:
+    if not isinstance(subscription_id, int) or subscription_id < 1 or subscription_id > 2_147_483_647:
+        return None
     stmt = (
         select(WhiteInternetSubscription)
         .where(WhiteInternetSubscription.id == subscription_id)

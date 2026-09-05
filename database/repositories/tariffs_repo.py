@@ -37,6 +37,8 @@ async def get_tariff_by_id(
     session: AsyncSession,
     tariff_id: int,
 ) -> Tariff | None:
+    if not isinstance(tariff_id, int) or tariff_id < 1 or tariff_id > 2_147_483_647:
+        return None
     stmt = select(Tariff).where(Tariff.id == tariff_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
