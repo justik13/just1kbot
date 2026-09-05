@@ -64,6 +64,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
                 "DATABASE_URL": os.environ["TEST_DATABASE_URL"],
                 "WHITE_INTERNET_CDN_DOMAIN": "cdn.test.vpn.online",
+                "WHITE_INTERNET_TRIAL_MODE_ONLY": "false",
             },
         )
         self.env_patcher.start()

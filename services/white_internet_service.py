@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
 import urllib.parse
 import uuid
@@ -25,6 +26,7 @@ from config.constants import (
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
     WHITE_INTERNET_TRIAL_DURATION_DAYS,
+    WHITE_INTERNET_TRIAL_MODE_ONLY,
     WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
     XRAY_PROTOCOL,
 )
@@ -81,6 +83,13 @@ def _normalize_base_path(path: str | None) -> str:
     if not cleaned.startswith("/"):
         cleaned = "/" + cleaned
     return cleaned
+
+
+def _is_trial_mode_only() -> bool:
+    val = os.getenv("WHITE_INTERNET_TRIAL_MODE_ONLY")
+    if val is not None:
+        return val.strip().lower() in ("true", "1", "yes")
+    return WHITE_INTERNET_TRIAL_MODE_ONLY
 
 
 class WhiteInternetService:
@@ -166,6 +175,8 @@ class WhiteInternetService:
 
     @classmethod
     async def purchase_subscription(cls, session: AsyncSession, user_id: int):
+        if _is_trial_mode_only():
+            return False, texts.WL_PAID_FEATURES_DISABLED_ALERT, None
         user = await lock_checkout_user(session, user_id)
         if user is None:
             return False, texts.WL_USER_NOT_FOUND, None
@@ -253,6 +264,8 @@ class WhiteInternetService:
 
     @classmethod
     async def renew_subscription(cls, session: AsyncSession, user_id: int):
+        if _is_trial_mode_only():
+            return False, texts.WL_PAID_FEATURES_DISABLED_ALERT, None
         user = await lock_checkout_user(session, user_id)
         if user is None:
             return False, texts.WL_USER_NOT_FOUND, None
@@ -381,6 +394,8 @@ class WhiteInternetService:
 
     @classmethod
     async def topup_quota(cls, session: AsyncSession, user_id: int, pack_gb: int):
+        if _is_trial_mode_only():
+            return False, texts.WL_PAID_FEATURES_DISABLED_ALERT, None
         if pack_gb not in WHITE_INTERNET_TOPUP_PACKS:
             return False, texts.WL_INVALID_TOPUP_PACK.format(gb=pack_gb), None
         pack_price = WHITE_INTERNET_TOPUP_PACKS[pack_gb]

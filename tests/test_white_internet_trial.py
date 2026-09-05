@@ -162,6 +162,91 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sub.status, WhiteInternetStatus.PENDING)
             self.assertEqual(sub.actual_version, 0)
 
+    async def test_service_level_protection_blocks_paid_operations(self):
+        """WhiteInternetService must reject purchase, renew, and topup in trial mode."""
+        # 1. Purchase
+        ok, msg, sub = await WhiteInternetService.purchase_subscription(self.session, self.user.id)
+        self.assertFalse(ok)
+        self.assertEqual(msg, texts.WL_PAID_FEATURES_DISABLED_ALERT)
+        self.assertIsNone(sub)
+
+        # 2. Renew
+        ok, msg, sub = await WhiteInternetService.renew_subscription(self.session, self.user.id)
+        self.assertFalse(ok)
+        self.assertEqual(msg, texts.WL_PAID_FEATURES_DISABLED_ALERT)
+        self.assertIsNone(sub)
+
+        # 3. Topup
+        ok, msg, grant = await WhiteInternetService.topup_quota(self.session, self.user.id, pack_gb=10)
+        self.assertFalse(ok)
+        self.assertEqual(msg, texts.WL_PAID_FEATURES_DISABLED_ALERT)
+        self.assertIsNone(grant)
+
+    async def test_concurrent_trial_activations_only_one_succeeds(self):
+        """10 concurrent tasks calling create_trial_subscription for the same user.
+        Only the first creates the trial, while the rest receive WL_ALREADY_ACTIVE.
+        """
+        import asyncio
+
+        lock = asyncio.Lock()
+        has_sub_state = False
+        created_sub = WhiteInternetSubscription(
+            id=200,
+            user_id=self.user.id,
+            origin_node_id=self.origin_server.id,
+            token="token-concurrent",
+            uuid="uuid-concurrent",
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
+            traffic_limit_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
+            desired_version=1,
+            actual_version=1,
+        )
+
+        async def fake_lock_checkout_user(session, user_id):
+            await lock.acquire()
+            return self.user
+
+        async def fake_has_user_any_subscription(session, user_id):
+            return has_sub_state
+
+        async def fake_create_sub(*args, **kwargs):
+            nonlocal has_sub_state
+            has_sub_state = True
+            lock.release()
+            return created_sub
+
+        async def fake_get_sub_by_user_id(session, user_id):
+            lock.release()
+            return created_sub
+
+        with patch("services.white_internet_service.lock_checkout_user", side_effect=fake_lock_checkout_user), \
+             patch("database.repositories.white_internet_repo.has_user_any_subscription", side_effect=fake_has_user_any_subscription), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", side_effect=fake_get_sub_by_user_id), \
+             patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
+             patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
+             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
+             patch("database.repositories.white_internet_repo.create_white_internet_subscription", side_effect=fake_create_sub) as mock_create, \
+             patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
+
+            mock_client_instance = AsyncMock()
+            mock_client_instance.sync_client.return_value = SyncResponse(
+                result=SyncResult.APPLIED, error=None, verified_epoch=1
+            )
+            mock_xray_client_cls.return_value.__aenter__.return_value = mock_client_instance
+
+            results = await asyncio.gather(
+                *(WhiteInternetService.create_trial_subscription(self.session, self.user.id) for _ in range(10))
+            )
+
+            # Exactly 1 activation succeeds with WL_TRIAL_ACTIVATED_SUCCESS
+            activated = [r for r in results if r[0] is True and r[1] == texts.WL_TRIAL_ACTIVATED_SUCCESS]
+            already_active = [r for r in results if r[0] is True and r[1] == texts.WL_ALREADY_ACTIVE]
+
+            self.assertEqual(len(activated), 1)
+            self.assertEqual(len(already_active), 9)
+            self.assertEqual(mock_create.call_count, 1)
+
 
 class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
     """Test suite for Telegram Bot UI in trial mode."""
