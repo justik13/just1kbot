@@ -62,7 +62,6 @@ PURCHASE_ERRORS = {
     "active_quote_has_existing_debit": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
     "active_quote_has_existing_entitlement": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
     "tariff_duration_not_whole_days": texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE,
-    "no_available_servers": texts.ERROR_NO_FREE_SLOTS,
 }
 
 
