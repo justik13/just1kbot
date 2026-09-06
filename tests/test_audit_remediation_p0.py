@@ -180,7 +180,7 @@ class AuditRemediationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("dead", compiled_clause)
 
     def test_healthcheck_access_logger_masks_sub_wl_token(self):
-        """M5: HealthcheckAccessLogger masks /sub/wl/{token} as /sub/wl/***."""
+        """M5: HealthcheckAccessLogger masks /sub/wl/{token} as /sub/wl/*** and logs 200 at DEBUG."""
         logger_mock = MagicMock()
         access_logger = HealthcheckAccessLogger(logger_mock, "%a %t %r %s")
 
@@ -189,13 +189,14 @@ class AuditRemediationTests(unittest.IsolatedAsyncioTestCase):
         req.method = "GET"
         req.remote = "127.0.0.1"
         req.version = MagicMock(major=1, minor=1)
+        req.headers = {"X-Real-IP": "127.0.0.1", "User-Agent": "TestClient"}
         resp = MagicMock(spec=web.StreamResponse)
         resp.status = 200
         resp.body_length = 512
 
         access_logger.log(req, resp, 0.05)
 
-        logger_mock.info.assert_called_once()
-        log_text = logger_mock.info.call_args[0][0] % logger_mock.info.call_args[0][1:]
+        logger_mock.debug.assert_called_once()
+        log_text = logger_mock.debug.call_args[0][0] % logger_mock.debug.call_args[0][1:]
         self.assertIn("/sub/wl/***", log_text)
         self.assertNotIn("secret_bearer_token_12345", log_text)
