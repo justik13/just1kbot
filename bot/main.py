@@ -319,10 +319,32 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
 
 
 class HealthcheckAccessLogger(AccessLogger):
-    """Suppresses access logging for successful GET /health requests and masks secret subscription tokens."""
+    """Suppresses routine 200 OK access logs (healthchecks, synthetic pings, subscription polls) and masks tokens."""
 
     def log(self, request: web.Request, response: web.StreamResponse, time: float) -> None:
-        if request.path == "/health" and response.status == 200:
+        # 1. Suppress routine 200 OK healthchecks and synthetic monitor pings
+        if response.status == 200 and (request.path == "/health" or request.path.endswith("/ping")):
+            return
+
+        client_ip = (
+            request.headers.get("X-Real-IP")
+            or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.remote
+        )
+        user_agent = request.headers.get("User-Agent", "-")
+
+        # 2. Synthetic ping failure logging (not a secret token)
+        if request.path.endswith("/ping"):
+            self.logger.warning(
+                '%s "%s %s %s" %s %s [UA: %s]',
+                client_ip,
+                request.method,
+                request.path,
+                f"HTTP/{request.version.major}.{request.version.minor}",
+                response.status,
+                response.body_length,
+                user_agent,
+            )
             return
 
         sub_prefix = (
@@ -338,16 +360,34 @@ class HealthcheckAccessLogger(AccessLogger):
                 break
 
         if matched_prefix:
-            self.logger.info(
-                '%s "%s %s %s" %s %s',
-                request.remote,
+            masked_path = f"{matched_prefix}***"
+            # Routine 200 OK subscription polls are logged at DEBUG to prevent production log spam
+            if response.status == 200:
+                self.logger.debug(
+                    '%s "%s %s %s" %s %s [UA: %s]',
+                    client_ip,
+                    request.method,
+                    masked_path,
+                    f"HTTP/{request.version.major}.{request.version.minor}",
+                    response.status,
+                    response.body_length,
+                    user_agent,
+                )
+                return
+
+            # Failed requests (4xx, 5xx) are logged at WARNING with real client IP and User-Agent
+            self.logger.warning(
+                '%s "%s %s %s" %s %s [UA: %s]',
+                client_ip,
                 request.method,
-                f"{matched_prefix}***",
+                masked_path,
                 f"HTTP/{request.version.major}.{request.version.minor}",
                 response.status,
                 response.body_length,
+                user_agent,
             )
             return
+
         super().log(request, response, time)
 
 
