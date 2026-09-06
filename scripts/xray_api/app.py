@@ -12,12 +12,149 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from pydantic import BaseModel, Field, model_validator
 
+import sqlite3
+
 from client_store import ClientStore, ClientStoreCorruptedError
 from epoch_manager import EpochManager
 from xray_grpc import XrayGrpcClient
 
-# Cache for durable idempotent operations {idempotency_key: response_dict}
-completed_idempotent_ops: Dict[str, Dict[str, Any]] = {}
+
+class DurableIdempotencyStore:
+    """Persistent SQLite-backed store for durable idempotent operations.
+
+    Ensures idempotent operation records survive process restarts, crashes, and OOM kills.
+    """
+
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self._init_db()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.db_path), timeout=10.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
+    def _init_db(self) -> None:
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS idempotent_ops (
+                        idempotency_key TEXT PRIMARY KEY,
+                        response_json TEXT NOT NULL,
+                        created_at REAL NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_idempotent_ops_created ON idempotent_ops(created_at)"
+                )
+        except Exception as e:
+            logging.getLogger("xray_api").warning(
+                "Failed to initialize idempotency db at %s: %s", self.db_path, e
+            )
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            with self._get_conn() as conn:
+                cur = conn.execute(
+                    "SELECT response_json FROM idempotent_ops WHERE idempotency_key = ?",
+                    (key,),
+                )
+                row = cur.fetchone()
+                if row:
+                    return json.loads(row[0])
+        except Exception as e:
+            logging.getLogger("xray_api").warning("Failed to read idempotent op %s: %s", key, e)
+        return default
+
+    def set(self, key: str, response: Dict[str, Any]) -> None:
+        try:
+            now_ts = time.time()
+            data_str = json.dumps(response)
+            with self._get_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO idempotent_ops (idempotency_key, response_json, created_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(idempotency_key) DO UPDATE SET
+                        response_json=excluded.response_json,
+                        created_at=excluded.created_at
+                    """,
+                    (key, data_str, now_ts),
+                )
+                cur = conn.execute("SELECT COUNT(*) FROM idempotent_ops")
+                count = cur.fetchone()[0]
+                if count > 2000:
+                    conn.execute(
+                        """
+                        DELETE FROM idempotent_ops WHERE idempotency_key IN (
+                            SELECT idempotency_key FROM idempotent_ops
+                            ORDER BY created_at ASC LIMIT 500
+                        )
+                        """
+                    )
+        except Exception as e:
+            logging.getLogger("xray_api").warning("Failed to persist idempotent op %s: %s", key, e)
+
+    def __contains__(self, key: str) -> bool:
+        return self.get(key) is not None
+
+    def __getitem__(self, key: str) -> Dict[str, Any]:
+        val = self.get(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+
+    def __setitem__(self, key: str, response: Dict[str, Any]) -> None:
+        self.set(key, response)
+
+    def __len__(self) -> int:
+        try:
+            with self._get_conn() as conn:
+                cur = conn.execute("SELECT COUNT(*) FROM idempotent_ops")
+                return cur.fetchone()[0]
+        except Exception:
+            return 0
+
+    def keys(self) -> list[str]:
+        try:
+            with self._get_conn() as conn:
+                cur = conn.execute("SELECT idempotency_key FROM idempotent_ops ORDER BY created_at ASC")
+                return [row[0] for row in cur.fetchall()]
+        except Exception:
+            return []
+
+    def pop(self, key: str, default: Any = None) -> Any:
+        try:
+            val = self.get(key)
+            if val is not None:
+                with self._get_conn() as conn:
+                    conn.execute("DELETE FROM idempotent_ops WHERE idempotency_key = ?", (key,))
+                return val
+        except Exception:
+            pass
+        return default
+
+
+def _resolve_idempotency_db_path() -> Path:
+    env_path = os.getenv("IDEMPOTENCY_DB_PATH")
+    if env_path:
+        return Path(env_path)
+    if os.getenv("CLIENTS_FILE_PATH"):
+        return Path(os.getenv("CLIENTS_FILE_PATH")).parent / "idempotency.db"
+    default_path = Path("/etc/just1knode/idempotency.db")
+    try:
+        default_path.parent.mkdir(parents=True, exist_ok=True)
+        return default_path
+    except (PermissionError, OSError):
+        import tempfile
+        return Path(tempfile.gettempdir()) / "xray_idempotency.db"
+
+
+completed_idempotent_ops = DurableIdempotencyStore(_resolve_idempotency_db_path())
 
 # Configure logging
 logging.basicConfig(

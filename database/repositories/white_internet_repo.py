@@ -425,21 +425,6 @@ async def enqueue_orphan_cleanup(
     return row
 
 
-async def claim_orphan_cleanups(
-    session: AsyncSession,
-    limit: int = 20,
-) -> list[WhiteInternetOrphanCleanup]:
-    """Claim pending orphan rows for this worker (FOR UPDATE SKIP LOCKED)."""
-    stmt = (
-        select(WhiteInternetOrphanCleanup)
-        .where(WhiteInternetOrphanCleanup.status == "pending")
-        .order_by(WhiteInternetOrphanCleanup.id.asc())
-        .limit(limit)
-        .with_for_update(skip_locked=True)
-    )
-    return list((await session.execute(stmt)).scalars().all())
-
-
 async def mark_orphan_cleanup_done(
     session: AsyncSession,
     cleanup_id: int,

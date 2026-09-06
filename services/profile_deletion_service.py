@@ -61,7 +61,10 @@ class ProfileDeletionService:
     @staticmethod
     async def _delete_profiles(session, profiles, *, reason, background):
         count = 0
+        affected_server_ids = set()
         for profile in profiles:
+            if getattr(profile, "server_id", None):
+                affected_server_ids.add(profile.server_id)
             if profile.provisioning_status == "create_cleanup_pending":
                 await session.execute(
                     update(APIOperation)
@@ -159,6 +162,8 @@ class ProfileDeletionService:
                 count += 1
                 continue
             server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
+            if server_id:
+                affected_server_ids.add(server_id)
             profile.provisioning_status = "deleting"
             await ensure_delete_operation(
                 session,
@@ -174,4 +179,9 @@ class ProfileDeletionService:
             )
             count += 1
         await session.flush()
+        if affected_server_ids:
+            from services.slots_cache import invalidate_server_cache
+
+            for sid in affected_server_ids:
+                invalidate_server_cache(sid)
         return count

@@ -22,7 +22,7 @@ from services.api_operations_queue import (
     resolve_profile_endpoint_snapshot,
 )
 from services.audit_service import AuditService
-from services.slots_cache import ServerPeerSnapshot
+from services.slots_cache import ServerPeerSnapshot, invalidate_server_cache
 from utils.admin import is_admin
 from utils.datetime_helpers import is_expired, now_msk, now_utc
 
@@ -389,4 +389,6 @@ class DeviceService:
                 "force": force,
             },
         )
+        if server_id:
+            invalidate_server_cache(server_id)
         return True

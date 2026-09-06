@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import AdminAuditAction
+from config.enums import AdminAuditAction, ServiceType
 from database.models import (
     AccountLedgerEntry,
     EntitlementEntry,
@@ -221,7 +221,12 @@ async def _settle_account_tariff_change(
     tariff = await session.scalar(
         select(Tariff).where(Tariff.id == target.tariff_id).with_for_update()
     )
-    if tariff is None or not tariff.is_active:
+    if tariff is None or not tariff.is_active or (getattr(tariff, "service_type", None) or ServiceType.AWG) != ServiceType.AWG:
+        raise AccountTariffChangeError("tariff_unavailable")
+    source_tariff = await session.scalar(
+        select(Tariff).where(Tariff.id == source.tariff_id)
+    )
+    if source_tariff is None or (getattr(source_tariff, "service_type", None) or ServiceType.AWG) != ServiceType.AWG:
         raise AccountTariffChangeError("tariff_unavailable")
     current_target = await get_or_create_current_version(session, tariff)
     if current_target.id != target.id:

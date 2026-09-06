@@ -443,13 +443,19 @@ async def check_node_resources_and_alerts(bot: Bot):
                             await session.commit()
                     finally:
                         if is_pg and got_lock:
-                            try:
-                                if session.in_transaction():
+                            async def _do_unlock():
+                                try:
+                                    if session.in_transaction():
+                                        await session.commit()
+                                    await session.scalar(select(func.pg_advisory_unlock(lock_key)))
                                     await session.commit()
-                                await session.scalar(select(func.pg_advisory_unlock(lock_key)))
-                                await session.commit()
-                            except Exception as unlock_err:
-                                logger.debug("Error releasing ingress advisory lock %d: %s", lock_key, unlock_err)
+                                except Exception as unlock_err:
+                                    logger.debug("Error releasing ingress advisory lock %d: %s", lock_key, unlock_err)
+
+                            try:
+                                await asyncio.shield(_do_unlock())
+                            except BaseException as unlock_err:
+                                logger.debug("Shielded unlock for ingress lock %d completed or interrupted: %s", lock_key, unlock_err)
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:

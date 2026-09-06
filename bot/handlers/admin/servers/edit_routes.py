@@ -439,22 +439,7 @@ async def process_edit_server_url(
 
         return
 
-    if "xray_origin" in (server.capabilities or []) or server.protocol == "xray":
-        from services.xray_node_client import XrayNodeClient
-
-        async with XrayNodeClient(timeout=10.0) as xclient:
-            is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
-        if not is_healthy:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-    elif server.protocol == AMNEZIA_PROTOCOL:
+    if server.protocol == AMNEZIA_PROTOCOL:
         client = AmneziaClient(new_url, server.api_key)
 
         if not await client.healthcheck():
@@ -492,6 +477,21 @@ async def process_edit_server_url(
                         else texts.LABEL_UNKNOWN_LOWER
                     ),
                 ),
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
+    elif server.protocol == "xray":
+        from services.xray_node_client import XrayNodeClient
+
+        async with XrayNodeClient(timeout=10.0) as xclient:
+            is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
+        if not is_healthy:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_UNREACHABLE,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
@@ -727,22 +727,7 @@ async def process_edit_server_key(
         return
 
 
-    if "xray_origin" in (server.capabilities or []) or server.protocol == "xray":
-        from services.xray_node_client import XrayNodeClient
-
-        async with XrayNodeClient(timeout=10.0) as xclient:
-            is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
-        if not is_healthy:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-    elif server.protocol == AMNEZIA_PROTOCOL:
+    if server.protocol == AMNEZIA_PROTOCOL:
         client = AmneziaClient(server.api_url, new_key)
 
         if not await client.healthcheck():
@@ -780,6 +765,21 @@ async def process_edit_server_key(
                         else texts.LABEL_UNKNOWN_LOWER
                     ),
                 ),
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
+    elif server.protocol == "xray":
+        from services.xray_node_client import XrayNodeClient
+
+        async with XrayNodeClient(timeout=10.0) as xclient:
+            is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
+        if not is_healthy:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_UNREACHABLE,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )

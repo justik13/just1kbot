@@ -106,6 +106,13 @@ async def prepare_account_purchase(
             raise AccountPurchaseError("tariff_change_required")
         operation_type = "renew"
 
+    if operation_type == "purchase":
+        from config.constants import AMNEZIA_PROTOCOL
+        from database.repositories.servers_repo import get_available_servers
+        available_servers = await get_available_servers(session, protocol=AMNEZIA_PROTOCOL)
+        if not available_servers:
+            raise AccountPurchaseError("no_available_servers")
+
     active_quotes = await get_active_financial_quotes_for_update(
         session, user_id=user.id, as_of=now
     )
@@ -355,6 +362,14 @@ async def _settle_account_purchase(
     profiles = await get_user_profiles_count(session, user.id)
     if profiles > version.device_limit:
         raise AccountPurchaseError("too_many_devices")
+
+    # Pre-Debit Validation: Ensure available AWG server exists before debiting user balance
+    if quote.operation_type == "purchase" or profiles == 0:
+        from config.constants import AMNEZIA_PROTOCOL
+        from database.repositories.servers_repo import get_available_servers
+        available_servers = await get_available_servers(session, protocol=AMNEZIA_PROTOCOL)
+        if not available_servers:
+            raise AccountPurchaseError("no_available_servers")
 
     before = await get_account_balance(session, user_id=user.id)
     if before.debt > 0:

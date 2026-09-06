@@ -22,6 +22,8 @@ from utils.telegram import render_hub, safe
 
 from .common import URL_REGEX, normalize_api_url
 
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 router = Router()
 logger = logging.getLogger(__name__)
 
@@ -43,13 +45,38 @@ async def start_add_server(
     await callback.answer(show_alert=False)
     await state.clear()
 
+    builder = InlineKeyboardBuilder()
+    builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2")
+    builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray")
+    builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data="admin_servers")
+    builder.adjust(1, 1, 1)
+
     await callback.message.edit_text(
-        texts.ADMIN_SERVER_NAME_PROMPT,
-        reply_markup=get_back_button("admin_servers"),
+        texts.ADMIN_SERVER_SELECT_PROTO_PROMPT,
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
     )
 
+
+@router.callback_query(F.data.startswith("admin_server_add_proto:"))
+async def select_add_server_protocol(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    protocol = callback.data.split(":")[1]
+    await callback.answer(show_alert=False)
     await state.set_state(AdminStates.adding_server)
-    await state.update_data(step="name")
+    await state.update_data(protocol=protocol, step="name")
+
+    await callback.message.edit_text(
+        texts.ADMIN_SERVER_NAME_PROMPT,
+        reply_markup=get_back_button("admin_server_add"),
+        parse_mode="HTML",
+    )
 
 
 @router.message(AdminStates.adding_server)
@@ -215,22 +242,33 @@ async def process_add_server(
             parse_mode="HTML",
         )
 
-        from services.xray_node_client import XrayNodeClient
+        protocol = all_data.get("protocol", AMNEZIA_PROTOCOL)
 
-        is_xray = False
-        xray_epoch = None
-        xray_data = None
-        try:
-            async with XrayNodeClient(timeout=10.0) as xray_client:
-                xray_ok, xray_epoch, xray_data = await xray_client.check_health(
-                    all_data["api_url"], api_key
+        if protocol == "xray":
+            from services.xray_node_client import XrayNodeClient
+
+            xray_ok = False
+            xray_epoch = None
+            xray_data = None
+            try:
+                async with XrayNodeClient(timeout=10.0) as xray_client:
+                    xray_ok, xray_epoch, xray_data = await xray_client.check_health(
+                        all_data["api_url"], api_key
+                    )
+            except Exception as e:
+                logger.warning("Xray health check failed for %s: %s", all_data["api_url"], e)
+                xray_ok = False
+
+            if not xray_ok:
+                await render_hub(
+                    message.bot,
+                    message.chat.id,
+                    texts.ERROR_SERVER_UNREACHABLE,
+                    get_back_button("admin_servers"),
+                    parse_mode="HTML",
                 )
-                if xray_ok:
-                    is_xray = True
-        except Exception:
-            is_xray = False
-
-        if is_xray:
+                await state.clear()
+                return
             from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
             api_server_name = all_data["name"]
             api_max_peers = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS

@@ -117,17 +117,63 @@ class EpochManager:
             except Exception:
                 pass
 
+    def _read_proc_stat(self, pid: int) -> Optional[int]:
+        """Extracts field 22 (starttime) from /proc/<pid>/stat safely."""
+        stat_path = Path(f"/proc/{pid}/stat")
+        if not stat_path.exists():
+            return None
+        try:
+            content = stat_path.read_text(encoding="utf-8", errors="ignore")
+            rparen_idx = content.rfind(")")
+            if rparen_idx == -1:
+                return None
+            rest = content[rparen_idx + 1 :].strip()
+            tokens = rest.split()
+            if len(tokens) > 19:
+                return int(tokens[19])
+        except (ProcessLookupError, PermissionError):
+            return None
+        except Exception as e:
+            logger.debug("Error reading /proc/%s/stat: %s", pid, e)
+        return None
+
     def get_xray_process_info(self) -> Tuple[Optional[int], Optional[int]]:
         """
         Finds the running xray process and extracts (pid, starttime).
-        Reads /proc filesystem directly.
+        Reads /proc filesystem directly, with fallback to pidfiles when /proc
+        is mounted with hidepid=2 or permissions are restricted.
         Returns (pid, starttime) or (None, None) if not running.
         """
+        # 1. Check known pidfiles first (handles hidepid=2 and container sandboxes)
+        pidfile_candidates = [
+            Path("/run/xray/xray.pid"),
+            Path("/run/xray.pid"),
+            Path("/var/run/xray.pid"),
+            Path("/var/run/xray/xray.pid"),
+        ]
+        for pf in pidfile_candidates:
+            if pf.exists():
+                try:
+                    raw = pf.read_text(encoding="utf-8").strip()
+                    if raw.isdigit():
+                        candidate_pid = int(raw)
+                        starttime = self._read_proc_stat(candidate_pid)
+                        if starttime is not None:
+                            return candidate_pid, starttime
+                except Exception as e:
+                    logger.debug("Error checking pidfile %s: %s", pf, e)
+
         proc_dir = Path("/proc")
         if not proc_dir.exists() or not proc_dir.is_dir():
             return None, None
 
-        for entry in proc_dir.iterdir():
+        try:
+            entries = list(proc_dir.iterdir())
+        except (PermissionError, OSError) as e:
+            logger.debug("Cannot iterate /proc (possibly hidepid): %s", e)
+            return None, None
+
+        for entry in entries:
             if not entry.is_dir() or not entry.name.isdigit():
                 continue
             pid = int(entry.name)
@@ -158,21 +204,8 @@ class EpochManager:
                 if not is_xray:
                     continue
 
-                # 2. Parse /proc/<pid>/stat
-                stat_path = entry / "stat"
-                if not stat_path.exists():
-                    continue
-
-                content = stat_path.read_text(encoding="utf-8", errors="ignore")
-                # Parse: find closing parenthesis for comm field
-                rparen_idx = content.rfind(")")
-                if rparen_idx == -1:
-                    continue
-                rest = content[rparen_idx + 1 :].strip()
-                tokens = rest.split()
-                # token index 19 corresponds to field 22 (starttime)
-                if len(tokens) > 19:
-                    starttime = int(tokens[19])
+                starttime = self._read_proc_stat(pid)
+                if starttime is not None:
                     return pid, starttime
             except (ProcessLookupError, PermissionError):
                 continue
