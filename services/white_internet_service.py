@@ -292,6 +292,13 @@ class WhiteInternetService:
             duration_days=tariff.duration_days,
             base_bytes=tariff_version.base_quota_bytes,
         )
+        # Commit DB state before executing external network sync.
+        # This durably persists user debit, quote, and subscription in PostgreSQL
+        # and releases all SELECT FOR UPDATE row locks (Server, User) so concurrent
+        # operations are not blocked during external network I/O.
+        # If commit fails, we fail-closed immediately WITHOUT mutating Xray.
+        await session.commit()
+
         await cls._try_inline_sync(
             session, sub, origin_node, idempotency_key=f"purchase:{sub.id}:1:True"
         )
@@ -391,6 +398,9 @@ class WhiteInternetService:
             sub.last_reconciled_node_epoch = None
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
             await session.flush()
+            await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
+                session, new_origin_server.id, sub.uuid
+            )
 
         renewed = await white_internet_repo.renew_subscription_atomic(
             session,
@@ -519,6 +529,9 @@ class WhiteInternetService:
             sub.last_reconciled_node_epoch = None
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
             await session.flush()
+            await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
+                session, new_origin_server.id, sub.uuid
+            )
 
         grant = await white_internet_repo.topup_quota_atomic(
             session,
@@ -604,6 +617,13 @@ class WhiteInternetService:
             base_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
         )
 
+        # Commit DB state before executing external network sync.
+        # This durably persists quote and trial subscription in PostgreSQL
+        # and releases all SELECT FOR UPDATE row locks (Server, User) so concurrent
+        # operations are not blocked during external network I/O.
+        # If commit fails, we fail-closed immediately WITHOUT mutating Xray.
+        await session.commit()
+
         # Zero-Wait UX: Synchronous provisioning on Xray node.
         await cls._try_inline_sync(
             session, sub, origin_node, idempotency_key=f"trial:{sub.id}:1:True"
@@ -676,6 +696,13 @@ class WhiteInternetService:
                     sub.last_reconciled_node_epoch = verified_epoch
                     sub.last_synced_at = now_utc()
                     await session.flush()
+                    try:
+                        await session.commit()
+                    except Exception as exc:
+                        logger.warning(
+                            "Session commit after inline sync failed, leaving PENDING_CREATE: %s", exc
+                        )
+                        return False
                     return True
                 else:
                     logger.warning(

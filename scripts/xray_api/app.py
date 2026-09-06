@@ -154,8 +154,6 @@ def _resolve_idempotency_db_path() -> Path:
         return Path(tempfile.gettempdir()) / "xray_idempotency.db"
 
 
-completed_idempotent_ops = DurableIdempotencyStore(_resolve_idempotency_db_path())
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -163,7 +161,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("xray_api")
 
-# Configuration from environment / config file
+# Configuration from environment / config file:
+# Must be loaded BEFORE resolving paths or initializing stores
 CONFIG_ENV_FILE = "/etc/xray-api/config.env"
 if os.path.exists(CONFIG_ENV_FILE):
     try:
@@ -186,6 +185,23 @@ RELAYS_FILE_PATH = Path(os.getenv("RELAYS_FILE_PATH", "/etc/just1knode/relays.js
 XRAY_CONFIG_PATH = Path(os.getenv("XRAY_CONFIG_PATH", "/usr/local/etc/xray/config.json"))
 CLIENTS_FILE_PATH = Path(os.getenv("CLIENTS_FILE_PATH", "/etc/just1knode/clients.json"))
 STATE_FILE_PATH = Path(os.getenv("STATE_FILE_PATH", "/etc/just1knode/state.json"))
+
+completed_idempotent_ops = DurableIdempotencyStore(_resolve_idempotency_db_path())
+
+# Concurrency locks for in-flight idempotent operations (prevents check-then-mutate races)
+_inflight_op_locks: Dict[str, asyncio.Lock] = {}
+_inflight_master_lock = asyncio.Lock()
+
+
+async def _get_inflight_op_lock(key: str) -> asyncio.Lock:
+    async with _inflight_master_lock:
+        if key not in _inflight_op_locks:
+            if len(_inflight_op_locks) > 1000:
+                unlocked_keys = [k for k, v in _inflight_op_locks.items() if not v.locked()]
+                for k in unlocked_keys:
+                    _inflight_op_locks.pop(k, None)
+            _inflight_op_locks[key] = asyncio.Lock()
+        return _inflight_op_locks[key]
 
 
 def _mask_uuid(val: str) -> str:
@@ -669,12 +685,22 @@ async def sync_client(req: ClientSyncRequest, _: bool = Depends(verify_api_key))
 
     desired_state = req.desired_state or "active"
 
-    # Durable idempotency check
-    if req.idempotency_key and req.idempotency_key in completed_idempotent_ops:
-        cached = completed_idempotent_ops[req.idempotency_key]
-        logger.info("Returning cached durable operation for key %s", req.idempotency_key)
-        return {**cached, "idempotent": True}
+    # Durable idempotency check with concurrency serialization
+    if req.idempotency_key:
+        op_lock = await _get_inflight_op_lock(req.idempotency_key)
+        async with op_lock:
+            if req.idempotency_key in completed_idempotent_ops:
+                cached = completed_idempotent_ops[req.idempotency_key]
+                logger.info("Returning cached durable operation for key %s", req.idempotency_key)
+                return {**cached, "idempotent": True}
+            return await _sync_client_internal(req, client_uuid, desired_state)
 
+    return await _sync_client_internal(req, client_uuid, desired_state)
+
+
+async def _sync_client_internal(
+    req: ClientSyncRequest, client_uuid: str, desired_state: str
+) -> Dict[str, Any]:
     target_inbounds = get_target_inbounds()
     if not target_inbounds:
         raise HTTPException(

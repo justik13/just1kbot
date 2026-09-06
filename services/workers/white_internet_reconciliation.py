@@ -479,6 +479,33 @@ class WhiteInternetReconciliationWorker:
                         await sess.commit()
                         swept += 1
                         continue
+
+                    # Defense against A -> B -> A ping-pong migration:
+                    # If this client is currently active/pending on this origin node,
+                    # the orphan cleanup is stale and must not deactivate the active user!
+                    reassigned_sub = await sess.scalar(
+                        select(WhiteInternetSubscription.id).where(
+                            WhiteInternetSubscription.uuid == row.client_uuid,
+                            WhiteInternetSubscription.origin_node_id == row.server_id,
+                            WhiteInternetSubscription.status.in_([
+                                WhiteInternetStatus.ACTIVE,
+                                WhiteInternetStatus.PENDING,
+                                WhiteInternetStatus.EXHAUSTED,
+                            ]),
+                        )
+                    )
+                    if isinstance(reassigned_sub, (int, str)):
+                        logger.info(
+                            "Orphan cleanup %d cancelled: client %s is currently active/placed on origin %d (sub_id=%s).",
+                            row.id,
+                            row.client_uuid,
+                            row.server_id,
+                            reassigned_sub,
+                        )
+                        await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
+                        await sess.commit()
+                        swept += 1
+                        continue
                     server_proto = getattr(server, "protocol", None)
                     if not server_proto:
                         caps = getattr(server, "capabilities", None) or []
