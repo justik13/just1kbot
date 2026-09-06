@@ -14,6 +14,7 @@ from sqlalchemy import select
 from bot import texts
 from config.constants import (
     DEFAULT_WHITE_INTERNET_PATH,
+    DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     XRAY_PROTOCOL,
@@ -242,4 +243,7 @@ def setup_white_internet_web_routes(app: web.Application) -> None:
         sub_prefix = f"/{sub_prefix}"
     app.router.add_get(f"{sub_prefix}/ping", white_internet_ping_handler)
     app.router.add_get(f"{sub_prefix}/{{token}}", white_internet_subscription_feed_handler)
+    if sub_prefix != DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX:
+        app.router.add_get(f"{DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX}/ping", white_internet_ping_handler)
+        app.router.add_get(f"{DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX}/{{token}}", white_internet_subscription_feed_handler)
     logger.info("White Internet subscription feed routes registered: %s/{token} and %s/ping", sub_prefix, sub_prefix)

@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 ADMIN_BTN_ADD_SERVER = "➕ Добавить сервер"
+ADMIN_SERVER_SELECT_PROTO_PROMPT = """🛠 Админка › ➕ <b>Добавление сервера</b>
+
+Выберите протокол узла:"""
+ADMIN_SERVER_BTN_PROTO_AWG = "🛡 AmneziaWG"
+ADMIN_SERVER_BTN_PROTO_XRAY = "⚡ Xray (Белый Интернет)"
 
 PROTOCOL_XRAY_ORIGIN = "Xray (Origin)"
 

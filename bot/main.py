@@ -24,6 +24,7 @@ from cachetools import TTLCache
 from cryptography.fernet import Fernet
 
 from bot import texts
+from config.constants import WHITE_INTERNET_SUB_PATH_PREFIX
 from bot.handlers.admin.broadcast import (
     _background_tasks,
     _broadcast_stop_events,
@@ -323,12 +324,25 @@ class HealthcheckAccessLogger(AccessLogger):
     def log(self, request: web.Request, response: web.StreamResponse, time: float) -> None:
         if request.path == "/health" and response.status == 200:
             return
-        if request.path.startswith("/sub/wl/"):
+
+        sub_prefix = (
+            os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX
+        ).strip().rstrip("/")
+        if not sub_prefix.startswith("/"):
+            sub_prefix = f"/{sub_prefix}"
+
+        matched_prefix = None
+        for p in (f"{sub_prefix}/", "/sub/wl/", "/sub/"):
+            if request.path.startswith(p):
+                matched_prefix = p
+                break
+
+        if matched_prefix:
             self.logger.info(
                 '%s "%s %s %s" %s %s',
                 request.remote,
                 request.method,
-                "/sub/wl/***",
+                f"{matched_prefix}***",
                 f"HTTP/{request.version.major}.{request.version.minor}",
                 response.status,
                 response.body_length,

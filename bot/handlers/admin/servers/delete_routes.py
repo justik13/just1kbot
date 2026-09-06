@@ -12,7 +12,7 @@ from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
-from config.enums import WhiteInternetStatus
+from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.models import (
     APIOperation,
     Server,
@@ -269,7 +269,11 @@ async def confirm_delete_server(
     await session.execute(
         update(WhiteInternetSubscription)
         .where(WhiteInternetSubscription.origin_node_id == server_id)
-        .values(origin_node_id=None)
+        .values(
+            origin_node_id=None,
+            provisioning_status=WhiteInternetProvisioningStatus.PENDING_UPDATE,
+            last_reconciled_node_epoch=None,
+        )
     )
 
     await delete_server(session, server)

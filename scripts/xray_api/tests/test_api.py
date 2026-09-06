@@ -760,4 +760,41 @@ def test_startup_restore_persisted_clients_and_probe_lifecycle():
         f.write("{}")
 
 
+def test_xray_api_idempotency_inflight_lock():
+    """xray_api _get_inflight_op_lock returns distinct locks per key and serializes concurrent calls."""
+    import asyncio
+    from app import _get_inflight_op_lock
+
+    async def _test():
+        lock1 = await _get_inflight_op_lock("key-a")
+        lock2 = await _get_inflight_op_lock("key-a")
+        lock3 = await _get_inflight_op_lock("key-b")
+        assert lock1 is lock2
+        assert lock1 is not lock3
+
+    asyncio.run(_test())
+
+
+def test_xray_api_idempotency_inflight_lock_eviction():
+    """xray_api _get_inflight_op_lock evicts unlocked locks when cache exceeds 1000, preserving locked ones."""
+    import asyncio
+    import app
+
+    async def _test():
+        app._inflight_op_locks.clear()
+        active_lock = await app._get_inflight_op_lock("active-key")
+        await active_lock.acquire()
+        try:
+            for i in range(1005):
+                await app._get_inflight_op_lock(f"dummy-{i}")
+            assert "active-key" in app._inflight_op_locks
+            assert app._inflight_op_locks["active-key"] is active_lock
+        finally:
+            active_lock.release()
+            app._inflight_op_locks.clear()
+
+    asyncio.run(_test())
+
+
+
 

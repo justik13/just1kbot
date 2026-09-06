@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import (
@@ -166,6 +166,7 @@ async def create_white_internet_subscription(
     )
     session.add(subscription)
     await session.flush()
+    await cancel_pending_orphan_cleanups_for_client(session, origin_node_id, uuid)
     await session.refresh(subscription)
     return subscription
 
@@ -425,21 +426,6 @@ async def enqueue_orphan_cleanup(
     return row
 
 
-async def claim_orphan_cleanups(
-    session: AsyncSession,
-    limit: int = 20,
-) -> list[WhiteInternetOrphanCleanup]:
-    """Claim pending orphan rows for this worker (FOR UPDATE SKIP LOCKED)."""
-    stmt = (
-        select(WhiteInternetOrphanCleanup)
-        .where(WhiteInternetOrphanCleanup.status == "pending")
-        .order_by(WhiteInternetOrphanCleanup.id.asc())
-        .limit(limit)
-        .with_for_update(skip_locked=True)
-    )
-    return list((await session.execute(stmt)).scalars().all())
-
-
 async def mark_orphan_cleanup_done(
     session: AsyncSession,
     cleanup_id: int,
@@ -463,6 +449,26 @@ async def mark_orphan_cleanup_failed(
     row.attempts = (row.attempts or 0) + 1
     row.last_error = error[:500]
     await session.flush()
+
+
+async def cancel_pending_orphan_cleanups_for_client(
+    session: AsyncSession,
+    server_id: int,
+    client_uuid: str,
+) -> int:
+    """Cancel any pending orphan cleanups for a client that has been re-placed on server_id."""
+    stmt = (
+        update(WhiteInternetOrphanCleanup)
+        .where(
+            WhiteInternetOrphanCleanup.server_id == server_id,
+            WhiteInternetOrphanCleanup.client_uuid == client_uuid,
+            WhiteInternetOrphanCleanup.status == "pending",
+        )
+        .values(status="done", last_error="Cancelled by re-placement on this origin node")
+    )
+    res = await session.execute(stmt)
+    await session.flush()
+    return getattr(res, "rowcount", 0) or 0
 
 
 async def get_white_internet_dashboard_stats(session: AsyncSession) -> dict:

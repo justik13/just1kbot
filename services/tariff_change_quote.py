@@ -11,6 +11,7 @@ from decimal import ROUND_CEILING, Decimal
 
 from sqlalchemy import select
 
+from config.enums import ServiceType
 from database.models import Tariff, TariffQuote, TariffVersion
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.profiles_repo import get_user_profiles_count
@@ -159,6 +160,10 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         return TariffChangeQuoteResult(failure_code="target_tariff_not_found")
     if not target.is_active:
         return TariffChangeQuoteResult(failure_code="target_tariff_inactive")
+    source_service = getattr(source, "service_type", None) or ServiceType.AWG
+    target_service = getattr(target, "service_type", None) or ServiceType.AWG
+    if source_service != target_service or target_service != ServiceType.AWG:
+        return TariffChangeQuoteResult(failure_code="cross_protocol_forbidden")
     if target.id == user.current_tariff_id or target.device_limit == source.device_limit:
         return TariffChangeQuoteResult(failure_code="same_tariff_requires_renew")
     if source.duration_days <= 0 or source.price_rub <= 0 or source.device_limit <= 0 \

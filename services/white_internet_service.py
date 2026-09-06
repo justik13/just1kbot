@@ -292,6 +292,16 @@ class WhiteInternetService:
             duration_days=tariff.duration_days,
             base_bytes=tariff_version.base_quota_bytes,
         )
+        # Commit DB state before executing external network sync.
+        # This durably persists user debit, quote, and subscription in PostgreSQL
+        # and releases all SELECT FOR UPDATE row locks (Server, User) so concurrent
+        # operations are not blocked during external network I/O.
+        # If commit fails, we fail-closed immediately WITHOUT mutating Xray.
+        await session.commit()
+
+        await cls._try_inline_sync(
+            session, sub, origin_node, idempotency_key=f"purchase:{sub.id}:1:True"
+        )
         return True, texts.WL_BUY_SUCCESS, sub
 
     @classmethod
@@ -388,6 +398,9 @@ class WhiteInternetService:
             sub.last_reconciled_node_epoch = None
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
             await session.flush()
+            await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
+                session, new_origin_server.id, sub.uuid
+            )
 
         renewed = await white_internet_repo.renew_subscription_atomic(
             session,
@@ -437,6 +450,28 @@ class WhiteInternetService:
         if sub.status == WhiteInternetStatus.EXPIRED or sub.expires_at <= now:
             return False, texts.WL_SUB_EXPIRED, None
 
+        # Pre-Debit Validation: validate origin node health & availability before debiting funds
+        origin_node = await session.scalar(
+            select(Server).where(
+                Server.id == sub.origin_node_id,
+                Server.protocol == XRAY_PROTOCOL,
+            )
+        )
+        needs_migration = (
+            not origin_node
+            or not origin_node.is_active
+            or origin_node.health_state != ServerHealthState.ONLINE
+            or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
+            or not (origin_node.extra_data or {}).get("relays")
+        )
+        new_origin_server: Server | None = None
+        if needs_migration:
+            try:
+                new_origin_server = await cls.select_origin_node(session)
+            except RuntimeError as exc:
+                logger.warning("No healthy origin node available for topup migration: %s", exc)
+                return False, texts.WL_NO_SERVERS_AVAILABLE, None
+
         pack_bytes = pack_gb * 1024 * 1024 * 1024
         total_accumulated = (
             (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0) + pack_bytes
@@ -484,6 +519,20 @@ class WhiteInternetService:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+
+        # Apply node migration ONLY after successful financial debit
+        old_origin_for_cleanup: Server | None = None
+        if needs_migration and new_origin_server is not None:
+            old_origin_for_cleanup = origin_node
+            sub.origin_node_id = new_origin_server.id
+            sub.actual_version = 0
+            sub.last_reconciled_node_epoch = None
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
+            await session.flush()
+            await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
+                session, new_origin_server.id, sub.uuid
+            )
+
         grant = await white_internet_repo.topup_quota_atomic(
             session,
             subscription_id=sub.id,
@@ -493,6 +542,21 @@ class WhiteInternetService:
         )
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
+
+        if old_origin_for_cleanup:
+            await white_internet_repo.enqueue_orphan_cleanup(
+                session,
+                server_id=old_origin_for_cleanup.id,
+                client_uuid=sub.uuid,
+                desired_version=sub.desired_version + 1,
+            )
+            _dispatch_deprovision(
+                old_origin_for_cleanup,
+                client_uuid=sub.uuid,
+                version=sub.desired_version + 1,
+                context=f"topup sub {sub.id}",
+            )
+
         return True, texts.WL_TOPUP_SUCCESS.format(gb=pack_gb), grant
 
     @classmethod
@@ -553,11 +617,35 @@ class WhiteInternetService:
             base_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
         )
 
+        # Commit DB state before executing external network sync.
+        # This durably persists quote and trial subscription in PostgreSQL
+        # and releases all SELECT FOR UPDATE row locks (Server, User) so concurrent
+        # operations are not blocked during external network I/O.
+        # If commit fails, we fail-closed immediately WITHOUT mutating Xray.
+        await session.commit()
+
         # Zero-Wait UX: Synchronous provisioning on Xray node.
-        # Fail-closed like the reconciliation worker: mark ACTIVE only when the
-        # node confirms the expected epoch and full inbound coverage; verify
-        # ALREADY_NEWER against runtime inventory. Anything unconfirmed stays
-        # PENDING_CREATE for the background worker to converge.
+        await cls._try_inline_sync(
+            session, sub, origin_node, idempotency_key=f"trial:{sub.id}:1:True"
+        )
+
+        return True, texts.WL_TRIAL_ACTIVATED_SUCCESS, sub
+
+    @classmethod
+    async def _try_inline_sync(
+        cls,
+        session: AsyncSession,
+        sub: WhiteInternetSubscription,
+        origin_node: Server,
+        idempotency_key: str,
+    ) -> bool:
+        """Attempt best-effort synchronous activation on origin node (timeout=4.0s).
+
+        Fail-closed like the reconciliation worker: mark ACTIVE only when the
+        node confirms the expected epoch and full inbound coverage; verify
+        ALREADY_NEWER against runtime inventory. Anything unconfirmed stays
+        PENDING_CREATE for the background worker to converge.
+        """
         expected_inbound_tags: set[str] = set()
         for relay in (origin_node.extra_data or {}).get("relays", []) or []:
             code = (relay or {}).get("code")
@@ -570,11 +658,11 @@ class WhiteInternetService:
                 resp = await xray_client.sync_client(
                     origin_node.api_url,
                     origin_node.api_key,
-                    client_uuid=sub_uuid,
+                    client_uuid=sub.uuid,
                     is_active=True,
-                    version=1,
+                    version=sub.desired_version or 1,
                     expected_node_epoch=origin_node.xray_instance_epoch,
-                    idempotency_key=f"trial:{sub.id}:1:True",
+                    idempotency_key=idempotency_key,
                 )
                 sync_res = resp.result if hasattr(resp, "result") else resp[0]
                 verified_epoch = (
@@ -593,24 +681,32 @@ class WhiteInternetService:
                     inv_ok, inv_data, _ = await xray_client.get_inventory(
                         origin_node.api_url,
                         origin_node.api_key,
-                        client_ids=[sub_uuid],
+                        client_ids=[sub.uuid],
                     )
                     observed = None
                     if inv_ok and inv_data and "inventory" in inv_data:
-                        observed = (inv_data["inventory"].get(sub_uuid) or {}).get(
+                        observed = (inv_data["inventory"].get(sub.uuid) or {}).get(
                             "observed_state"
                         )
                     confirmed = inv_ok and observed == "active" and inbounds_ok
                 if confirmed:
                     sub.status = WhiteInternetStatus.ACTIVE
-                    sub.actual_version = 1
+                    sub.actual_version = sub.desired_version or 1
                     sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
                     sub.last_reconciled_node_epoch = verified_epoch
                     sub.last_synced_at = now_utc()
                     await session.flush()
+                    try:
+                        await session.commit()
+                    except Exception as exc:
+                        logger.warning(
+                            "Session commit after inline sync failed, leaving PENDING_CREATE: %s", exc
+                        )
+                        return False
+                    return True
                 else:
                     logger.warning(
-                        "Trial sync unconfirmed (result=%s epoch_ok=%s inbounds_ok=%s), "
+                        "Inline sync unconfirmed (result=%s epoch_ok=%s inbounds_ok=%s), "
                         "leaving subscription %d PENDING_CREATE for worker",
                         sync_res,
                         epoch_ok,
@@ -619,10 +715,9 @@ class WhiteInternetService:
                     )
         except Exception as exc:
             logger.warning(
-                "Synchronous trial activation fallback to background worker: %s", exc
+                "Synchronous activation fallback to background worker: %s", exc
             )
-
-        return True, texts.WL_TRIAL_ACTIVATED_SUCCESS, sub
+        return False
 
     @classmethod
     async def deactivate_user_subscriptions(
