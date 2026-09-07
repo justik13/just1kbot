@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select, update
@@ -203,13 +203,18 @@ async def renew_subscription_atomic(
     now: datetime | None = None,
 ) -> WhiteInternetSubscription:
     now = now or now_utc()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
     if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.PENDING):
         raise WhiteInternetInactiveSubscriptionError("Subscription is not eligible for renewal")
 
-    base_time = sub.expires_at if sub.expires_at > now else now
+    sub_expires_at = sub.expires_at
+    if sub_expires_at is not None and sub_expires_at.tzinfo is None:
+        sub_expires_at = sub_expires_at.replace(tzinfo=timezone.utc)
+    base_time = sub_expires_at if (sub_expires_at and sub_expires_at > now) else now
     new_expires_at = base_time + timedelta(days=duration_days)
     if new_expires_at > now + timedelta(days=max_expiry_days):
         raise WhiteInternetRenewalHorizonExceededError(
@@ -231,7 +236,7 @@ async def renew_subscription_atomic(
     )
     extra_rollover = min(sub.extra_traffic_bytes or 0, total_left)
 
-    is_grace_valid = now <= (sub.expires_at + timedelta(days=7))
+    is_grace_valid = (now <= (sub_expires_at + timedelta(days=7))) if sub_expires_at else True
     max_extra_allowed = max(0, WHITE_INTERNET_MAX_QUOTA_BYTES - new_base_bytes)
     new_extra = min(extra_rollover, max_extra_allowed) if is_grace_valid else 0
 
@@ -651,8 +656,12 @@ async def reset_active_hwids_atomic(
         return False
 
     now = now or now_utc()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     last_reset = getattr(sub, "last_device_reset_at", None)
     if isinstance(last_reset, datetime):
+        if last_reset.tzinfo is None:
+            last_reset = last_reset.replace(tzinfo=timezone.utc)
         elapsed = (now - last_reset).total_seconds()
         if elapsed < cooldown_seconds:
             remaining = int(cooldown_seconds - elapsed)
