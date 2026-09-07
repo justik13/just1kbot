@@ -18,6 +18,7 @@ from bot import texts
 from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
+    WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
     WHITE_INTERNET_HWID_TTL_HOURS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
@@ -631,7 +632,8 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
 
     next_limit = current_limit + 1
     next_price = int(get_white_internet_tier_price(next_limit))
-    next_traffic = next_limit * 50
+    base_gb = int(WHITE_INTERNET_BASE_TRAFFIC_BYTES // (1024**3))
+    next_traffic = next_limit * base_gb
 
     kb = InlineKeyboardBuilder()
     kb.button(text=texts.BTN_WL_ADD_DEVICE_CONFIRM, callback_data="wl_add_device_confirm")
