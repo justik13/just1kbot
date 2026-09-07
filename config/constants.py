@@ -6,6 +6,7 @@ integrations, services, and bot layers without architectural cycles.
 """
 
 import os
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -108,15 +109,29 @@ WHITE_INTERNET_BASE_DURATION_DAYS = int(os.getenv("WHITE_INTERNET_BASE_DURATION_
 WHITE_INTERNET_BASE_TRAFFIC_BYTES = int(
     os.getenv("WHITE_INTERNET_BASE_TRAFFIC_BYTES", str(53_687_091_200))
 )  # 50 GiB
-WHITE_INTERNET_TRIAL_MODE_ONLY = os.getenv("WHITE_INTERNET_TRIAL_MODE_ONLY", "true").lower() in (
+WHITE_INTERNET_TRIAL_MODE_ONLY = os.getenv("WHITE_INTERNET_TRIAL_MODE_ONLY", "false").lower() in (
     "true",
     "1",
     "yes",
 )
 WHITE_INTERNET_TRIAL_DURATION_DAYS = int(os.getenv("WHITE_INTERNET_TRIAL_DURATION_DAYS", "3"))
 WHITE_INTERNET_TRIAL_TRAFFIC_BYTES = int(
-    os.getenv("WHITE_INTERNET_TRIAL_TRAFFIC_BYTES", str(10 * 1024 * 1024 * 1024))
-)  # 10 GiB
+    os.getenv("WHITE_INTERNET_TRIAL_TRAFFIC_BYTES", str(5 * 1024 * 1024 * 1024))
+)  # 5 GiB
+WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB = Decimal(
+    os.getenv("WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB", "200.00")
+)
+WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES = int(
+    os.getenv("WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES", str(53_687_091_200))
+)  # 50 GiB
+WHITE_INTERNET_MAX_DEVICE_LIMIT = min(
+    3, max(1, int(os.getenv("WHITE_INTERNET_MAX_DEVICE_LIMIT", "3")))
+)  # Enforced by PostgreSQL CheckConstraint: 1 <= device_limit <= 3
+WHITE_INTERNET_HWID_TTL_HOURS = int(os.getenv("WHITE_INTERNET_HWID_TTL_HOURS", "48"))
+WHITE_INTERNET_MAX_EXPIRY_DAYS = int(os.getenv("WHITE_INTERNET_MAX_EXPIRY_DAYS", "60"))
+WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS = int(
+    os.getenv("WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS", "900")
+)  # 15 minutes
 WHITE_INTERNET_MAX_QUOTA_BYTES = int(
     os.getenv("WHITE_INTERNET_MAX_QUOTA_BYTES", str(161_061_273_600))
 )  # 150 GiB
@@ -141,6 +156,19 @@ if not WHITE_INTERNET_SUB_PATH_PREFIX.startswith("/"):
     WHITE_INTERNET_SUB_PATH_PREFIX = f"/{WHITE_INTERNET_SUB_PATH_PREFIX}"
 
 
+WHITE_INTERNET_DEFAULT_DEVICE_LIMIT: int = 1
+
+
+def _validate_xhttp_padding_bytes(val: str | None) -> str:
+    default_val = "100-1000"
+    if not val or not isinstance(val, str):
+        return default_val
+    clean = val.strip()
+    if re.match(r"^\d+-\d+$|^\d+$", clean):
+        return clean
+    return default_val
+
+
 CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "mode": "packet-up",
     "uplinkHTTPMethod": "OPTIONS",
@@ -149,6 +177,7 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "xPaddingHeader": "X-Cache",
     "xPaddingMethod": "tokenish",
     "xPaddingObfsMode": True,
+    "xPaddingBytes": _validate_xhttp_padding_bytes(os.getenv("WHITE_INTERNET_PADDING_BYTES")),
     "security": "tls",
     "alpn": ["h2", "http/1.1"],
     "fp": WHITE_INTERNET_TLS_FINGERPRINT,
@@ -207,6 +236,12 @@ __all__ = [
     "WHITE_INTERNET_BASE_DURATION_DAYS",
     "WHITE_INTERNET_BASE_PRICE_RUB",
     "WHITE_INTERNET_BASE_TRAFFIC_BYTES",
+    "WHITE_INTERNET_DEFAULT_DEVICE_LIMIT",
+    "WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS",
+    "WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB",
+    "WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES",
+    "WHITE_INTERNET_MAX_DEVICE_LIMIT",
+    "WHITE_INTERNET_MAX_EXPIRY_DAYS",
     "WHITE_INTERNET_MAX_QUOTA_BYTES",
     "WHITE_INTERNET_SERVICE_TYPE",
     "WHITE_INTERNET_SUB_PATH_PREFIX",

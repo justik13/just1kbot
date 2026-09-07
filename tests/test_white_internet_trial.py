@@ -10,6 +10,7 @@ Tests cover:
 - Main hub indicator when White Internet is active
 """
 
+import os
 import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -43,6 +44,8 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
     """Test suite for WhiteInternetService.create_trial_subscription."""
 
     async def asyncSetUp(self):
+        self.orig_trial_env = os.environ.get("WHITE_INTERNET_TRIAL_MODE_ONLY")
+        os.environ["WHITE_INTERNET_TRIAL_MODE_ONLY"] = "true"
         self.session = AsyncMock(spec=AsyncSession)
         self.user = User(id=10, telegram_id=777000111, first_name="TrialUser")
         self.origin_server = Server(
@@ -55,6 +58,12 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
         )
         self.tariff = MagicMock(id=5, duration_days=30)
         self.tariff_version = MagicMock(id=15, price_rub=Decimal("0.00"))
+
+    async def asyncTearDown(self):
+        if self.orig_trial_env is None:
+            os.environ.pop("WHITE_INTERNET_TRIAL_MODE_ONLY", None)
+        else:
+            os.environ["WHITE_INTERNET_TRIAL_MODE_ONLY"] = self.orig_trial_env
 
     async def test_trial_creation_success_with_sync_xray(self):
         """Trial is created with 3 days, 10 GiB, 0 RUB, and immediately synced to ACTIVE."""
@@ -339,6 +348,16 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
 class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
     """Test suite for Telegram Bot UI in trial mode."""
 
+    def setUp(self):
+        self.orig_trial_env = os.environ.get("WHITE_INTERNET_TRIAL_MODE_ONLY")
+        os.environ["WHITE_INTERNET_TRIAL_MODE_ONLY"] = "true"
+
+    def tearDown(self):
+        if self.orig_trial_env is None:
+            os.environ.pop("WHITE_INTERNET_TRIAL_MODE_ONLY", None)
+        else:
+            os.environ["WHITE_INTERNET_TRIAL_MODE_ONLY"] = self.orig_trial_env
+
     def test_trial_overview_keyboard_has_no_paid_buttons(self):
         """In trial mode, overview keyboard must offer trial activation, copy link, and refresh without paid buttons."""
         domain = "cdn.just1k.best"
@@ -364,7 +383,8 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(copy_buttons), 1)
         self.assertIn("wl_show_link", callbacks_active)
-        self.assertIn("white_internet", callbacks_active)
+        self.assertNotIn("white_internet", callbacks_active)
+        self.assertIn("wl_reset_devices", callbacks_active)
         self.assertIn("back_to_main_menu", callbacks_active)
         self.assertNotIn("wl_topup_menu", callbacks_active)
         self.assertNotIn("wl_renew_confirm", callbacks_active)

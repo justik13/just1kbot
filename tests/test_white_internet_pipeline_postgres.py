@@ -261,6 +261,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 session=session,
                 user_id=self.user_id,
                 pack_gb=25,
+                actor_telegram_id=123456789,
             )
             self.assertTrue(ok, msg)
             self.assertIsNotNone(grant)

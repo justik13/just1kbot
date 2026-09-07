@@ -6,7 +6,7 @@ GIB_SUFFIX = " ГБ"
 WL_DATETIME_FORMAT = "%d.%m.%Y %H:%M UTC"
 
 BTN_WL_BUY_ACCESS = "🚀 Оформить доступ ({price} ₽ / {days} дней)"
-BTN_WL_ACTIVATE_TRIAL = "🎁 Активировать бесплатно (3 дня / 10 ГБ)"
+BTN_WL_ACTIVATE_TRIAL = "🎁 Активировать бесплатно (3 дня / 5 ГБ)"
 BTN_WL_CONNECT_CLIENT = "📱 Подключить в приложении"
 BTN_WL_COPY_LINK = "📋 Скопировать ссылку"
 BTN_WL_SHOW_LINK = "📋 Получить ссылку подписки"
@@ -14,8 +14,26 @@ BTN_WL_INSTRUCTIONS = "ℹ️ Инструкция по подключению"
 BTN_WL_INCY_INSTRUCTIONS = "📱 Инструкция по подключению в INCY"
 BTN_WL_REFRESH_TRAFFIC = "🔄 Обновить расход трафика"
 BTN_WL_TOPUP = "➕ Докупить трафик"
+BTN_WL_ADD_DEVICE = "📱 Добавить устройство (+200 ₽ / +50 ГБ)"
+BTN_WL_ADD_DEVICE_CONFIRM = "✅ Подтвердить (+200 ₽)"
 BTN_WL_RENEW = "🔄 Продлить на 30 дней ({price} ₽)"
 BTN_WL_TOPUP_PACK_ITEM = "+{gb} ГБ — {price} ₽"
+BTN_WL_RESET_DEVICES = "🔄 Сбросить устройства"
+WL_ALERT_DEVICES_RESET = "Привязка устройств сброшена! Теперь вы можете подключить новое устройство."
+WL_RESET_DEVICES_FAILED = "Не удалось сбросить устройства. Попробуйте позже."
+WL_RESET_COOLDOWN_ALERT = "⏳ Сброс устройств возможен не чаще одного раза в 15 минут. Подождите ещё {seconds} сек."
+WL_RENEWAL_HORIZON_EXCEEDED = "Подписка уже продлена на максимальный срок (до 2 месяцев вперед)."
+WL_ADMIN_ONLY_ALERT = "🔒 Данная операция доступна только администраторам бота."
+WL_DEVICE_LIMIT_MAX_REACHED = "Достигнут максимум устройств (3 устройства)."
+WL_ADD_DEVICE_CONFIRM = (
+    "📱 <b>Добавление устройства</b>\n\n"
+    "Стоимость: <b>200 ₽</b> (единоразово в текущем периоде)\n"
+    "Трафик: <b>+50 ГБ</b> сразу\n\n"
+    "При следующем продлении подписки тариф составит <b>{next_price} ₽ / месяц</b> "
+    "(включая {next_limit} устройств и {next_traffic} ГБ трафика).\n\n"
+    "Подтверждаете покупку?"
+)
+WL_ADD_DEVICE_SUCCESS = "Устройство успешно добавлено! Теперь доступно слотов: {limit}."
 
 WL_STATUS_PENDING = "🟡 Настраивается шлюз"
 WL_STATUS_TRIAL_ACTIVE = "🟢 Пробный доступ активен"
@@ -55,7 +73,8 @@ WL_OVERVIEW_ACTIVE = (
     "<b>Остаток трафика:</b> {available}\n"
     "<b>Использовано:</b> {used} из {total}\n"
     "<code>[{progress}]</code>\n\n"
-    "<i>Подключение: только через приложение INCY.</i>"
+    "📱 <b>Устройства:</b> {active_devices} из {device_limit}\n\n"
+    "<i>Подключение: через приложение INCY или Happ.</i>"
 )
 
 WL_TOPUP_MENU_TEXT = (
@@ -159,6 +178,7 @@ WL_WEB_EXHAUSTED = "Лимит трафика исчерпан. Пополнит
 WL_WEB_EXPIRED = "Срок действия подписки истек или доступ приостановлен."
 WL_WEB_UNSYNCED = "Шлюз синхронизируется, повторите через несколько секунд."
 WL_WEB_CDN_UNCONFIGURED = "Сетевой шлюз временно недоступен. Обратитесь к администратору."
+WL_WEB_DEVICE_LIMIT_EXCEEDED = "Лимит устройств ({active}/{limit}). Управление: @{bot_username}"
 
 
 WL_VLESS_TAG = "⚪️ Белый Интернет (XHTTP)"
