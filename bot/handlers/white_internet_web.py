@@ -90,6 +90,29 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         ):
             return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
 
+        # HWID (Device ID) enforcement if client sends device identifier header
+        hwid = (
+            request.headers.get("X-Hwid")
+            or request.headers.get("X-HWID")
+            or request.headers.get("X-Device-Id")
+            or request.headers.get("X-Device-ID")
+            or ""
+        ).strip()
+        if hwid:
+            from services.subscription import SubscriptionService
+
+            device_limit = await SubscriptionService.get_effective_device_limit(session, user)
+            effective_limit = device_limit if (isinstance(device_limit, int) and device_limit > 0) else 2
+            allowed_hwid, active_count, max_devs = await white_internet_repo.register_hwid_atomic(
+                session, sub.id, hwid, max_devices=effective_limit
+            )
+            if not allowed_hwid:
+                headers = dict(common_headers)
+                headers["Device-Limit-Exceeded"] = "1"
+                headers["Device-Limit"] = str(max_devs)
+                headers["Device-Active-Count"] = str(active_count)
+                return web.Response(status=403, text=texts.WL_WEB_DEVICE_LIMIT_EXCEEDED, headers=headers)
+
         traffic_limit = getattr(sub, "traffic_limit_bytes", None)
         base_bytes = getattr(sub, "base_traffic_bytes", None)
         extra_bytes = getattr(sub, "extra_traffic_bytes", None)

@@ -1429,6 +1429,10 @@ class WhiteInternetSubscription(Base):
 
     traffic_stats_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    active_hwids: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, default=dict, server_default=text("'{}'::jsonb")
+    )
+
     provisioning_status: Mapped[str] = mapped_column(
         String(30),
         nullable=False,

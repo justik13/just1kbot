@@ -820,6 +820,7 @@ class WhiteInternetService:
             "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
             "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
             "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
+            "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
         }
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
         fp = CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT)
@@ -897,6 +898,7 @@ class WhiteInternetService:
                             "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
                             "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
                             "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
+                            "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
                         },
                     },
                 },

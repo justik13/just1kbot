@@ -487,3 +487,60 @@ async def get_white_internet_dashboard_stats(session: AsyncSession) -> dict:
         "active_count": row.active_count or 0,
         "total_traffic_bytes": int(row.total_traffic_bytes or 0),
     }
+
+
+async def register_hwid_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+    hwid: str,
+    max_devices: int,
+    ttl_hours: int = 48,
+) -> tuple[bool, int, int]:
+    """Atomically registers an HWID for a White Internet subscription under row-level lock.
+
+    Returns:
+        tuple[allowed: bool, active_count: int, max_devices: int]
+    """
+    sub = await session.get(
+        WhiteInternetSubscription,
+        subscription_id,
+        with_for_update=True,
+    )
+    if sub is None:
+        return False, 0, max_devices
+
+    current_hwids: dict[str, str] = dict(sub.active_hwids or {})
+    now = now_utc()
+    cutoff = (now - timedelta(hours=ttl_hours)).isoformat()
+
+    # Filter out stale HWIDs
+    active_hwids = {
+        h: ts for h, ts in current_hwids.items()
+        if isinstance(ts, str) and ts >= cutoff
+    }
+
+    clean_hwid = str(hwid).strip()[:128]
+    effective_limit = max(1, max_devices)
+
+    if not clean_hwid:
+        return True, len(active_hwids), effective_limit
+
+    if clean_hwid in active_hwids:
+        # Existing device - refresh timestamp
+        active_hwids[clean_hwid] = now.isoformat()
+        sub.active_hwids = active_hwids
+        await session.flush()
+        return True, len(active_hwids), effective_limit
+
+    # New device - check limit
+    if len(active_hwids) >= effective_limit:
+        sub.active_hwids = active_hwids
+        await session.flush()
+        return False, len(active_hwids), effective_limit
+
+    # Within limit - register
+    active_hwids[clean_hwid] = now.isoformat()
+    sub.active_hwids = active_hwids
+    await session.flush()
+    return True, len(active_hwids), effective_limit
+

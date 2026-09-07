@@ -149,6 +149,7 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "xPaddingHeader": "X-Cache",
     "xPaddingMethod": "tokenish",
     "xPaddingObfsMode": True,
+    "xPaddingBytes": os.getenv("WHITE_INTERNET_PADDING_BYTES", "100-1000"),
     "security": "tls",
     "alpn": ["h2", "http/1.1"],
     "fp": WHITE_INTERNET_TLS_FINGERPRINT,
