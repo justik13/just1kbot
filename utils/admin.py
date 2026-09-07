@@ -9,8 +9,8 @@ def is_admin(telegram_id: int) -> bool:
     except Exception:
         raw = os.getenv("ADMIN_IDS", "")
         parsed: set[int] = set()
-        for chunk in raw.split(","):
-            chunk = chunk.strip()
-            if chunk.isdigit():
-                parsed.add(int(chunk))
+        for raw_chunk in raw.split(","):
+            item = raw_chunk.strip()
+            if item.isdigit():
+                parsed.add(int(item))
         return telegram_id in parsed

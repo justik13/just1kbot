@@ -8,32 +8,18 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot import texts
-from config.constants import (
-    WHITE_INTERNET_BASE_PRICE_RUB,
-    WHITE_INTERNET_BASE_TRAFFIC_BYTES,
-    WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS,
-    WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
-    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
-    WHITE_INTERNET_MAX_DEVICE_LIMIT,
-    WHITE_INTERNET_MAX_EXPIRY_DAYS,
-    WHITE_INTERNET_MAX_QUOTA_BYTES,
-)
 from config.enums import (
     ServerHealthState,
     ServerLifecycleStatus,
-    TariffQuoteStatus,
     WhiteInternetStatus,
 )
-from database.models import Server, Tariff, TariffQuote, TariffVersion, User, WhiteInternetSubscription
+from database.models import Server, Tariff, TariffVersion, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
     InsufficientAccountBalanceError,
 )
 from database.repositories.white_internet_repo import (
-    WhiteInternetDeviceLimitExceededError,
-    WhiteInternetQuotaCapExceededError,
-    WhiteInternetRenewalHorizonExceededError,
     WhiteInternetResetCooldownError,
 )
 from services.white_internet_service import (

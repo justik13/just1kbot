@@ -18,10 +18,7 @@ from bot import texts
 from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
-    WHITE_INTERNET_BASE_TRAFFIC_BYTES,
-    WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
-    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_TOPUP_PACKS,
@@ -37,7 +34,6 @@ from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.tariff_quotes_repo import get_or_create_current_version
 from database.repositories.users_repo import get_user_by_telegram_id
 from database.repositories.white_internet_repo import (
-    WhiteInternetDeviceLimitExceededError,
     WhiteInternetResetCooldownError,
 )
 from services.white_internet_service import (
