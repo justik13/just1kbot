@@ -19,6 +19,7 @@ from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
+    WHITE_INTERNET_HWID_TTL_HOURS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_TOPUP_PACKS,
@@ -355,7 +356,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         expiry_str = sub.expires_at.strftime(texts.WL_DATETIME_FORMAT) if sub.expires_at else texts.TIME_FOREVER
 
         current_hwids = dict(sub.active_hwids or {})
-        cutoff = (now - timedelta(hours=24)).isoformat()
+        cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
         active_devices = sum(
             1 for ts in current_hwids.values() if isinstance(ts, str) and ts >= cutoff
         )

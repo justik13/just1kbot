@@ -234,7 +234,7 @@ class WhiteInternetService:
         if existing is not None:
             if existing.status == WhiteInternetStatus.DISABLED:
                 return False, texts.WL_SUB_DISABLED, existing
-            if existing.expires_at <= now and existing.status in (
+            if existing.expires_at and existing.expires_at <= now and existing.status in (
                 WhiteInternetStatus.PENDING,
                 WhiteInternetStatus.ACTIVE,
                 WhiteInternetStatus.EXHAUSTED,
@@ -620,7 +620,7 @@ class WhiteInternetService:
         now = now_utc()
         if sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.DISABLED):
             return False, texts.WL_SUB_NOT_READY, None
-        if sub.status == WhiteInternetStatus.EXPIRED or sub.expires_at <= now:
+        if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
             return False, texts.WL_SUB_EXPIRED, None
 
         # Pre-Debit Validation: validate origin node health & availability before debiting funds

@@ -86,7 +86,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
 
         if (
             sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED)
-            or sub.expires_at <= now
+            or (sub.expires_at and sub.expires_at <= now)
         ):
             return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
 

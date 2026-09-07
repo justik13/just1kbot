@@ -562,5 +562,63 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
         self.assertTrue(any("650" in text for text in buttons_admin_max))
 
 
+class TestAuditRemediations(unittest.IsolatedAsyncioTestCase):
+    """Test bug fixes identified during audit remediation."""
+
+    async def test_add_device_slot_atomic_none_expires_at(self):
+        """add_device_slot_atomic must not raise TypeError when expires_at is None."""
+        sub = WhiteInternetSubscription(
+            id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=None,
+            device_limit=1,
+            base_traffic_bytes=50 * 1024**3,
+            extra_traffic_bytes=0,
+        )
+        mock_session = AsyncMock()
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+            updated = await white_internet_repo.add_device_slot_atomic(
+                mock_session,
+                subscription_id=10,
+            )
+        self.assertEqual(updated.device_limit, 2)
+        self.assertEqual(updated.extra_traffic_bytes, 50 * 1024**3)
+
+    async def test_topup_quota_atomic_none_expires_at(self):
+        """topup_quota_atomic must not raise TypeError when expires_at is None."""
+        sub = WhiteInternetSubscription(
+            id=11,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=None,
+            device_limit=1,
+            base_traffic_bytes=50 * 1024**3,
+            extra_traffic_bytes=0,
+        )
+        mock_session = AsyncMock()
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+            added_bytes = await white_internet_repo.topup_quota_atomic(
+                mock_session,
+                subscription_id=11,
+                quote_id=999,
+                pack_gb=10,
+                price_rub=Decimal("40.00"),
+            )
+        self.assertEqual(sub.extra_traffic_bytes, 10 * 1024**3)
+        self.assertEqual(added_bytes, 10 * 1024**3)
+
+    def test_max_device_limit_bounded_to_db_constraint(self):
+        """WHITE_INTERNET_MAX_DEVICE_LIMIT must never exceed 3 due to PostgreSQL CheckConstraint."""
+        from config.constants import WHITE_INTERNET_MAX_DEVICE_LIMIT
+        self.assertLessEqual(WHITE_INTERNET_MAX_DEVICE_LIMIT, 3)
+        self.assertGreaterEqual(WHITE_INTERNET_MAX_DEVICE_LIMIT, 1)
+
+    def test_hwid_ttl_hours_uniform(self):
+        """WHITE_INTERNET_HWID_TTL_HOURS must be defined and positive."""
+        from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
+        self.assertIsInstance(WHITE_INTERNET_HWID_TTL_HOURS, int)
+        self.assertGreater(WHITE_INTERNET_HWID_TTL_HOURS, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+

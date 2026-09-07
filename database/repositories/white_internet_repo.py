@@ -14,6 +14,7 @@ from config.constants import (
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS,
     WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+    WHITE_INTERNET_HWID_TTL_HOURS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
@@ -274,7 +275,7 @@ async def add_device_slot_atomic(
     if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.PENDING):
         raise WhiteInternetInactiveSubscriptionError("Subscription is not eligible for device slot upgrade")
     now = now_utc()
-    if sub.status == WhiteInternetStatus.EXPIRED or sub.expires_at <= now:
+    if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
         raise WhiteInternetInactiveSubscriptionError("Cannot upgrade an expired subscription")
 
     current_limit = max(1, getattr(sub, "device_limit", 1) or 1)
@@ -317,7 +318,7 @@ async def topup_quota_atomic(
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
     if sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.DISABLED):
         raise WhiteInternetInactiveSubscriptionError("Subscription is not eligible for top-up")
-    if sub.status == WhiteInternetStatus.EXPIRED or sub.expires_at <= now:
+    if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
         raise WhiteInternetInactiveSubscriptionError("Cannot top up an expired subscription")
 
     pack_bytes = pack_gb * 1024 * 1024 * 1024
@@ -576,7 +577,7 @@ async def register_hwid_atomic(
     subscription_id: int,
     hwid: str,
     max_devices: int,
-    ttl_hours: int = 48,
+    ttl_hours: int = WHITE_INTERNET_HWID_TTL_HOURS,
 ) -> tuple[bool, int, int]:
     """Atomically registers an HWID for a White Internet subscription under row-level lock.
 
