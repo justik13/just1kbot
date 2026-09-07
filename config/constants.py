@@ -6,6 +6,7 @@ integrations, services, and bot layers without architectural cycles.
 """
 
 import os
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -141,6 +142,19 @@ if not WHITE_INTERNET_SUB_PATH_PREFIX.startswith("/"):
     WHITE_INTERNET_SUB_PATH_PREFIX = f"/{WHITE_INTERNET_SUB_PATH_PREFIX}"
 
 
+WHITE_INTERNET_DEFAULT_DEVICE_LIMIT: int = 1
+
+
+def _validate_xhttp_padding_bytes(val: str | None) -> str:
+    default_val = "100-1000"
+    if not val or not isinstance(val, str):
+        return default_val
+    clean = val.strip()
+    if re.match(r"^\d+-\d+$|^\d+$", clean):
+        return clean
+    return default_val
+
+
 CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "mode": "packet-up",
     "uplinkHTTPMethod": "OPTIONS",
@@ -149,7 +163,7 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "xPaddingHeader": "X-Cache",
     "xPaddingMethod": "tokenish",
     "xPaddingObfsMode": True,
-    "xPaddingBytes": os.getenv("WHITE_INTERNET_PADDING_BYTES", "100-1000"),
+    "xPaddingBytes": _validate_xhttp_padding_bytes(os.getenv("WHITE_INTERNET_PADDING_BYTES")),
     "security": "tls",
     "alpn": ["h2", "http/1.1"],
     "fp": WHITE_INTERNET_TLS_FINGERPRINT,
@@ -208,6 +222,7 @@ __all__ = [
     "WHITE_INTERNET_BASE_DURATION_DAYS",
     "WHITE_INTERNET_BASE_PRICE_RUB",
     "WHITE_INTERNET_BASE_TRAFFIC_BYTES",
+    "WHITE_INTERNET_DEFAULT_DEVICE_LIMIT",
     "WHITE_INTERNET_MAX_QUOTA_BYTES",
     "WHITE_INTERNET_SERVICE_TYPE",
     "WHITE_INTERNET_SUB_PATH_PREFIX",

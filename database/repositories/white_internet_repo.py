@@ -525,6 +525,11 @@ async def register_hwid_atomic(
     if not clean_hwid:
         return True, len(active_hwids), effective_limit
 
+    # If active devices exceed limit (e.g. after tariff downgrade), prune to effective_limit most recently active
+    if len(active_hwids) > effective_limit:
+        sorted_hwids = sorted(active_hwids.items(), key=lambda item: item[1], reverse=True)
+        active_hwids = dict(sorted_hwids[:effective_limit])
+
     if clean_hwid in active_hwids:
         # Existing device - refresh timestamp
         active_hwids[clean_hwid] = now.isoformat()
@@ -543,4 +548,21 @@ async def register_hwid_atomic(
     sub.active_hwids = active_hwids
     await session.flush()
     return True, len(active_hwids), effective_limit
+
+
+async def reset_active_hwids_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+) -> bool:
+    """Atomically clears all registered HWIDs for a subscription under row-level lock."""
+    sub = await session.get(
+        WhiteInternetSubscription,
+        subscription_id,
+        with_for_update=True,
+    )
+    if sub is None:
+        return False
+    sub.active_hwids = {}
+    await session.flush()
+    return True
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+from decimal import Decimal
 import html
 import logging
 import os
@@ -12,12 +14,11 @@ from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from decimal import Decimal
-
 from bot import texts
 from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
+    WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_TOPUP_PACKS,
     WHITE_INTERNET_TRIAL_DURATION_DAYS,
@@ -31,6 +32,7 @@ from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.tariff_quotes_repo import get_or_create_current_version
 from database.repositories.users_repo import get_user_by_telegram_id
+from services.subscription import SubscriptionService
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
@@ -118,12 +120,14 @@ def get_white_internet_overview_keyboard(
                 )
                 builder.button(text=texts.BTN_WL_INCY_INSTRUCTIONS, callback_data="wl_show_link")
             builder.button(text=texts.BTN_WL_REFRESH_TRAFFIC, callback_data="white_internet")
+            if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
+                builder.button(text=texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices")
             builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
 
             if has_sub_link:
-                builder.adjust(1, 1, 1, 1)
+                builder.adjust(1, 1, 1, 1, 1)
             else:
-                builder.adjust(1, 1)
+                builder.adjust(1, 1, 1)
         return builder.as_markup()
 
     if sub is None:
@@ -169,12 +173,13 @@ def get_white_internet_overview_keyboard(
                 text=texts.BTN_WL_RENEW.format(price=base_price),
                 callback_data="wl_renew_confirm",
             )
+            builder.button(text=texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices")
         builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
 
         if has_sub_link:
-            builder.adjust(1, 1, 2, 1)
+            builder.adjust(1, 1, 2, 1, 1)
         else:
-            builder.adjust(2, 1)
+            builder.adjust(2, 1, 1)
 
     return builder.as_markup()
 
@@ -331,6 +336,18 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         progress_bar = _render_progress_bar(used_bytes, total_limit)
         expiry_str = sub.expires_at.strftime(texts.WL_DATETIME_FORMAT) if sub.expires_at else texts.TIME_FOREVER
 
+        current_hwids = dict(sub.active_hwids or {})
+        cutoff = (now - timedelta(hours=24)).isoformat()
+        active_devices = sum(
+            1 for ts in current_hwids.values() if isinstance(ts, str) and ts >= cutoff
+        )
+        dev_limit = await SubscriptionService.get_effective_device_limit(session, user)
+        effective_device_limit = (
+            dev_limit
+            if (isinstance(dev_limit, int) and dev_limit > 0)
+            else WHITE_INTERNET_DEFAULT_DEVICE_LIMIT
+        )
+
         text = texts.WL_OVERVIEW_ACTIVE.format(
             status=status_str,
             expiry=expiry_str,
@@ -338,6 +355,8 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             used=_format_bytes(used_bytes),
             total=_format_bytes(total_limit),
             progress=progress_bar,
+            active_devices=active_devices,
+            device_limit=effective_device_limit,
         )
         if sub.status == WhiteInternetStatus.ACTIVE and not sub_domain:
             text += texts.WL_DOMAIN_UNCONFIGURED_BANNER
@@ -586,3 +605,31 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
+
+
+@router.callback_query(F.data == "wl_reset_devices")
+async def handle_wl_reset_devices(query: CallbackQuery, session: AsyncSession):
+    user = await get_user_by_telegram_id(session, query.from_user.id)
+    if user is None:
+        try:
+            await query.answer(texts.WL_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if sub is None:
+        try:
+            await query.answer(texts.WL_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    await white_internet_repo.reset_active_hwids_atomic(session, sub.id)
+    await session.commit()
+    try:
+        await query.answer(texts.WL_ALERT_DEVICES_RESET, show_alert=True)
+    except Exception:
+        pass
+    await show_white_internet_menu(query, session)
+

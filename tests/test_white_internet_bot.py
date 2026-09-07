@@ -7,11 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiogram.types import CallbackQuery, User as TgUser
 
 from bot.handlers.white_internet import (
+    handle_wl_reset_devices,
     process_white_internet_buy,
     process_white_internet_renew,
     process_topup_pack,
 )
-from database.models import User
+from config.enums import WhiteInternetStatus
+from database.models import User, WhiteInternetSubscription
 from database.repositories.account_ledger_repo import AccountBalanceSnapshot
 
 
@@ -434,4 +436,41 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("457.5 KiB", rendered_text)
         self.assertIn("10.0 GiB", rendered_text)
         self.assertNotIn("0.0 ГБ", rendered_text)
+        self.assertIn("Устройства:</b> 0 из 1", rendered_text)
+
+    async def test_wl_reset_devices_success(self):
+        query = MagicMock(spec=CallbackQuery)
+        query.from_user = self.tg_user
+        query.message = MagicMock()
+        query.message.edit_text = AsyncMock()
+        query.answer = AsyncMock()
+
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 42
+        sub.user_id = self.user.id
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.active_hwids = {"hwid-1": "2026-09-01T10:00:00+00:00"}
+
+        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
+             patch("bot.handlers.white_internet.white_internet_repo.reset_active_hwids_atomic", new_callable=AsyncMock) as mock_reset, \
+             patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock) as mock_menu:
+            await handle_wl_reset_devices(query, self.session)
+            mock_reset.assert_awaited_once_with(self.session, sub.id)
+            self.session.commit.assert_awaited_once()
+            query.answer.assert_awaited_once()
+            mock_menu.assert_awaited_once_with(query, self.session)
+
+    async def test_wl_reset_devices_no_sub(self):
+        query = MagicMock(spec=CallbackQuery)
+        query.from_user = self.tg_user
+        query.message = MagicMock()
+        query.answer = AsyncMock()
+
+        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=None):
+            await handle_wl_reset_devices(query, self.session)
+            query.answer.assert_awaited_once()
+            self.session.commit.assert_not_called()
+
 

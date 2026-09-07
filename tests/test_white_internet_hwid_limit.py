@@ -114,6 +114,55 @@ class TestWhiteInternetHwidRepo(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count, 0)
         self.assertEqual(max_devs, 2)
 
+    async def test_reset_active_hwids_atomic(self):
+        """Verify resetting HWIDs clears dictionary and flushes."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        sub.active_hwids = {"device-1": "2026-09-01T10:00:00+00:00"}
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        success = await white_internet_repo.reset_active_hwids_atomic(
+            mock_session, subscription_id=1
+        )
+        self.assertTrue(success)
+        self.assertEqual(sub.active_hwids, {})
+        mock_session.flush.assert_awaited_once()
+
+    async def test_reset_active_hwids_not_found(self):
+        """Verify resetting HWIDs returns False when subscription does not exist."""
+        mock_session = AsyncMock()
+        mock_session.get.return_value = None
+
+        success = await white_internet_repo.reset_active_hwids_atomic(
+            mock_session, subscription_id=999
+        )
+        self.assertFalse(success)
+
+    async def test_register_hwid_downgrade_lru_prune(self):
+        """Verify that when effective limit drops below active count, oldest is pruned."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        now = datetime.now(timezone.utc)
+        sub.active_hwids = {
+            "dev-old": (now - timedelta(minutes=10)).isoformat(),
+            "dev-new": (now - timedelta(minutes=1)).isoformat(),
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        # Downgrade to max_devices=1 and attempt registering 3rd device
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session, subscription_id=1, hwid="dev-3", max_devices=1
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(max_devs, 1)
+        self.assertEqual(count, 1)
+        self.assertNotIn("dev-old", sub.active_hwids)
+        self.assertIn("dev-new", sub.active_hwids)
+
 
 class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
     """Test suite for HTTP feed device limiting based on X-Hwid / X-HWID headers."""
@@ -149,9 +198,75 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
         sub.status = WhiteInternetStatus.ACTIVE
         sub.user_id = 10
         sub.device_limit = 2
+        sub.uuid = "12345678-1234-1234-1234-123456789abc"
         sub.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
         sub.traffic_limit_bytes = 100 * 1024 * 1024 * 1024
         sub.traffic_used_bytes = 0
+        sub.traffic_uplink_bytes = 0
+        sub.traffic_downlink_bytes = 0
+        sub.last_uplink_snapshot = 0
+        sub.last_downlink_snapshot = 0
+        sub.origin_node_id = 1
+        sub.desired_version = 1
+        sub.actual_version = 1
+        sub.last_reconciled_node_epoch = "epoch-xyz"
+
+        server = MagicMock(spec=Server)
+        server.id = 1
+        server.ip = "192.0.2.1"
+        server.port = 443
+        server.protocol = XRAY_PROTOCOL
+        server.health_state = ServerHealthState.ONLINE
+        server.is_active = True
+        server.capabilities = ["xray_origin"]
+        server.xray_instance_epoch = "epoch-xyz"
+        server.extra_data = {"cdn_domain": "cdn.just1k.online"}
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    with patch(
+                        "services.subscription.SubscriptionService.get_effective_device_limit",
+                        new=AsyncMock(return_value=2),
+                    ):
+                        with patch(
+                            "database.repositories.white_internet_repo.register_hwid_atomic",
+                            new=AsyncMock(return_value=(False, 2, 2)),
+                        ):
+                            resp = await self.client.get(
+                                "/sub/wl/test-token-valid-1234567890abcdef",
+                                headers={"X-Hwid": "device-overflow-3"},
+                            )
+                            self.assertEqual(resp.status, 403)
+                            self.assertEqual(resp.headers.get("Device-Limit-Exceeded"), "1")
+                            self.assertEqual(resp.headers.get("Device-Limit"), "2")
+                            self.assertEqual(resp.headers.get("Device-Active-Count"), "2")
+                            self.assertEqual(resp.headers.get("x-hwid-max-devices-reached"), "true")
+                            self.assertEqual(resp.headers.get("x-hwid-limit"), "2")
+                            self.assertEqual(resp.headers.get("x-hwid-active"), "2")
+                            body = await resp.text()
+                            self.assertIn("Лимит устройств (2/2)", body)
+                            self.assertIn("@", body)
+
+    async def test_request_exhausted_quota_does_not_register_hwid(self):
+        """Verify that when quota is exhausted, 403 is returned and HWID is NOT registered."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 42
+        sub.status = WhiteInternetStatus.EXHAUSTED
+        sub.user_id = 10
+        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        sub.traffic_limit_bytes = 100
+        sub.traffic_used_bytes = 100
+        sub.traffic_uplink_bytes = 50
+        sub.traffic_downlink_bytes = 50
 
         mock_session = AsyncMock()
 
@@ -161,24 +276,47 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                with patch(
-                    "services.subscription.SubscriptionService.get_effective_device_limit",
-                    new=AsyncMock(return_value=2),
-                ):
-                    with patch(
-                        "database.repositories.white_internet_repo.register_hwid_atomic",
-                        new=AsyncMock(return_value=(False, 2, 2)),
-                    ):
-                        resp = await self.client.get(
-                            "/sub/wl/test-token-valid-1234567890abcdef",
-                            headers={"X-Hwid": "device-overflow-3"},
-                        )
-                        self.assertEqual(resp.status, 403)
-                        self.assertEqual(resp.headers.get("Device-Limit-Exceeded"), "1")
-                        self.assertEqual(resp.headers.get("Device-Limit"), "2")
-                        self.assertEqual(resp.headers.get("Device-Active-Count"), "2")
-                        body = await resp.text()
-                        self.assertIn("Превышен лимит активных устройств", body)
+                with patch("database.repositories.white_internet_repo.register_hwid_atomic") as mock_register:
+                    resp = await self.client.get(
+                        "/sub/wl/test-token-valid-1234567890abcdef",
+                        headers={"X-Hwid": "device-new"},
+                    )
+                    self.assertEqual(resp.status, 403)
+                    mock_register.assert_not_called()
+
+    async def test_request_unhealthy_server_does_not_register_hwid(self):
+        """Verify that when server is unhealthy, 503 is returned and HWID is NOT registered."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 42
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.user_id = 10
+        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        sub.traffic_limit_bytes = 100 * 1024 * 1024
+        sub.traffic_used_bytes = 0
+        sub.origin_node_id = 1
+
+        server = MagicMock(spec=Server)
+        server.id = 1
+        server.health_state = ServerHealthState.PROBLEM
+        server.is_active = True
+        server.protocol = XRAY_PROTOCOL
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                with patch("database.repositories.white_internet_repo.register_hwid_atomic") as mock_register:
+                    resp = await self.client.get(
+                        "/sub/wl/test-token-valid-1234567890abcdef",
+                        headers={"X-Hwid": "device-new"},
+                    )
+                    self.assertEqual(resp.status, 503)
+                    mock_register.assert_not_called()
 
     async def test_request_with_hwid_allowed(self):
         """Verify HTTP 200 and device registration when under limit."""

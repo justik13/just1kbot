@@ -16,6 +16,7 @@ from config.constants import (
     DEFAULT_WHITE_INTERNET_PATH,
     DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+    WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     XRAY_PROTOCOL,
 )
@@ -23,6 +24,7 @@ from config.enums import ServerHealthState, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server
 from database.repositories import users_repo, white_internet_repo
+from services.subscription import SubscriptionService
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
@@ -89,29 +91,6 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             or sub.expires_at <= now
         ):
             return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
-
-        # HWID (Device ID) enforcement if client sends device identifier header
-        hwid = (
-            request.headers.get("X-Hwid")
-            or request.headers.get("X-HWID")
-            or request.headers.get("X-Device-Id")
-            or request.headers.get("X-Device-ID")
-            or ""
-        ).strip()
-        if hwid:
-            from services.subscription import SubscriptionService
-
-            device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-            effective_limit = device_limit if (isinstance(device_limit, int) and device_limit > 0) else 2
-            allowed_hwid, active_count, max_devs = await white_internet_repo.register_hwid_atomic(
-                session, sub.id, hwid, max_devices=effective_limit
-            )
-            if not allowed_hwid:
-                headers = dict(common_headers)
-                headers["Device-Limit-Exceeded"] = "1"
-                headers["Device-Limit"] = str(max_devs)
-                headers["Device-Active-Count"] = str(active_count)
-                return web.Response(status=403, text=texts.WL_WEB_DEVICE_LIMIT_EXCEEDED, headers=headers)
 
         traffic_limit = getattr(sub, "traffic_limit_bytes", None)
         base_bytes = getattr(sub, "base_traffic_bytes", None)
@@ -210,6 +189,40 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 relays = json.loads(os.environ["WHITE_INTERNET_RELAYS"])
             except Exception:
                 pass
+
+        # HWID (Device ID) enforcement if client sends device identifier header
+        hwid = (
+            request.headers.get("X-Hwid")
+            or request.headers.get("X-HWID")
+            or request.headers.get("X-Device-Id")
+            or request.headers.get("X-Device-ID")
+            or ""
+        ).strip()
+        if hwid:
+            device_limit = await SubscriptionService.get_effective_device_limit(session, user)
+            effective_limit = (
+                device_limit
+                if (isinstance(device_limit, int) and device_limit > 0)
+                else WHITE_INTERNET_DEFAULT_DEVICE_LIMIT
+            )
+            allowed_hwid, active_count, max_devs = await white_internet_repo.register_hwid_atomic(
+                session, sub.id, hwid, max_devices=effective_limit
+            )
+            if not allowed_hwid:
+                headers = dict(common_headers)
+                headers["Device-Limit-Exceeded"] = "1"
+                headers["Device-Limit"] = str(max_devs)
+                headers["Device-Active-Count"] = str(active_count)
+                headers["x-hwid-max-devices-reached"] = "true"
+                headers["x-hwid-limit"] = str(max_devs)
+                headers["x-hwid-active"] = str(active_count)
+                bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+                limit_msg = texts.WL_WEB_DEVICE_LIMIT_EXCEEDED.format(
+                    active=active_count,
+                    limit=max_devs,
+                    bot_username=bot_username,
+                )
+                return web.Response(status=403, text=limit_msg, headers=headers)
 
         vless_links = WhiteInternetService.generate_vless_links(
             sub,
