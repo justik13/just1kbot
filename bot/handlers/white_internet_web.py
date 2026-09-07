@@ -24,7 +24,6 @@ from config.enums import ServerHealthState, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server
 from database.repositories import users_repo, white_internet_repo
-from services.subscription import SubscriptionService
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
@@ -199,12 +198,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             or ""
         ).strip()
         if hwid:
-            device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-            effective_limit = (
-                device_limit
-                if (isinstance(device_limit, int) and device_limit > 0)
-                else WHITE_INTERNET_DEFAULT_DEVICE_LIMIT
-            )
+            effective_limit = max(1, getattr(sub, "device_limit", 1) or 1)
             allowed_hwid, active_count, max_devs = await white_internet_repo.register_hwid_atomic(
                 session, sub.id, hwid, max_devices=effective_limit
             )

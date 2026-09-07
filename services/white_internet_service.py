@@ -21,6 +21,11 @@ from config.constants import (
     DEFAULT_WHITE_INTERNET_PATH,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
+    WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+    WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
+    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+    WHITE_INTERNET_MAX_DEVICE_LIMIT,
+    WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
     WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
@@ -51,11 +56,23 @@ from database.repositories.tariff_quotes_repo import (
     lock_checkout_user,
 )
 from services.xray_node_client import SyncResult, XrayNodeClient, _sanitize_url
+from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def get_white_internet_tier_price(device_limit: int) -> Decimal:
+    """Calculate White Internet monthly renewal/subscription price based on device slots.
+
+    1 device  = 250 RUB (50 GiB base)
+    2 devices = 450 RUB (100 GiB base)
+    3 devices = 650 RUB (150 GiB base)
+    """
+    limit = max(1, min(int(device_limit), WHITE_INTERNET_MAX_DEVICE_LIMIT))
+    return WHITE_INTERNET_BASE_PRICE_RUB + Decimal(limit - 1) * WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
 
 
 async def _deprovision_old_node_safe(
@@ -351,15 +368,25 @@ class WhiteInternetService:
             )
 
         now = now_utc()
+        base_time = sub.expires_at if sub.expires_at and sub.expires_at > now else now
+        if base_time + timedelta(days=WHITE_INTERNET_BASE_DURATION_DAYS) > now + timedelta(
+            days=WHITE_INTERNET_MAX_EXPIRY_DAYS
+        ):
+            return False, texts.WL_RENEWAL_HORIZON_EXCEEDED, None
+
+        sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+        tier_price = get_white_internet_tier_price(sub_device_limit)
+        tier_base_bytes = sub_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
+
         quote = cls._new_quote(
             user_id=user.id,
             operation_type=TariffQuoteOperation.RENEW,
             target_version_id=tariff_version.id,
             source_version_id=tariff_version.id,
-            amount_due=Decimal(tariff_version.price_rub),
+            amount_due=tier_price,
             expires_at=now + timedelta(minutes=15),
             resulting_paid_hours=tariff_version.duration_hours,
-            resulting_paid_value=Decimal(tariff_version.price_rub),
+            resulting_paid_value=tier_price,
         )
         session.add(quote)
         await session.flush()
@@ -374,10 +401,10 @@ class WhiteInternetService:
             return (
                 False,
                 texts.WL_INSUFFICIENT_BALANCE_RENEW.format(
-                    price=int(tariff_version.price_rub),
+                    price=int(tier_price),
                     balance=balance_snap.available,
                     shortage=max(
-                        Decimal(tariff_version.price_rub) - balance_snap.available, Decimal(0)
+                        tier_price - balance_snap.available, Decimal(0)
                     ),
                 ),
                 None,
@@ -406,9 +433,9 @@ class WhiteInternetService:
             session,
             subscription_id=sub.id,
             quote_id=quote.id,
-            price_rub=Decimal(tariff_version.price_rub),
+            price_rub=tier_price,
             duration_days=tariff.duration_days,
-            base_bytes=tariff_version.base_quota_bytes,
+            base_bytes=tier_base_bytes,
         )
 
         # Durable deprovisioning of UUID on old origin node: record the cleanup
@@ -432,9 +459,155 @@ class WhiteInternetService:
         return True, texts.WL_RENEW_SUCCESS, renewed
 
     @classmethod
-    async def topup_quota(cls, session: AsyncSession, user_id: int, pack_gb: int):
+    async def purchase_device_slot(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        actor_telegram_id: int | None = None,
+    ) -> tuple[bool, str, WhiteInternetSubscription | None]:
         if _is_trial_mode_only():
             return False, texts.WL_PAID_FEATURES_DISABLED_ALERT, None
+        if actor_telegram_id is None or not is_admin(actor_telegram_id):
+            return False, texts.WL_ADMIN_ONLY_ALERT, None
+        user = await lock_checkout_user(session, user_id)
+        if user is None:
+            return False, texts.WL_USER_NOT_FOUND, None
+        sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+        if sub is None:
+            return False, texts.WL_NO_SUB, None
+        now = now_utc()
+        if sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.DISABLED):
+            return False, texts.WL_SUB_NOT_READY, None
+        if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
+            return False, texts.WL_SUB_EXPIRED, None
+
+        current_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+        if current_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
+            return False, texts.WL_DEVICE_LIMIT_MAX_REACHED, None
+
+        total_accumulated = (
+            (sub.base_traffic_bytes or 0)
+            + (sub.extra_traffic_bytes or 0)
+            + WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES
+        )
+        if total_accumulated > WHITE_INTERNET_MAX_QUOTA_BYTES:
+            current_available = await white_internet_repo.get_available_quota_bytes(
+                session, sub.id, now
+            )
+            return (
+                False,
+                texts.WL_CAP_EXCEEDED.format(
+                    gb=int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES / (1024**3)),
+                    available=current_available // (1024**3),
+                ),
+                None,
+            )
+
+        # Pre-Debit Validation: validate origin node health & availability before debiting funds
+        origin_node = await session.scalar(
+            select(Server).where(
+                Server.id == sub.origin_node_id,
+                Server.protocol == XRAY_PROTOCOL,
+            )
+        )
+        needs_migration = (
+            not origin_node
+            or not origin_node.is_active
+            or origin_node.health_state != ServerHealthState.ONLINE
+            or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
+            or not (origin_node.extra_data or {}).get("relays")
+        )
+        new_origin_server: Server | None = None
+        if needs_migration:
+            try:
+                new_origin_server = await cls.select_origin_node(session)
+            except RuntimeError as exc:
+                logger.warning("No healthy origin node available for device slot migration: %s", exc)
+                return False, texts.WL_NO_SERVERS_AVAILABLE, None
+
+        price = WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
+        tariff = await cls.get_or_create_white_internet_tariff(session)
+        tariff_version = await get_or_create_current_version(session, tariff)
+        quote = cls._new_quote(
+            user_id=user.id,
+            operation_type=TariffQuoteOperation.PURCHASE,
+            target_version_id=tariff_version.id,
+            amount_due=price,
+            expires_at=now + timedelta(minutes=15),
+        )
+        session.add(quote)
+        await session.flush()
+        try:
+            await create_purchase_debit(
+                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+            )
+        except InsufficientAccountBalanceError:
+            quote.status = TariffQuoteStatus.CANCELLED
+            await session.flush()
+            balance_snap = await get_account_balance(session, user_id=user.id)
+            return (
+                False,
+                texts.WL_INSUFFICIENT_BALANCE_BUY.format(
+                    price=int(price),
+                    balance=balance_snap.available,
+                    shortage=max(price - balance_snap.available, Decimal(0)),
+                ),
+                None,
+            )
+        except AccountLedgerError as exc:
+            quote.status = TariffQuoteStatus.CANCELLED
+            await session.flush()
+            return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+
+        # Apply node migration ONLY after successful financial debit
+        old_origin_for_cleanup: Server | None = None
+        if needs_migration and new_origin_server is not None:
+            old_origin_for_cleanup = origin_node
+            sub.origin_node_id = new_origin_server.id
+            sub.actual_version = 0
+            sub.last_reconciled_node_epoch = None
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
+            await session.flush()
+            await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
+                session, new_origin_server.id, sub.uuid
+            )
+
+        updated_sub = await white_internet_repo.add_device_slot_atomic(
+            session,
+            subscription_id=sub.id,
+            extra_bytes=WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+        )
+        quote.status = TariffQuoteStatus.CONSUMED
+        quote.consumed_at = now_utc()
+
+        if old_origin_for_cleanup:
+            await white_internet_repo.enqueue_orphan_cleanup(
+                session,
+                server_id=old_origin_for_cleanup.id,
+                client_uuid=sub.uuid,
+                desired_version=sub.desired_version + 1,
+            )
+            _dispatch_deprovision(
+                old_origin_for_cleanup,
+                client_uuid=sub.uuid,
+                version=sub.desired_version + 1,
+                context=f"add_device_slot sub {sub.id}",
+            )
+
+        return True, texts.WL_ADD_DEVICE_SUCCESS.format(limit=updated_sub.device_limit), updated_sub
+
+    @classmethod
+    async def topup_quota(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        pack_gb: int,
+        actor_telegram_id: int | None = None,
+    ):
+        if _is_trial_mode_only():
+            return False, texts.WL_PAID_FEATURES_DISABLED_ALERT, None
+        if actor_telegram_id is None or not is_admin(actor_telegram_id):
+            return False, texts.WL_ADMIN_ONLY_ALERT, None
         if pack_gb not in WHITE_INTERNET_TOPUP_PACKS:
             return False, texts.WL_INVALID_TOPUP_PACK.format(gb=pack_gb), None
         pack_price = WHITE_INTERNET_TOPUP_PACKS[pack_gb]
@@ -561,7 +734,7 @@ class WhiteInternetService:
 
     @classmethod
     async def create_trial_subscription(cls, session: AsyncSession, user_id: int):
-        """Provision a free trial White Internet subscription (3 days / 10 GiB / 0 RUB)."""
+        """Provision a free trial White Internet subscription (3 days / 5 GiB / 0 RUB)."""
         user = await lock_checkout_user(session, user_id)
         if user is None:
             return False, texts.WL_USER_NOT_FOUND, None

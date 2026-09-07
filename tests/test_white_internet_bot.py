@@ -125,16 +125,17 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             debt=Decimal("0.00"),
         )
 
-        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user):
-            with patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance) as mock_balance:
-                with patch("services.white_internet_service.WhiteInternetService.topup_quota", return_value=(True, "OK", MagicMock())) as mock_topup:
-                    with patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock) as mock_menu:
-                        await process_topup_pack(query, self.session)
+        with patch("bot.handlers.white_internet.is_admin", return_value=True), \
+             patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance) as mock_balance, \
+             patch("services.white_internet_service.WhiteInternetService.topup_quota", return_value=(True, "OK", MagicMock())) as mock_topup, \
+             patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock) as mock_menu:
+            await process_topup_pack(query, self.session)
 
-                        mock_balance.assert_awaited_once_with(self.session, user_id=self.user.id)
-                        mock_topup.assert_awaited_once_with(self.session, self.user.id, 25)
-                        self.session.commit.assert_awaited_once()
-                        mock_menu.assert_awaited_once_with(query, self.session)
+            mock_balance.assert_awaited_once_with(self.session, user_id=self.user.id)
+            mock_topup.assert_awaited_once_with(self.session, self.user.id, 25, actor_telegram_id=self.tg_user.id)
+            self.session.commit.assert_awaited_once()
+            mock_menu.assert_awaited_once_with(query, self.session)
 
     def test_overview_keyboard_generates_valid_telegram_buttons(self):
         """Active subscription keyboard must use native CopyTextButton and Bot API compliant buttons."""
@@ -214,16 +215,16 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         callbacks_pending = [btn.callback_data for row in kb_pending.inline_keyboard for btn in row]
         self.assertEqual(callbacks_pending, ["back_to_main_menu"])
 
-        # 5. EXHAUSTED -> Top-up + Renew + Back button
+        # 5. EXHAUSTED -> Top-up + Renew + Back button (admin)
         sub_exhausted = WhiteInternetSubscription(id=4, user_id=1, status=WhiteInternetStatus.EXHAUSTED)
-        kb_exhausted = get_white_internet_overview_keyboard(sub_exhausted, bot_domain=domain)
+        kb_exhausted = get_white_internet_overview_keyboard(sub_exhausted, bot_domain=domain, is_admin_user=True)
         self.assertIsNotNone(kb_exhausted)
         callbacks_exhausted = [btn.callback_data for row in kb_exhausted.inline_keyboard for btn in row]
         self.assertIn("wl_topup_menu", callbacks_exhausted)
         self.assertIn("wl_renew_confirm", callbacks_exhausted)
         self.assertIn("back_to_main_menu", callbacks_exhausted)
 
-        # 6. ACTIVE + Provisioned -> Copy text + Instructions + Top-up + Renew + Back button
+        # 6. ACTIVE + Provisioned -> Copy text + Instructions + Top-up + Renew + Back button (admin)
         sub_active = WhiteInternetSubscription(
             id=5,
             user_id=1,
@@ -231,7 +232,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             status=WhiteInternetStatus.ACTIVE,
             provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
         )
-        kb_active = get_white_internet_overview_keyboard(sub_active, bot_domain=domain)
+        kb_active = get_white_internet_overview_keyboard(sub_active, bot_domain=domain, is_admin_user=True)
         self.assertIsNotNone(kb_active)
         callbacks_active = [btn.callback_data for row in kb_active.inline_keyboard for btn in row if btn.callback_data]
         self.assertIn("wl_show_link", callbacks_active)
