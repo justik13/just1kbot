@@ -78,7 +78,7 @@ def upgrade() -> None:
             WITH sub_counts AS (
                 SELECT user_id, count(*) AS sub_cnt
                 FROM white_internet_subscriptions
-                WHERE base_traffic_bytes = 5368709120
+                WHERE base_traffic_bytes IN (5368709120, 10737418240)
                   AND device_limit = 1
                 GROUP BY user_id
             ),
@@ -110,7 +110,7 @@ def upgrade() -> None:
         """
         UPDATE white_internet_subscriptions sub
         SET is_trial = true
-        WHERE sub.base_traffic_bytes = 5368709120
+        WHERE sub.base_traffic_bytes IN (5368709120, 10737418240)
           AND sub.device_limit = 1
           AND (sub.expires_at - sub.started_at) <= interval '4 days'
           AND EXISTS (

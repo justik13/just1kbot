@@ -188,7 +188,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             except Exception:
                 pass
 
-        # HWID (Device ID) enforcement if client sends device identifier header
+        # HWID (Device ID) strict enforcement
         hwid = (
             request.headers.get("X-Hwid")
             or request.headers.get("X-HWID")
@@ -196,26 +196,30 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             or request.headers.get("X-Device-ID")
             or ""
         ).strip()
-        if hwid:
-            effective_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-            allowed_hwid, active_count, max_devs = await white_internet_repo.register_hwid_atomic(
-                session, sub.id, hwid, max_devices=effective_limit
+        if not hwid:
+            headers = dict(common_headers)
+            headers["x-hwid-required"] = "true"
+            return web.Response(status=403, text=texts.WL_WEB_HWID_REQUIRED, headers=headers)
+
+        effective_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+        allowed_hwid, active_count, max_devs = await white_internet_repo.register_hwid_atomic(
+            session, sub.id, hwid, max_devices=effective_limit
+        )
+        if not allowed_hwid:
+            headers = dict(common_headers)
+            headers["Device-Limit-Exceeded"] = "1"
+            headers["Device-Limit"] = str(max_devs)
+            headers["Device-Active-Count"] = str(active_count)
+            headers["x-hwid-max-devices-reached"] = "true"
+            headers["x-hwid-limit"] = str(max_devs)
+            headers["x-hwid-active"] = str(active_count)
+            bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+            limit_msg = texts.WL_WEB_DEVICE_LIMIT_EXCEEDED.format(
+                active=active_count,
+                limit=max_devs,
+                bot_username=bot_username,
             )
-            if not allowed_hwid:
-                headers = dict(common_headers)
-                headers["Device-Limit-Exceeded"] = "1"
-                headers["Device-Limit"] = str(max_devs)
-                headers["Device-Active-Count"] = str(active_count)
-                headers["x-hwid-max-devices-reached"] = "true"
-                headers["x-hwid-limit"] = str(max_devs)
-                headers["x-hwid-active"] = str(active_count)
-                bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
-                limit_msg = texts.WL_WEB_DEVICE_LIMIT_EXCEEDED.format(
-                    active=active_count,
-                    limit=max_devs,
-                    bot_username=bot_username,
-                )
-                return web.Response(status=403, text=limit_msg, headers=headers)
+            return web.Response(status=403, text=limit_msg, headers=headers)
 
         vless_links = WhiteInternetService.generate_vless_links(
             sub,

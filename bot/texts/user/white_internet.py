@@ -218,6 +218,8 @@ WL_WEB_EXPIRED = "Срок действия подписки истек или �
 WL_WEB_UNSYNCED = "Шлюз синхронизируется, повторите через несколько секунд."
 WL_WEB_CDN_UNCONFIGURED = "Сетевой шлюз временно недоступен. Обратитесь к администратору."
 WL_WEB_DEVICE_LIMIT_EXCEEDED = "Лимит устройств ({active}/{limit}). Управление: @{bot_username}"
+WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включите отправку HWID в приложении."
+
 
 
 WL_VLESS_TAG = "⚪️ Белый Интернет (XHTTP)"

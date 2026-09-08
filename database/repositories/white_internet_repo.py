@@ -769,6 +769,10 @@ async def add_extra_traffic_atomic(
 
     sub.extra_traffic_bytes = (sub.extra_traffic_bytes or 0) + extra_bytes
     total_quota = (sub.base_traffic_bytes or 0) + sub.extra_traffic_bytes
+    if total_quota > WHITE_INTERNET_MAX_QUOTA_BYTES:
+        raise WhiteInternetQuotaCapExceededError(
+            f"Total quota ({total_quota} bytes) exceeds maximum allowed limit ({WHITE_INTERNET_MAX_QUOTA_BYTES} bytes)"
+        )
     used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
 
     if sub.status == WhiteInternetStatus.EXHAUSTED and total_quota > used:
@@ -801,8 +805,13 @@ async def set_base_traffic_quota_atomic(
             f"Cannot change quota for subscription in {sub.status} state"
         )
 
+    total_quota = base_bytes + (sub.extra_traffic_bytes or 0)
+    if total_quota > WHITE_INTERNET_MAX_QUOTA_BYTES:
+        raise WhiteInternetQuotaCapExceededError(
+            f"Total quota ({total_quota} bytes) exceeds maximum allowed limit ({WHITE_INTERNET_MAX_QUOTA_BYTES} bytes)"
+        )
+
     sub.base_traffic_bytes = base_bytes
-    total_quota = sub.base_traffic_bytes + (sub.extra_traffic_bytes or 0)
     used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
 
     if sub.status == WhiteInternetStatus.EXHAUSTED and total_quota > used:

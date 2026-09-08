@@ -99,6 +99,7 @@ async def admin_balance_preset(
             description=f"preset_{amount}_{callback.from_user.id}",
         )
     except AccountLedgerInvariantError as e:
+        await session.rollback()
         await callback.answer(texts.ADMIN_BALANCE_DEDUCT_FAILED.format(error=e), show_alert=True)
         return
 

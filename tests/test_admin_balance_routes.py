@@ -138,6 +138,44 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call_kwargs.get("target_telegram_id"), 888)
             self.assertEqual(real_callback.data, "admin_user_balance:888")
 
+    async def test_admin_balance_preset_rolls_back_on_invariant_error(self):
+        """When create_admin_adjustment raises AccountLedgerInvariantError, session must rollback so op_key is not committed."""
+        from aiogram.types import CallbackQuery, User as TgUser
+        from bot.handlers.admin.users.balance_routes import admin_balance_preset
+        from database.repositories.account_ledger_repo import AccountLedgerInvariantError
+
+        real_callback = CallbackQuery(
+            id="query_bal_124",
+            from_user=TgUser(id=123456789, is_bot=False, first_name="Admin"),
+            chat_instance="chat_inst_bal_2",
+            data="admin_bal_preset:888:-1000",
+        )
+        object.__setattr__(real_callback, "answer", AsyncMock())
+        msg = MagicMock()
+        msg.chat.id = 123
+        msg.message_id = 456
+        object.__setattr__(real_callback, "message", msg)
+
+        user = MagicMock()
+        user.id = 7
+        user.telegram_id = 888
+
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.admin.users.balance_routes.is_admin", return_value=True),
+            patch("bot.handlers.admin.users.balance_routes.get_user_by_telegram_id", return_value=user),
+            patch("bot.handlers.admin.users.balance_routes.check_and_record_admin_op", return_value=(True, None)),
+            patch(
+                "bot.handlers.admin.users.balance_routes.create_admin_adjustment",
+                side_effect=AccountLedgerInvariantError("Insufficient funds"),
+            ),
+        ):
+            await admin_balance_preset(real_callback, session)
+            session.rollback.assert_awaited_once()
+            real_callback.answer.assert_awaited_once()
+            self.assertIn("Insufficient funds", real_callback.answer.call_args[0][0])
+
 
 if __name__ == "__main__":
     unittest.main()

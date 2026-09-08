@@ -53,8 +53,9 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
         now = now_utc()
         async with self.sessions.begin() as session:
             u_trial = User(telegram_id=int(uuid.uuid4().int % 1000000000))
+            u_trial_10gb = User(telegram_id=int(uuid.uuid4().int % 1000000000))
             u_paid = User(telegram_id=int(uuid.uuid4().int % 1000000000))
-            session.add_all([u_trial, u_paid])
+            session.add_all([u_trial, u_trial_10gb, u_paid])
             await session.flush()
 
             from services.white_internet_service import WhiteInternetService
@@ -63,10 +64,30 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
             tariff = await WhiteInternetService.get_or_create_white_internet_tariff(session)
             tariff_version = await get_or_create_current_version(session, tariff)
 
-            # Trial quote for u_trial
+            # Trial quote for u_trial (5 GiB)
             q_trial = TariffQuote(
                 public_id=uuid.uuid4(),
                 user_id=u_trial.id,
+                service_type="white_internet",
+                operation_type=TariffQuoteOperation.TRIAL,
+                status=TariffQuoteStatus.CONSUMED,
+                target_tariff_version_id=tariff_version.id,
+                amount_due_rub=Decimal("0.00"),
+                current_paid_hours=0,
+                current_paid_value_rub=Decimal("0.00"),
+                bonus_hours=0,
+                resulting_paid_hours=72,
+                resulting_paid_value_rub=Decimal("0.00"),
+                resulting_bonus_hours=0,
+                rounding_loss_hours=Decimal("0.00"),
+                rounding_loss_value_rub=Decimal("0.00"),
+                consumed_at=now - timedelta(days=2),
+                expires_at=now + timedelta(days=1),
+            )
+            # Trial quote for u_trial_10gb (historical 10 GiB)
+            q_trial_10gb = TariffQuote(
+                public_id=uuid.uuid4(),
+                user_id=u_trial_10gb.id,
                 service_type="white_internet",
                 operation_type=TariffQuoteOperation.TRIAL,
                 status=TariffQuoteStatus.CONSUMED,
@@ -103,7 +124,7 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
                 consumed_at=now - timedelta(days=10),
                 expires_at=now + timedelta(days=20),
             )
-            session.add_all([q_trial, q_paid])
+            session.add_all([q_trial, q_trial_10gb, q_paid])
             await session.flush()
 
             # Subscriptions with is_trial=False initially
@@ -118,6 +139,17 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
                 device_limit=1,
                 is_trial=False,
             )
+            sub_trial_10gb = WhiteInternetSubscription(
+                user_id=u_trial_10gb.id,
+                token="pg_m0026_trial10g_" + uuid.uuid4().hex,
+                uuid=str(uuid.uuid4()),
+                status=WhiteInternetStatus.ACTIVE,
+                started_at=now - timedelta(days=2),
+                expires_at=now + timedelta(days=1),
+                base_traffic_bytes=10737418240,
+                device_limit=1,
+                is_trial=False,
+            )
             sub_paid = WhiteInternetSubscription(
                 user_id=u_paid.id,
                 token="pg_m0026_paid_" + uuid.uuid4().hex,
@@ -129,9 +161,10 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
                 device_limit=1,
                 is_trial=False,
             )
-            session.add_all([sub_trial, sub_paid])
+            session.add_all([sub_trial, sub_trial_10gb, sub_paid])
             await session.flush()
             sub_trial_id = sub_trial.id
+            sub_trial_10gb_id = sub_trial_10gb.id
             sub_paid_id = sub_paid.id
 
             # Execute migration 0026 backfill query
@@ -140,7 +173,7 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
                     """
                     UPDATE white_internet_subscriptions sub
                     SET is_trial = true
-                    WHERE sub.base_traffic_bytes = 5368709120
+                    WHERE sub.base_traffic_bytes IN (5368709120, 10737418240)
                       AND sub.device_limit = 1
                       AND (sub.expires_at - sub.started_at) <= interval '4 days'
                       AND EXISTS (
@@ -166,8 +199,10 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
         # Re-read committed state from PostgreSQL via a fresh session
         async with self.sessions() as read_session:
             st = await read_session.get(WhiteInternetSubscription, sub_trial_id)
+            st_10gb = await read_session.get(WhiteInternetSubscription, sub_trial_10gb_id)
             sp = await read_session.get(WhiteInternetSubscription, sub_paid_id)
             self.assertTrue(st.is_trial)
+            self.assertTrue(st_10gb.is_trial)
             self.assertFalse(sp.is_trial)
 
     async def test_fail_closed_on_ambiguous_trial_subscription(self):

@@ -207,6 +207,72 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             desired_version=1,
             actual_version=1,
             last_reconciled_node_epoch="epoch-xyz",
+            device_limit=1,
+            active_hwids={},
+        )
+
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get(
+                        "/sub/wl/valid-token-1234567890abcdef",
+                        headers={"X-Hwid": "test-device-hwid"},
+                    )
+
+                    self.assertEqual(resp.status, 200)
+                    self.assertEqual(resp.headers.get("Content-Type"), "text/plain; charset=utf-8")
+                    self.assertEqual(resp.headers.get("Profile-Title"), "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==")
+                    self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
+                    self.assertEqual(resp.headers.get("hide-url"), "1")
+                    self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
+                    self.assertIn("upload=500", resp.headers.get("Subscription-Userinfo", ""))
+                    self.assertIn("download=500", resp.headers.get("Subscription-Userinfo", ""))
+
+                    body_b64 = await resp.text()
+                    decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
+                    self.assertEqual(len(decoded_lines), 1)
+
+                    wl_url = decoded_lines[0]
+                    self.assertTrue(wl_url.startswith("vless://"))
+                    self.assertIn("/stream/v1", unquote(wl_url))
+                    self.assertIn("OPTIONS", unquote(wl_url))
+
+    async def test_feed_without_hwid_returns_403_hwid_required(self):
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=1000,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
         )
 
         server = Server(
@@ -232,24 +298,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
                     resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
-
-                    self.assertEqual(resp.status, 200)
-                    self.assertEqual(resp.headers.get("Content-Type"), "text/plain; charset=utf-8")
-                    self.assertEqual(resp.headers.get("Profile-Title"), "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==")
-                    self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
-                    self.assertEqual(resp.headers.get("hide-url"), "1")
-                    self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
-                    self.assertIn("upload=500", resp.headers.get("Subscription-Userinfo", ""))
-                    self.assertIn("download=500", resp.headers.get("Subscription-Userinfo", ""))
-
-                    body_b64 = await resp.text()
-                    decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
-                    self.assertEqual(len(decoded_lines), 1)
-
-                    wl_url = decoded_lines[0]
-                    self.assertTrue(wl_url.startswith("vless://"))
-                    self.assertIn("/stream/v1", unquote(wl_url))
-                    self.assertIn("OPTIONS", unquote(wl_url))
+                    self.assertEqual(resp.status, 403)
+                    self.assertEqual(resp.headers.get("x-hwid-required"), "true")
+                    self.assertEqual(await resp.text(), texts.WL_WEB_HWID_REQUIRED)
 
 
     async def test_missing_cdn_domain_returns_503_fail_closed(self):
@@ -320,6 +371,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             desired_version=1,
             actual_version=1,
             last_reconciled_node_epoch="epoch-xyz",
+            device_limit=1,
+            active_hwids={},
         )
 
         server = Server(
@@ -337,6 +390,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
         mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
 
         @asynccontextmanager
         async def fake_session_scope():
@@ -345,7 +399,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         with patch.dict(os.environ, {}, clear=True):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                    resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+                    resp = await self.client.get(
+                        "/sub/wl/valid-token-1234567890abcdef",
+                        headers={"X-Hwid": "test-device-hwid"},
+                    )
                     self.assertEqual(resp.status, 200)
                     body_b64 = await resp.text()
                     decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
