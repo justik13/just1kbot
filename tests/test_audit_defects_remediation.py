@@ -62,6 +62,30 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         self.assertIn("aq:x:", LOCKED_ACTION_PREFIXES)
         self.assertIn("aq:x:", STALE_ACTION_PREFIXES)
 
+        for prefix in (
+            "admin_wi_traffic_add:",
+            "admin_wi_quota_set:",
+            "admin_wi_devlimit_set:",
+            "admin_wl_reset_apply:",
+            "admin_wl_grant_trial:",
+            "wl_add_device_confirm",
+            "confirm_server_purge:",
+            "admin_server_migrate_confirm:",
+            "admin_bal_preset:",
+        ):
+            self.assertIn(prefix, LOCKED_ACTION_PREFIXES)
+            self.assertIn(prefix, STALE_ACTION_PREFIXES)
+
+        for wrong_prefix in (
+            "admin_wi_traffic_add_apply:",
+            "admin_wi_quota_set_apply:",
+            "admin_wi_devlimit_set_apply:",
+            "admin_wi_reset_trial_apply:",
+            "admin_wi_grant_trial_apply:",
+        ):
+            self.assertNotIn(wrong_prefix, LOCKED_ACTION_PREFIXES)
+            self.assertNotIn(wrong_prefix, STALE_ACTION_PREFIXES)
+
     def test_auto_disabled_check_interval_is_fifteen_minutes(self):
         self.assertEqual(AUTO_DISABLED_CHECK_INTERVAL, 900.0)
 

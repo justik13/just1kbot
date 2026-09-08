@@ -251,7 +251,11 @@ async def admin_wi_traffic_add(
         return
 
     extra_bytes = gb * 1024 * 1024 * 1024
-    await white_internet_repo.add_extra_traffic_atomic(session, wi_sub.id, extra_bytes)
+    try:
+        await white_internet_repo.add_extra_traffic_atomic(session, wi_sub.id, extra_bytes)
+    except white_internet_repo.WhiteInternetError as e:
+        await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=str(e)), show_alert=True)
+        return
 
     await AuditService.log_action(
         session,
@@ -327,9 +331,10 @@ async def admin_wi_traffic_reset_apply(
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
         return
 
-    ok, msg = await white_internet_repo.reset_traffic_used_atomic(session, wi_sub.id)
-    if not ok:
-        await callback.answer(texts.ADMIN_WI_TRAFFIC_RESET_FAILED.format(error=msg), show_alert=True)
+    try:
+        await white_internet_repo.reset_traffic_used_atomic(session, wi_sub.id)
+    except white_internet_repo.WhiteInternetError as e:
+        await callback.answer(texts.ADMIN_WI_TRAFFIC_RESET_FAILED.format(error=str(e)), show_alert=True)
         return
 
     await AuditService.log_action(
@@ -407,7 +412,11 @@ async def admin_wi_quota_set(
         return
 
     quota_bytes = gb * 1024 * 1024 * 1024
-    await white_internet_repo.set_base_traffic_quota_atomic(session, wi_sub.id, quota_bytes)
+    try:
+        await white_internet_repo.set_base_traffic_quota_atomic(session, wi_sub.id, quota_bytes)
+    except white_internet_repo.WhiteInternetError as e:
+        await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=str(e)), show_alert=True)
+        return
 
     await callback.answer(texts.ADMIN_WI_QUOTA_SET_SUCCESS.format(gb=gb), show_alert=True)
     callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
@@ -474,7 +483,11 @@ async def admin_wi_devlimit_set(
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
         return
 
-    await white_internet_repo.set_device_limit_atomic(session, wi_sub.id, limit)
+    try:
+        await white_internet_repo.set_device_limit_atomic(session, wi_sub.id, limit)
+    except white_internet_repo.WhiteInternetError as e:
+        await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=str(e)), show_alert=True)
+        return
 
     await callback.answer(texts.ADMIN_WI_DEVLIMIT_SET_SUCCESS.format(limit=limit), show_alert=True)
     callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
@@ -541,9 +554,13 @@ async def admin_wi_hwid_reset_apply(
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
         return
 
-    await white_internet_repo.reset_active_hwids_atomic(
-        session, wi_sub.id, cooldown_seconds=0
-    )
+    try:
+        await white_internet_repo.reset_active_hwids_atomic(
+            session, wi_sub.id, cooldown_seconds=0
+        )
+    except white_internet_repo.WhiteInternetError as e:
+        await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=str(e)), show_alert=True)
+        return
 
     await AuditService.log_action(
         session,

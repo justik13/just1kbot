@@ -36,6 +36,7 @@ LOCKED_ACTION_PREFIXES = (
     "admin_dispute_apply:",
     "confirm_admin_balance_apply",
     "confirm_mass_bonus_apply",
+    "admin_bal_preset:",
     # Админские действия с подпиской.
     "admin_sub_apply_tariff:",
     "admin_sub_apply_extend:",
@@ -48,7 +49,9 @@ LOCKED_ACTION_PREFIXES = (
     "admin_manual_grant_apply:",
     # Админские действия с серверами.
     "confirm_server_delete:",
+    "confirm_server_purge:",
     "admin_server_toggle_apply:",
+    "admin_server_migrate_confirm:",
     # Админские действия с тарифами.
     "admin_tariff_toggle_apply:",
     # Режим технических работ.
@@ -62,14 +65,15 @@ LOCKED_ACTION_PREFIXES = (
     "wl_renew_execute",
     "wl_topup_execute:",
     "wl_reset_devices",
+    "wl_add_device_confirm",
     # Админские действия Белый Интернет.
-    "admin_wi_traffic_add_apply:",
+    "admin_wi_traffic_add:",
     "admin_wi_traffic_reset_apply:",
-    "admin_wi_quota_set_apply:",
-    "admin_wi_devlimit_set_apply:",
+    "admin_wi_quota_set:",
+    "admin_wi_devlimit_set:",
     "admin_wi_hwid_reset_apply:",
-    "admin_wi_reset_trial_apply:",
-    "admin_wi_grant_trial_apply:",
+    "admin_wl_reset_apply:",
+    "admin_wl_grant_trial:",
 )
 
 STALE_ACTION_PREFIXES = (
@@ -85,22 +89,26 @@ STALE_ACTION_PREFIXES = (
     "admin_dispute_apply:",
     "confirm_admin_balance_apply",
     "confirm_mass_bonus_apply",
+    "admin_bal_preset:",
     "admin_manual_grant_apply:",
     "confirm_server_delete:",
+    "confirm_server_purge:",
     "admin_server_toggle_apply:",
+    "admin_server_migrate_confirm:",
     "admin_tariff_toggle_apply:",
     "admin_maintenance_toggle_apply",
     "broadcast_send_all",
     "broadcast_send_active",
     "balance_resume_purchase:",
     "aq:x:",
-    "admin_wi_traffic_add_apply:",
+    "wl_add_device_confirm",
+    "admin_wi_traffic_add:",
     "admin_wi_traffic_reset_apply:",
-    "admin_wi_quota_set_apply:",
-    "admin_wi_devlimit_set_apply:",
+    "admin_wi_quota_set:",
+    "admin_wi_devlimit_set:",
     "admin_wi_hwid_reset_apply:",
-    "admin_wi_reset_trial_apply:",
-    "admin_wi_grant_trial_apply:",
+    "admin_wl_reset_apply:",
+    "admin_wl_grant_trial:",
 )
 
 STALE_MAX_AGE_SECONDS = 600

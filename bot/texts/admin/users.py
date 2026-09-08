@@ -478,7 +478,8 @@ ADMIN_WI_TRAFFIC_RESET_CONFIRM_TITLE = """🔄 <b>Сброс расхода тр
 Вы уверены, что хотите обнулить использованный трафик пользователя <code>{telegram_id}</code>?
 <i>Текущие снимки счетчиков ноды будут сохранены во избежание скачков.</i>"""
 ADMIN_WI_TRAFFIC_RESET_SUCCESS = "✅ Использованный трафик успешно сброшен в 0"
-ADMIN_WI_TRAFFIC_RESET_FAILED = "❌ {error}"
+ADMIN_WI_ACTION_FAILED = "❌ {error}"
+ADMIN_WI_TRAFFIC_RESET_FAILED = ADMIN_WI_ACTION_FAILED
 
 ADMIN_WI_QUOTA_MENU_TITLE = """📊 <b>Квота трафика (Белый Интернет)</b>
 

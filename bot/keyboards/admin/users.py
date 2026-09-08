@@ -3,6 +3,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
 from bot.formatters import get_tariff_group_name
+from config.constants import WHITE_INTERNET_MAX_DEVICE_LIMIT
 from utils.text_limits import truncate_button_text
 
 
@@ -257,7 +258,7 @@ def get_admin_wi_device_limit_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    for limit in (1, 2, 3, 5):
+    for limit in range(1, WHITE_INTERNET_MAX_DEVICE_LIMIT + 1):
         builder.button(
             text=texts.ADMIN_WI_BTN_DEVICES.format(limit=limit),
             callback_data=f"admin_wi_devlimit_set:{telegram_id}:{limit}",
@@ -268,7 +269,7 @@ def get_admin_wi_device_limit_keyboard(
         callback_data=f"admin_sub_wi_menu:{telegram_id}",
     )
 
-    builder.adjust(4, 1)
+    builder.adjust(WHITE_INTERNET_MAX_DEVICE_LIMIT, 1)
     return builder.as_markup()
 
 
