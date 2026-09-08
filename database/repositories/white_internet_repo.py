@@ -18,9 +18,20 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
+    WHITE_INTERNET_SERVICE_TYPE,
 )
-from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import WhiteInternetOrphanCleanup, WhiteInternetSubscription
+from config.enums import (
+    TariffQuoteOperation,
+    TariffQuoteStatus,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
+)
+from database.models import (
+    TariffQuote,
+    User,
+    WhiteInternetOrphanCleanup,
+    WhiteInternetSubscription,
+)
 from utils.datetime_helpers import now_utc
 
 
@@ -94,6 +105,25 @@ async def has_user_any_subscription(
     return await session.scalar(stmt) is not None
 
 
+async def has_ever_activated_trial(session: AsyncSession, user_id: int) -> bool:
+    """Check if user has ever consumed a White Internet trial quote (with last_trial_reset_at guard)."""
+    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
+        return False
+    user = await session.get(User, user_id)
+    stmt = (
+        select(TariffQuote.id)
+        .where(
+            TariffQuote.user_id == user_id,
+            TariffQuote.service_type == WHITE_INTERNET_SERVICE_TYPE,
+            TariffQuote.operation_type == TariffQuoteOperation.TRIAL,
+            TariffQuote.status == TariffQuoteStatus.CONSUMED,
+        )
+    )
+    if user and user.last_trial_reset_at is not None:
+        stmt = stmt.where(TariffQuote.created_at > user.last_trial_reset_at)
+    return (await session.scalar(stmt.limit(1))) is not None
+
+
 async def get_subscription_by_id(
     session: AsyncSession, subscription_id: int
 ) -> WhiteInternetSubscription | None:
@@ -159,6 +189,7 @@ async def create_white_internet_subscription(
     price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
     duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     base_bytes: int = WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+    is_trial: bool = False,
 ) -> WhiteInternetSubscription:
     now = now_utc()
     expires_at = now + timedelta(days=duration_days)
@@ -173,6 +204,7 @@ async def create_white_internet_subscription(
         expires_at=expires_at,
         base_traffic_bytes=base_bytes,
         extra_traffic_bytes=0,
+        is_trial=is_trial,
         traffic_used_bytes=0,
         traffic_uplink_bytes=0,
         traffic_downlink_bytes=0,
@@ -237,10 +269,14 @@ async def renew_subscription_atomic(
     )
     extra_rollover = min(sub.extra_traffic_bytes or 0, total_left)
 
-    is_grace_valid = (now <= (sub_expires_at + timedelta(days=7))) if sub_expires_at else True
-    max_extra_allowed = max(0, WHITE_INTERNET_MAX_QUOTA_BYTES - new_base_bytes)
-    new_extra = min(extra_rollover, max_extra_allowed) if is_grace_valid else 0
+    if getattr(sub, "is_trial", False):
+        new_extra = 0
+    else:
+        is_grace_valid = (now <= (sub_expires_at + timedelta(days=7))) if sub_expires_at else True
+        max_extra_allowed = max(0, WHITE_INTERNET_MAX_QUOTA_BYTES - new_base_bytes)
+        new_extra = min(extra_rollover, max_extra_allowed) if is_grace_valid else 0
 
+    sub.is_trial = False
     sub.base_traffic_bytes = new_base_bytes
     sub.extra_traffic_bytes = new_extra
     sub.expires_at = new_expires_at

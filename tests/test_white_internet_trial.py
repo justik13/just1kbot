@@ -22,9 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.handlers.white_internet import (
     get_white_internet_overview_keyboard,
-    process_white_internet_buy,
-    process_white_internet_renew,
-    process_topup_pack,
     show_topup_menu,
 )
 from config.constants import (
@@ -90,7 +87,8 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
-             patch("database.repositories.white_internet_repo.has_user_any_subscription", return_value=False), \
+             patch("database.repositories.white_internet_repo.has_ever_activated_trial", return_value=False), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
@@ -126,7 +124,7 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             status=WhiteInternetStatus.EXPIRED,
         )
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
-             patch("database.repositories.white_internet_repo.has_user_any_subscription", return_value=True), \
+             patch("database.repositories.white_internet_repo.has_ever_activated_trial", return_value=True), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=existing_sub):
 
             success, msg, sub = await WhiteInternetService.create_trial_subscription(self.session, self.user.id)
@@ -154,7 +152,8 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
-             patch("database.repositories.white_internet_repo.has_user_any_subscription", return_value=False), \
+             patch("database.repositories.white_internet_repo.has_ever_activated_trial", return_value=False), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
@@ -195,7 +194,8 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
-             patch("database.repositories.white_internet_repo.has_user_any_subscription", return_value=False), \
+             patch("database.repositories.white_internet_repo.has_ever_activated_trial", return_value=False), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
@@ -242,7 +242,8 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
-             patch("database.repositories.white_internet_repo.has_user_any_subscription", return_value=False), \
+             patch("database.repositories.white_internet_repo.has_ever_activated_trial", return_value=False), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
@@ -260,24 +261,42 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sub.actual_version, 0)
 
     async def test_service_level_protection_blocks_paid_operations(self):
-        """WhiteInternetService must reject purchase, renew, and topup in trial mode."""
-        # 1. Purchase
-        ok, msg, sub = await WhiteInternetService.purchase_subscription(self.session, self.user.id)
-        self.assertFalse(ok)
-        self.assertEqual(msg, texts.WL_PAID_FEATURES_DISABLED_ALERT)
-        self.assertIsNone(sub)
+        """WhiteInternetService operations validate balance, sub presence, and trial constraints."""
+        # 1. Purchase without balance
+        from database.repositories.account_ledger_repo import InsufficientAccountBalanceError
 
-        # 2. Renew
-        ok, msg, sub = await WhiteInternetService.renew_subscription(self.session, self.user.id)
-        self.assertFalse(ok)
-        self.assertEqual(msg, texts.WL_PAID_FEATURES_DISABLED_ALERT)
-        self.assertIsNone(sub)
+        fake_balance = MagicMock(available=Decimal("0.00"))
+        paid_tariff = MagicMock(id=5, duration_days=30, is_active=True)
+        paid_tariff_version = MagicMock(id=15, price_rub=Decimal("150.00"), base_quota_bytes=5368709120)
+        with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
+             patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
+             patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=paid_tariff), \
+             patch("services.white_internet_service.get_or_create_current_version", return_value=paid_tariff_version), \
+             patch("services.white_internet_service.create_purchase_debit", side_effect=InsufficientAccountBalanceError("Insufficient balance")), \
+             patch("services.white_internet_service.get_account_balance", return_value=fake_balance):
+            ok, msg, sub = await WhiteInternetService.purchase_subscription(self.session, self.user.id)
+            self.assertFalse(ok)
+            self.assertIn("Недостаточно средств", msg)
+            self.assertIsNone(sub)
 
-        # 3. Topup
-        ok, msg, grant = await WhiteInternetService.topup_quota(self.session, self.user.id, pack_gb=10)
-        self.assertFalse(ok)
-        self.assertEqual(msg, texts.WL_PAID_FEATURES_DISABLED_ALERT)
-        self.assertIsNone(grant)
+        # 2. Renew without existing subscription
+        with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None):
+            ok, msg, sub = await WhiteInternetService.renew_subscription(self.session, self.user.id)
+            self.assertFalse(ok)
+            self.assertEqual(msg, texts.WL_SUB_NOT_FOUND)
+            self.assertIsNone(sub)
+
+        # 3. Topup on trial subscription is rejected
+        sub_trial = WhiteInternetSubscription(
+            id=1, user_id=self.user.id, is_trial=True, status=WhiteInternetStatus.ACTIVE
+        )
+        with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub_trial):
+            ok, msg, grant = await WhiteInternetService.topup_quota(self.session, self.user.id, pack_gb=10, actor_telegram_id=self.user.telegram_id)
+            self.assertFalse(ok)
+            self.assertEqual(msg, texts.WL_TRIAL_CANNOT_TOPUP)
+            self.assertIsNone(grant)
 
     async def test_concurrent_trial_activations_only_one_succeeds(self):
         """10 concurrent tasks calling create_trial_subscription for the same user.
@@ -304,8 +323,8 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             await lock.acquire()
             return self.user
 
-        async def fake_has_user_any_subscription(session, user_id):
-            return has_sub_state
+        async def fake_has_ever_activated_trial(session, user_id):
+            return False
 
         async def fake_create_sub(*args, **kwargs):
             nonlocal has_sub_state
@@ -314,11 +333,13 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             return created_sub
 
         async def fake_get_sub_by_user_id(session, user_id):
-            lock.release()
-            return created_sub
+            if has_sub_state:
+                lock.release()
+                return created_sub
+            return None
 
         with patch("services.white_internet_service.lock_checkout_user", side_effect=fake_lock_checkout_user), \
-             patch("database.repositories.white_internet_repo.has_user_any_subscription", side_effect=fake_has_user_any_subscription), \
+             patch("database.repositories.white_internet_repo.has_ever_activated_trial", side_effect=fake_has_ever_activated_trial), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", side_effect=fake_get_sub_by_user_id), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
@@ -358,22 +379,23 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
         else:
             os.environ["WHITE_INTERNET_TRIAL_MODE_ONLY"] = self.orig_trial_env
 
-    def test_trial_overview_keyboard_has_no_paid_buttons(self):
-        """In trial mode, overview keyboard must offer trial activation, copy link, and refresh without paid buttons."""
+    def test_trial_overview_keyboard_has_trial_buttons(self):
+        """Overview keyboard displays appropriate buttons for trial status."""
         domain = "cdn.just1k.best"
 
-        # 1. No subscription -> Trial activation button only, NO wl_buy_confirm
-        kb_none = get_white_internet_overview_keyboard(None, bot_domain=domain)
+        # 1. No subscription, has_trial_available=True -> Trial activation + buy preview
+        kb_none = get_white_internet_overview_keyboard(None, bot_domain=domain, has_trial_available=True)
         callbacks_none = [btn.callback_data for row in kb_none.inline_keyboard for btn in row]
         self.assertIn("wl_trial_activate", callbacks_none)
-        self.assertNotIn("wl_buy_confirm", callbacks_none)
+        self.assertIn("wl_buy_preview", callbacks_none)
         self.assertIn("back_to_main_menu", callbacks_none)
 
-        # 2. ACTIVE subscription -> Copy link, Instructions, Refresh, Back. NO wl_topup_menu, NO wl_renew_confirm
+        # 2. ACTIVE trial subscription -> Copy link, Instructions, Convert trial, Reset devices, Back. NO wl_topup_menu
         sub_active = WhiteInternetSubscription(
             id=1,
             user_id=10,
             token="test-token",
+            is_trial=True,
             status=WhiteInternetStatus.ACTIVE,
             provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
         )
@@ -383,51 +405,38 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(copy_buttons), 1)
         self.assertIn("wl_show_link", callbacks_active)
-        self.assertNotIn("white_internet", callbacks_active)
+        self.assertIn("wl_renew_preview", callbacks_active)
         self.assertIn("wl_reset_devices", callbacks_active)
         self.assertIn("back_to_main_menu", callbacks_active)
         self.assertNotIn("wl_topup_menu", callbacks_active)
-        self.assertNotIn("wl_renew_confirm", callbacks_active)
 
-        # 3. EXPIRED subscription -> Back button only. NO wl_renew_confirm
+        # 3. EXPIRED trial subscription -> Convert trial + Back button
         sub_expired = WhiteInternetSubscription(
             id=2,
             user_id=10,
+            is_trial=True,
             status=WhiteInternetStatus.EXPIRED,
         )
         kb_expired = get_white_internet_overview_keyboard(sub_expired, bot_domain=domain)
         callbacks_expired = [btn.callback_data for row in kb_expired.inline_keyboard for btn in row]
         self.assertIn("back_to_main_menu", callbacks_expired)
-        self.assertNotIn("wl_renew_confirm", callbacks_expired)
+        self.assertIn("wl_renew_preview", callbacks_expired)
 
-    async def test_stale_paid_callbacks_blocked_with_alert(self):
-        """Clicking stale paid buttons must answer with an informative alert and never charge money."""
+    async def test_topup_menu_blocks_trial_subscription(self):
+        """Topup menu must reject users on trial subscription with an alert."""
         session = AsyncMock()
         query = MagicMock(spec=CallbackQuery)
         query.answer = AsyncMock()
-        query.data = "wl_buy_confirm"
-
-        # 1. Buy callback
-        await process_white_internet_buy(query, session)
-        query.answer.assert_awaited_with(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
-
-        # 2. Renew callback
-        query.answer.reset_mock()
-        query.data = "wl_renew_confirm"
-        await process_white_internet_renew(query, session)
-        query.answer.assert_awaited_with(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
-
-        # 3. Topup menu callback
-        query.answer.reset_mock()
+        query.from_user = MagicMock()
+        query.from_user.id = 999888777
         query.data = "wl_topup_menu"
-        await show_topup_menu(query, session)
-        query.answer.assert_awaited_with(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
+        user = User(id=42, telegram_id=999888777)
+        sub = WhiteInternetSubscription(id=1, user_id=42, is_trial=True, status=WhiteInternetStatus.ACTIVE)
 
-        # 4. Topup pack callback
-        query.answer.reset_mock()
-        query.data = "wl_topup_pack_10"
-        await process_topup_pack(query, session)
-        query.answer.assert_awaited_with(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
+        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=user):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub):
+                await show_topup_menu(query, session)
+                query.answer.assert_awaited_with(texts.WL_TRIAL_CANNOT_TOPUP, show_alert=True)
 
 
 if __name__ == "__main__":

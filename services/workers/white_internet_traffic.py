@@ -262,7 +262,7 @@ class WhiteInternetTrafficWorker:
                         total_processed += 1
 
                         if became_exhausted:
-                            exhausted_users_to_notify.append(sub.user_id)
+                            exhausted_users_to_notify.append((sub.user_id, bool(getattr(sub, "is_trial", False))))
                 except Exception as client_exc:
                     logger.error(
                         "Error processing traffic deduction for client %s on server %d: %s",
@@ -274,7 +274,7 @@ class WhiteInternetTrafficWorker:
 
         # Send Telegram notifications strictly outside all DB transactions
         if self.bot is not None and exhausted_users_to_notify:
-            for uid in set(exhausted_users_to_notify):
+            for uid, is_sub_trial in set(exhausted_users_to_notify):
                 async with sf() as sess:
                     user = await sess.scalar(select(User).where(User.id == uid))
                     telegram_id = user.telegram_id if user else None
@@ -282,11 +282,10 @@ class WhiteInternetTrafficWorker:
                 if telegram_id:
                     try:
                         from bot import texts
-                        from config.constants import WHITE_INTERNET_TRIAL_MODE_ONLY
 
                         alert_text = (
                             texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT
-                            if WHITE_INTERNET_TRIAL_MODE_ONLY
+                            if is_sub_trial
                             else texts.WL_TRAFFIC_EXHAUSTED_ALERT
                         )
                         await self.bot.send_message(

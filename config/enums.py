@@ -66,6 +66,7 @@ class TariffQuoteOperation(StrEnum):
     PURCHASE = "purchase"
     RENEW = "renew"
     CHANGE = "change"
+    TRIAL = "trial"
 
 
 class AccountLedgerEntryType(StrEnum):

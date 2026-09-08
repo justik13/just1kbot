@@ -56,6 +56,12 @@ LOCKED_ACTION_PREFIXES = (
     # Рассылка.
     "broadcast_send_all",
     "broadcast_send_active",
+    # Белый Интернет.
+    "wl_trial_activate",
+    "wl_buy_execute",
+    "wl_renew_execute",
+    "wl_topup_execute:",
+    "wl_reset_devices",
 )
 
 STALE_ACTION_PREFIXES = (

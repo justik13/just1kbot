@@ -25,9 +25,9 @@ from config.constants import (
     WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_TOPUP_PACKS,
     WHITE_INTERNET_TRIAL_DURATION_DAYS,
-    WHITE_INTERNET_TRIAL_MODE_ONLY,
     WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
 )
+from bot.handlers.payment.balance_routes import _create_and_render_topup
 from config.enums import WhiteInternetStatus
 from config.settings import get_settings
 from database.models import Server, WhiteInternetSubscription
@@ -38,6 +38,7 @@ from database.repositories.users_repo import get_user_by_telegram_id
 from database.repositories.white_internet_repo import (
     WhiteInternetResetCooldownError,
 )
+from services.maintenance_service import MaintenanceService
 from services.white_internet_service import (
     WhiteInternetService,
     get_white_internet_tier_price,
@@ -61,13 +62,6 @@ def _render_progress_bar(used_bytes: int, total_bytes: int, length: int = 10) ->
     ratio = min(max(used_bytes / total_bytes, 0.0), 1.0)
     filled = int(round(ratio * length))
     return "█" * filled + "░" * (length - filled)
-
-
-def _is_trial_mode_only() -> bool:
-    val = os.getenv("WHITE_INTERNET_TRIAL_MODE_ONLY")
-    if val is not None:
-        return val.strip().lower() in ("true", "1", "yes", "on")
-    return bool(WHITE_INTERNET_TRIAL_MODE_ONLY)
 
 
 def _resolve_subscription_prefix(origin_node: Server | None = None) -> str:
@@ -97,112 +91,108 @@ def get_white_internet_overview_keyboard(
     base_price: int = int(WHITE_INTERNET_BASE_PRICE_RUB),
     sub_prefix: str | None = None,
     is_admin_user: bool = False,
+    has_trial_available: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    if _is_trial_mode_only():
-        if sub is None:
+    if sub is None:
+        if has_trial_available:
             builder.button(
                 text=texts.BTN_WL_ACTIVATE_TRIAL,
                 callback_data="wl_trial_activate",
                 style="success",
             )
-            builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
-            builder.adjust(1, 1)
-        elif sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED):
-            builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
-            builder.adjust(1)
-        elif sub.status == WhiteInternetStatus.PENDING:
-            builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
-            builder.adjust(1)
-        else:
-            has_sub_link = bool(
-                sub.status == WhiteInternetStatus.ACTIVE
-                and getattr(sub, "token", None)
-                and bot_domain
-            )
-            if has_sub_link:
-                sub_url = _build_subscription_url(bot_domain, sub.token, sub_prefix=sub_prefix)
-                builder.button(
-                    text=texts.BTN_WL_COPY_LINK,
-                    copy_text=CopyTextButton(text=sub_url),
-                )
-                builder.button(text=texts.BTN_WL_INCY_INSTRUCTIONS, callback_data="wl_show_link")
-            if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
-                builder.button(text=texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices")
-            builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
-
-            if has_sub_link:
-                builder.adjust(1, 1, 1, 1)
-            else:
-                builder.adjust(1, 1)
-        return builder.as_markup()
-
-    if sub is None:
         builder.button(
             text=texts.BTN_WL_BUY_ACCESS.format(
                 price=base_price,
                 days=WHITE_INTERNET_BASE_DURATION_DAYS,
             ),
-            callback_data="wl_buy_confirm",
-            style="success",
+            callback_data="wl_buy_preview",
+            style="success" if not has_trial_available else None,
         )
-        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
-        builder.adjust(1, 1)
-    elif sub.status == WhiteInternetStatus.EXPIRED:
-        sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-        renew_price = int(get_white_internet_tier_price(sub_limit))
-        builder.button(
-            text=texts.BTN_WL_RENEW.format(price=renew_price),
-            callback_data="wl_renew_confirm",
-            style="success",
-        )
-        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
-        builder.adjust(1, 1)
-    elif sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.PENDING):
         builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
         builder.adjust(1)
-    else:
-        has_sub_link = bool(
-            sub.status == WhiteInternetStatus.ACTIVE
-            and getattr(sub, "token", None)
-            and bot_domain
-        )
-        if has_sub_link:
-            sub_url = _build_subscription_url(bot_domain, sub.token, sub_prefix=sub_prefix)
-            builder.button(
-                text=texts.BTN_WL_COPY_LINK,
-                copy_text=CopyTextButton(text=sub_url),
-            )
-            builder.button(text=texts.BTN_WL_INSTRUCTIONS, callback_data="wl_show_link")
+        return builder.as_markup()
 
-        now = now_utc()
-        can_renew = (
-            sub.expires_at is None
-            or (sub.expires_at - now).total_seconds() <= 30 * 86400
-        )
+    if sub.status == WhiteInternetStatus.PENDING:
+        builder.button(text=texts.BTN_WL_REFRESH_STATUS, callback_data="white_internet")
+        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+        builder.adjust(1)
+        return builder.as_markup()
+
+    if sub.status == WhiteInternetStatus.EXPIRED:
         sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
         renew_price = int(get_white_internet_tier_price(sub_limit))
-
-        if can_renew:
+        if getattr(sub, "is_trial", False):
+            builder.button(
+                text=texts.BTN_WL_CONVERT_TRIAL.format(price=base_price),
+                callback_data="wl_renew_preview",
+                style="success",
+            )
+        else:
             builder.button(
                 text=texts.BTN_WL_RENEW.format(price=renew_price),
-                callback_data="wl_renew_confirm",
+                callback_data="wl_renew_preview",
+                style="success",
             )
-
-        if is_admin_user:
-            builder.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
-            if sub_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
-                builder.button(text=texts.BTN_WL_ADD_DEVICE, callback_data="wl_add_device_menu")
-
-        if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
-            builder.button(text=texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices")
-
         builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
         builder.adjust(1)
+        return builder.as_markup()
+
+    if sub.status == WhiteInternetStatus.DISABLED:
+        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+        builder.adjust(1)
+        return builder.as_markup()
+
+    has_sub_link = bool(
+        sub.status == WhiteInternetStatus.ACTIVE
+        and getattr(sub, "token", None)
+        and bot_domain
+    )
+    if has_sub_link:
+        sub_url = _build_subscription_url(bot_domain, sub.token, sub_prefix=sub_prefix)
+        builder.button(
+            text=texts.BTN_WL_COPY_LINK,
+            copy_text=CopyTextButton(text=sub_url),
+        )
+        builder.button(
+            text=texts.BTN_WL_INCY_INSTRUCTIONS if getattr(sub, "is_trial", False) else texts.BTN_WL_INSTRUCTIONS,
+            callback_data="wl_show_link",
+        )
+
+    now = now_utc()
+    can_renew = (
+        sub.expires_at is None
+        or (sub.expires_at - now).total_seconds() <= 30 * 86400
+    )
+    sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+    renew_price = int(get_white_internet_tier_price(sub_limit))
+
+    if can_renew:
+        if getattr(sub, "is_trial", False):
+            builder.button(
+                text=texts.BTN_WL_CONVERT_TRIAL.format(price=base_price),
+                callback_data="wl_renew_preview",
+                style="success",
+            )
+        else:
+            builder.button(
+                text=texts.BTN_WL_RENEW.format(price=renew_price),
+                callback_data="wl_renew_preview",
+            )
+
+    if not getattr(sub, "is_trial", False):
+        builder.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+        if is_admin_user and sub_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
+            builder.button(text=texts.BTN_WL_ADD_DEVICE, callback_data="wl_add_device_menu")
+
+    if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
+        builder.button(text=texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices")
+
+    builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+    builder.adjust(1)
 
     return builder.as_markup()
-
 
 
 def get_topup_keyboard() -> InlineKeyboardMarkup:
@@ -210,10 +200,10 @@ def get_topup_keyboard() -> InlineKeyboardMarkup:
     for pack_gb, price in sorted(WHITE_INTERNET_TOPUP_PACKS.items()):
         builder.button(
             text=texts.BTN_WL_TOPUP_PACK_ITEM.format(gb=pack_gb, price=int(price)),
-            callback_data=f"wl_topup_pack_{pack_gb}",
+            callback_data=f"wl_topup_preview:{pack_gb}",
         )
     builder.button(text=texts.BTN_BACK, callback_data="white_internet")
-    builder.adjust(1, 1, 1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -317,18 +307,15 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         return
 
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    has_trial_available = not await white_internet_repo.has_ever_activated_trial(session, user.id)
     sub_domain = await _resolve_subscription_domain(session, sub)
     sub_prefix = await _resolve_subscription_prefix_for_sub(session, sub)
     now = now_utc()
 
-    if not _is_trial_mode_only():
-        _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
-    else:
-        base_price_int = int(WHITE_INTERNET_BASE_PRICE_RUB)
-        duration_days = WHITE_INTERNET_BASE_DURATION_DAYS
+    _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
 
     if sub is None:
-        if _is_trial_mode_only():
+        if has_trial_available:
             text = texts.WL_OVERVIEW_TRIAL_NO_SUB.format(
                 days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
                 traffic=int(WHITE_INTERNET_TRIAL_TRAFFIC_BYTES / (1024**3)),
@@ -337,16 +324,18 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             text = texts.WL_OVERVIEW_NO_SUB.format(
                 price=base_price_int,
                 days=duration_days,
-                traffic=50,
+                traffic=int(WHITE_INTERNET_BASE_TRAFFIC_BYTES // (1024**3)),
             )
-    elif sub.status == WhiteInternetStatus.EXPIRED and _is_trial_mode_only():
-        text = texts.WL_TRIAL_FINISHED
     else:
         available_bytes = await white_internet_repo.get_available_quota_bytes(session, sub.id, now)
         total_limit = sub.traffic_limit_bytes
         status_text_map = {
             WhiteInternetStatus.PENDING: texts.WL_STATUS_PENDING,
-            WhiteInternetStatus.ACTIVE: texts.WL_STATUS_TRIAL_ACTIVE if _is_trial_mode_only() else texts.STATUS_SUBSCRIPTION_ACTIVE,
+            WhiteInternetStatus.ACTIVE: (
+                texts.WL_STATUS_TRIAL_ACTIVE
+                if getattr(sub, "is_trial", False)
+                else texts.STATUS_SUBSCRIPTION_ACTIVE
+            ),
             WhiteInternetStatus.EXHAUSTED: texts.WL_STATUS_EXHAUSTED,
             WhiteInternetStatus.EXPIRED: texts.WL_STATUS_EXPIRED,
             WhiteInternetStatus.DISABLED: texts.WL_STATUS_DISABLED,
@@ -383,6 +372,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         base_price=base_price_int,
         sub_prefix=sub_prefix,
         is_admin_user=is_admin_user,
+        has_trial_available=has_trial_available,
     )
     try:
         await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
@@ -436,11 +426,51 @@ async def process_white_internet_trial_activate(query: CallbackQuery, session: A
     await show_white_internet_menu(query, session)
 
 
-@router.callback_query(F.data == "wl_buy_confirm")
-async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession):
-    if _is_trial_mode_only():
-        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
+@router.callback_query(F.data == "wl_buy_preview")
+async def process_white_internet_buy_preview(query: CallbackQuery, session: AsyncSession):
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    user = await get_user_by_telegram_id(session, query.from_user.id)
+    if user is None:
         return
+    base_price, base_price_int, duration_days = await _get_effective_base_price(session)
+    traffic_gb = int(WHITE_INTERNET_BASE_TRAFFIC_BYTES // (1024**3))
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
+    balance = balance_snapshot.available
+
+    builder = InlineKeyboardBuilder()
+    if balance >= base_price:
+        balance_details = texts.WL_PREVIEW_BALANCE_OK.format(remaining=(balance - base_price))
+        builder.button(
+            text=texts.BTN_WL_PAY_BASE.format(price=base_price_int),
+            callback_data="wl_buy_execute",
+            style="success",
+        )
+    else:
+        shortage = base_price - balance
+        balance_details = texts.WL_PREVIEW_BALANCE_SHORTAGE.format(shortage=shortage)
+        builder.button(
+            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            style="success",
+        )
+    builder.button(text=texts.BTN_BACK, callback_data="white_internet")
+    builder.adjust(1, 1)
+
+    text = texts.WL_BUY_PREVIEW_TEXT.format(
+        days=duration_days,
+        traffic=traffic_gb,
+        price=base_price_int,
+        balance=balance,
+        balance_details=balance_details,
+    )
+    await query.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@router.callback_query(F.data.in_({"wl_buy_execute", "wl_buy_confirm"}))
+async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession):
     try:
         await query.answer()
     except Exception:
@@ -454,7 +484,13 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
     if balance_snapshot.available < base_price:
         shortage = base_price - balance_snapshot.available
         kb = InlineKeyboardBuilder()
+        kb.button(
+            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            style="success",
+        )
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
+        kb.adjust(1, 1)
         await query.message.edit_text(
             texts.WL_INSUFFICIENT_BALANCE_BUY.format(
                 price=base_price_int,
@@ -481,11 +517,60 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
     await show_white_internet_menu(query, session)
 
 
-@router.callback_query(F.data == "wl_renew_confirm")
-async def process_white_internet_renew(query: CallbackQuery, session: AsyncSession):
-    if _is_trial_mode_only():
-        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
+@router.callback_query(F.data == "wl_renew_preview")
+async def process_white_internet_renew_preview(query: CallbackQuery, session: AsyncSession):
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    user = await get_user_by_telegram_id(session, query.from_user.id)
+    if user is None:
         return
+    sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    sub_limit = max(1, getattr(sub, "device_limit", 1) or 1) if sub else 1
+    tier_price = get_white_internet_tier_price(sub_limit)
+    tier_price_int = int(tier_price)
+    base_gb = int(WHITE_INTERNET_BASE_TRAFFIC_BYTES // (1024**3))
+    traffic_gb = sub_limit * base_gb
+
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
+    balance = balance_snapshot.available
+
+    is_trial = getattr(sub, "is_trial", False)
+    trial_note = texts.WL_RENEW_TRIAL_NOTE if is_trial else ""
+
+    builder = InlineKeyboardBuilder()
+    if balance >= tier_price:
+        balance_details = texts.WL_PREVIEW_BALANCE_OK.format(remaining=(balance - tier_price))
+        builder.button(
+            text=texts.BTN_WL_CONFIRM_RENEW.format(price=tier_price_int),
+            callback_data="wl_renew_execute",
+            style="success",
+        )
+    else:
+        shortage = tier_price - balance
+        balance_details = texts.WL_PREVIEW_BALANCE_SHORTAGE.format(shortage=shortage)
+        builder.button(
+            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            style="success",
+        )
+    builder.button(text=texts.BTN_BACK, callback_data="white_internet")
+    builder.adjust(1, 1)
+
+    text = texts.WL_RENEW_PREVIEW_TEXT.format(
+        price=tier_price_int,
+        devices=sub_limit,
+        traffic=traffic_gb,
+        trial_note=trial_note,
+        balance=balance,
+        balance_details=balance_details,
+    )
+    await query.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@router.callback_query(F.data.in_({"wl_renew_execute", "wl_renew_confirm"}))
+async def process_white_internet_renew(query: CallbackQuery, session: AsyncSession):
     try:
         await query.answer()
     except Exception:
@@ -501,7 +586,11 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
     if balance_snapshot.available < tier_price:
         shortage = tier_price - balance_snapshot.available
         kb = InlineKeyboardBuilder()
-        kb.button(text=texts.BUTTON_TOPUP, callback_data="menu_balance")
+        kb.button(
+            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            style="success",
+        )
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         kb.adjust(1, 1)
         await query.message.edit_text(
@@ -515,7 +604,12 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
         )
         return
 
-    success, msg, _sub = await WhiteInternetService.renew_subscription(session, user.id)
+    try:
+        success, msg, _sub = await WhiteInternetService.renew_subscription(session, user.id)
+    except Exception as exc:
+        logger.error("Unexpected error during white internet renewal: %s", exc)
+        success, msg = False, texts.WL_NO_SERVERS_AVAILABLE
+
     if not success:
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
@@ -527,45 +621,89 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
 
 @router.callback_query(F.data == "wl_topup_menu")
 async def show_topup_menu(query: CallbackQuery, session: AsyncSession):
-    if _is_trial_mode_only():
-        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
-        return
-    if not is_admin(query.from_user.id):
-        await query.answer(texts.WL_ADMIN_ONLY_ALERT, show_alert=True)
-        return
     try:
         await query.answer()
     except Exception:
         pass
     user = await get_user_by_telegram_id(session, query.from_user.id)
-    if user is not None:
-        sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if user is None:
+        return
+    sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if sub is None or sub.status not in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
         sub_domain, sub_prefix = await _resolve_subscription_target(session, sub)
-        if sub is None or sub.status not in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
-            await query.message.edit_text(
-                texts.WL_SUB_NOT_READY,
-                reply_markup=get_white_internet_overview_keyboard(
-                    sub, sub_domain, sub_prefix=sub_prefix, is_admin_user=True
-                ),
-            )
-            return
+        await query.message.edit_text(
+            texts.WL_SUB_NOT_READY,
+            reply_markup=get_white_internet_overview_keyboard(
+                sub, sub_domain, sub_prefix=sub_prefix, is_admin_user=is_admin(query.from_user.id)
+            ),
+        )
+        return
+    if getattr(sub, "is_trial", False):
+        await query.answer(texts.WL_TRIAL_CANNOT_TOPUP, show_alert=True)
+        return
     await query.message.edit_text(texts.WL_TOPUP_MENU_TEXT, reply_markup=get_topup_keyboard(), parse_mode="HTML")
 
 
-@router.callback_query(F.data.startswith("wl_topup_pack_"))
-async def process_topup_pack(query: CallbackQuery, session: AsyncSession):
-    if _is_trial_mode_only():
-        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
-        return
-    if not is_admin(query.from_user.id):
-        await query.answer(texts.WL_ADMIN_ONLY_ALERT, show_alert=True)
-        return
+@router.callback_query(F.data.startswith("wl_topup_preview:"))
+async def process_topup_preview(query: CallbackQuery, session: AsyncSession):
     try:
         await query.answer()
     except Exception:
         pass
     try:
-        pack_gb = int(query.data.replace("wl_topup_pack_", ""))
+        pack_gb = int(query.data.split(":")[1])
+    except (ValueError, IndexError):
+        return
+    pack_price = WHITE_INTERNET_TOPUP_PACKS.get(pack_gb)
+    if pack_price is None:
+        return
+    user = await get_user_by_telegram_id(session, query.from_user.id)
+    if user is None:
+        return
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
+    balance = balance_snapshot.available
+
+    builder = InlineKeyboardBuilder()
+    if balance >= pack_price:
+        balance_details = texts.WL_PREVIEW_BALANCE_OK.format(remaining=(balance - pack_price))
+        builder.button(
+            text=texts.BTN_WL_PAY_PACK.format(gb=pack_gb, price=int(pack_price)),
+            callback_data=f"wl_topup_execute:{pack_gb}",
+            style="success",
+        )
+    else:
+        shortage = pack_price - balance
+        balance_details = texts.WL_PREVIEW_BALANCE_SHORTAGE.format(shortage=shortage)
+        builder.button(
+            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            style="success",
+        )
+    builder.button(text=texts.BTN_BACK, callback_data="wl_topup_menu")
+    builder.adjust(1, 1)
+
+    text = texts.WL_TOPUP_PREVIEW_TEXT.format(
+        gb=pack_gb,
+        price=int(pack_price),
+        balance=balance,
+        balance_details=balance_details,
+    )
+    await query.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("wl_topup_execute:") | F.data.startswith("wl_topup_pack_"))
+async def process_topup_execute(query: CallbackQuery, session: AsyncSession):
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    data = query.data
+    if ":" in data:
+        pack_str = data.split(":")[1]
+    else:
+        pack_str = data.replace("wl_topup_pack_", "")
+    try:
+        pack_gb = int(pack_str)
     except ValueError:
         return
     user = await get_user_by_telegram_id(session, query.from_user.id)
@@ -576,11 +714,14 @@ async def process_topup_pack(query: CallbackQuery, session: AsyncSession):
         return
 
     balance_snapshot = await get_account_balance(session, user_id=user.id)
-
     if balance_snapshot.available < pack_price:
         shortage = pack_price - balance_snapshot.available
         kb = InlineKeyboardBuilder()
-        kb.button(text=texts.BUTTON_TOPUP, callback_data="menu_balance")
+        kb.button(
+            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            style="success",
+        )
         kb.button(text=texts.BTN_BACK, callback_data="wl_topup_menu")
         kb.adjust(1, 1)
         await query.message.edit_text(
@@ -595,9 +736,14 @@ async def process_topup_pack(query: CallbackQuery, session: AsyncSession):
         )
         return
 
-    success, msg, _grant = await WhiteInternetService.topup_quota(
-        session, user.id, pack_gb, actor_telegram_id=query.from_user.id
-    )
+    try:
+        success, msg, _grant = await WhiteInternetService.topup_quota(
+            session, user.id, pack_gb, actor_telegram_id=query.from_user.id
+        )
+    except Exception as exc:
+        logger.error("Unexpected error during topup: %s", exc)
+        success, msg = False, texts.WL_DEBIT_FAILED
+
     if not success:
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
@@ -607,11 +753,50 @@ async def process_topup_pack(query: CallbackQuery, session: AsyncSession):
     await show_white_internet_menu(query, session)
 
 
+# Backward-compatibility alias
+process_topup_pack = process_topup_execute
+
+
+@router.callback_query(F.data.startswith("wl_topup_shortage:"))
+async def process_wl_topup_shortage(query: CallbackQuery, session: AsyncSession):
+    try:
+        shortage_val = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        return
+
+    if shortage_val <= 0:
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        return
+
+    user = await get_user_by_telegram_id(session, query.from_user.id)
+    if user is None:
+        return
+
+    if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
+        try:
+            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    await _create_and_render_topup(
+        target=query,
+        session=session,
+        user=user,
+        amount=shortage_val,
+        context={"source": "white_internet"},
+    )
+
+
 @router.callback_query(F.data == "wl_add_device_menu")
 async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
-    if _is_trial_mode_only():
-        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
-        return
     if not is_admin(query.from_user.id):
         await query.answer(texts.WL_ADMIN_ONLY_ALERT, show_alert=True)
         return
@@ -650,9 +835,6 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "wl_add_device_confirm")
 async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession):
-    if _is_trial_mode_only():
-        await query.answer(texts.WL_PAID_FEATURES_DISABLED_ALERT, show_alert=True)
-        return
     if not is_admin(query.from_user.id):
         await query.answer(texts.WL_ADMIN_ONLY_ALERT, show_alert=True)
         return
@@ -669,7 +851,11 @@ async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession
     if balance_snapshot.available < price:
         shortage = price - balance_snapshot.available
         kb = InlineKeyboardBuilder()
-        kb.button(text=texts.BUTTON_TOPUP, callback_data="menu_balance")
+        kb.button(
+            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            style="success",
+        )
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         kb.adjust(1, 1)
         await query.message.edit_text(

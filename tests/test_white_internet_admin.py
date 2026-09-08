@@ -575,6 +575,7 @@ class TestWhiteInternetTrialProtectionAndReset(unittest.IsolatedAsyncioTestCase)
             uuid="client-uuid-123",
             status=WhiteInternetStatus.ACTIVE,
             desired_version=1,
+            is_trial=True,
         )
 
         mock_exec = MagicMock()

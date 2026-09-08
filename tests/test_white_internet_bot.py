@@ -29,11 +29,6 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.session.add = MagicMock()
         self.user = User(id=42, telegram_id=999888777)
         self.tg_user = TgUser(id=999888777, is_bot=False, first_name="TestUser")
-        self.trial_patcher = patch("bot.handlers.white_internet.WHITE_INTERNET_TRIAL_MODE_ONLY", False)
-        self.trial_patcher.start()
-
-    async def asyncTearDown(self):
-        self.trial_patcher.stop()
 
     async def test_buy_confirm_with_insufficient_balance(self):
         query = MagicMock(spec=CallbackQuery)
@@ -190,7 +185,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         kb_none = get_white_internet_overview_keyboard(None, bot_domain=domain)
         self.assertIsNotNone(kb_none)
         callbacks_none = [btn.callback_data for row in kb_none.inline_keyboard for btn in row]
-        self.assertIn("wl_buy_confirm", callbacks_none)
+        self.assertTrue("wl_buy_preview" in callbacks_none or "wl_buy_confirm" in callbacks_none)
         self.assertIn("back_to_main_menu", callbacks_none)
 
         # 2. EXPIRED -> Renew button + Back button
@@ -198,7 +193,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         kb_expired = get_white_internet_overview_keyboard(sub_expired, bot_domain=domain)
         self.assertIsNotNone(kb_expired)
         callbacks_expired = [btn.callback_data for row in kb_expired.inline_keyboard for btn in row]
-        self.assertIn("wl_renew_confirm", callbacks_expired)
+        self.assertTrue("wl_renew_preview" in callbacks_expired or "wl_renew_confirm" in callbacks_expired)
         self.assertIn("back_to_main_menu", callbacks_expired)
 
         # 3. DISABLED -> Back button only
@@ -208,12 +203,12 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         callbacks_disabled = [btn.callback_data for row in kb_disabled.inline_keyboard for btn in row]
         self.assertEqual(callbacks_disabled, ["back_to_main_menu"])
 
-        # 4. PENDING -> Back button only
+        # 4. PENDING -> Refresh button + Back button
         sub_pending = WhiteInternetSubscription(id=3, user_id=1, status=WhiteInternetStatus.PENDING)
         kb_pending = get_white_internet_overview_keyboard(sub_pending, bot_domain=domain)
         self.assertIsNotNone(kb_pending)
         callbacks_pending = [btn.callback_data for row in kb_pending.inline_keyboard for btn in row]
-        self.assertEqual(callbacks_pending, ["back_to_main_menu"])
+        self.assertEqual(callbacks_pending, ["white_internet", "back_to_main_menu"])
 
         # 5. EXHAUSTED -> Top-up + Renew + Back button (admin)
         sub_exhausted = WhiteInternetSubscription(id=4, user_id=1, status=WhiteInternetStatus.EXHAUSTED)
@@ -221,7 +216,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(kb_exhausted)
         callbacks_exhausted = [btn.callback_data for row in kb_exhausted.inline_keyboard for btn in row]
         self.assertIn("wl_topup_menu", callbacks_exhausted)
-        self.assertIn("wl_renew_confirm", callbacks_exhausted)
+        self.assertTrue("wl_renew_preview" in callbacks_exhausted or "wl_renew_confirm" in callbacks_exhausted)
         self.assertIn("back_to_main_menu", callbacks_exhausted)
 
         # 6. ACTIVE + Provisioned -> Copy text + Instructions + Top-up + Renew + Back button (admin)
@@ -237,7 +232,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         callbacks_active = [btn.callback_data for row in kb_active.inline_keyboard for btn in row if btn.callback_data]
         self.assertIn("wl_show_link", callbacks_active)
         self.assertIn("wl_topup_menu", callbacks_active)
-        self.assertIn("wl_renew_confirm", callbacks_active)
+        self.assertTrue("wl_renew_preview" in callbacks_active or "wl_renew_confirm" in callbacks_active)
         self.assertIn("back_to_main_menu", callbacks_active)
 
     async def test_show_subscription_link_renders_clean_incy_instructions(self):

@@ -508,6 +508,7 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
             expires_at=now + timedelta(days=10),
             device_limit=2,
             token="token123",
+            is_trial=False,
         )
         kb_user = get_white_internet_overview_keyboard(
             sub_soon, bot_domain="test.domain", is_admin_user=False
@@ -516,11 +517,27 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
 
         # Must have renewal button for 450 ₽
         self.assertTrue(any("450" in text for text in buttons_user))
-        # Non-admin must NOT have topup or add-device
-        self.assertFalse(any("Докупить трафик" in text for text in buttons_user))
+        # Paid user HAS topup (no longer admin-gated in v7.0), but non-admin cannot add device
+        self.assertTrue(any("Докупить трафик" in text for text in buttons_user))
         self.assertFalse(any("Добавить устройство" in text for text in buttons_user))
         # Refresh button must NEVER be present
         self.assertFalse(any("Обновить расход" in text for text in buttons_user))
+
+        # Trial user cannot topup or add device
+        sub_trial = WhiteInternetSubscription(
+            id=3,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=now + timedelta(days=2),
+            device_limit=1,
+            token="tokentrial",
+            is_trial=True,
+        )
+        kb_trial = get_white_internet_overview_keyboard(
+            sub_trial, bot_domain="test.domain", is_admin_user=False
+        )
+        buttons_trial = [btn.text for row in kb_trial.inline_keyboard for btn in row]
+        self.assertFalse(any("Докупить трафик" in text for text in buttons_trial))
+        self.assertFalse(any("Добавить устройство" in text for text in buttons_trial))
 
         # 2. Sub expiring in 45 days -> Renewal button MUST NOT be present (> 30 days remaining)
         sub_far = WhiteInternetSubscription(

@@ -16,7 +16,7 @@ class Migration0025Tests(unittest.TestCase):
         rev = scripts.get_revision("0025_admin_qol_and_idempotency")
         self.assertIsNotNone(rev)
         self.assertEqual(rev.down_revision, "0024_wi_device_limit")
-        self.assertEqual(scripts.get_heads(), ["0025_admin_qol_and_idempotency"])
+        self.assertEqual(scripts.get_heads(), ["0026_wi_trial_semantics"])
 
     def test_migration_0025_source_content(self):
         m25_path = Path("alembic/versions/0025_admin_qol_and_idempotency.py")

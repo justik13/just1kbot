@@ -1,16 +1,16 @@
 # ⚪ БЕЛЫЕ СПИСКИ В РФ: АРХИТЕКТУРА, ТЕОРИЯ, МЕТОДЫ ОБХОДА И ПОЛНОЕ РУКОВОДСТВО ПО VLESS XHTTP ЧЕРЕЗ РОССИЙСКИЕ CDN
 
-> **Единый источник истины (SSOT)** по анализу белых списков, цензурной инфраструктуры РКН/ТСПУ и развертыванию отказоустойчивого каскадного проксирования **VLESS XHTTP + Padding (OPTIONS) через Yandex Cloud CDN**.
+> **Инженерно-техническое руководство** по анализу белых списков, цензурной инфраструктуры РКН/ТСПУ и развертыванию отказоустойчивого каскадного проксирования **VLESS XHTTP + Padding (OPTIONS) через Yandex Cloud CDN**.
 >
-> 📌 **Версия руководства:** `v1.0 (PRODUCTION READY / FIELD TESTED)` | **Дата фиксации:** `05.09.2026`
-> 🛡️ **Статус аудита:** Проведен комплексный аппаратно-программный аудит (NTC.party, Habr, 4PDA, GitHub XTLS/Xray-core issues/PRs, документация EcoFilter RDP.ru, телеметрия Cheburcheck). Все архитектурные решения верифицированы на реальных мобильных сетях операторов РФ («Большая четверка»: МТС AS8359, МегаФон AS25159, Билайн AS16345, Т2 AS12958/AS15378).
+> 📌 **Версия руководства:** `v1.1 (ACTUALIZED / FIELD TESTED)` | **Дата фиксации:** `08.09.2026`
+> 🛡️ **Статус аудита:** Документ аккумулирует полевые инженерные данные, анализ протоколов и тестов (NTC.party, Habr, 4PDA, GitHub XTLS/Xray-core issues/PRs, документация EcoFilter RDP.ru, телеметрия Cheburcheck, опыт эксплуатации Just1kbot). Материал не претендует на статус догматического или неизменного «источника абсолютной истины» — цензурные механизмы и сетевые условия в РФ непрерывно эволюционируют, требуя регулярного тестирования и валидации на реальной инфраструктуре. Все архитектурные решения верифицированы на реальных мобильных сетях операторов РФ («Большая четверка»: МТС AS8359, МегаФон AS25159, Билайн AS16345, Т2 AS12958/AS15378).
 >
 > ⚡ **СТРАТЕГИЯ КЛИЕНТОВ ДЛЯ РЕЖИМА БЕЛЫХ СПИСКОВ (WL):**
 > 1. **Режим Белых Списков — СТРОГО Xray (VLESS XHTTP).** Протокол AmneziaWG в белых списках **НЕ ИСПОЛЬЗУЕТСЯ**, так как весь трафик UDP аппаратно уничтожается (`protocols capacity 0` на ASIC Barefoot Tofino комплексов ТСПУ) либо деградирует до 0 кбит/с.
 > 2. **Основной клиент (Primary Client #1) — INCY (Xray):** нативная работа с `xray-core`, поддержка Full Xray JSON, HTTP-подписок с автообновлением, управлением через заголовки (`subscription-userinfo`, `profile-title`) и deep links (`incy://add/...`, `incy://crypt1/...`).
 > 3. **Второй клиент (Secondary Client #2) — AmneziaVPN Client:** нативная работа через контейнер `amnezia-xray` по ключам формата **`vpn://`** и прямым JSON-файлам.
 >
-> *Актуальность: 05 сентября 2026 года. Официальный baseline: Xray-core v26.7.28+ (с поддержкой uplinkHTTPMethod PR #5414 и путей без обязательного закрывающего слэша для маскировки под статические файлы PR #6307). Экспериментальные функции динамической рандомизации путей (PR #6720, closed unmerged) и workarounds для клиентов (INCY Issue #114, Amnezia Issue #2943) вынесены в отдельные опциональные блоки.*
+> *Актуальность: 08 сентября 2026 года. Официальный baseline: Xray-core v26.7.28+ (с поддержкой uplinkHTTPMethod PR #5414 и путей без обязательного закрывающего слэша для маскировки под статические файлы PR #6307) с учетом анализа ядра v26.9.8 (PR #6632: retry при HTTP/2 GOAWAY; PR #6058: sockopt.domainStrategy).*
 
 ---
 
@@ -75,10 +75,10 @@
 
 ## 1. ВВЕДЕНИЕ И ФУНДАМЕНТАЛЬНАЯ РАЗНИЦА: ЧЕРНЫЕ VS БЕЛЫЕ СПИСКИ
 
-> [!IMPORTANT]
-> **Миссия и позиционирование руководства:**  
-> Настоящий документ спроектирован как **универсальный архитектурный стандарт обхода белых списков (Default-Drop) в РФ**, одновременно выступая производственным эталоном для развертывания и масштабирования сервиса **Just1kbot**.  
-> В отличие от любительских схем «на коленке», архитектура Just1kbot рассчитана на работу в условиях высоких клиентских нагрузок (сотни/тысячи абонентов), противодействие активному зондированию ТСПУ и защиту ценных зарубежных серверов от перманентных блокировок.
+> [!NOTE]
+> **Назначение и позиционирование руководства:**
+> Настоящий документ служит **практическим инженерным справочником по обходу белых списков (Default-Drop) в РФ**, систематизируя производственный опыт проектирования, развертывания и масштабирования сервиса **Just1kbot**.
+> Документ не является догмой или неизменным утверждением: сетевой ландшафт ТСПУ и политики CDN динамичны. Представленная архитектура ориентирована на устойчивость под высокими клиентскими нагрузками (сотни/тысячи абонентов), противодействие активному зондированию ТСПУ и защиту ценных зарубежных серверов от перманентных блокировок.
 
 Для правильного выбора технологии и протокола необходимо четко понимать текущее разделение режимов фильтрации трафика в Российской Федерации.
 
@@ -332,22 +332,32 @@
  (YouTube, Instagram, ChatGPT, Telegram, etc.)
 ```
 
-### 3.2. Почему именно Yandex Cloud CDN?
+### 3.2. Почему именно Yandex Cloud CDN и специфика таймаутов отечественных сетей
 
 1. **Неприкасаемый L3:** IP-диапазоны CDN Яндекса (`*.gslb.yccdn.ru`) входят в базовые белые списки абсолютно всех операторов сотовой связи в РФ (МТС, Мегафон, Билайн, Т2).
 2. **Легитимный L7:** Клиент подключается к CDN с настоящим валидным сертификатом Let's Encrypt, выпущенным через Yandex Certificate Manager. ТСПУ видит идеальное HTTPS-соединение без каких-либо аномалий.
 3. **Экономичность:** Трафик внутри РФ через Cloud CDN тарифицируется по минимальным ценам, а начального гранта хватает на месяцы работы.
 
+#### Специфика таймаутов Edge CDN и обработка HTTP/2 GOAWAY (Анализ ядра Xray-core v26.9.8 / PR #6632):
+В реальных условиях отечественные CDN имеют различные профили сброса неактивных или длительных HTTP/2 сессий:
+- **VK Cloud CDN:** агрессивно закрывает неактивные потоки уже через **10 секунд**.
+- **Timeweb CDN:** сбрасывает сессию через **30 секунд**.
+- **Yandex Cloud CDN:** отправляет graceful shutdown кадра `GOAWAY` (код NO_ERROR) ровно через **60 секунд** простоя стрима.
+
+В версиях Xray-core до v26.9.8 при передаче uplink-пакета в момент закрытия стрима CDN клиент получал ошибку:
+`http2: Transport: cannot retry err [http2: Transport received Server's graceful shutdown GOAWAY]`, так как стандартный `http.Request.Body` в Go не поддерживал автоматический перезапуск (`rewind`).
+В **Xray-core v26.9.8** (PR #6632) для транспорта XHTTP в режиме `packet-up` реализован метод `Request.GetBody()`, что позволяет Go HTTP/2 транспортному клиенту прозрачно переоткрывать новый стрим к CDN без потери пакета при получении `GOAWAY`.
+
 ### 3.2.1. Альтернативные отечественные CDN (Selectel, Timeweb, VK Cloud, TurboFlare, CDNvideo)
 
-Хотя **Yandex Cloud CDN** является рекомендуемым индустриальным стандартом (SSOT) благодаря надежной Anycast-инфраструктуре, бесплатному пулу в 150 ГБ и сквозному HTTPS до Origin, на практике (включая исследования репозитория `matrixlegend-code/vpn-cdn-installer`) успешно применяются еще 5 альтернативных CDN-провайдеров РФ:
+Хотя **Yandex Cloud CDN** является основным рекомендуемым профилем благодаря надежной Anycast-инфраструктуре, бесплатному пулу в 150 ГБ и сквозному HTTPS до Origin, на практике (включая исследования сообщества и репозитория `matrixlegend-code/vpn-cdn-installer`) могут применяться еще 5 альтернативных CDN-провайдеров РФ:
 
 | CDN-провайдер | Технический домен / Edge | Протокол до Origin | Метод Uplink (`uplinkHTTPMethod`) | Рекомендуемый путь маскировки (Path) | Специфика настройки профиля CDN |
 | :--- | :--- | :---: | :---: | :--- | :--- |
-| **Yandex Cloud CDN** | `*.gslb.yccdn.ru` | **HTTPS:443** | **`OPTIONS`** | `/api/v3/secure-data` | **Эталон (SSOT)**. Zero Buffering, автовыпуск Let's Encrypt через Certificate Manager. |
-| **Selectel CDN** | `*.selcdn.net` | **HTTPS:443** | **`DELETE`** | `/api/uploadFile/` | Ресурс «Статика». Edge блокирует POST, но **пропускает DELETE** с телом! Отключить кеш, Brotli, Gzip и оптимизацию картинок. Увеличить таймауты ответа. |
+| **Yandex Cloud CDN** | `*.gslb.yccdn.ru` | **HTTPS:443** | **`OPTIONS`** | `/api/v3/secure-data` | **Основной профиль (Рекомендуемый)**. Zero Buffering, автовыпуск Let's Encrypt через Certificate Manager. |
+| **Selectel CDN** | `*.selcdn.net` | **HTTPS:443** | **`DELETE`** | `/api/uploadFile/` | Ресурс «Статика». Edge блокирует POST, но **пропускает DELETE** с телом! Требует Origin Probe (`/health`). Отключить кеш, Brotli, Gzip и оптимизацию картинок. |
 | **Timeweb CDN** | `*.cdn.twcstorage.ru` | **HTTP:80** | `OPTIONS` / `POST` | `/content/media/stream.m3u8` | Origin задается IP-адресом на порту 80 (без SSL). Маскировка под HLS-поток. Выключить опцию «Игнорировать параметры запроса». CNAME на техдомен. |
-| **VK Cloud CDN** | `*.vkcloud-cdn.ru` | **HTTP:80** | `OPTIONS` | `/api/v2/stream` | Базовый профиль с Origin по HTTP. Требует привязки CNAME и отключения буферизации. |
+| **VK Cloud CDN** | `*.vkcloud-cdn.ru` | **HTTP:80** | `OPTIONS` | `/api/v2/stream` | Базовый профиль с Origin по HTTP. Таймаут сессии 10с. Требует привязки CNAME и отключения буферизации. |
 | **TurboFlare CDN** | Собственные NS | **HTTPS:443** | `POST` | `/static/getFile/video/segment.ts` | Управляет всей DNS-зоной домена (делегирование NS). Сертификат edge выпускает сам TurboFlare. Маскировка под сегменты видео MPEG-TS. |
 | **Beeline CDNvideo** | Домен CDNvideo | HTTP / HTTPS | `OPTIONS` | `/live/stream.flv` | Профиль стриминга без буферизации. |
 
@@ -368,6 +378,14 @@
    - **Тип ресурса:** Создается ресурс типа **«Статика»** с источником по протоколу **HTTPS на порту 443**.
    - **Технический домен:** Выдается системой в виде `xxxx.selcdn.net`. В DNS вашего домена создается CNAME-запись, ведущая на этот хост.
    - **Специфика метода Uplink (`DELETE`):** Edge-серверы Selectel отбрасывают метод `POST` (возвращая 405 Method Not Allowed) либо буферизируют его, однако **метод `DELETE` беспрепятственно пропускается вместе с телом запроса** без буферизации. В клиентах Xray выставляется: `uplinkHTTPMethod: "DELETE"`.
+   - **Origin Probe (Проверка доступности источника):** В отличие от Yandex Cloud, контроллеры Selectel CDN выполняют периодический опрос источника (Health Probe). Если Origin отдает ошибку или сбрасывает TCP-соединение, Selectel помечает источник как недоступный (`Dead`) и возвращает абонентам ошибку `502 Bad Gateway`. В Nginx на Origin необходим выделенный некешируемый эндпоинт проверки:
+     ```nginx
+     location = /health {
+         access_log off;
+         default_type text/plain;
+         return 200 "OK\n";
+     }
+     ```
    - **Таймауты:** В настройках CDN обязательно увеличиваются `Response timeout` и `Connection timeout` (до 300–600 секунд), чтобы CDN не сбрасывал соединение при кратковременных паузах в потоке данных.
    - **Отключение сжатия и обработки:** Полностью отключить кеширование, Gzip, Brotli и автоконвертацию изображений в WebP.
    - **Важное правило FQDN:** Пользовательский CDN-домен (например, `cdn.domain.com`) категорически **не должен совпадать** с доменом источника Origin (`origin.domain.com`), иначе возникает бесконечный цикл перенаправлений.
@@ -752,9 +770,21 @@ ufw --force enable
          }
        }
      ],
-     "outbounds": [{ "tag": "internet", "protocol": "freedom" }]
+     "outbounds": [
+       {
+         "tag": "internet",
+         "protocol": "freedom",
+         "streamSettings": {
+           "sockopt": {
+             "domainStrategy": "UseIPv4"
+           }
+         }
+       }
+     ]
    }
    ```
+
+> 📌 **Примечание по Xray-core PR #6058:** Начиная с Xray-core v26.1.18+ / v26.7.x директива freedom `domainStrategy` перенесена из `settings` в `streamSettings.sockopt.domainStrategy`. Хотя ядро сохраняет обратную совместимость со старым форматом, в современных конфигурациях рекомендуется использовать блок `sockopt`.
 
 #### 5.1.1. Паттерн Exit-узла: Интеграция Cloudflare WARP (защита от Captcha и блокировок Datacenter IP)
 
@@ -917,10 +947,30 @@ ln -sfn /etc/nginx/sites-available/xhttp-origin.conf /etc/nginx/sites-enabled/xh
 nginx -t && systemctl enable --now nginx && systemctl reload nginx
 certbot certonly --webroot -w /var/www/acme --non-interactive --agree-tos --email "$EMAIL" -d "$ORIGIN_HOST"
 
-# Конфиг Xray на Origin
+# Конфиг Xray на Origin (с поддержкой Split-DNS и Split-Routing в Рунет)
 cat > /usr/local/etc/xray/config.json <<EOF
 {
   "log": { "loglevel": "warning" },
+  "dns": {
+    "servers": [
+      {
+        "address": "77.88.8.8",
+        "port": 53,
+        "domains": [
+          "geosite:category-ru",
+          "geosite:tld-ru",
+          "domain:ru",
+          "domain:su",
+          "domain:xn--p1ai",
+          "domain:2ip.ru"
+        ],
+        "skipFallback": true
+      },
+      "1.1.1.1",
+      "localhost"
+    ],
+    "queryStrategy": "UseIPv4"
+  },
   "inbounds": [
     {
       "tag": "from-yandex-cdn",
@@ -943,6 +993,11 @@ cat > /usr/local/etc/xray/config.json <<EOF
           "xPaddingMethod": "tokenish",
           "xPaddingPlacement": "queryInHeader"
         }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["tls", "http", "quic"],
+        "routeOnly": false
       }
     }
   ],
@@ -968,9 +1023,50 @@ cat > /usr/local/etc/xray/config.json <<EOF
         }
       }
     },
-    { "tag": "direct", "protocol": "freedom" },
-    { "tag": "block", "protocol": "blackhole" }
-  ]
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "streamSettings": {
+        "sockopt": {
+          "domainStrategy": "UseIPv4"
+        }
+      }
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole",
+      "settings": { "response": { "type": "none" } }
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["from-yandex-cdn"],
+        "domain": [
+          "geosite:category-ru",
+          "geosite:tld-ru",
+          "domain:ru",
+          "domain:su",
+          "domain:xn--p1ai",
+          "domain:2ip.ru"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["from-yandex-cdn"],
+        "ip": ["geoip:ru"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["from-yandex-cdn"],
+        "outboundTag": "to-exit"
+      }
+    ]
+  }
 }
 EOF
 
@@ -1046,6 +1142,13 @@ server {
         add_header X-Origin-Method \$request_method always;
         add_header X-Origin-Content-Length \$http_content_length always;
         return 204;
+    }
+
+    # 1.1. Эндпоинт проверки доступности источника (Origin Health Probe для Selectel CDN и систем мониторинга)
+    location = /health {
+        access_log off;
+        default_type text/plain;
+        return 200 "OK\n";
     }
 
     # 2. VLESS XHTTP эндпоинт (модификатор ^~ предотвращает коллизии с regex-правилами)
@@ -1163,6 +1266,19 @@ ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
+```
+
+#### 5. Оптимизация MTU и предотвращение фрагментации на мобильных сетях (TCPMSS Clamping)
+В мобильных сетях (LTE/3G/5G) сотовые операторы РФ используют туннелирование GTP (GPRS Tunnelling Protocol) с уменьшенным MTU (часто 1380–1420 байт вместо стандартных 1500). С учетом накладных расходов TLS-инкапсуляции XHTTP (заголовок TLS record, TCP options, padding) размер пакета может превысить Path MTU радиоканала оператора. Если промежуточные сетевые узлы или ТСПУ сбрасывают ICMP-пакеты «Fragmentation Needed» (феномен Path MTU Black Hole), клиентское соединение зависает на передаче медиафайлов и тяжелых ответов.
+Решение — нормализация максимального размера TCP-сегмента через `iptables` TCPMSS Clamping на Origin и Exit серверах:
+```bash
+# Клампинг MSS по PMTU для транзитного и локального TCP-трафика:
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+
+# Сохранение правил iptables между перезагрузками ОС:
+apt-get install -y iptables-persistent netfilter-persistent
+netfilter-persistent save
 ```
 
 ### 5.3.1. Разграничение плоскостей DNS: почему системный DNS на Origin не видит пользовательский трафик и как исключены DNS-утечки (DNS Leak Proof)

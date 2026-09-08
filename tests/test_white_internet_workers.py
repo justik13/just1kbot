@@ -956,6 +956,7 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         sub = WhiteInternetSubscription(
             id=1, user_id=42, origin_node_id=1, uuid="client-uuid-1",
             status=WhiteInternetStatus.ACTIVE,
+            is_trial=True,
         )
         user = User(id=42, telegram_id=777777)
 
@@ -965,8 +966,7 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         mock_session.scalar.side_effect = [sub, user]
 
         with patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(200, True, 0, None)):
-            with patch("config.constants.WHITE_INTERNET_TRIAL_MODE_ONLY", True):
-                await worker.run_traffic_cycle(mock_session)
+            await worker.run_traffic_cycle(mock_session)
 
         mock_bot.send_message.assert_awaited_once_with(
             chat_id=777777,

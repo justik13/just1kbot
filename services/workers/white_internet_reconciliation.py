@@ -58,6 +58,27 @@ class WhiteInternetReconciliationWorker:
             self._sub_locks[sub_id] = lock
         return lock
 
+    async def _notify_sub_ready(self, session: AsyncSession, user_id: int) -> None:
+        if self.bot is None:
+            return
+        try:
+            from database.models import User
+            user = await session.get(User, user_id)
+            if not user or not user.telegram_id:
+                return
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            from bot import texts
+            kb = InlineKeyboardBuilder()
+            kb.button(text=texts.BTN_WL_CONNECT_CLIENT, callback_data="white_internet")
+            await self.bot.send_message(
+                chat_id=user.telegram_id,
+                text=texts.WL_AUTO_PUSH_READY,
+                reply_markup=kb.as_markup(),
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            logger.warning("Failed to send auto-push for user_id=%d: %s", user_id, exc)
+
     async def _reconcile_single_subscription(
         self,
         server_id: int,
@@ -150,9 +171,11 @@ class WhiteInternetReconciliationWorker:
 
                             sub.actual_version = target_version
                             sub.last_reconciled_node_epoch = verified_epoch
+                            transitioned_to_active = False
                             if sub.status == WhiteInternetStatus.PENDING and desired_active:
                                 sub.status = WhiteInternetStatus.ACTIVE
                                 sub.status_reason = None
+                                transitioned_to_active = True
                             sub.provisioning_status = (
                                 WhiteInternetProvisioningStatus.ACTIVE
                                 if desired_active
@@ -161,6 +184,8 @@ class WhiteInternetReconciliationWorker:
                             sub.last_synced_at = now_utc()
                             sub.last_sync_error = None
                             await lock_session.commit()
+                            if transitioned_to_active:
+                                await self._notify_sub_ready(lock_session, sub.user_id)
                             return True
                         elif sync_result == SyncResult.ALREADY_NEWER:
                             # Check real observed runtime inventory before trusting ALREADY_NEWER
@@ -180,9 +205,11 @@ class WhiteInternetReconciliationWorker:
                                         )
                                         sub.actual_version = max(sub.actual_version or 0, target_version)
                                         sub.last_reconciled_node_epoch = target_epoch
+                                        transitioned_to_active = False
                                         if sub.status == WhiteInternetStatus.PENDING and desired_active:
                                             sub.status = WhiteInternetStatus.ACTIVE
                                             sub.status_reason = None
+                                            transitioned_to_active = True
                                         sub.provisioning_status = (
                                             WhiteInternetProvisioningStatus.ACTIVE
                                             if desired_active
@@ -191,6 +218,8 @@ class WhiteInternetReconciliationWorker:
                                         sub.last_synced_at = now_utc()
                                         sub.last_sync_error = None
                                         await lock_session.commit()
+                                        if transitioned_to_active:
+                                            await self._notify_sub_ready(lock_session, sub.user_id)
                                         return True
 
                             # Observed state does not match desired state: force convergence by bumping desired_version

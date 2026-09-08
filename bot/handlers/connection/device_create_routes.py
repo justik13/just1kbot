@@ -90,9 +90,10 @@ def _get_no_subscription_keyboard():
     return builder.as_markup()
 
 
-def _get_device_limit_keyboard():
+def _get_device_limit_keyboard(can_upgrade: bool = True):
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff")
+    if can_upgrade:
+        builder.button(text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff")
     builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections")
     builder.adjust(1)
     return builder.as_markup()
@@ -355,11 +356,14 @@ async def _process_server_selection(
             except Exception:
                 pass
             limit = await _get_effective_device_limit(session, user)
+            from database.repositories.tariffs_repo import get_active_tariffs
+            active_tariffs = await get_active_tariffs(session, service_type="awg")
+            can_upgrade = any(getattr(t, "device_limit", 1) > limit for t in active_tariffs)
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
                 texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=limit),
-                _get_device_limit_keyboard(),
+                _get_device_limit_keyboard(can_upgrade=can_upgrade),
             )
             await state.clear()
             return

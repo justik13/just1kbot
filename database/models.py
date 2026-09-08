@@ -1455,6 +1455,9 @@ class WhiteInternetSubscription(Base):
     last_device_reset_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    is_trial: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     provisioning_status: Mapped[str] = mapped_column(
         String(30),

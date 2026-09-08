@@ -425,11 +425,17 @@ def get_balance_change_shortage_keyboard(
     return builder.as_markup()
 
 
-def get_topup_credit_keyboard(context: dict) -> InlineKeyboardMarkup:
+def get_topup_credit_keyboard(context: dict | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    context = context or {}
     tariff_id = context.get("tariff_id")
     source = context.get("source")
-    if tariff_id and source in {"showcase", "renew", "change"}:
+    if source == "white_internet":
+        builder.button(
+            text=texts.BTN_WL_RETURN_TO_SERVICE,
+            callback_data="white_internet",
+        )
+    elif tariff_id and source in {"showcase", "renew", "change"}:
         builder.button(
             text=texts.BTN_PAYMENT_RETURN_TO_PURCHASE,
             callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
