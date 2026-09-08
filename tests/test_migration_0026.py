@@ -274,6 +274,113 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(ambiguous_no_quote), 1)
             self.assertEqual(ambiguous_no_quote[0][0], sub_ambig.id)
 
+    async def test_check_4b_allows_legitimate_reset_trials_with_excess_quotes(self):
+        """Check 4b must permit users whose trial quotes exceed active subscriptions (due to trial reset/delete)."""
+        now = now_utc()
+        async with self.sessions.begin() as session:
+            u_reset = User(telegram_id=int(uuid.uuid4().int % 1000000000))
+            session.add(u_reset)
+            await session.flush()
+
+            from services.white_internet_service import WhiteInternetService
+            from database.repositories.tariff_quotes_repo import get_or_create_current_version
+
+            tariff = await WhiteInternetService.get_or_create_white_internet_tariff(session)
+            tariff_version = await get_or_create_current_version(session, tariff)
+
+            # Two consumed trial quotes (initial + reset re-grant)
+            q1 = TariffQuote(
+                public_id=uuid.uuid4(),
+                user_id=u_reset.id,
+                service_type="white_internet",
+                operation_type=TariffQuoteOperation.TRIAL,
+                status=TariffQuoteStatus.CONSUMED,
+                target_tariff_version_id=tariff_version.id,
+                amount_due_rub=Decimal("0.00"),
+                current_paid_hours=0,
+                current_paid_value_rub=Decimal("0.00"),
+                bonus_hours=0,
+                resulting_paid_hours=72,
+                resulting_paid_value_rub=Decimal("0.00"),
+                resulting_bonus_hours=0,
+                rounding_loss_hours=Decimal("0.00"),
+                rounding_loss_value_rub=Decimal("0.00"),
+                consumed_at=now - timedelta(days=5),
+                expires_at=now - timedelta(days=2),
+            )
+            q2 = TariffQuote(
+                public_id=uuid.uuid4(),
+                user_id=u_reset.id,
+                service_type="white_internet",
+                operation_type=TariffQuoteOperation.TRIAL,
+                status=TariffQuoteStatus.CONSUMED,
+                target_tariff_version_id=tariff_version.id,
+                amount_due_rub=Decimal("0.00"),
+                current_paid_hours=0,
+                current_paid_value_rub=Decimal("0.00"),
+                bonus_hours=0,
+                resulting_paid_hours=72,
+                resulting_paid_value_rub=Decimal("0.00"),
+                resulting_bonus_hours=0,
+                rounding_loss_hours=Decimal("0.00"),
+                rounding_loss_value_rub=Decimal("0.00"),
+                consumed_at=now - timedelta(days=1),
+                expires_at=now + timedelta(days=2),
+            )
+            session.add_all([q1, q2])
+
+            # Only ONE active subscription (the second trial, after first was deleted)
+            sub_second = WhiteInternetSubscription(
+                user_id=u_reset.id,
+                token="pg_m0026_second_" + uuid.uuid4().hex,
+                uuid=str(uuid.uuid4()),
+                status=WhiteInternetStatus.ACTIVE,
+                started_at=now - timedelta(days=1),
+                expires_at=now + timedelta(days=2),
+                base_traffic_bytes=5368709120,
+                device_limit=1,
+                is_trial=False,
+            )
+            session.add(sub_second)
+            await session.flush()
+
+            # Execute Check 4b query for this user
+            ambiguous_counts = (
+                await session.execute(
+                    text(
+                        """
+                        WITH sub_counts AS (
+                            SELECT user_id, count(*) AS sub_cnt
+                            FROM white_internet_subscriptions
+                            WHERE base_traffic_bytes IN (5368709120, 10737418240)
+                              AND device_limit = 1
+                              AND user_id = :uid
+                            GROUP BY user_id
+                        ),
+                        quote_counts AS (
+                            SELECT user_id, count(*) AS quote_cnt
+                            FROM tariff_quotes
+                            WHERE service_type = 'white_internet'
+                              AND operation_type = 'trial'
+                              AND status = 'consumed'
+                              AND user_id = :uid
+                            GROUP BY user_id
+                        )
+                        SELECT coalesce(s.user_id, q.user_id) AS user_id,
+                               coalesce(s.sub_cnt, 0) AS sub_cnt,
+                               coalesce(q.quote_cnt, 0) AS quote_cnt
+                        FROM sub_counts s
+                        FULL OUTER JOIN quote_counts q ON s.user_id = q.user_id
+                        WHERE coalesce(s.sub_cnt, 0) > coalesce(q.quote_cnt, 0)
+                        """
+                    ),
+                    {"uid": u_reset.id},
+                )
+            ).fetchall()
+
+            # Must NOT be flagged as ambiguous: sub_cnt (1) <= quote_cnt (2)
+            self.assertEqual(len(ambiguous_counts), 0)
+
     async def test_downgrade_fails_closed_when_trial_quotes_exist(self):
         """Downgrade guard prevents rolling back if trial quotes exist in database."""
         async with self.sessions.begin() as session:

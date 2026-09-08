@@ -17,6 +17,10 @@ from bot.keyboards.admin.users import (
 )
 from config.enums import AdminAuditAction, WhiteInternetStatus
 from database.repositories import white_internet_repo
+from database.repositories.idempotency_repo import (
+    check_and_record_admin_op,
+    make_admin_op_key,
+)
 from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import get_user_by_telegram_id
@@ -248,6 +252,27 @@ async def admin_wi_traffic_add(
     wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     if not wi_sub:
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+        return
+
+    message = getattr(callback, "message", None)
+    chat_id = getattr(getattr(message, "chat", None), "id", callback.from_user.id) if message else callback.from_user.id
+    message_id = getattr(message, "message_id", 0) if message else 0
+    op_key = make_admin_op_key(
+        action="wi_traffic_add",
+        admin_id=callback.from_user.id,
+        target_id=user.id,
+        chat_id=chat_id,
+        message_id=message_id,
+        value=gb,
+    )
+    is_new = await check_and_record_admin_op(
+        session,
+        op_key=op_key,
+        admin_id=callback.from_user.id,
+        target_id=user.id,
+    )
+    if not is_new:
+        await callback.answer(texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED, show_alert=True)
         return
 
     extra_bytes = gb * 1024 * 1024 * 1024

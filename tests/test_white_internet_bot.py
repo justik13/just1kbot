@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.types import CallbackQuery, User as TgUser
 
+from bot import texts
 from bot.handlers.white_internet import (
     handle_wl_reset_devices,
     process_white_internet_buy,
@@ -123,6 +124,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.white_internet.is_admin", return_value=True), \
              patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
              patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance) as mock_balance, \
+             patch("bot.handlers.white_internet.check_and_record_admin_op", new=AsyncMock(return_value=True)), \
              patch("services.white_internet_service.WhiteInternetService.topup_quota", return_value=(True, "OK", MagicMock())) as mock_topup, \
              patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock) as mock_menu:
             await process_topup_pack(query, self.session)
@@ -131,6 +133,31 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             mock_topup.assert_awaited_once_with(self.session, self.user.id, 25, actor_telegram_id=self.tg_user.id)
             self.session.commit.assert_awaited_once()
             mock_menu.assert_awaited_once_with(query, self.session)
+
+    async def test_topup_pack_replay_duplicate_prevented(self):
+        query = MagicMock(spec=CallbackQuery)
+        query.from_user = self.tg_user
+        query.data = "wl_topup_pack_25"
+        query.message = MagicMock()
+        query.answer = AsyncMock()
+
+        high_balance = AccountBalanceSnapshot(
+            accounting_position=Decimal("150.00"),
+            available=Decimal("150.00"),
+            reserved=Decimal("0.00"),
+            debt=Decimal("0.00"),
+        )
+
+        with patch("bot.handlers.white_internet.is_admin", return_value=True), \
+             patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance), \
+             patch("bot.handlers.white_internet.check_and_record_admin_op", new=AsyncMock(return_value=False)), \
+             patch("services.white_internet_service.WhiteInternetService.topup_quota", new=AsyncMock()) as mock_topup:
+            await process_topup_pack(query, self.session)
+
+            mock_topup.assert_not_awaited()
+            self.assertEqual(query.answer.await_count, 2)
+            query.answer.assert_awaited_with(texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED, show_alert=True)
 
     def test_overview_keyboard_generates_valid_telegram_buttons(self):
         """Active subscription keyboard must use native CopyTextButton and Bot API compliant buttons."""

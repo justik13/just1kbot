@@ -33,6 +33,10 @@ from config.settings import get_settings
 from database.models import Server, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import get_account_balance
+from database.repositories.idempotency_repo import (
+    check_and_record_admin_op,
+    make_admin_op_key,
+)
 from database.repositories.tariff_quotes_repo import get_or_create_current_version
 from database.repositories.users_repo import get_user_by_telegram_id
 from database.repositories.white_internet_repo import (
@@ -516,10 +520,12 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
     try:
         success, msg, _sub = await WhiteInternetService.purchase_subscription(session, user.id)
     except Exception as exc:
+        await session.rollback()
         logger.error("Unexpected error during white internet purchase: %s", exc)
         success, msg = False, texts.WL_NO_SERVERS_AVAILABLE
 
     if not success:
+        await session.rollback()
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup())
@@ -620,10 +626,12 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
     try:
         success, msg, _sub = await WhiteInternetService.renew_subscription(session, user.id)
     except Exception as exc:
+        await session.rollback()
         logger.error("Unexpected error during white internet renewal: %s", exc)
         success, msg = False, texts.WL_NO_SERVERS_AVAILABLE
 
     if not success:
+        await session.rollback()
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup())
@@ -749,15 +757,38 @@ async def process_topup_execute(query: CallbackQuery, session: AsyncSession):
         )
         return
 
+    message = getattr(query, "message", None)
+    chat_id = getattr(getattr(message, "chat", None), "id", query.from_user.id) if message else query.from_user.id
+    message_id = getattr(message, "message_id", 0) if message else 0
+    op_key = make_admin_op_key(
+        action="wl_topup",
+        admin_id=query.from_user.id,
+        target_id=user.id,
+        chat_id=chat_id,
+        message_id=message_id,
+        value=pack_gb,
+    )
+    is_new = await check_and_record_admin_op(
+        session,
+        op_key=op_key,
+        admin_id=query.from_user.id,
+        target_id=user.id,
+    )
+    if not is_new:
+        await query.answer(texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED, show_alert=True)
+        return
+
     try:
         success, msg, _grant = await WhiteInternetService.topup_quota(
             session, user.id, pack_gb, actor_telegram_id=query.from_user.id
         )
     except Exception as exc:
+        await session.rollback()
         logger.error("Unexpected error during topup: %s", exc)
         success, msg = False, texts.WL_DEBIT_FAILED
 
     if not success:
+        await session.rollback()
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup())
@@ -883,10 +914,38 @@ async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession
         )
         return
 
-    success, msg, _sub = await WhiteInternetService.purchase_device_slot(
-        session, user.id, actor_telegram_id=query.from_user.id
+    message = getattr(query, "message", None)
+    chat_id = getattr(getattr(message, "chat", None), "id", query.from_user.id) if message else query.from_user.id
+    message_id = getattr(message, "message_id", 0) if message else 0
+    op_key = make_admin_op_key(
+        action="wl_add_device",
+        admin_id=query.from_user.id,
+        target_id=user.id,
+        chat_id=chat_id,
+        message_id=message_id,
+        value="device_slot",
     )
+    is_new = await check_and_record_admin_op(
+        session,
+        op_key=op_key,
+        admin_id=query.from_user.id,
+        target_id=user.id,
+    )
+    if not is_new:
+        await query.answer(texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED, show_alert=True)
+        return
+
+    try:
+        success, msg, _sub = await WhiteInternetService.purchase_device_slot(
+            session, user.id, actor_telegram_id=query.from_user.id
+        )
+    except Exception as exc:
+        await session.rollback()
+        logger.error("Unexpected error during device slot purchase: %s", exc)
+        success, msg = False, texts.WL_DEBIT_FAILED
+
     if not success:
+        await session.rollback()
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup())

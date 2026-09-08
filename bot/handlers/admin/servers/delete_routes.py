@@ -12,7 +12,12 @@ from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
-from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+from config.enums import (
+    ServerHealthState,
+    ServerLifecycleStatus,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
+)
 from database.models import (
     APIOperation,
     Server,
@@ -414,6 +419,11 @@ async def confirm_purge_server(
         sub.origin_node_id = None
         sub.pending_hard_delete = False
         sub.status_reason = "force_purged_node_destroyed"
+
+    # Decommission the purged server so it is excluded from allocation and monitoring
+    server.is_active = False
+    server.lifecycle_status = ServerLifecycleStatus.DECOMMISSIONED
+    server.health_state = ServerHealthState.MANUAL_DISABLED
 
     # 3. Log structured audit
     await AuditService.log_action(

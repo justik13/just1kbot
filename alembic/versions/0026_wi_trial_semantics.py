@@ -71,7 +71,7 @@ def upgrade() -> None:
             f"{ambiguous_no_quote}. Fail-closed."
         )
 
-    # 4b. Mismatch between candidate trial subscriptions count and consumed trial quotes count
+    # 4b. Candidate trial subscriptions exceeding consumed trial quotes count (orphaned subscriptions)
     ambiguous_counts = bind.execute(
         sa.text(
             """
@@ -95,13 +95,13 @@ def upgrade() -> None:
                    coalesce(q.quote_cnt, 0) AS quote_cnt
             FROM sub_counts s
             FULL OUTER JOIN quote_counts q ON s.user_id = q.user_id
-            WHERE coalesce(s.sub_cnt, 0) <> coalesce(q.quote_cnt, 0)
+            WHERE coalesce(s.sub_cnt, 0) > coalesce(q.quote_cnt, 0)
             """
         )
     ).fetchall()
     if ambiguous_counts:
         raise RuntimeError(
-            f"Migration 0026 aborted: mismatch between trial subscription count and trial quote count: "
+            f"Migration 0026 aborted: found more candidate trial subscriptions than trial quotes: "
             f"{ambiguous_counts}. Fail-closed."
         )
 

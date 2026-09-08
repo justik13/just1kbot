@@ -439,11 +439,11 @@ class WhiteInternetService:
         await session.refresh(sub_locked)
 
         if old_origin_for_cleanup is not None and old_origin_for_cleanup.id != sub_locked.origin_node_id:
-            await white_internet_repo.record_orphan_cleanup(
+            await white_internet_repo.enqueue_orphan_cleanup(
                 session,
-                origin_node_id=old_origin_for_cleanup.id,
+                server_id=old_origin_for_cleanup.id,
                 client_uuid=sub_locked.uuid,
-                version=sub_locked.desired_version,
+                desired_version=sub_locked.desired_version,
             )
 
         await session.commit()
@@ -512,7 +512,7 @@ class WhiteInternetService:
 
         now = now_utc()
         base_time = sub.expires_at if sub.expires_at and sub.expires_at > now else now
-        if base_time + timedelta(days=WHITE_INTERNET_BASE_DURATION_DAYS) > now + timedelta(
+        if base_time + timedelta(days=tariff.duration_days) > now + timedelta(
             days=WHITE_INTERNET_MAX_EXPIRY_DAYS
         ):
             return False, texts.WL_RENEWAL_HORIZON_EXCEEDED, None
