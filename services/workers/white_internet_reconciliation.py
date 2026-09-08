@@ -106,18 +106,21 @@ class WhiteInternetReconciliationWorker:
         async with self._get_sub_lock(sub_id):
             async with self._semaphore:
                 async with sf() as lock_session:
-                    is_pg = False
+                    lock_conn = None
+                    locked = False
                     bind = getattr(lock_session, "bind", None)
                     if not bind and hasattr(lock_session, "sync_session"):
                         bind = getattr(lock_session.sync_session, "bind", None)
                     if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
-                        is_pg = True
-                        locked = await lock_session.scalar(
-                            select(func.pg_try_advisory_lock(sub_id + 7_000_000_000))
-                        )
-                        if not locked:
-                            logger.debug("Subscription %d locked by peer worker process. Skipping.", sub_id)
-                            return False
+                        if hasattr(bind, "connect"):
+                            lock_conn = await bind.connect()
+                            locked = bool(await lock_conn.scalar(
+                                select(func.pg_try_advisory_lock(sub_id + 7_000_000_000))
+                            ))
+                            if not locked:
+                                await lock_conn.close()
+                                logger.debug("Subscription %d locked by peer worker process. Skipping.", sub_id)
+                                return False
 
                     try:
                         # 1. External network mutation on Xray node (executed under distributed advisory lock)
@@ -277,15 +280,17 @@ class WhiteInternetReconciliationWorker:
                             await lock_session.commit()
                             return False
                     finally:
-                        if is_pg and locked:
+                        if lock_conn is not None:
                             async def _do_unlock():
                                 try:
-                                    if lock_session.in_transaction():
-                                        await lock_session.rollback()
-                                    await lock_session.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
-                                    await lock_session.commit()
+                                    await lock_conn.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
                                 except Exception as exc:
                                     logger.debug("Error releasing advisory lock for sub_id %d: %s", sub_id, exc)
+                                finally:
+                                    try:
+                                        await lock_conn.close()
+                                    except Exception:
+                                        pass
 
                             try:
                                 await asyncio.shield(_do_unlock())

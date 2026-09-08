@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 MAX_BALANCE_ADJUSTMENT = 1_000_000
 
 
+def _safe_update_callback_data(callback: CallbackQuery, new_data: str) -> CallbackQuery:
+    """Safely update callback data on frozen Pydantic models or mocks."""
+    object.__setattr__(callback, "data", new_data)
+    return callback
+
+
 @router.callback_query(F.data.startswith("admin_bal_preset:"))
 async def admin_balance_preset(
     callback: CallbackQuery,
@@ -99,7 +105,7 @@ async def admin_balance_preset(
     await AuditService.log_action(
         session,
         admin_id=callback.from_user.id,
-        action=AdminAuditAction.USER_BALANCE_ADJUSTED,
+        action=AdminAuditAction.ADMIN_BALANCE_TOPUP,
         target_type="user",
         target_id=user.id,
         details={
@@ -114,26 +120,32 @@ async def admin_balance_preset(
         texts.ADMIN_BALANCE_ADJUSTED_SUCCESS.format(amount=f"{amount:+d}"),
         show_alert=True,
     )
-    callback.data = f"admin_user_balance:{telegram_id}"
-    await show_user_balance_menu(callback, None, session)
+    callback = _safe_update_callback_data(callback, f"admin_user_balance:{telegram_id}")
+    await show_user_balance_menu(callback, None, session, target_telegram_id=telegram_id)
 
 
 @router.callback_query(F.data.startswith("admin_user_balance:"))
 async def show_user_balance_menu(
     callback: CallbackQuery,
-    state: FSMContext,
+    state: FSMContext | None,
     session: AsyncSession,
+    target_telegram_id: int | None = None,
 ):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    telegram_id = parse_callback_id(callback.data, 1)
+    telegram_id = (
+        target_telegram_id
+        if target_telegram_id is not None
+        else parse_callback_id(callback.data, 1)
+    )
     if telegram_id is None:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
-    await state.clear()
+    if state is not None:
+        await state.clear()
 
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:

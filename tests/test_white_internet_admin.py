@@ -302,6 +302,27 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
             callback.answer.assert_awaited_with(texts.ADMIN_WL_RESET_SUCCESS, show_alert=True)
             mock_menu.assert_awaited_once()
 
+    async def test_admin_wl_reset_apply_with_real_frozen_callback_query(self):
+        """Zero-mock test: real frozen CallbackQuery must not raise ValidationError on admin_wl_reset_apply."""
+        real_callback = CallbackQuery(
+            id="query_12345",
+            from_user=TgUser(id=123456789, is_bot=False, first_name="Admin"),
+            chat_instance="chat_inst_1",
+            data=f"admin_wl_reset_apply:{self.user.telegram_id}",
+        )
+        object.__setattr__(real_callback, "answer", AsyncMock())
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch.object(WhiteInternetService, "reset_user_trial", new=AsyncMock(return_value=(True, "ok"))), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wl_reset_apply(real_callback, self.session)
+            mock_menu.assert_awaited_once()
+            call_kwargs = mock_menu.call_args[1]
+            self.assertEqual(call_kwargs.get("target_telegram_id"), self.user.telegram_id)
+
     async def test_admin_wl_grant_trial_callback(self):
         """admin_wl_grant_trial calls create_trial_subscription, logs audit, and refreshes menu."""
         callback = MagicMock(spec=CallbackQuery)

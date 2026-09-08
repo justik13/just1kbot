@@ -101,6 +101,43 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Подтверждение изменения баланса", text_arg)
             self.assertIn("Компенсация за техработы", text_arg)
 
+    async def test_admin_balance_preset_apply_with_real_frozen_callback_query(self):
+        """Zero-mock test: real frozen CallbackQuery must not raise ValidationError on admin_bal_preset."""
+        from aiogram.types import CallbackQuery, User as TgUser
+        from bot.handlers.admin.users.balance_routes import admin_balance_preset
+
+        real_callback = CallbackQuery(
+            id="query_bal_123",
+            from_user=TgUser(id=123456789, is_bot=False, first_name="Admin"),
+            chat_instance="chat_inst_bal_1",
+            data="admin_bal_preset:888:100",
+        )
+        object.__setattr__(real_callback, "answer", AsyncMock())
+        msg = MagicMock()
+        msg.chat.id = 123
+        msg.message_id = 456
+        object.__setattr__(real_callback, "message", msg)
+
+        user = MagicMock()
+        user.id = 7
+        user.telegram_id = 888
+
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.admin.users.balance_routes.is_admin", return_value=True),
+            patch("bot.handlers.admin.users.balance_routes.get_user_by_telegram_id", return_value=user),
+            patch("bot.handlers.admin.users.balance_routes.check_and_record_admin_op", return_value=(True, None)),
+            patch("bot.handlers.admin.users.balance_routes.create_admin_adjustment", return_value=None),
+            patch("bot.handlers.admin.users.balance_routes.AuditService.log_action", new=AsyncMock()),
+            patch("bot.handlers.admin.users.balance_routes.show_user_balance_menu", new=AsyncMock()) as mock_menu,
+        ):
+            await admin_balance_preset(real_callback, session)
+            mock_menu.assert_awaited_once()
+            call_kwargs = mock_menu.call_args[1]
+            self.assertEqual(call_kwargs.get("target_telegram_id"), 888)
+            self.assertEqual(real_callback.data, "admin_user_balance:888")
+
 
 if __name__ == "__main__":
     unittest.main()

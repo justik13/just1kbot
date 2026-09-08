@@ -130,7 +130,11 @@ async def global_error_handler(
         tb_sanitized = sanitize_text(tb_text)
 
         if len(tb_sanitized) > 4000:
-            tb_sanitized = tb_sanitized[:4000] + "\n...[truncated]"
+            tb_sanitized = (
+                tb_sanitized[:1000]
+                + "\n...[middle frames truncated]...\n"
+                + tb_sanitized[-3000:]
+            )
 
         logger.critical(
             "[%s] Unhandled exception: %s\n%s",
