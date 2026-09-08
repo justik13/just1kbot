@@ -47,34 +47,72 @@ def upgrade() -> None:
         sa.Column("is_trial", sa.Boolean(), nullable=False, server_default=sa.text("false")),
     )
 
-    # 4. Fail-Closed Ambiguity Check: Ensure no paid subscriptions could be misclassified
-    ambiguous = bind.execute(
+    # 4. Fail-Closed Ambiguity Checks: Ensure zero misclassification of historical subscriptions
+    # 4a. Candidate sub-50GiB subscriptions lacking a historical trial quote
+    ambiguous_no_quote = bind.execute(
         sa.text(
             """
             SELECT s.id, s.user_id, s.base_traffic_bytes
             FROM white_internet_subscriptions s
             WHERE s.base_traffic_bytes < 53687091200
-              AND s.user_id NOT IN (
-                  SELECT user_id FROM tariff_quotes
-                  WHERE service_type = 'white_internet'
-                    AND operation_type = 'trial'
+              AND NOT EXISTS (
+                  SELECT 1 FROM tariff_quotes q
+                  WHERE q.user_id = s.user_id
+                    AND q.service_type = 'white_internet'
+                    AND q.operation_type = 'trial'
+                    AND q.status = 'consumed'
               )
             """
         )
     ).fetchall()
-    if ambiguous:
+    if ambiguous_no_quote:
         raise RuntimeError(
-            f"Migration 0026 aborted: found ambiguous subscriptions with sub-50GiB traffic "
-            f"lacking historical trial quote: {ambiguous}. Manual DBA resolution required."
+            f"Migration 0026 aborted: found candidate trial subscriptions lacking trial quote: "
+            f"{ambiguous_no_quote}. Fail-closed."
         )
 
-    # 5. Positive-Identification Backfill for historical trial subscriptions
+    # 4b. Mismatch between candidate trial subscriptions count and consumed trial quotes count
+    ambiguous_counts = bind.execute(
+        sa.text(
+            """
+            WITH sub_counts AS (
+                SELECT user_id, count(*) AS sub_cnt
+                FROM white_internet_subscriptions
+                WHERE base_traffic_bytes = 5368709120
+                  AND device_limit = 1
+                GROUP BY user_id
+            ),
+            quote_counts AS (
+                SELECT user_id, count(*) AS quote_cnt
+                FROM tariff_quotes
+                WHERE service_type = 'white_internet'
+                  AND operation_type = 'trial'
+                  AND status = 'consumed'
+                GROUP BY user_id
+            )
+            SELECT coalesce(s.user_id, q.user_id) AS user_id,
+                   coalesce(s.sub_cnt, 0) AS sub_cnt,
+                   coalesce(q.quote_cnt, 0) AS quote_cnt
+            FROM sub_counts s
+            FULL OUTER JOIN quote_counts q ON s.user_id = q.user_id
+            WHERE coalesce(s.sub_cnt, 0) <> coalesce(q.quote_cnt, 0)
+            """
+        )
+    ).fetchall()
+    if ambiguous_counts:
+        raise RuntimeError(
+            f"Migration 0026 aborted: mismatch between trial subscription count and trial quote count: "
+            f"{ambiguous_counts}. Fail-closed."
+        )
+
+    # 5. Positive-Identification Backfill for historical trial subscriptions (1:1 confirmed)
     op.execute(
         """
         UPDATE white_internet_subscriptions sub
         SET is_trial = true
         WHERE sub.base_traffic_bytes = 5368709120
           AND sub.device_limit = 1
+          AND (sub.expires_at - sub.started_at) <= interval '4 days'
           AND EXISTS (
               SELECT 1 FROM tariff_quotes q
               WHERE q.user_id = sub.user_id
@@ -89,7 +127,7 @@ def upgrade() -> None:
                 AND pq.service_type = 'white_internet'
                 AND pq.amount_due_rub > 0
                 AND pq.status = 'consumed'
-                AND pq.consumed_at >= sub.started_at
+                AND abs(extract(epoch from (sub.started_at - pq.consumed_at))) < 3600
           )
         """
     )

@@ -18,7 +18,7 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from config.enums import (
@@ -337,3 +337,117 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             avail = await white_internet_repo.get_available_quota_bytes(session, sub_id, now=now)
             self.assertEqual(avail, 150 * 1024**3)
+
+    async def test_concurrent_purchase_subscription_atomic_exclusion(self):
+        """Two concurrent purchases for the same user must serialize: exactly one debits and activates, the other returns WL_ALREADY_ACTIVE without double-debit."""
+        from unittest.mock import patch
+        from bot import texts
+        from database.repositories.account_ledger_repo import (
+            create_admin_adjustment,
+            get_account_balance,
+        )
+        from services.white_internet_service import WhiteInternetService
+
+        # Credit 500 RUB to user
+        async with self.sessions.begin() as session:
+            await create_admin_adjustment(
+                session,
+                user_id=self.user.id,
+                signed_amount=Decimal("500"),
+                idempotency_key=f"credit:{self.user.id}:test",
+                metadata={"reason": "test_concurrency"},
+            )
+
+        with patch.object(WhiteInternetService, "_try_inline_sync", return_value=True):
+            async def try_purchase(task_id: int):
+                async with self.sessions() as session:
+                    return await WhiteInternetService.purchase_subscription(session, self.user.id)
+
+            results = await asyncio.gather(try_purchase(1), try_purchase(2))
+
+        successes = [r for r in results if r[0] is True]
+        failures = [r for r in results if r[0] is False]
+
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(successes[0][1], texts.WL_BUY_SUCCESS)
+        self.assertEqual(failures[0][1], texts.WL_ALREADY_ACTIVE)
+
+        # Check PostgreSQL state: exact 1 debit, remaining balance = 250 RUB, exact 1 active subscription
+        async with self.sessions() as session:
+            bal = await get_account_balance(session, user_id=self.user.id)
+            self.assertEqual(bal.available, Decimal("250.00"))
+
+            subs = (
+                await session.scalars(
+                    select(WhiteInternetSubscription).where(
+                        WhiteInternetSubscription.user_id == self.user.id,
+                        WhiteInternetSubscription.status.in_([WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE]),
+                    )
+                )
+            ).all()
+            self.assertEqual(len(subs), 1)
+            self.assertEqual(subs[0].base_traffic_bytes, 50 * 1024**3)
+            self.assertFalse(subs[0].is_trial)
+
+    async def test_concurrent_convert_trial_to_paid_atomic_exclusion(self):
+        """Two concurrent trial conversions must serialize: exactly one converts and debits, the second detects already paid and returns WL_ALREADY_ACTIVE."""
+        from unittest.mock import patch
+        from bot import texts
+        from database.repositories.account_ledger_repo import (
+            create_admin_adjustment,
+            get_account_balance,
+        )
+        from services.white_internet_service import WhiteInternetService
+
+        now = now_utc()
+        # Seed user with trial subscription and 500 RUB
+        async with self.sessions.begin() as session:
+            await create_admin_adjustment(
+                session,
+                user_id=self.user.id,
+                signed_amount=Decimal("500"),
+                idempotency_key=f"credit_trial:{self.user.id}:test",
+                metadata={"reason": "test_trial_conversion"},
+            )
+            trial_sub = WhiteInternetSubscription(
+                user_id=self.user.id,
+                origin_node_id=self.server.id,
+                token="pg_trial_token_" + uuid.uuid4().hex,
+                uuid=str(uuid.uuid4()),
+                status=WhiteInternetStatus.ACTIVE,
+                started_at=now,
+                expires_at=now + timedelta(days=3),
+                base_traffic_bytes=5 * 1024**3,
+                extra_traffic_bytes=0,
+                is_trial=True,
+                traffic_used_bytes=0,
+                desired_version=1,
+                actual_version=1,
+            )
+            session.add(trial_sub)
+
+        with patch.object(WhiteInternetService, "_try_inline_sync", return_value=True):
+            async def try_convert(task_id: int):
+                async with self.sessions() as session:
+                    return await WhiteInternetService.convert_trial_to_paid(session, self.user.id)
+
+            results = await asyncio.gather(try_convert(1), try_convert(2))
+
+        successes = [r for r in results if r[0] is True]
+        failures = [r for r in results if r[0] is False]
+
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(successes[0][1], texts.WL_BUY_SUCCESS)
+        self.assertEqual(failures[0][1], texts.WL_ALREADY_ACTIVE)
+
+        # Check DB state
+        async with self.sessions() as session:
+            bal = await get_account_balance(session, user_id=self.user.id)
+            self.assertEqual(bal.available, Decimal("250.00"))
+
+            sub = await white_internet_repo.get_subscription_by_user_id(session, self.user.id)
+            self.assertIsNotNone(sub)
+            self.assertFalse(sub.is_trial)
+            self.assertEqual(sub.base_traffic_bytes, 50 * 1024**3)

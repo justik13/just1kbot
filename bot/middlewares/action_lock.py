@@ -62,6 +62,14 @@ LOCKED_ACTION_PREFIXES = (
     "wl_renew_execute",
     "wl_topup_execute:",
     "wl_reset_devices",
+    # Админские действия Белый Интернет.
+    "admin_wi_traffic_add_apply:",
+    "admin_wi_traffic_reset_apply:",
+    "admin_wi_quota_set_apply:",
+    "admin_wi_devlimit_set_apply:",
+    "admin_wi_hwid_reset_apply:",
+    "admin_wi_reset_trial_apply:",
+    "admin_wi_grant_trial_apply:",
 )
 
 STALE_ACTION_PREFIXES = (
@@ -86,6 +94,13 @@ STALE_ACTION_PREFIXES = (
     "broadcast_send_active",
     "balance_resume_purchase:",
     "aq:x:",
+    "admin_wi_traffic_add_apply:",
+    "admin_wi_traffic_reset_apply:",
+    "admin_wi_quota_set_apply:",
+    "admin_wi_devlimit_set_apply:",
+    "admin_wi_hwid_reset_apply:",
+    "admin_wi_reset_trial_apply:",
+    "admin_wi_grant_trial_apply:",
 )
 
 STALE_MAX_AGE_SECONDS = 600

@@ -207,9 +207,12 @@ def get_topup_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-async def _get_effective_base_price(session: AsyncSession) -> tuple[Decimal, int, int]:
+async def _get_effective_tariff_info(
+    session: AsyncSession,
+) -> tuple[Decimal, int, int, int]:
     base_price = WHITE_INTERNET_BASE_PRICE_RUB
     duration_days = WHITE_INTERNET_BASE_DURATION_DAYS
+    base_quota_bytes = WHITE_INTERNET_BASE_TRAFFIC_BYTES
     try:
         tariff = await WhiteInternetService.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
@@ -218,9 +221,17 @@ async def _get_effective_base_price(session: AsyncSession) -> tuple[Decimal, int
             base_price = Decimal(str(price_val))
         if isinstance(getattr(tariff, "duration_days", None), int):
             duration_days = tariff.duration_days
+        quota_val = getattr(tariff_version, "base_quota_bytes", None)
+        if isinstance(quota_val, int) and quota_val > 0:
+            base_quota_bytes = quota_val
     except Exception:
         pass
-    return base_price, int(base_price), duration_days
+    return base_price, int(base_price), duration_days, base_quota_bytes
+
+
+async def _get_effective_base_price(session: AsyncSession) -> tuple[Decimal, int, int]:
+    base_price, base_price_int, duration_days, _ = await _get_effective_tariff_info(session)
+    return base_price, base_price_int, duration_days
 
 
 async def _resolve_subscription_domain(
@@ -312,7 +323,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
     sub_prefix = await _resolve_subscription_prefix_for_sub(session, sub)
     now = now_utc()
 
-    _base_price, base_price_int, duration_days = await _get_effective_base_price(session)
+    _base_price, base_price_int, duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
 
     if sub is None:
         if has_trial_available:
@@ -324,7 +335,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             text = texts.WL_OVERVIEW_NO_SUB.format(
                 price=base_price_int,
                 days=duration_days,
-                traffic=int(WHITE_INTERNET_BASE_TRAFFIC_BYTES // (1024**3)),
+                traffic=int(base_quota_bytes // (1024**3)),
             )
     else:
         available_bytes = await white_internet_repo.get_available_quota_bytes(session, sub.id, now)
@@ -435,8 +446,8 @@ async def process_white_internet_buy_preview(query: CallbackQuery, session: Asyn
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
-    base_price, base_price_int, duration_days = await _get_effective_base_price(session)
-    traffic_gb = int(WHITE_INTERNET_BASE_TRAFFIC_BYTES // (1024**3))
+    base_price, base_price_int, duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
+    traffic_gb = int(base_quota_bytes // (1024**3))
     balance_snapshot = await get_account_balance(session, user_id=user.id)
     balance = balance_snapshot.available
 
@@ -530,7 +541,8 @@ async def process_white_internet_renew_preview(query: CallbackQuery, session: As
     sub_limit = max(1, getattr(sub, "device_limit", 1) or 1) if sub else 1
     tier_price = get_white_internet_tier_price(sub_limit)
     tier_price_int = int(tier_price)
-    base_gb = int(WHITE_INTERNET_BASE_TRAFFIC_BYTES // (1024**3))
+    _base_price, _base_price_int, _duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
+    base_gb = int(base_quota_bytes // (1024**3))
     traffic_gb = sub_limit * base_gb
 
     balance_snapshot = await get_account_balance(session, user_id=user.id)
@@ -817,7 +829,8 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
 
     next_limit = current_limit + 1
     next_price = int(get_white_internet_tier_price(next_limit))
-    base_gb = int(WHITE_INTERNET_BASE_TRAFFIC_BYTES // (1024**3))
+    _base_price, _base_price_int, _duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
+    base_gb = int(base_quota_bytes // (1024**3))
     next_traffic = next_limit * base_gb
 
     kb = InlineKeyboardBuilder()

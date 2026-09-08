@@ -20,7 +20,6 @@ from config.constants import (
     DEFAULT_WHITE_INTERNET_PATH,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
-    WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
     WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
@@ -517,7 +516,7 @@ class WhiteInternetService:
 
         sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
         tier_price = get_white_internet_tier_price(sub_device_limit)
-        tier_base_bytes = sub_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
+        tier_base_bytes = sub_device_limit * tariff_version.base_quota_bytes
 
         quote = cls._new_quote(
             user_id=user.id,
@@ -1028,6 +1027,7 @@ class WhiteInternetService:
                     try:
                         await session.commit()
                     except Exception as exc:
+                        await session.rollback()
                         logger.warning(
                             "Session commit after inline sync failed, leaving PENDING_CREATE: %s", exc
                         )
@@ -1043,6 +1043,10 @@ class WhiteInternetService:
                         sub.id,
                     )
         except Exception as exc:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             logger.warning(
                 "Synchronous activation fallback to background worker: %s", exc
             )
