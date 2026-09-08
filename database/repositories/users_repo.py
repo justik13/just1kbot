@@ -524,16 +524,13 @@ async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
             User.created_at >= now - timedelta(days=7),
         ).label("new_7d"),
         func.count(User.id).filter(
-            User.subscription_end.is_not(None),
-            User.subscription_end > now,
+            get_effective_active_condition(now),
         ).label("active"),
         func.count(User.id).filter(
-            User.subscription_end.is_not(None),
-            User.subscription_end > now,
-            User.subscription_end <= now + timedelta(days=3),
+            get_effective_expiring_3d_condition(now),
         ).label("expiring_3d"),
         func.count(User.id).filter(
-            (User.subscription_end.is_(None)) | (User.subscription_end <= now)
+            get_effective_expired_condition(now),
         ).label("expired"),
         func.count(User.id).filter(
             (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
