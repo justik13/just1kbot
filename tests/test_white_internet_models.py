@@ -41,7 +41,10 @@ class WhiteInternetModelsTests(unittest.TestCase):
         rev_0024 = scripts.get_revision("0024_wi_device_limit")
         self.assertIsNotNone(rev_0024)
         self.assertEqual(rev_0024.down_revision, "0023_wi_active_hwids")
-        self.assertEqual(scripts.get_heads(), ["0024_wi_device_limit"])
+        rev_0025 = scripts.get_revision("0025_admin_qol_and_idempotency")
+        self.assertIsNotNone(rev_0025)
+        self.assertEqual(rev_0025.down_revision, "0024_wi_device_limit")
+        self.assertEqual(scripts.get_heads(), ["0025_admin_qol_and_idempotency"])
 
     def test_server_lifecycle_status_field_and_constraints(self):
         self.assertEqual(ServerLifecycleStatus.ACTIVE, "ACTIVE")

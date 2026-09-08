@@ -117,6 +117,22 @@ async def process_send_user_message(
         )
         return
 
+    if message.text and message.text.startswith("/"):
+        await state.clear()
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from bot.keyboards.common import get_back_button
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_OPERATION_CANCELLED,
+            get_back_button(f"admin_user_card:{target_telegram_id}"),
+            trigger_message_id=message.message_id,
+        )
+        return
+
     text_to_send = message.text or message.caption
     if not text_to_send and not message.photo and not message.document:
         from bot.keyboards.common import get_back_button

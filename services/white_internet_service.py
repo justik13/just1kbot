@@ -9,7 +9,7 @@ import os
 import secrets
 import urllib.parse
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -744,11 +744,19 @@ class WhiteInternetService:
         has_sub = await white_internet_repo.has_user_any_subscription(session, user_id)
         if has_sub:
             existing = await white_internet_repo.get_subscription_by_user_id(session, user_id)
-            if existing and existing.status in (
-                WhiteInternetStatus.ACTIVE,
-                WhiteInternetStatus.PENDING,
-            ):
-                return True, texts.WL_ALREADY_ACTIVE, existing
+            if existing:
+                if existing.status in (
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.PENDING,
+                ):
+                    return True, texts.WL_ALREADY_ACTIVE, existing
+                if (
+                    getattr(existing, "pending_hard_delete", False)
+                    or getattr(existing, "provisioning_status", None)
+                    == WhiteInternetProvisioningStatus.PENDING_DELETE
+                ):
+                    return False, texts.WL_DEACTIVATION_PENDING, existing
+
             return False, texts.WL_TRIAL_ALREADY_USED, existing
 
         try:
@@ -944,6 +952,16 @@ class WhiteInternetService:
         if user is None:
             return False, texts.WL_USER_NOT_FOUND
 
+        now = now_utc()
+        last_reset = getattr(user, "last_trial_reset_at", None)
+        if isinstance(last_reset, datetime):
+            if last_reset.tzinfo is None:
+                last_reset = last_reset.replace(tzinfo=timezone.utc)
+            elapsed = (now - last_reset).total_seconds()
+            if elapsed < 60:
+                remaining = int(60 - elapsed)
+                return False, texts.ADMIN_WL_RESET_COOLDOWN.format(seconds=remaining)
+
         stmt = (
             select(WhiteInternetSubscription)
             .where(WhiteInternetSubscription.user_id == user_id)
@@ -954,6 +972,8 @@ class WhiteInternetService:
 
         if not subs:
             return False, texts.WL_SUB_NOT_FOUND
+
+        user.last_trial_reset_at = now
 
         # Two-phase reset (durable-by-default): mark DISABLED+PENDING_DELETE and
         # let the reconciliation worker hard-delete the row only after the node

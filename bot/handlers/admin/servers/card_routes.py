@@ -4,15 +4,22 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
+from bot.keyboards.admin.servers import get_server_migration_targets_keyboard
 from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
 from bot.states import AdminStates
+from config.constants import XRAY_PROTOCOL
+from config.enums import ServerHealthState, ServerLifecycleStatus
+from database.models import Server, WhiteInternetSubscription
 from database.repositories.servers_repo import (
+    capacity_consuming_wl_condition,
     get_server_by_id,
+    migrate_origin_subscriptions,
     update_server,
 )
 from services.audit_service import AuditService
@@ -319,3 +326,172 @@ async def admin_server_broadcast_start(
         )
     except TelegramBadRequest as e:
         logger.debug(f"admin_server_broadcast_start edit_text failed: {e}")
+
+
+@router.callback_query(F.data.startswith("admin_server_migrate:"))
+async def admin_server_migrate_start(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    server_id = parse_callback_id(callback.data, 1)
+    if server_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    source_server = await get_server_by_id(session, server_id)
+    if not source_server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    source_count = (await session.scalar(
+        select(func.count(WhiteInternetSubscription.id)).where(
+            WhiteInternetSubscription.origin_node_id == server_id,
+            capacity_consuming_wl_condition(),
+        )
+    )) or 0
+
+    if source_count == 0:
+        await callback.answer(texts.ADMIN_SERVER_MIGRATE_NO_SUBS, show_alert=True)
+        return
+
+    # Find candidate active Xray nodes (excluding source)
+    stmt_targets = (
+        select(Server)
+        .where(
+            Server.id != server_id,
+            Server.protocol == XRAY_PROTOCOL,
+            Server.is_active.is_(True),
+            Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+            Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
+        )
+        .order_by(Server.name)
+    )
+    targets = list((await session.execute(stmt_targets)).scalars().all())
+
+    if not targets:
+        await callback.answer(texts.ADMIN_SERVER_MIGRATE_NO_TARGETS, show_alert=True)
+        return
+
+    targets_info = []
+    for t in targets:
+        t_active = (await session.scalar(
+            select(func.count(WhiteInternetSubscription.id)).where(
+                WhiteInternetSubscription.origin_node_id == t.id,
+                capacity_consuming_wl_condition(),
+            )
+        )) or 0
+        targets_info.append((t.id, t.name, t.country_flag or "🌐", t_active, t.max_clients))
+
+    text = texts.ADMIN_SERVER_MIGRATE_SELECT_TARGET_PROMPT.format(
+        source_flag=source_server.country_flag or "🌐",
+        source_name=safe(source_server.name),
+        count=source_count,
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_server_migration_targets_keyboard(server_id, targets_info),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("admin_server_migrate_to:"))
+async def admin_server_migrate_to(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    source_id = int(parts[1])
+    target_id = int(parts[2])
+
+    source_server = await get_server_by_id(session, source_id)
+    target_server = await get_server_by_id(session, target_id)
+    if not source_server or not target_server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    source_count = (await session.scalar(
+        select(func.count(WhiteInternetSubscription.id)).where(
+            WhiteInternetSubscription.origin_node_id == source_id,
+            capacity_consuming_wl_condition(),
+        )
+    )) or 0
+
+    target_active = (await session.scalar(
+        select(func.count(WhiteInternetSubscription.id)).where(
+            WhiteInternetSubscription.origin_node_id == target_id,
+            capacity_consuming_wl_condition(),
+        )
+    )) or 0
+
+    free_slots = max(0, target_server.max_clients - target_active)
+    text = texts.ADMIN_SERVER_MIGRATE_CONFIRM_PROMPT.format(
+        source_count=source_count,
+        source_flag=source_server.country_flag or "🌐",
+        source_name=safe(source_server.name),
+        target_flag=target_server.country_flag or "🌐",
+        target_name=safe(target_server.name),
+        free_slots=free_slots,
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_admin_confirm_action_keyboard(
+            confirm_callback=f"admin_server_migrate_confirm:{source_id}:{target_id}",
+            cancel_callback=f"admin_server_migrate:{source_id}",
+        ),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("admin_server_migrate_confirm:"))
+async def admin_server_migrate_confirm(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    source_id = int(parts[1])
+    target_id = int(parts[2])
+
+    try:
+        count = await migrate_origin_subscriptions(session, source_id, target_id, callback.from_user.id)
+        await AuditService.log_action(
+            session,
+            admin_id=callback.from_user.id,
+            action=AdminAuditAction.WHITE_INTERNET_ORIGIN_MIGRATED,
+            target_type="server",
+            target_id=source_id,
+            details={
+                "source_id": source_id,
+                "target_id": target_id,
+                "count": count,
+            },
+        )
+        await session.commit()
+        await callback.answer(texts.ADMIN_SERVER_MIGRATE_SUCCESS.format(count=count), show_alert=True)
+    except Exception as exc:
+        await session.rollback()
+        await callback.answer(texts.ADMIN_SERVER_MIGRATE_FAILED.format(error=exc), show_alert=True)
+
+    server = await get_server_by_id(session, source_id)
+    if server:
+        await _show_server_card(callback, session, server)
+

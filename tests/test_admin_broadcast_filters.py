@@ -15,16 +15,22 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
             expected_fragments = {
                 "all": ["users.id >"],
-                "active": ["users.subscription_end >"],
+                "active": [
+                    "users.subscription_end >",
+                    "white_internet_subscriptions.user_id",
+                ],
                 "expiring_3d": [
                     "users.subscription_end >",
-                    "users.subscription_end <=",
+                    "white_internet_subscriptions.user_id",
                 ],
                 "expired": [
                     "users.subscription_end IS NOT NULL",
-                    "users.subscription_end <=",
+                    "white_internet_subscriptions.user_id",
                 ],
-                "never": ["users.subscription_end IS NULL"],
+                "never": [
+                    "users.subscription_end IS NULL",
+                    "white_internet_subscriptions.user_id",
+                ],
                 "test_12345": ["users.telegram_id ="],
                 "server_1": [
                     "servers.protocol",

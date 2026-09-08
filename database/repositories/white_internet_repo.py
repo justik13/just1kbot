@@ -676,3 +676,133 @@ async def reset_active_hwids_atomic(
     await session.flush()
     return True
 
+
+async def reset_traffic_used_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+) -> WhiteInternetSubscription:
+    """Zeroes traffic usage counters for ACTIVE or EXHAUSTED subscription under row lock.
+
+    State Guard: rejects DISABLED, PENDING_DELETE, or EXPIRED subscriptions.
+    Preserves last_uplink_snapshot, last_downlink_snapshot, and traffic_stats_epoch
+    to prevent worker delta desynchronization.
+    """
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+    if sub.status not in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
+        raise WhiteInternetInactiveSubscriptionError(
+            f"Cannot reset traffic for subscription in {sub.status} state"
+        )
+
+    sub.traffic_used_bytes = 0
+    sub.traffic_overage_bytes = 0
+    sub.traffic_uplink_bytes = 0
+    sub.traffic_downlink_bytes = 0
+    # Preserves last_uplink_snapshot, last_downlink_snapshot, and traffic_stats_epoch
+
+    if sub.status == WhiteInternetStatus.EXHAUSTED:
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.status_reason = None
+        sub.desired_version += 1
+        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+
+    await session.flush()
+    return sub
+
+
+async def add_extra_traffic_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+    extra_bytes: int,
+) -> WhiteInternetSubscription:
+    """Adds bonus/extra traffic bytes to subscription quota under row lock."""
+    if extra_bytes <= 0:
+        raise WhiteInternetError("Extra traffic bytes must be positive")
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+    if sub.status not in (
+        WhiteInternetStatus.ACTIVE,
+        WhiteInternetStatus.EXHAUSTED,
+        WhiteInternetStatus.PENDING,
+    ):
+        raise WhiteInternetInactiveSubscriptionError(
+            f"Cannot add traffic to subscription in {sub.status} state"
+        )
+
+    sub.extra_traffic_bytes = (sub.extra_traffic_bytes or 0) + extra_bytes
+    total_quota = (sub.base_traffic_bytes or 0) + sub.extra_traffic_bytes
+    used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
+
+    if sub.status == WhiteInternetStatus.EXHAUSTED and total_quota > used:
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.status_reason = None
+        sub.desired_version += 1
+        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+
+    await session.flush()
+    return sub
+
+
+async def set_base_traffic_quota_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+    base_bytes: int,
+) -> WhiteInternetSubscription:
+    """Updates base traffic quota under row lock."""
+    if base_bytes <= 0:
+        raise WhiteInternetError("Base traffic quota must be positive")
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+    if sub.status not in (
+        WhiteInternetStatus.ACTIVE,
+        WhiteInternetStatus.EXHAUSTED,
+        WhiteInternetStatus.PENDING,
+    ):
+        raise WhiteInternetInactiveSubscriptionError(
+            f"Cannot change quota for subscription in {sub.status} state"
+        )
+
+    sub.base_traffic_bytes = base_bytes
+    total_quota = sub.base_traffic_bytes + (sub.extra_traffic_bytes or 0)
+    used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
+
+    if sub.status == WhiteInternetStatus.EXHAUSTED and total_quota > used:
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.status_reason = None
+        sub.desired_version += 1
+        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+
+    await session.flush()
+    return sub
+
+
+async def set_device_limit_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+    limit: int,
+) -> WhiteInternetSubscription:
+    """Updates device limit and applies LRU truncation to active_hwids under row lock."""
+    if limit < 1 or limit > WHITE_INTERNET_MAX_DEVICE_LIMIT:
+        raise WhiteInternetDeviceLimitExceededError(
+            f"Device limit must be between 1 and {WHITE_INTERNET_MAX_DEVICE_LIMIT}"
+        )
+    sub = await session.get(
+        WhiteInternetSubscription,
+        subscription_id,
+        with_for_update=True,
+    )
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+
+    sub.device_limit = limit
+    current_hwids: dict[str, str] = dict(sub.active_hwids or {})
+    if len(current_hwids) > limit:
+        sorted_hwids = sorted(current_hwids.items(), key=lambda item: item[1], reverse=True)
+        sub.active_hwids = dict(sorted_hwids[:limit])
+    await session.flush()
+    return sub
+
+

@@ -30,7 +30,7 @@ from bot.handlers.admin.users.subscription_menu_routes import (
     admin_wl_reset_apply,
     admin_wl_reset_confirm,
 )
-from bot.keyboards.admin.users import get_admin_subscription_keyboard
+from bot.keyboards.admin.users import get_admin_wi_subscription_keyboard
 from config.constants import XRAY_PROTOCOL
 from config.enums import (
     WhiteInternetProvisioningStatus,
@@ -229,32 +229,29 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
     def test_subscription_keyboard_wl_buttons(self):
         """Keyboard must render reset button when user has WL sub, and grant button when no active WL sub."""
         # 1. Has WL sub, active -> has reset button, no grant button
-        kb_active = get_admin_subscription_keyboard(
+        kb_active = get_admin_wi_subscription_keyboard(
             telegram_id=self.user.telegram_id,
-            has_active_sub=False,
-            has_wl_sub=True,
-            wl_is_active=True,
+            has_wi_sub=True,
+            wi_is_active=True,
         )
         buttons_active = [btn.callback_data for row in kb_active.inline_keyboard for btn in row]
         self.assertIn(f"admin_wl_reset_confirm:{self.user.telegram_id}", buttons_active)
         self.assertNotIn(f"admin_wl_grant_trial:{self.user.telegram_id}", buttons_active)
 
         # 2. Has WL sub, but expired/inactive -> has reset button (grant shown only if not has_wl_sub)
-        kb_expired = get_admin_subscription_keyboard(
+        kb_expired = get_admin_wi_subscription_keyboard(
             telegram_id=self.user.telegram_id,
-            has_active_sub=False,
-            has_wl_sub=True,
-            wl_is_active=False,
+            has_wi_sub=True,
+            wi_is_active=False,
         )
         buttons_expired = [btn.callback_data for row in kb_expired.inline_keyboard for btn in row]
         self.assertIn(f"admin_wl_reset_confirm:{self.user.telegram_id}", buttons_expired)
 
         # 3. No WL sub at all -> no reset button, has grant button
-        kb_none = get_admin_subscription_keyboard(
+        kb_none = get_admin_wi_subscription_keyboard(
             telegram_id=self.user.telegram_id,
-            has_active_sub=False,
-            has_wl_sub=False,
-            wl_is_active=False,
+            has_wi_sub=False,
+            wi_is_active=False,
         )
         buttons_none = [btn.callback_data for row in kb_none.inline_keyboard for btn in row]
         self.assertNotIn(f"admin_wl_reset_confirm:{self.user.telegram_id}", buttons_none)
@@ -289,7 +286,7 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch.object(WhiteInternetService, "reset_user_trial", new=AsyncMock(return_value=(True, "ok"))) as mock_reset, \
              patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
-             patch("bot.handlers.admin.users.subscription_menu_routes.admin_subscription_menu", new=AsyncMock()) as mock_menu:
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
 
             await admin_wl_reset_apply(callback, self.session)
 
@@ -320,7 +317,7 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch.object(WhiteInternetService, "create_trial_subscription", new=AsyncMock(return_value=(True, "ok", sub))) as mock_create, \
              patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
-             patch("bot.handlers.admin.users.subscription_menu_routes.admin_subscription_menu", new=AsyncMock()) as mock_menu:
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
 
             await admin_wl_grant_trial(callback, self.session)
 

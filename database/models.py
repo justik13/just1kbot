@@ -134,6 +134,11 @@ class User(Base):
             postgresql_using="gin",
             postgresql_ops={"username": "gin_trgm_ops"},
         ),
+        Index(
+            "ix_users_username_lower",
+            text("lower(username)"),
+            postgresql_where=text("username IS NOT NULL AND is_deleted = false"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -143,6 +148,9 @@ class User(Base):
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     subscription_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_trial_reset_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     device_limit: Mapped[int] = mapped_column(Integer, default=0)
@@ -1360,6 +1368,11 @@ class WhiteInternetSubscription(Base):
             unique=True,
             postgresql_where=text("status IN ('PENDING', 'ACTIVE', 'EXHAUSTED')"),
         ),
+        Index(
+            "ix_white_internet_subscriptions_active_hwids",
+            "active_hwids",
+            postgresql_using="gin",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -1532,3 +1545,19 @@ class WhiteInternetOrphanCleanup(Base):
     )
 
     server = relationship("Server", foreign_keys=[server_id])
+
+
+class AdminOperationIdempotency(Base):
+    """Stores deterministic idempotency tokens for admin UI mutations with 7-day TTL."""
+
+    __tablename__ = "admin_operation_idempotency"
+
+    op_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    admin_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )

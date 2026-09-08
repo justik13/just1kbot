@@ -142,7 +142,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0024_wi_device_limit"])
+        self.assertEqual(heads, ["0025_admin_qol_and_idempotency"])
+        rev = scripts.get_revision("0025_admin_qol_and_idempotency")
+        self.assertEqual(rev.down_revision, "0024_wi_device_limit")
         rev = scripts.get_revision("0024_wi_device_limit")
         self.assertEqual(rev.down_revision, "0023_wi_active_hwids")
         rev = scripts.get_revision("0023_wi_active_hwids")

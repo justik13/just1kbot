@@ -79,7 +79,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("subscription_end >", str(stmt_expiring))
         self.assertIn("subscription_end <=", str(stmt_expiring))
         self.assertIn("subscription_end >", str(stmt_active))
-        self.assertIn("subscription_end is null", str(stmt_expired).lower())
+        self.assertIn("subscription_end is not null", str(stmt_expired).lower())
         self.assertIn("is_banned is true", str(stmt_banned).lower())
         self.assertIn("is_bot_blocked is true", str(stmt_banned).lower())
         self.assertIn("server_id =", str(stmt_server).lower())

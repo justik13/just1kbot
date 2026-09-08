@@ -429,6 +429,7 @@ ADMIN_WL_RESET_CONFIRM = """⚠️ <b>Сброс триала Белого Ин�
 Вы уверены, что хотите аннулировать текущий доступ по Белому Интернету и сбросить триал для пользователя <code>{telegram_id}</code>?
 Пользователь сможет активировать бесплатный период заново."""
 ADMIN_WL_RESET_SUCCESS = "✅ Сброс триала принят: доступ будет отключён на узле и запись удалена автоматически."
+ADMIN_WL_RESET_COOLDOWN = "Сброс триала возможен не чаще одного раза в минуту (подождите {seconds}с)"
 ADMIN_WL_GRANT_SUCCESS = "✅ Триал Белого Интернета успешно выдан пользователю."
 ADMIN_WL_GRANT_FAILED = "❌ Не удалось выдать триал: {error}"
 
@@ -443,3 +444,76 @@ ADMIN_USER_CARD_WHITE_INTERNET_BLOCK = """🌐 <b>Белый Интернет:</
 • <b>Трафик:</b> {used_str} / {total_str}
 • <b>Действует до:</b> {expires_str}
 • <b>Сервер:</b> {origin_name}"""
+
+ADMIN_BTN_SUB_WI = "🌐 Белый Интернет"
+ADMIN_BTN_USER_PAYMENTS = "🧾 Платежи"
+
+ADMIN_BAN_REASON_BTN_SPAM = "🚫 Спам / Абуз"
+ADMIN_BAN_REASON_BTN_FRAUD = "💳 Чарджбэк / Фрод"
+ADMIN_BAN_REASON_BTN_RULES = "⚠️ Нарушение правил"
+ADMIN_BAN_REASON_BTN_REQUEST = "👤 По просьбе клиента"
+
+ADMIN_BTN_TOPUP_MANUAL = "➕ Начислить вручную"
+ADMIN_BTN_DEDUCT_MANUAL = "➖ Списать вручную"
+
+ADMIN_WI_BTN_TRAFFIC_ADD = "➕ Добавить трафик"
+ADMIN_WI_BTN_TRAFFIC_RESET = "🔄 Сбросить расход в 0"
+ADMIN_WI_BTN_QUOTA = "📊 Квота трафика"
+ADMIN_WI_BTN_DEVLIMIT = "👥 Лимит устройств"
+ADMIN_WI_BTN_HWID_RESET = "🔄 Сбросить HWID"
+
+ADMIN_WI_BTN_GB_PACK = "+{gb} GB"
+ADMIN_WI_BTN_GB_QUOTA = "{gb} GB"
+ADMIN_WI_BTN_DEVICES = "{limit} устр."
+
+ADMIN_WI_TRAFFIC_ADD_MENU_TITLE = """➕ <b>Добавление трафика (Белый Интернет)</b>
+
+Пользователь: <code>{telegram_id}</code>
+Выберите объем трафика для начисления:"""
+ADMIN_WI_SUB_NOT_FOUND = "❌ Подписка Белый Интернет не найдена"
+ADMIN_WI_TRAFFIC_ADDED_SUCCESS = "✅ Добавлено +{gb} GB трафика"
+
+ADMIN_WI_TRAFFIC_RESET_CONFIRM_TITLE = """🔄 <b>Сброс расхода трафика в 0</b>
+
+Вы уверены, что хотите обнулить использованный трафик пользователя <code>{telegram_id}</code>?
+<i>Текущие снимки счетчиков ноды будут сохранены во избежание скачков.</i>"""
+ADMIN_WI_TRAFFIC_RESET_SUCCESS = "✅ Использованный трафик успешно сброшен в 0"
+ADMIN_WI_TRAFFIC_RESET_FAILED = "❌ {error}"
+
+ADMIN_WI_QUOTA_MENU_TITLE = """📊 <b>Квота трафика (Белый Интернет)</b>
+
+Пользователь: <code>{telegram_id}</code>
+Выберите базовую квоту трафика:"""
+ADMIN_WI_QUOTA_SET_SUCCESS = "✅ Базовая квота установлена: {gb} GB"
+
+ADMIN_WI_DEVLIMIT_MENU_TITLE = """👥 <b>Лимит устройств (Белый Интернет)</b>
+
+Пользователь: <code>{telegram_id}</code>
+Выберите максимальное количество устройств:"""
+ADMIN_WI_DEVLIMIT_SET_SUCCESS = "✅ Лимит устройств установлен: {limit}"
+
+ADMIN_WI_HWID_RESET_CONFIRM_TITLE = """🔄 <b>Сброс привязанных устройств (HWID)</b>
+
+Вы уверены, что хотите сбросить все привязанные устройства пользователя <code>{telegram_id}</code>?
+<i>Пользователь сможет подключиться с новых устройств без ожидания кулдауна.</i>"""
+ADMIN_WI_HWID_RESET_SUCCESS = "✅ Все привязанные HWID пользователя сброшены"
+
+ADMIN_WI_MENU_TITLE = "🛠 Админка › 👥 Пользователи › 🌐 <b>Белый Интернет</b> (ID: <code>{telegram_id}</code>)"
+ADMIN_WI_MENU_NO_SUB = "<i>У пользователя нет подписки Белый Интернет.</i>"
+ADMIN_USER_CARD_WL_DEVICES = "• <b>Устройства:</b> {active} / {limit}"
+ADMIN_USER_CARD_WL_NODE_STATUS = "• <b>Узел:</b> <code>{status}</code>"
+ADMIN_USER_CARD_WL_ERROR = "• <b>Ошибка:</b> <code>{error}</code>"
+ADMIN_BAN_REASON_LABELS = {
+    "spam": "Спам / Абуз",
+    "fraud": "Чарджбэк / Фрод",
+    "rules": "Нарушение правил",
+    "request": "По просьбе клиента",
+}
+ADMIN_BAN_PROMPT = """🚫 <b>Блокировка пользователя</b> <code>{telegram_id}</code>
+
+Выберите причину блокировки:"""
+ADMIN_BALANCE_OP_ALREADY_PROCESSED = "⚠️ Операция уже была выполнена (защита от повторного списания)"
+ADMIN_BALANCE_DEDUCT_FAILED = "❌ Ошибка списания: {error}"
+ADMIN_BALANCE_ADJUSTED_SUCCESS = "✅ Баланс успешно изменен на {amount} ₽"
+
+

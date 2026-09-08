@@ -294,7 +294,10 @@ class WhiteInternetReconciliationWorker:
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
-                    Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+                    Server.lifecycle_status.in_([
+                        ServerLifecycleStatus.ACTIVE,
+                        ServerLifecycleStatus.DECOMMISSIONING,
+                    ]),
                     Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
                 )
                 .order_by(Server.id.asc())

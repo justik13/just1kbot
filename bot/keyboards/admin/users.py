@@ -14,8 +14,12 @@ def get_admin_user_card_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.ADMIN_BTN_SUBSCRIPTION,
-        callback_data=f"admin_subscription:{user_id}",
+        text=texts.ADMIN_SERVER_BTN_PROTO_AWG,
+        callback_data=f"admin_sub_awg_menu:{user_id}",
+    )
+    builder.button(
+        text=texts.ADMIN_BTN_SUB_WI,
+        callback_data=f"admin_sub_wi_menu:{user_id}",
     )
 
     builder.button(
@@ -26,6 +30,11 @@ def get_admin_user_card_keyboard(
     builder.button(
         text=texts.ADMIN_BTN_USER_DEVICES,
         callback_data=f"admin_user_devices:{user_id}",
+    )
+
+    builder.button(
+        text=texts.ADMIN_BTN_USER_PAYMENTS,
+        callback_data=f"admin_payments_filter:user:{user_id}:1",
     )
 
     builder.button(
@@ -54,8 +63,38 @@ def get_admin_user_card_keyboard(
         callback_data=back_callback,
     )
 
-    builder.adjust(1)
+    builder.adjust(2, 2, 2, 1, 1, 1)
 
+    return builder.as_markup()
+
+
+def get_admin_ban_reasons_keyboard(
+    user_id: int,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    builder.button(
+        text=texts.ADMIN_BAN_REASON_BTN_SPAM,
+        callback_data=f"admin_ban_apply:{user_id}:spam",
+    )
+    builder.button(
+        text=texts.ADMIN_BAN_REASON_BTN_FRAUD,
+        callback_data=f"admin_ban_apply:{user_id}:fraud",
+    )
+    builder.button(
+        text=texts.ADMIN_BAN_REASON_BTN_RULES,
+        callback_data=f"admin_ban_apply:{user_id}:rules",
+    )
+    builder.button(
+        text=texts.ADMIN_BAN_REASON_BTN_REQUEST,
+        callback_data=f"admin_ban_apply:{user_id}:request",
+    )
+    builder.button(
+        text=texts.BTN_CANCEL,
+        callback_data=f"admin_user_card:{user_id}",
+    )
+
+    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -64,12 +103,19 @@ def get_admin_user_balance_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    # 1-click presets for quick adjustments
+    for amount in (100, 300, 500, 1000):
+        builder.button(
+            text=f"+{amount} ₽",
+            callback_data=f"admin_bal_preset:{user_id}:{amount}",
+        )
+
     builder.button(
-        text=texts.BTN_ADMIN_USER_ADD_BALANCE,
+        text=texts.ADMIN_BTN_TOPUP_MANUAL,
         callback_data=f"admin_balance_topup:{user_id}",
     )
     builder.button(
-        text=texts.BTN_ADMIN_USER_DEDUCT_BALANCE,
+        text=texts.ADMIN_BTN_DEDUCT_MANUAL,
         callback_data=f"admin_balance_deduct:{user_id}",
     )
     builder.button(
@@ -77,17 +123,14 @@ def get_admin_user_balance_keyboard(
         callback_data=f"admin_user_card:{user_id}",
     )
 
-    builder.adjust(1)
+    builder.adjust(4, 2, 1)
 
     return builder.as_markup()
 
 
-
-def get_admin_subscription_keyboard(
+def get_admin_awg_subscription_keyboard(
     telegram_id: int,
     has_active_sub: bool,
-    has_wl_sub: bool = False,
-    wl_is_active: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -96,12 +139,10 @@ def get_admin_subscription_keyboard(
             text=texts.ADMIN_BTN_CHANGE_TARIFF,
             callback_data=f"admin_sub_change_tariff:{telegram_id}",
         )
-
         builder.button(
             text=texts.ADMIN_BTN_EXTEND_SUBSCRIPTION,
             callback_data=f"admin_sub_extend:{telegram_id}",
         )
-
         builder.button(
             text=texts.ADMIN_BTN_REDUCE_SUBSCRIPTION,
             callback_data=f"admin_sub_reduce:{telegram_id}",
@@ -112,7 +153,46 @@ def get_admin_subscription_keyboard(
             callback_data=f"admin_sub_grant:{telegram_id}",
         )
 
-    if has_wl_sub:
+    builder.button(
+        text=texts.ADMIN_BTN_BACK_TO_CARD,
+        callback_data=f"admin_user_card:{telegram_id}",
+    )
+
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+get_admin_subscription_keyboard = get_admin_awg_subscription_keyboard
+
+
+def get_admin_wi_subscription_keyboard(
+    telegram_id: int,
+    has_wi_sub: bool = False,
+    wi_is_active: bool = False,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    if has_wi_sub:
+        builder.button(
+            text=texts.ADMIN_WI_BTN_TRAFFIC_ADD,
+            callback_data=f"admin_wi_traffic_add_menu:{telegram_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_WI_BTN_TRAFFIC_RESET,
+            callback_data=f"admin_wi_traffic_reset_confirm:{telegram_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_WI_BTN_QUOTA,
+            callback_data=f"admin_wi_quota_menu:{telegram_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_WI_BTN_DEVLIMIT,
+            callback_data=f"admin_wi_devlimit_menu:{telegram_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_WI_BTN_HWID_RESET,
+            callback_data=f"admin_wi_hwid_reset_confirm:{telegram_id}",
+        )
         builder.button(
             text=texts.ADMIN_BTN_RESET_WL_TRIAL,
             callback_data=f"admin_wl_reset_confirm:{telegram_id}",
@@ -129,7 +209,66 @@ def get_admin_subscription_keyboard(
     )
 
     builder.adjust(1)
+    return builder.as_markup()
 
+
+def get_admin_wi_traffic_add_keyboard(
+    telegram_id: int,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    for gb in (10, 25, 50):
+        builder.button(
+            text=texts.ADMIN_WI_BTN_GB_PACK.format(gb=gb),
+            callback_data=f"admin_wi_traffic_add:{telegram_id}:{gb}",
+        )
+
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=f"admin_sub_wi_menu:{telegram_id}",
+    )
+
+    builder.adjust(3, 1)
+    return builder.as_markup()
+
+
+def get_admin_wi_quota_keyboard(
+    telegram_id: int,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    for gb in (50, 75, 100):
+        builder.button(
+            text=texts.ADMIN_WI_BTN_GB_QUOTA.format(gb=gb),
+            callback_data=f"admin_wi_quota_set:{telegram_id}:{gb}",
+        )
+
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=f"admin_sub_wi_menu:{telegram_id}",
+    )
+
+    builder.adjust(3, 1)
+    return builder.as_markup()
+
+
+def get_admin_wi_device_limit_keyboard(
+    telegram_id: int,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    for limit in (1, 2, 3, 5):
+        builder.button(
+            text=texts.ADMIN_WI_BTN_DEVICES.format(limit=limit),
+            callback_data=f"admin_wi_devlimit_set:{telegram_id}:{limit}",
+        )
+
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=f"admin_sub_wi_menu:{telegram_id}",
+    )
+
+    builder.adjust(4, 1)
     return builder.as_markup()
 
 
