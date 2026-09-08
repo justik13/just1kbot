@@ -446,7 +446,7 @@ class WhiteInternetService:
                 version=sub_locked.desired_version,
             )
 
-        await session.commit()
+        await session.flush()
 
         active_origin = new_origin_server or origin_node
         if active_origin is not None:
@@ -593,7 +593,7 @@ class WhiteInternetService:
                 desired_version=sub.desired_version + 1,
             )
 
-        await session.commit()
+        await session.flush()
 
         if old_origin_for_cleanup:
             _dispatch_deprovision(
@@ -733,7 +733,7 @@ class WhiteInternetService:
                 desired_version=sub.desired_version + 1,
             )
 
-        await session.commit()
+        await session.flush()
 
         if old_origin_for_cleanup:
             _dispatch_deprovision(
@@ -879,7 +879,7 @@ class WhiteInternetService:
                 desired_version=sub.desired_version + 1,
             )
 
-        await session.commit()
+        await session.flush()
 
         if old_origin_for_cleanup:
             _dispatch_deprovision(
