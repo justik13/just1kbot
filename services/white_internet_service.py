@@ -446,7 +446,7 @@ class WhiteInternetService:
                 version=sub_locked.desired_version,
             )
 
-        await session.flush()
+        await session.commit()
 
         active_origin = new_origin_server or origin_node
         if active_origin is not None:
