@@ -25,10 +25,17 @@ CANONICAL_ALIASES: dict[str, str] = {
 class TextsConsistencyTests(unittest.TestCase):
 
     def test_alias_registry_is_acyclic_and_valid(self):
-        """Verify CANONICAL_ALIASES contains valid mapping and no self-aliases."""
+        """Verify CANONICAL_ALIASES contains valid mapping, exists in texts facade, and is identical."""
         for alias, canonical in CANONICAL_ALIASES.items():
             self.assertNotEqual(alias, canonical, f"Self-alias detected: {alias} -> {canonical}")
             self.assertNotIn(canonical, CANONICAL_ALIASES, f"Alias cycle detected: {canonical} is also an alias key")
+            self.assertTrue(hasattr(texts, alias), f"Alias key {alias} not found in texts facade")
+            self.assertTrue(hasattr(texts, canonical), f"Canonical key {canonical} not found in texts facade")
+            self.assertEqual(
+                getattr(texts, alias),
+                getattr(texts, canonical),
+                f"Alias {alias} value does not match canonical {canonical}",
+            )
 
     """Automated consistency, markup, placeholder, and architectural verification for all application texts."""
 

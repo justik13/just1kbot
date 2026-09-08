@@ -64,8 +64,10 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
 
         for prefix in (
             "admin_wi_traffic_add:",
+            "admin_wi_traffic_reset_apply:",
             "admin_wi_quota_set:",
             "admin_wi_devlimit_set:",
+            "admin_wi_hwid_reset_apply:",
             "admin_wl_reset_apply:",
             "admin_wl_grant_trial:",
             "wl_add_device_confirm",
