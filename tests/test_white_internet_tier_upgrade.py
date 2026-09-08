@@ -45,6 +45,12 @@ class TestWhiteInternetTierModel(unittest.TestCase):
         self.assertEqual(get_white_internet_tier_price(4), Decimal("650.00"))
         self.assertEqual(get_white_internet_tier_price(10), Decimal("650.00"))
 
+    def test_tier_price_calculation_with_dynamic_base_price(self):
+        # Dynamic base price 300 RUB
+        self.assertEqual(get_white_internet_tier_price(1, base_price=Decimal("300.00")), Decimal("300.00"))
+        self.assertEqual(get_white_internet_tier_price(2, base_price=Decimal("300.00")), Decimal("500.00"))
+        self.assertEqual(get_white_internet_tier_price(3, base_price=Decimal("300.00")), Decimal("700.00"))
+
 
 class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
     """Test device slot purchase (tier upgrade) business logic and ledger invariants."""

@@ -370,7 +370,12 @@ async def admin_server_migrate_start(
         )
         .order_by(Server.name)
     )
-    targets = list((await session.execute(stmt_targets)).scalars().all())
+    raw_targets = list((await session.execute(stmt_targets)).scalars().all())
+    targets = [
+        t for t in raw_targets
+        if "xray_origin" in (t.capabilities or [])
+        and bool((t.extra_data or {}).get("relays"))
+    ]
 
     if not targets:
         await callback.answer(texts.ADMIN_SERVER_MIGRATE_NO_TARGETS, show_alert=True)
@@ -419,6 +424,15 @@ async def admin_server_migrate_to(
     target_server = await get_server_by_id(session, target_id)
     if not source_server or not target_server:
         await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    if (
+        target_server.protocol != XRAY_PROTOCOL
+        or not target_server.is_active
+        or "xray_origin" not in (target_server.capabilities or [])
+        or not bool((target_server.extra_data or {}).get("relays"))
+    ):
+        await callback.answer(texts.ADMIN_SERVER_MIGRATE_NO_TARGETS, show_alert=True)
         return
 
     source_count = (await session.scalar(

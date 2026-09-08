@@ -122,7 +122,7 @@ def get_white_internet_overview_keyboard(
 
     if sub.status == WhiteInternetStatus.EXPIRED:
         sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-        renew_price = int(get_white_internet_tier_price(sub_limit))
+        renew_price = int(get_white_internet_tier_price(sub_limit, base_price=Decimal(base_price)))
         if getattr(sub, "is_trial", False):
             builder.button(
                 text=texts.BTN_WL_CONVERT_TRIAL.format(price=base_price),
@@ -166,7 +166,7 @@ def get_white_internet_overview_keyboard(
         or (sub.expires_at - now).total_seconds() <= 30 * 86400
     )
     sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-    renew_price = int(get_white_internet_tier_price(sub_limit))
+    renew_price = int(get_white_internet_tier_price(sub_limit, base_price=Decimal(base_price)))
 
     if can_renew:
         if getattr(sub, "is_trial", False):
@@ -539,9 +539,9 @@ async def process_white_internet_renew_preview(query: CallbackQuery, session: As
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     sub_limit = max(1, getattr(sub, "device_limit", 1) or 1) if sub else 1
-    tier_price = get_white_internet_tier_price(sub_limit)
-    tier_price_int = int(tier_price)
     _base_price, _base_price_int, _duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
+    tier_price = get_white_internet_tier_price(sub_limit, base_price=Decimal(_base_price))
+    tier_price_int = int(tier_price)
     base_gb = int(base_quota_bytes // (1024**3))
     traffic_gb = sub_limit * base_gb
 
@@ -592,7 +592,8 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     sub_limit = max(1, getattr(sub, "device_limit", 1) or 1) if sub else 1
-    tier_price = get_white_internet_tier_price(sub_limit)
+    _base_price, _base_price_int, _duration_days, _ = await _get_effective_tariff_info(session)
+    tier_price = get_white_internet_tier_price(sub_limit, base_price=Decimal(_base_price))
 
     balance_snapshot = await get_account_balance(session, user_id=user.id)
     if balance_snapshot.available < tier_price:
@@ -828,8 +829,8 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
         return
 
     next_limit = current_limit + 1
-    next_price = int(get_white_internet_tier_price(next_limit))
     _base_price, _base_price_int, _duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
+    next_price = int(get_white_internet_tier_price(next_limit, base_price=Decimal(_base_price)))
     base_gb = int(base_quota_bytes // (1024**3))
     next_traffic = next_limit * base_gb
 

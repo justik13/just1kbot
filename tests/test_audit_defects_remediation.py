@@ -630,6 +630,140 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(res_server.recovery_notice_sent)
         self.assertFalse(res_server.is_active)
 
+    def test_apply_user_filters_differentiates_no_sub_and_never(self):
+        from database.repositories.users_repo import _apply_user_filters
+        from sqlalchemy import select
+        from database.models import User
+
+        stmt_never = _apply_user_filters(select(User), "never")
+        stmt_no_sub = _apply_user_filters(select(User), "no_sub")
+
+        compiled_never = str(stmt_never.compile())
+        compiled_no_sub = str(stmt_no_sub.compile())
+
+        self.assertNotEqual(compiled_never, compiled_no_sub)
+        self.assertIn("users.subscription_end IS NULL", compiled_never)
+
+class TestAuditDefectsRemediationXrayAndLedgerAsync(unittest.IsolatedAsyncioTestCase):
+    async def test_admin_user_card_hwid_ttl_filtering(self):
+        from bot.handlers.admin.users.common import _get_white_internet_card_info
+        from datetime import timedelta
+        from unittest.mock import MagicMock, AsyncMock
+        from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
+        from utils.datetime_helpers import now_utc
+
+        now = now_utc()
+        fresh_ts = (now - timedelta(hours=1)).isoformat()
+        stale_ts = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS + 1)).isoformat()
+
+        session = AsyncMock()
+        sub = MagicMock()
+        sub.origin_node_id = None
+        sub.status = "ACTIVE"
+        sub.device_limit = 2
+        sub.traffic_used_bytes = 0
+        sub.traffic_limit_bytes = 10 * 1024 * 1024 * 1024
+        sub.expires_at = None
+        sub.provisioning_status = "SYNCED_ACTIVE"
+        sub.last_sync_error = None
+        sub.last_error = None
+        sub.active_hwids = {
+            "hwid-fresh-1": fresh_ts,
+            "hwid-stale-2": stale_ts,
+        }
+
+        block = await _get_white_internet_card_info(session, user_id=1, sub=sub)
+        self.assertIsNotNone(block)
+        # Stale HWID must be filtered out, leaving only 1 active device out of 2
+        self.assertIn("1 / 2", block)
+
+    async def test_migrate_origin_subscriptions_rejects_missing_xray_origin_or_relays(self):
+        from config.constants import XRAY_PROTOCOL
+        from config.enums import ServerHealthState
+        from database.repositories.servers_repo import migrate_origin_subscriptions
+
+        session = AsyncMock()
+        source = Server(id=1, protocol=XRAY_PROTOCOL, is_active=True, capabilities=["xray_origin"], health_state=ServerHealthState.ONLINE)
+        target_no_cap = Server(id=2, protocol=XRAY_PROTOCOL, is_active=True, capabilities=[], health_state=ServerHealthState.ONLINE, extra_data={"relays": [{"code": "de"}]})
+
+        session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(scalar_one_or_none=MagicMock(return_value=source)),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=target_no_cap)),
+            ]
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            await migrate_origin_subscriptions(session, source_id=1, target_id=2)
+        self.assertIn("xray_origin", str(ctx.exception))
+
+        # Target with capability but no relays
+        target_no_relays = Server(id=2, protocol=XRAY_PROTOCOL, is_active=True, capabilities=["xray_origin"], health_state=ServerHealthState.ONLINE, extra_data={})
+        session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(scalar_one_or_none=MagicMock(return_value=source)),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=target_no_relays)),
+            ]
+        )
+        with self.assertRaises(ValueError) as ctx:
+            await migrate_origin_subscriptions(session, source_id=1, target_id=2)
+        self.assertIn("relays", str(ctx.exception))
+
+    async def test_create_purchase_debit_under_lock_validation(self):
+        from database.repositories.account_ledger_repo import (
+            create_purchase_debit,
+            AccountLedgerConflictError,
+        )
+        from database.models import TariffQuote, User
+        from config.enums import TariffQuoteStatus
+        from utils.datetime_helpers import now_utc
+        from datetime import timedelta
+        from decimal import Decimal
+
+        session = AsyncMock()
+        now = now_utc()
+        user = User(id=1, telegram_id=123)
+        quote = TariffQuote(
+            id=10,
+            user_id=1,
+            amount_due_rub=Decimal("100.00"),
+            status=TariffQuoteStatus.ACTIVE,
+            expires_at=now + timedelta(minutes=15),
+        )
+
+        with patch("database.repositories.account_ledger_repo.lock_account_user", AsyncMock(return_value=user)):
+            # 1. Amount mismatch
+            session.scalar = AsyncMock(return_value=quote)
+            with self.assertRaises(AccountLedgerConflictError) as ctx:
+                await create_purchase_debit(session, user_id=1, quote_id=10, amount=Decimal("200.00"))
+            self.assertIn("purchase_quote_amount_mismatch", str(ctx.exception))
+
+            # 2. Inactive quote (no existing ledger entry)
+            inactive_quote = TariffQuote(
+                id=10,
+                user_id=1,
+                amount_due_rub=Decimal("100.00"),
+                status=TariffQuoteStatus.CANCELLED,
+                expires_at=now + timedelta(minutes=15),
+            )
+            session.scalar = AsyncMock(side_effect=[inactive_quote, None])
+            with self.assertRaises(LookupError) as ctx:
+                await create_purchase_debit(session, user_id=1, quote_id=10, amount=Decimal("100.00"))
+            self.assertIn("purchase_quote_inactive:cancelled", str(ctx.exception))
+
+            # 3. Expired quote (no existing ledger entry)
+            expired_quote = TariffQuote(
+                id=10,
+                user_id=1,
+                amount_due_rub=Decimal("100.00"),
+                status=TariffQuoteStatus.ACTIVE,
+                expires_at=now - timedelta(seconds=1),
+            )
+            session.scalar = AsyncMock(side_effect=[expired_quote, None])
+            with self.assertRaises(LookupError) as ctx:
+                await create_purchase_debit(session, user_id=1, quote_id=10, amount=Decimal("100.00"))
+            self.assertIn("purchase_quote_expired", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

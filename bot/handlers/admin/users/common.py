@@ -1,3 +1,4 @@
+from datetime import timedelta
 import logging
 
 from aiogram.exceptions import TelegramBadRequest
@@ -9,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
+from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
 from database.models import Server, Tariff, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.profiles_repo import (
@@ -387,11 +389,16 @@ async def _get_white_internet_card_info(
         expires_str=expires_str,
         origin_name=origin_name,
     )
-    dev_limit = getattr(sub, "device_limit", 1)
-    active_hwids = getattr(sub, "active_hwids", None) or {}
+    dev_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+    raw_hwids = getattr(sub, "active_hwids", None) or {}
+    now = now_utc()
+    cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
+    active_count = sum(
+        1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff
+    )
     extra_lines = [
         texts.ADMIN_USER_CARD_WL_DEVICES.format(
-            active=len(active_hwids), limit=dev_limit
+            active=active_count, limit=dev_limit
         )
     ]
     prov_status = getattr(sub, "provisioning_status", None)

@@ -128,7 +128,7 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
             patch("bot.handlers.admin.users.balance_routes.is_admin", return_value=True),
             patch("bot.handlers.admin.users.balance_routes.get_user_by_telegram_id", return_value=user),
             patch("bot.handlers.admin.users.balance_routes.check_and_record_admin_op", return_value=(True, None)),
-            patch("bot.handlers.admin.users.balance_routes.create_admin_adjustment", return_value=None),
+            patch("bot.handlers.admin.users.balance_routes.create_admin_adjustment", new=AsyncMock(return_value=(MagicMock(), True))) as mock_adj,
             patch("bot.handlers.admin.users.balance_routes.AuditService.log_action", new=AsyncMock()),
             patch("bot.handlers.admin.users.balance_routes.show_user_balance_menu", new=AsyncMock()) as mock_menu,
         ):
@@ -137,6 +137,27 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
             call_kwargs = mock_menu.call_args[1]
             self.assertEqual(call_kwargs.get("target_telegram_id"), 888)
             self.assertEqual(real_callback.data, "admin_user_balance:888")
+            mock_adj.assert_awaited_once()
+            _, adj_kwargs = mock_adj.call_args
+            self.assertEqual(adj_kwargs["user_id"], 7)
+            self.assertEqual(adj_kwargs["signed_amount"], 100)
+            self.assertEqual(adj_kwargs["metadata"], {"admin_id": 123456789, "reason": "preset_100_123456789"})
+            self.assertTrue(adj_kwargs["idempotency_key"].startswith("admin_adj:"))
+
+    async def test_admin_balance_preset_signature_compatible_with_real_repo(self):
+        """Verify admin_balance_preset parameter names match real create_admin_adjustment signature."""
+        import inspect
+        from bot.handlers.admin.users.balance_routes import create_admin_adjustment as handler_adj
+        from database.repositories.account_ledger_repo import create_admin_adjustment as repo_adj
+
+        self.assertIs(handler_adj, repo_adj)
+        sig = inspect.signature(repo_adj)
+        # Verify repo signature has expected parameter names
+        self.assertIn("signed_amount", sig.parameters)
+        self.assertIn("idempotency_key", sig.parameters)
+        self.assertIn("metadata", sig.parameters)
+        self.assertNotIn("amount", sig.parameters)
+        self.assertNotIn("account_type", sig.parameters)
 
     async def test_admin_balance_preset_rolls_back_on_invariant_error(self):
         """When create_admin_adjustment raises AccountLedgerInvariantError, session must rollback so op_key is not committed."""

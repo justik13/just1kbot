@@ -8,6 +8,8 @@ from decimal import Decimal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from unittest.mock import MagicMock, patch
+
 from config.enums import TariffQuoteOperation, TariffQuoteStatus, WhiteInternetStatus
 from database.models import (
     TariffQuote,
@@ -35,6 +37,25 @@ class TestMigration0026Metadata(unittest.TestCase):
     def test_has_upgrade_and_downgrade(self):
         self.assertTrue(callable(getattr(self.migration, "upgrade", None)))
         self.assertTrue(callable(getattr(self.migration, "downgrade", None)))
+
+    def test_downgrade_guard_checks_quotes_and_subs(self):
+        bind = MagicMock()
+        # 1. trial quotes exist -> raise
+        bind.execute.side_effect = [MagicMock(scalar=MagicMock(return_value=1))]
+        with patch("alembic.op.get_bind", return_value=bind):
+            with self.assertRaises(RuntimeError) as ctx:
+                self.migration.downgrade()
+            self.assertIn("Cannot safely downgrade migration 0026", str(ctx.exception))
+
+        # 2. trial subs exist -> raise
+        bind.execute.side_effect = [
+            MagicMock(scalar=MagicMock(return_value=None)),
+            MagicMock(scalar=MagicMock(return_value=1)),
+        ]
+        with patch("alembic.op.get_bind", return_value=bind):
+            with self.assertRaises(RuntimeError) as ctx:
+                self.migration.downgrade()
+            self.assertIn("Cannot safely downgrade migration 0026", str(ctx.exception))
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")

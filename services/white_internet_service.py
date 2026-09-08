@@ -61,15 +61,16 @@ logger = logging.getLogger(__name__)
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
-def get_white_internet_tier_price(device_limit: int) -> Decimal:
+def get_white_internet_tier_price(device_limit: int, base_price: Decimal | None = None) -> Decimal:
     """Calculate White Internet monthly renewal/subscription price based on device slots.
 
-    1 device  = 250 RUB (50 GiB base)
-    2 devices = 450 RUB (100 GiB base)
-    3 devices = 650 RUB (150 GiB base)
+    1 device  = base_price (50 GiB base)
+    2 devices = base_price + 200 RUB (100 GiB base)
+    3 devices = base_price + 400 RUB (150 GiB base)
     """
     limit = max(1, min(int(device_limit), WHITE_INTERNET_MAX_DEVICE_LIMIT))
-    return WHITE_INTERNET_BASE_PRICE_RUB + Decimal(limit - 1) * WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
+    base = base_price if base_price is not None else WHITE_INTERNET_BASE_PRICE_RUB
+    return base + Decimal(limit - 1) * WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
 
 
 async def _deprovision_old_node_safe(
@@ -366,7 +367,7 @@ class WhiteInternetService:
 
         now = now_utc()
         sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-        tier_price = get_white_internet_tier_price(sub_device_limit)
+        tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff_version.price_rub))
         tier_base_bytes = sub_device_limit * tariff_version.base_quota_bytes
 
         quote = cls._new_quote(
@@ -437,6 +438,14 @@ class WhiteInternetService:
         await session.flush()
         await session.refresh(sub_locked)
 
+        if old_origin_for_cleanup is not None and old_origin_for_cleanup.id != sub_locked.origin_node_id:
+            await white_internet_repo.record_orphan_cleanup(
+                session,
+                origin_node_id=old_origin_for_cleanup.id,
+                client_uuid=sub_locked.uuid,
+                version=sub_locked.desired_version,
+            )
+
         await session.commit()
 
         active_origin = new_origin_server or origin_node
@@ -446,12 +455,6 @@ class WhiteInternetService:
             )
 
         if old_origin_for_cleanup is not None and old_origin_for_cleanup.id != sub_locked.origin_node_id:
-            await white_internet_repo.record_orphan_cleanup(
-                session,
-                origin_node_id=old_origin_for_cleanup.id,
-                client_uuid=sub_locked.uuid,
-                version=sub_locked.desired_version,
-            )
             _dispatch_deprovision(
                 old_origin_for_cleanup,
                 client_uuid=sub_locked.uuid,
@@ -515,7 +518,7 @@ class WhiteInternetService:
             return False, texts.WL_RENEWAL_HORIZON_EXCEEDED, None
 
         sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-        tier_price = get_white_internet_tier_price(sub_device_limit)
+        tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff_version.price_rub))
         tier_base_bytes = sub_device_limit * tariff_version.base_quota_bytes
 
         quote = cls._new_quote(
@@ -589,6 +592,10 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 desired_version=sub.desired_version + 1,
             )
+
+        await session.commit()
+
+        if old_origin_for_cleanup:
             _dispatch_deprovision(
                 old_origin_for_cleanup,
                 client_uuid=sub.uuid,
@@ -725,6 +732,10 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 desired_version=sub.desired_version + 1,
             )
+
+        await session.commit()
+
+        if old_origin_for_cleanup:
             _dispatch_deprovision(
                 old_origin_for_cleanup,
                 client_uuid=sub.uuid,
@@ -867,6 +878,10 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 desired_version=sub.desired_version + 1,
             )
+
+        await session.commit()
+
+        if old_origin_for_cleanup:
             _dispatch_deprovision(
                 old_origin_for_cleanup,
                 client_uuid=sub.uuid,
@@ -1140,6 +1155,10 @@ class WhiteInternetService:
             sub.desired_version += 1
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
             sub.pending_hard_delete = True
+
+        await session.flush()
+
+        for sub in trial_subs:
             if sub.origin_node_id:
                 origin_server = await session.get(Server, sub.origin_node_id)
                 _dispatch_deprovision(
@@ -1149,7 +1168,6 @@ class WhiteInternetService:
                     context=f"reset sub {sub.id}",
                 )
 
-        await session.flush()
         return True, texts.ADMIN_WL_RESET_SUCCESS
 
     @staticmethod

@@ -73,6 +73,7 @@ class TestWhiteInternetProductionFixes(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
              patch("bot.handlers.white_internet.white_internet_repo.get_available_quota_bytes", return_value=10 * 1024**3), \
              patch("bot.handlers.white_internet._get_effective_base_price", return_value=(Decimal("100"), 100, 30)), \
+             patch("bot.handlers.white_internet._get_effective_tariff_info", return_value=(Decimal("100"), 100, 30, 50 * 1024**3)), \
              patch("bot.handlers.white_internet._resolve_subscription_domain", return_value="cdn.just1k.best"):
 
             await show_white_internet_menu(query, session)

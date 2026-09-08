@@ -518,6 +518,13 @@ async def migrate_origin_subscriptions(
     if target_server.protocol != XRAY_PROTOCOL or not target_server.is_active:
         raise ValueError("Target server is not an active Xray node.")
 
+    if "xray_origin" not in (target_server.capabilities or []):
+        raise ValueError("Target server does not have the required 'xray_origin' capability.")
+
+    relays = (target_server.extra_data or {}).get("relays", [])
+    if not relays or len(relays) == 0:
+        raise ValueError("Target server does not have relays configured.")
+
     if target_server.health_state not in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION):
         raise ValueError("Target server health state is not eligible for migration.")
 

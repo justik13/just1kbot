@@ -494,6 +494,8 @@ async def create_purchase_debit(
     )
     if quote is None:
         raise LookupError("purchase_quote_not_found")
+    if quote.amount_due_rub != amount:
+        raise AccountLedgerConflictError("purchase_quote_amount_mismatch")
     if amount == 0:
         return None, False
     existing = await session.scalar(
@@ -506,6 +508,10 @@ async def create_purchase_debit(
         if existing.user_id != user.id or existing.amount != -amount:
             raise AccountLedgerConflictError("purchase_debit_conflict")
         return existing, False
+    if quote.status != "active":
+        raise LookupError(f"purchase_quote_inactive:{quote.status}")
+    if quote.expires_at is not None and quote.expires_at <= now_utc():
+        raise LookupError("purchase_quote_expired")
     snapshot = await get_account_balance(
         session, user_id=user.id, for_update=False, locked_user=user
     )

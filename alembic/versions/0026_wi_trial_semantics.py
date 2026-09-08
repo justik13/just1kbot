@@ -138,10 +138,12 @@ def downgrade() -> None:
     bind = op.get_bind()
     has_trials = bind.execute(
         sa.text("SELECT 1 FROM tariff_quotes WHERE operation_type = 'trial' LIMIT 1")
+    ).scalar() or bind.execute(
+        sa.text("SELECT 1 FROM white_internet_subscriptions WHERE is_trial = true LIMIT 1")
     ).scalar()
     if has_trials:
         raise RuntimeError(
-            "Cannot safely downgrade migration 0026: records with operation_type='trial' exist. "
+            "Cannot safely downgrade migration 0026: records with operation_type='trial' or is_trial=true exist. "
             "Manual data migration of historical trial records is required."
         )
 

@@ -423,8 +423,10 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(get_effective_active_condition(now))
     elif filter_type == "expired":
         stmt = stmt.where(get_effective_expired_condition(now))
-    elif filter_type in ("no_sub", "never"):
+    elif filter_type == "no_sub":
         stmt = stmt.where(~get_effective_active_condition(now))
+    elif filter_type == "never":
+        stmt = stmt.where(get_effective_never_condition())
     elif filter_type in ("banned", "problem"):
         stmt = stmt.where(
             (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))

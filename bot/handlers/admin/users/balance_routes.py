@@ -92,11 +92,9 @@ async def admin_balance_preset(
         await create_admin_adjustment(
             session=session,
             user_id=user.id,
-            amount=amount,
-            account_type="bonus",
-            admin_id=callback.from_user.id,
+            signed_amount=amount,
             idempotency_key=idempotency_key,
-            description=f"preset_{amount}_{callback.from_user.id}",
+            metadata={"admin_id": callback.from_user.id, "reason": f"preset_{amount}_{callback.from_user.id}"},
         )
     except AccountLedgerInvariantError as e:
         await session.rollback()
