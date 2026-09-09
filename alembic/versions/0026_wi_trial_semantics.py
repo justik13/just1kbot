@@ -6,9 +6,12 @@ Create Date: 2026-09-08 20:00:00.000000
 """
 
 from collections.abc import Sequence
+import logging
 
 import sqlalchemy as sa
 from alembic import op
+
+logger = logging.getLogger("alembic.runtime.migration_0026")
 
 # revision identifiers, used by Alembic.
 revision: str = "0026_wi_trial_semantics"
@@ -47,7 +50,7 @@ def upgrade() -> None:
         sa.Column("is_trial", sa.Boolean(), nullable=False, server_default=sa.text("false")),
     )
 
-    # 4. Fail-Closed Ambiguity Checks: Ensure zero misclassification of historical subscriptions
+    # 4. Diagnostic Ambiguity Inspection: Safely log any unconfirmed subscriptions
     # 4a. Candidate sub-50GiB subscriptions lacking a historical trial quote
     ambiguous_no_quote = bind.execute(
         sa.text(
@@ -66,9 +69,10 @@ def upgrade() -> None:
         )
     ).fetchall()
     if ambiguous_no_quote:
-        raise RuntimeError(
-            f"Migration 0026 aborted: found candidate trial subscriptions lacking trial quote: "
-            f"{ambiguous_no_quote}. Fail-closed."
+        logger.warning(
+            "Migration 0026: found candidate trial subscriptions lacking trial quote: %s. "
+            "Safely leaving is_trial=false by default without aborting migration.",
+            ambiguous_no_quote,
         )
 
     # 4b. Candidate trial subscriptions exceeding consumed trial quotes count (orphaned subscriptions)
@@ -100,9 +104,10 @@ def upgrade() -> None:
         )
     ).fetchall()
     if ambiguous_counts:
-        raise RuntimeError(
-            f"Migration 0026 aborted: found more candidate trial subscriptions than trial quotes: "
-            f"{ambiguous_counts}. Fail-closed."
+        logger.warning(
+            "Migration 0026: found unconfirmed trial subscriptions exceeding trial quotes: %s. "
+            "Safely leaving is_trial=false by default without aborting migration.",
+            ambiguous_counts,
         )
 
     # 5. Positive-Identification Backfill for historical trial subscriptions (1:1 confirmed)

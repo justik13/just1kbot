@@ -1986,7 +1986,7 @@ class WhitelistKeyGenerator:
         return json.dumps(full_cfg, indent=2)
 
     def generate_incy_vless_url(self, label: str = "WL-CDN") -> str:
-        """Генерирует vless:// ссылку с параметром extra для INCY / Happ / v2rayNG."""
+        """Генерирует vless:// ссылку с параметром extra для INCY."""
         extra_dict = {
             "mode": "packet-up",
             "scMaxEachPostBytes": 1000000,
@@ -2159,7 +2159,7 @@ if __name__ == "__main__":
 ```
 
 ##### Настройка в клиентских приложениях:
-- **v2rayNG / Sing-box / Happ / INCY:**
+- **INCY:**
   1. Зайдите в меню *Настройки* ➔ *Раздельное туннелирование (Per-app proxy / Bypass mode)*.
   2. Выберите режим **«Проксировать только выбранные приложения» (Proxy only selected apps)** либо режим **«Исключить выбранные» (Bypass selected apps)**.
   3. Внесите в список исключений (Bypass):

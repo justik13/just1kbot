@@ -1222,7 +1222,7 @@ class WhiteInternetService:
         port: int = 443,
         path: str = DEFAULT_WHITE_INTERNET_PATH,
     ) -> dict:
-        """Generate complete Xray client JSON config for INCY / Happ / v2rayN."""
+        """Generate complete Xray client JSON config for INCY."""
         base = _normalize_base_path(path)
         return {
             "log": {"loglevel": "warning"},

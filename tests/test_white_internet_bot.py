@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.types import CallbackQuery, User as TgUser
 
-from bot import texts
 from bot.handlers.white_internet import (
     handle_wl_reset_devices,
     process_white_internet_buy,
     process_white_internet_renew,
     process_topup_pack,
+    process_add_device_confirm,
 )
 from config.enums import WhiteInternetStatus
 from database.models import User, WhiteInternetSubscription
@@ -124,7 +124,6 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.white_internet.is_admin", return_value=True), \
              patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
              patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance) as mock_balance, \
-             patch("bot.handlers.white_internet.check_and_record_admin_op", new=AsyncMock(return_value=True)), \
              patch("services.white_internet_service.WhiteInternetService.topup_quota", return_value=(True, "OK", MagicMock())) as mock_topup, \
              patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock) as mock_menu:
             await process_topup_pack(query, self.session)
@@ -134,16 +133,18 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             self.session.commit.assert_awaited_once()
             mock_menu.assert_awaited_once_with(query, self.session)
 
-    async def test_topup_pack_replay_duplicate_prevented(self):
+    async def test_topup_pack_allows_repeated_purchases(self):
+        """Users can repeatedly buy quota packs without being trapped by message_id idempotency."""
         query = MagicMock(spec=CallbackQuery)
         query.from_user = self.tg_user
         query.data = "wl_topup_pack_25"
         query.message = MagicMock()
+        query.message.message_id = 999
         query.answer = AsyncMock()
 
         high_balance = AccountBalanceSnapshot(
-            accounting_position=Decimal("150.00"),
-            available=Decimal("150.00"),
+            accounting_position=Decimal("300.00"),
+            available=Decimal("300.00"),
             reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
         )
@@ -151,13 +152,73 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.white_internet.is_admin", return_value=True), \
              patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
              patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance), \
-             patch("bot.handlers.white_internet.check_and_record_admin_op", new=AsyncMock(return_value=False)), \
-             patch("services.white_internet_service.WhiteInternetService.topup_quota", new=AsyncMock()) as mock_topup:
+             patch("services.white_internet_service.WhiteInternetService.topup_quota", return_value=(True, "OK", MagicMock())) as mock_topup, \
+             patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock):
+            # First purchase
             await process_topup_pack(query, self.session)
+            self.assertEqual(mock_topup.await_count, 1)
 
-            mock_topup.assert_not_awaited()
-            self.assertEqual(query.answer.await_count, 2)
-            query.answer.assert_awaited_with(texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED, show_alert=True)
+            # Second purchase with identical message_id must not be blocked by ADMIN_BALANCE_OP_ALREADY_PROCESSED
+            await process_topup_pack(query, self.session)
+            self.assertEqual(mock_topup.await_count, 2)
+
+    async def test_add_device_confirm_allows_repeated_purchases(self):
+        """Users can repeatedly buy device slots without being trapped by message_id idempotency."""
+        query = MagicMock(spec=CallbackQuery)
+        query.from_user = self.tg_user
+        query.data = "wl_add_device_confirm"
+        query.message = MagicMock()
+        query.message.message_id = 888
+        query.answer = AsyncMock()
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=False,
+        )
+
+        high_balance = AccountBalanceSnapshot(
+            accounting_position=Decimal("500.00"),
+            available=Decimal("500.00"),
+            reserved=Decimal("0.00"),
+            debt=Decimal("0.00"),
+        )
+
+        with patch("bot.handlers.white_internet.is_admin", return_value=True), \
+             patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
+             patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance), \
+             patch("services.white_internet_service.WhiteInternetService.purchase_device_slot", return_value=(True, "OK", sub)) as mock_buy_slot, \
+             patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock):
+            # First device slot purchase
+            await process_add_device_confirm(query, self.session)
+            self.assertEqual(mock_buy_slot.await_count, 1)
+
+            # Second device slot purchase with identical message_id must not be blocked by ADMIN_BALANCE_OP_ALREADY_PROCESSED
+            await process_add_device_confirm(query, self.session)
+            self.assertEqual(mock_buy_slot.await_count, 2)
+
+    def test_action_lock_middleware_prefixes_configured(self):
+        """ActionLockMiddleware must configure locked and stale prefixes for White Internet purchase actions."""
+        from bot.middlewares.action_lock import LOCKED_ACTION_PREFIXES, STALE_ACTION_PREFIXES
+
+        self.assertIn("wl_topup_execute:", LOCKED_ACTION_PREFIXES)
+        self.assertIn("wl_topup_pack_", LOCKED_ACTION_PREFIXES)
+        self.assertIn("wl_add_device_confirm", LOCKED_ACTION_PREFIXES)
+        self.assertIn("wl_buy_execute", LOCKED_ACTION_PREFIXES)
+        self.assertIn("wl_buy_confirm", LOCKED_ACTION_PREFIXES)
+        self.assertIn("wl_renew_execute", LOCKED_ACTION_PREFIXES)
+        self.assertIn("wl_renew_confirm", LOCKED_ACTION_PREFIXES)
+
+        self.assertIn("wl_topup_execute:", STALE_ACTION_PREFIXES)
+        self.assertIn("wl_topup_pack_", STALE_ACTION_PREFIXES)
+        self.assertIn("wl_add_device_confirm", STALE_ACTION_PREFIXES)
+        self.assertIn("wl_buy_execute", STALE_ACTION_PREFIXES)
+        self.assertIn("wl_buy_confirm", STALE_ACTION_PREFIXES)
+        self.assertIn("wl_renew_execute", STALE_ACTION_PREFIXES)
+        self.assertIn("wl_renew_confirm", STALE_ACTION_PREFIXES)
 
     def test_overview_keyboard_generates_valid_telegram_buttons(self):
         """Active subscription keyboard must use native CopyTextButton and Bot API compliant buttons."""
@@ -495,5 +556,60 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             await handle_wl_reset_devices(query, self.session)
             query.answer.assert_awaited_once()
             self.session.commit.assert_not_called()
+
+    async def test_user_receives_strictly_sub_url_never_raw_vless_or_config(self):
+        """User receives exclusively https:// subscription URLs, never raw vless:// keys or raw configs."""
+        from bot.handlers.white_internet import get_white_internet_overview_keyboard, show_subscription_link
+        from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+        from database.models import WhiteInternetSubscription
+
+        for is_trial in (True, False):
+            sub = WhiteInternetSubscription(
+                id=1,
+                user_id=self.user.id,
+                token="test-secret-token-abc123xyz",
+                uuid="a1b2c3d4-e5f6-47a8-b9c0-d1e2f3a4b5c6",
+                status=WhiteInternetStatus.ACTIVE,
+                provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
+                is_trial=is_trial,
+            )
+            domain = "cdn.just1k.online"
+            kb = get_white_internet_overview_keyboard(sub, bot_domain=domain)
+
+            copy_btns = [btn for row in kb.inline_keyboard for btn in row if btn.copy_text]
+            self.assertEqual(len(copy_btns), 1)
+            copy_text = copy_btns[0].copy_text.text
+            self.assertTrue(copy_text.startswith("https://"), f"Must start with https://, got: {copy_text}")
+            self.assertIn("/sub/", copy_text)
+            self.assertIn(sub.token, copy_text)
+            self.assertNotIn("vless://", copy_text)
+            self.assertNotIn("vmess://", copy_text)
+            self.assertNotIn(sub.uuid, copy_text)
+
+            query = MagicMock(spec=CallbackQuery)
+            query.from_user = self.tg_user
+            query.message = MagicMock()
+            query.message.edit_text = AsyncMock()
+            query.answer = AsyncMock()
+
+            with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+                 patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
+                 patch("bot.handlers.white_internet._resolve_subscription_domain", return_value=domain), \
+                 patch("bot.handlers.white_internet._resolve_subscription_prefix_for_sub", return_value="/sub/wl"):
+                await show_subscription_link(query, self.session)
+
+            query.message.edit_text.assert_awaited()
+            rendered_text = query.message.edit_text.call_args[0][0]
+            markup = query.message.edit_text.call_args[1]["reply_markup"]
+
+            self.assertIn(f"https://{domain}/sub/wl/{sub.token}", rendered_text)
+            self.assertNotIn("vless://", rendered_text)
+            self.assertNotIn(sub.uuid, rendered_text)
+
+            modal_copy_btns = [btn for row in markup.inline_keyboard for btn in row if btn.copy_text]
+            self.assertEqual(len(modal_copy_btns), 1)
+            modal_copy_text = modal_copy_btns[0].copy_text.text
+            self.assertEqual(modal_copy_text, f"https://{domain}/sub/wl/{sub.token}")
+            self.assertNotIn("vless://", modal_copy_text)
 
 

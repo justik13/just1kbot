@@ -57,6 +57,31 @@ class TestMigration0026Metadata(unittest.TestCase):
                 self.migration.downgrade()
             self.assertIn("Cannot safely downgrade migration 0026", str(ctx.exception))
 
+    def test_upgrade_safely_logs_and_does_not_abort_on_ambiguous_data(self):
+        """upgrade() must log warnings and complete without raising RuntimeError when ambiguous rows are detected."""
+        bind = MagicMock()
+        # Mock responses for checks 4a and 4b: both return ambiguous records
+        ambig_no_quote_result = MagicMock()
+        ambig_no_quote_result.fetchall.return_value = [(1, 100, 5368709120)]
+        ambig_counts_result = MagicMock()
+        ambig_counts_result.fetchall.return_value = [(100, 2, 1)]
+        bind.execute.side_effect = [ambig_no_quote_result, ambig_counts_result]
+
+        with patch("alembic.op.get_bind", return_value=bind), \
+             patch("alembic.op.drop_constraint") as mock_drop_c, \
+             patch("alembic.op.create_check_constraint") as mock_create_c, \
+             patch("alembic.op.execute") as mock_exec, \
+             patch("alembic.op.add_column") as mock_add_col, \
+             patch.object(self.migration.logger, "warning") as mock_warn:
+            # Must NOT raise RuntimeError
+            self.migration.upgrade()
+
+            mock_drop_c.assert_called_once_with("ck_tariff_quotes_operation", "tariff_quotes", type_="check")
+            mock_create_c.assert_called_once()
+            mock_add_col.assert_called_once()
+            self.assertEqual(mock_exec.call_count, 2)  # backfill quotes + backfill subs
+            self.assertEqual(mock_warn.call_count, 2)  # 4a and 4b both logged warnings
+
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
@@ -273,6 +298,37 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(len(ambiguous_no_quote), 1)
             self.assertEqual(ambiguous_no_quote[0][0], sub_ambig.id)
+
+            # Positive-identification backfill safely leaves ambiguous subscription as is_trial=False
+            await session.execute(
+                text(
+                    """
+                    UPDATE white_internet_subscriptions sub
+                    SET is_trial = true
+                    WHERE sub.base_traffic_bytes IN (5368709120, 10737418240)
+                      AND sub.device_limit = 1
+                      AND (sub.expires_at - sub.started_at) <= interval '4 days'
+                      AND EXISTS (
+                          SELECT 1 FROM tariff_quotes q
+                          WHERE q.user_id = sub.user_id
+                            AND q.service_type = 'white_internet'
+                            AND q.operation_type = 'trial'
+                            AND q.status = 'consumed'
+                            AND q.amount_due_rub = 0
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM tariff_quotes pq
+                          WHERE pq.user_id = sub.user_id
+                            AND pq.service_type = 'white_internet'
+                            AND pq.amount_due_rub > 0
+                            AND pq.status = 'consumed'
+                            AND abs(extract(epoch from (sub.started_at - pq.consumed_at))) < 3600
+                      )
+                    """
+                )
+            )
+            sub_after = await session.get(WhiteInternetSubscription, sub_ambig.id)
+            self.assertFalse(sub_after.is_trial)
 
     async def test_check_4b_allows_legitimate_reset_trials_with_excess_quotes(self):
         """Check 4b must permit users whose trial quotes exceed active subscriptions (due to trial reset/delete)."""
