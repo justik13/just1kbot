@@ -344,6 +344,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         if ingress_probe_result is not None and probe_domain:
             ingress_ok, ingress_detail = ingress_probe_result
             lock_key = 8_000_000_000 + int(server.id)
+            alert_to_send: tuple[str, object, bool] | None = None
 
             async with session_scope() as session:
                 bind = getattr(session, "bind", None)
@@ -371,8 +372,6 @@ async def check_node_resources_and_alerts(bot: Bot):
 
                     has_problem = db_ingress_problem or st.ingress_problem
                     extra_changed = False
-
-                    alert_to_send: tuple[str, object, bool] | None = None
 
                     if not ingress_ok:
                         st.consecutive_ingress_fails += 1
