@@ -206,6 +206,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("wl_topup_execute:", LOCKED_ACTION_PREFIXES)
         self.assertIn("wl_topup_pack_", LOCKED_ACTION_PREFIXES)
+        self.assertIn("wl_topup_shortage:", LOCKED_ACTION_PREFIXES)
         self.assertIn("wl_add_device_confirm", LOCKED_ACTION_PREFIXES)
         self.assertIn("wl_buy_execute", LOCKED_ACTION_PREFIXES)
         self.assertIn("wl_buy_confirm", LOCKED_ACTION_PREFIXES)
@@ -214,6 +215,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("wl_topup_execute:", STALE_ACTION_PREFIXES)
         self.assertIn("wl_topup_pack_", STALE_ACTION_PREFIXES)
+        self.assertIn("wl_topup_shortage:", STALE_ACTION_PREFIXES)
         self.assertIn("wl_add_device_confirm", STALE_ACTION_PREFIXES)
         self.assertIn("wl_buy_execute", STALE_ACTION_PREFIXES)
         self.assertIn("wl_buy_confirm", STALE_ACTION_PREFIXES)
@@ -611,5 +613,3 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             modal_copy_text = modal_copy_btns[0].copy_text.text
             self.assertEqual(modal_copy_text, f"https://{domain}/sub/wl/{sub.token}")
             self.assertNotIn("vless://", modal_copy_text)
-
-

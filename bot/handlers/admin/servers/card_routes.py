@@ -512,4 +512,3 @@ async def admin_server_migrate_confirm(
     server = await get_server_by_id(session, source_id)
     if server:
         await _show_server_card(callback, session, server)
-

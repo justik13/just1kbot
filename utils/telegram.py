@@ -992,4 +992,3 @@ def equalize_buttons_braille(*button_texts: str) -> list[str]:
         return []
     max_len = max(len(t) for t in button_texts)
     return [pad_braille(t, max_len, align="center") for t in button_texts]
-

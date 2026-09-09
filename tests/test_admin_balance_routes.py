@@ -169,7 +169,7 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
             id="query_bal_124",
             from_user=TgUser(id=123456789, is_bot=False, first_name="Admin"),
             chat_instance="chat_inst_bal_2",
-            data="admin_bal_preset:888:-1000",
+            data="admin_bal_preset:888:100",
         )
         object.__setattr__(real_callback, "answer", AsyncMock())
         msg = MagicMock()
@@ -196,6 +196,26 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
             session.rollback.assert_awaited_once()
             real_callback.answer.assert_awaited_once()
             self.assertIn("Insufficient funds", real_callback.answer.call_args[0][0])
+
+    async def test_admin_balance_preset_rejects_unlisted_amount(self):
+        """Preset amounts not in (100, 300, 500, 1000) must be rejected with ERROR_INVALID_REQUEST."""
+        from aiogram.types import CallbackQuery, User as TgUser
+        from bot import texts
+        from bot.handlers.admin.users.balance_routes import admin_balance_preset
+
+        for invalid_amount in (-1000, 0, 50, 250, 99999):
+            callback = CallbackQuery(
+                id=f"query_bal_inv_{invalid_amount}",
+                from_user=TgUser(id=123456789, is_bot=False, first_name="Admin"),
+                chat_instance="chat_inst_bal_inv",
+                data=f"admin_bal_preset:888:{invalid_amount}",
+            )
+            object.__setattr__(callback, "answer", AsyncMock())
+            session = AsyncMock()
+
+            with patch("bot.handlers.admin.users.balance_routes.is_admin", return_value=True):
+                await admin_balance_preset(callback, session)
+                callback.answer.assert_awaited_once_with(texts.ERROR_INVALID_REQUEST, show_alert=True)
 
 
 if __name__ == "__main__":

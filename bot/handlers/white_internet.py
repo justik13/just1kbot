@@ -430,10 +430,12 @@ async def process_white_internet_trial_activate(query: CallbackQuery, session: A
     try:
         success, msg, _sub = await WhiteInternetService.create_trial_subscription(session, user.id)
     except Exception as exc:
+        await session.rollback()
         logger.error("Unexpected error during white internet trial activation: %s", exc)
         success, msg = False, texts.WL_NO_SERVERS_AVAILABLE
 
     if not success:
+        await session.rollback()
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup(), parse_mode="HTML")
@@ -1030,5 +1032,3 @@ async def handle_wl_reset_devices(query: CallbackQuery, session: AsyncSession):
         return
 
     await show_white_internet_menu(query, session)
-
-

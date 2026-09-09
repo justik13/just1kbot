@@ -575,4 +575,3 @@ async def migrate_origin_subscriptions(
 
     await session.flush()
     return count
-

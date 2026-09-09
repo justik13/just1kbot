@@ -57,8 +57,12 @@ LOCKED_ACTION_PREFIXES = (
     # Режим технических работ.
     "admin_maintenance_toggle_apply",
     # Рассылка.
+    "broadcast_confirm_launch",
     "broadcast_send_all",
     "broadcast_send_active",
+    "broadcast_send_expired",
+    "broadcast_send_never",
+    "broadcast_send_test",
     # Белый Интернет.
     "wl_trial_activate",
     "wl_buy_execute",
@@ -67,6 +71,7 @@ LOCKED_ACTION_PREFIXES = (
     "wl_renew_confirm",
     "wl_topup_execute:",
     "wl_topup_pack_",
+    "wl_topup_shortage:",
     "wl_reset_devices",
     "wl_add_device_confirm",
     # Админские действия Белый Интернет.
@@ -100,8 +105,12 @@ STALE_ACTION_PREFIXES = (
     "admin_server_migrate_confirm:",
     "admin_tariff_toggle_apply:",
     "admin_maintenance_toggle_apply",
+    "broadcast_confirm_launch",
     "broadcast_send_all",
     "broadcast_send_active",
+    "broadcast_send_expired",
+    "broadcast_send_never",
+    "broadcast_send_test",
     "balance_resume_purchase:",
     "aq:x:",
     "wl_add_device_confirm",
@@ -111,6 +120,7 @@ STALE_ACTION_PREFIXES = (
     "wl_renew_execute",
     "wl_topup_pack_",
     "wl_topup_execute:",
+    "wl_topup_shortage:",
     "admin_wi_traffic_add:",
     "admin_wi_traffic_reset_apply:",
     "admin_wi_quota_set:",

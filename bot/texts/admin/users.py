@@ -516,5 +516,3 @@ ADMIN_BAN_PROMPT = """🚫 <b>Блокировка пользователя</b> 
 ADMIN_BALANCE_OP_ALREADY_PROCESSED = "⚠️ Операция уже была выполнена (защита от повторного списания)"
 ADMIN_BALANCE_DEDUCT_FAILED = "❌ Ошибка списания: {error}"
 ADMIN_BALANCE_ADJUSTED_SUCCESS = "✅ Баланс успешно изменен на {amount} ₽"
-
-

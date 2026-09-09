@@ -61,6 +61,11 @@ async def admin_balance_preset(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
+    ALLOWED_PRESETS = (100, 300, 500, 1000)
+    if amount not in ALLOWED_PRESETS:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
@@ -534,6 +539,7 @@ async def apply_user_balance_change(
         await state.clear()
         return
     except Exception as exc:
+        await session.rollback()
         logger.error("Failed to apply admin balance adjustment for user %s: %s", target_user_id, exc)
         await callback.answer(texts.ADMIN_USERS_BALANCE_ERROR_PRIMENENIYA_BALANCE, show_alert=True)
         await state.clear()

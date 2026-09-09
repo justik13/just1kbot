@@ -237,5 +237,3 @@ ADMIN_SERVER_MIGRATE_SELECT_TARGET_PROMPT = """📦 <b>Миграция подп
 Подписчиков для переноса: <b>{count}</b>
 
 Выберите целевой сервер Origin:"""
-
-

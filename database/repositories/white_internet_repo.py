@@ -849,5 +849,3 @@ async def set_device_limit_atomic(
         sub.active_hwids = dict(sorted_hwids[:limit])
     await session.flush()
     return sub
-
-
