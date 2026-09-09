@@ -87,15 +87,84 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
             xray_instance_epoch="ep1",
         )
 
-    async def test_purchase_device_slot_non_admin_rejected(self):
+    async def test_purchase_device_slot_unauthorized_actor_rejected(self):
         mock_session = AsyncMock()
-        with patch("services.white_internet_service.is_admin", return_value=False):
+        with patch("services.white_internet_service.is_admin", return_value=False), \
+             patch("services.white_internet_service.lock_checkout_user", return_value=self.user):
             ok, msg, sub = await WhiteInternetService.purchase_device_slot(
-                mock_session, user_id=42, actor_telegram_id=111222
+                mock_session, user_id=42, actor_telegram_id=999888
             )
             self.assertFalse(ok)
             self.assertEqual(msg, texts.WL_ADMIN_ONLY_ALERT)
             self.assertIsNone(sub)
+
+    async def test_purchase_device_slot_trial_rejected(self):
+        mock_session = AsyncMock()
+        trial_sub = WhiteInternetSubscription(
+            id=1,
+            user_id=42,
+            origin_node_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=True,
+            base_traffic_bytes=5 * 1024**3,
+            traffic_used_bytes=0,
+        )
+        with patch("services.white_internet_service.is_admin", return_value=False), \
+             patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=trial_sub):
+            ok, msg, sub = await WhiteInternetService.purchase_device_slot(
+                mock_session, user_id=42, actor_telegram_id=self.user.telegram_id
+            )
+            self.assertFalse(ok)
+            self.assertEqual(msg, texts.WL_TRIAL_CANNOT_ADD_DEVICE)
+            self.assertIsNone(sub)
+
+    async def test_purchase_device_slot_regular_user_success(self):
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.scalar = AsyncMock(return_value=self.server)
+
+        tariff = Tariff(id=1, service_type="white_internet", duration_days=30, price_rub=250)
+        tariff_version = TariffVersion(
+            id=1,
+            tariff_id=1,
+            version_number=1,
+            name_snapshot="Белый Интернет 50 ГБ",
+            service_type="white_internet",
+            device_limit=1,
+            price_rub=Decimal("250.00"),
+            duration_hours=720,
+            base_quota_bytes=50 * 1024**3,
+        )
+
+        with patch("services.white_internet_service.is_admin", return_value=False), \
+             patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=self.sub), \
+             patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), reserved=Decimal("0"), debt=Decimal("0"))), \
+             patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock) as mock_debit, \
+             patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
+             patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
+             patch("database.repositories.white_internet_repo.add_device_slot_atomic") as mock_add_slot:
+
+            updated_sub = WhiteInternetSubscription(
+                id=1,
+                user_id=42,
+                device_limit=2,
+                base_traffic_bytes=50 * 1024**3,
+                extra_traffic_bytes=50 * 1024**3,
+            )
+            mock_add_slot.return_value = updated_sub
+
+            ok, msg, result = await WhiteInternetService.purchase_device_slot(
+                mock_session, user_id=42, actor_telegram_id=self.user.telegram_id
+            )
+
+            self.assertTrue(ok)
+            self.assertEqual(result.device_limit, 2)
+            mock_debit.assert_awaited_once()
+            debit_call_args = mock_debit.await_args[1]
+            self.assertEqual(debit_call_args["amount"], Decimal("200.00"))
 
     async def test_purchase_device_slot_admin_success(self):
         mock_session = AsyncMock()
@@ -523,11 +592,27 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
 
         # Must have renewal button for 450 ₽
         self.assertTrue(any("450" in text for text in buttons_user))
-        # Paid user HAS topup (no longer admin-gated in v7.0), but non-admin cannot add device
+        # Paid user HAS topup and add device (self-service up to max 3 devices)
         self.assertTrue(any("Докупить трафик" in text for text in buttons_user))
-        self.assertFalse(any("Добавить устройство" in text for text in buttons_user))
+        self.assertTrue(any("Добавить устройство" in text for text in buttons_user))
         # Refresh button must NEVER be present
         self.assertFalse(any("Обновить расход" in text for text in buttons_user))
+
+        # Paid user at max limit (3 devices) cannot add more devices
+        sub_max = WhiteInternetSubscription(
+            id=4,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=now + timedelta(days=10),
+            device_limit=3,
+            token="tokenmax",
+            is_trial=False,
+        )
+        kb_max = get_white_internet_overview_keyboard(
+            sub_max, bot_domain="test.domain", is_admin_user=False
+        )
+        buttons_max = [btn.text for row in kb_max.inline_keyboard for btn in row]
+        self.assertTrue(any("Докупить трафик" in text for text in buttons_max))
+        self.assertFalse(any("Добавить устройство" in text for text in buttons_max))
 
         # Trial user cannot topup or add device
         sub_trial = WhiteInternetSubscription(

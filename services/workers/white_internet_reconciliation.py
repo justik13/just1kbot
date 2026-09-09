@@ -103,6 +103,7 @@ class WhiteInternetReconciliationWorker:
         else:
             expected_inbound_tags.add("just1k-wl-default")
 
+        notify_user_id: int | None = None
         async with self._get_sub_lock(sub_id):
             async with self._semaphore:
                 async with sf() as lock_session:
@@ -188,7 +189,7 @@ class WhiteInternetReconciliationWorker:
                             sub.last_sync_error = None
                             await lock_session.commit()
                             if transitioned_to_active:
-                                await self._notify_sub_ready(lock_session, sub.user_id)
+                                notify_user_id = sub.user_id
                             return True
                         elif sync_result == SyncResult.ALREADY_NEWER:
                             # Check real observed runtime inventory before trusting ALREADY_NEWER
@@ -222,7 +223,7 @@ class WhiteInternetReconciliationWorker:
                                         sub.last_sync_error = None
                                         await lock_session.commit()
                                         if transitioned_to_active:
-                                            await self._notify_sub_ready(lock_session, sub.user_id)
+                                            notify_user_id = sub.user_id
                                         return True
 
                             # Observed state does not match desired state: force convergence by bumping desired_version
@@ -296,6 +297,18 @@ class WhiteInternetReconciliationWorker:
                                 await asyncio.shield(_do_unlock())
                             except BaseException as exc:
                                 logger.debug("Shielded advisory unlock for sub_id %d completed or interrupted: %s", sub_id, exc)
+
+                        if notify_user_id is not None:
+                            try:
+                                async with sf() as notify_session:
+                                    await self._notify_sub_ready(notify_session, notify_user_id)
+                            except Exception as exc:
+                                logger.warning(
+                                    "Failed to notify user %s for sub %d after advisory unlock: %s",
+                                    notify_user_id,
+                                    sub_id,
+                                    exc,
+                                )
 
     async def run_reconciliation_cycle(self, session: AsyncSession | None = None) -> int:
         now = now_utc()

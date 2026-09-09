@@ -803,11 +803,20 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.set_base_traffic_quota_atomic", new=AsyncMock(return_value=self.sub)) as mock_quota, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
              patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
 
             await admin_wi_quota_set(callback, self.session)
             mock_quota.assert_awaited_once_with(self.session, self.sub.id, 50 * 1024 * 1024 * 1024)
             callback.answer.assert_awaited_once_with(texts.ADMIN_WI_QUOTA_SET_SUCCESS.format(gb=50), show_alert=True)
+            mock_audit.assert_awaited_once_with(
+                self.session,
+                admin_id=callback.from_user.id,
+                action=AdminAuditAction.WHITE_INTERNET_QUOTA_SET,
+                target_type="user",
+                target_id=self.user.id,
+                details={"telegram_id": self.user.telegram_id, "quota_gb": 50, "quota_bytes": 50 * 1024 * 1024 * 1024},
+            )
             mock_menu.assert_awaited_once()
 
         # Error path
@@ -835,11 +844,20 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.set_device_limit_atomic", new=AsyncMock(return_value=self.sub)) as mock_devlimit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
              patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
 
             await admin_wi_devlimit_set(callback, self.session)
             mock_devlimit.assert_awaited_once_with(self.session, self.sub.id, 2)
             callback.answer.assert_awaited_once_with(texts.ADMIN_WI_DEVLIMIT_SET_SUCCESS.format(limit=2), show_alert=True)
+            mock_audit.assert_awaited_once_with(
+                self.session,
+                admin_id=callback.from_user.id,
+                action=AdminAuditAction.WHITE_INTERNET_DEVLIMIT_SET,
+                target_type="user",
+                target_id=self.user.id,
+                details={"telegram_id": self.user.telegram_id, "device_limit": 2},
+            )
             mock_menu.assert_awaited_once()
 
         # Error path

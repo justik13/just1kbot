@@ -62,8 +62,11 @@ LOCKED_ACTION_PREFIXES = (
     # Белый Интернет.
     "wl_trial_activate",
     "wl_buy_execute",
+    "wl_buy_confirm",
     "wl_renew_execute",
+    "wl_renew_confirm",
     "wl_topup_execute:",
+    "wl_topup_pack_",
     "wl_reset_devices",
     "wl_add_device_confirm",
     # Админские действия Белый Интернет.
@@ -102,6 +105,9 @@ STALE_ACTION_PREFIXES = (
     "balance_resume_purchase:",
     "aq:x:",
     "wl_add_device_confirm",
+    "wl_buy_confirm",
+    "wl_renew_confirm",
+    "wl_topup_pack_",
     "admin_wi_traffic_add:",
     "admin_wi_traffic_reset_apply:",
     "admin_wi_quota_set:",

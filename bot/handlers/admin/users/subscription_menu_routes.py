@@ -279,6 +279,7 @@ async def admin_wi_traffic_add(
     try:
         await white_internet_repo.add_extra_traffic_atomic(session, wi_sub.id, extra_bytes)
     except white_internet_repo.WhiteInternetError as e:
+        await session.rollback()
         await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=str(e)), show_alert=True)
         return
 
@@ -440,8 +441,18 @@ async def admin_wi_quota_set(
     try:
         await white_internet_repo.set_base_traffic_quota_atomic(session, wi_sub.id, quota_bytes)
     except white_internet_repo.WhiteInternetError as e:
+        await session.rollback()
         await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=str(e)), show_alert=True)
         return
+
+    await AuditService.log_action(
+        session,
+        admin_id=callback.from_user.id,
+        action=AdminAuditAction.WHITE_INTERNET_QUOTA_SET,
+        target_type="user",
+        target_id=user.id,
+        details={"telegram_id": telegram_id, "quota_gb": gb, "quota_bytes": quota_bytes},
+    )
 
     await callback.answer(texts.ADMIN_WI_QUOTA_SET_SUCCESS.format(gb=gb), show_alert=True)
     callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
@@ -511,8 +522,18 @@ async def admin_wi_devlimit_set(
     try:
         await white_internet_repo.set_device_limit_atomic(session, wi_sub.id, limit)
     except white_internet_repo.WhiteInternetError as e:
+        await session.rollback()
         await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=str(e)), show_alert=True)
         return
+
+    await AuditService.log_action(
+        session,
+        admin_id=callback.from_user.id,
+        action=AdminAuditAction.WHITE_INTERNET_DEVLIMIT_SET,
+        target_type="user",
+        target_id=user.id,
+        details={"telegram_id": telegram_id, "device_limit": limit},
+    )
 
     await callback.answer(texts.ADMIN_WI_DEVLIMIT_SET_SUCCESS.format(limit=limit), show_alert=True)
     callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")

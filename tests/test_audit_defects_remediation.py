@@ -71,6 +71,9 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
             "admin_wl_reset_apply:",
             "admin_wl_grant_trial:",
             "wl_add_device_confirm",
+            "wl_buy_confirm",
+            "wl_renew_confirm",
+            "wl_topup_pack_",
             "confirm_server_purge:",
             "admin_server_migrate_confirm:",
             "admin_bal_preset:",
@@ -763,6 +766,22 @@ class TestAuditDefectsRemediationXrayAndLedgerAsync(unittest.IsolatedAsyncioTest
             with self.assertRaises(LookupError) as ctx:
                 await create_purchase_debit(session, user_id=1, quote_id=10, amount=Decimal("100.00"))
             self.assertIn("purchase_quote_expired", str(ctx.exception))
+
+    def test_admin_audit_actions_white_internet_enums(self):
+        from config.enums import AdminAuditAction
+        self.assertEqual(AdminAuditAction.WHITE_INTERNET_QUOTA_SET, "WHITE_INTERNET_QUOTA_SET")
+        self.assertEqual(AdminAuditAction.WHITE_INTERNET_DEVLIMIT_SET, "WHITE_INTERNET_DEVLIMIT_SET")
+
+    def test_admin_fallback_parsing(self):
+        from utils.admin import is_admin
+        with patch("utils.admin.get_settings", side_effect=Exception("no settings")):
+            with patch.dict("os.environ", {"ADMIN_IDS": "[12345, 67890]"}):
+                self.assertTrue(is_admin(12345))
+                self.assertTrue(is_admin(67890))
+                self.assertFalse(is_admin(99999))
+            with patch.dict("os.environ", {"ADMIN_IDS": "12345, 67890"}):
+                self.assertTrue(is_admin(12345))
+                self.assertFalse(is_admin(99999))
 
 
 if __name__ == "__main__":

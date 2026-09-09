@@ -187,7 +187,7 @@ def get_white_internet_overview_keyboard(
 
     if not getattr(sub, "is_trial", False):
         builder.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
-        if is_admin_user and sub_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
+        if sub_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
             builder.button(text=texts.BTN_WL_ADD_DEVICE, callback_data="wl_add_device_menu")
 
     if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
@@ -421,6 +421,12 @@ async def process_white_internet_trial_activate(query: CallbackQuery, session: A
         await query.answer()
     except Exception:
         pass
+    if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
+        try:
+            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
@@ -490,6 +496,12 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
         await query.answer()
     except Exception:
         pass
+    if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
+        try:
+            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
@@ -593,6 +605,12 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
         await query.answer()
     except Exception:
         pass
+    if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
+        try:
+            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
@@ -718,6 +736,12 @@ async def process_topup_execute(query: CallbackQuery, session: AsyncSession):
         await query.answer()
     except Exception:
         pass
+    if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
+        try:
+            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
     data = query.data
     if ":" in data:
         pack_str = data.split(":")[1]
@@ -841,18 +865,24 @@ async def process_wl_topup_shortage(query: CallbackQuery, session: AsyncSession)
 
 @router.callback_query(F.data == "wl_add_device_menu")
 async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
-    if not is_admin(query.from_user.id):
-        await query.answer(texts.WL_ADMIN_ONLY_ALERT, show_alert=True)
-        return
     try:
         await query.answer()
     except Exception:
         pass
+    if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
+        try:
+            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     if sub is None:
+        return
+    if getattr(sub, "is_trial", False):
+        await query.answer(texts.WL_TRIAL_CANNOT_ADD_DEVICE, show_alert=True)
         return
     current_limit = max(1, getattr(sub, "device_limit", 1) or 1)
     if current_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
@@ -880,15 +910,24 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "wl_add_device_confirm")
 async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession):
-    if not is_admin(query.from_user.id):
-        await query.answer(texts.WL_ADMIN_ONLY_ALERT, show_alert=True)
-        return
     try:
         await query.answer()
     except Exception:
         pass
+    if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
+        try:
+            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
+        return
+    sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if sub is None:
+        return
+    if getattr(sub, "is_trial", False):
+        await query.answer(texts.WL_TRIAL_CANNOT_ADD_DEVICE, show_alert=True)
         return
 
     price = WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
@@ -999,6 +1038,12 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "wl_reset_devices")
 async def handle_wl_reset_devices(query: CallbackQuery, session: AsyncSession):
+    if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
+        try:
+            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         try:

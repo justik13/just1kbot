@@ -482,8 +482,12 @@ async def admin_server_migrate_confirm(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    source_id = int(parts[1])
-    target_id = int(parts[2])
+    try:
+        source_id = int(parts[1])
+        target_id = int(parts[2])
+    except ValueError:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
 
     try:
         count = await migrate_origin_subscriptions(session, source_id, target_id, callback.from_user.id)
@@ -503,7 +507,7 @@ async def admin_server_migrate_confirm(
         await callback.answer(texts.ADMIN_SERVER_MIGRATE_SUCCESS.format(count=count), show_alert=True)
     except Exception as exc:
         await session.rollback()
-        await callback.answer(texts.ADMIN_SERVER_MIGRATE_FAILED.format(error=exc), show_alert=True)
+        await callback.answer(texts.ADMIN_SERVER_MIGRATE_FAILED.format(error=str(exc)), show_alert=True)
 
     server = await get_server_by_id(session, source_id)
     if server:

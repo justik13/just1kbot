@@ -612,14 +612,22 @@ class WhiteInternetService:
         user_id: int,
         actor_telegram_id: int | None = None,
     ) -> tuple[bool, str, WhiteInternetSubscription | None]:
-        if actor_telegram_id is None or not is_admin(actor_telegram_id):
-            return False, texts.WL_ADMIN_ONLY_ALERT, None
         user = await lock_checkout_user(session, user_id)
         if user is None:
             return False, texts.WL_USER_NOT_FOUND, None
+
+        is_owner = bool(actor_telegram_id is not None and user.telegram_id == actor_telegram_id)
+        is_admin_actor = bool(actor_telegram_id is not None and is_admin(actor_telegram_id))
+        if not (is_owner or is_admin_actor):
+            return False, texts.WL_ADMIN_ONLY_ALERT, None
+
         sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
         if sub is None:
             return False, texts.WL_NO_SUB, None
+        if sub.user_id != user.id:
+            return False, texts.ERROR_ACCESS_DENIED, None
+        if getattr(sub, "is_trial", False):
+            return False, texts.WL_TRIAL_CANNOT_ADD_DEVICE, None
         now = now_utc()
         if sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.DISABLED):
             return False, texts.WL_SUB_NOT_READY, None
