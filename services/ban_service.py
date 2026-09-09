@@ -45,6 +45,7 @@ class BanService:
         session: AsyncSession,
         admin_id: int,
         telegram_id: int,
+        reason: str | None = None,
     ) -> tuple:
         user = await get_user_by_telegram_id(session, telegram_id)
         if not user:
@@ -56,6 +57,7 @@ class BanService:
             admin_id=admin_id,
             user=user,
             telegram_id=telegram_id,
+            reason=reason,
         )
 
     @staticmethod
@@ -110,6 +112,7 @@ class BanService:
         admin_id: int,
         user,
         telegram_id: int,
+        reason: str | None = None,
     ) -> tuple:
         # Global lock order Payment -> advisory -> User, same as the ledger
         # (credit_succeeded_topup) and checkout paths. Taking the advisory
@@ -197,6 +200,7 @@ class BanService:
             target_type="user",
             target_id=locked_user.id,
             details={
+                "reason": reason or "admin_action",
                 "profiles_deleted": deleted_profiles,
                 "payments_closed": payments_closed,
                 "reconciliations_queued": reconciliations_queued,

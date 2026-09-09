@@ -16,7 +16,6 @@ from sqlalchemy import func, select
 
 from bot.keyboards.notifications import get_node_monitor_alert_keyboard
 from bot.texts.runtime.alerts import (
-    ALERT_INGRESS_ERR_NETWORK,
     ALERT_INGRESS_ERR_TIMEOUT,
     ALERT_INGRESS_PROBLEM,
     ALERT_INGRESS_RESTORED,
@@ -345,117 +344,107 @@ async def check_node_resources_and_alerts(bot: Bot):
         if ingress_probe_result is not None and probe_domain:
             ingress_ok, ingress_detail = ingress_probe_result
             lock_key = 8_000_000_000 + int(server.id)
+            alert_to_send: tuple[str, object, bool] | None = None
 
             async with session_scope() as session:
-                is_pg = False
                 bind = getattr(session, "bind", None)
                 if not bind and hasattr(session, "sync_session"):
                     bind = getattr(session.sync_session, "bind", None)
                 if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
-                    is_pg = True
-                    got_lock = bool(await session.scalar(select(func.pg_try_advisory_lock(lock_key))))
+                    got_lock = bool(await session.scalar(select(func.pg_try_advisory_xact_lock(lock_key))))
                     if not got_lock:
                         logger.debug("Ingress alert evaluation for server %d locked by peer worker. Skipping alert dispatch.", server.id)
                 else:
                     got_lock = True
 
                 if got_lock:
-                    try:
-                        fresh_server = await get_server_by_id(session, server.id)
-                        db_extra = dict((fresh_server.extra_data if fresh_server else server.extra_data) or {})
-                        db_ingress_problem = bool(db_extra.get("ingress_problem"))
+                    fresh_server = await get_server_by_id(session, server.id)
+                    db_extra = dict((fresh_server.extra_data if fresh_server else server.extra_data) or {})
+                    db_ingress_problem = bool(db_extra.get("ingress_problem"))
 
-                        # Durable-by-Default: sync in-memory state with DB
-                        if db_ingress_problem:
-                            st.ingress_problem = True
-                        if "consecutive_ingress_fails" in db_extra:
-                            st.consecutive_ingress_fails = int(db_extra.get("consecutive_ingress_fails") or 0)
-                        if "consecutive_ingress_successes" in db_extra:
-                            st.consecutive_ingress_successes = int(db_extra.get("consecutive_ingress_successes") or 0)
+                    # Durable-by-Default: sync in-memory state with DB
+                    if db_ingress_problem:
+                        st.ingress_problem = True
+                    if "consecutive_ingress_fails" in db_extra:
+                        st.consecutive_ingress_fails = int(db_extra.get("consecutive_ingress_fails") or 0)
+                    if "consecutive_ingress_successes" in db_extra:
+                        st.consecutive_ingress_successes = int(db_extra.get("consecutive_ingress_successes") or 0)
 
-                        has_problem = db_ingress_problem or st.ingress_problem
-                        extra_changed = False
+                    has_problem = db_ingress_problem or st.ingress_problem
+                    extra_changed = False
 
-                        if not ingress_ok:
-                            st.consecutive_ingress_fails += 1
-                            st.consecutive_ingress_successes = 0
-                            if (
-                                db_extra.get("consecutive_ingress_fails") != st.consecutive_ingress_fails
-                                or db_extra.get("consecutive_ingress_successes") != 0
-                            ):
-                                db_extra["consecutive_ingress_fails"] = st.consecutive_ingress_fails
-                                db_extra["consecutive_ingress_successes"] = 0
-                                extra_changed = True
+                    if not ingress_ok:
+                        st.consecutive_ingress_fails += 1
+                        st.consecutive_ingress_successes = 0
+                        if (
+                            db_extra.get("consecutive_ingress_fails") != st.consecutive_ingress_fails
+                            or db_extra.get("consecutive_ingress_successes") != 0
+                        ):
+                            db_extra["consecutive_ingress_fails"] = st.consecutive_ingress_fails
+                            db_extra["consecutive_ingress_successes"] = 0
+                            extra_changed = True
 
-                            if not has_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
-                                sent_ok = False
-                                try:
-                                    sent_ok = await _send_admin_alert_msg(
-                                        bot,
-                                        ALERT_INGRESS_PROBLEM.format(
-                                            server_name=safe(server.name),
-                                            server_id=server.id,
-                                            domain=safe(probe_domain),
-                                            status_or_err=safe(ingress_detail or ALERT_INGRESS_ERR_NETWORK),
-                                            endpoint=safe(f"{sub_prefix}/ping"),
-                                        ),
-                                        reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
-                                    )
-                                except Exception as e:
-                                    logger.error("Failed to deliver ingress problem alert: %s", e)
-                                if sent_ok:
-                                    st.ingress_problem = True
-                                    db_extra["ingress_problem"] = True
-                                    extra_changed = True
-                        else:
-                            st.consecutive_ingress_successes += 1
-                            st.consecutive_ingress_fails = 0
-                            if (
-                                db_extra.get("consecutive_ingress_successes") != st.consecutive_ingress_successes
-                                or db_extra.get("consecutive_ingress_fails") != 0
-                            ):
-                                db_extra["consecutive_ingress_successes"] = st.consecutive_ingress_successes
-                                db_extra["consecutive_ingress_fails"] = 0
-                                extra_changed = True
+                        if not has_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
+                            alert_to_send = (
+                                ALERT_INGRESS_PROBLEM.format(
+                                    server_name=safe(server.name),
+                                    server_id=server.id,
+                                    domain=safe(probe_domain),
+                                    status_or_err=safe(ingress_detail),
+                                    endpoint=safe(f"{sub_prefix}/ping"),
+                                ),
+                                get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                True,
+                            )
+                    else:
+                        st.consecutive_ingress_successes += 1
+                        st.consecutive_ingress_fails = 0
+                        if (
+                            db_extra.get("consecutive_ingress_successes") != st.consecutive_ingress_successes
+                            or db_extra.get("consecutive_ingress_fails") != 0
+                        ):
+                            db_extra["consecutive_ingress_successes"] = st.consecutive_ingress_successes
+                            db_extra["consecutive_ingress_fails"] = 0
+                            extra_changed = True
 
-                            if has_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
-                                sent_ok = False
-                                try:
-                                    sent_ok = await _send_admin_alert_msg(
-                                        bot,
-                                        ALERT_INGRESS_RESTORED.format(
-                                            server_name=safe(server.name),
-                                            server_id=server.id,
-                                            domain=safe(probe_domain),
-                                            endpoint=safe(f"{sub_prefix}/ping"),
-                                        ),
-                                        reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
-                                    )
-                                except Exception as e:
-                                    logger.error("Failed to deliver ingress restored alert: %s", e)
-                                if sent_ok:
-                                    st.ingress_problem = False
-                                    db_extra.pop("ingress_problem", None)
-                                    extra_changed = True
+                        if has_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
+                            alert_to_send = (
+                                ALERT_INGRESS_RESTORED.format(
+                                    server_name=safe(server.name),
+                                    server_id=server.id,
+                                    domain=safe(probe_domain),
+                                    endpoint=safe(f"{sub_prefix}/ping"),
+                                ),
+                                get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                False,
+                            )
 
-                        if extra_changed and fresh_server:
-                            await update_server(session, fresh_server, extra_data=db_extra)
-                            await session.commit()
-                    finally:
-                        if is_pg and got_lock:
-                            async def _do_unlock():
-                                try:
-                                    if session.in_transaction():
-                                        await session.commit()
-                                    await session.scalar(select(func.pg_advisory_unlock(lock_key)))
-                                    await session.commit()
-                                except Exception as unlock_err:
-                                    logger.debug("Error releasing ingress advisory lock %d: %s", lock_key, unlock_err)
+                    if extra_changed and fresh_server:
+                        await update_server(session, fresh_server, extra_data=db_extra)
 
-                            try:
-                                await asyncio.shield(_do_unlock())
-                            except BaseException as unlock_err:
-                                logger.debug("Shielded unlock for ingress lock %d completed or interrupted: %s", lock_key, unlock_err)
+            # Decoupled alert dispatch outside DB transaction and advisory lock
+            if alert_to_send is not None:
+                alert_text, alert_kb, is_problem = alert_to_send
+                sent_ok = False
+                try:
+                    sent_ok = await _send_admin_alert_msg(
+                        bot,
+                        alert_text,
+                        reply_markup=alert_kb,
+                    )
+                except Exception as e:
+                    logger.error("Failed to deliver ingress alert for server %d: %s", server.id, e)
+                if sent_ok:
+                    st.ingress_problem = is_problem
+                    async with session_scope() as session:
+                        fresh = await get_server_by_id(session, server.id)
+                        if fresh:
+                            cur_extra = dict(fresh.extra_data or {})
+                            if is_problem:
+                                cur_extra["ingress_problem"] = True
+                            else:
+                                cur_extra.pop("ingress_problem", None)
+                            await update_server(session, fresh, extra_data=cur_extra)
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:

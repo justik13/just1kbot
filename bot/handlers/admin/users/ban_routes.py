@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 BAN_STATUS_LABELS: dict[str, str] = texts.ADMIN_USER_BAN_STATUS_LABELS
 
 
+BAN_REASONS = texts.ADMIN_BAN_REASON_LABELS
+
+
 @router.callback_query(F.data.startswith("admin_ban:"))
 async def admin_ban_confirm(
     callback: CallbackQuery,
@@ -55,15 +58,13 @@ async def admin_ban_confirm(
         )
         return
 
-    text = texts.ADMIN_BAN_CONFIRM.format(telegram_id=telegram_id)
+    from bot.keyboards.admin.users import get_admin_ban_reasons_keyboard
+    text = texts.ADMIN_BAN_PROMPT.format(telegram_id=telegram_id)
 
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=get_admin_confirm_action_keyboard(
-                confirm_callback=f"admin_ban_apply:{telegram_id}",
-                cancel_callback=f"admin_user_card:{telegram_id}",
-            ),
+            reply_markup=get_admin_ban_reasons_keyboard(telegram_id),
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
@@ -82,7 +83,13 @@ async def admin_ban_apply(
         )
         return
 
-    telegram_id = parse_callback_id(callback.data, 1)
+    parts = callback.data.split(":")
+    telegram_id = None
+    reason_code = None
+    if len(parts) >= 2 and parts[1].isdigit():
+        telegram_id = int(parts[1])
+    if len(parts) >= 3:
+        reason_code = parts[2]
 
     if telegram_id is None:
         await callback.answer(
@@ -102,10 +109,13 @@ async def admin_ban_apply(
         )
         return
 
+    reason = BAN_REASONS.get(reason_code, "admin_action")
+
     success, message = await BanService.ban_user(
         session,
         callback.from_user.id,
         telegram_id,
+        reason=reason,
     )
 
     status_label = BAN_STATUS_LABELS.get(str(message).lower(), str(message).lower())

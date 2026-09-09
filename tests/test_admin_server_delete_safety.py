@@ -4,8 +4,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiogram.fsm.context import FSMContext
 
 from bot import texts
-from bot.handlers.admin.servers.delete_routes import confirm_delete_server
+from bot.handlers.admin.servers.delete_routes import confirm_delete_server, confirm_purge_server
 from bot.states import AdminStates
+from config.enums import (
+    ServerHealthState,
+    ServerLifecycleStatus,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
+)
 
 
 class AdminServerDeleteSafetyTests(unittest.IsolatedAsyncioTestCase):
@@ -82,6 +88,63 @@ class AdminServerDeleteSafetyTests(unittest.IsolatedAsyncioTestCase):
         mock_session.rollback.assert_awaited_once()
         self.assertTrue(callback.answer.call_args[1]["show_alert"])
         self.assertIn("активных подписок White Internet", callback.answer.call_args[0][0])
+
+    async def test_confirm_purge_server_decommissions_server(self):
+        callback = MagicMock()
+        callback.from_user.id = 1
+        callback.data = "confirm_server_purge:10"
+        callback.answer = AsyncMock()
+        callback.message.edit_text = AsyncMock()
+
+        mock_server = MagicMock()
+        mock_server.id = 10
+        mock_server.name = "Dead Origin"
+        mock_server.is_active = True
+        mock_server.lifecycle_status = ServerLifecycleStatus.ACTIVE
+        mock_server.health_state = ServerHealthState.ONLINE
+
+        mock_sub = MagicMock()
+        mock_sub.id = 1
+        mock_sub.origin_node_id = 10
+        mock_sub.status = WhiteInternetStatus.ACTIVE
+        mock_sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+        mock_sub.pending_hard_delete = False
+
+        mock_session = AsyncMock()
+        res_server = MagicMock()
+        res_server.scalar_one_or_none.return_value = mock_server
+
+        res_subs = MagicMock()
+        res_subs.scalars.return_value.all.return_value = [mock_sub]
+
+        # 1st execute: select server with_for_update
+        # 2nd execute: update WhiteInternetOrphanCleanup
+        # 3rd execute: select WhiteInternetSubscription with_for_update
+        mock_session.execute.side_effect = [res_server, MagicMock(), res_subs]
+
+        with patch(
+            "bot.handlers.admin.servers.delete_routes.is_admin",
+            return_value=True,
+        ), patch(
+            "bot.handlers.admin.servers.delete_routes.parse_callback_id",
+            return_value=10,
+        ), patch(
+            "bot.handlers.admin.servers.delete_routes._show_servers_list",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin.servers.delete_routes.AuditService.log_action",
+            new=AsyncMock(),
+        ):
+            await confirm_purge_server(callback, mock_session)
+
+        self.assertFalse(mock_server.is_active)
+        self.assertEqual(mock_server.lifecycle_status, ServerLifecycleStatus.DECOMMISSIONED)
+        self.assertEqual(mock_server.health_state, ServerHealthState.MANUAL_DISABLED)
+        self.assertEqual(mock_sub.status, WhiteInternetStatus.DISABLED)
+        self.assertEqual(mock_sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
+        self.assertIsNone(mock_sub.origin_node_id)
+        mock_session.commit.assert_awaited_once()
+        callback.answer.assert_awaited_once()
 
 
 if __name__ == "__main__":

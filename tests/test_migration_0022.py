@@ -19,7 +19,7 @@ class Migration0022Tests(unittest.TestCase):
         rev = scripts.get_revision("0022_servers_protocol_not_null")
         self.assertIsNotNone(rev)
         self.assertEqual(rev.down_revision, "0021_wi_orphan_cleanups")
-        self.assertEqual(scripts.get_heads(), ["0022_servers_protocol_not_null"])
+        self.assertEqual(scripts.get_heads(), ["0026_wi_trial_semantics"])
 
     def test_migration_0022_source_content(self):
         m22_path = Path("alembic/versions/0022_servers_protocol_not_null.py")

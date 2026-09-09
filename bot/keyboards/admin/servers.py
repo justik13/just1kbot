@@ -23,6 +23,11 @@ def get_admin_server_card_keyboard(
             text=peers_btn_text,
             callback_data=f"admin_server_peers:{server_id}:1",
         )
+    else:
+        builder.button(
+            text=texts.ADMIN_SERVER_BTN_MIGRATE,
+            callback_data=f"admin_server_migrate:{server_id}",
+        )
     builder.button(
         text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
         callback_data=f"admin_users_filter:server:{server_id}:1",
@@ -144,4 +149,22 @@ def get_server_delete_confirm_keyboard(
     )
 
     builder.adjust(1, 1, 1, 1)
+    return builder.as_markup()
+
+
+def get_server_migration_targets_keyboard(
+    source_id: int,
+    targets: list[tuple[int, str, str, int, int]],
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for t_id, name, flag, active, max_c in targets:
+        builder.button(
+            text=f"{flag} {name} ({active}/{max_c})",
+            callback_data=f"admin_server_migrate_to:{source_id}:{t_id}",
+        )
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=f"admin_server_card:{source_id}",
+    )
+    builder.adjust(1)
     return builder.as_markup()

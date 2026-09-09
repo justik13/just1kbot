@@ -18,6 +18,7 @@ from config.constants import (
 )
 from database.connection import session_scope
 from database.models import (
+    AdminOperationIdempotency,
     APIOperation,
     BroadcastProgress,
     HubMessage,
@@ -675,6 +676,12 @@ async def _cleanup_old_records():
     hub_deleted = await _batch_delete_matching(
         HubMessage,
         HubMessage.created_at < threshold_hub,
+    )
+
+    threshold_idempotency = current_time - timedelta(days=7)
+    await _batch_delete_matching(
+        AdminOperationIdempotency,
+        AdminOperationIdempotency.created_at < threshold_idempotency,
     )
 
     # Auto-expire abandoned pending payments older than PAYMENT_EXPIRATION_HOURS.

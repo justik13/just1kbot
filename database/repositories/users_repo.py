@@ -12,7 +12,7 @@ from config.constants import (
     XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Server, Tariff, User, VPNProfile, WhiteInternetSubscription
+from database.models import Payment, Server, Tariff, User, VPNProfile, WhiteInternetSubscription
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from utils.datetime_helpers import now_utc
 
@@ -35,6 +35,7 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "notified_grace_12h",
     "notification_retry_count",
     "last_notification_attempt",
+    "last_trial_reset_at",
 }
 
 
@@ -236,15 +237,14 @@ async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
 
 async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
     clean = username.lstrip("@").strip()
-    # Escape LIKE wildcards: without this, an admin typing "%" or "_" in user
-    # search would match arbitrary users (ilike treats them as wildcards),
-    # risking bans/bonuses applied to the wrong account.
-    escaped = (
-        clean.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    )
+    if not clean:
+        return None
     stmt = (
         select(User)
-        .where(User.username.ilike(escaped, escape="\\"), User.is_deleted.is_(False))
+        .where(
+            func.lower(User.username) == clean.lower(),
+            User.is_deleted.is_(False),
+        )
         .options(selectinload(User.profiles))
     )
     result = await session.execute(stmt)
@@ -256,6 +256,7 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
     if not query_str:
         return None
 
+    # 1. Numeric ID (Telegram ID or internal User ID)
     if query_str.isdigit():
         num_id = int(query_str)
         if 1 <= num_id <= MAX_INT64:
@@ -263,13 +264,151 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
             if user:
                 return user
         if 1 <= num_id <= MAX_INT32:
-            stmt = select(User).where(User.id == num_id, User.is_deleted.is_(False)).options(selectinload(User.profiles))
+            stmt = (
+                select(User)
+                .where(User.id == num_id, User.is_deleted.is_(False))
+                .options(selectinload(User.profiles))
+            )
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
             if user:
                 return user
+        return await get_user_by_username(session, query_str)
 
-    return await get_user_by_username(session, query_str)
+    # 2. Username exact case-insensitive lookup (B-tree index)
+    user = await get_user_by_username(session, query_str)
+    if user:
+        return user
+
+    # 3. Canonical client UUID (36 chars: 8-4-4-4-12)
+    if len(query_str) == 36 and query_str.count("-") == 4:
+        sub_user_id = await session.scalar(
+            select(WhiteInternetSubscription.user_id)
+            .where(WhiteInternetSubscription.uuid == query_str)
+            .limit(1)
+        )
+        if sub_user_id:
+            stmt = (
+                select(User)
+                .where(User.id == sub_user_id, User.is_deleted.is_(False))
+                .options(selectinload(User.profiles))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
+    # 4. Peer ID (AmneziaWG)
+    peer_user_id = await session.scalar(
+        select(VPNProfile.user_id)
+        .where(VPNProfile.peer_id == query_str)
+        .limit(1)
+    )
+    if peer_user_id:
+        stmt = (
+            select(User)
+            .where(User.id == peer_user_id, User.is_deleted.is_(False))
+            .options(selectinload(User.profiles))
+        )
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    # 5. Payment ID (external_id)
+    payment_user_id = await session.scalar(
+        select(Payment.user_id)
+        .where(Payment.external_id == query_str)
+        .limit(1)
+    )
+    if payment_user_id:
+        stmt = (
+            select(User)
+            .where(User.id == payment_user_id, User.is_deleted.is_(False))
+            .options(selectinload(User.profiles))
+        )
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    # 6. HWID lookup (GIN index on active_hwids)
+    if len(query_str) >= 8:
+        hwid_user_id = await session.scalar(
+            select(WhiteInternetSubscription.user_id)
+            .where(WhiteInternetSubscription.active_hwids.has_key(query_str))
+            .limit(1)
+        )
+        if hwid_user_id:
+            stmt = (
+                select(User)
+                .where(User.id == hwid_user_id, User.is_deleted.is_(False))
+                .options(selectinload(User.profiles))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
+    return None
+
+
+def get_effective_active_condition(now=None):
+    if now is None:
+        now = now_utc()
+    xray_active_subq = select(WhiteInternetSubscription.user_id).where(
+        WhiteInternetSubscription.status.in_([
+            WhiteInternetStatus.ACTIVE,
+            WhiteInternetStatus.PENDING,
+        ]),
+        WhiteInternetSubscription.expires_at > now,
+        WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+    )
+    return or_(
+        User.subscription_end > now,
+        User.id.in_(xray_active_subq),
+    )
+
+
+def get_effective_expiring_3d_condition(now=None):
+    if now is None:
+        now = now_utc()
+    limit_3d = now + timedelta(days=3)
+    awg_expiring = and_(
+        User.subscription_end > now,
+        User.subscription_end <= limit_3d,
+    )
+    xray_expiring = User.id.in_(
+        select(WhiteInternetSubscription.user_id).where(
+            WhiteInternetSubscription.status.in_([
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.PENDING,
+            ]),
+            WhiteInternetSubscription.expires_at > now,
+            WhiteInternetSubscription.expires_at <= limit_3d,
+            WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+        )
+    )
+    awg_longer = User.subscription_end > limit_3d
+    xray_longer = User.id.in_(
+        select(WhiteInternetSubscription.user_id).where(
+            WhiteInternetSubscription.status.in_([
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.PENDING,
+            ]),
+            WhiteInternetSubscription.expires_at > limit_3d,
+            WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+        )
+    )
+    return and_(
+        or_(awg_expiring, xray_expiring),
+        ~awg_longer,
+        ~xray_longer,
+    )
+
+
+def get_effective_expired_condition(now=None):
+    if now is None:
+        now = now_utc()
+    active_cond = get_effective_active_condition(now)
+    had_awg = User.subscription_end.is_not(None)
+    had_xray = User.id.in_(select(WhiteInternetSubscription.user_id))
+    return and_(or_(had_awg, had_xray), ~active_cond)
+
+
+def get_effective_never_condition():
+    return and_(
+        User.subscription_end.is_(None),
+        ~User.id.in_(select(WhiteInternetSubscription.user_id)),
+    )
 
 
 def _apply_user_filters(stmt, filter_type: str, filter_param=None):
@@ -279,20 +418,15 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     elif filter_type in ("new_7d", "new"):
         stmt = stmt.where(User.created_at >= now - timedelta(days=7))
     elif filter_type == "expiring_3d":
-        stmt = stmt.where(
-            User.subscription_end.is_not(None),
-            User.subscription_end > now,
-            User.subscription_end <= now + timedelta(days=3),
-        )
+        stmt = stmt.where(get_effective_expiring_3d_condition(now))
     elif filter_type == "active":
-        stmt = stmt.where(
-            User.subscription_end.is_not(None),
-            User.subscription_end > now,
-        )
-    elif filter_type in ("expired", "no_sub"):
-        stmt = stmt.where(
-            (User.subscription_end.is_(None)) | (User.subscription_end <= now)
-        )
+        stmt = stmt.where(get_effective_active_condition(now))
+    elif filter_type == "expired":
+        stmt = stmt.where(get_effective_expired_condition(now))
+    elif filter_type == "no_sub":
+        stmt = stmt.where(~get_effective_active_condition(now))
+    elif filter_type == "never":
+        stmt = stmt.where(get_effective_never_condition())
     elif filter_type in ("banned", "problem"):
         stmt = stmt.where(
             (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
@@ -392,16 +526,13 @@ async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
             User.created_at >= now - timedelta(days=7),
         ).label("new_7d"),
         func.count(User.id).filter(
-            User.subscription_end.is_not(None),
-            User.subscription_end > now,
+            get_effective_active_condition(now),
         ).label("active"),
         func.count(User.id).filter(
-            User.subscription_end.is_not(None),
-            User.subscription_end > now,
-            User.subscription_end <= now + timedelta(days=3),
+            get_effective_expiring_3d_condition(now),
         ).label("expiring_3d"),
         func.count(User.id).filter(
-            (User.subscription_end.is_(None)) | (User.subscription_end <= now)
+            get_effective_expired_condition(now),
         ).label("expired"),
         func.count(User.id).filter(
             (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))

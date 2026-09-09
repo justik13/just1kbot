@@ -103,7 +103,7 @@ class TestHealthcheckAccessLogger(unittest.TestCase):
         request.method = "GET"
         request.remote = "172.19.0.3"
         request.version = MagicMock(major=1, minor=1)
-        request.headers = {"X-Real-IP": "5.6.7.8", "User-Agent": "Happ/2.0"}
+        request.headers = {"X-Real-IP": "5.6.7.8", "User-Agent": "INCY/2.0"}
         response = MagicMock(spec=web.StreamResponse)
         response.status = 403
         response.body_length = 40
@@ -116,7 +116,7 @@ class TestHealthcheckAccessLogger(unittest.TestCase):
         self.assertIn("5.6.7.8", log_text)
         self.assertIn("/sub/wl/***", log_text)
         self.assertNotIn("secret_token_1234567890", log_text)
-        self.assertIn("Happ/2.0", log_text)
+        self.assertIn("INCY/2.0", log_text)
 
 
 

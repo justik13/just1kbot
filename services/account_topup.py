@@ -460,7 +460,7 @@ async def settle_succeeded_topup(
             if payment.topup_context and isinstance(payment.topup_context, dict):
                 auto_action = payment.topup_context.get("auto_fulfill_action")
                 quote_raw = payment.topup_context.get("quote_public_id")
-                if auto_action and quote_raw:
+                if auto_action and (quote_raw or str(auto_action).startswith("white_internet_")):
                     import inspect
                     import logging
                     from contextlib import asynccontextmanager
@@ -480,9 +480,9 @@ async def settle_succeeded_topup(
 
                     import uuid
 
-                    quote_uuid = uuid.UUID(str(quote_raw))
+                    quote_uuid = uuid.UUID(str(quote_raw)) if quote_raw else None
                     async with _safe_begin_nested(session):
-                        if auto_action == "tariff_change":
+                        if auto_action == "tariff_change" and quote_uuid:
                             from services.account_tariff_change import (
                                 settle_account_tariff_change,
                             )
@@ -502,7 +502,7 @@ async def settle_succeeded_topup(
                                 payment.id,
                                 payment.user_id,
                             )
-                        elif auto_action == "purchase":
+                        elif auto_action == "purchase" and quote_uuid:
                             from services.account_purchase import (
                                 settle_account_purchase,
                             )
@@ -519,6 +519,80 @@ async def settle_succeeded_topup(
                             }
                             logging.getLogger(__name__).info(
                                 "Auto-fulfilled purchase for payment %s, user_id=%s",
+                                payment.id,
+                                payment.user_id,
+                            )
+                        elif auto_action == "white_internet_buy":
+                            from services.white_internet_service import WhiteInternetService
+                            ok, msg, _sub = await WhiteInternetService.purchase_subscription(
+                                session, user_id=payment.user_id
+                            )
+                            if not ok:
+                                raise RuntimeError(f"White Internet purchase failed: {msg}")
+                            auto_fulfilled_action = "white_internet_buy"
+                            payment.topup_context = {
+                                **payment.topup_context,
+                                "auto_fulfill_status": "succeeded",
+                            }
+                            logging.getLogger(__name__).info(
+                                "Auto-fulfilled White Internet purchase for payment %s, user_id=%s",
+                                payment.id,
+                                payment.user_id,
+                            )
+                        elif auto_action == "white_internet_renew":
+                            from services.white_internet_service import WhiteInternetService
+                            ok, msg, _sub = await WhiteInternetService.renew_subscription(
+                                session, user_id=payment.user_id
+                            )
+                            if not ok:
+                                raise RuntimeError(f"White Internet renewal failed: {msg}")
+                            auto_fulfilled_action = "white_internet_renew"
+                            payment.topup_context = {
+                                **payment.topup_context,
+                                "auto_fulfill_status": "succeeded",
+                            }
+                            logging.getLogger(__name__).info(
+                                "Auto-fulfilled White Internet renewal for payment %s, user_id=%s",
+                                payment.id,
+                                payment.user_id,
+                            )
+                        elif auto_action == "white_internet_add_device":
+                            from services.white_internet_service import WhiteInternetService
+                            actor_tg = user.telegram_id if user else None
+                            ok, msg, _sub = await WhiteInternetService.purchase_device_slot(
+                                session, user_id=payment.user_id, actor_telegram_id=actor_tg
+                            )
+                            if not ok:
+                                raise RuntimeError(f"White Internet device slot purchase failed: {msg}")
+                            auto_fulfilled_action = "white_internet_add_device"
+                            payment.topup_context = {
+                                **payment.topup_context,
+                                "auto_fulfill_status": "succeeded",
+                            }
+                            logging.getLogger(__name__).info(
+                                "Auto-fulfilled White Internet device slot for payment %s, user_id=%s",
+                                payment.id,
+                                payment.user_id,
+                            )
+                        elif auto_action == "white_internet_pack":
+                            pack_gb = payment.topup_context.get("pack_gb")
+                            if not pack_gb:
+                                raise ValueError("Missing pack_gb in topup_context for white_internet_pack")
+                            from services.white_internet_service import WhiteInternetService
+                            actor_tg = user.telegram_id if user else None
+                            ok, msg, _sub = await WhiteInternetService.purchase_traffic_pack(
+                                session, user_id=payment.user_id, pack_gb=int(pack_gb), actor_telegram_id=actor_tg
+                            )
+                            if not ok:
+                                raise RuntimeError(f"White Internet traffic pack purchase failed: {msg}")
+                            auto_fulfilled_action = "white_internet_pack"
+                            payment.topup_context = {
+                                **payment.topup_context,
+                                "auto_fulfill_status": "succeeded",
+                            }
+                            logging.getLogger(__name__).info(
+                                "Auto-fulfilled White Internet traffic pack (%s GB) for payment %s, user_id=%s",
+                                pack_gb,
                                 payment.id,
                                 payment.user_id,
                             )
@@ -560,6 +634,47 @@ async def settle_succeeded_topup(
                         text=texts.NOTIF_OPEN_SUBSCRIPTION_BUTTON,
                         callback_data="menu_subscription",
                     )
+                elif auto_fulfilled_action == "white_internet_buy":
+                    text = texts.WL_TOPUP_AUTO_BUY_SUCCESS
+                    builder.button(
+                        text=texts.BTN_WHITE_INTERNET,
+                        callback_data="white_internet",
+                    )
+                    builder.button(
+                        text=texts.BTN_MAIN_MENU,
+                        callback_data="back_to_main_menu",
+                    )
+                elif auto_fulfilled_action == "white_internet_renew":
+                    text = texts.WL_TOPUP_AUTO_RENEW_SUCCESS
+                    builder.button(
+                        text=texts.BTN_WHITE_INTERNET,
+                        callback_data="white_internet",
+                    )
+                    builder.button(
+                        text=texts.BTN_MAIN_MENU,
+                        callback_data="back_to_main_menu",
+                    )
+                elif auto_fulfilled_action == "white_internet_add_device":
+                    text = texts.WL_TOPUP_AUTO_ADD_DEVICE_SUCCESS
+                    builder.button(
+                        text=texts.BTN_WHITE_INTERNET,
+                        callback_data="white_internet",
+                    )
+                    builder.button(
+                        text=texts.BTN_MAIN_MENU,
+                        callback_data="back_to_main_menu",
+                    )
+                elif auto_fulfilled_action == "white_internet_pack":
+                    pack_gb = (payment.topup_context or {}).get("pack_gb", "")
+                    text = texts.WL_TOPUP_AUTO_PACK_SUCCESS_TEMPLATE.format(pack_gb=pack_gb)
+                    builder.button(
+                        text=texts.BTN_WHITE_INTERNET,
+                        callback_data="white_internet",
+                    )
+                    builder.button(
+                        text=texts.BTN_MAIN_MENU,
+                        callback_data="back_to_main_menu",
+                    )
                 else:
                     text = texts.TOPUP_PAID_BALANCE_TEMPLATE.format(
                         amount=int(payment.amount),
@@ -577,10 +692,17 @@ async def settle_succeeded_topup(
                         wb = payment.topup_context["purchaser_welcome_bonus"]
                         text += texts.TOPUP_WELCOME_BONUS_LINE.format(welcome_bonus=wb)
                     builder.button(text=texts.BTN_MY_BALANCE, callback_data="menu_balance")
-                    builder.button(
-                        text=texts.NOTIF_BUY_NEW_SUBSCRIPTION_BUTTON,
-                        callback_data="payment_showcase",
-                    )
+                    context_source = (payment.topup_context or {}).get("source")
+                    if context_source == "white_internet":
+                        builder.button(
+                            text=texts.BTN_WHITE_INTERNET,
+                            callback_data="white_internet",
+                        )
+                    else:
+                        builder.button(
+                            text=texts.NOTIF_BUY_NEW_SUBSCRIPTION_BUTTON,
+                            callback_data="payment_showcase",
+                        )
                     builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
 
                 builder.adjust(1)
@@ -625,7 +747,7 @@ async def settle_succeeded_topup(
                 # When the user manually triggers reconciliation (balance_check),
                 # the handler renders the balance screen itself; queuing the push
                 # here too would double-render the same chat (flicker + extra API calls).
-                if source.startswith("user_refresh"):
+                if (source or "").startswith("user_refresh"):
                     import logging
 
                     logging.getLogger(__name__).info(

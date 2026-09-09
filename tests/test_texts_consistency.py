@@ -18,16 +18,24 @@ CANONICAL_ALIASES: dict[str, str] = {
     "NOTIF_OPEN_SUBSCRIPTION_BUTTON": "BTN_MY_SUBSCRIPTION",
     "NOTIF_BUY_NEW_SUBSCRIPTION_BUTTON": "BTN_BUY_ACCESS",
     "BTN_PAYMENT_CANCEL": "BTN_CANCEL_ACTION",
+    "ADMIN_WI_TRAFFIC_RESET_FAILED": "ADMIN_WI_ACTION_FAILED",
 }
 
 
 class TextsConsistencyTests(unittest.TestCase):
 
     def test_alias_registry_is_acyclic_and_valid(self):
-        """Verify CANONICAL_ALIASES contains valid mapping and no self-aliases."""
+        """Verify CANONICAL_ALIASES contains valid mapping, exists in texts facade, and is identical."""
         for alias, canonical in CANONICAL_ALIASES.items():
             self.assertNotEqual(alias, canonical, f"Self-alias detected: {alias} -> {canonical}")
             self.assertNotIn(canonical, CANONICAL_ALIASES, f"Alias cycle detected: {canonical} is also an alias key")
+            self.assertTrue(hasattr(texts, alias), f"Alias key {alias} not found in texts facade")
+            self.assertTrue(hasattr(texts, canonical), f"Canonical key {canonical} not found in texts facade")
+            self.assertEqual(
+                getattr(texts, alias),
+                getattr(texts, canonical),
+                f"Alias {alias} value does not match canonical {canonical}",
+            )
 
     """Automated consistency, markup, placeholder, and architectural verification for all application texts."""
 
@@ -663,6 +671,28 @@ class TextsConsistencyTests(unittest.TestCase):
                 provided = {kw.arg for kw in call_node.keywords if kw.arg}
                 missing = required - provided
                 self.assertTrue(bool(missing), f"Failed to detect missing placeholder in {sample}")
+
+
+
+    def test_new_white_internet_texts_exist(self):
+        self.assertTrue(hasattr(texts, "BTN_WL_CONFIRM_RENEW"))
+        self.assertTrue(hasattr(texts, "BTN_WL_PAY_BASE"))
+        self.assertTrue(hasattr(texts, "BTN_WL_PAY_PACK"))
+        self.assertTrue(hasattr(texts, "BTN_WL_TOPUP_SHORTAGE"))
+        self.assertTrue(hasattr(texts, "BTN_WL_RETURN_TO_SERVICE"))
+        self.assertTrue(hasattr(texts, "BTN_WL_CONVERT_TRIAL"))
+        self.assertTrue(hasattr(texts, "BTN_WL_REFRESH_STATUS"))
+        self.assertTrue(hasattr(texts, "WL_TRIAL_CANNOT_TOPUP"))
+        self.assertTrue(hasattr(texts, "WL_AUTO_PUSH_READY"))
+        self.assertTrue(hasattr(texts, "WL_BUY_PREVIEW_TEXT"))
+        self.assertTrue(hasattr(texts, "WL_RENEW_PREVIEW_TEXT"))
+        self.assertTrue(hasattr(texts, "WL_TOPUP_PREVIEW_TEXT"))
+        self.assertTrue(hasattr(texts, "WL_PREVIEW_BALANCE_OK"))
+        self.assertTrue(hasattr(texts, "WL_PREVIEW_BALANCE_SHORTAGE"))
+
+    def test_dead_white_internet_texts_removed(self):
+        self.assertFalse(hasattr(texts, "WL_TRIAL_FINISHED"))
+        self.assertFalse(hasattr(texts, "WL_PAID_FEATURES_DISABLED_ALERT"))
 
 
 if __name__ == "__main__":

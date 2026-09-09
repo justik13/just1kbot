@@ -40,6 +40,7 @@ ADMIN_SERVER_ADDED_NO_RELAYS_WARNING = (
 )
 
 ADMIN_SERVER_BTN_DELETE = "🗑 Удалить сервер"
+ADMIN_SERVER_BTN_MIGRATE = "📦 Мигрировать подписчиков"
 
 ADMIN_SERVER_BTN_CHANGE_LIMIT = "👥 Изменить лимит"
 
@@ -208,3 +209,31 @@ BTN_DISABLE_SERVER = "🔴 Выключить"
 BTN_ENABLE_SERVER_CARD = "🟢 Включить"
 
 LABEL_UNKNOWN_LOWER = "неизвестно"
+
+ADMIN_SERVER_BTN_FORCE_PURGE = "💥 Аварийное списание (Force Purge)"
+ADMIN_SERVER_MIGRATE_CONFIRM_PROMPT = """⚠️ <b>Подтверждение миграции</b>
+
+Перенести <b>{source_count}</b> подписчиков:
+С сервера: {source_flag} <b>{source_name}</b>
+На сервер: {target_flag} <b>{target_name}</b> (свободно мест: {free_slots})
+
+Исходный сервер будет переведён в статус вывода из эксплуатации (DECOMMISSIONING)."""
+ADMIN_SERVER_MIGRATE_SUCCESS = "Миграция успешно запущена: {count} подписчиков перенесены."
+ADMIN_SERVER_MIGRATE_FAILED = "Ошибка миграции: {error}"
+ADMIN_SERVER_FORCE_PURGE_CONFIRM = """⚠️ <b>ВНИМАНИЕ: Аварийное списание узла</b>
+
+Сервер: <b>{name}</b>
+Подписок на узле: <b>{count}</b>
+
+Все подписки узла будут немедленно переведены в статус архивных (DISABLED / SYNCED_INACTIVE), а задачи очистки отменены.
+
+<b>Используйте ТОЛЬКО если узел безвозвратно уничтожен!</b>"""
+ADMIN_SERVER_FORCE_PURGE_SUCCESS = "Сервер {name} списан ({count} подписок)."
+ADMIN_SERVER_MIGRATE_NO_SUBS = "На сервере нет активных подписчиков для миграции."
+ADMIN_SERVER_MIGRATE_NO_TARGETS = "Нет доступных серверов Xray Origin для миграции."
+ADMIN_SERVER_MIGRATE_SELECT_TARGET_PROMPT = """📦 <b>Миграция подписчиков</b>
+
+Исходный сервер: {source_flag} <b>{source_name}</b>
+Подписчиков для переноса: <b>{count}</b>
+
+Выберите целевой сервер Origin:"""

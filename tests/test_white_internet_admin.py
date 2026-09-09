@@ -26,12 +26,20 @@ from bot.handlers.admin.users.common import (
 )
 from bot.handlers.admin.users.subscription_menu_routes import (
     admin_subscription_menu,
+    admin_wi_devlimit_set,
+    admin_wi_hwid_reset_apply,
+    admin_wi_quota_set,
+    admin_wi_traffic_add,
+    admin_wi_traffic_reset_apply,
     admin_wl_grant_trial,
     admin_wl_reset_apply,
     admin_wl_reset_confirm,
 )
-from bot.keyboards.admin.users import get_admin_subscription_keyboard
-from config.constants import XRAY_PROTOCOL
+from bot.keyboards.admin.users import (
+    get_admin_wi_device_limit_keyboard,
+    get_admin_wi_subscription_keyboard,
+)
+from config.constants import WHITE_INTERNET_MAX_DEVICE_LIMIT, XRAY_PROTOCOL
 from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
@@ -229,32 +237,29 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
     def test_subscription_keyboard_wl_buttons(self):
         """Keyboard must render reset button when user has WL sub, and grant button when no active WL sub."""
         # 1. Has WL sub, active -> has reset button, no grant button
-        kb_active = get_admin_subscription_keyboard(
+        kb_active = get_admin_wi_subscription_keyboard(
             telegram_id=self.user.telegram_id,
-            has_active_sub=False,
-            has_wl_sub=True,
-            wl_is_active=True,
+            has_wi_sub=True,
+            wi_is_active=True,
         )
         buttons_active = [btn.callback_data for row in kb_active.inline_keyboard for btn in row]
         self.assertIn(f"admin_wl_reset_confirm:{self.user.telegram_id}", buttons_active)
         self.assertNotIn(f"admin_wl_grant_trial:{self.user.telegram_id}", buttons_active)
 
         # 2. Has WL sub, but expired/inactive -> has reset button (grant shown only if not has_wl_sub)
-        kb_expired = get_admin_subscription_keyboard(
+        kb_expired = get_admin_wi_subscription_keyboard(
             telegram_id=self.user.telegram_id,
-            has_active_sub=False,
-            has_wl_sub=True,
-            wl_is_active=False,
+            has_wi_sub=True,
+            wi_is_active=False,
         )
         buttons_expired = [btn.callback_data for row in kb_expired.inline_keyboard for btn in row]
         self.assertIn(f"admin_wl_reset_confirm:{self.user.telegram_id}", buttons_expired)
 
         # 3. No WL sub at all -> no reset button, has grant button
-        kb_none = get_admin_subscription_keyboard(
+        kb_none = get_admin_wi_subscription_keyboard(
             telegram_id=self.user.telegram_id,
-            has_active_sub=False,
-            has_wl_sub=False,
-            wl_is_active=False,
+            has_wi_sub=False,
+            wi_is_active=False,
         )
         buttons_none = [btn.callback_data for row in kb_none.inline_keyboard for btn in row]
         self.assertNotIn(f"admin_wl_reset_confirm:{self.user.telegram_id}", buttons_none)
@@ -289,7 +294,7 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch.object(WhiteInternetService, "reset_user_trial", new=AsyncMock(return_value=(True, "ok"))) as mock_reset, \
              patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
-             patch("bot.handlers.admin.users.subscription_menu_routes.admin_subscription_menu", new=AsyncMock()) as mock_menu:
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
 
             await admin_wl_reset_apply(callback, self.session)
 
@@ -304,6 +309,27 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
             )
             callback.answer.assert_awaited_with(texts.ADMIN_WL_RESET_SUCCESS, show_alert=True)
             mock_menu.assert_awaited_once()
+
+    async def test_admin_wl_reset_apply_with_real_frozen_callback_query(self):
+        """Zero-mock test: real frozen CallbackQuery must not raise ValidationError on admin_wl_reset_apply."""
+        real_callback = CallbackQuery(
+            id="query_12345",
+            from_user=TgUser(id=123456789, is_bot=False, first_name="Admin"),
+            chat_instance="chat_inst_1",
+            data=f"admin_wl_reset_apply:{self.user.telegram_id}",
+        )
+        object.__setattr__(real_callback, "answer", AsyncMock())
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch.object(WhiteInternetService, "reset_user_trial", new=AsyncMock(return_value=(True, "ok"))), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wl_reset_apply(real_callback, self.session)
+            mock_menu.assert_awaited_once()
+            call_kwargs = mock_menu.call_args[1]
+            self.assertEqual(call_kwargs.get("target_telegram_id"), self.user.telegram_id)
 
     async def test_admin_wl_grant_trial_callback(self):
         """admin_wl_grant_trial calls create_trial_subscription, logs audit, and refreshes menu."""
@@ -320,7 +346,7 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch.object(WhiteInternetService, "create_trial_subscription", new=AsyncMock(return_value=(True, "ok", sub))) as mock_create, \
              patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
-             patch("bot.handlers.admin.users.subscription_menu_routes.admin_subscription_menu", new=AsyncMock()) as mock_menu:
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
 
             await admin_wl_grant_trial(callback, self.session)
 
@@ -578,6 +604,7 @@ class TestWhiteInternetTrialProtectionAndReset(unittest.IsolatedAsyncioTestCase)
             uuid="client-uuid-123",
             status=WhiteInternetStatus.ACTIVE,
             desired_version=1,
+            is_trial=True,
         )
 
         mock_exec = MagicMock()
@@ -657,6 +684,246 @@ class TestWhiteInternetTrialProtectionAndReset(unittest.IsolatedAsyncioTestCase)
         self.assertIn("WHITE_INTERNET_GRANT_TRIAL", AUDIT_ACTIONS)
         self.assertIn("Сброс триала", AUDIT_ACTIONS["WHITE_INTERNET_RESET_TRIAL"])
         self.assertIn("Выдача триала", AUDIT_ACTIONS["WHITE_INTERNET_GRANT_TRIAL"])
+
+
+class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTestCase):
+    """Test suite for White Internet admin subscription mutator endpoints and keyboard limits."""
+
+    async def asyncSetUp(self):
+        self.session = AsyncMock(spec=AsyncSession)
+        self.user = User(
+            id=42,
+            telegram_id=123456789,
+            first_name="TestUser",
+            is_banned=False,
+            is_deleted=False,
+        )
+        self.sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            origin_node_id=1,
+            token="test-token",
+            uuid="test-uuid",
+            status=WhiteInternetStatus.ACTIVE,
+            desired_version=1,
+        )
+
+    async def test_admin_wi_traffic_reset_apply_success(self):
+        """reset_traffic_used_atomic returns WhiteInternetSubscription object and resets traffic successfully."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_traffic_reset_apply:{self.user.telegram_id}"
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.reset_traffic_used_atomic", new=AsyncMock(return_value=self.sub)) as mock_reset, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_traffic_reset_apply(callback, self.session)
+
+            mock_reset.assert_awaited_once_with(self.session, self.sub.id)
+            mock_audit.assert_awaited_once_with(
+                self.session,
+                admin_id=callback.from_user.id,
+                action=AdminAuditAction.WHITE_INTERNET_TRAFFIC_RESET,
+                target_type="user",
+                target_id=self.user.id,
+                details={"telegram_id": self.user.telegram_id, "subscription_id": self.sub.id},
+            )
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_TRAFFIC_RESET_SUCCESS, show_alert=True)
+            mock_menu.assert_awaited_once()
+
+    async def test_admin_wi_traffic_reset_apply_inactive_subscription_error(self):
+        """reset_traffic_used_atomic raising WhiteInternetInactiveSubscriptionError is caught and reported to admin."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_traffic_reset_apply:{self.user.telegram_id}"
+        callback.answer = AsyncMock()
+
+        err_msg = "Cannot reset traffic for subscription in disabled state"
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.reset_traffic_used_atomic", new=AsyncMock(side_effect=white_internet_repo.WhiteInternetInactiveSubscriptionError(err_msg))), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_traffic_reset_apply(callback, self.session)
+
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_TRAFFIC_RESET_FAILED.format(error=err_msg), show_alert=True)
+            mock_audit.assert_not_called()
+            mock_menu.assert_not_called()
+
+    async def test_admin_wi_traffic_add_success_and_error(self):
+        """admin_wi_traffic_add succeeds and handles WhiteInternetError without unhandled crash."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_traffic_add:{self.user.telegram_id}:10"
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.add_extra_traffic_atomic", new=AsyncMock(return_value=self.sub)) as mock_add, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_traffic_add(callback, self.session)
+            mock_add.assert_awaited_once_with(self.session, self.sub.id, 10 * 1024 * 1024 * 1024)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_TRAFFIC_ADDED_SUCCESS.format(gb=10), show_alert=True)
+            mock_menu.assert_awaited_once()
+
+        # Error path
+        callback.reset_mock()
+        callback.data = f"admin_wi_traffic_add:{self.user.telegram_id}:10"
+        err_msg = "Cannot add traffic to subscription in disabled state"
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.add_extra_traffic_atomic", new=AsyncMock(side_effect=white_internet_repo.WhiteInternetInactiveSubscriptionError(err_msg))), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_traffic_add(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_ACTION_FAILED.format(error=err_msg), show_alert=True)
+            mock_audit.assert_not_called()
+            mock_menu.assert_not_called()
+
+    async def test_admin_wi_quota_set_success_and_error(self):
+        """admin_wi_quota_set succeeds and handles WhiteInternetError gracefully."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_quota_set:{self.user.telegram_id}:50"
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.set_base_traffic_quota_atomic", new=AsyncMock(return_value=self.sub)) as mock_quota, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_quota_set(callback, self.session)
+            mock_quota.assert_awaited_once_with(self.session, self.sub.id, 50 * 1024 * 1024 * 1024)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_QUOTA_SET_SUCCESS.format(gb=50), show_alert=True)
+            mock_audit.assert_awaited_once_with(
+                self.session,
+                admin_id=callback.from_user.id,
+                action=AdminAuditAction.WHITE_INTERNET_QUOTA_SET,
+                target_type="user",
+                target_id=self.user.id,
+                details={"telegram_id": self.user.telegram_id, "quota_gb": 50, "quota_bytes": 50 * 1024 * 1024 * 1024},
+            )
+            mock_menu.assert_awaited_once()
+
+        # Error path
+        callback.reset_mock()
+        callback.data = f"admin_wi_quota_set:{self.user.telegram_id}:50"
+        err_msg = "Cannot change quota for subscription in expired state"
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.set_base_traffic_quota_atomic", new=AsyncMock(side_effect=white_internet_repo.WhiteInternetInactiveSubscriptionError(err_msg))), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_quota_set(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_ACTION_FAILED.format(error=err_msg), show_alert=True)
+            mock_menu.assert_not_called()
+
+    async def test_admin_wi_devlimit_set_success_and_error(self):
+        """admin_wi_devlimit_set succeeds and handles WhiteInternetError gracefully."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_devlimit_set:{self.user.telegram_id}:2"
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.set_device_limit_atomic", new=AsyncMock(return_value=self.sub)) as mock_devlimit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_devlimit_set(callback, self.session)
+            mock_devlimit.assert_awaited_once_with(self.session, self.sub.id, 2)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_DEVLIMIT_SET_SUCCESS.format(limit=2), show_alert=True)
+            mock_audit.assert_awaited_once_with(
+                self.session,
+                admin_id=callback.from_user.id,
+                action=AdminAuditAction.WHITE_INTERNET_DEVLIMIT_SET,
+                target_type="user",
+                target_id=self.user.id,
+                details={"telegram_id": self.user.telegram_id, "device_limit": 2},
+            )
+            mock_menu.assert_awaited_once()
+
+        # Error path
+        callback.reset_mock()
+        callback.data = f"admin_wi_devlimit_set:{self.user.telegram_id}:2"
+        err_msg = f"Device limit must be between 1 and {WHITE_INTERNET_MAX_DEVICE_LIMIT}"
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.set_device_limit_atomic", new=AsyncMock(side_effect=white_internet_repo.WhiteInternetDeviceLimitExceededError(err_msg))), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_devlimit_set(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_ACTION_FAILED.format(error=err_msg), show_alert=True)
+            mock_menu.assert_not_called()
+
+    async def test_admin_wi_hwid_reset_apply_success_and_error(self):
+        """admin_wi_hwid_reset_apply succeeds and handles WhiteInternetError gracefully."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_hwid_reset_apply:{self.user.telegram_id}"
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.reset_active_hwids_atomic", new=AsyncMock(return_value=self.sub)) as mock_hwid, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_hwid_reset_apply(callback, self.session)
+            mock_hwid.assert_awaited_once_with(self.session, self.sub.id, cooldown_seconds=0)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_HWID_RESET_SUCCESS, show_alert=True)
+            mock_menu.assert_awaited_once()
+
+        # Error path
+        callback.reset_mock()
+        err_msg = "Subscription 10 not found"
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.reset_active_hwids_atomic", new=AsyncMock(side_effect=white_internet_repo.WhiteInternetSubscriptionNotFoundError(err_msg))), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_hwid_reset_apply(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_ACTION_FAILED.format(error=err_msg), show_alert=True)
+            mock_audit.assert_not_called()
+            mock_menu.assert_not_called()
+
+    def test_get_admin_wi_device_limit_keyboard_bounds(self):
+        """Keyboard must only offer valid limits up to WHITE_INTERNET_MAX_DEVICE_LIMIT (1..3), never exceeding DB CheckConstraint."""
+        kb = get_admin_wi_device_limit_keyboard(telegram_id=self.user.telegram_id)
+        self.assertEqual(len(kb.inline_keyboard), 2)
+        device_buttons = kb.inline_keyboard[0]
+        back_button = kb.inline_keyboard[1][0]
+
+        self.assertEqual(len(device_buttons), WHITE_INTERNET_MAX_DEVICE_LIMIT)
+        callback_datas = [btn.callback_data for btn in device_buttons]
+        expected_callbacks = [
+            f"admin_wi_devlimit_set:{self.user.telegram_id}:{limit}"
+            for limit in range(1, WHITE_INTERNET_MAX_DEVICE_LIMIT + 1)
+        ]
+        self.assertEqual(callback_datas, expected_callbacks)
+        self.assertNotIn(f"admin_wi_devlimit_set:{self.user.telegram_id}:5", callback_datas)
+        self.assertEqual(back_button.callback_data, f"admin_sub_wi_menu:{self.user.telegram_id}")
 
 
 if __name__ == "__main__":

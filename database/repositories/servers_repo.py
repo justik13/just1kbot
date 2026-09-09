@@ -480,3 +480,98 @@ async def update_server_xray_epoch_cas(
 
     # Stale starttime within same boot
     return False, None
+
+
+async def migrate_origin_subscriptions(
+    session: AsyncSession,
+    source_id: int,
+    target_id: int,
+    admin_id: int | None = None,
+) -> int:
+    """Migrate all active White Internet subscriptions from source origin server to target origin server.
+
+    1. Acquires row locks on source and target servers ordered by id ASC to avoid deadlocks.
+    2. Verifies target server is active, Xray protocol, and has sufficient capacity using capacity_consuming_wl_condition.
+    3. Sets source server lifecycle_status to DECOMMISSIONING.
+    4. For each subscription:
+       - Creates a WhiteInternetOrphanCleanup entry for source node (desired_version N).
+       - Updates subscription: origin_node_id = target_id, desired_version = N + 1, provisioning_status = PENDING_UPDATE.
+    """
+    if source_id == target_id:
+        raise ValueError("Source and target servers must be different.")
+
+    # 1. Lock servers in deterministic id ASC order to prevent deadlocks
+    first_id, second_id = sorted([source_id, target_id])
+    first_server = (await session.execute(
+        select(Server).where(Server.id == first_id).with_for_update()
+    )).scalar_one_or_none()
+    second_server = (await session.execute(
+        select(Server).where(Server.id == second_id).with_for_update()
+    )).scalar_one_or_none()
+
+    source_server = first_server if first_id == source_id else second_server
+    target_server = first_server if first_id == target_id else second_server
+
+    if not source_server or not target_server:
+        raise ValueError("Source or target server not found.")
+
+    if target_server.protocol != XRAY_PROTOCOL or not target_server.is_active:
+        raise ValueError("Target server is not an active Xray node.")
+
+    if "xray_origin" not in (target_server.capabilities or []):
+        raise ValueError("Target server does not have the required 'xray_origin' capability.")
+
+    relays = (target_server.extra_data or {}).get("relays", [])
+    if not relays or len(relays) == 0:
+        raise ValueError("Target server does not have relays configured.")
+
+    if target_server.health_state not in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION):
+        raise ValueError("Target server health state is not eligible for migration.")
+
+    from config.enums import WhiteInternetProvisioningStatus
+    from database.models import WhiteInternetOrphanCleanup, WhiteInternetSubscription
+
+    # 2. Check capacity under lock
+    target_active = (await session.scalar(
+        select(func.count(WhiteInternetSubscription.id)).where(
+            WhiteInternetSubscription.origin_node_id == target_id,
+            capacity_consuming_wl_condition(),
+        )
+    )) or 0
+
+    to_migrate_subs = list((await session.execute(
+        select(WhiteInternetSubscription).where(
+            WhiteInternetSubscription.origin_node_id == source_id,
+            capacity_consuming_wl_condition(),
+        ).with_for_update()
+    )).scalars().all())
+
+    count = len(to_migrate_subs)
+    if count == 0:
+        return 0
+
+    if target_active + count > target_server.max_clients:
+        free_slots = max(0, target_server.max_clients - target_active)
+        raise ValueError(
+            f"Недостаточно мест на целевом сервере: свободно {free_slots}, требуется {count}."
+        )
+
+    # 3. Mark source server as DECOMMISSIONING so it is no longer allocated to new clients
+    source_server.lifecycle_status = ServerLifecycleStatus.DECOMMISSIONING
+
+    # 4. Migrate subscriptions with version fencing and orphan outbox
+    for sub in to_migrate_subs:
+        orphan = WhiteInternetOrphanCleanup(
+            server_id=source_id,
+            client_uuid=sub.uuid,
+            desired_version=sub.desired_version,
+            status="pending",
+        )
+        session.add(orphan)
+
+        sub.origin_node_id = target_id
+        sub.desired_version += 1
+        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+
+    await session.flush()
+    return count

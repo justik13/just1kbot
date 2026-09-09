@@ -134,6 +134,11 @@ class User(Base):
             postgresql_using="gin",
             postgresql_ops={"username": "gin_trgm_ops"},
         ),
+        Index(
+            "ix_users_username_lower",
+            text("lower(username)"),
+            postgresql_where=text("username IS NOT NULL AND is_deleted = false"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -143,6 +148,9 @@ class User(Base):
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     subscription_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_trial_reset_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     device_limit: Mapped[int] = mapped_column(Integer, default=0)
@@ -1350,11 +1358,20 @@ class WhiteInternetSubscription(Base):
             "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0",
             name="ck_white_internet_subscriptions_traffic_nonnegative",
         ),
+        CheckConstraint(
+            "device_limit >= 1 AND device_limit <= 3",
+            name="ck_white_internet_subscriptions_device_limit",
+        ),
         Index(
             "uq_white_internet_live_user",
             "user_id",
             unique=True,
             postgresql_where=text("status IN ('PENDING', 'ACTIVE', 'EXHAUSTED')"),
+        ),
+        Index(
+            "ix_white_internet_subscriptions_active_hwids",
+            "active_hwids",
+            postgresql_using="gin",
         ),
     )
 
@@ -1428,6 +1445,19 @@ class WhiteInternetSubscription(Base):
     )
 
     traffic_stats_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    active_hwids: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, default=dict, server_default=text("'{}'::jsonb")
+    )
+    device_limit: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    last_device_reset_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_trial: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     provisioning_status: Mapped[str] = mapped_column(
         String(30),
@@ -1518,3 +1548,19 @@ class WhiteInternetOrphanCleanup(Base):
     )
 
     server = relationship("Server", foreign_keys=[server_id])
+
+
+class AdminOperationIdempotency(Base):
+    """Stores deterministic idempotency tokens for admin UI mutations with 7-day TTL."""
+
+    __tablename__ = "admin_operation_idempotency"
+
+    op_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    admin_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )

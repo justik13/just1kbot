@@ -145,8 +145,7 @@ class AuditRemediationP1Tests(unittest.IsolatedAsyncioTestCase):
             commit_order.append("inline_sync")
             return True
 
-        with patch("services.white_internet_service._is_trial_mode_only", return_value=False), \
-             patch("services.white_internet_service.lock_checkout_user", return_value=user), \
+        with patch("services.white_internet_service.lock_checkout_user", return_value=user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
@@ -204,9 +203,9 @@ class AuditRemediationP1Tests(unittest.IsolatedAsyncioTestCase):
             commit_order.append("inline_sync")
             return True
 
-        with patch("services.white_internet_service._is_trial_mode_only", return_value=False), \
-             patch("services.white_internet_service.lock_checkout_user", return_value=user), \
-             patch("database.repositories.white_internet_repo.has_user_any_subscription", return_value=False), \
+        with patch("services.white_internet_service.lock_checkout_user", return_value=user), \
+             patch("database.repositories.white_internet_repo.has_ever_activated_trial", return_value=False), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=origin_server), \

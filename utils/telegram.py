@@ -957,3 +957,38 @@ async def append_hub_message(
             reply_markup=reply_markup,
             parse_mode=parse_mode,
         )
+
+
+# ==============================================================================
+# Telegram UI Formatting: Braille Pattern Blank (U+2800)
+# Monospace-width invisible spacer to prevent inline button jitter across devices
+# ==============================================================================
+BRAILLE_BLANK = "\u2800"
+
+
+def pad_braille(text: str, target_width: int, align: str = "center") -> str:
+    """Pad string with invisible Braille Pattern Blank (U+2800) for fixed-width Telegram button alignment.
+
+    In Telegram clients on iOS/Android/Desktop, U+2800 renders with fixed monospace advance width
+    without collapsing like standard ASCII whitespace, preventing inline button jitter.
+    """
+    current_len = len(text)
+    if current_len >= target_width:
+        return text
+    pad_len = target_width - current_len
+    if align == "left":
+        return text + (BRAILLE_BLANK * pad_len)
+    elif align == "right":
+        return (BRAILLE_BLANK * pad_len) + text
+    else:  # center
+        left_pad = pad_len // 2
+        right_pad = pad_len - left_pad
+        return (BRAILLE_BLANK * left_pad) + text + (BRAILLE_BLANK * right_pad)
+
+
+def equalize_buttons_braille(*button_texts: str) -> list[str]:
+    """Pad a collection of button texts to equal visual character width using Braille blank spaces."""
+    if not button_texts:
+        return []
+    max_len = max(len(t) for t in button_texts)
+    return [pad_braille(t, max_len, align="center") for t in button_texts]

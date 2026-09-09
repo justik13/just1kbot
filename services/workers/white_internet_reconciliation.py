@@ -58,6 +58,27 @@ class WhiteInternetReconciliationWorker:
             self._sub_locks[sub_id] = lock
         return lock
 
+    async def _notify_sub_ready(self, session: AsyncSession, user_id: int) -> None:
+        if self.bot is None:
+            return
+        try:
+            from database.models import User
+            user = await session.get(User, user_id)
+            if not user or not user.telegram_id:
+                return
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            from bot import texts
+            kb = InlineKeyboardBuilder()
+            kb.button(text=texts.BTN_WL_CONNECT_CLIENT, callback_data="white_internet")
+            await self.bot.send_message(
+                chat_id=user.telegram_id,
+                text=texts.WL_AUTO_PUSH_READY,
+                reply_markup=kb.as_markup(),
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            logger.warning("Failed to send auto-push for user_id=%d: %s", user_id, exc)
+
     async def _reconcile_single_subscription(
         self,
         server_id: int,
@@ -82,21 +103,25 @@ class WhiteInternetReconciliationWorker:
         else:
             expected_inbound_tags.add("just1k-wl-default")
 
+        notify_user_id: int | None = None
         async with self._get_sub_lock(sub_id):
             async with self._semaphore:
                 async with sf() as lock_session:
-                    is_pg = False
+                    lock_conn = None
+                    locked = False
                     bind = getattr(lock_session, "bind", None)
                     if not bind and hasattr(lock_session, "sync_session"):
                         bind = getattr(lock_session.sync_session, "bind", None)
                     if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
-                        is_pg = True
-                        locked = await lock_session.scalar(
-                            select(func.pg_try_advisory_lock(sub_id + 7_000_000_000))
-                        )
-                        if not locked:
-                            logger.debug("Subscription %d locked by peer worker process. Skipping.", sub_id)
-                            return False
+                        if hasattr(bind, "connect"):
+                            lock_conn = await bind.connect()
+                            locked = bool(await lock_conn.scalar(
+                                select(func.pg_try_advisory_lock(sub_id + 7_000_000_000))
+                            ))
+                            if not locked:
+                                await lock_conn.close()
+                                logger.debug("Subscription %d locked by peer worker process. Skipping.", sub_id)
+                                return False
 
                     try:
                         # 1. External network mutation on Xray node (executed under distributed advisory lock)
@@ -150,9 +175,11 @@ class WhiteInternetReconciliationWorker:
 
                             sub.actual_version = target_version
                             sub.last_reconciled_node_epoch = verified_epoch
+                            transitioned_to_active = False
                             if sub.status == WhiteInternetStatus.PENDING and desired_active:
                                 sub.status = WhiteInternetStatus.ACTIVE
                                 sub.status_reason = None
+                                transitioned_to_active = True
                             sub.provisioning_status = (
                                 WhiteInternetProvisioningStatus.ACTIVE
                                 if desired_active
@@ -161,6 +188,8 @@ class WhiteInternetReconciliationWorker:
                             sub.last_synced_at = now_utc()
                             sub.last_sync_error = None
                             await lock_session.commit()
+                            if transitioned_to_active:
+                                notify_user_id = sub.user_id
                             return True
                         elif sync_result == SyncResult.ALREADY_NEWER:
                             # Check real observed runtime inventory before trusting ALREADY_NEWER
@@ -180,9 +209,11 @@ class WhiteInternetReconciliationWorker:
                                         )
                                         sub.actual_version = max(sub.actual_version or 0, target_version)
                                         sub.last_reconciled_node_epoch = target_epoch
+                                        transitioned_to_active = False
                                         if sub.status == WhiteInternetStatus.PENDING and desired_active:
                                             sub.status = WhiteInternetStatus.ACTIVE
                                             sub.status_reason = None
+                                            transitioned_to_active = True
                                         sub.provisioning_status = (
                                             WhiteInternetProvisioningStatus.ACTIVE
                                             if desired_active
@@ -191,6 +222,8 @@ class WhiteInternetReconciliationWorker:
                                         sub.last_synced_at = now_utc()
                                         sub.last_sync_error = None
                                         await lock_session.commit()
+                                        if transitioned_to_active:
+                                            notify_user_id = sub.user_id
                                         return True
 
                             # Observed state does not match desired state: force convergence by bumping desired_version
@@ -248,20 +281,34 @@ class WhiteInternetReconciliationWorker:
                             await lock_session.commit()
                             return False
                     finally:
-                        if is_pg and locked:
+                        if lock_conn is not None:
                             async def _do_unlock():
                                 try:
-                                    if lock_session.in_transaction():
-                                        await lock_session.rollback()
-                                    await lock_session.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
-                                    await lock_session.commit()
+                                    await lock_conn.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
                                 except Exception as exc:
                                     logger.debug("Error releasing advisory lock for sub_id %d: %s", sub_id, exc)
+                                finally:
+                                    try:
+                                        await lock_conn.close()
+                                    except Exception:
+                                        pass
 
                             try:
                                 await asyncio.shield(_do_unlock())
                             except BaseException as exc:
                                 logger.debug("Shielded advisory unlock for sub_id %d completed or interrupted: %s", sub_id, exc)
+
+                        if notify_user_id is not None:
+                            try:
+                                async with sf() as notify_session:
+                                    await self._notify_sub_ready(notify_session, notify_user_id)
+                            except Exception as exc:
+                                logger.warning(
+                                    "Failed to notify user %s for sub %d after advisory unlock: %s",
+                                    notify_user_id,
+                                    sub_id,
+                                    exc,
+                                )
 
     async def run_reconciliation_cycle(self, session: AsyncSession | None = None) -> int:
         now = now_utc()
@@ -294,7 +341,10 @@ class WhiteInternetReconciliationWorker:
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
-                    Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+                    Server.lifecycle_status.in_([
+                        ServerLifecycleStatus.ACTIVE,
+                        ServerLifecycleStatus.DECOMMISSIONING,
+                    ]),
                     Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
                 )
                 .order_by(Server.id.asc())

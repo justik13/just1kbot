@@ -18,6 +18,10 @@ from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
     get_account_balance,
 )
+from database.repositories.idempotency_repo import (
+    check_and_record_admin_op,
+    make_admin_op_key,
+)
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.audit_service import AuditService
 from utils.admin import is_admin
@@ -30,22 +34,122 @@ logger = logging.getLogger(__name__)
 MAX_BALANCE_ADJUSTMENT = 1_000_000
 
 
-@router.callback_query(F.data.startswith("admin_user_balance:"))
-async def show_user_balance_menu(
+def _safe_update_callback_data(callback: CallbackQuery, new_data: str) -> CallbackQuery:
+    """Safely update callback data on frozen Pydantic models or mocks."""
+    object.__setattr__(callback, "data", new_data)
+    return callback
+
+
+@router.callback_query(F.data.startswith("admin_bal_preset:"))
+async def admin_balance_preset(
     callback: CallbackQuery,
-    state: FSMContext,
     session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    telegram_id = parse_callback_id(callback.data, 1)
+    parts = callback.data.split(":")
+    if len(parts) < 3 or not parts[1].isdigit():
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    telegram_id = int(parts[1])
+    try:
+        amount = int(parts[2])
+    except ValueError:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    ALLOWED_PRESETS = (100, 300, 500, 1000)
+    if amount not in ALLOWED_PRESETS:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    op_key = make_admin_op_key(
+        action="balance_adjust",
+        admin_id=callback.from_user.id,
+        target_id=user.id,
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+        value=amount,
+    )
+    is_new = await check_and_record_admin_op(
+        session,
+        op_key=op_key,
+        admin_id=callback.from_user.id,
+        target_id=user.id,
+    )
+    if not is_new:
+        await callback.answer(
+            texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED,
+            show_alert=True,
+        )
+        return
+
+    idempotency_key = f"admin_adj:{uuid4()}"
+    try:
+        await create_admin_adjustment(
+            session=session,
+            user_id=user.id,
+            signed_amount=amount,
+            idempotency_key=idempotency_key,
+            metadata={"admin_id": callback.from_user.id, "reason": f"preset_{amount}_{callback.from_user.id}"},
+        )
+    except AccountLedgerInvariantError as e:
+        await session.rollback()
+        await callback.answer(texts.ADMIN_BALANCE_DEDUCT_FAILED.format(error=e), show_alert=True)
+        return
+
+    await AuditService.log_action(
+        session,
+        admin_id=callback.from_user.id,
+        action=AdminAuditAction.ADMIN_BALANCE_TOPUP,
+        target_type="user",
+        target_id=user.id,
+        details={
+            "telegram_id": telegram_id,
+            "amount": amount,
+            "account_type": "bonus",
+            "reason": "preset_adjustment",
+        },
+    )
+
+    await callback.answer(
+        texts.ADMIN_BALANCE_ADJUSTED_SUCCESS.format(amount=f"{amount:+d}"),
+        show_alert=True,
+    )
+    callback = _safe_update_callback_data(callback, f"admin_user_balance:{telegram_id}")
+    await show_user_balance_menu(callback, None, session, target_telegram_id=telegram_id)
+
+
+@router.callback_query(F.data.startswith("admin_user_balance:"))
+async def show_user_balance_menu(
+    callback: CallbackQuery,
+    state: FSMContext | None,
+    session: AsyncSession,
+    target_telegram_id: int | None = None,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    telegram_id = (
+        target_telegram_id
+        if target_telegram_id is not None
+        else parse_callback_id(callback.data, 1)
+    )
     if telegram_id is None:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
-    await state.clear()
+    if state is not None:
+        await state.clear()
 
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
@@ -157,6 +261,10 @@ async def process_balance_topup(
 
     if message.text and message.text.startswith("/"):
         await state.clear()
+        try:
+            await message.delete()
+        except Exception:
+            pass
         await render_hub(
             message.bot,
             message.chat.id,
@@ -220,6 +328,10 @@ async def process_balance_deduct(
 
     if message.text and message.text.startswith("/"):
         await state.clear()
+        try:
+            await message.delete()
+        except Exception:
+            pass
         await render_hub(
             message.bot,
             message.chat.id,
@@ -307,6 +419,21 @@ async def process_balance_reason(
 
     if not telegram_id or not amount or not action_type:
         await state.clear()
+        return
+
+    if message.text and message.text.startswith("/"):
+        await state.clear()
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_OPERATION_CANCELLED,
+            get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
+        )
         return
 
     reason = message.text.strip() if message.text and message.text.strip() != "-" else texts.ADMIN_USERS_BALANCE_KORREKTIROVKA_ADMINISTRATOROM
@@ -412,6 +539,7 @@ async def apply_user_balance_change(
         await state.clear()
         return
     except Exception as exc:
+        await session.rollback()
         logger.error("Failed to apply admin balance adjustment for user %s: %s", target_user_id, exc)
         await callback.answer(texts.ADMIN_USERS_BALANCE_ERROR_PRIMENENIYA_BALANCE, show_alert=True)
         await state.clear()

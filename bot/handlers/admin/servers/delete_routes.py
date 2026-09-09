@@ -12,11 +12,17 @@ from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
-from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+from config.enums import (
+    ServerHealthState,
+    ServerLifecycleStatus,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
+)
 from database.models import (
     APIOperation,
     Server,
     VPNProfile,
+    WhiteInternetOrphanCleanup,
     WhiteInternetSubscription,
 )
 from database.repositories.servers_repo import (
@@ -207,19 +213,40 @@ async def confirm_delete_server(
         ).with_for_update()
     )).scalars().all())
 
-    if active_wl_subs:
+    pending_orphans_count = (await session.scalar(
+        select(func.count(WhiteInternetOrphanCleanup.id)).where(
+            WhiteInternetOrphanCleanup.server_id == server.id,
+            WhiteInternetOrphanCleanup.status == "pending",
+        )
+    )) or 0
+
+    pending_trial_resets_count = (await session.scalar(
+        select(func.count(WhiteInternetSubscription.id)).where(
+            WhiteInternetSubscription.origin_node_id == server.id,
+            WhiteInternetSubscription.pending_hard_delete.is_(True),
+        )
+    )) or 0
+
+    if active_wl_subs or pending_orphans_count > 0 or pending_trial_resets_count > 0:
+        total_blocked = len(active_wl_subs) + pending_orphans_count + pending_trial_resets_count
         await session.rollback()
         await callback.answer(
-            texts.ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_ALERT.format(count=len(active_wl_subs)),
+            texts.ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_ALERT.format(count=total_blocked),
             show_alert=True,
         )
         try:
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            builder = InlineKeyboardBuilder()
+            builder.button(text=texts.ADMIN_SERVER_BTN_MIGRATE, callback_data=f"admin_server_migrate:{server.id}")
+            builder.button(text=texts.ADMIN_SERVER_BTN_FORCE_PURGE, callback_data=f"admin_server_purge:{server.id}")
+            builder.button(text=texts.ADMIN_SERVER_BTN_BACK_TO_CARD, callback_data=f"admin_server_card:{server.id}")
+            builder.adjust(1)
             await callback.message.edit_text(
                 texts.ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_TEXT.format(
                     name=safe(server_name),
-                    count=len(active_wl_subs),
+                    count=total_blocked,
                 ),
-                reply_markup=get_back_button(f"admin_server_card:{server.id}"),
+                reply_markup=builder.as_markup(),
                 parse_mode="HTML",
             )
         except TelegramBadRequest:
@@ -271,14 +298,13 @@ async def confirm_delete_server(
         .where(WhiteInternetSubscription.origin_node_id == server_id)
         .values(
             origin_node_id=None,
-            provisioning_status=WhiteInternetProvisioningStatus.PENDING_UPDATE,
+            provisioning_status=WhiteInternetProvisioningStatus.SYNCED_INACTIVE,
             last_reconciled_node_epoch=None,
         )
     )
 
     await delete_server(session, server)
     session.expire_all()
-
 
     cleanup_server_circuit_breakers(api_url)
     from services.slots_cache import invalidate_server_cache
@@ -305,4 +331,114 @@ async def confirm_delete_server(
         f"({server_name}) with {deleted_profiles} profiles"
     )
 
+    await _show_servers_list(callback, session, page=1)
+
+
+@router.callback_query(F.data.startswith("admin_server_purge:"))
+async def request_purge_server(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    server_id = parse_callback_id(callback.data, 1)
+    if server_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    server = await get_server_by_id(session, server_id)
+    if not server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    wl_subs_count = (await session.scalar(
+        select(func.count(WhiteInternetSubscription.id)).where(
+            WhiteInternetSubscription.origin_node_id == server.id,
+        )
+    )) or 0
+
+    from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
+    text = texts.ADMIN_SERVER_FORCE_PURGE_CONFIRM.format(name=safe(server.name), count=wl_subs_count)
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_admin_confirm_action_keyboard(
+            confirm_callback=f"confirm_server_purge:{server.id}",
+            cancel_callback=f"admin_server_card:{server.id}",
+        ),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("confirm_server_purge:"))
+async def confirm_purge_server(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    server_id = parse_callback_id(callback.data, 1)
+    if server_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    server = (await session.execute(
+        select(Server).where(Server.id == server_id).with_for_update()
+    )).scalar_one_or_none()
+    if not server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    # 1. Mark pending orphans as done with error
+    await session.execute(
+        update(WhiteInternetOrphanCleanup)
+        .where(
+            WhiteInternetOrphanCleanup.server_id == server.id,
+            WhiteInternetOrphanCleanup.status == "pending",
+        )
+        .values(
+            status="done",
+            last_error="node_destroyed_force_purge",
+            updated_at=now_utc(),
+        )
+    )
+
+    # 2. Update all subscriptions on this dead node to consistent inactive state
+    subs = list((await session.execute(
+        select(WhiteInternetSubscription).where(
+            WhiteInternetSubscription.origin_node_id == server.id,
+        ).with_for_update()
+    )).scalars().all())
+
+    for sub in subs:
+        sub.status = WhiteInternetStatus.DISABLED
+        sub.provisioning_status = WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+        sub.origin_node_id = None
+        sub.pending_hard_delete = False
+        sub.status_reason = "force_purged_node_destroyed"
+
+    # Decommission the purged server so it is excluded from allocation and monitoring
+    server.is_active = False
+    server.lifecycle_status = ServerLifecycleStatus.DECOMMISSIONED
+    server.health_state = ServerHealthState.MANUAL_DISABLED
+
+    # 3. Log structured audit
+    await AuditService.log_action(
+        session,
+        admin_id=callback.from_user.id,
+        action=AdminAuditAction.SERVER_FORCE_PURGE,
+        target_type="server",
+        target_id=server.id,
+        details={
+            "server_id": server.id,
+            "server_name": server.name,
+            "affected_subscriptions": len(subs),
+        },
+    )
+
+    await session.commit()
+    await callback.answer(texts.ADMIN_SERVER_FORCE_PURGE_SUCCESS.format(name=server.name, count=len(subs)), show_alert=True)
     await _show_servers_list(callback, session, page=1)

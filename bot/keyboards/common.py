@@ -24,23 +24,28 @@ def get_hub_keyboard(
             style="success",
         )
 
+    from utils.telegram import equalize_buttons_braille
+
+    conn_text, bal_text = equalize_buttons_braille(texts.BTN_CONNECTIONS, texts.BTN_BALANCE)
+    invite_text, supp_text = equalize_buttons_braille(texts.BTN_INVITE_FRIEND, texts.BTN_SUPPORT)
+
     builder.button(
-        text=texts.BTN_CONNECTIONS,
+        text=conn_text,
         callback_data="menu_connections",
     )
 
     builder.button(
-        text=texts.BTN_BALANCE,
+        text=bal_text,
         callback_data="menu_balance",
     )
 
     builder.button(
-        text=texts.BTN_INVITE_FRIEND,
+        text=invite_text,
         callback_data="menu_referral",
     )
 
     builder.button(
-        text=texts.BTN_SUPPORT,
+        text=supp_text,
         callback_data="menu_support",
     )
 

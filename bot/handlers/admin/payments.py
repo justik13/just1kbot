@@ -214,6 +214,110 @@ async def payments_pagination(
     await callback.answer(show_alert=False)
 
 
+@router.callback_query(F.data.startswith("admin_payments_filter:user:"))
+async def show_user_payments_list(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    if len(parts) < 4 or not parts[2].isdigit() or not parts[3].isdigit():
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    telegram_id = int(parts[2])
+    page = int(parts[3])
+
+    from database.repositories.users_repo import get_user_by_telegram_id
+
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    await state.clear()
+    total_payments = (
+        await session.scalar(
+            select(func.count(Payment.id)).where(Payment.user_id == user.id)
+        )
+        or 0
+    )
+
+    total_pages = max(1, math.ceil(total_payments / PAYMENTS_PER_PAGE))
+    page = min(max(1, page), total_pages)
+    offset = (page - 1) * PAYMENTS_PER_PAGE
+
+    stmt = (
+        select(Payment)
+        .where(Payment.user_id == user.id)
+        .options(selectinload(Payment.user))
+        .order_by(Payment.created_at.desc())
+        .offset(offset)
+        .limit(PAYMENTS_PER_PAGE)
+    )
+    result = await session.execute(stmt)
+    payments = result.scalars().all()
+
+    user_label = user.username or str(user.telegram_id)
+    header = texts.ADMIN_PAYMENTS_USER_TITLE.format(
+        user_label=user_label,
+        page=page,
+        total_pages=total_pages,
+        total_count=total_payments,
+    ) + "\n\n"
+
+    builder = InlineKeyboardBuilder()
+    if not payments:
+        rendered = header + texts.ADMIN_PAYMENTS_USER_EMPTY
+    else:
+        rendered = header
+        for payment in payments:
+            display_status = payment_display_status(payment)
+            status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                display_status,
+                texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
+            )
+            button_text = truncate_button_text(
+                f"{status_icon} #{payment.id} • {payment.amount} ₽ ({format_datetime(payment.created_at)})"
+            )
+            builder.button(
+                text=button_text,
+                callback_data=f"admin_payment_card:{payment.id}",
+            )
+
+    if page > 1:
+        builder.button(
+            text=texts.ADMIN_BTN_PAGINATION_PREV,
+            callback_data=f"admin_payments_filter:user:{telegram_id}:{page - 1}",
+        )
+    if page < total_pages:
+        builder.button(
+            text=texts.ADMIN_BTN_PAGINATION_NEXT,
+            callback_data=f"admin_payments_filter:user:{telegram_id}:{page + 1}",
+        )
+
+    builder.button(
+        text=texts.ADMIN_CLIENT_CARD_BUTTON,
+        callback_data=f"admin_user_card:{telegram_id}",
+    )
+    builder.adjust(1)
+
+    try:
+        await callback.message.edit_text(
+            rendered,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug("show_user_payments_list edit_text failed: %s", e)
+
+    await callback.answer(show_alert=False)
+
+
 @router.callback_query(F.data.startswith("admin_payment_card:"))
 async def show_payment_card(
     callback: CallbackQuery,

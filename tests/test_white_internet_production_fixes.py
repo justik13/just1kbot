@@ -72,6 +72,8 @@ class TestWhiteInternetProductionFixes(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=user), \
              patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
              patch("bot.handlers.white_internet.white_internet_repo.get_available_quota_bytes", return_value=10 * 1024**3), \
+             patch("bot.handlers.white_internet._get_effective_base_price", return_value=(Decimal("100"), 100, 30)), \
+             patch("bot.handlers.white_internet._get_effective_tariff_info", return_value=(Decimal("100"), 100, 30, 50 * 1024**3)), \
              patch("bot.handlers.white_internet._resolve_subscription_domain", return_value="cdn.just1k.best"):
 
             await show_white_internet_menu(query, session)
@@ -1343,7 +1345,88 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             call_text = bot.send_message.call_args[1]["text"]
             self.assertIn("восстановлено", call_text)
 
+    async def test_node_monitor_ingress_alert_skipped_when_pg_advisory_lock_held(self):
+        """When pg_try_advisory_xact_lock returns False (advisory lock held by peer worker),
+        ingress evaluation must not crash with UnboundLocalError and must skip alert dispatch cleanly."""
+        from services.workers.node_monitor import _server_states
+        _server_states.clear()
+
+        server = Server(
+            id=7777,
+            name="Origin-Lock-Contention",
+            api_url="https://origin7777.example.com",
+            api_key="secret7777",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol=XRAY_PROTOCOL,
+            capabilities=["xray_origin"],
+            extra_data={"cdn_domain": "cdn.just1k.best"},
+        )
+
+        bot = AsyncMock()
+        bot.send_message = AsyncMock()
+
+        session_mock = AsyncMock()
+        bind_mock = MagicMock()
+        bind_mock.dialect.name = "postgresql"
+        session_mock.bind = bind_mock
+        # Simulates lock acquisition failure: another worker is evaluating ingress alert
+        session_mock.scalar.return_value = False
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__ = AsyncMock(return_value=session_mock)
+        mock_scope.__aexit__ = AsyncMock(return_value=None)
+
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        class MockProbeResponse:
+            def __init__(self, status=502):
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            def get(self, url, **kwargs):
+                return MockProbeResponse(status=502)
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope", return_value=mock_scope), \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession", lambda **kw: MockSession()), \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock, return_value=(server, True)), \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            # Must NOT raise UnboundLocalError when advisory lock is held by peer worker
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
-

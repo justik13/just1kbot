@@ -1,7 +1,6 @@
 import asyncio
 import html
 import logging
-from datetime import timedelta
 
 from aiogram import F, Router
 from aiogram.exceptions import (
@@ -177,10 +176,51 @@ async def process_broadcast_message(
         return
     if message.text and message.text.startswith("/"):
         await state.clear()
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_OPERATION_CANCELLED,
+            get_back_button("admin_broadcast"),
+            trigger_message_id=message.message_id,
+        )
         return
 
-    broadcast_text = message.text or message.caption
-    if not broadcast_text:
+    broadcast_text = message.text or message.caption or ""
+    media_id = None
+    content_type = str(message.content_type).lower().split(".")[-1]
+
+    if message.photo:
+        media_id = message.photo[-1].file_id
+        content_type = "photo"
+    elif message.video:
+        media_id = message.video.file_id
+        content_type = "video"
+    elif message.animation:
+        media_id = message.animation.file_id
+        content_type = "animation"
+    elif message.document:
+        media_id = message.document.file_id
+        content_type = "document"
+    elif message.voice:
+        media_id = message.voice.file_id
+        content_type = "voice"
+    elif message.video_note:
+        media_id = message.video_note.file_id
+        content_type = "video_note"
+        broadcast_text = ""
+    elif message.audio:
+        media_id = message.audio.file_id
+        content_type = "audio"
+    elif message.sticker:
+        media_id = message.sticker.file_id
+        content_type = "sticker"
+        broadcast_text = ""
+
+    if not broadcast_text and not media_id:
         await render_hub(
             message.bot,
             message.chat.id,
@@ -188,13 +228,6 @@ async def process_broadcast_message(
             get_back_button("admin_menu"),
         )
         return
-
-    media_id = None
-    content_type = message.content_type
-    if message.photo:
-        media_id = message.photo[-1].file_id
-    elif message.document:
-        media_id = message.document.file_id
 
     if not media_id and len(broadcast_text) > TELEGRAM_MESSAGE_LIMIT:
         await render_hub(
@@ -316,21 +349,22 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
         User.is_bot_blocked.is_(False),
         User.is_banned.is_(False),
     )
+    from database.repositories.users_repo import (
+        get_effective_active_condition,
+        get_effective_expiring_3d_condition,
+        get_effective_expired_condition,
+        get_effective_never_condition,
+    )
+
     current_time = now_utc()
     if audience == "active":
-        stmt = stmt.where(User.subscription_end > current_time)
+        stmt = stmt.where(get_effective_active_condition(current_time))
     elif audience == "expiring_3d":
-        stmt = stmt.where(
-            User.subscription_end > current_time,
-            User.subscription_end <= current_time + timedelta(days=3),
-        )
+        stmt = stmt.where(get_effective_expiring_3d_condition(current_time))
     elif audience == "expired":
-        stmt = stmt.where(
-            User.subscription_end.is_not(None),
-            User.subscription_end <= current_time,
-        )
-    elif audience == "never":
-        stmt = stmt.where(User.subscription_end.is_(None))
+        stmt = stmt.where(get_effective_expired_condition(current_time))
+    elif audience in ("never", "no_sub"):
+        stmt = stmt.where(get_effective_never_condition())
     elif audience == "test" or audience.startswith("test_"):
         tg_id = admin_tg_id
         if tg_id is None and audience.startswith("test_"):

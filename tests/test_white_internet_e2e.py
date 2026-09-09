@@ -99,6 +99,8 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             desired_version=1,
             actual_version=0,
             last_reconciled_node_epoch=None,
+            device_limit=1,
+            active_hwids={},
         )
 
         # 2. Feed check before reconciliation -> must return 503 (Retry-After: 5)
@@ -171,13 +173,17 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                 session = AsyncMock()
                 session.scalar.return_value = server
                 session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+                session.get.return_value = sub
                 mock_scope.return_value.__aenter__.return_value = session
 
                 with patch(
                     "database.repositories.white_internet_repo.get_subscription_by_token",
                     return_value=sub,
                 ):
-                    resp = await self.client.get(f"/sub/wl/{sub.token}")
+                    resp = await self.client.get(
+                        f"/sub/wl/{sub.token}",
+                        headers={"X-Hwid": "e2e-device-1"},
+                    )
                     self.assertEqual(resp.status, 200)
                     self.assertEqual(
                         resp.headers.get("Profile-Title"),
@@ -380,11 +386,15 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                 session = AsyncMock()
                 session.scalar.return_value = server
                 session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+                session.get.return_value = sub
                 mock_scope.return_value.__aenter__.return_value = session
 
                 with patch(
                     "database.repositories.white_internet_repo.get_subscription_by_token",
                     return_value=sub,
                 ):
-                    resp = await self.client.get(f"/sub/wl/{sub.token}")
+                    resp = await self.client.get(
+                        f"/sub/wl/{sub.token}",
+                        headers={"X-Hwid": "e2e-device-1"},
+                    )
                     self.assertEqual(resp.status, 200)

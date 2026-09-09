@@ -1,3 +1,4 @@
+from datetime import timedelta
 import logging
 
 from aiogram.exceptions import TelegramBadRequest
@@ -9,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
+from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
 from database.models import Server, Tariff, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.profiles_repo import (
@@ -39,6 +41,7 @@ def format_user_card_text(
     tariff_info: str = "—",
     referrer_info: str = "—",
     white_internet_info: str | None = None,
+    ban_reason: str | None = None,
 ) -> str:
     from datetime import timezone
     from utils.telegram import safe
@@ -50,7 +53,10 @@ def format_user_card_text(
     referrals_count = len(referrals) if isinstance(referrals, list) else int(referrals or 0)
 
     status_str = texts.STATUS_ACTIVE_BADGE if has_access else texts.STATUS_INACTIVE_BADGE
-    ban_str = texts.STATUS_BANNED_BADGE if user.is_banned else texts.STATUS_NOT_BANNED_BADGE
+    if user.is_banned:
+        ban_str = f"{texts.STATUS_BANNED_BADGE} (<i>{safe(ban_reason)}</i>)" if ban_reason else texts.STATUS_BANNED_BADGE
+    else:
+        ban_str = texts.STATUS_NOT_BANNED_BADGE
 
     card_text = texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,
@@ -376,13 +382,56 @@ async def _get_white_internet_card_info(
     }
     status_badge = status_badge_map.get(sub.status, sub.status)
 
-    return texts.ADMIN_USER_CARD_WHITE_INTERNET_BLOCK.format(
+    base = texts.ADMIN_USER_CARD_WHITE_INTERNET_BLOCK.format(
         status_badge=status_badge,
         used_str=used_str,
         total_str=total_str,
         expires_str=expires_str,
         origin_name=origin_name,
     )
+    dev_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+    raw_hwids = getattr(sub, "active_hwids", None) or {}
+    now = now_utc()
+    cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
+    active_count = sum(
+        1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff
+    )
+    extra_lines = [
+        texts.ADMIN_USER_CARD_WL_DEVICES.format(
+            active=active_count, limit=dev_limit
+        )
+    ]
+    prov_status = getattr(sub, "provisioning_status", None)
+    if prov_status and prov_status != "SYNCED_ACTIVE":
+        extra_lines.append(
+            texts.ADMIN_USER_CARD_WL_NODE_STATUS.format(status=prov_status)
+        )
+    last_err = getattr(sub, "last_sync_error", None) or getattr(sub, "last_error", None)
+    if last_err:
+        extra_lines.append(
+            texts.ADMIN_USER_CARD_WL_ERROR.format(error=safe(str(last_err)[:100]))
+        )
+    return base + "\n" + "\n".join(extra_lines)
+
+
+async def _get_user_ban_reason(session: AsyncSession, user_id: int) -> str | None:
+    import json
+    from config.enums import AdminAuditAction
+    from database.models import AuditLog
+
+    audit_row = await session.scalar(
+        select(AuditLog)
+        .where(AuditLog.target_id == user_id, AuditLog.action == AdminAuditAction.BAN_USER)
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .limit(1)
+    )
+    if audit_row and audit_row.details:
+        try:
+            details_dict = json.loads(audit_row.details) if isinstance(audit_row.details, str) else audit_row.details
+            return details_dict.get("reason")
+        except Exception:
+            pass
+    return None
 
 
 async def _render_user_card(
@@ -401,6 +450,7 @@ async def _render_user_card(
     balance = await get_account_balance(session, user_id=user.id)
     tariff_info, referrer_info = await _get_user_card_details(session, user)
     wl_info = await _get_white_internet_card_info(session, user.id)
+    ban_reason = await _get_user_ban_reason(session, user.id) if user.is_banned else None
 
     current_time = now_utc()
 
@@ -414,6 +464,7 @@ async def _render_user_card(
         tariff_info=tariff_info,
         referrer_info=referrer_info,
         white_internet_info=wl_info,
+        ban_reason=ban_reason,
     )
 
     try:
@@ -446,6 +497,7 @@ async def _show_user_card_edit(
     balance = await get_account_balance(session, user_id=user.id)
     tariff_info, referrer_info = await _get_user_card_details(session, user)
     wl_info = await _get_white_internet_card_info(session, user.id)
+    ban_reason = await _get_user_ban_reason(session, user.id) if user.is_banned else None
 
     current_time = now_utc()
 
@@ -459,6 +511,7 @@ async def _show_user_card_edit(
         tariff_info=tariff_info,
         referrer_info=referrer_info,
         white_internet_info=wl_info,
+        ban_reason=ban_reason,
     )
 
     if notice:
