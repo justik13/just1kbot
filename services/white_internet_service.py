@@ -927,6 +927,7 @@ class WhiteInternetService:
                 == WhiteInternetProvisioningStatus.PENDING_DELETE
             ):
                 return False, texts.WL_DEACTIVATION_PENDING, existing
+            return False, texts.WL_TRIAL_ALREADY_USED, existing
 
         try:
             origin_node = await cls.select_origin_node(session)

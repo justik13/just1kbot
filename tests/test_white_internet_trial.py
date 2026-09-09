@@ -133,6 +133,24 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(msg, texts.WL_TRIAL_ALREADY_USED)
             self.assertEqual(sub, existing_sub)
 
+    async def test_trial_rejected_for_user_with_expired_paid_subscription(self):
+        """User who never had trial but has an expired paid subscription cannot activate trial."""
+        existing_sub = WhiteInternetSubscription(
+            id=51,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.EXPIRED,
+            is_trial=False,
+        )
+        with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
+             patch("database.repositories.white_internet_repo.has_ever_activated_trial", return_value=False), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=existing_sub):
+
+            success, msg, sub = await WhiteInternetService.create_trial_subscription(self.session, self.user.id)
+
+            self.assertFalse(success)
+            self.assertEqual(msg, texts.WL_TRIAL_ALREADY_USED)
+            self.assertEqual(sub, existing_sub)
+
     async def test_trial_sync_fallback_on_network_error(self):
         """If Xray node sync fails, subscription remains created in PENDING for worker fallback."""
         now = datetime(2026, 9, 5, 12, 0, 0, tzinfo=timezone.utc)

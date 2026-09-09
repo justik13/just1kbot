@@ -647,7 +647,7 @@ async def register_hwid_atomic(
     clean_hwid = str(hwid).strip()[:128]
 
     if not clean_hwid:
-        return True, len(active_hwids), effective_limit
+        return False, len(active_hwids), effective_limit
 
     # If active devices exceed limit (e.g. after tariff downgrade), prune to effective_limit most recently active
     if len(active_hwids) > effective_limit:

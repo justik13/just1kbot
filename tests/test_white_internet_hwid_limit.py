@@ -54,6 +54,25 @@ class TestWhiteInternetHwidRepo(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(max_devs, 2)
         mock_session.flush.assert_awaited_once()
 
+    async def test_register_hwid_empty_rejected(self):
+        """Verify registering an empty HWID string is fail-closed and rejected."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        now = datetime.now(timezone.utc)
+        sub.active_hwids = {"device-aaa": now.isoformat()}
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session, subscription_id=1, hwid="   ", max_devices=2
+        )
+
+        self.assertFalse(allowed)
+        self.assertEqual(count, 1)
+        self.assertEqual(max_devs, 2)
+        mock_session.flush.assert_not_called()
+
     async def test_register_hwid_exceeds_limit(self):
         """Verify registering a new HWID when limit reached is rejected."""
         sub = MagicMock(spec=WhiteInternetSubscription)
@@ -99,7 +118,7 @@ class TestWhiteInternetHwidRepo(unittest.IsolatedAsyncioTestCase):
         self.assertIn("new-device", sub.active_hwids)
 
     async def test_register_hwid_empty_or_none(self):
-        """Verify empty HWID is ignored and treated as allowed."""
+        """Verify empty HWID is rejected fail-closed."""
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
         sub.active_hwids = {}
@@ -110,7 +129,7 @@ class TestWhiteInternetHwidRepo(unittest.IsolatedAsyncioTestCase):
         allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
             mock_session, subscription_id=1, hwid="", max_devices=2
         )
-        self.assertTrue(allowed)
+        self.assertFalse(allowed)
         self.assertEqual(count, 0)
         self.assertEqual(max_devs, 2)
 
