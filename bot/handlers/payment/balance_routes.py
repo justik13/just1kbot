@@ -592,6 +592,20 @@ async def check_topup(
         ctx = payment.topup_context or {}
         is_auto_fulfilled = ctx.get("auto_fulfill_status") == "succeeded"
         ui_notified = bool(ctx.get("ui_confetti_shown"))
+        source = ctx.get("source")
+
+        if source == "white_internet":
+            if not is_auto_fulfilled and not payment.credit_notified_at:
+                payment.credit_notified_at = now_utc()
+            if is_auto_fulfilled and not ui_notified:
+                payment.topup_context = {
+                    **ctx,
+                    "ui_confetti_shown": True,
+                }
+            await session.flush()
+            from bot.handlers.white_internet import show_white_internet_menu
+            await show_white_internet_menu(callback, session)
+            return
 
         if (payment.credit_notified_at and not is_auto_fulfilled) or (
             is_auto_fulfilled and ui_notified
@@ -661,6 +675,8 @@ async def cancel_topup_ui(
     payment_id = parse_callback_id(callback.data, 1)
     if db_user is None or payment_id is None:
         return
+    payment = await session.get(Payment, payment_id)
+    source = (payment.topup_context or {}).get("source") if payment else None
     try:
         await hide_balance_topup(
             session, user_id=db_user.id, payment_id=payment_id
@@ -668,6 +684,12 @@ async def cancel_topup_ui(
     except AccountTopupError:
         await callback.answer(texts.TOPUP_ALREADY_FINISHED_ALERT, show_alert=True)
         return
+
+    if source == "white_internet":
+        from bot.handlers.white_internet import show_white_internet_menu
+        await show_white_internet_menu(callback, session)
+        return
+
     await _render_balance(
         callback.bot,
         callback.message.chat.id,

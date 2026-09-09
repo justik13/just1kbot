@@ -472,7 +472,7 @@ async def process_white_internet_buy_preview(query: CallbackQuery, session: Asyn
         balance_details = texts.WL_PREVIEW_BALANCE_SHORTAGE.format(shortage=shortage)
         builder.button(
             text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            callback_data=f"wl_topup_shortage:{int(shortage)}:buy",
             style="success",
         )
     builder.button(text=texts.BTN_BACK, callback_data="white_internet")
@@ -511,7 +511,7 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
         kb = InlineKeyboardBuilder()
         kb.button(
             text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            callback_data=f"wl_topup_shortage:{int(shortage)}:buy",
             style="success",
         )
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
@@ -580,7 +580,7 @@ async def process_white_internet_renew_preview(query: CallbackQuery, session: As
         balance_details = texts.WL_PREVIEW_BALANCE_SHORTAGE.format(shortage=shortage)
         builder.button(
             text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            callback_data=f"wl_topup_shortage:{int(shortage)}:renew",
             style="success",
         )
     builder.button(text=texts.BTN_BACK, callback_data="white_internet")
@@ -623,7 +623,7 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
         kb = InlineKeyboardBuilder()
         kb.button(
             text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            callback_data=f"wl_topup_shortage:{int(shortage)}:renew",
             style="success",
         )
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
@@ -713,7 +713,7 @@ async def process_topup_preview(query: CallbackQuery, session: AsyncSession):
         balance_details = texts.WL_PREVIEW_BALANCE_SHORTAGE.format(shortage=shortage)
         builder.button(
             text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            callback_data=f"wl_topup_shortage:{int(shortage)}:pack:{pack_gb}",
             style="success",
         )
     builder.button(text=texts.BTN_BACK, callback_data="wl_topup_menu")
@@ -762,7 +762,7 @@ async def process_topup_execute(query: CallbackQuery, session: AsyncSession):
         kb = InlineKeyboardBuilder()
         kb.button(
             text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            callback_data=f"wl_topup_shortage:{int(shortage)}:pack:{pack_gb}",
             style="success",
         )
         kb.button(text=texts.BTN_BACK, callback_data="wl_topup_menu")
@@ -804,14 +804,18 @@ process_topup_pack = process_topup_execute
 
 @router.callback_query(F.data.startswith("wl_topup_shortage:"))
 async def process_wl_topup_shortage(query: CallbackQuery, session: AsyncSession):
+    parts = query.data.split(":")
     try:
-        shortage_val = int(query.data.split(":")[1])
+        shortage_val = int(parts[1])
     except (IndexError, ValueError):
         try:
             await query.answer()
         except Exception:
             pass
         return
+
+    action_type = parts[2] if len(parts) > 2 else "buy"
+    pack_gb = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
 
     if shortage_val <= 0:
         try:
@@ -831,12 +835,19 @@ async def process_wl_topup_shortage(query: CallbackQuery, session: AsyncSession)
             pass
         return
 
+    context = {
+        "source": "white_internet",
+        "auto_fulfill_action": f"white_internet_{action_type}",
+    }
+    if pack_gb is not None:
+        context["pack_gb"] = pack_gb
+
     await _create_and_render_topup(
         target=query,
         session=session,
         user=user,
         amount=shortage_val,
-        context={"source": "white_internet"},
+        context=context,
     )
 
 
@@ -914,7 +925,7 @@ async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession
         kb = InlineKeyboardBuilder()
         kb.button(
             text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}",
+            callback_data=f"wl_topup_shortage:{int(shortage)}:add_device",
             style="success",
         )
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")

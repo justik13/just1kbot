@@ -613,3 +613,77 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             modal_copy_text = modal_copy_btns[0].copy_text.text
             self.assertEqual(modal_copy_text, f"https://{domain}/sub/wl/{sub.token}")
             self.assertNotIn("vless://", modal_copy_text)
+
+    async def test_process_wl_topup_shortage_contextual_actions(self):
+        """Shortage top-up callbacks must properly parse action type and pass into context."""
+        from bot.handlers.white_internet import process_wl_topup_shortage
+
+        test_cases = [
+            ("wl_topup_shortage:150:buy", {"source": "white_internet", "auto_fulfill_action": "white_internet_buy"}),
+            ("wl_topup_shortage:200:renew", {"source": "white_internet", "auto_fulfill_action": "white_internet_renew"}),
+            ("wl_topup_shortage:30:add_device", {"source": "white_internet", "auto_fulfill_action": "white_internet_add_device"}),
+            ("wl_topup_shortage:50:pack:10", {"source": "white_internet", "auto_fulfill_action": "white_internet_pack", "pack_gb": 10}),
+            ("wl_topup_shortage:100", {"source": "white_internet", "auto_fulfill_action": "white_internet_buy"}),
+        ]
+
+        for callback_str, expected_context in test_cases:
+            query = MagicMock(spec=CallbackQuery)
+            query.data = callback_str
+            query.from_user = self.tg_user
+            query.answer = AsyncMock()
+
+            with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+                 patch("bot.handlers.white_internet.MaintenanceService.can_user_perform_action", return_value=True), \
+                 patch("bot.handlers.white_internet._create_and_render_topup", new_callable=AsyncMock) as mock_create:
+                await process_wl_topup_shortage(query, self.session)
+
+                mock_create.assert_awaited_once()
+                call_kwargs = mock_create.call_args[1]
+                self.assertEqual(call_kwargs["context"], expected_context)
+
+    async def test_settle_succeeded_topup_white_internet_auto_fulfill(self):
+        """settle_succeeded_topup must automatically execute White Internet purchase when auto_fulfill_action is set."""
+        from services.account_topup import settle_succeeded_topup
+        from database.models import Payment
+        from utils.datetime_helpers import now_utc
+
+        payment = Payment(
+            id=99,
+            user_id=self.user.id,
+            amount=Decimal("150.00"),
+            currency="RUB",
+            public_order_id="topup_test_99",
+            provider_status="succeeded",
+            provider_confirmed_at=now_utc(),
+            paid_at=now_utc(),
+            fulfillment_status="not_ready",
+            reconciliation_status="ok",
+            topup_context={
+                "source": "white_internet",
+                "auto_fulfill_action": "white_internet_buy",
+            },
+        )
+
+        with patch("services.account_topup.credit_succeeded_topup", return_value=(MagicMock(), True)), \
+             patch("services.account_topup.lock_checkout_user", return_value=self.user), \
+             patch("services.account_topup.get_account_balance", return_value=MagicMock(real_position=Decimal(150), accounting_position=Decimal(150), available=Decimal(150), real_available=Decimal(150), bonus_available=Decimal(0))), \
+             patch("services.account_topup.refresh_user_dispute_hold", new_callable=AsyncMock), \
+             patch("services.white_internet_service.WhiteInternetService.purchase_subscription", return_value=(True, "OK", MagicMock())) as mock_buy, \
+             patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock), \
+             patch("services.referral_bonus.grant_referral_bonus_for_topup", return_value=Decimal(0)):
+
+            bot = MagicMock()
+            mock_settings = MagicMock()
+            mock_settings.BALANCE_MAX_AVAILABLE_RUB = "50000"
+            settled, _ = await settle_succeeded_topup(
+                self.session,
+                payment=payment,
+                source="test",
+                settings=mock_settings,
+                bot=bot,
+            )
+
+            self.assertTrue(settled)
+            mock_buy.assert_awaited_once_with(self.session, user_id=self.user.id)
+            self.assertEqual(payment.topup_context.get("auto_fulfill_status"), "succeeded")
+
