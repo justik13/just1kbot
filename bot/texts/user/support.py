@@ -1,6 +1,7 @@
 """Domain texts for user/support.py."""
 from __future__ import annotations
 
+AMNEZIA_ANDROID = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-amneziavpn-on-android/"
 AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs?m-path=/"
 AMNEZIA_DOWNLOAD_MIRROR = "https://storage.googleapis.com/amnezia/amnezia.org?m-path=/downloads"
 AMNEZIA_GITHUB_LATEST = "https://github.com/amnezia-vpn/amnezia-client/releases/latest"
@@ -10,6 +11,8 @@ AMNEZIA_SPLIT_TUNNELING = "https://storage.googleapis.com/amnezia/docs?m-path=/d
 AMNEZIA_WIN_INSTALL = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-app-on-windows/"
 AMNEZIA_WIN_UPDATE = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/application-update-on-windows/"
 
+BTN_INSTRUCTION_ANDROID = "🤖 Инструкция Android"
+BTN_OPEN_ANDROID_INSTRUCTION = "📖 Открыть инструкцию Android"
 BTN_PRIVACY_POLICY = "🔒 Политика"
 
 BTN_TOS = "📄 Условия сервиса"
@@ -53,7 +56,17 @@ FAQ_TEXT = """❓ <b>Частые вопросы (FAQ)</b>
 
 <blockquote expandable>📌 <b>8. Безопасность и конфиденциальность</b>
 • Соединение защищено современными протоколами шифрования.
-• Мы не ведем логов посещаемых ресурсов и не храним историю вашего трафика.</blockquote>"""
+• Мы не ведем логов посещаемых ресурсов и не храним историю вашего трафика.</blockquote>
+
+<blockquote expandable>📌 <b>9. Что такое «Белый Интернет» и чем он отличается?</b>
+• «Белый Интернет» использует протокол Xray (VLESS over XHTTP), замаскированный под российский трафик CDN.
+• Он работает при глубоких блокировках мобильных операторов в РФ.
+• Поддерживается в клиентах Happ, INCY, v2rayNG, v2rayN и других VLESS-совместимых приложениях.</blockquote>
+
+<blockquote expandable>📌 <b>10. Как подключить «Белый Интернет»?</b>
+• Откройте «🌐 Белый Интернет» в главном меню бота.
+• Скопируйте ссылку подписки или воспользуйтесь бесплатным 3-дневным триалом.
+• Вставьте ссылку в приложение (Happ / INCY / v2rayNG) и нажмите «Обновить подписку».</blockquote>"""
 
 PRIVACY_POLICY_URL = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
 
@@ -78,6 +91,10 @@ SUPPORT_HELP_ROOT_TEXT = """📖 <b>Инструкции и справка Amnez
 • <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>
 
 Выберите нужную тему ниже:"""
+
+SUPPORT_ANDROID_INSTRUCTION_TEXT = """🤖 <b>Инструкция по настройке Amnezia на Android</b>
+
+Пошаговое руководство по установке приложения и настройке подключения на Android."""
 
 SUPPORT_IOS_INSTRUCTION_TEXT = """🍏 <b>Установка AmneziaVPN на iOS для жителей России</b>
 

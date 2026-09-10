@@ -56,7 +56,7 @@ async def fsm_media_guard(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
-        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=30.0)
     except Exception:
         pass
 
@@ -104,7 +104,7 @@ async def handle_unknown_text(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
-        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=30.0)
     except Exception:
         pass
 

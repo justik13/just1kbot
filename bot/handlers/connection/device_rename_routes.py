@@ -181,7 +181,7 @@ async def rename_device_process(
         )
         return
 
-    if len(cleaned_base) > 16:
+    if len(cleaned_base) > 32:
         err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SLISHKOM_DLINNOE_IZ_16_SI.format(len_cleaned_base=len(cleaned_base))
         await render_hub(
             message.bot,

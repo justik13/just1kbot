@@ -79,7 +79,7 @@ def get_admin_server_card_keyboard(
         callback_data="admin_servers",
     )
 
-    builder.adjust(1)
+    builder.adjust(2, 2, 2, 2, 2, 2)
     return builder.as_markup()
 
 

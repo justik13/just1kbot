@@ -282,17 +282,24 @@ class WhiteInternetTrafficWorker:
                 if telegram_id:
                     try:
                         from bot import texts
+                        from aiogram.utils.keyboard import InlineKeyboardBuilder
 
                         alert_text = (
                             texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT
                             if is_sub_trial
                             else texts.WL_TRAFFIC_EXHAUSTED_ALERT
                         )
-                        await self.bot.send_message(
-                            chat_id=telegram_id,
-                            text=alert_text,
-                            parse_mode="HTML",
-                        )
+                        send_kwargs = {
+                            "chat_id": telegram_id,
+                            "text": alert_text,
+                            "parse_mode": "HTML",
+                        }
+                        if not is_sub_trial:
+                            kb = InlineKeyboardBuilder()
+                            kb.button(text=texts.BTN_WHITE_INTERNET, callback_data="white_internet")
+                            send_kwargs["reply_markup"] = kb.as_markup()
+
+                        await self.bot.send_message(**send_kwargs)
                     except Exception as exc:
                         logger.warning(
                             "Failed to send quota exhaustion alert to user %d: %s",

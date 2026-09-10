@@ -30,6 +30,13 @@ def get_device_keyboard(
             callback_data=f"alt_connection:{profile_id}",
         )
         adjustments.append(1)
+    else:
+        builder.button(
+            text=texts.BTN_WL_REFRESH_STATUS,
+            callback_data=f"manage_device:{profile_id}",
+            style="primary",
+        )
+        adjustments.append(1)
 
     if show_delete:
         builder.button(

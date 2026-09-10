@@ -1,6 +1,8 @@
 """Telegram account-balance, top-up, and financial-history screens."""
 
 import logging
+import re
+from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -465,7 +467,19 @@ async def accept_custom_amount(
         await state.clear()
         return
 
-    if not raw.isascii() or not raw.isdigit():
+    clean_raw = raw.replace("\u00a0", " ").replace(" ", "").replace(",", ".")
+    clean_raw = re.sub(texts.TOPUP_AMOUNT_STRIP_REGEX, "", clean_raw).strip()
+
+    try:
+        val = Decimal(clean_raw)
+        if val <= 0 or val != int(val):
+            amount = None
+        else:
+            amount = int(val)
+    except Exception:
+        amount = None
+
+    if amount is None:
         prompt = texts.TOPUP_CUSTOM_AMOUNT_PROMPT.format(
             minimum=get_settings().BALANCE_MIN_TOPUP_RUB,
             maximum=get_settings().BALANCE_MAX_CUSTOM_TOPUP_RUB,
@@ -488,8 +502,6 @@ async def accept_custom_amount(
         minimum=minimum,
         maximum=maximum,
     )
-
-    amount = int(raw)
     if amount < minimum:
         err = texts.TOPUP_OPERATION_MINIMUM.format(minimum=minimum)
         await render_hub(
@@ -746,3 +758,19 @@ async def return_later(
         db_user,
         notice=texts.TOPUP_SAVED_NOTICE,
     )
+
+
+@router.callback_query(F.data == "balance_new_topup")
+async def balance_new_topup(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    await callback.answer(show_alert=False)
+    if db_user is None:
+        return
+    from services.account_topup import cancel_all_unfinished_topups
+    await cancel_all_unfinished_topups(session, user_id=db_user.id)
+    await choose_topup_amount(callback, state, session, db_user)
+
