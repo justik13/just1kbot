@@ -217,6 +217,57 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
                 await admin_balance_preset(callback, session)
                 callback.answer.assert_awaited_once_with(texts.ERROR_INVALID_REQUEST, show_alert=True)
 
+    async def test_admin_balance_confirm_deduct_aborts_when_bonus_depleted(self):
+        """If bonus was spent during FSM step, confirm must abort and not debit real money."""
+        from aiogram.types import CallbackQuery, User as TgUser
+        from bot.handlers.admin.users.balance_routes import apply_user_balance_change
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+
+        callback = CallbackQuery(
+            id="query_bal_conf_1",
+            from_user=TgUser(id=123456789, is_bot=False, first_name="Admin"),
+            chat_instance="chat_inst_bal_conf",
+            data="confirm_admin_balance_apply",
+        )
+        object.__setattr__(callback, "answer", AsyncMock())
+
+        state = AsyncMock()
+        state.get_data.return_value = {
+            "target_telegram_id": 888,
+            "amount": 100,
+            "action_type": "deduct",
+            "adjustment_id": "test_adj_1",
+        }
+
+        user = MagicMock()
+        user.id = 7
+        user.telegram_id = 888
+
+        session = AsyncMock()
+
+        stale_bonus_snapshot = AccountBalanceSnapshot(
+            accounting_position=Decimal(500),
+            available=Decimal(500),
+            reserved=Decimal(0),
+            debt=Decimal(0),
+            bonus_available=Decimal(0),  # User spent all bonus!
+            real_available=Decimal(500),
+        )
+
+        with (
+            patch("bot.handlers.admin.users.balance_routes.is_admin", return_value=True),
+            patch("bot.handlers.admin.users.balance_routes.get_user_by_telegram_id", return_value=user),
+            patch("bot.handlers.admin.users.balance_routes.get_account_balance", return_value=stale_bonus_snapshot),
+            patch("bot.handlers.admin.users.balance_routes.create_admin_adjustment") as mock_adj,
+        ):
+            await apply_user_balance_change(callback, state, session)
+            session.rollback.assert_awaited_once()
+            mock_adj.assert_not_called()
+            callback.answer.assert_awaited_once()
+            self.assertIn("Недостаточно бонусных средств", callback.answer.call_args[0][0])
+            state.clear.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+
