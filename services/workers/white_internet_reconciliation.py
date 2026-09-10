@@ -584,33 +584,6 @@ class WhiteInternetReconciliationWorker:
                     sync_result = resp.result if hasattr(resp, "result") else resp[0]
                     err_msg = resp.error if hasattr(resp, "error") else resp[1]
                     if sync_result == SyncResult.APPLIED:
-                        # Post-deprovision race guard: verify client was not concurrently re-placed on this node
-                        concurrent_sub = await sess.scalar(
-                            select(WhiteInternetSubscription.id).where(
-                                WhiteInternetSubscription.uuid == row.client_uuid,
-                                WhiteInternetSubscription.origin_node_id == row.server_id,
-                                WhiteInternetSubscription.status.in_([
-                                    WhiteInternetStatus.ACTIVE,
-                                    WhiteInternetStatus.PENDING,
-                                    WhiteInternetStatus.EXHAUSTED,
-                                ]),
-                            )
-                        )
-                        if isinstance(concurrent_sub, (int, str)):
-                            logger.warning(
-                                "Client %s was concurrently re-assigned to origin %d during deprovision. Immediately restoring active state.",
-                                row.client_uuid,
-                                row.server_id,
-                            )
-                            await self.client.sync_client(
-                                server.api_url,
-                                server.api_key,
-                                client_uuid=row.client_uuid,
-                                is_active=True,
-                                version=row.desired_version + 1,
-                                expected_node_epoch=server.xray_instance_epoch,
-                                idempotency_key=f"re_enable:{row.id}:{row.client_uuid}:{row.desired_version + 1}",
-                            )
                         await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
                         await sess.commit()
                         swept += 1

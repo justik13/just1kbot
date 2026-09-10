@@ -137,6 +137,30 @@ class EpochManager:
             logger.debug("Error reading /proc/%s/stat: %s", pid, e)
         return None
 
+    @staticmethod
+    def _is_xray_process(pid: int) -> bool:
+        """Verify whether a given process ID belongs to an Xray process."""
+        comm_path = Path(f"/proc/{pid}/comm")
+        if comm_path.exists():
+            try:
+                comm = comm_path.read_text(encoding="utf-8", errors="ignore").strip().lower()
+                if "xray" in comm:
+                    return True
+            except Exception:
+                pass
+
+        cmdline_path = Path(f"/proc/{pid}/cmdline")
+        if cmdline_path.exists():
+            try:
+                cmdline = cmdline_path.read_text(encoding="utf-8", errors="ignore").lower()
+                parts = cmdline.split("\0")
+                if parts and (parts[0].endswith("/xray") or parts[0] == "xray" or "xray" in parts[0]):
+                    return True
+            except Exception:
+                pass
+
+        return False
+
     def get_xray_process_info(self) -> Tuple[Optional[int], Optional[int]]:
         """
         Finds the running xray process and extracts (pid, starttime).
@@ -157,16 +181,9 @@ class EpochManager:
                     raw = pf.read_text(encoding="utf-8").strip()
                     if raw.isdigit():
                         candidate_pid = int(raw)
-                        starttime = self._read_proc_stat(candidate_pid)
-                        if starttime is not None:
-                            comm_file = Path(f"/proc/{candidate_pid}/comm")
-                            cmd_file = Path(f"/proc/{candidate_pid}/cmdline")
-                            is_xray = False
-                            if comm_file.exists():
-                                is_xray = "xray" in comm_file.read_text(encoding="utf-8", errors="ignore").strip().lower()
-                            elif cmd_file.exists():
-                                is_xray = "xray" in cmd_file.read_text(encoding="utf-8", errors="ignore").strip().lower()
-                            if is_xray:
+                        if self._is_xray_process(candidate_pid):
+                            starttime = self._read_proc_stat(candidate_pid)
+                            if starttime is not None:
                                 return candidate_pid, starttime
                 except Exception as e:
                     logger.debug("Error checking pidfile %s: %s", pf, e)
@@ -186,32 +203,8 @@ class EpochManager:
                 continue
             pid = int(entry.name)
             try:
-                # 1. Check /proc/<pid>/comm or cmdline
-                comm_path = entry / "comm"
-                is_xray = False
-                if comm_path.exists():
-                    try:
-                        comm = comm_path.read_text(encoding="utf-8", errors="ignore").strip()
-                        if comm == "xray":
-                            is_xray = True
-                    except Exception:
-                        pass
-
-                if not is_xray:
-                    cmdline_path = entry / "cmdline"
-                    if cmdline_path.exists():
-                        try:
-                            cmdline = cmdline_path.read_text(encoding="utf-8", errors="ignore")
-                            # Look for 'xray' binary name or 'xray run'
-                            parts = cmdline.split("\0")
-                            if parts and (parts[0].endswith("/xray") or parts[0] == "xray"):
-                                is_xray = True
-                        except Exception:
-                            pass
-
-                if not is_xray:
+                if not self._is_xray_process(pid):
                     continue
-
                 starttime = self._read_proc_stat(pid)
                 if starttime is not None:
                     return pid, starttime
