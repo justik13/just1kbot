@@ -60,6 +60,7 @@ class TestMigration0026Metadata(unittest.TestCase):
     def test_upgrade_safely_logs_and_does_not_abort_on_ambiguous_data(self):
         """upgrade() must log warnings and complete without raising RuntimeError when ambiguous rows are detected."""
         bind = MagicMock()
+        bind.dialect.name = "postgresql"
         # Mock responses for checks 4a and 4b: both return ambiguous records
         ambig_no_quote_result = MagicMock()
         ambig_no_quote_result.fetchall.return_value = [(1, 100, 5368709120)]
@@ -79,8 +80,34 @@ class TestMigration0026Metadata(unittest.TestCase):
             mock_drop_c.assert_called_once_with("ck_tariff_quotes_operation", "tariff_quotes", type_="check")
             mock_create_c.assert_called_once()
             mock_add_col.assert_called_once()
-            self.assertEqual(mock_exec.call_count, 2)  # backfill quotes + backfill subs
+            # On postgresql: 4 calls (disable trigger DO block, quotes backfill, enable trigger DO block, subs backfill)
+            self.assertEqual(mock_exec.call_count, 4)
+            self.assertIn("DISABLE TRIGGER tariff_quotes_immutable", mock_exec.call_args_list[0][0][0])
+            self.assertIn("UPDATE tariff_quotes", mock_exec.call_args_list[1][0][0])
+            self.assertIn("ENABLE TRIGGER tariff_quotes_immutable", mock_exec.call_args_list[2][0][0])
+            self.assertIn("UPDATE white_internet_subscriptions", mock_exec.call_args_list[3][0][0])
             self.assertEqual(mock_warn.call_count, 2)  # 4a and 4b both logged warnings
+
+    def test_upgrade_skips_trigger_alter_on_non_postgres(self):
+        """upgrade() must skip PostgreSQL DO blocks on non-PostgreSQL dialects."""
+        bind = MagicMock()
+        bind.dialect.name = "sqlite"
+        ambig_no_quote_result = MagicMock()
+        ambig_no_quote_result.fetchall.return_value = []
+        ambig_counts_result = MagicMock()
+        ambig_counts_result.fetchall.return_value = []
+        bind.execute.side_effect = [ambig_no_quote_result, ambig_counts_result]
+
+        with patch("alembic.op.get_bind", return_value=bind), \
+             patch("alembic.op.drop_constraint"), \
+             patch("alembic.op.create_check_constraint"), \
+             patch("alembic.op.execute") as mock_exec, \
+             patch("alembic.op.add_column"):
+            self.migration.upgrade()
+            # On non-postgres: exactly 2 calls (quotes backfill, subs backfill)
+            self.assertEqual(mock_exec.call_count, 2)
+            self.assertIn("UPDATE tariff_quotes", mock_exec.call_args_list[0][0][0])
+            self.assertIn("UPDATE white_internet_subscriptions", mock_exec.call_args_list[1][0][0])
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
@@ -436,6 +463,115 @@ class TestMigration0026PostgreSql(unittest.IsolatedAsyncioTestCase):
 
             # Must NOT be flagged as ambiguous: sub_cnt (1) <= quote_cnt (2)
             self.assertEqual(len(ambiguous_counts), 0)
+
+    async def test_historical_quote_backfill_bypasses_immutable_trigger_and_restores_guard(self):
+        """Historical purchase quotes with 0 RUB are migrated to 'trial' under PostgreSQL trigger."""
+        now = now_utc()
+        async with self.sessions.begin() as session:
+            u_hist = User(telegram_id=int(uuid.uuid4().int % 1000000000))
+            session.add(u_hist)
+            await session.flush()
+
+            from services.white_internet_service import WhiteInternetService
+            from database.repositories.tariff_quotes_repo import get_or_create_current_version
+
+            tariff = await WhiteInternetService.get_or_create_white_internet_tariff(session)
+            tariff_version = await get_or_create_current_version(session, tariff)
+
+            q_hist = TariffQuote(
+                public_id=uuid.uuid4(),
+                user_id=u_hist.id,
+                service_type="white_internet",
+                operation_type=TariffQuoteOperation.PURCHASE,
+                status=TariffQuoteStatus.CONSUMED,
+                target_tariff_version_id=tariff_version.id,
+                amount_due_rub=Decimal("0.00"),
+                current_paid_hours=0,
+                current_paid_value_rub=Decimal("0.00"),
+                bonus_hours=0,
+                resulting_paid_hours=72,
+                resulting_paid_value_rub=Decimal("0.00"),
+                resulting_bonus_hours=0,
+                rounding_loss_hours=Decimal("0.00"),
+                rounding_loss_value_rub=Decimal("0.00"),
+                consumed_at=now - timedelta(days=2),
+                expires_at=now + timedelta(days=1),
+            )
+            session.add(q_hist)
+            await session.flush()
+            q_id = q_hist.id
+
+        # 1. Direct update without disabling trigger MUST fail with 'quote economic fields are immutable'
+        with self.assertRaises(Exception) as ctx:
+            async with self.sessions.begin() as session:
+                await session.execute(
+                    text("UPDATE tariff_quotes SET operation_type = 'trial' WHERE id = :id"),
+                    {"id": q_id},
+                )
+        self.assertIn("quote economic fields are immutable", str(ctx.exception))
+
+        # Reopen fresh session after failed statement in previous transaction
+        async with self.sessions.begin() as session:
+            # 2. Execute the migration pattern (disable trigger -> update -> enable trigger)
+            await session.execute(
+                text(
+                    """
+                    DO $$
+                    BEGIN
+                      IF EXISTS (
+                        SELECT 1 FROM pg_trigger t
+                        JOIN pg_class c ON t.tgrelid = c.oid
+                        WHERE c.relname = 'tariff_quotes' AND t.tgname = 'tariff_quotes_immutable'
+                      ) THEN
+                        ALTER TABLE tariff_quotes DISABLE TRIGGER tariff_quotes_immutable;
+                      END IF;
+                    END $$;
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    UPDATE tariff_quotes
+                    SET operation_type = 'trial'
+                    WHERE service_type = 'white_internet'
+                      AND operation_type = 'purchase'
+                      AND amount_due_rub = 0
+                      AND status = 'consumed'
+                      AND resulting_paid_hours <= 72
+                      AND id = :id
+                    """
+                ),
+                {"id": q_id},
+            )
+            await session.execute(
+                text(
+                    """
+                    DO $$
+                    BEGIN
+                      IF EXISTS (
+                        SELECT 1 FROM pg_trigger t
+                        JOIN pg_class c ON t.tgrelid = c.oid
+                        WHERE c.relname = 'tariff_quotes' AND t.tgname = 'tariff_quotes_immutable'
+                      ) THEN
+                        ALTER TABLE tariff_quotes ENABLE TRIGGER tariff_quotes_immutable;
+                      END IF;
+                    END $$;
+                    """
+                )
+            )
+
+            # Verify quote was successfully updated to 'trial'
+            q_refreshed = await session.get(TariffQuote, q_id)
+            self.assertEqual(q_refreshed.operation_type, TariffQuoteOperation.TRIAL)
+
+            # 3. Verify trigger is restored and rejects subsequent economic modification
+            with self.assertRaises(Exception) as ctx:
+                await session.execute(
+                    text("UPDATE tariff_quotes SET amount_due_rub = 100 WHERE id = :id"),
+                    {"id": q_id},
+                )
+            self.assertIn("quote economic fields are immutable", str(ctx.exception))
 
     async def test_downgrade_fails_closed_when_trial_quotes_exist(self):
         """Downgrade guard prevents rolling back if trial quotes exist in database."""

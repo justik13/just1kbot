@@ -691,6 +691,7 @@ setup_external_nginx_integration "{nginx_dir.as_posix()}"
             "YOOKASSA_SHOP_ID=123\n"
             "YOOKASSA_SECRET_KEY=sec\n"
             "USE_EXTERNAL_NGINX=true\n"
+            "BOT_PORT=58080\n"
         )
         (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
         (self.project_dir / ".env").chmod(0o600)
