@@ -691,8 +691,17 @@ async def sync_client(req: ClientSyncRequest, _: bool = Depends(verify_api_key))
         async with op_lock:
             if req.idempotency_key in completed_idempotent_ops:
                 cached = completed_idempotent_ops[req.idempotency_key]
-                logger.info("Returning cached durable operation for key %s", req.idempotency_key)
-                return {**cached, "idempotent": True}
+                cached_epoch = cached.get("verified_epoch")
+                if not req.expected_node_epoch or not cached_epoch or cached_epoch == req.expected_node_epoch:
+                    logger.info("Returning cached durable operation for key %s", req.idempotency_key)
+                    return {**cached, "idempotent": True}
+                logger.info(
+                    "Stale cached operation for key %s (cached epoch %s != expected %s). Evicting and re-executing.",
+                    req.idempotency_key,
+                    cached_epoch,
+                    req.expected_node_epoch,
+                )
+                completed_idempotent_ops.pop(req.idempotency_key, None)
             return await _sync_client_internal(req, client_uuid, desired_state)
 
     return await _sync_client_internal(req, client_uuid, desired_state)

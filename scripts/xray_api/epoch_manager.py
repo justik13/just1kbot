@@ -159,7 +159,15 @@ class EpochManager:
                         candidate_pid = int(raw)
                         starttime = self._read_proc_stat(candidate_pid)
                         if starttime is not None:
-                            return candidate_pid, starttime
+                            comm_file = Path(f"/proc/{candidate_pid}/comm")
+                            cmd_file = Path(f"/proc/{candidate_pid}/cmdline")
+                            is_xray = False
+                            if comm_file.exists():
+                                is_xray = "xray" in comm_file.read_text(encoding="utf-8", errors="ignore").strip().lower()
+                            elif cmd_file.exists():
+                                is_xray = "xray" in cmd_file.read_text(encoding="utf-8", errors="ignore").strip().lower()
+                            if is_xray:
+                                return candidate_pid, starttime
                 except Exception as e:
                     logger.debug("Error checking pidfile %s: %s", pf, e)
 
