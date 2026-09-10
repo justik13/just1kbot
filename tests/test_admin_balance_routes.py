@@ -220,7 +220,6 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
     async def test_admin_balance_confirm_deduct_aborts_when_bonus_depleted(self):
         """If bonus was spent during FSM step, confirm must abort and not debit real money."""
         from aiogram.types import CallbackQuery, User as TgUser
-        from bot import texts
         from bot.handlers.admin.users.balance_routes import apply_user_balance_change
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
 
