@@ -7,6 +7,7 @@ from bot import texts
 def get_hub_keyboard(
     is_admin: bool = False,
     is_active: bool = False,
+    is_wi_active: bool = False,
     mtproto_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -15,6 +16,12 @@ def get_hub_keyboard(
         builder.button(
             text=texts.BTN_MY_SUBSCRIPTION,
             callback_data="menu_subscription",
+            style="success",
+        )
+    elif is_wi_active:
+        builder.button(
+            text=texts.BTN_WHITE_INTERNET,
+            callback_data="white_internet",
             style="success",
         )
     else:
@@ -55,10 +62,11 @@ def get_hub_keyboard(
             url=mtproto_url,
         )
 
-    builder.button(
-        text=texts.BTN_WHITE_INTERNET,
-        callback_data="white_internet",
-    )
+    if not is_wi_active:
+        builder.button(
+            text=texts.BTN_WHITE_INTERNET,
+            callback_data="white_internet",
+        )
 
     if is_admin:
         builder.button(
@@ -69,9 +77,10 @@ def get_hub_keyboard(
     sizes = [1, 2, 2]
     if mtproto_url:
         sizes.append(1)
-    sizes.append(1)  # White Internet (all users)
+    if not is_wi_active:
+        sizes.append(1)
     if is_admin:
-        sizes.append(1)  # Admin
+        sizes.append(1)
 
     builder.adjust(*sizes)
 

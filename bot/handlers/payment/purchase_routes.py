@@ -303,6 +303,10 @@ async def confirm_purchase(
     operation = (
         texts.PAYMENT_PURCHASE_RENEW_COMPLETED if result.quote.operation_type == "renew" else texts.PURCHASE_COMPLETED
     )
+    from database.repositories.profiles_repo import get_user_profiles
+    profiles = await get_user_profiles(session, db_user.id)
+    has_devices = len(profiles) > 0
+
     await render_hub(
         callback.bot,
         callback.message.chat.id,
@@ -314,7 +318,7 @@ async def confirm_purchase(
             real_balance=int(result.balance_after.real_available),
             bonus_balance=int(result.balance_after.bonus_available),
         ),
-        get_payment_success_keyboard(),
+        get_payment_success_keyboard(has_devices=has_devices),
         message_effect_id=EFFECT_CONFETTI,
         force_new=True,
     )

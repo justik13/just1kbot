@@ -109,15 +109,45 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     from database.repositories.profiles_repo import get_user_profiles
     from bot.formatters import format_days_left, format_subscription_date
 
+    from database.repositories.white_internet_repo import get_subscription_by_user_id
+    from config.enums import WhiteInternetStatus
+    from utils.datetime_helpers import now_utc
+
     is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
+    try:
+        wi_sub = await get_subscription_by_user_id(session, db_user.id)
+    except (TypeError, AttributeError):
+        wi_sub = None
+    now = now_utc()
+    is_wi_active = bool(
+        wi_sub
+        and wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED)
+        and wi_sub.expires_at
+        and wi_sub.expires_at > now
+    )
+
     is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
     name = safe(db_user.first_name or texts.USER_HUB_START)
     balance = await get_account_balance(session, user_id=db_user.id)
     profiles = await get_user_profiles(session, db_user.id)
 
-    status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
-    valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
-    days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
+    if is_active and is_wi_active:
+        status_str = texts.STATUS_SUBSCRIPTION_ACTIVE_DUAL
+        end_date = max(db_user.subscription_end, wi_sub.expires_at)
+        valid_until_str = format_subscription_date(end_date)
+        days_left_str = format_days_left(end_date)
+    elif is_wi_active:
+        status_str = texts.STATUS_SUBSCRIPTION_ACTIVE_WI
+        valid_until_str = format_subscription_date(wi_sub.expires_at)
+        days_left_str = format_days_left(wi_sub.expires_at)
+    elif is_active:
+        status_str = texts.STATUS_SUBSCRIPTION_ACTIVE
+        valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
+        days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
+    else:
+        status_str = texts.STATUS_SUBSCRIPTION_INACTIVE
+        valid_until_str = texts.PLACEHOLDER_DASH
+        days_left_str = texts.ZERO_DAYS_LABEL
 
     inviter_line = ""
     if db_user.referred_by:
@@ -160,6 +190,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     kb = get_hub_keyboard(
         is_admin=is_admin,
         is_active=is_active,
+        is_wi_active=is_wi_active,
         mtproto_url=mtproto_url,
     )
 
@@ -221,11 +252,23 @@ async def cmd_start(
     if is_new_user:
         builder = InlineKeyboardBuilder()
         builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+        builder.button(text=texts.BTN_WHITE_INTERNET, callback_data="white_internet")
+        builder.adjust(1)
+
+        ref_bonus_notice = ""
+        if user.referred_by:
+            ref_bonus_notice = texts.WELCOME_REFERRAL_BONUS_HINT
+
+        welcome_message = (
+            texts.WELCOME_TEXT
+            + ref_bonus_notice
+            + texts.WELCOME_WI_TRIAL_HINT
+        )
 
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.WELCOME_TEXT,
+            welcome_message,
             builder.as_markup(),
             force_new=True,
             session=session,

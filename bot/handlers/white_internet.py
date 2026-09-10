@@ -20,6 +20,7 @@ from config.constants import (
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
+    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_HWID_TTL_HOURS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
@@ -184,7 +185,13 @@ def get_white_internet_overview_keyboard(
     if not getattr(sub, "is_trial", False):
         builder.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
         if sub_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
-            builder.button(text=texts.BTN_WL_ADD_DEVICE, callback_data="wl_add_device_menu")
+            builder.button(
+                text=texts.BTN_WL_ADD_DEVICE.format(
+                    price=int(WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB),
+                    gb=int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES // (1024**3)),
+                ),
+                callback_data="wl_add_device_menu",
+            )
 
     if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
         builder.button(text=texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices")
@@ -413,10 +420,6 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "wl_trial_activate")
 async def process_white_internet_trial_activate(query: CallbackQuery, session: AsyncSession):
-    try:
-        await query.answer()
-    except Exception:
-        pass
     if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
         try:
             await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
@@ -425,6 +428,10 @@ async def process_white_internet_trial_activate(query: CallbackQuery, session: A
         return
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
+        try:
+            await query.answer()
+        except Exception:
+            pass
         return
 
     try:
@@ -436,12 +443,20 @@ async def process_white_internet_trial_activate(query: CallbackQuery, session: A
 
     if not success:
         await session.rollback()
+        try:
+            await query.answer()
+        except Exception:
+            pass
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup(), parse_mode="HTML")
         return
 
     await session.commit()
+    try:
+        await query.answer(texts.WL_TRIAL_ACTIVATED_SUCCESS, show_alert=True)
+    except Exception:
+        pass
     await show_white_internet_menu(query, session)
 
 
@@ -883,12 +898,20 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
     base_gb = int(base_quota_bytes // (1024**3))
     next_traffic = next_limit * base_gb
 
+    extra_price = int(WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB)
+    extra_traffic = int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES // (1024**3))
+
     kb = InlineKeyboardBuilder()
-    kb.button(text=texts.BTN_WL_ADD_DEVICE_CONFIRM, callback_data="wl_add_device_confirm")
+    kb.button(
+        text=texts.BTN_WL_ADD_DEVICE_CONFIRM.format(price=extra_price),
+        callback_data="wl_add_device_confirm",
+    )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
     kb.adjust(1, 1)
 
     text = texts.WL_ADD_DEVICE_CONFIRM.format(
+        extra_price=extra_price,
+        extra_traffic=extra_traffic,
         next_price=next_price,
         next_limit=next_limit,
         next_traffic=next_traffic,

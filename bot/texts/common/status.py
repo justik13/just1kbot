@@ -50,6 +50,8 @@ STATUS_INACTIVE_ICON = "🔴"
 STATUS_NOT_SPECIFIED = "не указан"
 
 STATUS_SUBSCRIPTION_ACTIVE = "🟢 Активна"
+STATUS_SUBSCRIPTION_ACTIVE_DUAL = "🟢 Активна (AWG + Белый Интернет)"
+STATUS_SUBSCRIPTION_ACTIVE_WI = "🟢 Активна (Белый Интернет)"
 
 STATUS_SUBSCRIPTION_INACTIVE = "🔴 Неактивна"
 

@@ -412,7 +412,7 @@ async def _process_server_selection(
                 callback.bot,
                 callback.message.chat.id,
                 error_text,
-                get_back_button("back_to_connections"),
+                get_back_button("add_device"),
             )
             await state.clear()
             return

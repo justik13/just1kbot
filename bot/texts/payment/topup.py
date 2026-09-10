@@ -1,6 +1,10 @@
 """Domain texts for payment/topup.py."""
 from __future__ import annotations
 
+BTN_CHOOSE_LOCATION = "🌍 Выбрать локацию"
+BTN_NEW_TOPUP = "➕ Новое пополнение"
+TOPUP_AMOUNT_STRIP_REGEX = r"(?i)(?:руб\.?|рублей|рубля|р\.?|rub\.?)$"
+
 PAYMENT_LINK_READY = """💳 <b>Ссылка на оплату готова!</b>
 
 Сумма: <b>{amount} ₽</b>

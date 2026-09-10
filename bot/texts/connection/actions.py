@@ -9,9 +9,9 @@ CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC = """⚠️ Устр
 
 CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_NE_MOZHET_BYT_PUSTYM_VVED = "⚠️ Имя не может быть пустым. Введите корректное имя:"
 
-CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SLISHKOM_DLINNOE_IZ_16_SI = """⚠️ Имя слишком длинное ({len_cleaned_base} из 16 символов).
+CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SLISHKOM_DLINNOE_IZ_16_SI = """⚠️ Имя слишком длинное ({len_cleaned_base} из 32 символов).
 
-Пожалуйста, введите имя покороче (максимум 16 символов):"""
+Пожалуйста, введите имя покороче (максимум 32 символа):"""
 
 CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SODERZHIT_NEDOPUSTIMYE_SI = """⚠️ Имя содержит недопустимые символы.
 

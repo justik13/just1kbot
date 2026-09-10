@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
@@ -12,11 +12,16 @@ from bot.keyboards.notifications import (
     get_pre_expiry_keyboard,
 )
 from bot.texts.runtime.notifications import (
+    BTN_EXTEND_WHITE_INTERNET,
     NOTIFY_1D,
     NOTIFY_2H,
     NOTIFY_3D,
     NOTIFY_EXPIRED,
     NOTIFY_GRACE_12H,
+    NOTIFY_WI_1D,
+    NOTIFY_WI_2H,
+    NOTIFY_WI_3D,
+    NOTIFY_WI_EXPIRED,
     TIME_DAYS_HOURS_FORMAT,
     TIME_HOURS_MINUTES_FORMAT,
     TIME_SOON_LABEL,
@@ -120,6 +125,11 @@ async def subscription_notifications_loop(
             )
 
             await _send_post_expiry_notifications(
+                bot,
+                current_time,
+            )
+
+            await _send_white_internet_notifications(
                 bot,
                 current_time,
             )
@@ -445,3 +455,88 @@ async def _send_post_expiry_notifications(
                         user.telegram_id,
                         e,
                     )
+
+
+_wi_notification_cache: TTLCache[tuple[int, str], bool] = TTLCache(
+    maxsize=10000,
+    ttl=86400 * 7,
+)
+
+
+async def _send_white_internet_notifications(
+    bot: Bot,
+    current_time: datetime,
+) -> None:
+    from database.models import WhiteInternetSubscription
+    from config.enums import WhiteInternetStatus
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    async with session_scope() as session:
+        cutoff = current_time + timedelta(days=3)
+        stmt = (
+            select(WhiteInternetSubscription, User.telegram_id, User.is_bot_blocked)
+            .join(User, WhiteInternetSubscription.user_id == User.id)
+            .where(
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                ]),
+                WhiteInternetSubscription.expires_at.isnot(None),
+                WhiteInternetSubscription.expires_at <= cutoff,
+                User.is_bot_blocked.is_(False),
+                User.is_banned.is_(False),
+                User.is_deleted.is_(False),
+            )
+            .limit(NOTIFICATION_BATCH_SIZE)
+        )
+        rows = (await session.execute(stmt)).all()
+
+        for sub, telegram_id, is_blocked in rows:
+            if not telegram_id or is_blocked:
+                continue
+
+            time_left = sub.expires_at - current_time
+            notify_type = None
+            msg = None
+
+            if time_left.total_seconds() <= 0:
+                if (sub.id, "expired") not in _wi_notification_cache:
+                    notify_type = "expired"
+                    msg = NOTIFY_WI_EXPIRED
+            elif time_left <= timedelta(hours=2):
+                if (sub.id, "2h") not in _wi_notification_cache:
+                    notify_type = "2h"
+                    msg = NOTIFY_WI_2H.format(countdown=_format_countdown(time_left))
+            elif time_left <= timedelta(days=1):
+                if (sub.id, "1d") not in _wi_notification_cache:
+                    notify_type = "1d"
+                    msg = NOTIFY_WI_1D.format(countdown=_format_countdown(time_left))
+            elif time_left <= timedelta(days=3):
+                if (sub.id, "3d") not in _wi_notification_cache:
+                    notify_type = "3d"
+                    msg = NOTIFY_WI_3D.format(date=sub.expires_at.strftime('%d.%m.%Y %H:%M'))
+
+            if not notify_type or not msg:
+                continue
+
+            kb = InlineKeyboardBuilder()
+            kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="white_internet")
+
+            try:
+                await global_send_limiter.acquire()
+                await bot.send_message(
+                    telegram_id,
+                    msg,
+                    reply_markup=kb.as_markup(),
+                    parse_mode="HTML",
+                )
+                _wi_notification_cache[(sub.id, notify_type)] = True
+            except TelegramForbiddenError:
+                _wi_notification_cache[(sub.id, notify_type)] = True
+            except Exception as e:
+                logger.warning(
+                    "Failed to send WI notification to %s: %s",
+                    telegram_id,
+                    e,
+                )
+

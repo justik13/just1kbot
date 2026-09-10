@@ -170,10 +170,12 @@ def get_change_tariff_keyboard(
     return builder.as_markup()
 
 
-def get_payment_success_keyboard() -> InlineKeyboardMarkup:
+def get_payment_success_keyboard(*, has_devices: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    action_cb = "menu_connections" if has_devices else "add_device"
+    action_text = texts.BTN_PAYMENT_CONNECT_DEVICE if has_devices else texts.BTN_CHOOSE_LOCATION
     builder.button(
-        text=texts.BTN_PAYMENT_CONNECT_DEVICE, callback_data="menu_connections"
+        text=action_text, callback_data=action_cb
     )
     builder.button(
         text=texts.BTN_PAYMENT_TO_SUBSCRIPTION, callback_data="menu_subscription"
@@ -193,6 +195,10 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
             callback_data="balance_resume_topup",
             style="primary",
         )
+        builder.button(
+            text=texts.BTN_NEW_TOPUP,
+            callback_data="balance_new_topup",
+        )
     else:
         builder.button(
             text=texts.BUTTON_TOPUP,
@@ -200,17 +206,16 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
             style="success",
         )
     builder.button(
-        text=texts.BTN_ISTORIYA_POPOLNENIJ,
-        callback_data="user_history",
-    )
-    builder.button(
         text=texts.BTN_ISTORIYA_OPERATSIJ,
         callback_data="balance_history",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
     )
-    builder.adjust(1, 2, 1)
+    if has_visible_topup:
+        builder.adjust(2, 1, 1)
+    else:
+        builder.adjust(1, 1, 1)
     return builder.as_markup()
 
 
