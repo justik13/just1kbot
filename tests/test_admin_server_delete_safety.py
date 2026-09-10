@@ -146,6 +146,72 @@ class AdminServerDeleteSafetyTests(unittest.IsolatedAsyncioTestCase):
         mock_session.commit.assert_awaited_once()
         callback.answer.assert_awaited_once()
 
+    async def test_edit_server_url_blocked_when_white_internet_subscriptions_exist(self):
+        from bot.handlers.admin.servers.edit_routes import process_edit_server_url
+        from database.models import Server
+
+        message = AsyncMock()
+        message.from_user.id = 1
+        message.text = "https://new-origin.example.com:8443"
+        message.chat.id = 100
+
+        state = AsyncMock(spec=FSMContext)
+        state.get_data.return_value = {"server_id": 10}
+
+        server = Server(id=10, name="xray-origin", api_url="https://old.example.com:8443", api_key="secret", protocol="xray")
+        session = AsyncMock()
+
+        exec_res = MagicMock()
+        exec_res.scalar_one.return_value = 0
+        session.execute.return_value = exec_res
+        session.scalar.return_value = 5
+
+        with patch("bot.handlers.admin.servers.edit_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.edit_routes.get_server_by_id", return_value=server), \
+             patch("bot.handlers.admin.servers.edit_routes.get_server_by_api_url", return_value=None), \
+             patch("bot.handlers.admin.servers.edit_routes.is_safe_url", return_value=True), \
+             patch("services.xray_node_client.XrayNodeClient.check_health", return_value=(True, 1, {})), \
+             patch("bot.handlers.admin.servers.edit_routes.render_hub") as mock_render:
+
+            await process_edit_server_url(message, state, session)
+
+            mock_render.assert_called_once()
+            text = mock_render.call_args[0][2]
+            self.assertIn("Связанных устройств: <b>5</b>", text)
+            state.clear.assert_called_once()
+
+    async def test_edit_server_key_blocked_when_white_internet_subscriptions_exist(self):
+        from bot.handlers.admin.servers.edit_routes import process_edit_server_key
+        from database.models import Server
+
+        message = AsyncMock()
+        message.from_user.id = 1
+        message.text = "new-secret-key-12345"
+        message.chat.id = 100
+
+        state = AsyncMock(spec=FSMContext)
+        state.get_data.return_value = {"server_id": 10}
+
+        server = Server(id=10, name="xray-origin", api_url="https://old.example.com:8443", api_key="secret", protocol="xray")
+        session = AsyncMock()
+        exec_res = MagicMock()
+        exec_res.scalar_one.return_value = 0
+        session.execute.return_value = exec_res
+        session.scalar.return_value = 3
+
+        with patch("bot.handlers.admin.servers.edit_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.edit_routes.get_server_by_id", return_value=server), \
+             patch("services.xray_node_client.XrayNodeClient.check_health", return_value=(True, 1, {})), \
+             patch("bot.handlers.admin.servers.edit_routes.render_hub") as mock_render:
+
+            await process_edit_server_key(message, state, session)
+
+            mock_render.assert_called_once()
+            text = mock_render.call_args[0][2]
+            self.assertIn("Связанных устройств: <b>3</b>", text)
+            state.clear.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+

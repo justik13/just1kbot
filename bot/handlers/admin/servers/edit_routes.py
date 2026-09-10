@@ -11,7 +11,12 @@ from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from config.constants import AMNEZIA_PROTOCOL
-from database.models import APIOperation, VPNProfile
+from config.enums import WhiteInternetStatus
+from database.models import (
+    APIOperation,
+    VPNProfile,
+    WhiteInternetSubscription,
+)
 from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
@@ -575,12 +580,25 @@ async def process_edit_server_url(
             )
         ).scalar_one()
 
-        if profiles_count > 0 or active_ops_count > 0:
+        wl_subs_count = (
+            await session.scalar(
+                select(func.count(WhiteInternetSubscription.id)).where(
+                    WhiteInternetSubscription.origin_node_id == server_id,
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.EXHAUSTED,
+                    ]),
+                )
+            )
+        ) or 0
+
+        if profiles_count > 0 or active_ops_count > 0 or wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_EDIT_URL_BLOCKED.format(
-                    devices_count=profiles_count,
+                    devices_count=profiles_count + wl_subs_count,
                     operations_count=active_ops_count,
                 ),
                 get_back_button(f"admin_server_card:{server_id}"),
@@ -849,12 +867,25 @@ async def process_edit_server_key(
             )
         ).scalar_one()
 
-        if profiles_count > 0 or active_ops_count > 0:
+        wl_subs_count = (
+            await session.scalar(
+                select(func.count(WhiteInternetSubscription.id)).where(
+                    WhiteInternetSubscription.origin_node_id == server_id,
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.EXHAUSTED,
+                    ]),
+                )
+            )
+        ) or 0
+
+        if profiles_count > 0 or active_ops_count > 0 or wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_EDIT_KEY_BLOCKED.format(
-                    devices_count=profiles_count,
+                    devices_count=profiles_count + wl_subs_count,
                     operations_count=active_ops_count,
                 ),
                 get_back_button(f"admin_server_card:{server_id}"),

@@ -519,6 +519,19 @@ async def apply_user_balance_change(
     # (MissingGreenlet) in async context.
     target_user_id = user.id
 
+    if action_type == "deduct":
+        fresh_balance = await get_account_balance(session, user_id=target_user_id, for_update=True)
+        if fresh_balance.bonus_available < amount:
+            await session.rollback()
+            await callback.answer(
+                texts.ADMIN_USERS_BALANCE_NEDOSTATOCHNO_BONUS_SREDST.format(
+                    int_fresh_bonus_available=int(fresh_balance.bonus_available)
+                ),
+                show_alert=True,
+            )
+            await state.clear()
+            return
+
     try:
         await create_admin_adjustment(
             session,
