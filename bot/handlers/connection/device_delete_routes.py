@@ -49,6 +49,10 @@ async def request_delete_device(
 
     from .device_view_routes import can_show_delete_action, render_device_screen
 
+    if await DeviceService.has_active_migration(session, profile.id):
+        await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
+        return
+
     if not can_show_delete_action(profile):
         status = getattr(profile, "provisioning_status", "")
         if status == "deleting":
@@ -151,7 +155,11 @@ async def confirm_delete_device(
     try:
         await state.clear()
 
-        from services.device_service import DeviceCreationError, DeviceStillCreating
+        from services.device_service import (
+            DeviceCreationError,
+            DeviceMigrationInProgress,
+            DeviceStillCreating,
+        )
 
         try:
             success = await DeviceService.delete_device(
@@ -159,6 +167,10 @@ async def confirm_delete_device(
                 profile,
                 actor_id=callback.from_user.id,
             )
+        except DeviceMigrationInProgress:
+            await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
+            answered = True
+            return
         except DeviceStillCreating:
             await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
             answered = True

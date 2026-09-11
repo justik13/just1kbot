@@ -75,6 +75,10 @@ class MigrationCooldownActive(DeviceCreationError):
         super().__init__(f"Migration cooldown active: {remaining_seconds}s")
 
 
+class DeviceMigrationInProgress(DeviceCreationError):
+    pass
+
+
 def _is_same_day_msk(stored_date: date | None, today: date) -> bool:
     return stored_date == today if stored_date else False
 
@@ -259,6 +263,36 @@ class DeviceService:
         return profile
 
     @staticmethod
+    async def has_active_migration(session: AsyncSession, profile_id: int) -> bool:
+        """Check if there is an in-flight peer creation operation migrating from this profile."""
+        query = (
+            select(APIOperation.id)
+            .where(
+                APIOperation.operation_type == "create_peer",
+                APIOperation.status.in_(("pending", "processing", "retry")),
+                APIOperation.payload["migrating_from_id"].as_string() == str(profile_id),
+            )
+            .limit(1)
+        )
+        return (await session.execute(query)).scalar_one_or_none() is not None
+
+    @staticmethod
+    async def get_last_migration_time(session: AsyncSession, profile_id: int) -> datetime | None:
+        """Return the completion or creation time of the last migration that created this profile, if any."""
+        query = (
+            select(func.coalesce(APIOperation.completed_at, APIOperation.created_at))
+            .where(
+                APIOperation.operation_type == "create_peer",
+                APIOperation.profile_id == profile_id,
+                APIOperation.status == "succeeded",
+                APIOperation.payload["migrating_from_id"].as_string().is_not(None),
+            )
+            .order_by(APIOperation.id.desc())
+            .limit(1)
+        )
+        return (await session.execute(query)).scalar_one_or_none()
+
+    @staticmethod
     async def migrate_device(
         session: AsyncSession,
         *,
@@ -293,6 +327,9 @@ class DeviceService:
         if old_profile.server_id == target_server_id:
             raise DeviceCreationError("Target server cannot be the same as current server")
 
+        if await DeviceService.has_active_migration(session, old_profile.id):
+            raise DeviceMigrationInProgress("Device is already undergoing server migration")
+
         target_server = (
             await session.execute(
                 select(Server)
@@ -310,9 +347,10 @@ class DeviceService:
         ):
             raise NoActiveSubscription("No active subscription")
 
-        # 15-minute cooldown per device
-        if old_profile.created_at:
-            elapsed = (now_utc() - old_profile.created_at).total_seconds()
+        # 15-minute cooldown between migrations of this device slot
+        last_migrated = await DeviceService.get_last_migration_time(session, old_profile.id)
+        if last_migrated:
+            elapsed = (now_utc() - last_migrated).total_seconds()
             cooldown_seconds = 900
             if elapsed < cooldown_seconds:
                 raise MigrationCooldownActive(int(cooldown_seconds - elapsed))
@@ -477,6 +515,8 @@ class DeviceService:
                 return True
             if profile.provisioning_status not in ALLOWED_DELETE_STATES:
                 raise DeviceCreationError(f"Deletion not allowed in status: {profile.provisioning_status}")
+            if await DeviceService.has_active_migration(session, profile.id):
+                raise DeviceMigrationInProgress("Device is currently undergoing server migration")
 
         # Capture server and device info for audit before deletion
         server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)

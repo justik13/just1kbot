@@ -1,11 +1,16 @@
+import os
 import unittest
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from database.models import Server, User, VPNProfile
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from database.models import APIOperation, Server, User, VPNProfile
+from services.api_operations_queue import enqueue_api_operation
 from services.device_service import (
     DeviceCreationError,
+    DeviceMigrationInProgress,
     DeviceService,
     MigrationCooldownActive,
 )
@@ -64,6 +69,7 @@ class TestDeviceMigrationService(unittest.IsolatedAsyncioTestCase):
         # Set up execute scalar results
         async def mock_execute(query, *args, **kwargs):
             m = MagicMock()
+            m.scalar_one_or_none.return_value = None
             q_str = str(query).lower()
             if "from users" in q_str:
                 m.scalar_one.return_value = user
@@ -115,7 +121,13 @@ class TestDeviceMigrationService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["server_id"], 200)
         self.assertEqual(kwargs["payload"]["migrating_from_id"], 10)
 
-    async def test_migrate_device_cooldown_rejection(self):
+    @patch.object(DeviceService, "get_last_migration_time", new_callable=AsyncMock)
+    @patch.object(DeviceService, "has_active_migration", new_callable=AsyncMock)
+    async def test_migrate_device_cooldown_rejection(
+        self, mock_has_active, mock_get_last_migration
+    ):
+        mock_has_active.return_value = False
+        mock_get_last_migration.return_value = self.now - timedelta(minutes=5)
         mock_session = AsyncMock()
 
         user = User(
@@ -126,14 +138,13 @@ class TestDeviceMigrationService(unittest.IsolatedAsyncioTestCase):
             is_banned=False,
         )
 
-        # Profile created 5 mins ago (cooldown 15m active)
         old_profile = VPNProfile(
             id=10,
             user_id=1,
             server_id=100,
             device_name="Phone #1",
             provisioning_status="active",
-            created_at=self.now - timedelta(minutes=5),
+            created_at=self.now - timedelta(minutes=20),
         )
 
         target_server = Server(
@@ -174,6 +185,179 @@ class TestDeviceMigrationService(unittest.IsolatedAsyncioTestCase):
                 snapshot=snapshot,
             )
         self.assertTrue(ctx.exception.remaining_seconds > 0)
+
+    @patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock)
+    @patch("services.device_service.AuditService.log_action", new_callable=AsyncMock)
+    @patch("services.device_service.enqueue_api_operation", new_callable=AsyncMock)
+    @patch.object(DeviceService, "get_last_migration_time", new_callable=AsyncMock)
+    @patch.object(DeviceService, "has_active_migration", new_callable=AsyncMock)
+    async def test_first_migration_allowed_for_recent_device(
+        self,
+        mock_has_active,
+        mock_get_last_migration,
+        mock_enqueue,
+        mock_audit,
+        mock_ensure_capacity,
+    ):
+        mock_has_active.return_value = False
+        mock_get_last_migration.return_value = None  # Never migrated before
+
+        mock_session = AsyncMock()
+        user = User(
+            id=1,
+            telegram_id=12345,
+            device_limit=1,
+            subscription_end=self.now + timedelta(days=30),
+            is_banned=False,
+            device_creations_today=0,
+            last_creation_date=self.now.date(),
+        )
+        # Created only 1 minute ago, but first migration is allowed immediately
+        old_profile = VPNProfile(
+            id=10,
+            user_id=1,
+            server_id=100,
+            device_name="Phone #1",
+            peer_id="peer-old-123",
+            provisioning_status="active",
+            created_at=self.now - timedelta(minutes=1),
+        )
+        target_server = Server(
+            id=200,
+            name="Germany",
+            protocol="amneziawg2",
+            is_active=True,
+            max_clients=50,
+            api_url="https://vpn.example.com",
+            api_key="secret",
+        )
+
+        async def mock_execute(query, *args, **kwargs):
+            m = MagicMock()
+            q_str = str(query).lower()
+            if "from users" in q_str:
+                m.scalar_one.return_value = user
+            elif "from vpn_profiles" in q_str and "where vpn_profiles.id =" in q_str:
+                m.scalar_one_or_none.return_value = old_profile
+            elif "from servers" in q_str:
+                m.scalar_one_or_none.return_value = target_server
+            elif "count(vpn_profiles.id)" in q_str:
+                m.scalar_one.return_value = 0
+            elif "vpn_profiles.peer_id" in q_str:
+                m.scalars.return_value.all.return_value = []
+            elif "lower(vpn_profiles.device_name)" in q_str:
+                m.scalar_one_or_none.return_value = None
+            return m
+
+        mock_session.execute = mock_execute
+        mock_session.add = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_session.begin_nested = MagicMock(return_value=mock_ctx)
+
+        snapshot = ServerPeerSnapshot(
+            server_id=200,
+            peer_ids=set(),
+            captured_at=self.now,
+        )
+
+        new_profile = await DeviceService.migrate_device(
+            mock_session,
+            user_id=1,
+            profile_id=10,
+            target_server_id=200,
+            snapshot=snapshot,
+        )
+        self.assertEqual(new_profile.server_id, 200)
+
+    @patch.object(DeviceService, "has_active_migration", new_callable=AsyncMock)
+    async def test_migrate_device_blocked_when_already_migrating(
+        self, mock_has_active
+    ):
+        mock_has_active.return_value = True
+
+        mock_session = AsyncMock()
+        user = User(
+            id=1,
+            telegram_id=12345,
+            device_limit=1,
+            subscription_end=self.now + timedelta(days=30),
+            is_banned=False,
+        )
+        old_profile = VPNProfile(
+            id=10,
+            user_id=1,
+            server_id=100,
+            device_name="Phone #1",
+            provisioning_status="active",
+            created_at=self.now - timedelta(minutes=20),
+        )
+
+        async def mock_execute(query, *args, **kwargs):
+            m = MagicMock()
+            q_str = str(query).lower()
+            if "from users" in q_str:
+                m.scalar_one.return_value = user
+            elif "from vpn_profiles" in q_str:
+                m.scalar_one_or_none.return_value = old_profile
+            return m
+
+        mock_session.execute = mock_execute
+        snapshot = ServerPeerSnapshot(
+            server_id=200, peer_ids=set(), captured_at=self.now
+        )
+
+        with self.assertRaises(DeviceMigrationInProgress):
+            await DeviceService.migrate_device(
+                mock_session,
+                user_id=1,
+                profile_id=10,
+                target_server_id=200,
+                snapshot=snapshot,
+            )
+
+    @patch.object(DeviceService, "has_active_migration", new_callable=AsyncMock)
+    @patch(
+        "services.device_service.resolve_profile_endpoint_snapshot",
+        new_callable=AsyncMock,
+    )
+    @patch("services.device_service.ensure_delete_operation", new_callable=AsyncMock)
+    @patch("services.device_service.AuditService.log_action", new_callable=AsyncMock)
+    async def test_delete_device_blocked_during_active_migration(
+        self, mock_audit, mock_ensure_delete, mock_resolve_snapshot, mock_has_active
+    ):
+        mock_session = AsyncMock()
+        mock_has_active.return_value = True
+        mock_resolve_snapshot.return_value = (
+            100,
+            "Server1",
+            "https://srv.test",
+            "key",
+        )
+
+        user = User(id=1, telegram_id=12345)
+        profile = VPNProfile(
+            id=10,
+            user_id=1,
+            server_id=100,
+            device_name="Phone #1",
+            peer_id="peer-10",
+            provisioning_status="active",
+        )
+
+        mock_exec = MagicMock()
+        mock_exec.scalar_one_or_none.return_value = profile
+        mock_session.execute = AsyncMock(return_value=mock_exec)
+
+        # Non-force delete must raise DeviceMigrationInProgress
+        with self.assertRaises(DeviceMigrationInProgress):
+            await DeviceService.delete_device(mock_session, profile, actor_id=user.id, force=False)
+
+        # Force delete must bypass the active migration check
+        mock_session.delete = AsyncMock()
+        await DeviceService.delete_device(mock_session, profile, actor_id=user.id, force=True)
+        mock_ensure_delete.assert_called_once()
 
     async def test_migrate_device_same_server_rejection(self):
         mock_session = AsyncMock()
@@ -280,3 +464,102 @@ class TestMigrationFinalizerHook(unittest.IsolatedAsyncioTestCase):
         await _schedule_migration_grace_deletion(mock_session, operation, new_profile)
         # Session should not even be queried
         mock_session.execute.assert_not_called()
+
+
+@unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
+class TestDeviceMigrationPostgres(unittest.IsolatedAsyncioTestCase):
+    """PostgreSQL integration tests verifying JSONB migration query semantics."""
+
+    async def asyncSetUp(self):
+        if not os.environ["TEST_DATABASE_URL"].startswith(
+            ("postgresql://", "postgresql+asyncpg://")
+        ):
+            self.fail("TEST_DATABASE_URL must point to PostgreSQL")
+        self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
+        async with self.sessions.begin() as s:
+            from sqlalchemy import text
+
+            await s.execute(text(TRUNCATE_SQL))
+
+    async def asyncTearDown(self):
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
+        async with self.sessions.begin() as s:
+            from sqlalchemy import text
+
+            await s.execute(text(TRUNCATE_SQL))
+        await self.engine.dispose()
+
+    async def test_has_active_migration_postgres_jsonb(self):
+        async with self.sessions.begin() as session:
+            # Initially no active migration for profile 42
+            self.assertFalse(await DeviceService.has_active_migration(session, 42))
+
+            # Enqueue a pending create_peer migrating from 42
+            await enqueue_api_operation(
+                session,
+                operation_type="create_peer",
+                idempotency_key="migrate-test-1",
+                api_url_snapshot="https://test.server",
+                api_key_snapshot="key",
+                client_name="test_client",
+                payload={"migrating_from_id": 42},
+            )
+
+        async with self.sessions.begin() as session:
+            # Now active migration should be detected
+            self.assertTrue(await DeviceService.has_active_migration(session, 42))
+            # Different profile should still be false
+            self.assertFalse(await DeviceService.has_active_migration(session, 99))
+
+    async def test_get_last_migration_time_postgres_jsonb(self):
+        async with self.sessions.begin() as session:
+            u = User(telegram_id=987654)
+            s = Server(
+                name="TestServer",
+                protocol="amneziawg2",
+                is_active=True,
+                max_clients=50,
+                api_url="https://vpn.example.com",
+                api_key="secret",
+            )
+            session.add_all([u, s])
+            await session.flush()
+
+            p = VPNProfile(
+                user_id=u.id,
+                server_id=s.id,
+                device_name="TestDevice",
+                provisioning_status="active",
+            )
+            session.add(p)
+            await session.flush()
+
+            # Initially None
+            self.assertIsNone(await DeviceService.get_last_migration_time(session, p.id))
+
+            # Add succeeded create_peer operation that created profile p.id with migrating_from_id
+            t0 = now_utc() - timedelta(minutes=10)
+            op = APIOperation(
+                operation_type="create_peer",
+                idempotency_key="migrate-test-2",
+                profile_id=p.id,
+                server_id=s.id,
+                client_name="client",
+                status="succeeded",
+                payload={"migrating_from_id": 50},
+                completed_at=t0,
+            )
+            session.add(op)
+
+        async with self.sessions.begin() as session:
+            last_time = await DeviceService.get_last_migration_time(session, p.id)
+            self.assertIsNotNone(last_time)
+            self.assertAlmostEqual(last_time.timestamp(), t0.timestamp(), delta=2)

@@ -21,6 +21,7 @@ from services.device_service import (
     DailyLimitExceeded,
     DeviceCreationError,
     DeviceLimitExceeded,
+    DeviceMigrationInProgress,
     DeviceService,
     DuplicateDeviceName,
     MigrationCooldownActive,
@@ -252,6 +253,14 @@ async def confirm_migrate_device(
                 snapshot=snapshot,
             )
             await session.commit()
+        except DeviceMigrationInProgress:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
+            await render_device_screen(callback.bot, callback.message.chat.id, profile, user, session)
+            return
         except MigrationCooldownActive as e:
             try:
                 await session.rollback()
@@ -303,7 +312,7 @@ async def confirm_migrate_device(
 
         if new_profile:
             try:
-                ready_profile = await _await_profile_ready(new_profile.id, timeout_seconds=5.0)
+                ready_profile = await _await_profile_ready(new_profile.id, timeout_seconds=7.0)
             except Exception:
                 logger.exception("Error awaiting profile ready for migrated profile_id=%s", new_profile.id)
                 ready_profile = None
@@ -320,8 +329,8 @@ async def confirm_migrate_device(
                     message_effect_id=EFFECT_FIRE,
                     notice=notice,
                 )
-            else:
-                # Creation failed or timed out: original profile was untouched and remains active
+            elif ready_profile and ready_profile.provisioning_status in ("create_failed", "create_cleanup_pending"):
+                # Creation genuinely failed on node: original profile was untouched and remains active
                 await session.refresh(user)
                 await render_device_screen(
                     callback.bot,
@@ -330,6 +339,19 @@ async def confirm_migrate_device(
                     user,
                     session,
                     notice=texts.DEVICE_MIGRATE_FAILED_NOTICE,
+                )
+            else:
+                # Timeout reached while still pending_create: background worker continues provisioning.
+                # Never show false failure notice. Render the new profile with pending notice.
+                await session.refresh(user)
+                pending_profile = ready_profile or await get_profile_by_id(session, new_profile.id) or new_profile
+                await render_device_screen(
+                    callback.bot,
+                    callback.message.chat.id,
+                    pending_profile,
+                    user,
+                    session,
+                    notice=texts.DEVICE_MIGRATE_PENDING_NOTICE,
                 )
     finally:
         _migrating_devices.pop(telegram_user_id, None)

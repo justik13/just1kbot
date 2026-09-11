@@ -48,6 +48,12 @@ async def rename_device_start(
         )
         return
 
+    from services.device_service import DeviceService
+
+    if await DeviceService.has_active_migration(session, profile.id):
+        await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
+        return
+
     if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
         if profile.provisioning_status == "deleting":
             msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
@@ -160,6 +166,16 @@ async def rename_device_process(
             message.chat.id,
             texts.DEVICE_ACCESS_INACTIVE,
             get_back_button("back_to_connections"),
+        )
+    from services.device_service import DeviceService
+
+    if await DeviceService.has_active_migration(session, profile.id):
+        await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.DEVICE_MIGRATE_IN_PROGRESS,
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 
