@@ -26,13 +26,13 @@ def get_device_keyboard(
 
     if config_ready:
         builder.button(
-            text=texts.BTN_CHANGE_SERVER,
-            callback_data=f"migrate_device:{profile_id}",
+            text=texts.CONNECTION_DEVICES_DEVICE_ALT_CONNECTION,
+            callback_data=f"alt_connection:{profile_id}",
         )
         adjustments.append(1)
         builder.button(
-            text=texts.CONNECTION_DEVICES_DEVICE_ALT_CONNECTION,
-            callback_data=f"alt_connection:{profile_id}",
+            text=texts.BTN_CHANGE_SERVER,
+            callback_data=f"migrate_device:{profile_id}",
         )
         adjustments.append(1)
 

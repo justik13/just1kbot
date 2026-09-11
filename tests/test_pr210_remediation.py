@@ -796,6 +796,9 @@ class TestIntegrationsAndCleanupVerification(unittest.TestCase):
         self.assertTrue(rows[1][0].callback_data.startswith("alt_connection"))
         self.assertIsNone(rows[1][0].style)  # Not primary!
 
+        self.assertEqual(len(rows[2]), 1)  # Migrate device
+        self.assertTrue(rows[2][0].callback_data.startswith("migrate_device"))
+
 
 if __name__ == "__main__":
     unittest.main()
