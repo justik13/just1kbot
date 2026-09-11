@@ -281,6 +281,33 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
             cb.answer.assert_awaited_once_with(show_alert=False)
             cb.message.delete.assert_awaited_once()
 
+    async def test_balance_new_topup_uses_hide_topup_non_destructively(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from bot.handlers.payment.balance_routes import balance_new_topup
+
+        cb = MagicMock()
+        cb.answer = AsyncMock()
+        state = MagicMock()
+        session = AsyncMock()
+        db_user = MagicMock()
+        db_user.id = 42
+
+        visible_topup = MagicMock(id=100)
+
+        with (
+            patch("services.account_topup.get_visible_balance_topup", new=AsyncMock(return_value=visible_topup)) as mock_get,
+            patch("services.account_topup.hide_balance_topup", new=AsyncMock()) as mock_hide,
+            patch("services.account_topup.cancel_all_unfinished_topups", new=AsyncMock()) as mock_cancel,
+            patch("bot.handlers.payment.balance_routes.choose_topup_amount", new=AsyncMock()) as mock_choose,
+        ):
+            await balance_new_topup(cb, state, session, db_user)
+
+            cb.answer.assert_awaited_once_with(show_alert=False)
+            mock_get.assert_awaited_once_with(session, user_id=42)
+            mock_hide.assert_awaited_once_with(session, user_id=42, payment_id=100)
+            mock_cancel.assert_not_called()
+            mock_choose.assert_awaited_once_with(cb, state, session, db_user)
+
 
 if __name__ == "__main__":
     unittest.main()

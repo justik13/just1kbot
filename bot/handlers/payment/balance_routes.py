@@ -770,7 +770,18 @@ async def balance_new_topup(
     await callback.answer(show_alert=False)
     if db_user is None:
         return
-    from services.account_topup import cancel_all_unfinished_topups
-    await cancel_all_unfinished_topups(session, user_id=db_user.id)
+    from services.account_topup import get_visible_balance_topup, hide_balance_topup
+
+    visible = await get_visible_balance_topup(session, user_id=db_user.id)
+    if visible:
+        try:
+            await hide_balance_topup(session, user_id=db_user.id, payment_id=visible.id)
+        except Exception as exc:
+            logger.warning(
+                "Could not hide topup %s for user %s: %s",
+                visible.id,
+                db_user.id,
+                exc,
+            )
     await choose_topup_amount(callback, state, session, db_user)
 

@@ -687,3 +687,63 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             mock_buy.assert_awaited_once_with(self.session, user_id=self.user.id)
             self.assertEqual(payment.topup_context.get("auto_fulfill_status"), "succeeded")
 
+    async def test_hub_header_status_multi_protocol_matrix(self):
+        from datetime import timedelta
+        from bot.handlers.start import _build_hub_text_and_kb
+        from bot import texts
+        from config.enums import WhiteInternetStatus
+        from utils.datetime_helpers import now_utc
+
+        now = now_utc()
+        future = now + timedelta(days=5)
+
+        db_user = MagicMock(spec=User)
+        db_user.id = 1
+        db_user.telegram_id = 12345
+        db_user.first_name = "Alice"
+        db_user.subscription_end = future
+        db_user.device_limit = 2
+        db_user.referred_by = None
+
+        mock_balance = MagicMock(real_available=100, bonus_available=0)
+
+        # Helper to run _build_hub_text_and_kb with mocked check_access and get_subscription
+        async def run_hub(awg_active: bool, wi_sub_val):
+            with (
+                patch("services.subscription.SubscriptionService.check_access", new=AsyncMock(return_value=awg_active)),
+                patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=wi_sub_val)),
+                patch("bot.handlers.start.get_account_balance", new=AsyncMock(return_value=mock_balance)),
+                patch("bot.handlers.start.get_settings", return_value=MagicMock(ADMIN_IDS=[999999])),
+                patch("database.repositories.profiles_repo.get_user_profiles", new=AsyncMock(return_value=[])),
+                patch("database.repositories.system_settings_repo.get_system_setting", new=AsyncMock(return_value=None)),
+            ):
+                text, kb = await _build_hub_text_and_kb(self.session, db_user)
+                return text
+
+        # 1. Dual active: AWG + WI
+        wi_active = MagicMock(status=WhiteInternetStatus.ACTIVE, expires_at=future)
+        text1 = await run_hub(True, wi_active)
+        self.assertIn(texts.STATUS_SUBSCRIPTION_ACTIVE_DUAL, text1)
+
+        # 2. AWG active + WI exhausted
+        wi_exhausted = MagicMock(status=WhiteInternetStatus.EXHAUSTED, expires_at=future)
+        text2 = await run_hub(True, wi_exhausted)
+        self.assertIn(texts.STATUS_SUBSCRIPTION_ACTIVE_AWG_WI_EXHAUSTED, text2)
+
+        # 3. AWG active + no WI
+        text3 = await run_hub(True, None)
+        self.assertIn(texts.STATUS_SUBSCRIPTION_ACTIVE, text3)
+        self.assertNotIn(texts.STATUS_SUBSCRIPTION_ACTIVE_DUAL, text3)
+
+        # 4. AWG inactive + WI active
+        text4 = await run_hub(False, wi_active)
+        self.assertIn(texts.STATUS_SUBSCRIPTION_ACTIVE_WI, text4)
+
+        # 5. AWG inactive + WI exhausted
+        text5 = await run_hub(False, wi_exhausted)
+        self.assertIn(texts.STATUS_SUBSCRIPTION_EXHAUSTED_WI, text5)
+        self.assertNotIn("🟢", text5)
+
+        # 6. Both inactive
+        text6 = await run_hub(False, None)
+        self.assertIn(texts.STATUS_SUBSCRIPTION_INACTIVE, text6)
