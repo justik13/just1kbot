@@ -205,24 +205,136 @@ Endpoint = 185.220.1.50:443
 PersistentKeepalive = 25
 """
 
-# In-memory test state
+SLOT_1_GERMANY = """[Interface]
+Address = 10.8.2.2/32
+DNS = 8.8.8.8, 1.1.1.1
+MTU = 1280
+PrivateKey = gH9xWvuTSR8+qPONml65KJIHGFEDCba0987654321Z=
+Jc = 4
+Jmin = 10
+Jmax = 50
+S1 = 80
+S2 = 112
+S3 = 6
+S4 = 3
+H1 = 169000000-1200000000
+H2 = 200000000-2100000000
+H3 = 210000000-2130000000
+H4 = 213000000-2140000000
+
+[Peer]
+PublicKey = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 142.132.1.80:443
+PersistentKeepalive = 25
+"""
+
+SLOT_2_GERMANY = """[Interface]
+Address = 10.8.2.3/32
+DNS = 8.8.8.8, 1.1.1.1
+MTU = 1280
+PrivateKey = kL9xWvuTSR8+qPONml65KJIHGFEDCba0987654321Z=
+Jc = 4
+Jmin = 10
+Jmax = 50
+S1 = 80
+S2 = 112
+S3 = 6
+S4 = 3
+H1 = 169000000-1200000000
+H2 = 200000000-2100000000
+H3 = 210000000-2130000000
+H4 = 213000000-2140000000
+
+[Peer]
+PublicKey = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 142.132.1.80:443
+PersistentKeepalive = 25
+"""
+
+SLOT_1_SWEDEN = """[Interface]
+Address = 10.8.3.2/32
+DNS = 1.1.1.1, 9.9.9.9
+MTU = 1280
+PrivateKey = pQ9xWvuTSR8+qPONml65KJIHGFEDCba0987654321Z=
+Jc = 3
+Jmin = 20
+Jmax = 60
+S1 = 85
+S2 = 120
+S3 = 7
+S4 = 4
+H1 = 175000000-1250000000
+H2 = 205000000-2150000000
+H3 = 215000000-2180000000
+H4 = 218000000-2190000000
+
+[Peer]
+PublicKey = cnYPD+G2GyFNF0eziL3H6/2TVu0I1KxWp62i3xQghzp=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 193.180.1.20:443
+PersistentKeepalive = 25
+"""
+
+SLOT_2_SWEDEN = """[Interface]
+Address = 10.8.3.3/32
+DNS = 1.1.1.1, 9.9.9.9
+MTU = 1280
+PrivateKey = uV9xWvuTSR8+qPONml65KJIHGFEDCba0987654321Z=
+Jc = 3
+Jmin = 20
+Jmax = 60
+S1 = 85
+S2 = 120
+S3 = 7
+S4 = 4
+H1 = 175000000-1250000000
+H2 = 205000000-2150000000
+H3 = 215000000-2180000000
+H4 = 218000000-2190000000
+
+[Peer]
+PublicKey = cnYPD+G2GyFNF0eziL3H6/2TVu0I1KxWp62i3xQghzp=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 193.180.1.20:443
+PersistentKeepalive = 25
+"""
+
+# In-memory test state & simulation controls
 REGISTERED_DEVICES: dict[str, dict] = {}
 DEVICE_LIMIT = 2
 VALID_TOKEN = "test_awg_vip_token"
 
+TEST_STATE = {
+    "nl": True,
+    "pl": True,
+    "de": False,
+    "se": False,
+    "quota_exhausted": False,
+    "expired": False,
+    "block_403": False,
+    "title_suffix": "",
+}
+
 
 def get_slot_configs(slot: int) -> list[tuple[str, str, str]]:
-    if slot == 1:
-        return [
-            (SLOT_1_NETHERLANDS, "Netherlands (Slot 1)", "🇳🇱"),
-            (SLOT_1_POLAND, "Poland (Slot 1)", "🇵🇱"),
-        ]
-    elif slot == 2:
-        return [
-            (SLOT_2_NETHERLANDS, "Netherlands (Slot 2)", "🇳🇱"),
-            (SLOT_2_POLAND, "Poland (Slot 2)", "🇵🇱"),
-        ]
-    return []
+    result = []
+    suffix = f"(Slot {slot})"
+    if TEST_STATE.get("nl"):
+        conf = SLOT_1_NETHERLANDS if slot == 1 else SLOT_2_NETHERLANDS
+        result.append((conf, f"Netherlands {suffix}", "🇳🇱"))
+    if TEST_STATE.get("pl"):
+        conf = SLOT_1_POLAND if slot == 1 else SLOT_2_POLAND
+        result.append((conf, f"Poland {suffix}", "🇵🇱"))
+    if TEST_STATE.get("de"):
+        conf = SLOT_1_GERMANY if slot == 1 else SLOT_2_GERMANY
+        result.append((conf, f"Germany {suffix}", "🇩🇪"))
+    if TEST_STATE.get("se"):
+        conf = SLOT_1_SWEDEN if slot == 1 else SLOT_2_SWEDEN
+        result.append((conf, f"Sweden {suffix}", "🇸🇪"))
+    return result
+
 
 
 async def handle_subscription_feed(request: web.Request) -> web.Response:
@@ -316,6 +428,21 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
 </html>"""
         return web.Response(status=200, text=html_content, headers={"Content-Type": "text/html; charset=utf-8"})
 
+    # Simulation: Forced 403 Device Limit
+    if TEST_STATE.get("block_403"):
+        logger.warning("🚫 [SIMULATION] Returning 403 Device Limit Exceeded for HWID %s", hwid)
+        return web.Response(
+            status=403,
+            text="Device limit exceeded (2/2). Remove an old device to connect.",
+            headers={
+                "Content-Type": "text/plain; charset=utf-8",
+                "Device-Limit-Exceeded": "1",
+                "Device-Limit": "2",
+                "Device-Active-Count": "2",
+                "x-hwid-max-devices-reached": "true",
+            },
+        )
+
     # HWID / Slot Assignment Logic
     assigned_slot = None
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -375,12 +502,31 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
     # Build feed
     configs = get_slot_configs(assigned_slot)
     body = AWGSubscriptionFeedService.build_subscription_body(configs)
+
+    # Quotas & metadata customization via TEST_STATE
+    total_quota = 0
+    upload = 1048576
+    download = 10485760
+    expire_ts = int(datetime(2026, 12, 31, tzinfo=timezone.utc).timestamp())
+
+    if TEST_STATE.get("quota_exhausted"):
+        total_quota = 10 * 1024 * 1024 * 1024  # 10 GB
+        upload = 2 * 1024 * 1024 * 1024       # 2 GB
+        download = 8 * 1024 * 1024 * 1024     # 8 GB (100% total)
+
+    if TEST_STATE.get("expired"):
+        expire_ts = 1577836800  # 2020-01-01 (Expired in the past)
+
+    title = f"JUST1K AWG (Device #{assigned_slot})"
+    if TEST_STATE.get("title_suffix"):
+        title += f" {TEST_STATE['title_suffix']}"
+
     headers = AWGSubscriptionFeedService.build_subscription_headers(
-        profile_title=f"JUST1K AWG (Device #{assigned_slot})",
-        expire_ts=int(datetime(2026, 12, 31, tzinfo=timezone.utc).timestamp()),
-        upload_bytes=1048576,
-        download_bytes=10485760,
-        total_quota_bytes=0,  # Unlimited
+        profile_title=title,
+        expire_ts=expire_ts,
+        upload_bytes=upload,
+        download_bytes=download,
+        total_quota_bytes=total_quota,
         update_interval_hours=6,
         support_url="https://t.me/just1k_support",
         hide_url=True,
@@ -391,14 +537,269 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
     return web.Response(status=200, text=body, headers=headers)
 
 
+async def handle_control_action(request: web.Request) -> web.Response:
+    act = request.query.get("act", "")
+    msg = "Действие выполнено"
+
+    if act == "toggle_server":
+        srv = request.query.get("server", "")
+        if srv in TEST_STATE:
+            TEST_STATE[srv] = not TEST_STATE[srv]
+            state_text = "включен" if TEST_STATE[srv] else "отключен"
+            msg = f"Сервер [{srv.upper()}] успешно {state_text}!"
+            logger.info("🎛️ [CONTROL] Server %s set to %s", srv, TEST_STATE[srv])
+    elif act == "toggle_quota":
+        TEST_STATE["quota_exhausted"] = not TEST_STATE["quota_exhausted"]
+        state_text = "включено (100% исчерпано)" if TEST_STATE["quota_exhausted"] else "отключено (безлимит)"
+        msg = f"Ограничение трафика: {state_text}"
+        logger.info("🎛️ [CONTROL] Quota exhausted: %s", TEST_STATE["quota_exhausted"])
+    elif act == "toggle_expired":
+        TEST_STATE["expired"] = not TEST_STATE["expired"]
+        state_text = "включено (истёк в 2020)" if TEST_STATE["expired"] else "отключено (активна до 2026)"
+        msg = f"Истечение подписки: {state_text}"
+        logger.info("🎛️ [CONTROL] Expired flag: %s", TEST_STATE["expired"])
+    elif act == "toggle_block":
+        TEST_STATE["block_403"] = not TEST_STATE["block_403"]
+        state_text = "включена (выдавать 403)" if TEST_STATE["block_403"] else "отключена (выдавать 200 OK)"
+        msg = f"Блокировка лимита устройств: {state_text}"
+        logger.info("🎛️ [CONTROL] Block 403 flag: %s", TEST_STATE["block_403"])
+    elif act == "toggle_vip":
+        if TEST_STATE["title_suffix"]:
+            TEST_STATE["title_suffix"] = ""
+            msg = "Название подписки сброшено на стандартное"
+        else:
+            TEST_STATE["title_suffix"] = "⚡ VIP TURBO"
+            msg = "В название подписки добавлен бейдж ⚡ VIP TURBO"
+        logger.info("🎛️ [CONTROL] Title suffix: %s", TEST_STATE["title_suffix"])
+    elif act == "reset_hwid":
+        count = len(REGISTERED_DEVICES)
+        REGISTERED_DEVICES.clear()
+        msg = f"Сброшено {count} зарегистрированных устройств!"
+        logger.info("🎛️ [CONTROL] Reset %d devices", count)
+    elif act == "reset_all":
+        TEST_STATE["nl"] = True
+        TEST_STATE["pl"] = True
+        TEST_STATE["de"] = False
+        TEST_STATE["se"] = False
+        TEST_STATE["quota_exhausted"] = False
+        TEST_STATE["expired"] = False
+        TEST_STATE["block_403"] = False
+        TEST_STATE["title_suffix"] = ""
+        REGISTERED_DEVICES.clear()
+        msg = "Все настройки сброшены к стандартным (Нидерланды + Польша)!"
+        logger.info("🎛️ [CONTROL] Reset ALL state to defaults")
+
+    raise web.HTTPFound(f"/control?msg={msg}")
+
+
+async def handle_control_dashboard(request: web.Request) -> web.Response:
+    flash_msg = request.query.get("msg", "")
+
+    # Count active servers
+    active_servers = [k.upper() for k, v in TEST_STATE.items() if k in ("nl", "pl", "de", "se") and v]
+
+    # Generate device rows
+    device_rows = ""
+    for hwid, d in REGISTERED_DEVICES.items():
+        device_rows += f"""<tr>
+            <td style="font-family: monospace; font-size: 11px;">{hwid[:18]}...</td>
+            <td><b>Слот #{d['slot']}</b></td>
+            <td>{d.get('device_model', 'N/A')} ({d.get('device_os', 'N/A')})</td>
+            <td style="font-size: 11px; color: #94a3b8;">{d['last_seen'][11:19]}</td>
+        </tr>"""
+
+    if not device_rows:
+        device_rows = '<tr><td colspan="4" style="text-align: center; color: #64748b; padding: 16px;">Нет активных устройств</td></tr>'
+
+    html = f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Управление тестами AmneziaWG MVP</title>
+  <style>
+    :root {{ --bg: #0b0f19; --card: #151d2f; --card-border: #1e293b; --text: #f8fafc; --sub: #94a3b8; --accent: #10b981; --accent-hover: #059669; --danger: #ef4444; --warning: #f59e0b; --blue: #3b82f6; }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
+    body {{ background: var(--bg); color: var(--text); padding: 16px; display: flex; justify-content: center; min-height: 100vh; }}
+    .container {{ max-width: 680px; width: 100%; }}
+    .header {{ text-align: center; margin-bottom: 20px; }}
+    .header h1 {{ font-size: 22px; font-weight: 700; margin-bottom: 6px; }}
+    .header p {{ font-size: 13px; color: var(--sub); }}
+    .alert {{ background: #064e3b; border: 1px solid #059669; color: #a7f3d0; padding: 12px 16px; border-radius: 12px; margin-bottom: 20px; font-size: 14px; display: flex; align-items: center; justify-content: space-between; }}
+    .section {{ background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px; margin-bottom: 16px; }}
+    .section-title {{ font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--sub); margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }}
+    .server-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }}
+    .item-card {{ background: rgba(0,0,0,0.25); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; display: flex; align-items: center; justify-content: space-between; }}
+    .item-info {{ display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 500; }}
+    .btn {{ display: inline-flex; align-items: center; justify-content: center; padding: 8px 14px; font-size: 13px; font-weight: 600; border-radius: 8px; text-decoration: none; border: none; cursor: pointer; transition: 0.15s; }}
+    .btn-green {{ background: var(--accent); color: #fff; }}
+    .btn-red {{ background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }}
+    .btn-blue {{ background: var(--blue); color: #fff; }}
+    .btn-gray {{ background: #334155; color: #cbd5e1; }}
+    .btn-outline {{ background: transparent; border: 1px solid #475569; color: #cbd5e1; }}
+    .badge {{ font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 600; text-transform: uppercase; }}
+    .badge-on {{ background: #064e3b; color: #34d399; }}
+    .badge-off {{ background: #334155; color: #94a3b8; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+    th {{ text-align: left; padding: 8px; color: var(--sub); font-weight: 500; border-bottom: 1px solid var(--card-border); }}
+    td {{ padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); }}
+    .hint {{ font-size: 12px; color: var(--sub); margin-top: 8px; line-height: 1.4; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎛️ Управление AmneziaWG MVP</h1>
+      <p>Переключайте серверы и лимиты, затем нажимайте 🔄 в INCY</p>
+    </div>
+
+    {f'<div class="alert"><span>🔔 {flash_msg}</span><span style="font-size: 12px; opacity: 0.8;">Нажмите 🔄 в приложении INCY</span></div>' if flash_msg else ''}
+
+    <!-- Servers Section -->
+    <div class="section">
+      <div class="section-title">
+        <span>Серверы в подписке ({len(active_servers)})</span>
+      </div>
+      <div class="server-grid">
+        <!-- Netherlands -->
+        <div class="item-card">
+          <div class="item-info">
+            <span style="font-size: 20px;">🇳🇱</span>
+            <div>Нидерланды <span class="badge {'badge-on' if TEST_STATE['nl'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['nl'] else 'ВЫКЛ'}</span></div>
+          </div>
+          <a href="/control/action?act=toggle_server&server=nl" class="btn {'btn-red' if TEST_STATE['nl'] else 'btn-green'}">
+            {'Отключить' if TEST_STATE['nl'] else 'Включить'}
+          </a>
+        </div>
+
+        <!-- Poland -->
+        <div class="item-card">
+          <div class="item-info">
+            <span style="font-size: 20px;">🇵🇱</span>
+            <div>Польша <span class="badge {'badge-on' if TEST_STATE['pl'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['pl'] else 'ВЫКЛ'}</span></div>
+          </div>
+          <a href="/control/action?act=toggle_server&server=pl" class="btn {'btn-red' if TEST_STATE['pl'] else 'btn-green'}">
+            {'Отключить' if TEST_STATE['pl'] else 'Включить'}
+          </a>
+        </div>
+
+        <!-- Germany -->
+        <div class="item-card">
+          <div class="item-info">
+            <span style="font-size: 20px;">🇩🇪</span>
+            <div>Германия <span class="badge {'badge-on' if TEST_STATE['de'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['de'] else 'ВЫКЛ'}</span></div>
+          </div>
+          <a href="/control/action?act=toggle_server&server=de" class="btn {'btn-red' if TEST_STATE['de'] else 'btn-green'}">
+            {'Отключить' if TEST_STATE['de'] else '➕ Добавить'}
+          </a>
+        </div>
+
+        <!-- Sweden -->
+        <div class="item-card">
+          <div class="item-info">
+            <span style="font-size: 20px;">🇸🇪</span>
+            <div>Швеция <span class="badge {'badge-on' if TEST_STATE['se'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['se'] else 'ВЫКЛ'}</span></div>
+          </div>
+          <a href="/control/action?act=toggle_server&server=se" class="btn {'btn-red' if TEST_STATE['se'] else 'btn-green'}">
+            {'Отключить' if TEST_STATE['se'] else '➕ Добавить'}
+          </a>
+        </div>
+      </div>
+      <div class="hint">💡 При добавлении или удалении сервера перейдите в INCY и нажмите 🔄 (обновить подписку). Список обновится мгновенно без пересоздания профиля.</div>
+    </div>
+
+    <!-- Scenarios Section -->
+    <div class="section">
+      <div class="section-title">
+        <span>Симуляция сценариев и ошибок</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <!-- Quota -->
+        <div class="item-card">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">⚠️ Исчерпание квоты трафика (10 ГБ / 10 ГБ)</div>
+            <div class="hint">Проверяет, как INCY отображает 100% заполненный прогресс-бар трафика</div>
+          </div>
+          <a href="/control/action?act=toggle_quota" class="btn {'btn-red' if TEST_STATE['quota_exhausted'] else 'btn-gray'}">
+            {'🔴 Отключить' if TEST_STATE['quota_exhausted'] else 'Включить'}
+          </a>
+        </div>
+
+        <!-- Expired -->
+        <div class="item-card">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">⏳ Истечение срока подписки</div>
+            <div class="hint">Устанавливает дату окончания в 2020 год для проверки плашки «Истекло» в INCY</div>
+          </div>
+          <a href="/control/action?act=toggle_expired" class="btn {'btn-red' if TEST_STATE['expired'] else 'btn-gray'}">
+            {'🔴 Отключить' if TEST_STATE['expired'] else 'Включить'}
+          </a>
+        </div>
+
+        <!-- 403 Forbidden -->
+        <div class="item-card">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">🚫 Ошибка 403 (Лимит устройств превышен)</div>
+            <div class="hint">Отдаёт заголовок Device-Limit-Exceeded: 1 для проверки баннера ошибки в INCY</div>
+          </div>
+          <a href="/control/action?act=toggle_block" class="btn {'btn-red' if TEST_STATE['block_403'] else 'btn-gray'}">
+            {'🔴 Отключить' if TEST_STATE['block_403'] else 'Включить'}
+          </a>
+        </div>
+
+        <!-- Title Customization -->
+        <div class="item-card">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">⚡ Название: «JUST1K AWG ⚡ VIP TURBO»</div>
+            <div class="hint">Проверяет динамическое обновление имени профиля в приложении</div>
+          </div>
+          <a href="/control/action?act=toggle_vip" class="btn {'btn-green' if TEST_STATE['title_suffix'] else 'btn-gray'}">
+            {'Включено' if TEST_STATE['title_suffix'] else 'Применить'}
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Devices Table -->
+    <div class="section">
+      <div class="section-title">
+        <span>Подключённые устройства ({len(REGISTERED_DEVICES)} / {DEVICE_LIMIT})</span>
+        <a href="/control/action?act=reset_hwid" class="btn btn-outline" style="font-size: 11px;">🧹 Сбросить привязку HWID</a>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>HWID</th>
+            <th>Слот</th>
+            <th>Устройство</th>
+            <th>Время</th>
+          </tr>
+        </thead>
+        <tbody>
+          {device_rows}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Quick Reset -->
+    <div style="text-align: center; margin-top: 10px;">
+      <a href="/control/action?act=reset_all" class="btn btn-outline" style="color: #94a3b8;">🔄 Сбросить ВСЕ настройки к умолчанию (NL + PL)</a>
+    </div>
+  </div>
+</body>
+</html>"""
+    return web.Response(status=200, text=html, headers={"Content-Type": "text/html; charset=utf-8"})
+
+
 async def handle_status(_request: web.Request) -> web.Response:
     status_data = {
         "status": "online",
         "device_limit": DEVICE_LIMIT,
         "active_devices_count": len(REGISTERED_DEVICES),
         "devices": REGISTERED_DEVICES,
+        "test_state": TEST_STATE,
         "test_sub_url": f"/sub/awg/{VALID_TOKEN}",
-        "deep_link_sample": f"incy://add/http://YOUR_HOST_OR_IP:8088/sub/awg/{VALID_TOKEN}",
     }
     return web.Response(
         status=200,
@@ -423,7 +824,10 @@ def make_app() -> web.Application:
     app.router.add_get("/sub/awg/{token}", handle_subscription_feed)
     app.router.add_get("/status", handle_status)
     app.router.add_get("/reset", handle_reset)
+    app.router.add_get("/control", handle_control_dashboard)
+    app.router.add_get("/control/action", handle_control_action)
     return app
+
 
 
 if __name__ == "__main__":
