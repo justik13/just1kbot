@@ -667,3 +667,116 @@ class TestDeviceMigrationPostgres(unittest.IsolatedAsyncioTestCase):
             last_time = await DeviceService.get_last_migration_time(session, p.id)
             self.assertIsNotNone(last_time)
             self.assertAlmostEqual(last_time.timestamp(), t0.timestamp(), delta=2)
+
+    @patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock)
+    @patch("services.device_service.AuditService.log_action", new_callable=AsyncMock)
+    async def test_concurrent_migrate_device_postgres(
+        self, mock_audit, mock_ensure_capacity
+    ):
+        """Simulate two concurrent transactions migrating the same device in PostgreSQL.
+
+        Due to User/VPNProfile FOR UPDATE row locks and has_active_migration check,
+        exactly ONE transaction must succeed and the other must raise DeviceMigrationInProgress.
+        """
+        import asyncio
+
+        user_id = None
+        old_profile_id = None
+        server_1_id = None
+        server_2_id = None
+
+        async with self.sessions.begin() as session:
+            u = User(
+                telegram_id=777888,
+                device_limit=5,
+                subscription_end=now_utc() + timedelta(days=30),
+                is_banned=False,
+                device_creations_today=0,
+                last_creation_date=now_utc().date(),
+            )
+            s0 = Server(
+                name="ServerOrig",
+                protocol="amneziawg2",
+                is_active=True,
+                max_clients=50,
+                api_url="https://vpn0.example.com",
+                api_key="secret",
+            )
+            s1 = Server(
+                name="ServerTarget1",
+                protocol="amneziawg2",
+                is_active=True,
+                max_clients=50,
+                api_url="https://vpn1.example.com",
+                api_key="secret",
+            )
+            s2 = Server(
+                name="ServerTarget2",
+                protocol="amneziawg2",
+                is_active=True,
+                max_clients=50,
+                api_url="https://vpn2.example.com",
+                api_key="secret",
+            )
+            session.add_all([u, s0, s1, s2])
+            await session.flush()
+
+            p = VPNProfile(
+                user_id=u.id,
+                server_id=s0.id,
+                device_name="ConcurrentDevice #1",
+                peer_id="peer-orig-1",
+                provisioning_status="active",
+            )
+            session.add(p)
+            await session.flush()
+
+            user_id = u.id
+            old_profile_id = p.id
+            server_1_id = s1.id
+            server_2_id = s2.id
+
+        snap_1 = ServerPeerSnapshot(
+            server_id=server_1_id, peer_ids=set(), captured_at=now_utc()
+        )
+        snap_2 = ServerPeerSnapshot(
+            server_id=server_2_id, peer_ids=set(), captured_at=now_utc()
+        )
+
+        async def run_migration(target_srv_id, snapshot):
+            async with self.sessions.begin() as s:
+                return await DeviceService.migrate_device(
+                    s,
+                    user_id=user_id,
+                    profile_id=old_profile_id,
+                    target_server_id=target_srv_id,
+                    snapshot=snapshot,
+                )
+
+        results = await asyncio.gather(
+            run_migration(server_1_id, snap_1),
+            run_migration(server_2_id, snap_2),
+            return_exceptions=True,
+        )
+
+        successes = [r for r in results if isinstance(r, VPNProfile)]
+        conflicts = [
+            r for r in results if isinstance(r, DeviceMigrationInProgress)
+        ]
+
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(conflicts), 1)
+
+        async with self.sessions.begin() as session:
+            from sqlalchemy import func, select
+
+            ops = (
+                await session.execute(
+                    select(func.count(APIOperation.id)).where(
+                        APIOperation.operation_type == "create_peer",
+                        APIOperation.payload["migrating_from_id"].as_string()
+                        == str(old_profile_id),
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(ops, 1)

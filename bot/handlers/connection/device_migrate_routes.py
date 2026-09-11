@@ -224,11 +224,11 @@ async def confirm_migrate_device(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    if telegram_user_id in _migrating_devices:
+    if profile_id in _migrating_devices:
         await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
         return
 
-    _migrating_devices[telegram_user_id] = True
+    _migrating_devices[profile_id] = True
 
     try:
         user = db_user or await get_user_by_telegram_id(session, telegram_user_id)
@@ -367,4 +367,4 @@ async def confirm_migrate_device(
                     notice=texts.DEVICE_MIGRATE_PENDING_NOTICE,
                 )
     finally:
-        _migrating_devices.pop(telegram_user_id, None)
+        _migrating_devices.pop(profile_id, None)

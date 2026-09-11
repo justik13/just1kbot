@@ -275,21 +275,18 @@ class DeviceService:
             )
             .limit(1)
         )
-        try:
-            res = await session.execute(query)
-            if inspect.isawaitable(res):
-                res = await res
-            scalar_fn = getattr(res, "scalar_one_or_none", None)
-            if scalar_fn is None:
-                return False
-            val = scalar_fn()
-            if inspect.isawaitable(val):
-                val = await val
-            if isinstance(val, (int, str)) and not isinstance(val, bool):
-                return True
+        res = await session.execute(query)
+        if inspect.isawaitable(res):
+            res = await res
+        scalar_fn = getattr(res, "scalar_one_or_none", None)
+        if scalar_fn is None:
             return False
-        except Exception:
-            return False
+        val = scalar_fn()
+        if inspect.isawaitable(val):
+            val = await val
+        if isinstance(val, (int, str)) and not isinstance(val, bool):
+            return True
+        return False
 
     @staticmethod
     async def get_last_migration_time(session: AsyncSession, profile_id: int) -> datetime | None:
@@ -305,21 +302,18 @@ class DeviceService:
             .order_by(APIOperation.id.desc())
             .limit(1)
         )
-        try:
-            res = await session.execute(query)
-            if inspect.isawaitable(res):
-                res = await res
-            scalar_fn = getattr(res, "scalar_one_or_none", None)
-            if scalar_fn is None:
-                return None
-            val = scalar_fn()
-            if inspect.isawaitable(val):
-                val = await val
-            if isinstance(val, datetime):
-                return val
+        res = await session.execute(query)
+        if inspect.isawaitable(res):
+            res = await res
+        scalar_fn = getattr(res, "scalar_one_or_none", None)
+        if scalar_fn is None:
             return None
-        except Exception:
-            return None
+        val = scalar_fn()
+        if inspect.isawaitable(val):
+            val = await val
+        if isinstance(val, datetime):
+            return val
+        return None
 
     @staticmethod
     async def migrate_device(
