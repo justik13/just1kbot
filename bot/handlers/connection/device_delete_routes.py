@@ -49,10 +49,6 @@ async def request_delete_device(
 
     from .device_view_routes import can_show_delete_action, render_device_screen
 
-    if await DeviceService.has_active_migration(session, profile.id):
-        await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
-        return
-
     if not can_show_delete_action(profile):
         status = getattr(profile, "provisioning_status", "")
         if status == "deleting":
@@ -64,7 +60,11 @@ async def request_delete_device(
         else:
             msg = texts.DEVICE_ACTION_UNAVAILABLE_STATE
         await callback.answer(msg, show_alert=True)
-        await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
+        await render_device_screen(callback, session, profile, db_user)
+        return
+
+    if await DeviceService.has_active_migration(session, profile.id):
+        await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
         return
 
     await callback.answer(show_alert=False)
