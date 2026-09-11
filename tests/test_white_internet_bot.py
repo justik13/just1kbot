@@ -1,7 +1,7 @@
 """Unit tests for Telegram bot handlers of White Internet."""
 
 import unittest
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
