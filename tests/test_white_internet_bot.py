@@ -1,6 +1,7 @@
 """Unit tests for Telegram bot handlers of White Internet."""
 
 import unittest
+from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -747,3 +748,75 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         # 6. Both inactive
         text6 = await run_hub(False, None)
         self.assertIn(texts.STATUS_SUBSCRIPTION_INACTIVE, text6)
+
+    async def test_hub_device_counts_for_white_internet(self):
+        """Verify hub displays accurate device count and limit for White Internet users instead of 0/0."""
+        from bot.handlers.start import _build_hub_text_and_kb
+        from config.enums import WhiteInternetStatus
+        from utils.datetime_helpers import now_utc
+
+        now = now_utc()
+        future = now + timedelta(days=10)
+        db_user = MagicMock()
+        db_user.id = 100
+        db_user.telegram_id = 100
+        db_user.first_name = "Alice"
+        db_user.subscription_end = None
+        db_user.device_limit = 0
+        db_user.referred_by = None
+
+        mock_balance = MagicMock(available=Decimal("0.0"), real_available=Decimal("0.0"), bonus_available=Decimal("0.0"))
+        cutoff = now.isoformat()
+        wi_sub = MagicMock(
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=future,
+            active_hwids={"hwid1": cutoff},
+            device_limit=2,
+        )
+
+        with (
+            patch("services.subscription.SubscriptionService.check_access", new=AsyncMock(return_value=False)),
+            patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=wi_sub)),
+            patch("bot.handlers.start.get_account_balance", new=AsyncMock(return_value=mock_balance)),
+            patch("bot.handlers.start.get_settings", return_value=MagicMock(ADMIN_IDS=[999999])),
+            patch("database.repositories.profiles_repo.get_user_profiles", new=AsyncMock(return_value=[])),
+            patch("database.repositories.system_settings_repo.get_system_setting", new=AsyncMock(return_value=None)),
+        ):
+            text, kb = await _build_hub_text_and_kb(self.session, db_user)
+            self.assertIn("1/2", text)
+            self.assertNotIn("0/0", text)
+
+    def test_hub_keyboard_dual_active_includes_white_internet(self):
+        """When both AWG and White Internet are active, hub must include white_internet button."""
+        from bot.keyboards.common import get_hub_keyboard
+
+        kb = get_hub_keyboard(is_admin=False, is_active=True, is_wi_active=True)
+        callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row if btn.callback_data]
+        self.assertIn("white_internet", callbacks)
+        self.assertIn("menu_subscription", callbacks)
+
+    async def test_connections_screen_white_internet_integration(self):
+        """When user has active White Internet, connections view includes button and explanation."""
+        from bot.handlers.connection.common import _build_connections_screen
+        from config.enums import WhiteInternetStatus
+        from utils.datetime_helpers import now_utc
+
+        now = now_utc()
+        future = now + timedelta(days=10)
+        user = MagicMock(id=200, subscription_end=None)
+        wi_sub = MagicMock(
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=future,
+            active_hwids={"hwid1": now.isoformat()},
+            device_limit=1,
+        )
+
+        with (
+            patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=wi_sub)),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", new=AsyncMock(return_value=0)),
+        ):
+            text, builder = await _build_connections_screen(user, self.session, profiles=[])
+            markup = builder.as_markup()
+            callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row if btn.callback_data]
+            self.assertIn("white_internet", callbacks)
+            self.assertIn("Белый Интернет", text)

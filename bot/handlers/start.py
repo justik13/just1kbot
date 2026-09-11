@@ -114,21 +114,29 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     from utils.datetime_helpers import now_utc
 
     is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
+    import inspect
     try:
         wi_sub = await get_subscription_by_user_id(session, db_user.id)
-    except (TypeError, AttributeError):
+        if inspect.iscoroutine(wi_sub):
+            wi_sub.close()
+            wi_sub = None
+    except Exception:
         wi_sub = None
     now = now_utc()
     is_wi_active = bool(
         wi_sub
-        and wi_sub.status == WhiteInternetStatus.ACTIVE
-        and wi_sub.expires_at
+        and not inspect.iscoroutine(wi_sub)
+        and getattr(wi_sub, "status", None) == WhiteInternetStatus.ACTIVE
+        and getattr(wi_sub, "expires_at", None)
+        and not inspect.iscoroutine(getattr(wi_sub, "expires_at", None))
         and wi_sub.expires_at > now
     )
     is_wi_exhausted = bool(
         wi_sub
-        and wi_sub.status == WhiteInternetStatus.EXHAUSTED
-        and wi_sub.expires_at
+        and not inspect.iscoroutine(wi_sub)
+        and getattr(wi_sub, "status", None) == WhiteInternetStatus.EXHAUSTED
+        and getattr(wi_sub, "expires_at", None)
+        and not inspect.iscoroutine(getattr(wi_sub, "expires_at", None))
         and wi_sub.expires_at > now
     )
 
@@ -201,14 +209,38 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         else ""
     )
 
+    wi_active_devices = 0
+    wi_limit = 0
+    if wi_sub:
+        from datetime import timedelta
+        from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
+        raw_hwids = getattr(wi_sub, "active_hwids", None)
+        current_hwids = dict(raw_hwids) if isinstance(raw_hwids, dict) else {}
+        cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
+        wi_active_devices = sum(
+            1 for ts in current_hwids.values() if isinstance(ts, str) and ts >= cutoff
+        )
+        raw_limit = getattr(wi_sub, "device_limit", 1)
+        wi_limit = raw_limit if isinstance(raw_limit, int) and raw_limit > 0 else 1
+
+    if is_active and is_wi_active:
+        devices_count = len(profiles) + wi_active_devices
+        device_limit = (db_user.device_limit or 0) + wi_limit
+    elif is_wi_active:
+        devices_count = wi_active_devices
+        device_limit = wi_limit
+    else:
+        devices_count = len(profiles)
+        device_limit = db_user.device_limit or 0
+
     text = texts.HUB_HEADER.format(
         name=name,
         telegram_id=db_user.telegram_id,
         status=status_str,
         valid_until=valid_until_str,
         days_left=days_left_str,
-        devices_count=len(profiles),
-        device_limit=db_user.device_limit or 0,
+        devices_count=devices_count,
+        device_limit=device_limit,
         real_balance=int(balance.real_available),
         bonus_line=bonus_line,
         inviter_line=inviter_line,

@@ -62,7 +62,8 @@ def get_hub_keyboard(
             url=mtproto_url,
         )
 
-    if not is_wi_active:
+    show_wi = not (is_wi_active and not is_active)
+    if show_wi:
         builder.button(
             text=texts.BTN_WHITE_INTERNET,
             callback_data="white_internet",
@@ -77,7 +78,7 @@ def get_hub_keyboard(
     sizes = [1, 2, 2]
     if mtproto_url:
         sizes.append(1)
-    if not is_wi_active:
+    if show_wi:
         sizes.append(1)
     if is_admin:
         sizes.append(1)
