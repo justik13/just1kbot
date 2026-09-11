@@ -140,6 +140,20 @@ class AWGSubscriptionFeedServiceTests(unittest.TestCase):
         body = AWGSubscriptionFeedService.build_subscription_body([])
         self.assertEqual(body, "")
 
+    def test_create_stub_server(self):
+        conf, name, flag = AWGSubscriptionFeedService.create_stub_server(
+            "Подписка истекла (Продлите: @just1kbot)",
+            "🛑",
+        )
+        self.assertIn("127.0.0.1:1", conf)
+        self.assertEqual(name, "Подписка истекла (Продлите: @just1kbot)")
+        self.assertEqual(flag, "🛑")
+
+        body = AWGSubscriptionFeedService.build_subscription_body([(conf, name, flag)])
+        decoded = base64.b64decode(body).decode("utf-8")
+        self.assertTrue(decoded.startswith("awg://"))
+        self.assertIn("#🛑 Подписка истекла (Продлите: @just1kbot)", decoded)
+
 
 if __name__ == "__main__":
     unittest.main()

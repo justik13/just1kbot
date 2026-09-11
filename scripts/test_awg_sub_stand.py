@@ -97,6 +97,35 @@ class AWGSubscriptionFeedService:
 
         return headers
 
+    DUMMY_SINKHOLE_CONFIG: str = """[Interface]
+Address = 10.255.255.2/32
+DNS = 127.0.0.1
+MTU = 1280
+PrivateKey = aAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+Jc = 4
+Jmin = 10
+Jmax = 50
+S1 = 79
+S2 = 115
+S3 = 5
+S4 = 1
+H1 = 169154911-1234371153
+H2 = 2057051984-2121122945
+H3 = 2132872968-2133668229
+H4 = 2136455412-2141801388
+
+[Peer]
+PublicKey = aAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 127.0.0.1:1
+PersistentKeepalive = 25
+"""
+
+    @classmethod
+    def create_stub_server(cls, message: str, flag: str = "🛑") -> Tuple[str, str, str]:
+        """Create a non-routable stub server item for informative paywalls/notices."""
+        return (cls.DUMMY_SINKHOLE_CONFIG, message, flag)
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -314,6 +343,7 @@ TEST_STATE = {
     "quota_exhausted": False,
     "expired": False,
     "block_403": False,
+    "stub_mode": True,  # True = Smart Stub (200 OK + notice server), False = Raw HTTP 403
     "title_suffix": "",
 }
 
@@ -428,20 +458,41 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
 </html>"""
         return web.Response(status=200, text=html_content, headers={"Content-Type": "text/html; charset=utf-8"})
 
-    # Simulation: Forced 403 Device Limit
+    # Simulation: Forced Device Limit
     if TEST_STATE.get("block_403"):
-        logger.warning("🚫 [SIMULATION] Returning 403 Device Limit Exceeded for HWID %s", hwid)
-        return web.Response(
-            status=403,
-            text="Device limit exceeded (2/2). Remove an old device to connect.",
-            headers={
-                "Content-Type": "text/plain; charset=utf-8",
-                "Device-Limit-Exceeded": "1",
-                "Device-Limit": "2",
-                "Device-Active-Count": "2",
-                "x-hwid-max-devices-reached": "true",
-            },
-        )
+        if TEST_STATE.get("stub_mode", True):
+            logger.warning("🚫 [SMART STUB] Forced limit exceeded: delivering 200 OK notice stub for HWID %s", hwid)
+            stub_configs = [
+                AWGSubscriptionFeedService.create_stub_server(
+                    "Превышен лимит устройств — отключите в @just1kbot", "🚫"
+                )
+            ]
+            stub_body = AWGSubscriptionFeedService.build_subscription_body(stub_configs)
+            stub_headers = AWGSubscriptionFeedService.build_subscription_headers(
+                profile_title="JUST1K [ЛИМИТ УСТРОЙСТВ]",
+                expire_ts=0,
+                upload_bytes=1048576,
+                download_bytes=1048576,
+                total_quota_bytes=1048576,
+                update_interval_hours=1,
+                support_url="https://t.me/just1k_support",
+                hide_url=True,
+            )
+            stub_headers["Device-Limit-Exceeded"] = "1"
+            return web.Response(status=200, text=stub_body, headers=stub_headers)
+        else:
+            logger.warning("🚫 [SIMULATION] Returning 403 Device Limit Exceeded for HWID %s", hwid)
+            return web.Response(
+                status=403,
+                text="Device limit exceeded (2/2). Remove an old device to connect.",
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Device-Limit-Exceeded": "1",
+                    "Device-Limit": "2",
+                    "Device-Active-Count": "2",
+                    "x-hwid-max-devices-reached": "true",
+                },
+            )
 
     # HWID / Slot Assignment Logic
     assigned_slot = None
@@ -463,23 +514,43 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         active_count = len(REGISTERED_DEVICES)
         if active_count >= DEVICE_LIMIT:
             logger.warning(
-                "🚫 Device limit reached! Active: %d, Max: %d. Rejecting HWID: %s",
+                "🚫 Device limit reached! Active: %d, Max: %d. HWID: %s",
                 active_count,
                 DEVICE_LIMIT,
                 hwid,
             )
-            response_headers = {
-                "Content-Type": "text/plain; charset=utf-8",
-                "Device-Limit-Exceeded": "1",
-                "Device-Limit": str(DEVICE_LIMIT),
-                "Device-Active-Count": str(active_count),
-                "x-hwid-max-devices-reached": "true",
-            }
-            return web.Response(
-                status=403,
-                text=f"Device limit exceeded ({active_count}/{DEVICE_LIMIT}). Remove an old device to connect.",
-                headers=response_headers,
-            )
+            if TEST_STATE.get("stub_mode", True):
+                stub_configs = [
+                    AWGSubscriptionFeedService.create_stub_server(
+                        f"Лимит устройств ({active_count}/{DEVICE_LIMIT}) — отключите в @just1kbot", "🚫"
+                    )
+                ]
+                stub_body = AWGSubscriptionFeedService.build_subscription_body(stub_configs)
+                stub_headers = AWGSubscriptionFeedService.build_subscription_headers(
+                    profile_title=f"JUST1K [ЛИМИТ {active_count}/{DEVICE_LIMIT}]",
+                    expire_ts=0,
+                    upload_bytes=1048576,
+                    download_bytes=1048576,
+                    total_quota_bytes=1048576,
+                    update_interval_hours=1,
+                    support_url="https://t.me/just1k_support",
+                    hide_url=True,
+                )
+                stub_headers["Device-Limit-Exceeded"] = "1"
+                return web.Response(status=200, text=stub_body, headers=stub_headers)
+            else:
+                response_headers = {
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Device-Limit-Exceeded": "1",
+                    "Device-Limit": str(DEVICE_LIMIT),
+                    "Device-Active-Count": str(active_count),
+                    "x-hwid-max-devices-reached": "true",
+                }
+                return web.Response(
+                    status=403,
+                    text=f"Device limit exceeded ({active_count}/{DEVICE_LIMIT}). Remove an old device to connect.",
+                    headers=response_headers,
+                )
 
         # Allocate next available slot (1 or 2)
         used_slots = {d["slot"] for d in REGISTERED_DEVICES.values()}
@@ -501,38 +572,62 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
 
     # Build feed
     configs = get_slot_configs(assigned_slot)
-    body = AWGSubscriptionFeedService.build_subscription_body(configs)
 
     # Quotas & metadata customization via TEST_STATE
     total_quota = 0
     upload = 1048576
     download = 10485760
     expire_ts = int(datetime(2026, 12, 31, tzinfo=timezone.utc).timestamp())
-
-    if TEST_STATE.get("quota_exhausted"):
-        total_quota = 10 * 1024 * 1024 * 1024  # 10 GB
-        upload = 2 * 1024 * 1024 * 1024       # 2 GB
-        download = 8 * 1024 * 1024 * 1024     # 8 GB (100% total)
+    title = f"JUST1K AWG (Device #{assigned_slot})"
 
     if TEST_STATE.get("expired"):
         expire_ts = 1577836800  # 2020-01-01 (Expired in the past)
+        if TEST_STATE.get("stub_mode", True):
+            configs = [
+                AWGSubscriptionFeedService.create_stub_server(
+                    "Срок подписки истёк — продлите в @just1kbot", "🛑"
+                )
+            ]
+            title = "JUST1K [ПОДПИСКА ИСТЕКЛА]"
+            logger.info("🛑 [SMART STUB] Subscription expired! Replaced servers with expiration notice stub.")
 
-    title = f"JUST1K AWG (Device #{assigned_slot})"
-    if TEST_STATE.get("title_suffix"):
+    elif TEST_STATE.get("quota_exhausted"):
+        total_quota = 10 * 1024 * 1024 * 1024  # 10 GB
+        upload = 2 * 1024 * 1024 * 1024       # 2 GB
+        download = 8 * 1024 * 1024 * 1024     # 8 GB (100% total)
+        if TEST_STATE.get("stub_mode", True):
+            configs = [
+                AWGSubscriptionFeedService.create_stub_server(
+                    "Трафик исчерпан — пополните в @just1kbot", "⚠️"
+                )
+            ]
+            title = "JUST1K [ТРАФИК 100%]"
+            logger.info("⚠️ [SMART STUB] Quota exhausted! Replaced servers with quota notice stub.")
+
+    if not configs:
+        configs = [
+            AWGSubscriptionFeedService.create_stub_server(
+                "Нет доступных серверов — @just1kbot", "⚠️"
+            )
+        ]
+        title = "JUST1K [НЕТ СЕРВЕРОВ]"
+
+    if TEST_STATE.get("title_suffix") and not TEST_STATE.get("expired") and not TEST_STATE.get("quota_exhausted"):
         title += f" {TEST_STATE['title_suffix']}"
 
+    body = AWGSubscriptionFeedService.build_subscription_body(configs)
     headers = AWGSubscriptionFeedService.build_subscription_headers(
         profile_title=title,
         expire_ts=expire_ts,
         upload_bytes=upload,
         download_bytes=download,
         total_quota_bytes=total_quota,
-        update_interval_hours=6,
+        update_interval_hours=1 if (TEST_STATE.get("expired") or TEST_STATE.get("quota_exhausted")) else 6,
         support_url="https://t.me/just1k_support",
         hide_url=True,
     )
 
-    logger.info("📤 Response 200 OK sent with %d servers for Slot #%d", len(configs), assigned_slot)
+    logger.info("📤 Response 200 OK sent with %d servers for Slot #%d (Title: '%s')", len(configs), assigned_slot, title)
     logger.info("==================================================")
     return web.Response(status=200, text=body, headers=headers)
 
@@ -571,6 +666,11 @@ async def handle_control_action(request: web.Request) -> web.Response:
             TEST_STATE["title_suffix"] = "⚡ VIP TURBO"
             msg = "В название подписки добавлен бейдж ⚡ VIP TURBO"
         logger.info("🎛️ [CONTROL] Title suffix: %s", TEST_STATE["title_suffix"])
+    elif act == "toggle_stub":
+        TEST_STATE["stub_mode"] = not TEST_STATE["stub_mode"]
+        state_text = "ВКЛЮЧЕНА (HTTP 200 OK с сервером-уведомлением)" if TEST_STATE["stub_mode"] else "ВЫКЛЮЧЕНА (Сырая ошибка HTTP 403)"
+        msg = f"Умная заглушка {state_text}"
+        logger.info("🎛️ [CONTROL] Stub mode: %s", TEST_STATE["stub_mode"])
     elif act == "reset_hwid":
         count = len(REGISTERED_DEVICES)
         REGISTERED_DEVICES.clear()
@@ -584,9 +684,10 @@ async def handle_control_action(request: web.Request) -> web.Response:
         TEST_STATE["quota_exhausted"] = False
         TEST_STATE["expired"] = False
         TEST_STATE["block_403"] = False
+        TEST_STATE["stub_mode"] = True
         TEST_STATE["title_suffix"] = ""
         REGISTERED_DEVICES.clear()
-        msg = "Все настройки сброшены к стандартным (Нидерланды + Польша)!"
+        msg = "Все настройки сброшены к стандартным (Нидерланды + Польша, Умная заглушка)!"
         logger.info("🎛️ [CONTROL] Reset ALL state to defaults")
 
     raise web.HTTPFound(f"/control?msg={msg}")
@@ -711,15 +812,31 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
     <!-- Scenarios Section -->
     <div class="section">
       <div class="section-title">
-        <span>Симуляция сценариев и ошибок</span>
+        <span>Симуляция сценариев и обработка ограничений</span>
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 10px;">
+        <!-- Smart Stub Mode vs Raw 403 -->
+        <div class="item-card" style="background: {'rgba(16,185,129,0.08)' if TEST_STATE['stub_mode'] else 'rgba(239,68,68,0.08)'}; border: 1px solid {'#10b981' if TEST_STATE['stub_mode'] else '#ef4444'};">
+          <div>
+            <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+              <span>{'💡 Режим «Умная заглушка (200 OK)»' if TEST_STATE['stub_mode'] else '⚠️ Режим «Сырая ошибка (HTTP 403)»'}</span>
+              <span class="badge {'badge-on' if TEST_STATE['stub_mode'] else 'badge-off'}">{'Рекомендуется' if TEST_STATE['stub_mode'] else 'Классический'}</span>
+            </div>
+            <div class="hint" style="color: {'#6ee7b7' if TEST_STATE['stub_mode'] else '#fca5a5'}; margin-top: 4px;">
+              {'✅ Вместо сбоев INCY получает HTTP 200 OK, заменяя серверы на понятные плашки: «🛑 Подписка истекла / ⚠️ Трафик исчерпан / 🚫 Лимит устройств — продлите в @just1kbot». Работает одинаково на телефонах и ПК!' if TEST_STATE['stub_mode'] else '❌ Выдаёт HTTP 403. Телефон показывает пугающую «ошибку 403», а ПК тихо игнорирует запрос.'}
+            </div>
+          </div>
+          <a href="/control/action?act=toggle_stub" class="btn {'btn-blue' if TEST_STATE['stub_mode'] else 'btn-green'}">
+            {'Переключить на 403' if TEST_STATE['stub_mode'] else 'Включить заглушку 200 OK'}
+          </a>
+        </div>
+
         <!-- Quota -->
         <div class="item-card">
           <div>
             <div style="font-weight: 600; font-size: 14px;">⚠️ Исчерпание квоты трафика (10 ГБ / 10 ГБ)</div>
-            <div class="hint">Проверяет, как INCY отображает 100% заполненный прогресс-бар трафика</div>
+            <div class="hint">В режиме заглушки заменяет сервер на «⚠️ Трафик исчерпан — пополните в @just1kbot» и ставит 100% прогресс-бар</div>
           </div>
           <a href="/control/action?act=toggle_quota" class="btn {'btn-red' if TEST_STATE['quota_exhausted'] else 'btn-gray'}">
             {'🔴 Отключить' if TEST_STATE['quota_exhausted'] else 'Включить'}
@@ -730,18 +847,18 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
         <div class="item-card">
           <div>
             <div style="font-weight: 600; font-size: 14px;">⏳ Истечение срока подписки</div>
-            <div class="hint">Устанавливает дату окончания в 2020 год для проверки плашки «Истекло» в INCY</div>
+            <div class="hint">В режиме заглушки заменяет сервер на «🛑 Срок подписки истёк — продлите в @just1kbot» и меняет название профиля</div>
           </div>
           <a href="/control/action?act=toggle_expired" class="btn {'btn-red' if TEST_STATE['expired'] else 'btn-gray'}">
             {'🔴 Отключить' if TEST_STATE['expired'] else 'Включить'}
           </a>
         </div>
 
-        <!-- 403 Forbidden -->
+        <!-- 403 Forbidden / Limit -->
         <div class="item-card">
           <div>
-            <div style="font-weight: 600; font-size: 14px;">🚫 Ошибка 403 (Лимит устройств превышен)</div>
-            <div class="hint">Отдаёт заголовок Device-Limit-Exceeded: 1 для проверки баннера ошибки в INCY</div>
+            <div style="font-weight: 600; font-size: 14px;">🚫 Превышение лимита устройств (2/2)</div>
+            <div class="hint">В режиме заглушки отдаёт сервер «🚫 Превышен лимит устройств». В режиме 403 отдаёт сырой HTTP 403.</div>
           </div>
           <a href="/control/action?act=toggle_block" class="btn {'btn-red' if TEST_STATE['block_403'] else 'btn-gray'}">
             {'🔴 Отключить' if TEST_STATE['block_403'] else 'Включить'}

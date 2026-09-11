@@ -99,3 +99,32 @@ class AWGSubscriptionFeedService:
             headers["support-url"] = support_url.strip()
 
         return headers
+
+    DUMMY_SINKHOLE_CONFIG: str = """[Interface]
+Address = 10.255.255.2/32
+DNS = 127.0.0.1
+MTU = 1280
+PrivateKey = aAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+Jc = 4
+Jmin = 10
+Jmax = 50
+S1 = 79
+S2 = 115
+S3 = 5
+S4 = 1
+H1 = 169154911-1234371153
+H2 = 2057051984-2121122945
+H3 = 2132872968-2133668229
+H4 = 2136455412-2141801388
+
+[Peer]
+PublicKey = aAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 127.0.0.1:1
+PersistentKeepalive = 25
+"""
+
+    @classmethod
+    def create_stub_server(cls, message: str, flag: str = "🛑") -> Tuple[str, str, str]:
+        """Create a non-routable stub server item for informative paywalls/notices."""
+        return (cls.DUMMY_SINKHOLE_CONFIG, message, flag)
