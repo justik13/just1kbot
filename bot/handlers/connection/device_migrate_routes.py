@@ -87,9 +87,14 @@ async def start_migrate_device(
         await callback.answer(texts.DEVICE_ACTION_UNAVAILABLE_STATE, show_alert=True)
         return
 
-    # Check 15-minute cooldown
-    if profile.created_at:
-        elapsed = (now_utc() - profile.created_at).total_seconds()
+    if await DeviceService.has_active_migration(session, profile.id):
+        await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
+        return
+
+    # Check 15-minute cooldown between migrations
+    last_migrated = await DeviceService.get_last_migration_time(session, profile.id)
+    if last_migrated:
+        elapsed = (now_utc() - last_migrated).total_seconds()
         if elapsed < 900:
             remaining_min = max(1, int((900 - elapsed + 59) // 60))
             await callback.answer(
@@ -165,6 +170,14 @@ async def select_migrate_target_server(
 
     if not profile or not user or profile.user_id != user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    if profile.provisioning_status != "active":
+        await callback.answer(texts.DEVICE_ACTION_UNAVAILABLE_STATE, show_alert=True)
+        return
+
+    if await DeviceService.has_active_migration(session, profile.id):
+        await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
         return
 
     target_server = await get_server_by_id(session, target_server_id)
