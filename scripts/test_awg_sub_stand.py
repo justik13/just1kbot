@@ -269,7 +269,10 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
 
     if is_browser:
         logger.info("📱 Web browser detected. Rendering 1-Click INCY import page.")
-        sub_full_url = str(request.url).split("?")[0]
+        # Ensure scheme is https:// (Nginx reverse proxy sets X-Forwarded-Proto: https)
+        proto = request.headers.get("X-Forwarded-Proto") or ("https" if "best" in request.host or "online" in request.host else request.scheme)
+        host = request.headers.get("Host", request.host)
+        sub_full_url = f"{proto}://{host}{request.path}"
         deep_link = f"incy://add/{sub_full_url}"
         html_content = f"""<!doctype html>
 <html lang="ru">
