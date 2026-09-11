@@ -69,6 +69,12 @@ class DuplicateDeviceName(DeviceCreationError):
     pass
 
 
+class MigrationCooldownActive(DeviceCreationError):
+    def __init__(self, remaining_seconds: int):
+        self.remaining_seconds = remaining_seconds
+        super().__init__(f"Migration cooldown active: {remaining_seconds}s")
+
+
 def _is_same_day_msk(stored_date: date | None, today: date) -> bool:
     return stored_date == today if stored_date else False
 
@@ -251,6 +257,204 @@ class DeviceService:
             },
         )
         return profile
+
+    @staticmethod
+    async def migrate_device(
+        session: AsyncSession,
+        *,
+        user_id: int,
+        profile_id: int,
+        target_server_id: int,
+        snapshot: ServerPeerSnapshot,
+    ) -> VPNProfile:
+        if snapshot.server_id != target_server_id or datetime.now(
+            timezone.utc
+        ) - snapshot.captured_at > timedelta(minutes=5):
+            raise ServerUnavailable("Server capacity snapshot is stale")
+
+        user = (
+            await session.execute(
+                select(User).where(User.id == user_id).with_for_update()
+            )
+        ).scalar_one()
+
+        old_profile = (
+            await session.execute(
+                select(VPNProfile)
+                .where(VPNProfile.id == profile_id, VPNProfile.user_id == user.id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+
+        if not old_profile:
+            raise DeviceCreationError("Device not found")
+        if old_profile.provisioning_status != "active":
+            raise DeviceCreationError(f"Device is not active (status: {old_profile.provisioning_status})")
+        if old_profile.server_id == target_server_id:
+            raise DeviceCreationError("Target server cannot be the same as current server")
+
+        target_server = (
+            await session.execute(
+                select(Server)
+                .where(Server.id == target_server_id, Server.protocol == AMNEZIA_PROTOCOL)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not target_server or target_server.protocol != AMNEZIA_PROTOCOL or not target_server.is_active:
+            raise ServerUnavailable("Invalid or disabled server")
+
+        if (
+            user.is_banned
+            or not user.subscription_end
+            or is_expired(user.subscription_end)
+        ):
+            raise NoActiveSubscription("No active subscription")
+
+        # 15-minute cooldown per device
+        if old_profile.created_at:
+            elapsed = (now_utc() - old_profile.created_at).total_seconds()
+            cooldown_seconds = 900
+            if elapsed < cooldown_seconds:
+                raise MigrationCooldownActive(int(cooldown_seconds - elapsed))
+
+        if not is_admin(user.telegram_id):
+            today = now_msk().date()
+            if not _is_same_day_msk(user.last_creation_date, today):
+                user.device_creations_today, user.last_creation_date = 0, today
+            if user.device_creations_today >= DEVICE_DAILY_LIMIT:
+                raise DailyLimitExceeded("Daily limit exceeded")
+
+        # Quota check discounts old_profile.id because target profile replaces it
+        user_count = (
+            await session.execute(
+                select(func.count(VPNProfile.id)).where(
+                    VPNProfile.user_id == user.id,
+                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+                    VPNProfile.id != old_profile.id,
+                )
+            )
+        ).scalar_one()
+        if user_count >= user.device_limit:
+            raise DeviceLimitExceeded("Device limit reached")
+
+        server_count = (
+            await session.execute(
+                select(func.count(VPNProfile.id)).where(
+                    VPNProfile.server_id == target_server.id,
+                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+                )
+            )
+        ).scalar_one()
+        bot_peer_ids = frozenset(
+            (
+                await session.execute(
+                    select(VPNProfile.peer_id).where(
+                        VPNProfile.server_id == target_server.id,
+                        VPNProfile.peer_id.is_not(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        manual_peer_ids = snapshot.peer_ids - bot_peer_ids
+        if len(manual_peer_ids) + server_count >= target_server.max_clients:
+            raise ServerUnavailable("Server is full")
+
+        try:
+            await ensure_server_capacity(
+                api_url=target_server.api_url,
+                api_key=target_server.api_key,
+                max_clients=target_server.max_clients,
+                live_client_count=len(snapshot.peer_ids),
+            )
+        except ServerAtCapacity as exc:
+            raise ServerUnavailable("Server is full") from exc
+        except ServerCapacityUnavailable as exc:
+            raise ServerUnavailable("Unable to verify server capacity") from exc
+
+        device_name = old_profile.device_name
+        duplicate = (
+            await session.execute(
+                select(VPNProfile.id).where(
+                    VPNProfile.user_id == user.id,
+                    VPNProfile.server_id == target_server.id,
+                    func.lower(VPNProfile.device_name) == device_name.lower(),
+                )
+            )
+        ).scalar_one_or_none()
+        if duplicate:
+            raise DuplicateDeviceName("Device name already exists on target server")
+
+        new_profile = VPNProfile(
+            user_id=user.id,
+            server_id=target_server.id,
+            device_name=device_name,
+            peer_id=None,
+            raw_config=None,
+            provisioning_status="pending_create",
+            desired_is_active=True,
+            actual_is_active=None,
+            desired_expires_at=user.subscription_end,
+            desired_version=1,
+            is_active=True,
+        )
+
+        try:
+            async with session.begin_nested():
+                session.add(new_profile)
+                await session.flush()
+        except IntegrityError as e:
+            error_str = str(e.orig).lower() if e.orig else ""
+            if (
+                "duplicate" in error_str
+                or "unique" in error_str
+                or "uq_vpn_profiles" in error_str
+            ):
+                raise DuplicateDeviceName(
+                    "Device name already exists on this server"
+                ) from e
+            raise DeviceCreationError("Database integrity error") from e
+
+        m = re.search(r'#(\d+)$', new_profile.device_name)
+        slot_suffix = f"_n{m.group(1)}" if m else ""
+        new_profile.client_name = f"tg_{user.telegram_id}_p{new_profile.id}{slot_suffix}"
+
+        await enqueue_api_operation(
+            session,
+            operation_type="create_peer",
+            idempotency_key=f"create-peer:{new_profile.id}:v1",
+            server_id=target_server.id,
+            profile_id=new_profile.id,
+            client_name=new_profile.client_name,
+            server_name_snapshot=target_server.name,
+            api_url_snapshot=target_server.api_url,
+            api_key_snapshot=target_server.api_key,
+            payload={
+                "desired_version": 1,
+                "migrating_from_id": old_profile.id,
+            },
+        )
+
+        if not is_admin(user.telegram_id):
+            user.device_creations_today += 1
+
+        await AuditService.log_action(
+            session,
+            admin_id=0,
+            action=AdminAuditAction.DEVICE_CREATE,
+            target_type="user",
+            target_id=user.id,
+            details={
+                "action": "device_migrate",
+                "device_name": new_profile.device_name,
+                "from_server_id": old_profile.server_id,
+                "to_server_id": target_server.id,
+                "old_profile_id": old_profile.id,
+                "new_profile_id": new_profile.id,
+            },
+        )
+        return new_profile
 
     @staticmethod
     async def delete_device(

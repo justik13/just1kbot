@@ -132,10 +132,55 @@ async def finalize_create_success(
                     api_url_snapshot=api_url_snapshot,
                     api_key_snapshot=api_key_snapshot,
                 )
+            await _schedule_migration_grace_deletion(session, operation, profile)
             _complete(operation)
 
     if compensation_required:
         raise CreateCompensationRequired()
+
+
+async def _schedule_migration_grace_deletion(session, operation, profile) -> None:
+    """If profile creation was part of a device migration, schedule delayed deletion of the old peer."""
+    migrating_from_id = (operation.payload or {}).get("migrating_from_id")
+    if not migrating_from_id or getattr(profile, "provisioning_status", "") != "active":
+        return
+    from datetime import timedelta
+    from services.api_operations_queue import (
+        ensure_delete_operation,
+        resolve_profile_endpoint_snapshot,
+    )
+    from utils.datetime_helpers import now_utc
+
+    old_profile = (
+        await session.execute(
+            select(VPNProfile)
+            .where(VPNProfile.id == migrating_from_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if old_profile and old_profile.provisioning_status != "deleting":
+        old_profile.provisioning_status = "deleting"
+        if old_profile.peer_id:
+            (
+                s_id,
+                s_name,
+                s_url,
+                s_key,
+            ) = await resolve_profile_endpoint_snapshot(session, old_profile)
+            await ensure_delete_operation(
+                session,
+                idempotency_key=f"delete-peer:{old_profile.id}:{old_profile.peer_id}",
+                server_id=s_id,
+                profile_id=old_profile.id,
+                server_name_snapshot=s_name,
+                api_url_snapshot=s_url,
+                api_key_snapshot=s_key,
+                peer_id=old_profile.peer_id,
+                client_name=old_profile.client_name,
+                audit_reason="device_migration_grace_expired",
+                next_attempt_at=now_utc() + timedelta(minutes=15),
+            )
 
 
 async def finalize_existing_create_success(
