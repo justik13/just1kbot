@@ -206,6 +206,10 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
             style="success",
         )
     builder.button(
+        text=texts.BTN_ISTORIYA_POPOLNENIJ,
+        callback_data="user_history",
+    )
+    builder.button(
         text=texts.BTN_ISTORIYA_OPERATSIJ,
         callback_data="balance_history",
     )
@@ -213,9 +217,9 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
         text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
     )
     if has_visible_topup:
-        builder.adjust(2, 1, 1)
+        builder.adjust(2, 2, 1)
     else:
-        builder.adjust(1, 1, 1)
+        builder.adjust(1, 2, 1)
     return builder.as_markup()
 
 

@@ -138,6 +138,8 @@ CONNECTION_CONFIG_PROTOCOL_FORMAT = "{v0} ч. {v1} мин."
 CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "➕ Добавить устройство"
 
 CONNECTION_EMPTY = "<i>У вас пока нет подключённых устройств.</i>"
+CONNECTION_EMPTY_WI_ACTIVE = "🌐 <b>У вас активна подписка «Белый Интернет»</b> ({active_devices} из {device_limit} устр.).\n\nНастройка и ссылка на подключение доступны в разделе Белого Интернета."
+BTN_WHITE_INTERNET_CONNECTIONS = "🌐 Белый Интернет ({active}/{limit})"
 
 CONNECTION_EXPIRED_NO_GRACE = """
 ⚠️ <b>Подписка истекла</b>

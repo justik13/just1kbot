@@ -50,10 +50,10 @@ STATUS_INACTIVE_ICON = "🔴"
 STATUS_NOT_SPECIFIED = "не указан"
 
 STATUS_SUBSCRIPTION_ACTIVE = "🟢 Активна"
-STATUS_SUBSCRIPTION_ACTIVE_DUAL = "🟢 Активна (AWG + Белый Интернет)"
+STATUS_SUBSCRIPTION_ACTIVE_DUAL = "🟢 Активна (Основная + Белый Интернет)"
 STATUS_SUBSCRIPTION_ACTIVE_WI = "🟢 Активна (Белый Интернет)"
-STATUS_SUBSCRIPTION_EXHAUSTED_WI = "🔴 Исчерпан трафик (Белый Интернет)"
-STATUS_SUBSCRIPTION_ACTIVE_AWG_WI_EXHAUSTED = "🟢 Активна (AWG) / 🔴 Исчерпан трафик (БИ)"
+STATUS_SUBSCRIPTION_EXHAUSTED_WI = "🔴 Трафик закончился (Белый Интернет)"
+STATUS_SUBSCRIPTION_ACTIVE_AWG_WI_EXHAUSTED = "🟢 Основная / 🔴 Трафик Белого Интернета закончился"
 
 STATUS_SUBSCRIPTION_INACTIVE = "🔴 Неактивна"
 

@@ -319,6 +319,7 @@ async def device_help(
     suffix = f":device_{profile_id}"
     builder.button(text=texts.BTN_DOWNLOAD_AMNEZIA, callback_data=f"help_download{suffix}")
     builder.button(text=texts.BTN_INSTRUCTION_IOS, callback_data=f"help_ios{suffix}")
+    builder.button(text=texts.BTN_INSTRUCTION_ANDROID, callback_data=f"help_android{suffix}")
     builder.button(text=texts.BTN_INSTRUCTION_WINDOWS, callback_data=f"help_windows{suffix}")
     builder.button(text=texts.BTN_SPLIT_TUNNELING, callback_data=f"help_split{suffix}")
     builder.button(text=texts.BTN_AMNEZIA_DOCS, url=_AMNEZIA_DOCS)

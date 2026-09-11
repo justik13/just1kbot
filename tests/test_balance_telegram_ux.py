@@ -50,13 +50,14 @@ class BalanceTelegramUXTests(unittest.TestCase):
     def test_balance_screen_always_has_topup_history_and_back(self):
         self.assertEqual(
             callbacks(get_balance_keyboard()),
-            ["balance_topup", "balance_history", "back_to_main_menu"],
+            ["balance_topup", "user_history", "balance_history", "back_to_main_menu"],
         )
         self.assertEqual(
             callbacks(get_balance_keyboard(has_visible_topup=True)),
             [
                 "balance_resume_topup",
                 "balance_new_topup",
+                "user_history",
                 "balance_history",
                 "back_to_main_menu",
             ],
