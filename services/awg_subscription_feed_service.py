@@ -73,6 +73,16 @@ class AWGSubscriptionFeedService:
         update_interval_hours: int = 6,
         support_url: str | None = None,
         hide_url: bool = True,
+        web_page_url: str | None = None,
+        premium_url: str | None = None,
+        support_email: str | None = None,
+        announce: str | None = None,
+        sort_order: str | None = None,
+        banner_text: str | None = None,
+        banner_button_text: str | None = None,
+        banner_button_url: str | None = None,
+        banner_bg_color: str | None = None,
+        banner_button_color: str | None = None,
     ) -> dict[str, str]:
         """Generate standardized HTTP headers for INCY client."""
         title_b64 = base64.b64encode(profile_title.strip().encode("utf-8")).decode("ascii")
@@ -97,6 +107,38 @@ class AWGSubscriptionFeedService:
 
         if support_url and support_url.strip():
             headers["support-url"] = support_url.strip()
+
+        if web_page_url and web_page_url.strip():
+            headers["profile-web-page-url"] = web_page_url.strip()
+
+        if premium_url and premium_url.strip():
+            headers["premium-url"] = premium_url.strip()
+
+        if support_email and support_email.strip():
+            headers["support-email"] = support_email.strip()
+
+        if sort_order and sort_order.strip():
+            headers["sort-order"] = sort_order.strip()
+
+        if announce and announce.strip():
+            ann_b64 = base64.b64encode(announce.strip().encode("utf-8")).decode("ascii")
+            headers["announce"] = f"base64:{ann_b64}"
+
+        if banner_text and banner_text.strip():
+            b_b64 = base64.b64encode(banner_text.strip().encode("utf-8")).decode("ascii")
+            headers["banner-text"] = f"base64:{b_b64}"
+
+        if banner_button_text and banner_button_text.strip():
+            headers["banner-button-text"] = banner_button_text.strip()
+
+        if banner_button_url and banner_button_url.strip():
+            headers["banner-button-url"] = banner_button_url.strip()
+
+        if banner_bg_color and banner_bg_color.strip():
+            headers["banner-bg-color"] = banner_bg_color.strip()
+
+        if banner_button_color and banner_button_color.strip():
+            headers["banner-button-color"] = banner_button_color.strip()
 
         return headers
 

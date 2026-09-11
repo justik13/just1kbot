@@ -154,6 +154,37 @@ class AWGSubscriptionFeedServiceTests(unittest.TestCase):
         self.assertTrue(decoded.startswith("awg://"))
         self.assertIn("#🛑 Подписка истекла (Продлите: @just1kbot)", decoded)
 
+    def test_rich_button_and_banner_headers(self):
+        headers = AWGSubscriptionFeedService.build_subscription_headers(
+            profile_title="JUST1K VPN",
+            support_url="https://t.me/just1k_support",
+            web_page_url="https://t.me/just1kbot",
+            premium_url="https://t.me/just1kbot?start=renew",
+            support_email="support@just1k.best",
+            sort_order="ping",
+            announce="Техработы завершены",
+            banner_text="Скидка 20% на продление!",
+            banner_button_text="Купить",
+            banner_button_url="https://t.me/just1kbot?start=sale",
+            banner_bg_color="#1e293b",
+            banner_button_color="#10b981",
+        )
+
+        self.assertEqual(headers["profile-web-page-url"], "https://t.me/just1kbot")
+        self.assertEqual(headers["premium-url"], "https://t.me/just1kbot?start=renew")
+        self.assertEqual(headers["support-email"], "support@just1k.best")
+        self.assertEqual(headers["sort-order"], "ping")
+        self.assertEqual(headers["banner-button-text"], "Купить")
+        self.assertEqual(headers["banner-button-url"], "https://t.me/just1kbot?start=sale")
+        self.assertEqual(headers["banner-bg-color"], "#1e293b")
+        self.assertEqual(headers["banner-button-color"], "#10b981")
+
+        ann_decoded = base64.b64decode(headers["announce"].removeprefix("base64:")).decode("utf-8")
+        self.assertEqual(ann_decoded, "Техработы завершены")
+
+        b_decoded = base64.b64decode(headers["banner-text"].removeprefix("base64:")).decode("utf-8")
+        self.assertEqual(b_decoded, "Скидка 20% на продление!")
+
 
 if __name__ == "__main__":
     unittest.main()
