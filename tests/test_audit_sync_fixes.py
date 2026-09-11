@@ -13,9 +13,13 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_head_is_0026_wi_trial_semantics(self):
+    def test_alembic_head_is_0027_wi_notification_flags(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0026_wi_trial_semantics"])
+        self.assertEqual(scripts.get_heads(), ["0027_wi_notification_flags"])
+        self.assertEqual(
+            scripts.get_revision("0027_wi_notification_flags").down_revision,
+            "0026_wi_trial_semantics",
+        )
         self.assertEqual(
             scripts.get_revision("0026_wi_trial_semantics").down_revision,
             "0025_admin_qol_and_idempotency",

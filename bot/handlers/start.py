@@ -121,7 +121,13 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     now = now_utc()
     is_wi_active = bool(
         wi_sub
-        and wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED)
+        and wi_sub.status == WhiteInternetStatus.ACTIVE
+        and wi_sub.expires_at
+        and wi_sub.expires_at > now
+    )
+    is_wi_exhausted = bool(
+        wi_sub
+        and wi_sub.status == WhiteInternetStatus.EXHAUSTED
         and wi_sub.expires_at
         and wi_sub.expires_at > now
     )
@@ -136,14 +142,38 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         end_date = max(db_user.subscription_end, wi_sub.expires_at)
         valid_until_str = format_subscription_date(end_date)
         days_left_str = format_days_left(end_date)
+    elif is_active and is_wi_exhausted:
+        status_str = texts.STATUS_SUBSCRIPTION_ACTIVE_AWG_WI_EXHAUSTED
+        valid_until_str = (
+            format_subscription_date(db_user.subscription_end)
+            if db_user.subscription_end
+            else texts.PLACEHOLDER_DASH
+        )
+        days_left_str = (
+            format_days_left(db_user.subscription_end)
+            if db_user.subscription_end
+            else texts.ZERO_DAYS_LABEL
+        )
     elif is_wi_active:
         status_str = texts.STATUS_SUBSCRIPTION_ACTIVE_WI
         valid_until_str = format_subscription_date(wi_sub.expires_at)
         days_left_str = format_days_left(wi_sub.expires_at)
+    elif is_wi_exhausted:
+        status_str = texts.STATUS_SUBSCRIPTION_EXHAUSTED_WI
+        valid_until_str = format_subscription_date(wi_sub.expires_at)
+        days_left_str = format_days_left(wi_sub.expires_at)
     elif is_active:
         status_str = texts.STATUS_SUBSCRIPTION_ACTIVE
-        valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
-        days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
+        valid_until_str = (
+            format_subscription_date(db_user.subscription_end)
+            if db_user.subscription_end
+            else texts.PLACEHOLDER_DASH
+        )
+        days_left_str = (
+            format_days_left(db_user.subscription_end)
+            if db_user.subscription_end
+            else texts.ZERO_DAYS_LABEL
+        )
     else:
         status_str = texts.STATUS_SUBSCRIPTION_INACTIVE
         valid_until_str = texts.PLACEHOLDER_DASH

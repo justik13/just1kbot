@@ -1373,6 +1373,14 @@ class WhiteInternetSubscription(Base):
             "active_hwids",
             postgresql_using="gin",
         ),
+        Index(
+            "ix_wi_subs_expiring_notify",
+            "expires_at",
+            "user_id",
+            postgresql_where=text(
+                "status IN ('ACTIVE', 'EXHAUSTED') AND (notified_3d = false OR notified_1d = false OR notified_2h = false OR notified_expired = false)"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -1481,6 +1489,19 @@ class WhiteInternetSubscription(Base):
     # (SYNCED_INACTIVE with matching versions). Never delete rows that still
     # have an unconfirmed presence on the node — that would orphan credentials.
     pending_hard_delete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+    notified_3d: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_1d: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_2h: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_expired: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
 

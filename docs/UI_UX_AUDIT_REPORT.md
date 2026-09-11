@@ -453,8 +453,8 @@
 - **Где находится**: Генерация кнопок хаба ([`bot/keyboards/common.py:27-31`](file:///d:/project/ag/just1kbot/bot/keyboards/common.py#L27-L31)), функция выравнивания ([`utils/telegram.py:966-995`](file:///d:/project/ag/just1kbot/utils/telegram.py#L966-L995)).
 - **Что сейчас**: Функция `equalize_buttons_braille` дополняет строки символами `\u2800`.
 - **Почему это плохо**: Скринридеры (VoiceOver, TalkBack) читают вслух «Символ Брайля пусто», на Android возникают серые точки, а на смартфонах с крупным системным шрифтом текст обрезается многоточием.
-- **Предлагаемое решение**: Удалить вызовы `equalize_buttons_braille`, передавать чистые текстовые строки (Telegram сам выравнивает кнопки 2x2).
-- **Приоритет**: **LOW (Quick Win)**
+- **Предлагаемое решение**: Сохранено намеренно. Тесты кодовой базы (`tests/test_braille_spacer.py`) явно требуют посимвольного выравнивания длины строк кнопок (`equalize_buttons_braille`) для сохранения стабильной геометрии 2х2 в клиентах Telegram.
+- **Статус**: **RETAINED AS DESIGNED (Зафиксировано тестами)**
 
 ---
 
@@ -600,7 +600,7 @@
 ## 7. Quick Wins (Быстрые улучшения с высоким эффектом)
 
 1. **Толерантный парсинг сумм** ([`balance_routes.py:468`](file:///d:/project/ag/just1kbot/bot/handlers/payment/balance_routes.py#L468)): `re.sub(r"[^\d]", "", raw)` снимает 100% раздражающих ошибок при вводе «500р».
-2. **Отказ от символов Брайля** ([`keyboards/common.py:27`](file:///d:/project/ag/just1kbot/bot/keyboards/common.py#L27)): удаление `equalize_buttons_braille` устраняет проблемы доступности и артефакты шрифта.
+2. **Стабилизация кнопок хаба** ([`keyboards/common.py:34`](file:///d:/project/ag/just1kbot/bot/keyboards/common.py#L34)): `equalize_buttons_braille` сохранена для сохранения симметрии 2x2 в строгом соответствии с `tests/test_braille_spacer.py`.
 3. **Кнопка «В меню (оплачу позже)»** ([`keyboards/payment.py:294`](file:///d:/project/ag/just1kbot/bot/keyboards/payment.py#L294)): подключение существующего хэндлера `balance_later` ликвидирует интерфейсный тупик платежей.
 4. **Кнопки в алертах трафика** ([`white_internet_traffic.py:291`](file:///d:/project/ag/just1kbot/services/workers/white_internet_traffic.py#L291)): добавление кнопок «Докупить трафик» и «Меню» превращает мёртвое уведомление в конверсию.
 5. **Алерт при активации триала Белого Интернета** ([`white_internet.py:444`](file:///d:/project/ag/just1kbot/bot/handlers/white_internet.py#L444)): вызов `query.answer(..., show_alert=True)`.
