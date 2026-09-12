@@ -395,6 +395,7 @@ async def _settle_account_purchase(
         days,
         version.device_limit,
         version.tariff_id,
+        create_entitlement=False,
     )
     if updated is None:
         raise AccountPurchaseError("purchase_user_missing")

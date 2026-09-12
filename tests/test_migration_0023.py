@@ -16,7 +16,7 @@ class Migration0023Tests(unittest.TestCase):
         rev = scripts.get_revision("0023_wi_active_hwids")
         self.assertIsNotNone(rev)
         self.assertEqual(rev.down_revision, "0022_servers_protocol_not_null")
-        self.assertEqual(scripts.get_heads(), ["0026_wi_trial_semantics"])
+        self.assertEqual(scripts.get_heads(), ["0027_backfill_entitlements"])
 
     def test_migration_0023_source_content(self):
         m23_path = Path("alembic/versions/0023_wi_active_hwids.py")

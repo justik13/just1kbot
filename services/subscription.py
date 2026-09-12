@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -11,7 +12,7 @@ from config.constants import (
     PERMANENT_SUBSCRIPTION_DAYS,
     VPN_ACCESS_GRACE_HOURS,
 )
-from database.models import User
+from database.models import EntitlementEntry, User
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
@@ -297,6 +298,11 @@ class SubscriptionService:
         days: int,
         new_device_limit: int | None = None,
         new_tariff_id: int | None = None,
+        create_entitlement: bool = True,
+        admin_id: int | None = None,
+        source_type: str = "admin",
+        source_id: str | None = None,
+        reason: str | None = None,
     ) -> User | None:
         if days < 0:
             raise ValueError("days must be >= 0")
@@ -347,6 +353,20 @@ class SubscriptionService:
             )
 
         user.subscription_end = new_end
+
+        if days > 0 and create_entitlement:
+            entitlement = EntitlementEntry(
+                beneficiary_user_id=user.id,
+                source_type=source_type,
+                source_id=source_id or f"admin_{admin_id or 'system'}_{uuid.uuid4().hex[:12]}",
+                entry_type="manual_grant",
+                days_delta=days,
+                hours_delta=days * 24,
+                device_limit_snapshot=new_device_limit or user.device_limit or 1,
+                tariff_id_snapshot=new_tariff_id or user.current_tariff_id,
+                metadata_={"admin_id": admin_id, "reason": reason} if (admin_id or reason) else None,
+            )
+            session.add(entitlement)
 
         user.notified_3d = False
         user.notified_1d = False
