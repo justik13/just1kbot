@@ -215,7 +215,7 @@ AWG_CONF_READY_CAPTION = """✅ <b>Конфиг готов!</b>
 🌍 Локация: <b>{country}</b>
 📊 Занято: <b>{active_count} из {limit} устройств</b>
 
-<i>Импортируйте этот файл в приложение AmneziaVPN или WireGuard на вашем компьютере или телефоне.</i>"""
+<i>Импортируйте этот файл в приложение AmneziaWG или AmneziaVPN на вашем компьютере, телефоне или роутере.</i>"""
 
 AWG_CONF_LIMIT_EXCEEDED = """❌ <b>Все устройства заняты ({active_count} из {limit})</b>
 

@@ -14,7 +14,7 @@ class AWGSubscriptionFeedService:
 
     @staticmethod
     def encode_config_to_awg_uri(conf: str, server_name: str, country_flag: str = "") -> str:
-        """Encode a raw WireGuard/AmneziaWG .conf text into an awg:// URI.
+        """Encode a raw AmneziaWG .conf text into an awg:// URI.
 
         INCY specification requires:
         - Schema: 'awg://' or 'amneziawg://'
