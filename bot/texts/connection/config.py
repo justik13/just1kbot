@@ -189,3 +189,70 @@ LABEL_UNKNOWN_CAP = "Неизвестно"
 
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE = "<blockquote expandable><code>{key}</code></blockquote>\n"
 
+AWG_SUB_CARD_TEMPLATE = """🛡 <b>Ваша подписка: AmneziaWG</b>
+Тариф: «{limit} устройства» | До: {end_date} (осталось {days_left} дн.)
+Статус: <b>Активна ✅</b>
+
+🔗 <b>Ссылка подписки (для мобильного INCY):</b>
+<code>{sub_url}</code>
+<i>(Нажмите на ссылку, чтобы скопировать)</i>
+
+💡 <i>Скопируйте и вставьте эту ссылку в приложении INCY на телефоне для подключения всех стран в 1 клик.</i>
+
+📊 <b>Подключено устройств:</b> {active_count} из {limit}"""
+
+AWG_SUB_CARD_NO_SUB = """⚠️ <b>Подписка неактивна</b>
+
+У вас нет активной подписки AmneziaWG. Оформите доступ для подключения."""
+
+AWG_DOWNLOAD_CONF_SELECT_SERVER = """🌍 <b>Скачать конфиг (.conf)</b>
+
+Выберите страну для генерации конфигурационного файла:"""
+
+AWG_CONF_READY_CAPTION = """✅ <b>Конфиг готов!</b>
+
+🌍 Локация: <b>{country}</b>
+📊 Занято: <b>{active_count} из {limit} устройств</b>
+
+<i>Импортируйте этот файл в приложение AmneziaVPN или WireGuard на вашем компьютере или телефоне.</i>"""
+
+AWG_CONF_LIMIT_EXCEEDED = """❌ <b>Все устройства заняты ({active_count} из {limit})</b>
+
+Отключите одно из устройств в меню «⚙️ Управление устройствами», чтобы выпустить новый конфиг."""
+
+AWG_MANAGE_DEVICES_HEADER = """⚙️ <b>Ваши устройства</b> (Подключено {active_count} из {limit}):
+
+{devices_list}"""
+
+AWG_SUB_DEVICE_ITEM = """📱 <b>{label}</b>
+• Тип: Через подписку (INCY)
+• Активность: {last_seen}
+• Статус: Активно ✅
+"""
+
+AWG_MANUAL_DEVICE_ITEM = """💻 <b>{device_name}</b>
+• Тип: По файлу (.conf: {country})
+• Трафик: {traffic}
+• Статус: {status}
+"""
+
+BTN_DOWNLOAD_CONF = "📥 Скачать конфиг (.conf)"
+BTN_MANAGE_DEVICES = "⚙️ Управление устройствами"
+BTN_REFRESH_SUB = "🔄 Обновить подписку"
+
+AWG_WEB_TOO_MANY_REQUESTS = "Too Many Requests"
+AWG_WEB_HWID_REQUIRED = "HWID required"
+AWG_WEB_EXPIRED = "Subscription expired"
+AWG_WEB_DEVICE_LIMIT_EXCEEDED = "Device limit reached ({total_active}/{limit})"
+AWG_SUB_DEVICE_LABEL_TEMPLATE = "Устройство #{index} (INCY)"
+AWG_SUB_PROFILE_NAME_TEMPLATE = "INCY ({server_name})"
+AWG_WEB_NO_SERVERS = "No servers available"
+AWG_WEB_PREPARING = "Configuration is being prepared"
+AWG_WEB_NO_CONFIGS = "No ready configurations"
+AWG_PROFILE_NAME = "JUST1K AWG"
+
+BTN_DISCONNECT_DEVICE_TEMPLATE = "🗑 Отключить {label}"
+DEVICE_STATUS_ACTIVE_LABEL = "Активен ✅"
+ERROR_DEVICE_NOT_FOUND_LABEL = "⚠️ Устройство не найдено"
+DEVICE_DISCONNECTED_SUCCESS = "✅ Устройство отключено. Слот освобождён."
+

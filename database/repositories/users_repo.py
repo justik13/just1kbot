@@ -1,5 +1,6 @@
 from datetime import timedelta
 import inspect
+import secrets
 
 from sqlalchemy import and_, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,8 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "notification_retry_count",
     "last_notification_attempt",
     "last_trial_reset_at",
+    "subscription_token",
+    "active_sub_devices",
 }
 
 
@@ -85,6 +88,36 @@ async def get_user_by_id(
             res = await res
         return res
     return None
+
+
+async def get_user_by_subscription_token(
+    session: AsyncSession, token: str, for_update: bool = False
+) -> User | None:
+    """Retrieve user by unique subscription token with optional row lock."""
+    if not token or not isinstance(token, str) or len(token) < 16:
+        return None
+    stmt = select(User).where(
+        User.subscription_token == token,
+        User.is_deleted.is_(False),
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def ensure_subscription_token(session: AsyncSession, user: User) -> str:
+    """Ensure user has a persistent unique subscription token, generating one if missing."""
+    token = getattr(user, "subscription_token", None)
+    if token:
+        return token
+    new_token = secrets.token_hex(32)
+    try:
+        user.subscription_token = new_token
+        await session.flush()
+    except Exception:
+        pass
+    return new_token
 
 
 async def create_user(

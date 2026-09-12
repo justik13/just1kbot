@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from datetime import timedelta
 
@@ -9,6 +10,7 @@ from bot import texts
 from bot.constants import AMNEZIA_PROTOCOL, GRACE_PERIOD_HOURS
 from bot.keyboards import get_back_button
 from database.models import User
+from database.repositories import users_repo
 from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
@@ -91,26 +93,28 @@ async def _build_connections_screen(
     *,
     read_only: bool = False,
 ) -> tuple[str, InlineKeyboardBuilder]:
-    visible_profiles_count = len(profiles)
-
-    quota_profiles_count = len([
-        p for p in profiles
-        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
-    ])
-
     device_limit = await _get_effective_device_limit(
         session,
         user,
     )
 
-    rendered = texts.CONNECTION_LIST_HEADER.format(
-        count=quota_profiles_count,
-        limit=device_limit,
-    )
+    active_sub_devices = dict(getattr(user, "active_sub_devices", None) or {})
+    sub_count = len(active_sub_devices)
+
+    manual_profiles = [
+        p for p in profiles
+        if getattr(p, "device_type", "manual") == "manual"
+        and getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
+    ]
+    manual_count = len(manual_profiles)
+    active_count = sub_count + manual_count
 
     if read_only:
+        rendered = texts.CONNECTION_LIST_HEADER.format(
+            count=active_count,
+            limit=device_limit,
+        )
         deletion_time = _get_grace_deletion_time(user)
-
         if deletion_time:
             countdown = _format_grace_countdown(deletion_time)
             rendered += texts.CONNECTION_EXPIRED_READ_ONLY.format(
@@ -119,55 +123,112 @@ async def _build_connections_screen(
         else:
             rendered += texts.CONNECTION_EXPIRED_NO_GRACE
 
-    builder = InlineKeyboardBuilder()
+        builder = InlineKeyboardBuilder()
 
-    if not read_only and quota_profiles_count < device_limit:
+        if len(profiles) == 0:
+            rendered += texts.CONNECTION_EMPTY
+        else:
+            for profile in profiles:
+                server = getattr(profile, "server", None)
+                flag = getattr(server, "country_flag", None) if server else texts.EMOJI_GLOBE
+                server_name = getattr(server, "name", None) if server else texts.LABEL_UNKNOWN_CAP
+                raw_device_name = getattr(profile, "device_name", None) or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=1)
+                btn_text = f"{flag} {server_name} — {raw_device_name}"
+                builder.button(
+                    text=btn_text,
+                    callback_data=f"manage_device:{profile.id}",
+                )
+
+                location_label = f"{flag} {safe(server_name)}"
+                traffic_str = format_traffic(
+                    (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
+                )
+                last_conn_str = (
+                    format_datetime(profile.last_connected)
+                    if getattr(profile, "last_connected", None)
+                    else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
+                )
+                rendered += texts.CONNECTION_DEVICE_ROW_FORMAT.format(
+                    device_name=safe(getattr(profile, "device_name", "")),
+                    location=location_label,
+                    traffic=traffic_str,
+                    last_conn=last_conn_str,
+                )
+                labels = {
+                    "pending_create": texts.DEVICE_STATUS_CREATING,
+                    "pending_update": texts.PROVISIONING_UPDATING,
+                    "deleting": texts.DEVICE_STATUS_DELETING,
+                    "create_failed": texts.PROVISIONING_CREATE_FAILED,
+                    "create_cleanup_pending": texts.DEVICE_STATUS_CLEANUP,
+                    "update_failed": texts.DEVICE_STATUS_UPDATE_ERROR,
+                    "delete_failed": texts.PROVISIONING_DELETE_FAILED,
+                }
+                status = getattr(profile, "provisioning_status", "")
+                if status in labels:
+                    rendered += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[status])
+
+            rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
+
         builder.button(
-            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
-            callback_data="add_device",
-            style="success",
+            text=texts.BTN_MANAGE_DEVICES,
+            callback_data="awg_manage_devices",
         )
+        builder.button(
+            text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,
+            url="https://stats.uptimerobot.com/de5q3DNc95",
+        )
+        builder.button(
+            text=texts.BTN_MAIN_MENU_NAV,
+            callback_data="back_to_main_menu",
+        )
+        builder.adjust(1)
+        return rendered, builder
 
-    if visible_profiles_count == 0:
-        rendered += texts.CONNECTION_EMPTY
-    else:
-        for profile in profiles:
-            server = profile.server
+    # Active subscription: render unified AWG Subscription Card
+    days_left = 0
+    end_date_str = ""
+    sub_end = getattr(user, "subscription_end", None)
+    if sub_end:
+        now = now_utc()
+        delta = sub_end - now
+        days_left = max(0, delta.days)
+        end_date_str = sub_end.strftime("%d.%m.%Y")
 
-            flag = server.country_flag if server else texts.EMOJI_GLOBE
-            server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
-            raw_device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=1)
-            btn_text = f"{flag} {server_name} — {raw_device_name}"
-            builder.button(
-                text=btn_text,
-                callback_data=f"manage_device:{profile.id}",
-            )
+    token = await users_repo.ensure_subscription_token(session, user)
+    sub_base_url = (
+        os.getenv("PUBLIC_URL")
+        or os.getenv("SUB_BASE_URL")
+        or os.getenv("APP_BASE_URL")
+        or "https://sub.just1k.best"
+    ).rstrip("/")
+    sub_prefix = (
+        os.getenv("AWG_SUB_PATH_PREFIX") or "/sub/awg"
+    ).strip().rstrip("/")
+    if not sub_prefix.startswith("/"):
+        sub_prefix = f"/{sub_prefix}"
+    sub_url = f"{sub_base_url}{sub_prefix}/{token}"
 
-            location_label = f"{flag} {safe(server_name)}"
+    rendered = texts.AWG_SUB_CARD_TEMPLATE.format(
+        limit=device_limit,
+        end_date=end_date_str,
+        days_left=days_left,
+        sub_url=sub_url,
+        active_count=active_count,
+    )
 
-            traffic_str = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
-            last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
-
-            rendered += texts.CONNECTION_DEVICE_ROW_FORMAT.format(
-                device_name=safe(profile.device_name),
-                location=location_label,
-                traffic=traffic_str,
-                last_conn=last_conn_str,
-            )
-            labels = {
-                "pending_create": texts.DEVICE_STATUS_CREATING,
-                "pending_update": texts.PROVISIONING_UPDATING,
-                "deleting": texts.DEVICE_STATUS_DELETING,
-                "create_failed": texts.PROVISIONING_CREATE_FAILED,
-                "create_cleanup_pending": texts.DEVICE_STATUS_CLEANUP,
-                "update_failed": texts.DEVICE_STATUS_UPDATE_ERROR,
-                "delete_failed": texts.PROVISIONING_DELETE_FAILED,
-            }
-            if profile.provisioning_status in labels:
-                rendered += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
-
-        rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
-
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_DOWNLOAD_CONF,
+        callback_data="awg_download_conf_menu",
+    )
+    builder.button(
+        text=texts.BTN_MANAGE_DEVICES,
+        callback_data="awg_manage_devices",
+    )
+    builder.button(
+        text=texts.BTN_REFRESH_SUB,
+        callback_data="back_to_connections",
+    )
     builder.button(
         text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,
         url="https://stats.uptimerobot.com/de5q3DNc95",
@@ -176,7 +237,6 @@ async def _build_connections_screen(
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-
     builder.adjust(1)
 
     return rendered, builder

@@ -82,6 +82,9 @@ class DeviceService:
         server_id: int,
         device_name: str | None = None,
         snapshot: ServerPeerSnapshot,
+        device_type: str = "manual",
+        sub_device_hash: str | None = None,
+        replaces_profile_id: int | None = None,
     ) -> VPNProfile:
         if snapshot.server_id != server_id or datetime.now(
             timezone.utc
@@ -138,22 +141,30 @@ class DeviceService:
         ).scalar_one_or_none()
         if duplicate:
             raise DuplicateDeviceName("Duplicate device name")
-        if not is_admin(user.telegram_id):
+        if device_type != "sub" and not is_admin(user.telegram_id):
             today = now_msk().date()
             if not _is_same_day_msk(user.last_creation_date, today):
                 user.device_creations_today, user.last_creation_date = 0, today
             if user.device_creations_today >= DEVICE_DAILY_LIMIT:
                 raise DailyLimitExceeded("Daily limit exceeded")
-        user_count = (
-            await session.execute(
-                select(func.count(VPNProfile.id)).where(
-                    VPNProfile.user_id == user.id,
-                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
-                )
+        is_existing_sub_device = (
+            device_type == "sub"
+            and sub_device_hash is not None
+            and sub_device_hash in (user.active_sub_devices or {})
+        )
+        if not is_existing_sub_device:
+            manual_query = select(func.count(VPNProfile.id)).where(
+                VPNProfile.user_id == user.id,
+                VPNProfile.device_type == "manual",
+                VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
             )
-        ).scalar_one()
-        if user_count >= user.device_limit:
-            raise DeviceLimitExceeded("Device limit reached")
+            if replaces_profile_id:
+                manual_query = manual_query.where(VPNProfile.id != replaces_profile_id)
+            manual_count = (await session.execute(manual_query)).scalar_one()
+
+            sub_count = len(user.active_sub_devices or {})
+            if manual_count + sub_count >= user.device_limit:
+                raise DeviceLimitExceeded("Device limit reached")
         server_count = (
             await session.execute(
                 select(func.count(VPNProfile.id)).where(
@@ -194,6 +205,8 @@ class DeviceService:
             user_id=user.id,
             server_id=server.id,
             device_name=device_name,
+            device_type=device_type,
+            sub_device_hash=sub_device_hash,
             peer_id=None,
             raw_config=None,
             provisioning_status="pending_create",
@@ -235,7 +248,7 @@ class DeviceService:
             api_key_snapshot=server.api_key,
             payload={"desired_version": 1},
         )
-        if not is_admin(user.telegram_id):
+        if device_type != "sub" and not is_admin(user.telegram_id):
             user.device_creations_today += 1
 
         await AuditService.log_action(
@@ -392,3 +405,41 @@ class DeviceService:
         if server_id:
             invalidate_server_cache(server_id)
         return True
+
+    @staticmethod
+    async def delete_sub_device(
+        session: AsyncSession,
+        *,
+        user_id: int,
+        hwid_hash: str,
+    ) -> int:
+        """Disconnect and delete all server profiles associated with a sub-device."""
+        user = (
+            await session.execute(
+                select(User).where(User.id == user_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not user:
+            return 0
+        devices = dict(user.active_sub_devices or {})
+        if hwid_hash in devices:
+            del devices[hwid_hash]
+            user.active_sub_devices = devices
+
+        profiles = (
+            await session.execute(
+                select(VPNProfile).where(
+                    VPNProfile.user_id == user_id,
+                    VPNProfile.device_type == "sub",
+                    VPNProfile.sub_device_hash == hwid_hash,
+                )
+            )
+        ).scalars().all()
+        deleted_count = 0
+        for p in profiles:
+            try:
+                await DeviceService.delete_device(session, p, actor_id=user.telegram_id, force=True)
+                deleted_count += 1
+            except Exception as e:
+                logger.warning("Error deleting sub profile %s: %s", p.id, e)
+        return deleted_count
