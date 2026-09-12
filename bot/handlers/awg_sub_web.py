@@ -14,7 +14,7 @@ from bot import texts
 from config.constants import AMNEZIA_PROTOCOL
 from config.enums import ServerHealthState
 from database.connection import session_scope
-from database.models import Server, User, VPNProfile
+from database.models import Server, VPNProfile
 from database.repositories import users_repo
 from services.awg_subscription_feed_service import AWGSubscriptionFeedService
 from services.device_service import DeviceService, RESERVING_STATUSES

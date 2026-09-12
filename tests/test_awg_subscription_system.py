@@ -23,13 +23,11 @@ from bot.handlers.connection.common import _build_connections_screen
 from config.constants import AMNEZIA_PROTOCOL
 from config.enums import ServerHealthState
 from database.models import Server, User, VPNProfile
-from services.awg_subscription_feed_service import AWGSubscriptionFeedService
 from services.device_service import (
     DeviceLimitExceeded,
     DeviceService,
 )
 from services.slots_cache import ServerPeerSnapshot
-from utils.datetime_helpers import now_utc
 from utils.vpn_parser import encode_json_to_vpn_uri
 
 

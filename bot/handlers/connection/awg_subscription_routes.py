@@ -15,11 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.constants import AMNEZIA_PROTOCOL
-from database.models import Server, User, VPNProfile
-from database.repositories.profiles_repo import (
-    PROFILE_QUOTA_EXCLUDED_STATUSES,
-    get_profile_by_id,
-)
+from database.models import User, VPNProfile
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
