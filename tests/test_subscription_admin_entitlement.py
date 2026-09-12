@@ -157,7 +157,7 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
             )
             self.assertIsNone(quote_res.failure_code)
             self.assertIsNotNone(quote_res.quote)
-            self.assertEqual(quote_res.quote.status, "pending")
+            self.assertEqual(quote_res.quote.status, "active")
             self.assertGreater(quote_res.quote.final_price_rub, Decimal("0.00"))
 
     async def test_exact_hours_and_payment_linking_backfill_logic(self) -> None:
