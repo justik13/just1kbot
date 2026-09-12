@@ -34,19 +34,25 @@ class AWGSubscriptionFeedService:
         return f"awg://{b64_conf}#{fragment}"
 
     @classmethod
-    def build_subscription_body(cls, server_configs: Sequence[Tuple[str, str, str]]) -> str:
-        """Build the Base64-encoded subscription feed body containing multiple servers.
-
-        Args:
-            server_configs: Sequence of tuples (conf_text, server_name, country_flag).
-
-        Returns:
-            Base64-encoded plain text containing one awg:// URI per line.
+    def build_subscription_body(
+        cls,
+        server_configs: Sequence[Tuple[str, str, str]],
+        inline_metadata: list[str] | None = None,
+    ) -> str:
         """
-        if not server_configs:
+        Build base64 multi-server feed body for INCY.
+        Each server is represented as awg://<urlsafe_base64_conf>#{flag} {name}.
+        Optionally prepends inline subscription metadata (e.g. #announce: ..., #announce-url: ...).
+        """
+        if not server_configs and not inline_metadata:
             return ""
 
         lines = []
+        if inline_metadata:
+            for meta in inline_metadata:
+                if meta and meta.strip():
+                    lines.append(meta.strip())
+
         for item in server_configs:
             conf, name, flag = item
             try:
@@ -73,11 +79,14 @@ class AWGSubscriptionFeedService:
         update_interval_hours: int = 6,
         support_url: str | None = None,
         hide_url: bool = True,
+        hide_check: bool = False,
         web_page_url: str | None = None,
         premium_url: str | None = None,
         support_email: str | None = None,
         announce: str | None = None,
+        announce_url: str | None = None,
         sort_order: str | None = None,
+        profile_description: str | None = None,
         banner_text: str | None = None,
         banner_button_text: str | None = None,
         banner_button_url: str | None = None,
@@ -105,6 +114,13 @@ class AWGSubscriptionFeedService:
         if hide_url:
             headers["hide-url"] = "1"
 
+        if hide_check:
+            headers["hide-check"] = "1"
+
+        if profile_description and profile_description.strip():
+            desc_b64 = base64.b64encode(profile_description.strip().encode("utf-8")).decode("ascii")
+            headers["profile-description"] = f"base64:{desc_b64}"
+
         if support_url and support_url.strip():
             headers["support-url"] = support_url.strip()
 
@@ -123,6 +139,9 @@ class AWGSubscriptionFeedService:
         if announce and announce.strip():
             ann_b64 = base64.b64encode(announce.strip().encode("utf-8")).decode("ascii")
             headers["announce"] = f"base64:{ann_b64}"
+
+        if announce_url and announce_url.strip():
+            headers["announce-url"] = announce_url.strip()
 
         if banner_text and banner_text.strip():
             b_b64 = base64.b64encode(banner_text.strip().encode("utf-8")).decode("ascii")

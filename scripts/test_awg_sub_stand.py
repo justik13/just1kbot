@@ -41,11 +41,20 @@ class AWGSubscriptionFeedService:
         return f"awg://{b64_conf}#{fragment}"
 
     @classmethod
-    def build_subscription_body(cls, server_configs: Sequence[Tuple[str, str, str]]) -> str:
-        if not server_configs:
+    def build_subscription_body(
+        cls,
+        server_configs: Sequence[Tuple[str, str, str]],
+        inline_metadata: list[str] | None = None,
+    ) -> str:
+        if not server_configs and not inline_metadata:
             return ""
 
         lines = []
+        if inline_metadata:
+            for meta in inline_metadata:
+                if meta and meta.strip():
+                    lines.append(meta.strip())
+
         for item in server_configs:
             conf, name, flag = item
             try:
@@ -71,11 +80,14 @@ class AWGSubscriptionFeedService:
         update_interval_hours: int = 6,
         support_url: str | None = None,
         hide_url: bool = True,
+        hide_check: bool = False,
         web_page_url: str | None = None,
         premium_url: str | None = None,
         support_email: str | None = None,
         announce: str | None = None,
+        announce_url: str | None = None,
         sort_order: str | None = None,
+        profile_description: str | None = None,
         banner_text: str | None = None,
         banner_button_text: str | None = None,
         banner_button_url: str | None = None,
@@ -102,6 +114,13 @@ class AWGSubscriptionFeedService:
         if hide_url:
             headers["hide-url"] = "1"
 
+        if hide_check:
+            headers["hide-check"] = "1"
+
+        if profile_description and profile_description.strip():
+            desc_b64 = base64.b64encode(profile_description.strip().encode("utf-8")).decode("ascii")
+            headers["profile-description"] = f"base64:{desc_b64}"
+
         if support_url and support_url.strip():
             headers["support-url"] = support_url.strip()
 
@@ -120,6 +139,9 @@ class AWGSubscriptionFeedService:
         if announce and announce.strip():
             ann_b64 = base64.b64encode(announce.strip().encode("utf-8")).decode("ascii")
             headers["announce"] = f"base64:{ann_b64}"
+
+        if announce_url and announce_url.strip():
+            headers["announce-url"] = announce_url.strip()
 
         if banner_text and banner_text.strip():
             b_b64 = base64.b64encode(banner_text.strip().encode("utf-8")).decode("ascii")
@@ -380,35 +402,50 @@ VALID_TOKEN = "test_awg_vip_token"
 TEST_STATE = {
     "nl": True,
     "pl": True,
-    "de": False,
-    "se": False,
+    "de": True,
+    "se": True,
     "quota_exhausted": False,
     "expired": False,
     "block_403": False,
-    "stub_mode": True,      # True = Smart Stub (200 OK + notice server), False = Raw HTTP 403
+    "stub_mode": True,          # True = Smart Stub (200 OK + notice server), False = Raw HTTP 403
     "title_suffix": "",
-    "btn_web": True,        # profile-web-page-url (Кнопка «Личный кабинет / Сайт»)
-    "btn_premium": True,    # premium-url (Кнопка «Премиум / Продлить»)
-    "sort_ping": True,      # sort-order: ping (Автосортировка серверов по пингу)
-    "show_banner": False,   # In-App интерактивный баннер
+    "btn_web": True,            # profile-web-page-url (Кнопка «Личный кабинет / Сайт»)
+    "btn_email": True,          # support-email (Кнопка «Email поддержки»)
+    "btn_premium": True,        # premium-url (Кнопка «Премиум / Продлить»)
+    "sort_mode": "ping",        # "ping" | "name" | "none" | "server_de_first"
+    "show_banner": True,        # In-App интерактивное объявление / баннер (announce + announce-url)
+    "hide_check": False,        # hide-check: 1 (Скрыть кнопку «Проверить» на главном экране)
 }
 
 
 def get_slot_configs(slot: int) -> list[tuple[str, str, str]]:
     result = []
     suffix = f"(Slot {slot})"
+    sort_mode = TEST_STATE.get("sort_mode", "ping")
+
+    servers = []
     if TEST_STATE.get("nl"):
         conf = SLOT_1_NETHERLANDS if slot == 1 else SLOT_2_NETHERLANDS
-        result.append((conf, f"Netherlands {suffix}", "🇳🇱"))
+        servers.append(("Netherlands", "🇳🇱", conf))
     if TEST_STATE.get("pl"):
         conf = SLOT_1_POLAND if slot == 1 else SLOT_2_POLAND
-        result.append((conf, f"Poland {suffix}", "🇵🇱"))
+        servers.append(("Poland", "🇵🇱", conf))
     if TEST_STATE.get("de"):
         conf = SLOT_1_GERMANY if slot == 1 else SLOT_2_GERMANY
-        result.append((conf, f"Germany {suffix}", "🇩🇪"))
+        servers.append(("Germany", "🇩🇪", conf))
     if TEST_STATE.get("se"):
         conf = SLOT_1_SWEDEN if slot == 1 else SLOT_2_SWEDEN
-        result.append((conf, f"Sweden {suffix}", "🇸🇪"))
+        servers.append(("Sweden", "🇸🇪", conf))
+
+    if sort_mode == "server_de_first":
+        order = {"Germany": 1, "Poland": 2, "Sweden": 3, "Netherlands": 4}
+        servers.sort(key=lambda s: order.get(s[0], 99))
+    elif sort_mode == "name":
+        servers.sort(key=lambda s: s[0])
+
+    for country, flag, conf in servers:
+        result.append((conf, f"{country} {suffix}", flag))
+
     return result
 
 
@@ -505,27 +542,60 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         return web.Response(status=200, text=html_content, headers={"Content-Type": "text/html; charset=utf-8"})
 
     web_url = "https://t.me/just1kbot" if TEST_STATE.get("btn_web", True) else None
+    email_addr = "support@just1k.best" if TEST_STATE.get("btn_email", True) else None
     prem_url = "https://t.me/just1kbot?start=renew" if TEST_STATE.get("btn_premium", True) else None
-    sort_ord = "ping" if TEST_STATE.get("sort_ping", True) else None
 
-    # Banner resolution
+    # Sorting resolution
+    sort_mode = TEST_STATE.get("sort_mode", "ping")
+    sort_ord = None if sort_mode in ("none", "server_de_first") else sort_mode
+
+    # Banner and Announce resolution
+    ann_text = None
+    ann_url = None
     b_text = None
     b_btn_text = None
     b_btn_url = None
     b_bg = None
     b_btn_color = None
+
     if TEST_STATE.get("show_banner"):
-        b_text = "⚡ Спецпредложение: скидка 20% при продлении в боте на 3 месяца!"
+        ann_text = "⚡ Спецпредложение: скидка 20% при продлении в боте на 3 месяца!"
+        ann_url = "https://t.me/just1kbot"
+        b_text = ann_text
         b_btn_text = "Получить скидку"
-        b_btn_url = "https://t.me/just1kbot"
+        b_btn_url = ann_url
         b_bg = "#064e3b"
         b_btn_color = "#10b981"
     elif TEST_STATE.get("expired") and TEST_STATE.get("stub_mode"):
-        b_text = "Подписка истекла. Продлите доступ в Telegram-боте."
+        ann_text = "Подписка истекла. Продлите доступ в Telegram-боте."
+        ann_url = "https://t.me/just1kbot"
+        b_text = ann_text
         b_btn_text = "Продлить в боте"
-        b_btn_url = "https://t.me/just1kbot"
+        b_btn_url = ann_url
         b_bg = "#450a0a"
         b_btn_color = "#ef4444"
+    elif TEST_STATE.get("quota_exhausted") and TEST_STATE.get("stub_mode"):
+        ann_text = "Трафик 100% исчерпан. Пополните баланс в Telegram-боте."
+        ann_url = "https://t.me/just1kbot"
+        b_text = ann_text
+        b_btn_text = "Пополнить в боте"
+        b_btn_url = ann_url
+        b_bg = "#450a0a"
+        b_btn_color = "#ef4444"
+
+    # Inline metadata lines for body fallback
+    inline_meta = []
+    if ann_text:
+        inline_meta.append(f"#announce: {ann_text}")
+    if ann_url:
+        inline_meta.append(f"#announce-url: {ann_url}")
+    if email_addr:
+        inline_meta.append(f"#support-email: {email_addr}")
+    if web_url:
+        inline_meta.append(f"#profile-web-page-url: {web_url}")
+    inline_meta.append("#support-url: https://t.me/just1k_support")
+    if TEST_STATE.get("hide_check"):
+        inline_meta.append("#hide-check: 1")
 
     # Simulation: Forced Device Limit
     if TEST_STATE.get("block_403"):
@@ -536,7 +606,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
                     "Превышен лимит устройств — отключите в @just1kbot", "🚫"
                 )
             ]
-            stub_body = AWGSubscriptionFeedService.build_subscription_body(stub_configs)
+            stub_body = AWGSubscriptionFeedService.build_subscription_body(stub_configs, inline_metadata=inline_meta)
             stub_headers = AWGSubscriptionFeedService.build_subscription_headers(
                 profile_title="JUST1K [ЛИМИТ УСТРОЙСТВ]",
                 expire_ts=0,
@@ -545,15 +615,19 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
                 total_quota_bytes=1048576,
                 update_interval_hours=1,
                 support_url="https://t.me/just1k_support",
+                support_email=email_addr,
                 web_page_url=web_url,
                 premium_url=prem_url,
                 sort_order=sort_ord,
+                announce="Превышен лимит устройств! Отключите неактивное устройство в боте.",
+                announce_url="https://t.me/just1kbot",
                 banner_text="Превышен лимит устройств! Отключите неактивное устройство в боте.",
                 banner_button_text="Управление в боте",
                 banner_button_url="https://t.me/just1kbot",
                 banner_bg_color="#450a0a",
                 banner_button_color="#ef4444",
                 hide_url=True,
+                hide_check=TEST_STATE.get("hide_check", False),
             )
             stub_headers["Device-Limit-Exceeded"] = "1"
             return web.Response(status=200, text=stub_body, headers=stub_headers)
@@ -602,7 +676,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
                         f"Лимит устройств ({active_count}/{DEVICE_LIMIT}) — отключите в @just1kbot", "🚫"
                     )
                 ]
-                stub_body = AWGSubscriptionFeedService.build_subscription_body(stub_configs)
+                stub_body = AWGSubscriptionFeedService.build_subscription_body(stub_configs, inline_metadata=inline_meta)
                 stub_headers = AWGSubscriptionFeedService.build_subscription_headers(
                     profile_title=f"JUST1K [ЛИМИТ {active_count}/{DEVICE_LIMIT}]",
                     expire_ts=0,
@@ -611,15 +685,19 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
                     total_quota_bytes=1048576,
                     update_interval_hours=1,
                     support_url="https://t.me/just1k_support",
+                    support_email=email_addr,
                     web_page_url=web_url,
                     premium_url=prem_url,
                     sort_order=sort_ord,
+                    announce=f"Достигнут лимит устройств ({active_count}/{DEVICE_LIMIT}). Отключите неактивное в боте.",
+                    announce_url="https://t.me/just1kbot",
                     banner_text=f"Достигнут лимит устройств ({active_count}/{DEVICE_LIMIT}). Отключите неактивное в боте.",
                     banner_button_text="Управление слотами",
                     banner_button_url="https://t.me/just1kbot",
                     banner_bg_color="#450a0a",
                     banner_button_color="#ef4444",
                     hide_url=True,
+                    hide_check=TEST_STATE.get("hide_check", False),
                 )
                 stub_headers["Device-Limit-Exceeded"] = "1"
                 return web.Response(status=200, text=stub_body, headers=stub_headers)
@@ -700,7 +778,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
     if TEST_STATE.get("title_suffix") and not TEST_STATE.get("expired") and not TEST_STATE.get("quota_exhausted"):
         title += f" {TEST_STATE['title_suffix']}"
 
-    body = AWGSubscriptionFeedService.build_subscription_body(configs)
+    body = AWGSubscriptionFeedService.build_subscription_body(configs, inline_metadata=inline_meta)
     headers = AWGSubscriptionFeedService.build_subscription_headers(
         profile_title=title,
         expire_ts=expire_ts,
@@ -709,15 +787,20 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         total_quota_bytes=total_quota,
         update_interval_hours=1 if (TEST_STATE.get("expired") or TEST_STATE.get("quota_exhausted")) else 6,
         support_url="https://t.me/just1k_support",
+        support_email=email_addr,
         web_page_url=web_url,
         premium_url=prem_url,
         sort_order=sort_ord,
+        announce=ann_text,
+        announce_url=ann_url,
+        profile_description="⚡ Премиальный высокоскоростной AmneziaWG от JUST1K" if not (TEST_STATE.get("expired") or TEST_STATE.get("quota_exhausted")) else "Подписка неактивна",
         banner_text=b_text,
         banner_button_text=b_btn_text,
         banner_button_url=b_btn_url,
         banner_bg_color=b_bg,
         banner_button_color=b_btn_color,
         hide_url=True,
+        hide_check=TEST_STATE.get("hide_check", False),
     )
 
     logger.info("📤 Response 200 OK sent with %d servers for Slot #%d (Title: '%s')", len(configs), assigned_slot, title)
@@ -767,22 +850,39 @@ async def handle_control_action(request: web.Request) -> web.Response:
     elif act == "toggle_web":
         TEST_STATE["btn_web"] = not TEST_STATE.get("btn_web", True)
         state_text = "ВКЛЮЧЕНА" if TEST_STATE["btn_web"] else "ОТКЛЮЧЕНА"
-        msg = f"Кнопка «Личный кабинет»: {state_text}"
+        msg = f"Кнопка «Личный кабинет / Сайт»: {state_text}"
         logger.info("🎛️ [CONTROL] Btn Web: %s", TEST_STATE["btn_web"])
+    elif act == "toggle_email":
+        TEST_STATE["btn_email"] = not TEST_STATE.get("btn_email", True)
+        state_text = "ВКЛЮЧЕНА" if TEST_STATE["btn_email"] else "ОТКЛЮЧЕНА"
+        msg = f"Кнопка «Email поддержки»: {state_text}"
+        logger.info("🎛️ [CONTROL] Btn Email: %s", TEST_STATE["btn_email"])
     elif act == "toggle_premium":
         TEST_STATE["btn_premium"] = not TEST_STATE.get("btn_premium", True)
         state_text = "ВКЛЮЧЕНА" if TEST_STATE["btn_premium"] else "ОТКЛЮЧЕНА"
         msg = f"Кнопка «Премиум / Продлить»: {state_text}"
         logger.info("🎛️ [CONTROL] Btn Premium: %s", TEST_STATE["btn_premium"])
-    elif act == "toggle_sort_ping":
-        TEST_STATE["sort_ping"] = not TEST_STATE.get("sort_ping", True)
-        state_text = "ВКЛЮЧЕНА" if TEST_STATE["sort_ping"] else "ОТКЛЮЧЕНА"
-        msg = f"Сортировка по пингу: {state_text}"
-        logger.info("🎛️ [CONTROL] Sort ping: %s", TEST_STATE["sort_ping"])
+    elif act == "set_sort":
+        mode = request.query.get("mode", "ping")
+        if mode in ("ping", "name", "none", "server_de_first"):
+            TEST_STATE["sort_mode"] = mode
+            labels = {
+                "ping": "Заголовок sort-order: ping (по задержке)",
+                "name": "Заголовок sort-order: name (по алфавиту А-Я)",
+                "none": "Заголовок sort-order: none (как в файле)",
+                "server_de_first": "Серверная сортировка (Германия 51ms первой)",
+            }
+            msg = f"Сортировка установлена: {labels.get(mode, mode)}"
+            logger.info("🎛️ [CONTROL] Sort mode: %s", mode)
+    elif act == "toggle_hide_check":
+        TEST_STATE["hide_check"] = not TEST_STATE.get("hide_check", False)
+        state_text = "ВКЛЮЧЕНО (кнопка «Проверить» скрыта)" if TEST_STATE["hide_check"] else "ОТКЛЮЧЕНО (кнопка видна)"
+        msg = f"Скрытие кнопки «Проверить»: {state_text}"
+        logger.info("🎛️ [CONTROL] Hide check: %s", TEST_STATE["hide_check"])
     elif act == "toggle_banner":
         TEST_STATE["show_banner"] = not TEST_STATE.get("show_banner", False)
-        state_text = "ВКЛЮЧЕН (показывается)" if TEST_STATE["show_banner"] else "ОТКЛЮЧЕН (скрыт)"
-        msg = f"Интерактивный промо-баннер: {state_text}"
+        state_text = "ВКЛЮЧЕНО (announce + announce-url)" if TEST_STATE["show_banner"] else "ОТКЛЮЧЕНО (скрыто)"
+        msg = f"Интерактивное объявление / баннер: {state_text}"
         logger.info("🎛️ [CONTROL] Show banner: %s", TEST_STATE["show_banner"])
     elif act == "reset_hwid":
         count = len(REGISTERED_DEVICES)
@@ -792,19 +892,21 @@ async def handle_control_action(request: web.Request) -> web.Response:
     elif act == "reset_all":
         TEST_STATE["nl"] = True
         TEST_STATE["pl"] = True
-        TEST_STATE["de"] = False
-        TEST_STATE["se"] = False
+        TEST_STATE["de"] = True
+        TEST_STATE["se"] = True
         TEST_STATE["quota_exhausted"] = False
         TEST_STATE["expired"] = False
         TEST_STATE["block_403"] = False
         TEST_STATE["stub_mode"] = True
         TEST_STATE["title_suffix"] = ""
         TEST_STATE["btn_web"] = True
+        TEST_STATE["btn_email"] = True
         TEST_STATE["btn_premium"] = True
-        TEST_STATE["sort_ping"] = True
-        TEST_STATE["show_banner"] = False
+        TEST_STATE["sort_mode"] = "ping"
+        TEST_STATE["show_banner"] = True
+        TEST_STATE["hide_check"] = False
         REGISTERED_DEVICES.clear()
-        msg = "Все настройки сброшены к стандартным (Нидерланды + Польша, Умная заглушка, Кнопки ВКЛ)!"
+        msg = "Все настройки сброшены к стандарту (Все 4 сервера, Заглушка, Кнопки Сайт/Поддержка/Email, Объявление ВКЛ)!"
         logger.info("🎛️ [CONTROL] Reset ALL state to defaults")
 
     raise web.HTTPFound(f"/control?msg={msg}")
@@ -829,6 +931,8 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
     if not device_rows:
         device_rows = '<tr><td colspan="4" style="text-align: center; color: #64748b; padding: 16px;">Нет активных устройств</td></tr>'
 
+    cur_sort = TEST_STATE.get("sort_mode", "ping")
+
     html = f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -847,14 +951,15 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
     .section {{ background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px; margin-bottom: 16px; }}
     .section-title {{ font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--sub); margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }}
     .server-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }}
-    .item-card {{ background: rgba(0,0,0,0.25); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; display: flex; align-items: center; justify-content: space-between; }}
+    .item-card {{ background: rgba(0,0,0,0.25); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }}
     .item-info {{ display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 500; }}
-    .btn {{ display: inline-flex; align-items: center; justify-content: center; padding: 8px 14px; font-size: 13px; font-weight: 600; border-radius: 8px; text-decoration: none; border: none; cursor: pointer; transition: 0.15s; }}
+    .btn {{ display: inline-flex; align-items: center; justify-content: center; padding: 8px 14px; font-size: 13px; font-weight: 600; border-radius: 8px; text-decoration: none; border: none; cursor: pointer; transition: 0.15s; white-space: nowrap; }}
     .btn-green {{ background: var(--accent); color: #fff; }}
     .btn-red {{ background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }}
     .btn-blue {{ background: var(--blue); color: #fff; }}
     .btn-gray {{ background: #334155; color: #cbd5e1; }}
     .btn-outline {{ background: transparent; border: 1px solid #475569; color: #cbd5e1; }}
+    .btn-active {{ background: #2563eb; color: #fff; border: 1px solid #60a5fa; }}
     .badge {{ font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 600; text-transform: uppercase; }}
     .badge-on {{ background: #064e3b; color: #34d399; }}
     .badge-off {{ background: #334155; color: #94a3b8; }}
@@ -868,7 +973,7 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
   <div class="container">
     <div class="header">
       <h1>🎛️ Управление AmneziaWG MVP</h1>
-      <p>Переключайте серверы и лимиты, затем нажимайте 🔄 в INCY</p>
+      <p>Переключайте серверы, кнопки и сортировку, затем нажимайте 🔄 в INCY</p>
     </div>
 
     {f'<div class="alert"><span>🔔 {flash_msg}</span><span style="font-size: 12px; opacity: 0.8;">Нажмите 🔄 в приложении INCY</span></div>' if flash_msg else ''}
@@ -908,7 +1013,7 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
             <div>Германия <span class="badge {'badge-on' if TEST_STATE['de'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['de'] else 'ВЫКЛ'}</span></div>
           </div>
           <a href="/control/action?act=toggle_server&server=de" class="btn {'btn-red' if TEST_STATE['de'] else 'btn-green'}">
-            {'Отключить' if TEST_STATE['de'] else '➕ Добавить'}
+            {'Отключить' if TEST_STATE['de'] else 'Включить'}
           </a>
         </div>
 
@@ -919,11 +1024,102 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
             <div>Швеция <span class="badge {'badge-on' if TEST_STATE['se'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['se'] else 'ВЫКЛ'}</span></div>
           </div>
           <a href="/control/action?act=toggle_server&server=se" class="btn {'btn-red' if TEST_STATE['se'] else 'btn-green'}">
-            {'Отключить' if TEST_STATE['se'] else '➕ Добавить'}
+            {'Отключить' if TEST_STATE['se'] else 'Включить'}
           </a>
         </div>
       </div>
       <div class="hint">💡 При добавлении или удалении сервера перейдите в INCY и нажмите 🔄 (обновить подписку). Список обновится мгновенно без пересоздания профиля.</div>
+    </div>
+
+    <!-- Sorting Section -->
+    <div class="section">
+      <div class="section-title">
+        <span>📶 Порядок сортировки серверов</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 12px;">
+        <a href="/control/action?act=set_sort&mode=ping" class="btn {'btn-active' if cur_sort == 'ping' else 'btn-gray'}">
+          ⚡ По пингу (sort-order)
+        </a>
+        <a href="/control/action?act=set_sort&mode=server_de_first" class="btn {'btn-active' if cur_sort == 'server_de_first' else 'btn-gray'}">
+          🇩🇪 Германия первой (51ms)
+        </a>
+        <a href="/control/action?act=set_sort&mode=name" class="btn {'btn-active' if cur_sort == 'name' else 'btn-gray'}">
+          🔤 По имени (А-Я)
+        </a>
+        <a href="/control/action?act=set_sort&mode=none" class="btn {'btn-active' if cur_sort == 'none' else 'btn-gray'}">
+          📄 По умолчанию
+        </a>
+      </div>
+      <div class="hint">
+        <b>💡 Как работает сортировка в INCY:</b><br>
+        • <b>По пингу (sort-order: ping)</b>: задаёт клиенту режим сортировки по задержке. Однако в момент загрузки пинг ещё не измерен (показывается «-- ms»). Сортировка по пингу применяется в клиенте <i>после нажатия кнопки замера пинга</i>.<br>
+        • <b>Германия первой</b>: серверная сортировка. Стенд сразу отдаёт Германию (51 мс) первой в теле подписки, затем Польшу (71 мс), Швецию (89 мс) и Нидерланды (99 мс). Серверы сразу стоят от быстрых к медленным даже до замера!<br>
+        • <b>По имени (sort-order: name)</b>: клиент сортирует локации по алфавиту (Германия ➔ Нидерланды ➔ Польша ➔ Швеция).
+      </div>
+    </div>
+
+    <!-- Buttons & Banner Section -->
+    <div class="section">
+      <div class="section-title">
+        <span>Кнопки в карточке подписки и Объявления</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <!-- In-App Announcement / Banner -->
+        <div class="item-card" style="background: {'rgba(16,185,129,0.1)' if TEST_STATE.get('show_banner') else 'rgba(0,0,0,0.25)'}; border: 1px solid {'#10b981' if TEST_STATE.get('show_banner') else 'var(--card-border)'};">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">📢 In-App объявление в карточке (announce + announce-url)</div>
+            <div class="hint">Официальный заголовок <code>announce</code> (до 200 символов) + ссылка <code>announce-url</code>. Показывает плашку объявления прямо на главном экране INCY. Работает у всех пользователей!</div>
+          </div>
+          <a href="/control/action?act=toggle_banner" class="btn {'btn-red' if TEST_STATE.get('show_banner') else 'btn-green'}">
+            {'Скрыть объявление' if TEST_STATE.get('show_banner') else 'Включить объявление'}
+          </a>
+        </div>
+
+        <!-- Web Page / Site -->
+        <div class="item-card">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">🌐 Кнопка «Сайт» (profile-web-page-url)</div>
+            <div class="hint">Добавляет круглую кнопку «Сайт» со ссылкой на бота @just1kbot в карточку подписки</div>
+          </div>
+          <a href="/control/action?act=toggle_web" class="btn {'btn-red' if TEST_STATE.get('btn_web') else 'btn-green'}">
+            {'Отключить' if TEST_STATE.get('btn_web') else 'Включить'}
+          </a>
+        </div>
+
+        <!-- Email Support -->
+        <div class="item-card">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">✉️ Кнопка «Email» (support-email)</div>
+            <div class="hint">Заголовок <code>support-email: support@just1k.best</code>. Добавляет 3-ю нативную кнопку в карточку профиля</div>
+          </div>
+          <a href="/control/action?act=toggle_email" class="btn {'btn-red' if TEST_STATE.get('btn_email') else 'btn-green'}">
+            {'Отключить' if TEST_STATE.get('btn_email') else 'Включить'}
+          </a>
+        </div>
+
+        <!-- Premium / Renew -->
+        <div class="item-card">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">⭐ Кнопка «Премиум / Продлить» (premium-url)</div>
+            <div class="hint">Заголовок <code>premium-url</code>. В стандартном INCY зарезервирована для Lite Mode и партнерских аккаунтов.</div>
+          </div>
+          <a href="/control/action?act=toggle_premium" class="btn {'btn-red' if TEST_STATE.get('btn_premium') else 'btn-green'}">
+            {'Отключить' if TEST_STATE.get('btn_premium') else 'Включить'}
+          </a>
+        </div>
+
+        <!-- Hide Check Button -->
+        <div class="item-card">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">🚫 Скрыть кнопку «Проверить» на главном экране (hide-check: 1)</div>
+            <div class="hint">Убирает большую кнопку проверки соединения с главного экрана INCY</div>
+          </div>
+          <a href="/control/action?act=toggle_hide_check" class="btn {'btn-red' if TEST_STATE.get('hide_check') else 'btn-green'}">
+            {'Показать кнопку' if TEST_STATE.get('hide_check') else 'Скрыть кнопку'}
+          </a>
+        </div>
+      </div>
     </div>
 
     <!-- Scenarios Section -->
@@ -995,59 +1191,6 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
       </div>
     </div>
 
-    <!-- Buttons & Banner Section -->
-    <div class="section">
-      <div class="section-title">
-        <span>Кнопки в карточке подписки и In-App баннеры</span>
-      </div>
-
-      <div style="display: flex; flex-direction: column; gap: 10px;">
-        <!-- Web Page / Personal Account -->
-        <div class="item-card">
-          <div>
-            <div style="font-weight: 600; font-size: 14px;">🌐 Кнопка «Личный кабинет / Сайт»</div>
-            <div class="hint">Заголовок <code>profile-web-page-url</code>. Добавляет кнопку перехода в бота @just1kbot</div>
-          </div>
-          <a href="/control/action?act=toggle_web" class="btn {'btn-red' if TEST_STATE.get('btn_web') else 'btn-green'}">
-            {'Отключить' if TEST_STATE.get('btn_web') else 'Включить'}
-          </a>
-        </div>
-
-        <!-- Premium / Renew -->
-        <div class="item-card">
-          <div>
-            <div style="font-weight: 600; font-size: 14px;">⭐ Кнопка «Премиум / Продлить»</div>
-            <div class="hint">Заголовок <code>premium-url</code>. Добавляет кнопку продления прямо в карточку профиля</div>
-          </div>
-          <a href="/control/action?act=toggle_premium" class="btn {'btn-red' if TEST_STATE.get('btn_premium') else 'btn-green'}">
-            {'Отключить' if TEST_STATE.get('btn_premium') else 'Включить'}
-          </a>
-        </div>
-
-        <!-- Sort by ping -->
-        <div class="item-card">
-          <div>
-            <div style="font-weight: 600; font-size: 14px;">⚡ Автосортировка по пингу (sort-order: ping)</div>
-            <div class="hint">Заголовок <code>sort-order: ping</code>. Автоматически сортирует сервера в INCY от самых быстрых</div>
-          </div>
-          <a href="/control/action?act=toggle_sort_ping" class="btn {'btn-red' if TEST_STATE.get('sort_ping') else 'btn-green'}">
-            {'Отключить' if TEST_STATE.get('sort_ping') else 'Включить'}
-          </a>
-        </div>
-
-        <!-- In-App Interactive Banner -->
-        <div class="item-card">
-          <div>
-            <div style="font-weight: 600; font-size: 14px;">📢 Интерактивный промо-баннер с кнопкой</div>
-            <div class="hint">Заголовки <code>banner-text</code> и <code>banner-button</code>. Выводит цветной баннер со скидкой и кнопкой прямо на главном экране INCY</div>
-          </div>
-          <a href="/control/action?act=toggle_banner" class="btn {'btn-red' if TEST_STATE.get('show_banner') else 'btn-green'}">
-            {'Скрыть баннер' if TEST_STATE.get('show_banner') else 'Показать баннер'}
-          </a>
-        </div>
-      </div>
-    </div>
-
     <!-- Active Devices Table -->
     <div class="section">
       <div class="section-title">
@@ -1071,7 +1214,7 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
 
     <!-- Quick Reset -->
     <div style="text-align: center; margin-top: 10px;">
-      <a href="/control/action?act=reset_all" class="btn btn-outline" style="color: #94a3b8;">🔄 Сбросить ВСЕ настройки к умолчанию (NL + PL)</a>
+      <a href="/control/action?act=reset_all" class="btn btn-outline" style="color: #94a3b8;">🔄 Сбросить ВСЕ настройки к умолчанию</a>
     </div>
   </div>
 </body>

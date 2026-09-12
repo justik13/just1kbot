@@ -163,6 +163,9 @@ class AWGSubscriptionFeedServiceTests(unittest.TestCase):
             support_email="support@just1k.best",
             sort_order="ping",
             announce="Техработы завершены",
+            announce_url="https://t.me/just1kbot?start=news",
+            profile_description="Премиальный быстрый VPN",
+            hide_check=True,
             banner_text="Скидка 20% на продление!",
             banner_button_text="Купить",
             banner_button_url="https://t.me/just1kbot?start=sale",
@@ -174,6 +177,8 @@ class AWGSubscriptionFeedServiceTests(unittest.TestCase):
         self.assertEqual(headers["premium-url"], "https://t.me/just1kbot?start=renew")
         self.assertEqual(headers["support-email"], "support@just1k.best")
         self.assertEqual(headers["sort-order"], "ping")
+        self.assertEqual(headers["announce-url"], "https://t.me/just1kbot?start=news")
+        self.assertEqual(headers["hide-check"], "1")
         self.assertEqual(headers["banner-button-text"], "Купить")
         self.assertEqual(headers["banner-button-url"], "https://t.me/just1kbot?start=sale")
         self.assertEqual(headers["banner-bg-color"], "#1e293b")
@@ -182,8 +187,29 @@ class AWGSubscriptionFeedServiceTests(unittest.TestCase):
         ann_decoded = base64.b64decode(headers["announce"].removeprefix("base64:")).decode("utf-8")
         self.assertEqual(ann_decoded, "Техработы завершены")
 
+        desc_decoded = base64.b64decode(headers["profile-description"].removeprefix("base64:")).decode("utf-8")
+        self.assertEqual(desc_decoded, "Премиальный быстрый VPN")
+
         b_decoded = base64.b64decode(headers["banner-text"].removeprefix("base64:")).decode("utf-8")
         self.assertEqual(b_decoded, "Скидка 20% на продление!")
+
+    def test_build_subscription_body_with_inline_metadata(self):
+        inline_meta = [
+            "#announce: Важное уведомление",
+            "#announce-url: https://t.me/just1kbot",
+        ]
+        server_configs = [
+            (SAMPLE_CONF_NL, "Netherlands", "🇳🇱"),
+        ]
+        body = AWGSubscriptionFeedService.build_subscription_body(
+            server_configs, inline_metadata=inline_meta
+        )
+        decoded = base64.b64decode(body).decode("utf-8")
+        lines = [line.strip() for line in decoded.strip().split("\n") if line.strip()]
+
+        self.assertEqual(lines[0], "#announce: Важное уведомление")
+        self.assertEqual(lines[1], "#announce-url: https://t.me/just1kbot")
+        self.assertTrue(lines[2].startswith("awg://"))
 
 
 if __name__ == "__main__":
