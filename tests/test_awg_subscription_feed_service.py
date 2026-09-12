@@ -55,7 +55,10 @@ PersistentKeepalive = 25
 class AWGSubscriptionFeedServiceTests(unittest.TestCase):
     def test_encode_config_strict_urlsafe_base64(self):
         # A config string crafted so that standard Base64 produces '+' or '/'
-        conf_with_special_chars = "[Interface]\nPrivateKey = >>>>????\n"
+        conf_with_special_chars = (
+            "[Interface]\nPrivateKey = >>>>????\n"
+            "[Peer]\nEndpoint = 195.133.1.20:443\n"
+        )
         uri = AWGSubscriptionFeedService.encode_config_to_awg_uri(
             conf_with_special_chars, "Netherlands", "🇳🇱"
         )
@@ -72,6 +75,17 @@ class AWGSubscriptionFeedServiceTests(unittest.TestCase):
         # Decoding via urlsafe_b64decode reproduces original config
         decoded = base64.urlsafe_b64decode(inner_b64.encode("ascii")).decode("utf-8")
         self.assertEqual(decoded, conf_with_special_chars.strip())
+
+    def test_encode_config_invalid_rejected(self):
+        # Missing [Interface] / PrivateKey or [Peer] / Endpoint must raise ValueError
+        with self.assertRaises(ValueError):
+            AWGSubscriptionFeedService.encode_config_to_awg_uri("not a valid config", "Test")
+
+        with self.assertRaises(ValueError):
+            AWGSubscriptionFeedService.encode_config_to_awg_uri("[Interface]\nAddress = 10.0.0.1", "Test")
+
+        with self.assertRaises(ValueError):
+            AWGSubscriptionFeedService.encode_config_to_awg_uri("[Interface]\nPrivateKey = abc\n", "Test")
 
     def test_build_subscription_body_multi_server(self):
         server_configs = [

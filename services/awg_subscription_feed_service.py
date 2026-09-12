@@ -25,6 +25,12 @@ class AWGSubscriptionFeedService:
             raise ValueError("Configuration text cannot be empty")
 
         clean_conf = conf.strip()
+        lower_conf = clean_conf.lower()
+        if "[interface]" not in lower_conf or "privatekey" not in lower_conf:
+            raise ValueError("Configuration must contain a valid [Interface] section with PrivateKey")
+        if "[peer]" not in lower_conf or "endpoint" not in lower_conf:
+            raise ValueError("Configuration must contain a valid [Peer] section with Endpoint")
+
         b64_conf = base64.urlsafe_b64encode(clean_conf.encode("utf-8")).decode("ascii")
 
         clean_name = (server_name or "Server").strip()

@@ -37,6 +37,11 @@ except Exception:
             if not conf or not conf.strip():
                 raise ValueError("Configuration text cannot be empty")
             clean_conf = conf.strip()
+            lower_conf = clean_conf.lower()
+            if "[interface]" not in lower_conf or "privatekey" not in lower_conf:
+                raise ValueError("Configuration must contain a valid [Interface] section with PrivateKey")
+            if "[peer]" not in lower_conf or "endpoint" not in lower_conf:
+                raise ValueError("Configuration must contain a valid [Peer] section with Endpoint")
             b64_conf = base64.urlsafe_b64encode(clean_conf.encode("utf-8")).decode("ascii")
             clean_name = (server_name or "Server").strip()
             clean_flag = (country_flag or "").strip()
@@ -422,23 +427,32 @@ TEST_STATE = {
 }
 
 
+# Optional custom live configurations for Slot 1 and Slot 2
+CUSTOM_AWG_SLOT_1: str = os.environ.get("CUSTOM_AWG_SLOT_1", "")
+CUSTOM_AWG_SLOT_2: str = os.environ.get("CUSTOM_AWG_SLOT_2", "")
+
+
 async def get_slot_configs(slot: int) -> list[tuple[str, str, str]]:
-    suffix = f"(Slot {slot})"
     sort_mode = TEST_STATE.get("sort_mode", "ping")
 
     raw_candidates = []
     if TEST_STATE.get("nl"):
-        conf = SLOT_1_NETHERLANDS if slot == 1 else SLOT_2_NETHERLANDS
-        raw_candidates.append((conf, f"Netherlands {suffix}", "🇳🇱"))
+        if slot == 1 and CUSTOM_AWG_SLOT_1.strip():
+            conf = CUSTOM_AWG_SLOT_1.strip()
+        elif slot == 2 and CUSTOM_AWG_SLOT_2.strip():
+            conf = CUSTOM_AWG_SLOT_2.strip()
+        else:
+            conf = SLOT_1_NETHERLANDS if slot == 1 else SLOT_2_NETHERLANDS
+        raw_candidates.append((conf, "Нидерланды", "🇳🇱"))
     if TEST_STATE.get("pl"):
         conf = SLOT_1_POLAND if slot == 1 else SLOT_2_POLAND
-        raw_candidates.append((conf, f"Poland {suffix}", "🇵🇱"))
+        raw_candidates.append((conf, "Польша", "🇵🇱"))
     if TEST_STATE.get("de"):
         conf = SLOT_1_GERMANY if slot == 1 else SLOT_2_GERMANY
-        raw_candidates.append((conf, f"Germany {suffix}", "🇩🇪"))
+        raw_candidates.append((conf, "Германия", "🇩🇪"))
     if TEST_STATE.get("se"):
         conf = SLOT_1_SWEDEN if slot == 1 else SLOT_2_SWEDEN
-        raw_candidates.append((conf, f"Sweden {suffix}", "🇸🇪"))
+        raw_candidates.append((conf, "Швеция", "🇸🇪"))
 
     servers = []
     if sort_mode == "ping":
@@ -476,9 +490,15 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
     device_os = request.headers.get("x-device-os", "Unknown OS")
     device_model = request.headers.get("x-device-model", "Unknown Model")
 
+    def _mask_val(key: str, val: str) -> str:
+        k = key.lower()
+        if any(s in k for s in ("hwid", "token", "auth", "secret", "cookie")):
+            return f"{val[:6]}...***" if len(val) > 6 else "***"
+        return val
+
     logger.info("   Headers detected:")
     for h_name, h_val in request.headers.items():
-        logger.info("     [%s]: %s", h_name, h_val)
+        logger.info("     [%s]: %s", h_name, _mask_val(h_name, h_val))
 
     if token != VALID_TOKEN:
         logger.warning("❌ Invalid subscription token: %s", token)
@@ -839,6 +859,30 @@ async def handle_control_action(request: web.Request) -> web.Response:
     raise web.HTTPFound(f"/control?msg={msg}")
 
 
+async def handle_set_conf(request: web.Request) -> web.Response:
+    global CUSTOM_AWG_SLOT_1, CUSTOM_AWG_SLOT_2
+    data = await request.post()
+    slot = str(data.get("slot", "1"))
+    conf = str(data.get("conf", "")).strip()
+
+    if conf:
+        try:
+            # Validate configuration format
+            AWGSubscriptionFeedService.encode_config_to_awg_uri(conf, "Validation Test")
+        except Exception as exc:
+            raise web.HTTPFound(f"/control?msg=Ошибка валидации конфига: {exc}")
+
+    if slot == "1":
+        CUSTOM_AWG_SLOT_1 = conf
+        msg = "Живой конфиг для Слот #1 (Нидерланды) успешно установлен!" if conf else "Живой конфиг для Слот #1 сброшен."
+    else:
+        CUSTOM_AWG_SLOT_2 = conf
+        msg = "Живой конфиг для Слот #2 (Нидерланды) успешно установлен!" if conf else "Живой конфиг для Слот #2 сброшен."
+
+    logger.info("🎛️ [CONTROL] Set custom live config for Slot #%s (len: %d)", slot, len(conf))
+    raise web.HTTPFound(f"/control?msg={msg}")
+
+
 async def handle_control_dashboard(request: web.Request) -> web.Response:
     flash_msg = request.query.get("msg", "")
 
@@ -1106,6 +1150,30 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
       </div>
     </div>
 
+    <!-- Live AmneziaWG Config Input Section -->
+    <div class="section" style="border: 1px solid #3b82f6;">
+      <div class="section-title" style="color: #60a5fa;">
+        <span>⚡ Тестирование реального конфига (Handshake & Трафик)</span>
+      </div>
+      <form action="/control/set_conf" method="POST" style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 13px; color: var(--sub);">
+          Вставьте сюда реальный рабочий конфиг <code>.conf</code> от вашей ноды AmneziaWG. Он сразу подставится в слот Нидерландов и будет выдан клиенту INCY для проверки реального туннеля и трафика.
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+          <label style="font-size: 13px; font-weight: 600;">Назначить в слот:</label>
+          <select name="slot" style="background: #1e293b; color: #fff; border: 1px solid #334155; padding: 6px 12px; border-radius: 8px; font-size: 13px;">
+            <option value="1">Слот #1 (Устройство 1) {'[АКТИВЕН ЖИВОЙ]' if CUSTOM_AWG_SLOT_1 else ''}</option>
+            <option value="2">Слот #2 (Устройство 2) {'[АКТИВЕН ЖИВОЙ]' if CUSTOM_AWG_SLOT_2 else ''}</option>
+          </select>
+          <span style="font-size: 12px; color: #34d399;">{'✅ Слот 1: живой' if CUSTOM_AWG_SLOT_1 else '• Слот 1: демо'} | {'✅ Слот 2: живой' if CUSTOM_AWG_SLOT_2 else '• Слот 2: демо'}</span>
+        </div>
+        <textarea name="conf" rows="6" placeholder="[Interface]&#10;Address = 10.8.0.2/32&#10;PrivateKey = ...&#10;Jc = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = your-host:443" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid var(--card-border); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 12px;"></textarea>
+        <div style="display: flex; gap: 10px;">
+          <button type="submit" class="btn btn-blue">💾 Сохранить и выдать в подписку</button>
+        </div>
+      </form>
+    </div>
+
     <!-- Active Devices Table -->
     <div class="section">
       <div class="section-title">
@@ -1171,6 +1239,7 @@ def make_app() -> web.Application:
     app.router.add_get("/reset", handle_reset)
     app.router.add_get("/control", handle_control_dashboard)
     app.router.add_get("/control/action", handle_control_action)
+    app.router.add_post("/control/set_conf", handle_set_conf)
     return app
 
 
