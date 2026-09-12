@@ -19,6 +19,7 @@ from database.repositories import users_repo
 from services.awg_subscription_feed_service import AWGSubscriptionFeedService
 from services.device_service import DeviceService, RESERVING_STATUSES
 from services.slots_cache import capture_server_peer_snapshot
+from services.subscription import SubscriptionService
 from utils.datetime_helpers import is_expired, now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 from utils.vpn_parser import build_conf_file
@@ -107,7 +108,8 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
             )).scalar_one()
 
             total_active = manual_count + len(active_sub_devices)
-            limit = user.device_limit or 2
+            effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
+            limit = effective_limit or getattr(user, "device_limit", 2) or 2
 
             if total_active >= limit:
                 headers = dict(common_headers)
@@ -191,15 +193,16 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
 
                     replaces_id = old_p.id
                     try:
-                        await DeviceService.delete_device(session, old_p, actor_id=user.telegram_id, force=True)
+                        async with session.begin_nested():
+                            await DeviceService.delete_device(session, old_p, actor_id=user.telegram_id, force=True)
                     except Exception as del_exc:
                         logger.warning("Failed to clean up stale/failed profile %s on server %s: %s", old_p.id, srv.id, del_exc)
                         # Skip recreation on this server if cleanup failed to avoid orphaned state or capacity breach
                         continue
 
                 try:
+                    snapshot = await capture_server_peer_snapshot(srv.id)
                     async with session.begin_nested():
-                        snapshot = await capture_server_peer_snapshot(srv.id)
                         dev_name = texts.AWG_SUB_PROFILE_NAME_TEMPLATE.format(server_name=srv.name or "AWG")
                         profile = await DeviceService.create_device(
                             session,
