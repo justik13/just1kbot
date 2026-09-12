@@ -1962,6 +1962,121 @@ class TestAWGAllocationInvariantsHardening(unittest.IsolatedAsyncioTestCase):
                     )
                 self.assertIn("Invalid or disabled server", str(cm.exception))
 
+    async def test_device_limit_zero_is_fail_closed(self):
+        """Verify that device_limit == 0 strictly blocks device creation instead of defaulting to 5."""
+        from services.device_service import DeviceLimitExceeded, DeviceService
+
+        now = datetime.now(timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=12345,
+            subscription_end=now + timedelta(days=30),
+            device_limit=0,
+            active_sub_devices={},
+            is_banned=False,
+            is_deleted=False,
+        )
+        server = Server(
+            id=1,
+            name="DE",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            max_clients=100,
+        )
+        snapshot = ServerPeerSnapshot(server_id=1, peer_ids=frozenset(), captured_at=now)
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(scalar_one=MagicMock(return_value=user)),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=server)),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # dup query
+                MagicMock(scalar_one=MagicMock(return_value=0)),  # manual_count
+            ]
+        )
+
+        with self.assertRaises(DeviceLimitExceeded):
+            await DeviceService.create_device(
+                session=mock_session,
+                user_id=1,
+                server_id=1,
+                snapshot=snapshot,
+                device_name="Test#1",
+            )
+
+    async def test_get_available_servers_filters_offline_nodes(self):
+        """Verify get_available_servers excludes OFFLINE or PROBLEM servers."""
+        from database.repositories.servers_repo import get_available_servers
+
+        online_srv = Server(
+            id=1,
+            name="Online-1",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            max_clients=100,
+        )
+        offline_srv = Server(
+            id=2,
+            name="Offline-2",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.PROBLEM,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            max_clients=100,
+        )
+
+        mock_session = AsyncMock()
+        with (
+            patch("database.repositories.servers_repo.get_active_servers", new_callable=AsyncMock) as mock_get_active,
+            patch("database.repositories.servers_repo.get_server_peer_counts", new_callable=AsyncMock) as mock_counts,
+            patch("database.repositories.servers_repo.get_cached_peer_count", return_value=0),
+        ):
+            mock_get_active.return_value = [online_srv, offline_srv]
+            mock_counts.return_value = {1: 0, 2: 0}
+
+            available = await get_available_servers(mock_session)
+            self.assertEqual(len(available), 1)
+            self.assertEqual(available[0].id, 1)
+
+    async def test_build_connections_screen_uses_settings_domain(self):
+        """Verify _build_connections_screen uses settings.DOMAIN when PUBLIC_URL is not set."""
+        from bot.handlers.connection.common import _build_connections_screen
+
+        now = datetime.now(timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=12345,
+            subscription_end=now + timedelta(days=30),
+            device_limit=2,
+            active_sub_devices={},
+            subscription_token="test_token_12345678901234567890",
+        )
+        mock_session = AsyncMock()
+
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch("bot.handlers.connection.common.get_settings") as mock_settings,
+            patch("bot.handlers.connection.common.users_repo.ensure_subscription_token", new_callable=AsyncMock) as mock_token,
+            patch("bot.handlers.connection.common._get_effective_device_limit", new_callable=AsyncMock) as mock_limit,
+            patch("bot.handlers.connection.common.get_user_profiles", new_callable=AsyncMock) as mock_profiles,
+        ):
+            mock_settings.return_value.DOMAIN = "vpn.testdomain.org"
+            mock_token.return_value = user.subscription_token
+            mock_limit.return_value = 2
+            mock_profiles.return_value = []
+            # Ensure env vars aren't overriding
+            import os
+            for var in ("PUBLIC_URL", "SUB_BASE_URL", "APP_BASE_URL"):
+                os.environ.pop(var, None)
+
+            rendered, builder = await _build_connections_screen(user, [], mock_session)
+            self.assertIn("https://vpn.testdomain.org/sub/awg/test_token_12345678901234567890", rendered)
+            self.assertNotIn("sub.just1k.best", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

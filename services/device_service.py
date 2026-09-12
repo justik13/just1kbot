@@ -125,7 +125,7 @@ class DeviceService:
                 m = re.search(r"#(\d+)$", p.device_name)
                 if m:
                     used.add(int(m.group(1)))
-            limit = user.device_limit or 5
+            limit = user.device_limit if user.device_limit is not None else 2
             slot_index = 1
             for i in range(1, limit + 1):
                 if i not in used:
@@ -166,7 +166,7 @@ class DeviceService:
             manual_count = (await session.execute(manual_query)).scalar_one()
 
             sub_count = len(user.active_sub_devices or {})
-            effective_device_limit = user.device_limit or 5
+            effective_device_limit = user.device_limit if user.device_limit is not None else 2
             if manual_count + sub_count >= effective_device_limit:
                 raise DeviceLimitExceeded("Device limit reached")
         server_count = (

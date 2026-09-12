@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.constants import AMNEZIA_PROTOCOL, GRACE_PERIOD_HOURS
 from bot.keyboards import get_back_button
+from config.settings import get_settings
 from database.models import User
 from database.repositories import users_repo
 from database.repositories.profiles_repo import (
@@ -196,11 +197,19 @@ async def _build_connections_screen(
         end_date_str = sub_end.strftime("%d.%m.%Y")
 
     token = await users_repo.ensure_subscription_token(session, user)
+    try:
+        settings = get_settings()
+        domain = (getattr(settings, "DOMAIN", "") or "").strip()
+    except Exception:
+        domain = ""
+    if not domain:
+        domain = os.getenv("DOMAIN", "").strip()
+
     sub_base_url = (
         os.getenv("PUBLIC_URL")
         or os.getenv("SUB_BASE_URL")
         or os.getenv("APP_BASE_URL")
-        or "https://sub.just1k.best"
+        or (f"https://{domain}" if domain else "")
     ).rstrip("/")
     sub_prefix = (
         os.getenv("AWG_SUB_PATH_PREFIX") or "/sub/awg"
