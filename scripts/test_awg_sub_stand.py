@@ -197,26 +197,32 @@ PersistentKeepalive = 25
 """
 
 SLOT_1_POLAND = """[Interface]
-Address = 10.8.1.2/32
-DNS = 1.1.1.1, 1.0.0.1
+DNS = 8.8.8.8, 8.8.4.4
 MTU = 1280
-PrivateKey = iD8yVheREG5+gBPjx48aRDH8YmkjmEtoCDm8WI8cBm9=
+Address = 10.8.1.11/32
+PrivateKey = 2DyBIqQoFE3MOIddVBRh9fvsIDv02R2bGS+FFyOc3U8=
 Jc = 3
-Jmin = 15
-Jmax = 45
-S1 = 82
-S2 = 110
-S3 = 8
-S4 = 2
-H1 = 170000000-1200000000
-H2 = 200000000-2100000000
-H3 = 210000000-2130000000
-H4 = 213000000-2140000000
+Jmin = 40
+Jmax = 80
+S1 = 50
+S2 = 40
+S3 = 12
+S4 = 8
+H1 = 234567-345678
+H2 = 3456789-4567890
+H3 = 56789012-67890123
+H4 = 456789012-567890123
+I1 = <r 64>
+I2 = 
+I3 = 
+I4 = 
+I5 = 
 
 [Peer]
-PublicKey = cnYPD+G2GyFNF0eziL3H6/2TVu0I1KxWp62i3xQghzp=
+PublicKey = QQYkfk0HTatxBJT0k6Pq+H386H3Nh6c8FCHou2GYpGk=
+PresharedKey = W2sKAeur98STQFUtItyQ026wWup7llRe8z6YjlL46L4=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 212.77.98.9:443
+Endpoint = pl.just1k.best:777
 PersistentKeepalive = 25
 """
 
@@ -245,26 +251,32 @@ PersistentKeepalive = 25
 """
 
 SLOT_2_POLAND = """[Interface]
-Address = 10.8.1.3/32
-DNS = 1.1.1.1, 1.0.0.1
+DNS = 8.8.8.8, 8.8.4.4
 MTU = 1280
-PrivateKey = zY9xWvuTSR8+qPONml65KJIHGFEDCba0987654321Z=
+Address = 10.8.1.11/32
+PrivateKey = 2DyBIqQoFE3MOIddVBRh9fvsIDv02R2bGS+FFyOc3U8=
 Jc = 3
-Jmin = 15
-Jmax = 45
-S1 = 82
-S2 = 110
-S3 = 8
-S4 = 2
-H1 = 170000000-1200000000
-H2 = 200000000-2100000000
-H3 = 210000000-2130000000
-H4 = 213000000-2140000000
+Jmin = 40
+Jmax = 80
+S1 = 50
+S2 = 40
+S3 = 12
+S4 = 8
+H1 = 234567-345678
+H2 = 3456789-4567890
+H3 = 56789012-67890123
+H4 = 456789012-567890123
+I1 = <r 64>
+I2 = 
+I3 = 
+I4 = 
+I5 = 
 
 [Peer]
-PublicKey = cnYPD+G2GyFNF0eziL3H6/2TVu0I1KxWp62i3xQghzp=
+PublicKey = QQYkfk0HTatxBJT0k6Pq+H386H3Nh6c8FCHou2GYpGk=
+PresharedKey = W2sKAeur98STQFUtItyQ026wWup7llRe8z6YjlL46L4=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 212.77.98.9:443
+Endpoint = pl.just1k.best:777
 PersistentKeepalive = 25
 """
 
@@ -370,6 +382,12 @@ DEVICE_LIMIT = 2
 VALID_TOKEN = "test_awg_vip_token"
 
 ENDPOINT_LATENCY_CACHE: dict[str, tuple[float | None, float]] = {}
+
+
+def mask_sensitive(val: str, prefix_len: int = 6) -> str:
+    if not val:
+        return ""
+    return f"{val[:prefix_len]}...***" if len(val) > prefix_len else "***"
 
 
 async def measure_endpoint_latency(endpoint: str, timeout: float = 1.2) -> float | None:
@@ -493,7 +511,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
     def _mask_val(key: str, val: str) -> str:
         k = key.lower()
         if any(s in k for s in ("hwid", "token", "auth", "secret", "cookie")):
-            return f"{val[:6]}...***" if len(val) > 6 else "***"
+            return mask_sensitive(val)
         return val
 
     logger.info("   Headers detected:")
@@ -501,7 +519,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         logger.info("     [%s]: %s", h_name, _mask_val(h_name, h_val))
 
     if token != VALID_TOKEN:
-        logger.warning("❌ Invalid subscription token: %s", token)
+        logger.warning("❌ Invalid subscription token: %s", mask_sensitive(token))
         return web.Response(status=404, text="Not Found")
 
     # Check if request comes from a real web browser (navigation event) vs INCY app client
@@ -637,7 +655,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
 
     # Simulation: Forced Device Limit
     if TEST_STATE.get("block_403"):
-        logger.warning("🚫 [SIMULATION] Returning 403 Device Limit Exceeded for HWID %s", hwid)
+        logger.warning("🚫 [SIMULATION] Returning 403 Device Limit Exceeded for HWID %s", mask_sensitive(hwid))
         return web.Response(
             status=403,
             text="Device limit exceeded (2/2). Remove an old device to connect in @just1kbot.\n",
@@ -663,7 +681,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         device_entry["device_os"] = device_os
         device_entry["device_model"] = device_model
         assigned_slot = device_entry["slot"]
-        logger.info("✅ Recognized existing device: Slot #%d (%s)", assigned_slot, hwid[:8])
+        logger.info("✅ Recognized existing device: Slot #%d (%s)", assigned_slot, mask_sensitive(hwid))
     else:
         active_count = len(REGISTERED_DEVICES)
         if active_count >= DEVICE_LIMIT:
@@ -671,7 +689,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
                 "🚫 Device limit reached! Active: %d, Max: %d. HWID: %s",
                 active_count,
                 DEVICE_LIMIT,
-                hwid,
+                mask_sensitive(hwid),
             )
             return web.Response(
                 status=403,
@@ -697,7 +715,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         }
         logger.info(
             "🎉 Registered NEW device: HWID %s -> Slot #%d (Active devices: %d/%d)",
-            hwid,
+            mask_sensitive(hwid),
             assigned_slot,
             len(REGISTERED_DEVICES),
             DEVICE_LIMIT,
