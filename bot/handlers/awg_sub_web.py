@@ -127,7 +127,15 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                     headers=headers,
                 )
 
-            device_idx = len(active_sub_devices) + 1
+            existing_indices = {
+                dev.get("device_index")
+                for dev in active_sub_devices.values()
+                if isinstance(dev, dict) and isinstance(dev.get("device_index"), int)
+            }
+            device_idx = 1
+            while device_idx in existing_indices:
+                device_idx += 1
+
             new_sub_device_record = {
                 "device_index": device_idx,
                 "label": texts.AWG_SUB_DEVICE_LABEL_TEMPLATE.format(index=device_idx),
@@ -171,11 +179,23 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                 replaces_id = None
                 if srv.id in failed_profiles_by_server:
                     old_p = failed_profiles_by_server[srv.id]
+                    # If remote cleanup is already in-flight on the server, wait for cleanup worker
+                    # to avoid overloading server capacity or creating duplicate active peers.
+                    if old_p.provisioning_status == "create_cleanup_pending":
+                        logger.info(
+                            "Profile %s on server %s is still awaiting remote peer cleanup; deferring recreation",
+                            old_p.id,
+                            srv.id,
+                        )
+                        continue
+
                     replaces_id = old_p.id
                     try:
                         await DeviceService.delete_device(session, old_p, actor_id=user.telegram_id, force=True)
                     except Exception as del_exc:
                         logger.warning("Failed to clean up stale/failed profile %s on server %s: %s", old_p.id, srv.id, del_exc)
+                        # Skip recreation on this server if cleanup failed to avoid orphaned state or capacity breach
+                        continue
 
                 try:
                     snapshot = await capture_server_peer_snapshot(srv.id)

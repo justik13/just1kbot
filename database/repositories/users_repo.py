@@ -107,12 +107,26 @@ async def get_user_by_subscription_token(
 
 
 async def ensure_subscription_token(session: AsyncSession, user: User) -> str:
-    """Ensure user has a persistent unique subscription token, generating one if missing."""
+    """Ensure user has a persistent unique subscription token with row lock against concurrent generation races."""
     token = getattr(user, "subscription_token", None)
     if token:
         return token
+
+    target_user = user
+    if session is not None and getattr(user, "id", None) is not None:
+        locked_user = await session.scalar(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        if locked_user is not None:
+            target_user = locked_user
+            if locked_user.subscription_token:
+                user.subscription_token = locked_user.subscription_token
+                return locked_user.subscription_token
+
     new_token = secrets.token_hex(32)
-    user.subscription_token = new_token
+    target_user.subscription_token = new_token
+    if target_user is not user:
+        user.subscription_token = new_token
     if session is not None:
         await session.flush()
     return new_token
@@ -124,12 +138,16 @@ async def create_user(
     username: str = None,
     first_name: str = None,
     referred_by: int = None,
+    subscription_token: str = None,
 ) -> User:
+    if not subscription_token:
+        subscription_token = secrets.token_hex(32)
     user = User(
         telegram_id=telegram_id,
         username=username,
         first_name=first_name,
         referred_by=referred_by,
+        subscription_token=subscription_token,
     )
     session.add(user)
     await session.flush()

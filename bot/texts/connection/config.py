@@ -189,15 +189,16 @@ LABEL_UNKNOWN_CAP = "Неизвестно"
 
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE = "<blockquote expandable><code>{key}</code></blockquote>\n"
 
+BTN_COPY_SUB_LINK = "📋 Скопировать ссылку"
+
 AWG_SUB_CARD_TEMPLATE = """🛡 <b>Ваша подписка: AmneziaWG</b>
 Тариф: «{limit} устройства» | До: {end_date} (осталось {days_left} дн.)
 Статус: <b>Активна ✅</b>
 
 🔗 <b>Ссылка подписки (для мобильного INCY):</b>
 <code>{sub_url}</code>
-<i>(Нажмите на ссылку, чтобы скопировать)</i>
 
-💡 <i>Скопируйте и вставьте эту ссылку в приложении INCY на телефоне для подключения всех стран в 1 клик.</i>
+💡 <i>Используйте кнопку ниже или скопируйте ссылку вручную для подключения в приложении INCY на телефоне.</i>
 
 📊 <b>Подключено устройств:</b> {active_count} из {limit}"""
 

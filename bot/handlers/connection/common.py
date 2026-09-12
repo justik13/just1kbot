@@ -3,6 +3,7 @@ import os
 import re
 from datetime import timedelta
 
+from aiogram.types import CopyTextButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -217,6 +218,11 @@ async def _build_connections_screen(
     )
 
     builder = InlineKeyboardBuilder()
+    if len(sub_url) <= 256:
+        builder.button(
+            text=texts.BTN_COPY_SUB_LINK,
+            copy_text=CopyTextButton(text=sub_url),
+        )
     builder.button(
         text=texts.BTN_DOWNLOAD_CONF,
         callback_data="awg_download_conf_menu",
