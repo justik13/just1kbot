@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.constants import AMNEZIA_PROTOCOL
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import User, VPNProfile
 from database.repositories import users_repo
 from database.repositories.servers_repo import (
@@ -70,7 +71,9 @@ async def awg_download_conf_menu(
             callback.bot,
             callback.message.chat.id,
             texts.ERROR_NO_SUBSCRIPTION,
-            InlineKeyboardBuilder().button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy").as_markup(),
+            InlineKeyboardBuilder()
+            .button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy")
+            .as_markup(),
         )
         return
 
@@ -80,7 +83,9 @@ async def awg_download_conf_menu(
             callback.bot,
             callback.message.chat.id,
             texts.ERROR_NO_FREE_SLOTS,
-            InlineKeyboardBuilder().button(text=texts.BTN_BACK, callback_data="awg_manage_devices").as_markup(),
+            InlineKeyboardBuilder()
+            .button(text=texts.BTN_BACK, callback_data="awg_manage_devices")
+            .as_markup(),
         )
         return
 
@@ -129,17 +134,30 @@ async def awg_get_conf(
             callback.bot,
             callback.message.chat.id,
             texts.ERROR_NO_SUBSCRIPTION,
-            InlineKeyboardBuilder().button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy").as_markup(),
+            InlineKeyboardBuilder()
+            .button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy")
+            .as_markup(),
         )
         return
 
     server = await get_server_by_id(session, server_id)
-    if not server or not server.is_active or server.protocol != AMNEZIA_PROTOCOL:
+    if (
+        not server
+        or not server.is_active
+        or server.protocol != AMNEZIA_PROTOCOL
+        or (getattr(server, "health_state", None) or ServerHealthState.ONLINE)
+        != ServerHealthState.ONLINE
+        or (getattr(server, "lifecycle_status", None) or ServerLifecycleStatus.ACTIVE)
+        != ServerLifecycleStatus.ACTIVE
+        or "xray_origin" in (getattr(server, "capabilities", None) or [])
+    ):
         await render_hub(
             callback.bot,
             callback.message.chat.id,
             texts.ERROR_SERVER_DISABLED,
-            InlineKeyboardBuilder().button(text=texts.BTN_BACK, callback_data="awg_download_conf_menu").as_markup(),
+            InlineKeyboardBuilder()
+            .button(text=texts.BTN_BACK, callback_data="awg_download_conf_menu")
+            .as_markup(),
         )
         return
 
@@ -157,13 +175,15 @@ async def awg_get_conf(
     if not profile:
         # Check quota before creating
         active_sub_devices = dict(getattr(user, "active_sub_devices", None) or {})
-        manual_count = (await session.execute(
-            select(func.count(VPNProfile.id)).where(
-                VPNProfile.user_id == user.id,
-                VPNProfile.device_type == "manual",
-                VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+        manual_count = (
+            await session.execute(
+                select(func.count(VPNProfile.id)).where(
+                    VPNProfile.user_id == user.id,
+                    VPNProfile.device_type == "manual",
+                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+                )
             )
-        )).scalar_one()
+        ).scalar_one()
 
         total_active = len(active_sub_devices) + manual_count
         if total_active >= limit:
@@ -207,7 +227,9 @@ async def awg_get_conf(
             await callback.answer(texts.ERROR_SERVER_UNAVAILABLE, show_alert=True)
             return
         except Exception:
-            logger.exception("Failed to create manual profile for user %s on server %s", user.id, server_id)
+            logger.exception(
+                "Failed to create manual profile for user %s on server %s", user.id, server_id
+            )
             await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
             return
 
@@ -227,13 +249,15 @@ async def awg_get_conf(
 
     # Calculate active devices for caption
     active_sub_devices = dict(getattr(user, "active_sub_devices", None) or {})
-    manual_count = (await session.execute(
-        select(func.count(VPNProfile.id)).where(
-            VPNProfile.user_id == user.id,
-            VPNProfile.device_type == "manual",
-            VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+    manual_count = (
+        await session.execute(
+            select(func.count(VPNProfile.id)).where(
+                VPNProfile.user_id == user.id,
+                VPNProfile.device_type == "manual",
+                VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+            )
         )
-    )).scalar_one()
+    ).scalar_one()
     total_active = len(active_sub_devices) + manual_count
 
     country_label = f"{server.country_flag or ''} {server.name or 'Server'}".strip()
@@ -294,7 +318,9 @@ async def _render_manage_devices(
     now = now_utc()
     # 1. Sub devices
     for hwid_hash, data in active_sub_devices.items():
-        label = data.get("label") or texts.AWG_SUB_DEVICE_LABEL_TEMPLATE.format(index=data.get("device_index", 1))
+        label = data.get("label") or texts.AWG_SUB_DEVICE_LABEL_TEMPLATE.format(
+            index=data.get("device_index", 1)
+        )
         last_seen_raw = data.get("last_seen", "")
         last_seen_display = last_seen_raw
         is_inactive_7d = False
@@ -311,10 +337,12 @@ async def _render_manage_devices(
         activity_str = safe(last_seen_display) or texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
         if is_inactive_7d:
             activity_str += texts.AWG_DEVICE_INACTIVE_7D_TAG
-        items_text.append(texts.AWG_SUB_DEVICE_ITEM.format(
-            label=safe(label),
-            last_seen=activity_str,
-        ))
+        items_text.append(
+            texts.AWG_SUB_DEVICE_ITEM.format(
+                label=safe(label),
+                last_seen=activity_str,
+            )
+        )
         builder.button(
             text=texts.BTN_DISCONNECT_DEVICE_TEMPLATE.format(label=label),
             callback_data=f"awg_disconnect_sub:{hwid_hash[:16]}",
@@ -334,12 +362,14 @@ async def _render_manage_devices(
             if profile.provisioning_status == "pending_create"
             else texts.DEVICE_STATUS_ACTIVE_LABEL
         )
-        items_text.append(texts.AWG_MANUAL_DEVICE_ITEM.format(
-            device_name=safe(profile.device_name),
-            country=safe(location_label),
-            traffic=traffic_str,
-            status=status_label,
-        ))
+        items_text.append(
+            texts.AWG_MANUAL_DEVICE_ITEM.format(
+                device_name=safe(profile.device_name),
+                country=safe(location_label),
+                traffic=traffic_str,
+                status=status_label,
+            )
+        )
         builder.button(
             text=texts.BTN_DISCONNECT_DEVICE_TEMPLATE.format(label=profile.device_name),
             callback_data=f"request_delete_device:{profile.id}",
@@ -407,7 +437,6 @@ async def awg_reset_sub_execute(
     await callback.answer(texts.AWG_RESET_SUB_SUCCESS, show_alert=True)
     await session.refresh(user)
     await _render_manage_devices(callback.message, user, session)
-
 
 
 @router.callback_query(F.data == "awg_manage_devices")

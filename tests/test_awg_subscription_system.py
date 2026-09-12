@@ -21,11 +21,12 @@ from bot.handlers.awg_sub_web import (
 )
 from bot.handlers.connection.common import _build_connections_screen
 from config.constants import AMNEZIA_PROTOCOL
-from config.enums import ServerHealthState
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, User, VPNProfile
 from services.device_service import (
     DeviceLimitExceeded,
     DeviceService,
+    ServerUnavailable,
 )
 from services.slots_cache import ServerPeerSnapshot
 from utils.vpn_parser import encode_json_to_vpn_uri
@@ -37,18 +38,28 @@ def _make_dummy_awg_raw_config(server_name: str = "Test Server") -> str:
         "containers": [
             {
                 "awg": {
-                    "last_config": json.dumps({
-                        "client_priv_key": "dummy_client_priv_key_base64_len_44_chars==",
-                        "server_pub_key": "dummy_server_pub_key_base64_len_44_chars==",
-                        "client_ip": "10.8.0.2",
-                        "hostName": "test.server.io",
-                        "port": 51820,
-                        "mtu": "1280",
-                        "persistent_keep_alive": 25,
-                        "Jc": 4, "Jmin": 50, "Jmax": 1000,
-                        "S1": 15, "S2": 25, "S3": 35, "S4": 45,
-                        "H1": 1, "H2": 2, "H3": 3, "H4": 4,
-                    })
+                    "last_config": json.dumps(
+                        {
+                            "client_priv_key": "dummy_client_priv_key_base64_len_44_chars==",
+                            "server_pub_key": "dummy_server_pub_key_base64_len_44_chars==",
+                            "client_ip": "10.8.0.2",
+                            "hostName": "test.server.io",
+                            "port": 51820,
+                            "mtu": "1280",
+                            "persistent_keep_alive": 25,
+                            "Jc": 4,
+                            "Jmin": 50,
+                            "Jmax": 1000,
+                            "S1": 15,
+                            "S2": 25,
+                            "S3": 35,
+                            "S4": 45,
+                            "H1": 1,
+                            "H2": 2,
+                            "H3": 3,
+                            "H4": 4,
+                        }
+                    )
                 }
             }
         ],
@@ -72,8 +83,13 @@ class TestAWGLogicalDeviceService(unittest.IsolatedAsyncioTestCase):
         )
 
         server_1 = Server(
-            id=10, name="Poland", protocol=AMNEZIA_PROTOCOL, is_active=True,
-            max_clients=100, api_url="http://s1:8080", api_key="k1",
+            id=10,
+            name="Poland",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            max_clients=100,
+            api_url="http://s1:8080",
+            api_key="k1",
         )
 
         snapshot_1 = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=now)
@@ -98,17 +114,18 @@ class TestAWGLogicalDeviceService(unittest.IsolatedAsyncioTestCase):
         mock_peers_exec.scalars.return_value.all.return_value = []
 
         mock_session.execute.side_effect = [
-            mock_user_exec,      # User select
-            mock_server_exec,    # Server select
-            mock_duplicate_exec, # Duplicate name
-            mock_count_exec,     # Server count
-            mock_peers_exec,     # Bot peers
+            mock_user_exec,  # User select
+            mock_server_exec,  # Server select
+            mock_duplicate_exec,  # Duplicate name
+            mock_count_exec,  # Server count
+            mock_peers_exec,  # Bot peers
         ]
 
-        with patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock), \
-             patch("services.device_service.enqueue_api_operation", new_callable=AsyncMock), \
-             patch("services.device_service.AuditService.log_action", new_callable=AsyncMock):
-
+        with (
+            patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock),
+            patch("services.device_service.enqueue_api_operation", new_callable=AsyncMock),
+            patch("services.device_service.AuditService.log_action", new_callable=AsyncMock),
+        ):
             profile_1 = await DeviceService.create_device(
                 mock_session,
                 user_id=1,
@@ -135,8 +152,13 @@ class TestAWGLogicalDeviceService(unittest.IsolatedAsyncioTestCase):
             },
         )
         server = Server(
-            id=10, name="Poland", protocol=AMNEZIA_PROTOCOL, is_active=True,
-            max_clients=100, api_url="http://s1:8080", api_key="k1",
+            id=10,
+            name="Poland",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            max_clients=100,
+            api_url="http://s1:8080",
+            api_key="k1",
         )
         snapshot = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=now)
 
@@ -151,10 +173,10 @@ class TestAWGLogicalDeviceService(unittest.IsolatedAsyncioTestCase):
         mock_manual_count_exec.scalar_one.return_value = 0
 
         mock_session.execute.side_effect = [
-            mock_user_exec,         # User select
-            mock_server_exec,       # Server select
-            mock_duplicate_exec,    # Duplicate name
-            mock_manual_count_exec, # Manual count query (0 manual, 2 sub => total 2 >= limit 2)
+            mock_user_exec,  # User select
+            mock_server_exec,  # Server select
+            mock_duplicate_exec,  # Duplicate name
+            mock_manual_count_exec,  # Manual count query (0 manual, 2 sub => total 2 >= limit 2)
         ]
 
         with self.assertRaises(DeviceLimitExceeded):
@@ -178,8 +200,12 @@ class TestAWGLogicalDeviceService(unittest.IsolatedAsyncioTestCase):
             active_sub_devices={"hwid_to_del": {"device_index": 1}},
         )
 
-        p1 = VPNProfile(id=101, user_id=1, server_id=10, device_type="sub", sub_device_hash="hwid_to_del")
-        p2 = VPNProfile(id=102, user_id=1, server_id=20, device_type="sub", sub_device_hash="hwid_to_del")
+        p1 = VPNProfile(
+            id=101, user_id=1, server_id=10, device_type="sub", sub_device_hash="hwid_to_del"
+        )
+        p2 = VPNProfile(
+            id=102, user_id=1, server_id=20, device_type="sub", sub_device_hash="hwid_to_del"
+        )
 
         mock_session = AsyncMock()
         mock_user_exec = MagicMock()
@@ -193,7 +219,9 @@ class TestAWGLogicalDeviceService(unittest.IsolatedAsyncioTestCase):
             mock_profiles_exec,
         ]
 
-        with patch("services.device_service.DeviceService.delete_device", new_callable=AsyncMock) as mock_del:
+        with patch(
+            "services.device_service.DeviceService.delete_device", new_callable=AsyncMock
+        ) as mock_del:
             mock_del.return_value = True
             deleted = await DeviceService.delete_sub_device(
                 mock_session,
@@ -215,8 +243,12 @@ class TestAWGLogicalDeviceService(unittest.IsolatedAsyncioTestCase):
             active_sub_devices={"hwid_fail_closed": {"device_index": 1}},
         )
 
-        p1 = VPNProfile(id=101, user_id=1, server_id=10, device_type="sub", sub_device_hash="hwid_fail_closed")
-        p2 = VPNProfile(id=102, user_id=1, server_id=20, device_type="sub", sub_device_hash="hwid_fail_closed")
+        p1 = VPNProfile(
+            id=101, user_id=1, server_id=10, device_type="sub", sub_device_hash="hwid_fail_closed"
+        )
+        p2 = VPNProfile(
+            id=102, user_id=1, server_id=20, device_type="sub", sub_device_hash="hwid_fail_closed"
+        )
 
         mock_session = AsyncMock()
         mock_user_exec = MagicMock()
@@ -230,7 +262,9 @@ class TestAWGLogicalDeviceService(unittest.IsolatedAsyncioTestCase):
             mock_profiles_exec,
         ]
 
-        with patch("services.device_service.DeviceService.delete_device", new_callable=AsyncMock) as mock_del:
+        with patch(
+            "services.device_service.DeviceService.delete_device", new_callable=AsyncMock
+        ) as mock_del:
             # First profile deletion succeeds, second profile deletion fails with network error
             mock_del.side_effect = [True, RuntimeError("Amnezia node connection timeout")]
 
@@ -297,11 +331,18 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
             mock_get_user.return_value = None
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 404)
 
     async def test_feed_expired_subscription(self):
@@ -317,11 +358,18 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
             mock_get_user.return_value = user
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 403)
             text = await resp.text()
             self.assertIn("Subscription expired", text)
@@ -340,12 +388,22 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             active_sub_devices={hwid_hash: {"device_index": 1}},
         )
         server = Server(
-            id=10, name="Poland", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL,
-            is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
+            id=10,
+            name="Poland",
+            country_flag="🇵🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
         )
         pending_profile = VPNProfile(
-            id=101, user_id=1, server_id=10, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="pending_create", raw_config=None,
+            id=101,
+            user_id=1,
+            server_id=10,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="pending_create",
+            raw_config=None,
         )
 
         mock_session = AsyncMock()
@@ -354,8 +412,13 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
             mock_get_user.return_value = user
 
             mock_servers_exec = MagicMock()
@@ -369,7 +432,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 mock_profiles_exec,
             ]
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 503)
             self.assertEqual(resp.headers.get("Retry-After"), "3")
 
@@ -387,12 +452,22 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             active_sub_devices={hwid_hash: {"device_index": 1}},
         )
         server = Server(
-            id=10, name="Poland", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL,
-            is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
+            id=10,
+            name="Poland",
+            country_flag="🇵🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
         )
         ready_profile = VPNProfile(
-            id=101, user_id=1, server_id=10, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="active", raw_config=_make_dummy_awg_raw_config("Poland"),
+            id=101,
+            user_id=1,
+            server_id=10,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="active",
+            raw_config=_make_dummy_awg_raw_config("Poland"),
         )
 
         mock_session = AsyncMock()
@@ -401,8 +476,13 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
             mock_get_user.return_value = user
 
             mock_servers_exec = MagicMock()
@@ -416,7 +496,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 mock_profiles_exec,
             ]
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 200)
             self.assertIn("Profile-Title", resp.headers)
             self.assertEqual(resp.headers.get("sort-order"), "ping")
@@ -425,6 +507,85 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             decoded_feed = base64.b64decode(raw_body).decode("utf-8")
             self.assertTrue(decoded_feed.startswith("awg://"))
             self.assertIn("#🇵🇱 Poland", decoded_feed)
+
+    async def test_feed_excludes_xray_origin_and_decommissioning_servers(self):
+        """Verify awg_subscription_feed_handler excludes servers with xray_origin or non-ACTIVE."""
+        valid_token = "f" * 32
+        headers = {"X-HWID": "test-device-uuid-123"}
+        active_time = datetime.now(timezone.utc) + timedelta(days=30)
+        hwid_hash = hashlib.sha256(b"test-device-uuid-123").hexdigest()
+        user = User(
+            id=1,
+            telegram_id=111,
+            subscription_end=active_time,
+            device_limit=2,
+            active_sub_devices={hwid_hash: {"device_index": 1}},
+        )
+        awg_server = Server(
+            id=10,
+            name="Valid AWG",
+            country_flag="🇩🇪",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=[],
+        )
+        xray_server = Server(
+            id=20,
+            name="Xray Origin",
+            country_flag="🇷🇺",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+        )
+        ready_profile = VPNProfile(
+            id=101,
+            user_id=1,
+            server_id=10,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="active",
+            raw_config=_make_dummy_awg_raw_config("Valid AWG"),
+        )
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
+            mock_get_user.return_value = user
+
+            mock_servers_exec = MagicMock()
+            # DB returns both, but python code must filter out xray_server
+            mock_servers_exec.scalars.return_value.all.return_value = [awg_server, xray_server]
+
+            mock_profiles_exec = MagicMock()
+            mock_profiles_exec.scalars.return_value.all.return_value = [ready_profile]
+
+            mock_session.execute.side_effect = [
+                mock_servers_exec,
+                mock_profiles_exec,
+            ]
+
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
+            self.assertEqual(resp.status, 200)
+            body = await resp.text()
+            decoded = base64.b64decode(body).decode("utf-8")
+            self.assertIn("Valid AWG", decoded)
+            self.assertNotIn("Xray Origin", decoded)
 
     async def test_sub_device_registration_fails_closed_when_all_servers_fail(self):
         """Atomic registration: if all server creations fail, slot must NOT be occupied."""
@@ -440,8 +601,13 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             active_sub_devices={},
         )
         server = Server(
-            id=10, name="Poland", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL,
-            is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
+            id=10,
+            name="Poland",
+            country_flag="🇵🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
         )
 
         mock_session = self._make_mock_session()
@@ -450,12 +616,23 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user, \
-             patch("bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock) as mock_snap, \
-             patch("bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock) as mock_create_device:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock
+            ) as mock_snap,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock
+            ) as mock_create_device,
+        ):
             mock_get_user.return_value = user
-            mock_snap.return_value = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=active_time)
+            mock_snap.return_value = ServerPeerSnapshot(
+                server_id=10, peer_ids=frozenset(), captured_at=active_time
+            )
 
             mock_manual_count = MagicMock()
             mock_manual_count.scalar_one.return_value = 0
@@ -475,7 +652,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             # Server creation fails
             mock_create_device.side_effect = RuntimeError("Amnezia node is down")
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 503)
 
             # Strict Fail-Closed verification:
@@ -496,16 +675,31 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             active_sub_devices={hwid_hash: {"device_index": 1, "label": "Device 1"}},
         )
         server = Server(
-            id=10, name="Poland", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL,
-            is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
+            id=10,
+            name="Poland",
+            country_flag="🇵🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
         )
         stale_failed_profile = VPNProfile(
-            id=999, user_id=1, server_id=10, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="create_failed", raw_config=None,
+            id=999,
+            user_id=1,
+            server_id=10,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="create_failed",
+            raw_config=None,
         )
         fresh_profile = VPNProfile(
-            id=1000, user_id=1, server_id=10, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="pending_create", raw_config=None,
+            id=1000,
+            user_id=1,
+            server_id=10,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="pending_create",
+            raw_config=None,
         )
 
         mock_session = self._make_mock_session()
@@ -514,13 +708,26 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user, \
-             patch("bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock) as mock_snap, \
-             patch("bot.handlers.awg_sub_web.DeviceService.delete_device", new_callable=AsyncMock) as mock_delete_device, \
-             patch("bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock) as mock_create_device:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock
+            ) as mock_snap,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.delete_device", new_callable=AsyncMock
+            ) as mock_delete_device,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock
+            ) as mock_create_device,
+        ):
             mock_get_user.return_value = user
-            mock_snap.return_value = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=active_time)
+            mock_snap.return_value = ServerPeerSnapshot(
+                server_id=10, peer_ids=frozenset(), captured_at=active_time
+            )
 
             mock_servers_exec = MagicMock()
             mock_servers_exec.scalars.return_value.all.return_value = [server]
@@ -535,11 +742,15 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             mock_delete_device.return_value = True
             mock_create_device.return_value = fresh_profile
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 503)
 
             # Verify stale profile was deleted with force=True
-            mock_delete_device.assert_awaited_once_with(mock_session, stale_failed_profile, actor_id=111, force=True)
+            mock_delete_device.assert_awaited_once_with(
+                mock_session, stale_failed_profile, actor_id=111, force=True
+            )
             # Verify fresh profile was created with replaces_profile_id=999
             mock_create_device.assert_awaited_once()
             _, kwargs = mock_create_device.call_args
@@ -559,12 +770,22 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             active_sub_devices={hwid_hash: {"device_index": 1, "label": "Device 1"}},
         )
         server = Server(
-            id=10, name="Poland", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL,
-            is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
+            id=10,
+            name="Poland",
+            country_flag="🇵🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
         )
         stale_profile = VPNProfile(
-            id=999, user_id=1, server_id=10, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="create_cleanup_pending", raw_config=None,
+            id=999,
+            user_id=1,
+            server_id=10,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="create_cleanup_pending",
+            raw_config=None,
         )
 
         mock_session = self._make_mock_session()
@@ -573,13 +794,26 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user, \
-             patch("bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock) as mock_snap, \
-             patch("bot.handlers.awg_sub_web.DeviceService.delete_device", new_callable=AsyncMock) as mock_delete_device, \
-             patch("bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock) as mock_create_device:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock
+            ) as mock_snap,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.delete_device", new_callable=AsyncMock
+            ) as mock_delete_device,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock
+            ) as mock_create_device,
+        ):
             mock_get_user.return_value = user
-            mock_snap.return_value = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=active_time)
+            mock_snap.return_value = ServerPeerSnapshot(
+                server_id=10, peer_ids=frozenset(), captured_at=active_time
+            )
 
             mock_servers_exec = MagicMock()
             mock_servers_exec.scalars.return_value.all.return_value = [server]
@@ -592,7 +826,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 mock_profiles_exec,
             ]
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 503)
 
             # Neither delete_device nor create_device should be called on this turn
@@ -613,12 +849,22 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             active_sub_devices={hwid_hash: {"device_index": 1, "label": "Device 1"}},
         )
         server = Server(
-            id=10, name="Poland", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL,
-            is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
+            id=10,
+            name="Poland",
+            country_flag="🇵🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
         )
         stale_profile = VPNProfile(
-            id=999, user_id=1, server_id=10, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="create_failed", raw_config=None,
+            id=999,
+            user_id=1,
+            server_id=10,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="create_failed",
+            raw_config=None,
         )
 
         mock_session = self._make_mock_session()
@@ -627,13 +873,26 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user, \
-             patch("bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock) as mock_snap, \
-             patch("bot.handlers.awg_sub_web.DeviceService.delete_device", new_callable=AsyncMock) as mock_delete_device, \
-             patch("bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock) as mock_create_device:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock
+            ) as mock_snap,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.delete_device", new_callable=AsyncMock
+            ) as mock_delete_device,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock
+            ) as mock_create_device,
+        ):
             mock_get_user.return_value = user
-            mock_snap.return_value = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=active_time)
+            mock_snap.return_value = ServerPeerSnapshot(
+                server_id=10, peer_ids=frozenset(), captured_at=active_time
+            )
 
             mock_servers_exec = MagicMock()
             mock_servers_exec.scalars.return_value.all.return_value = [server]
@@ -647,7 +906,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             ]
             mock_delete_device.side_effect = RuntimeError("Lock acquisition failed during delete")
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 503)
 
             # delete_device attempted but raised; create_device must NOT be called
@@ -669,12 +930,22 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             active_sub_devices={"existing_hwid_2": {"device_index": 2, "label": "Device 2"}},
         )
         server = Server(
-            id=10, name="Poland", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL,
-            is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
+            id=10,
+            name="Poland",
+            country_flag="🇵🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
         )
         fresh_profile = VPNProfile(
-            id=1001, user_id=1, server_id=10, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="pending_create", raw_config=None,
+            id=1001,
+            user_id=1,
+            server_id=10,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="pending_create",
+            raw_config=None,
         )
 
         mock_session = self._make_mock_session()
@@ -683,12 +954,23 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user, \
-             patch("bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock) as mock_snap, \
-             patch("bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock) as mock_create_device:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock
+            ) as mock_snap,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock
+            ) as mock_create_device,
+        ):
             mock_get_user.return_value = user
-            mock_snap.return_value = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=active_time)
+            mock_snap.return_value = ServerPeerSnapshot(
+                server_id=10, peer_ids=frozenset(), captured_at=active_time
+            )
 
             mock_count_exec = MagicMock()
             mock_count_exec.scalar_one.return_value = 0
@@ -705,7 +987,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             ]
             mock_create_device.return_value = fresh_profile
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 503)
 
             # Assert registered device got index 1 (not 2 or 3)
@@ -725,12 +1009,33 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             device_limit=2,
             active_sub_devices={},
         )
-        s1 = Server(id=1, name="S1", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL, is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[])
-        s2 = Server(id=2, name="S2", country_flag="🇩🇪", protocol=AMNEZIA_PROTOCOL, is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[])
+        s1 = Server(
+            id=1,
+            name="S1",
+            country_flag="🇵🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
+        )
+        s2 = Server(
+            id=2,
+            name="S2",
+            country_flag="🇩🇪",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
+        )
 
         p2 = VPNProfile(
-            id=202, user_id=1, server_id=2, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="pending_create", raw_config=None,
+            id=202,
+            user_id=1,
+            server_id=2,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="pending_create",
+            raw_config=None,
         )
 
         mock_session = self._make_mock_session()
@@ -739,12 +1044,23 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user, \
-             patch("bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock) as mock_snap, \
-             patch("bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock) as mock_create_device:
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock
+            ) as mock_snap,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock
+            ) as mock_create_device,
+        ):
             mock_get_user.return_value = user
-            mock_snap.return_value = ServerPeerSnapshot(server_id=1, peer_ids=frozenset(), captured_at=active_time)
+            mock_snap.return_value = ServerPeerSnapshot(
+                server_id=1, peer_ids=frozenset(), captured_at=active_time
+            )
 
             mock_count_exec = MagicMock()
             mock_count_exec.scalar_one.return_value = 0
@@ -766,7 +1082,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 p2,
             ]
 
-            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
             self.assertEqual(resp.status, 503)
 
             # begin_nested must be called for each server iteration
@@ -828,8 +1146,12 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             mock_peers_exec,
         ]
 
-        with patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock), \
-             patch("services.device_service.enqueue_api_operation", new_callable=AsyncMock) as mock_enqueue:
+        with (
+            patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock),
+            patch(
+                "services.device_service.enqueue_api_operation", new_callable=AsyncMock
+            ) as mock_enqueue,
+        ):
             mock_enqueue.side_effect = RuntimeError("Enqueue operation database error")
 
             with self.assertRaises(RuntimeError):
@@ -856,8 +1178,13 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             active_sub_devices={},
         )
         server = Server(
-            id=10, name="Poland", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL,
-            is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
+            id=10,
+            name="Poland",
+            country_flag="🇵🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=[],
         )
         raw_conf = _make_dummy_awg_raw_config("Poland")
 
@@ -890,12 +1217,24 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 raw_config=raw_conf,
             )
 
-        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
-             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user, \
-             patch("bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock) as mock_snap, \
-             patch("bot.handlers.awg_sub_web.DeviceService.create_device", side_effect=fake_create_device):
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock
+            ) as mock_snap,
+            patch(
+                "bot.handlers.awg_sub_web.DeviceService.create_device",
+                side_effect=fake_create_device,
+            ),
+        ):
             mock_get_user.return_value = user
-            mock_snap.return_value = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=active_time)
+            mock_snap.return_value = ServerPeerSnapshot(
+                server_id=10, peer_ids=frozenset(), captured_at=active_time
+            )
 
             # 1. First device connects (HWID A)
             mock_count_exec_1 = MagicMock()
@@ -911,7 +1250,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 mock_profiles_exec_1,
             ]
 
-            resp_a = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers={"X-HWID": hwid_a})
+            resp_a = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers={"X-HWID": hwid_a}
+            )
             self.assertEqual(resp_a.status, 200)
             self.assertIn(hwid_a_hash, user.active_sub_devices)
             self.assertEqual(user.active_sub_devices[hwid_a_hash]["device_index"], 1)
@@ -930,7 +1271,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 mock_profiles_exec_2,
             ]
 
-            resp_b = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers={"X-HWID": hwid_b})
+            resp_b = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers={"X-HWID": hwid_b}
+            )
             self.assertEqual(resp_b.status, 200)
             self.assertIn(hwid_b_hash, user.active_sub_devices)
             self.assertEqual(user.active_sub_devices[hwid_b_hash]["device_index"], 2)
@@ -946,7 +1289,9 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             mock_count_exec_3.scalar_one.return_value = 0
             mock_session.execute.side_effect = [mock_count_exec_3]
 
-            resp_c = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers={"X-HWID": hwid_c})
+            resp_c = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers={"X-HWID": hwid_c}
+            )
             self.assertEqual(resp_c.status, 403)
             self.assertIn("Device limit reached (2/2)", await resp_c.text())
 
@@ -967,13 +1312,19 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
         )
 
         manual_profile = VPNProfile(
-            id=10, user_id=1, server_id=1, device_name="Manual 1",
-            device_type="manual", provisioning_status="active",
+            id=10,
+            user_id=1,
+            server_id=1,
+            device_name="Manual 1",
+            device_type="manual",
+            provisioning_status="active",
         )
 
         mock_session = AsyncMock()
 
-        with patch("bot.handlers.connection.common._get_effective_device_limit", new_callable=AsyncMock) as mock_limit:
+        with patch(
+            "bot.handlers.connection.common._get_effective_device_limit", new_callable=AsyncMock
+        ) as mock_limit:
             mock_limit.return_value = 2
 
             rendered_text, builder = await _build_connections_screen(
@@ -1003,13 +1354,19 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
             telegram_id=987654321,
             subscription_end=now + timedelta(days=30),
             device_limit=2,
-            active_sub_devices={"device_hwid_123456": {"device_index": 1, "label": "Мой Телефон (INCY)"}},
+            active_sub_devices={
+                "device_hwid_123456": {"device_index": 1, "label": "Мой Телефон (INCY)"}
+            },
         )
 
         server = Server(id=1, name="Poland", country_flag="🇵🇱")
         manual_profile = VPNProfile(
-            id=10, user_id=1, server_id=1, device_name="Мой ПК",
-            device_type="manual", provisioning_status="active",
+            id=10,
+            user_id=1,
+            server_id=1,
+            device_name="Мой ПК",
+            device_type="manual",
+            provisioning_status="active",
             server=server,
         )
 
@@ -1022,8 +1379,15 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
         mock_msg.chat.id = 12345
         mock_msg.bot = MagicMock()
 
-        with patch("bot.handlers.connection.awg_subscription_routes.render_hub", new_callable=AsyncMock) as mock_render_hub, \
-             patch("bot.handlers.connection.awg_subscription_routes._get_effective_device_limit", new_callable=AsyncMock) as mock_limit:
+        with (
+            patch(
+                "bot.handlers.connection.awg_subscription_routes.render_hub", new_callable=AsyncMock
+            ) as mock_render_hub,
+            patch(
+                "bot.handlers.connection.awg_subscription_routes._get_effective_device_limit",
+                new_callable=AsyncMock,
+            ) as mock_limit,
+        ):
             mock_limit.return_value = 2
 
             await _render_manage_devices(mock_msg, user, mock_session)
@@ -1050,7 +1414,9 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
             telegram_id=987654321,
             subscription_end=now + timedelta(days=30),
             device_limit=3,
-            active_sub_devices={"device_hwid_123456": {"device_index": 1, "label": "Мой Телефон (INCY)"}},
+            active_sub_devices={
+                "device_hwid_123456": {"device_index": 1, "label": "Мой Телефон (INCY)"}
+            },
         )
 
         mock_session = AsyncMock()
@@ -1062,8 +1428,15 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
         mock_msg.chat.id = 12345
         mock_msg.bot = MagicMock()
 
-        with patch("bot.handlers.connection.awg_subscription_routes.render_hub", new_callable=AsyncMock) as mock_render_hub, \
-             patch("bot.handlers.connection.awg_subscription_routes._get_effective_device_limit", new_callable=AsyncMock) as mock_limit:
+        with (
+            patch(
+                "bot.handlers.connection.awg_subscription_routes.render_hub", new_callable=AsyncMock
+            ) as mock_render_hub,
+            patch(
+                "bot.handlers.connection.awg_subscription_routes._get_effective_device_limit",
+                new_callable=AsyncMock,
+            ) as mock_limit,
+        ):
             mock_limit.return_value = 3
 
             await _render_manage_devices(mock_msg, user, mock_session)
@@ -1083,7 +1456,9 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
             telegram_id=987654321,
             subscription_end=now + timedelta(days=30),
             device_limit=2,
-            active_sub_devices={"abcdef1234567890abcdef": {"device_index": 1, "label": "INCY Phone"}},
+            active_sub_devices={
+                "abcdef1234567890abcdef": {"device_index": 1, "label": "INCY Phone"}
+            },
         )
 
         callback = MagicMock()
@@ -1097,9 +1472,20 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
 
         mock_session = AsyncMock()
 
-        with patch("bot.handlers.connection.awg_subscription_routes.get_user_by_telegram_id", new_callable=AsyncMock) as mock_get_user, \
-             patch("bot.handlers.connection.awg_subscription_routes.DeviceService.delete_sub_device", new_callable=AsyncMock) as mock_del_sub, \
-             patch("bot.handlers.connection.awg_subscription_routes._render_manage_devices", new_callable=AsyncMock) as mock_render:
+        with (
+            patch(
+                "bot.handlers.connection.awg_subscription_routes.get_user_by_telegram_id",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.connection.awg_subscription_routes.DeviceService.delete_sub_device",
+                new_callable=AsyncMock,
+            ) as mock_del_sub,
+            patch(
+                "bot.handlers.connection.awg_subscription_routes._render_manage_devices",
+                new_callable=AsyncMock,
+            ) as mock_render,
+        ):
             mock_get_user.return_value = user
 
             await awg_disconnect_sub(callback, state, mock_session, db_user=user)
@@ -1109,7 +1495,9 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
                 user_id=1,
                 hwid_hash="abcdef1234567890abcdef",
             )
-            callback.answer.assert_awaited_once_with(texts.DEVICE_DISCONNECTED_SUCCESS, show_alert=True)
+            callback.answer.assert_awaited_once_with(
+                texts.DEVICE_DISCONNECTED_SUCCESS, show_alert=True
+            )
             mock_render.assert_awaited_once()
 
 
@@ -1119,6 +1507,7 @@ class TestAWGSubscriptionTokenSafety(unittest.IsolatedAsyncioTestCase):
     async def test_ensure_subscription_token_propagates_flush_error(self):
         """ensure_subscription_token must raise if session.flush() fails, never returning phantom tokens."""
         from database.repositories.users_repo import ensure_subscription_token
+
         user = User(id=1, telegram_id=123, subscription_token=None)
         mock_session = AsyncMock()
         mock_session.scalar.return_value = user
@@ -1130,6 +1519,7 @@ class TestAWGSubscriptionTokenSafety(unittest.IsolatedAsyncioTestCase):
     async def test_ensure_subscription_token_returns_existing(self):
         """ensure_subscription_token returns existing token without touching database."""
         from database.repositories.users_repo import ensure_subscription_token
+
         user = User(id=1, telegram_id=123, subscription_token="existing_token_123")
         mock_session = AsyncMock()
 
@@ -1140,6 +1530,7 @@ class TestAWGSubscriptionTokenSafety(unittest.IsolatedAsyncioTestCase):
     async def test_ensure_subscription_token_concurrent_race_prevention(self):
         """When locked_user already got token set concurrently, ensure_subscription_token reuses it without overwriting."""
         from database.repositories.users_repo import ensure_subscription_token
+
         user = User(id=1, telegram_id=123, subscription_token=None)
         locked_user = User(id=1, telegram_id=123, subscription_token="concurrently_committed_token")
         mock_session = AsyncMock()
@@ -1153,6 +1544,7 @@ class TestAWGSubscriptionTokenSafety(unittest.IsolatedAsyncioTestCase):
     async def test_create_user_eagerly_generates_subscription_token(self):
         """create_user automatically assigns a 64-char hex subscription token if not provided."""
         from database.repositories.users_repo import create_user
+
         mock_session = AsyncMock()
         mock_session.add = MagicMock()
 
@@ -1179,15 +1571,34 @@ class TestAWGSubscriptionEndToEndLifecycle(unittest.IsolatedAsyncioTestCase):
         hwid_hash = hashlib.sha256(b"e2e-client-device").hexdigest()
 
         # Step 1: Attempt registration when all servers fail -> verify slot not consumed
-        s1 = Server(id=1, name="S1", country_flag="🇩🇪", protocol=AMNEZIA_PROTOCOL, is_active=True, health_state=ServerHealthState.ONLINE)
-        s2 = Server(id=2, name="S2", country_flag="🇳🇱", protocol=AMNEZIA_PROTOCOL, is_active=True, health_state=ServerHealthState.ONLINE)
+        s1 = Server(
+            id=1,
+            name="S1",
+            country_flag="🇩🇪",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+        s2 = Server(
+            id=2,
+            name="S2",
+            country_flag="🇳🇱",
+            protocol=AMNEZIA_PROTOCOL,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
 
         mock_session = AsyncMock()
 
         # Step 2: S1 succeeds, S2 fails during creation -> partial success
         p1 = VPNProfile(
-            id=101, user_id=42, server_id=1, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="pending_create", raw_config=None,
+            id=101,
+            user_id=42,
+            server_id=1,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="pending_create",
+            raw_config=None,
         )
 
         # Register HWID atomically when p1 is created
@@ -1206,18 +1617,25 @@ class TestAWGSubscriptionEndToEndLifecycle(unittest.IsolatedAsyncioTestCase):
         p1.raw_config = _make_dummy_awg_raw_config("S1")
 
         p2 = VPNProfile(
-            id=102, user_id=42, server_id=2, device_type="sub", sub_device_hash=hwid_hash,
-            provisioning_status="active", raw_config=_make_dummy_awg_raw_config("S2"),
+            id=102,
+            user_id=42,
+            server_id=2,
+            device_type="sub",
+            sub_device_hash=hwid_hash,
+            provisioning_status="active",
+            raw_config=_make_dummy_awg_raw_config("S2"),
         )
 
         # Build feed from active profiles
         feed_items = []
         for p, s in [(p1, s1), (p2, s2)]:
             from utils.vpn_parser import build_conf_file
+
             conf = build_conf_file(p.raw_config)
             feed_items.append((conf, s.name, s.country_flag, None))
 
         from services.awg_subscription_feed_service import AWGSubscriptionFeedService
+
         sorted_servers = AWGSubscriptionFeedService.sort_servers(feed_items, mode="ping")
         feed_b64 = AWGSubscriptionFeedService.build_subscription_body(sorted_servers)
         feed_plain = base64.b64decode(feed_b64).decode("utf-8")
@@ -1232,7 +1650,9 @@ class TestAWGSubscriptionEndToEndLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_profiles_exec.scalars.return_value.all.return_value = [p1, p2]
         mock_session.execute.side_effect = [mock_user_exec, mock_profiles_exec]
 
-        with patch("services.device_service.DeviceService.delete_device", new_callable=AsyncMock) as mock_delete:
+        with patch(
+            "services.device_service.DeviceService.delete_device", new_callable=AsyncMock
+        ) as mock_delete:
             mock_delete.side_effect = RuntimeError("Node 2 communication failure")
 
             with self.assertRaises(RuntimeError):
@@ -1243,9 +1663,13 @@ class TestAWGSubscriptionEndToEndLifecycle(unittest.IsolatedAsyncioTestCase):
 
         # Step 5: Successful disconnect clears both profiles and frees logical slot
         mock_session.execute.side_effect = [mock_user_exec, mock_profiles_exec]
-        with patch("services.device_service.DeviceService.delete_device", new_callable=AsyncMock) as mock_delete:
+        with patch(
+            "services.device_service.DeviceService.delete_device", new_callable=AsyncMock
+        ) as mock_delete:
             mock_delete.return_value = True
-            deleted = await DeviceService.delete_sub_device(mock_session, user_id=42, hwid_hash=hwid_hash)
+            deleted = await DeviceService.delete_sub_device(
+                mock_session, user_id=42, hwid_hash=hwid_hash
+            )
 
             self.assertEqual(deleted, 2)
             self.assertNotIn(hwid_hash, user.active_sub_devices)
@@ -1301,9 +1725,18 @@ class TestAWGDeviceUAAndInactivity(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("bot.handlers.awg_sub_web.session_scope") as mock_scope,
-            patch("bot.handlers.awg_sub_web.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user,
-            patch("bot.handlers.awg_sub_web.SubscriptionService.get_effective_device_limit", new_callable=AsyncMock) as mock_limit,
-            patch("bot.handlers.awg_sub_web.build_conf_file", return_value="[Interface]\nPrivateKey=..."),
+            patch(
+                "bot.handlers.awg_sub_web.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.awg_sub_web.SubscriptionService.get_effective_device_limit",
+                new_callable=AsyncMock,
+            ) as mock_limit,
+            patch(
+                "bot.handlers.awg_sub_web.build_conf_file",
+                return_value="[Interface]\nPrivateKey=...",
+            ),
         ):
             mock_scope.return_value.__aenter__.return_value = mock_session
             mock_get_user.return_value = user
@@ -1347,8 +1780,13 @@ class TestAWGDeviceUAAndInactivity(unittest.IsolatedAsyncioTestCase):
         mock_msg.chat.id = 123
 
         with (
-            patch("bot.handlers.connection.awg_subscription_routes.render_hub", new_callable=AsyncMock) as mock_render,
-            patch("bot.handlers.connection.awg_subscription_routes._get_effective_device_limit", new_callable=AsyncMock) as mock_limit,
+            patch(
+                "bot.handlers.connection.awg_subscription_routes.render_hub", new_callable=AsyncMock
+            ) as mock_render,
+            patch(
+                "bot.handlers.connection.awg_subscription_routes._get_effective_device_limit",
+                new_callable=AsyncMock,
+            ) as mock_limit,
         ):
             mock_limit.return_value = 2
             await _render_manage_devices(mock_msg, user, mock_session)
@@ -1358,9 +1796,172 @@ class TestAWGDeviceUAAndInactivity(unittest.IsolatedAsyncioTestCase):
             self.assertIn("📱 iPhone", rendered_text)
             self.assertIn("(не активно > 7 дн.)", rendered_text)
             self.assertIn("💻 Mac", rendered_text)
-            self.assertNotIn("💻 Mac</b>\n• Тип: Через подписку (INCY)\n• Активность: ⚠️", rendered_text)
+            self.assertNotIn(
+                "💻 Mac</b>\n• Тип: Через подписку (INCY)\n• Активность: ⚠️", rendered_text
+            )
+
+
+class TestAWGAllocationInvariantsHardening(unittest.IsolatedAsyncioTestCase):
+    """Test defensive allocation invariants: ServerLifecycleStatus, ServerHealthState, xray_origin exclusion."""
+
+    async def test_awg_get_conf_rejects_decommissioning_or_offline_or_xray_server(self):
+        """Verify awg_get_conf rejects servers that are DECOMMISSIONING, non-ONLINE, or xray_origin."""
+        from bot.handlers.connection.awg_subscription_routes import awg_get_conf
+
+        now = datetime.now(timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=987654321,
+            subscription_end=now + timedelta(days=30),
+            device_limit=5,
+        )
+
+        test_cases = [
+            (
+                "decommissioning",
+                Server(
+                    id=10,
+                    name="DE",
+                    protocol=AMNEZIA_PROTOCOL,
+                    is_active=True,
+                    lifecycle_status=ServerLifecycleStatus.DECOMMISSIONING,
+                ),
+            ),
+            (
+                "problem_health",
+                Server(
+                    id=11,
+                    name="NL",
+                    protocol=AMNEZIA_PROTOCOL,
+                    is_active=True,
+                    health_state=ServerHealthState.PROBLEM,
+                ),
+            ),
+            (
+                "xray_capability",
+                Server(
+                    id=12,
+                    name="US",
+                    protocol=AMNEZIA_PROTOCOL,
+                    is_active=True,
+                    capabilities=["xray_origin"],
+                ),
+            ),
+        ]
+
+        for desc, test_server in test_cases:
+            with self.subTest(desc=desc):
+                callback = MagicMock()
+                callback.data = f"awg_get_conf:{test_server.id}"
+                callback.from_user.id = 987654321
+                callback.answer = AsyncMock()
+                callback.message.chat.id = 12345
+                callback.bot = MagicMock()
+
+                state = MagicMock()
+                state.clear = AsyncMock()
+                mock_session = AsyncMock()
+
+                with (
+                    patch(
+                        "bot.handlers.connection.awg_subscription_routes.MaintenanceService.can_user_perform_action",
+                        new_callable=AsyncMock,
+                        return_value=True,
+                    ),
+                    patch(
+                        "bot.handlers.connection.awg_subscription_routes.get_user_by_telegram_id",
+                        new_callable=AsyncMock,
+                    ) as mock_get_user,
+                    patch(
+                        "bot.handlers.connection.awg_subscription_routes.SubscriptionService.check_access",
+                        new_callable=AsyncMock,
+                    ) as mock_check_access,
+                    patch(
+                        "bot.handlers.connection.awg_subscription_routes.get_server_by_id",
+                        new_callable=AsyncMock,
+                    ) as mock_get_server,
+                    patch(
+                        "bot.handlers.connection.awg_subscription_routes.render_hub",
+                        new_callable=AsyncMock,
+                    ) as mock_render_hub,
+                ):
+                    mock_get_user.return_value = user
+                    mock_check_access.return_value = True
+                    mock_get_server.return_value = test_server
+
+                    await awg_get_conf(callback, state, session=mock_session, db_user=user)
+
+                    mock_render_hub.assert_awaited_once()
+                    args = mock_render_hub.await_args[0]
+                    self.assertEqual(args[2], texts.ERROR_SERVER_DISABLED)
+
+    async def test_device_service_create_device_rejects_decommissioning_or_problem_or_xray(self):
+        """Verify DeviceService.create_device raises ServerUnavailable for non-active or xray nodes."""
+        now = datetime.now(timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=987654321,
+            subscription_end=now + timedelta(days=30),
+            device_limit=5,
+            is_banned=False,
+        )
+
+        test_cases = [
+            (
+                "decommissioning",
+                Server(
+                    id=10,
+                    name="DE",
+                    protocol=AMNEZIA_PROTOCOL,
+                    is_active=True,
+                    lifecycle_status=ServerLifecycleStatus.DECOMMISSIONING,
+                ),
+            ),
+            (
+                "problem_health",
+                Server(
+                    id=11,
+                    name="NL",
+                    protocol=AMNEZIA_PROTOCOL,
+                    is_active=True,
+                    health_state=ServerHealthState.PROBLEM,
+                ),
+            ),
+            (
+                "xray_capability",
+                Server(
+                    id=12,
+                    name="US",
+                    protocol=AMNEZIA_PROTOCOL,
+                    is_active=True,
+                    capabilities=["xray_origin"],
+                ),
+            ),
+        ]
+
+        for desc, test_server in test_cases:
+            with self.subTest(desc=desc):
+                mock_session = AsyncMock()
+                mock_session.execute = AsyncMock(
+                    side_effect=[
+                        MagicMock(scalar_one=MagicMock(return_value=user)),
+                        MagicMock(scalar_one_or_none=MagicMock(return_value=test_server)),
+                    ]
+                )
+
+                snapshot = ServerPeerSnapshot(
+                    server_id=test_server.id, peer_ids=frozenset(), captured_at=now
+                )
+
+                with self.assertRaises(ServerUnavailable) as cm:
+                    await DeviceService.create_device(
+                        session=mock_session,
+                        user_id=1,
+                        server_id=test_server.id,
+                        snapshot=snapshot,
+                    )
+                self.assertIn("Invalid or disabled server", str(cm.exception))
 
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 
 from bot import texts
 from config.constants import AMNEZIA_PROTOCOL
-from config.enums import ServerHealthState
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.connection import session_scope
 from database.models import Server, VPNProfile
 from database.repositories import users_repo
@@ -85,10 +85,7 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
         if user is None:
             return web.Response(status=404, text="Not Found", headers=common_headers)
 
-        if (
-            getattr(user, "is_banned", False) is True
-            or getattr(user, "is_deleted", False) is True
-        ):
+        if getattr(user, "is_banned", False) is True or getattr(user, "is_deleted", False) is True:
             return web.Response(status=403, text="Forbidden", headers=common_headers)
 
         if not user.subscription_end or is_expired(user.subscription_end):
@@ -100,13 +97,15 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
         new_sub_device_record = None
 
         if not is_existing:
-            manual_count = (await session.execute(
-                select(func.count(VPNProfile.id)).where(
-                    VPNProfile.user_id == user.id,
-                    VPNProfile.device_type == "manual",
-                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+            manual_count = (
+                await session.execute(
+                    select(func.count(VPNProfile.id)).where(
+                        VPNProfile.user_id == user.id,
+                        VPNProfile.device_type == "manual",
+                        VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+                    )
                 )
-            )).scalar_one()
+            ).scalar_one()
 
             total_active = manual_count + len(active_sub_devices)
             effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
@@ -160,6 +159,7 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
             Server.is_active.is_(True),
             Server.protocol == AMNEZIA_PROTOCOL,
             Server.health_state == ServerHealthState.ONLINE,
+            Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
         )
         servers = (await session.execute(servers_stmt)).scalars().all()
         awg_servers = [s for s in servers if "xray_origin" not in (s.capabilities or [])]
@@ -204,9 +204,16 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                     replaces_id = old_p.id
                     try:
                         async with session.begin_nested():
-                            await DeviceService.delete_device(session, old_p, actor_id=user.telegram_id, force=True)
+                            await DeviceService.delete_device(
+                                session, old_p, actor_id=user.telegram_id, force=True
+                            )
                     except Exception as del_exc:
-                        logger.warning("Failed to clean up stale/failed profile %s on server %s: %s", old_p.id, srv.id, del_exc)
+                        logger.warning(
+                            "Failed to clean up stale/failed profile %s on server %s: %s",
+                            old_p.id,
+                            srv.id,
+                            del_exc,
+                        )
                         # Skip recreation on this server if cleanup failed to avoid orphaned state or capacity breach
                         continue
 
@@ -232,7 +239,9 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                 except Exception as exc:
                     logger.warning("Failed to create sub profile for server %s: %s", srv.id, exc)
 
-        valid_profiles = [p for p in profiles_by_server.values() if p.provisioning_status in RESERVING_STATUSES]
+        valid_profiles = [
+            p for p in profiles_by_server.values() if p.provisioning_status in RESERVING_STATUSES
+        ]
         if not valid_profiles:
             # All profile creations failed. Fail-closed: do not register new device or occupy slot!
             headers = dict(common_headers)
@@ -247,14 +256,19 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
         elif is_existing:
             existing_dev = dict(active_sub_devices.get(hwid_hash) or {})
             curr_label = existing_dev.get("label", "")
-            if curr_label.startswith(texts.AWG_DEFAULT_DEVICE_PREFIX) or curr_label.startswith(texts.AWG_LEGACY_DEVICE_PREFIX):
+            if curr_label.startswith(texts.AWG_DEFAULT_DEVICE_PREFIX) or curr_label.startswith(
+                texts.AWG_LEGACY_DEVICE_PREFIX
+            ):
                 raw_ua = request.headers.get("User-Agent", "")
                 friendly = parse_device_model_from_ua(
                     raw_ua,
                     fallback_index=device_idx,
                     fallback_template=texts.AWG_SUB_DEVICE_LABEL_TEMPLATE,
                 )
-                if not (friendly.startswith(texts.AWG_DEFAULT_DEVICE_PREFIX) or friendly.startswith(texts.AWG_LEGACY_DEVICE_PREFIX)):
+                if not (
+                    friendly.startswith(texts.AWG_DEFAULT_DEVICE_PREFIX)
+                    or friendly.startswith(texts.AWG_LEGACY_DEVICE_PREFIX)
+                ):
                     existing_dev["label"] = friendly
             existing_dev["last_seen"] = now.isoformat()
             existing_dev["notified_inactive_at"] = None
@@ -284,12 +298,14 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                 continue
             conf = build_conf_file(p.raw_config)
             if conf:
-                server_configs.append((
-                    conf,
-                    srv.name or "Server",
-                    srv.country_flag or "",
-                    getattr(srv, "ping", None),
-                ))
+                server_configs.append(
+                    (
+                        conf,
+                        srv.name or "Server",
+                        srv.country_flag or "",
+                        getattr(srv, "ping", None),
+                    )
+                )
 
         if not server_configs:
             headers = dict(common_headers)
@@ -326,8 +342,8 @@ async def awg_ping_handler(_request: web.Request) -> web.Response:
 def setup_awg_subscription_web_routes(app: web.Application) -> None:
     """Register AmneziaWG HTTP subscription feed routes."""
     sub_prefix = (
-        os.getenv("AWG_SUB_PATH_PREFIX") or DEFAULT_AWG_SUB_PATH_PREFIX
-    ).strip().rstrip("/")
+        (os.getenv("AWG_SUB_PATH_PREFIX") or DEFAULT_AWG_SUB_PATH_PREFIX).strip().rstrip("/")
+    )
     if not sub_prefix.startswith("/"):
         sub_prefix = f"/{sub_prefix}"
 
@@ -335,5 +351,9 @@ def setup_awg_subscription_web_routes(app: web.Application) -> None:
     app.router.add_get(f"{sub_prefix}/{{token}}", awg_subscription_feed_handler)
     if sub_prefix != DEFAULT_AWG_SUB_PATH_PREFIX:
         app.router.add_get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/ping", awg_ping_handler)
-        app.router.add_get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{{token}}", awg_subscription_feed_handler)
-    logger.info("AWG subscription feed routes registered: %s/{token} and %s/ping", sub_prefix, sub_prefix)
+        app.router.add_get(
+            f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{{token}}", awg_subscription_feed_handler
+        )
+    logger.info(
+        "AWG subscription feed routes registered: %s/{token} and %s/ping", sub_prefix, sub_prefix
+    )

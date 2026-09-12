@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT, AdminAuditAction
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import APIOperation, Server, User, VPNProfile
 from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
 from services.amnezia_capacity import (
@@ -91,9 +92,7 @@ class DeviceService:
         ) - snapshot.captured_at > timedelta(minutes=5):
             raise ServerUnavailable("Server capacity snapshot is stale")
         user = (
-            await session.execute(
-                select(User).where(User.id == user_id).with_for_update()
-            )
+            await session.execute(select(User).where(User.id == user_id).with_for_update())
         ).scalar_one()
         server = (
             await session.execute(
@@ -102,20 +101,25 @@ class DeviceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if not server or server.protocol != AMNEZIA_PROTOCOL or not server.is_active:
-            raise ServerUnavailable("Invalid or disabled server")
         if (
-            user.is_banned
-            or not user.subscription_end
-            or is_expired(user.subscription_end)
+            not server
+            or server.protocol != AMNEZIA_PROTOCOL
+            or not server.is_active
+            or (getattr(server, "health_state", None) or ServerHealthState.ONLINE)
+            != ServerHealthState.ONLINE
+            or (getattr(server, "lifecycle_status", None) or ServerLifecycleStatus.ACTIVE)
+            != ServerLifecycleStatus.ACTIVE
+            or "xray_origin" in (getattr(server, "capabilities", None) or [])
         ):
+            raise ServerUnavailable("Invalid or disabled server")
+        if user.is_banned or not user.subscription_end or is_expired(user.subscription_end):
             raise NoActiveSubscription("No active subscription")
         if not device_name:
             user_profiles = (
-                await session.execute(
-                    select(VPNProfile).where(VPNProfile.user_id == user.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(VPNProfile).where(VPNProfile.user_id == user.id)))
+                .scalars()
+                .all()
+            )
             used = set()
             for p in user_profiles:
                 m = re.search(r"#(\d+)$", p.device_name)
@@ -222,7 +226,7 @@ class DeviceService:
                 session.add(profile)
                 await session.flush()
 
-                m = re.search(r'#(\d+)$', profile.device_name)
+                m = re.search(r"#(\d+)$", profile.device_name)
                 slot_suffix = f"_n{m.group(1)}" if m else ""
                 profile.client_name = f"tg_{user.telegram_id}_p{profile.id}{slot_suffix}"
                 await enqueue_api_operation(
@@ -254,14 +258,8 @@ class DeviceService:
                 )
         except IntegrityError as e:
             error_str = str(e.orig).lower() if e.orig else ""
-            if (
-                "duplicate" in error_str
-                or "unique" in error_str
-                or "uq_vpn_profiles" in error_str
-            ):
-                raise DuplicateDeviceName(
-                    "Device name already exists on this server"
-                ) from e
+            if "duplicate" in error_str or "unique" in error_str or "uq_vpn_profiles" in error_str:
+                raise DuplicateDeviceName("Device name already exists on this server") from e
             raise DeviceCreationError("Database integrity error") from e
 
         return profile
@@ -286,10 +284,14 @@ class DeviceService:
             if profile.provisioning_status == "deleting":
                 return True
             if profile.provisioning_status not in ALLOWED_DELETE_STATES:
-                raise DeviceCreationError(f"Deletion not allowed in status: {profile.provisioning_status}")
+                raise DeviceCreationError(
+                    f"Deletion not allowed in status: {profile.provisioning_status}"
+                )
 
         # Capture server and device info for audit before deletion
-        server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
+        server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(
+            session, profile
+        )
         device_name = profile.device_name
         profile_id = profile.id
         user_id = profile.user_id
@@ -364,8 +366,7 @@ class DeviceService:
             and create_operation is not None
             and (
                 create_operation.status == "processing"
-                or classify_create_side_effect_risk(create_operation)
-                != "never_started"
+                or classify_create_side_effect_risk(create_operation) != "never_started"
             )
         ):
             # The profile is being force-deleted, but we have a durable CREATE operation
@@ -383,12 +384,16 @@ class DeviceService:
                 create_operation.locked_by = None
                 create_operation.last_error_code = "device_delete_force_revive"
                 create_operation.last_error = "Revived by force delete for orphan cleanup"
-            
+
             await session.delete(profile)
         else:
             await session.delete(profile)
 
-        action = AdminAuditAction.ADMIN_DEVICE_DELETE if (actor_id and is_admin(actor_id)) else AdminAuditAction.DEVICE_DELETE
+        action = (
+            AdminAuditAction.ADMIN_DEVICE_DELETE
+            if (actor_id and is_admin(actor_id))
+            else AdminAuditAction.DEVICE_DELETE
+        )
         admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
         await AuditService.log_action(
             session,
@@ -416,21 +421,23 @@ class DeviceService:
     ) -> int:
         """Disconnect and delete all server profiles associated with a sub-device."""
         user = (
-            await session.execute(
-                select(User).where(User.id == user_id).with_for_update()
-            )
+            await session.execute(select(User).where(User.id == user_id).with_for_update())
         ).scalar_one_or_none()
         if not user:
             return 0
         profiles = (
-            await session.execute(
-                select(VPNProfile).where(
-                    VPNProfile.user_id == user_id,
-                    VPNProfile.device_type == "sub",
-                    VPNProfile.sub_device_hash == hwid_hash,
+            (
+                await session.execute(
+                    select(VPNProfile).where(
+                        VPNProfile.user_id == user_id,
+                        VPNProfile.device_type == "sub",
+                        VPNProfile.sub_device_hash == hwid_hash,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         deleted_count = 0
         for p in profiles:
             await DeviceService.delete_device(session, p, actor_id=user.telegram_id, force=True)
