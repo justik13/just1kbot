@@ -95,6 +95,7 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
         # Quota check: Distinct logical sub devices + manual configurations
         active_sub_devices = dict(user.active_sub_devices or {})
         is_existing = hwid_hash in active_sub_devices
+        new_sub_device_record = None
 
         if not is_existing:
             manual_count = (await session.execute(
@@ -127,18 +128,12 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                 )
 
             device_idx = len(active_sub_devices) + 1
-            active_sub_devices[hwid_hash] = {
+            new_sub_device_record = {
                 "device_index": device_idx,
                 "label": texts.AWG_SUB_DEVICE_LABEL_TEMPLATE.format(index=device_idx),
                 "first_seen": now.isoformat(),
                 "last_seen": now.isoformat(),
             }
-            user.active_sub_devices = active_sub_devices
-            await session.flush()
-        else:
-            active_sub_devices[hwid_hash]["last_seen"] = now.isoformat()
-            user.active_sub_devices = active_sub_devices
-            await session.flush()
 
         # Find active AWG servers
         servers_stmt = select(Server).where(
@@ -159,14 +154,29 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
             VPNProfile.user_id == user.id,
             VPNProfile.device_type == "sub",
             VPNProfile.sub_device_hash == hwid_hash,
-            VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+            VPNProfile.provisioning_status != "deleted",
         )
         existing_profiles = (await session.execute(existing_profiles_stmt)).scalars().all()
-        profiles_by_server = {p.server_id: p for p in existing_profiles}
+        profiles_by_server = {}
+        failed_profiles_by_server = {}
+        for p in existing_profiles:
+            if p.provisioning_status in RESERVING_STATUSES:
+                profiles_by_server[p.server_id] = p
+            elif p.provisioning_status in ("create_failed", "create_cleanup_pending"):
+                failed_profiles_by_server[p.server_id] = p
 
         newly_created = False
         for srv in awg_servers:
             if srv.id not in profiles_by_server:
+                replaces_id = None
+                if srv.id in failed_profiles_by_server:
+                    old_p = failed_profiles_by_server[srv.id]
+                    replaces_id = old_p.id
+                    try:
+                        await DeviceService.delete_device(session, old_p, actor_id=user.telegram_id, force=True)
+                    except Exception as del_exc:
+                        logger.warning("Failed to clean up stale/failed profile %s on server %s: %s", old_p.id, srv.id, del_exc)
+
                 try:
                     snapshot = await capture_server_peer_snapshot(srv.id)
                     dev_name = texts.AWG_SUB_PROFILE_NAME_TEMPLATE.format(server_name=srv.name or "AWG")
@@ -178,11 +188,29 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                         snapshot=snapshot,
                         device_type="sub",
                         sub_device_hash=hwid_hash,
+                        replaces_profile_id=replaces_id,
                     )
                     profiles_by_server[srv.id] = profile
                     newly_created = True
                 except Exception as exc:
                     logger.warning("Failed to create sub profile for server %s: %s", srv.id, exc)
+
+        valid_profiles = [p for p in profiles_by_server.values() if p.provisioning_status in RESERVING_STATUSES]
+        if not valid_profiles:
+            # All profile creations failed. Fail-closed: do not register new device or occupy slot!
+            headers = dict(common_headers)
+            headers["Retry-After"] = "10"
+            return web.Response(status=503, text=texts.AWG_WEB_NO_CONFIGS, headers=headers)
+
+        # Atomic logical device registration: only persist once at least one profile is created/available
+        if not is_existing and new_sub_device_record:
+            active_sub_devices[hwid_hash] = new_sub_device_record
+            user.active_sub_devices = active_sub_devices
+            await session.flush()
+        elif is_existing:
+            active_sub_devices[hwid_hash]["last_seen"] = now.isoformat()
+            user.active_sub_devices = active_sub_devices
+            await session.flush()
 
         if newly_created:
             await session.commit()
@@ -190,7 +218,7 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
         # Check if any profile is still provisioning
         has_pending = any(
             p.provisioning_status in ("pending_create", "pending_update") or not p.raw_config
-            for p in profiles_by_server.values()
+            for p in valid_profiles
         )
         if has_pending:
             title_b64 = base64.b64encode(texts.AWG_PROFILE_NAME.encode("utf-8")).decode("ascii")

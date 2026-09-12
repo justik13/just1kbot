@@ -112,11 +112,9 @@ async def ensure_subscription_token(session: AsyncSession, user: User) -> str:
     if token:
         return token
     new_token = secrets.token_hex(32)
-    try:
-        user.subscription_token = new_token
+    user.subscription_token = new_token
+    if session is not None:
         await session.flush()
-    except Exception:
-        pass
     return new_token
 
 

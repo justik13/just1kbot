@@ -130,15 +130,14 @@ class DeviceService:
             else:
                 slot_index = max(used) + 1 if used else 1
             device_name = texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=slot_index)
-        duplicate = (
-            await session.execute(
-                select(VPNProfile.id).where(
-                    VPNProfile.user_id == user.id,
-                    VPNProfile.server_id == server.id,
-                    func.lower(VPNProfile.device_name) == device_name.lower(),
-                )
-            )
-        ).scalar_one_or_none()
+        dup_query = select(VPNProfile.id).where(
+            VPNProfile.user_id == user.id,
+            VPNProfile.server_id == server.id,
+            func.lower(VPNProfile.device_name) == device_name.lower(),
+        )
+        if replaces_profile_id:
+            dup_query = dup_query.where(VPNProfile.id != replaces_profile_id)
+        duplicate = (await session.execute(dup_query)).scalar_one_or_none()
         if duplicate:
             raise DuplicateDeviceName("Duplicate device name")
         if device_type != "sub" and not is_admin(user.telegram_id):
@@ -421,11 +420,6 @@ class DeviceService:
         ).scalar_one_or_none()
         if not user:
             return 0
-        devices = dict(user.active_sub_devices or {})
-        if hwid_hash in devices:
-            del devices[hwid_hash]
-            user.active_sub_devices = devices
-
         profiles = (
             await session.execute(
                 select(VPNProfile).where(
@@ -437,9 +431,15 @@ class DeviceService:
         ).scalars().all()
         deleted_count = 0
         for p in profiles:
-            try:
-                await DeviceService.delete_device(session, p, actor_id=user.telegram_id, force=True)
-                deleted_count += 1
-            except Exception as e:
-                logger.warning("Error deleting sub profile %s: %s", p.id, e)
+            await DeviceService.delete_device(session, p, actor_id=user.telegram_id, force=True)
+            deleted_count += 1
+
+        # Strict Fail-Closed: Only remove the device from active_sub_devices once all profiles
+        # have been successfully processed and queued for deletion without exceptions.
+        devices = dict(user.active_sub_devices or {})
+        if hwid_hash in devices:
+            del devices[hwid_hash]
+            user.active_sub_devices = devices
+            await session.flush()
+
         return deleted_count
