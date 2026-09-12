@@ -14,17 +14,146 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import logging
 import os
 import sys
 from datetime import datetime, timezone
+from typing import Sequence, Tuple
 from aiohttp import web
 
-# Ensure repository root is on sys.path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Ensure repository root is on sys.path if running within repository
+try:
+    _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _repo_root not in sys.path:
+        sys.path.insert(0, _repo_root)
+    from services.awg_subscription_feed_service import AWGSubscriptionFeedService
+except Exception:
+    # Standalone mode: fallback definition for running directly on VPS (/tmp/awg_stand) without repo
+    class AWGSubscriptionFeedService:
+        @staticmethod
+        def encode_config_to_awg_uri(conf: str, server_name: str, country_flag: str = "") -> str:
+            if not conf or not conf.strip():
+                raise ValueError("Configuration text cannot be empty")
+            clean_conf = conf.strip()
+            b64_conf = base64.urlsafe_b64encode(clean_conf.encode("utf-8")).decode("ascii")
+            clean_name = (server_name or "Server").strip()
+            clean_flag = (country_flag or "").strip()
+            fragment = f"{clean_flag} {clean_name}".strip() if clean_flag else clean_name
+            return f"awg://{b64_conf}#{fragment}"
 
-from services.awg_subscription_feed_service import AWGSubscriptionFeedService
+        @staticmethod
+        def sort_servers(
+            server_configs: Sequence[Tuple[str, str, str, int | float | None]],
+            mode: str = "ping",
+        ) -> list[Tuple[str, str, str]]:
+            items = list(server_configs)
+            if mode == "ping":
+                def ping_key(x: Tuple[str, str, str, int | float | None]) -> float:
+                    lat = x[3] if len(x) > 3 else None
+                    return float(lat) if (isinstance(lat, (int, float)) and lat > 0) else 999999.0
+                items.sort(key=ping_key)
+            elif mode == "name":
+                items.sort(key=lambda x: (x[1] or "").lower())
+            return [(item[0], item[1], item[2]) for item in items]
+
+        @classmethod
+        def build_subscription_body(
+            cls,
+            server_configs: Sequence[Tuple[str, str, str]],
+            inline_metadata: list[str] | None = None,
+        ) -> str:
+            if not server_configs and not inline_metadata:
+                return ""
+            lines = []
+            if inline_metadata:
+                for meta in inline_metadata:
+                    if meta and meta.strip():
+                        lines.append(meta.strip())
+            for item in server_configs:
+                conf, name, flag = item
+                try:
+                    uri = cls.encode_config_to_awg_uri(conf, name, flag)
+                    lines.append(uri)
+                except Exception:
+                    continue
+            if not lines:
+                return ""
+            raw_payload = "\n".join(lines)
+            return base64.b64encode(raw_payload.encode("utf-8")).decode("ascii")
+
+        @staticmethod
+        def build_subscription_headers(
+            *,
+            profile_title: str = "JUST1K VPN",
+            expire_ts: int = 0,
+            upload_bytes: int = 0,
+            download_bytes: int = 0,
+            total_quota_bytes: int = 0,
+            update_interval_hours: int = 6,
+            support_url: str | None = None,
+            hide_url: bool = True,
+            hide_check: bool = False,
+            web_page_url: str | None = None,
+            support_email: str | None = None,
+            announce: str | None = None,
+            announce_url: str | None = None,
+            sort_order: str | None = None,
+            profile_description: str | None = None,
+            banner_text: str | None = None,
+            banner_button_text: str | None = None,
+            banner_button_url: str | None = None,
+            banner_bg_color: str | None = None,
+            banner_button_color: str | None = None,
+        ) -> dict[str, str]:
+            title_b64 = base64.b64encode(profile_title.strip().encode("utf-8")).decode("ascii")
+            headers = {
+                "Content-Type": "text/plain; charset=utf-8",
+                "Cache-Control": "no-store, private, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+                "Profile-Title": f"base64:{title_b64}",
+                "Profile-Update-Interval": str(max(1, update_interval_hours)),
+                "Subscription-Userinfo": (
+                    f"upload={max(0, upload_bytes)};"
+                    f"download={max(0, download_bytes)};"
+                    f"total={max(0, total_quota_bytes)};"
+                    f"expire={max(0, expire_ts)}"
+                ),
+            }
+            if hide_url:
+                headers["hide-url"] = "1"
+            if hide_check:
+                headers["hide-check"] = "1"
+            if profile_description and profile_description.strip():
+                desc_b64 = base64.b64encode(profile_description.strip().encode("utf-8")).decode("ascii")
+                headers["profile-description"] = f"base64:{desc_b64}"
+            if support_url and support_url.strip():
+                headers["support-url"] = support_url.strip()
+            if web_page_url and web_page_url.strip():
+                headers["profile-web-page-url"] = web_page_url.strip()
+            if support_email and support_email.strip():
+                headers["support-email"] = support_email.strip()
+            if sort_order and sort_order.strip():
+                headers["sort-order"] = sort_order.strip()
+            if announce and announce.strip():
+                ann_b64 = base64.b64encode(announce.strip().encode("utf-8")).decode("ascii")
+                headers["announce"] = f"base64:{ann_b64}"
+            if announce_url and announce_url.strip():
+                headers["announce-url"] = announce_url.strip()
+            if banner_text and banner_text.strip():
+                b_b64 = base64.b64encode(banner_text.strip().encode("utf-8")).decode("ascii")
+                headers["banner-text"] = f"base64:{b_b64}"
+            if banner_button_text and banner_button_text.strip():
+                headers["banner-button-text"] = banner_button_text.strip()
+            if banner_button_url and banner_button_url.strip():
+                headers["banner-button-url"] = banner_button_url.strip()
+            if banner_bg_color and banner_bg_color.strip():
+                headers["banner-bg-color"] = banner_bg_color.strip()
+            if banner_button_color and banner_button_color.strip():
+                headers["banner-button-color"] = banner_button_color.strip()
+            return headers
 
 
 logging.basicConfig(
@@ -298,9 +427,6 @@ async def get_slot_configs(slot: int) -> list[tuple[str, str, str]]:
     sort_mode = TEST_STATE.get("sort_mode", "ping")
 
     raw_candidates = []
-    if TEST_STATE.get("se"):
-        conf = SLOT_1_SWEDEN if slot == 1 else SLOT_2_SWEDEN
-        raw_candidates.append((conf, f"Sweden {suffix}", "🇸🇪"))
     if TEST_STATE.get("nl"):
         conf = SLOT_1_NETHERLANDS if slot == 1 else SLOT_2_NETHERLANDS
         raw_candidates.append((conf, f"Netherlands {suffix}", "🇳🇱"))
@@ -310,6 +436,9 @@ async def get_slot_configs(slot: int) -> list[tuple[str, str, str]]:
     if TEST_STATE.get("de"):
         conf = SLOT_1_GERMANY if slot == 1 else SLOT_2_GERMANY
         raw_candidates.append((conf, f"Germany {suffix}", "🇩🇪"))
+    if TEST_STATE.get("se"):
+        conf = SLOT_1_SWEDEN if slot == 1 else SLOT_2_SWEDEN
+        raw_candidates.append((conf, f"Sweden {suffix}", "🇸🇪"))
 
     servers = []
     if sort_mode == "ping":
@@ -362,11 +491,22 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
     sec_mode = request.headers.get("Sec-Fetch-Mode", "")
     force_raw = request.query.get("raw") == "1"
     
-    # Real browser page navigation sends Sec-Fetch-Dest: document or Sec-Fetch-Mode: navigate
-    is_browser = not force_raw and not hwid and "INCY" not in user_agent and (
-        sec_dest == "document" or sec_mode == "navigate" or (
-            "Mozilla" in user_agent and "Chrome" in user_agent and "text/html" in accept_header
-        )
+    # Strictly identify INCY app clients (iOS, Android, Windows Electron, Dalvik)
+    is_incy_client = (
+        "INCY" in user_agent
+        or "Dalvik" in user_agent
+        or bool(hwid)
+        or bool(request.headers.get("x-client"))
+        or bool(request.headers.get("x-app-version"))
+        or bool(request.headers.get("x-device-os"))
+    )
+
+    # Real browser page navigation sends Sec-Fetch-Dest: document and wants text/html
+    is_browser = (
+        not force_raw
+        and not is_incy_client
+        and "text/html" in accept_header
+        and (sec_dest == "document" or sec_mode == "navigate" or ("Mozilla" in user_agent and "Chrome" in user_agent))
     )
 
     if is_browser:
@@ -704,7 +844,7 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
 
     # Measure real live socket latency for all 4 servers
     real_latencies = {}
-    for srv_code, conf in [("se", SLOT_1_SWEDEN), ("nl", SLOT_1_NETHERLANDS), ("pl", SLOT_1_POLAND), ("de", SLOT_1_GERMANY)]:
+    for srv_code, conf in [("nl", SLOT_1_NETHERLANDS), ("pl", SLOT_1_POLAND), ("de", SLOT_1_GERMANY), ("se", SLOT_1_SWEDEN)]:
         ep = extract_endpoint_from_conf(conf)
         lat = await get_real_latency(ep)
         real_latencies[srv_code] = f"{lat} мс" if lat is not None else "n/a"
@@ -778,17 +918,6 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
         <span>Серверы в подписке ({len(active_servers)})</span>
       </div>
       <div class="server-grid">
-        <!-- Sweden -->
-        <div class="item-card">
-          <div class="item-info">
-            <span style="font-size: 20px;">🇸🇪</span>
-            <div>Швеция <span class="badge {'badge-on' if TEST_STATE['se'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['se'] else 'ВЫКЛ'}</span> <span style="font-size: 11px; color: #34d399; margin-left: 6px;">• {real_latencies.get('se', '...')}</span></div>
-          </div>
-          <a href="/control/action?act=toggle_server&server=se" class="btn {'btn-red' if TEST_STATE['se'] else 'btn-green'}">
-            {'Отключить' if TEST_STATE['se'] else 'Включить'}
-          </a>
-        </div>
-
         <!-- Netherlands -->
         <div class="item-card">
           <div class="item-info">
@@ -819,6 +948,17 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
           </div>
           <a href="/control/action?act=toggle_server&server=de" class="btn {'btn-red' if TEST_STATE['de'] else 'btn-green'}">
             {'Отключить' if TEST_STATE['de'] else 'Включить'}
+          </a>
+        </div>
+
+        <!-- Sweden -->
+        <div class="item-card">
+          <div class="item-info">
+            <span style="font-size: 20px;">🇸🇪</span>
+            <div>Швеция <span class="badge {'badge-on' if TEST_STATE['se'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['se'] else 'ВЫКЛ'}</span> <span style="font-size: 11px; color: #34d399; margin-left: 6px;">• {real_latencies.get('se', '...')}</span></div>
+          </div>
+          <a href="/control/action?act=toggle_server&server=se" class="btn {'btn-red' if TEST_STATE['se'] else 'btn-green'}">
+            {'Отключить' if TEST_STATE['se'] else 'Включить'}
           </a>
         </div>
       </div>

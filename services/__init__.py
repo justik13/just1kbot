@@ -4,5 +4,5 @@ try:
     )
 
     install_amnezia_client_pagination_patch()
-except (ImportError, ModuleNotFoundError):
+except Exception:
     pass
