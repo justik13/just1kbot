@@ -844,6 +844,112 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             # Verify begin_nested was used
             mock_session.begin_nested.assert_called_once()
 
+    async def test_multiple_hwids_same_user_same_server_unique_profiles(self):
+        """P1 verification: multiple subscription devices for same user get unique profile names on same server."""
+        valid_token = "f" * 32
+        active_time = datetime.now(timezone.utc) + timedelta(days=30)
+        user = User(
+            id=1,
+            telegram_id=12345,
+            subscription_end=active_time,
+            device_limit=2,
+            active_sub_devices={},
+        )
+        server = Server(
+            id=10, name="Poland", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL,
+            is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
+        )
+        raw_conf = _make_dummy_awg_raw_config("Poland")
+
+        mock_session = self._make_mock_session()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        hwid_a = "device-hardware-id-alpha"
+        hwid_b = "device-hardware-id-beta"
+        hwid_c = "device-hardware-id-gamma"
+        hwid_a_hash = hashlib.sha256(hwid_a.lower().encode("utf-8")).hexdigest()
+        hwid_b_hash = hashlib.sha256(hwid_b.lower().encode("utf-8")).hexdigest()
+
+        created_device_names = []
+
+        async def fake_create_device(session, **kwargs):
+            dev_name = kwargs.get("device_name")
+            created_device_names.append(dev_name)
+            sub_hash = kwargs.get("sub_device_hash")
+            return VPNProfile(
+                id=100 + len(created_device_names),
+                user_id=1,
+                server_id=10,
+                device_name=dev_name,
+                device_type="sub",
+                sub_device_hash=sub_hash,
+                provisioning_status="active",
+                raw_config=raw_conf,
+            )
+
+        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
+             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user, \
+             patch("bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("bot.handlers.awg_sub_web.DeviceService.create_device", side_effect=fake_create_device):
+            mock_get_user.return_value = user
+            mock_snap.return_value = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=active_time)
+
+            # 1. First device connects (HWID A)
+            mock_count_exec_1 = MagicMock()
+            mock_count_exec_1.scalar_one.return_value = 0
+            mock_servers_exec_1 = MagicMock()
+            mock_servers_exec_1.scalars.return_value.all.return_value = [server]
+            mock_profiles_exec_1 = MagicMock()
+            mock_profiles_exec_1.scalars.return_value.all.return_value = []
+
+            mock_session.execute.side_effect = [
+                mock_count_exec_1,
+                mock_servers_exec_1,
+                mock_profiles_exec_1,
+            ]
+
+            resp_a = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers={"X-HWID": hwid_a})
+            self.assertEqual(resp_a.status, 200)
+            self.assertIn(hwid_a_hash, user.active_sub_devices)
+            self.assertEqual(user.active_sub_devices[hwid_a_hash]["device_index"], 1)
+
+            # 2. Second device connects (HWID B)
+            mock_count_exec_2 = MagicMock()
+            mock_count_exec_2.scalar_one.return_value = 0
+            mock_servers_exec_2 = MagicMock()
+            mock_servers_exec_2.scalars.return_value.all.return_value = [server]
+            mock_profiles_exec_2 = MagicMock()
+            mock_profiles_exec_2.scalars.return_value.all.return_value = []
+
+            mock_session.execute.side_effect = [
+                mock_count_exec_2,
+                mock_servers_exec_2,
+                mock_profiles_exec_2,
+            ]
+
+            resp_b = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers={"X-HWID": hwid_b})
+            self.assertEqual(resp_b.status, 200)
+            self.assertIn(hwid_b_hash, user.active_sub_devices)
+            self.assertEqual(user.active_sub_devices[hwid_b_hash]["device_index"], 2)
+
+            # Verify both profiles got distinct names on server 10!
+            self.assertEqual(len(created_device_names), 2)
+            self.assertEqual(created_device_names[0], "INCY (Poland) #1")
+            self.assertEqual(created_device_names[1], "INCY (Poland) #2")
+            self.assertNotEqual(created_device_names[0], created_device_names[1])
+
+            # 3. Third device connects (HWID C) -> exceeds limit of 2
+            mock_count_exec_3 = MagicMock()
+            mock_count_exec_3.scalar_one.return_value = 0
+            mock_session.execute.side_effect = [mock_count_exec_3]
+
+            resp_c = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers={"X-HWID": hwid_c})
+            self.assertEqual(resp_c.status, 403)
+            self.assertIn("Device limit reached (2/2)", await resp_c.text())
+
 
 class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
     """Test suite for Telegram Bot UI screens for AWG subscriptions."""

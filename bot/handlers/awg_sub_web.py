@@ -144,6 +144,9 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                 "first_seen": now.isoformat(),
                 "last_seen": now.isoformat(),
             }
+        else:
+            existing_rec = active_sub_devices.get(hwid_hash) or {}
+            device_idx = existing_rec.get("device_index") or 1
 
         # Find active AWG servers
         servers_stmt = select(Server).where(
@@ -203,7 +206,10 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                 try:
                     snapshot = await capture_server_peer_snapshot(srv.id)
                     async with session.begin_nested():
-                        dev_name = texts.AWG_SUB_PROFILE_NAME_TEMPLATE.format(server_name=srv.name or "AWG")
+                        dev_name = texts.AWG_SUB_PROFILE_NAME_TEMPLATE.format(
+                            server_name=srv.name or "AWG",
+                            index=device_idx,
+                        )
                         profile = await DeviceService.create_device(
                             session,
                             user_id=user.id,
