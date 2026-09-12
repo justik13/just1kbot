@@ -33,6 +33,28 @@ class AWGSubscriptionFeedService:
 
         return f"awg://{b64_conf}#{fragment}"
 
+    @staticmethod
+    def sort_servers(
+        server_configs: Sequence[Tuple[str, str, str, int | float | None]],
+        mode: str = "ping",
+    ) -> list[Tuple[str, str, str]]:
+        """Sort server configs by mode:
+        - 'ping': lowest latency first (servers with None or <= 0 latency placed at end)
+        - 'name': alphabetical by server name (case-insensitive)
+        - 'none' | 'default': preserve incoming order
+        Returns list of (conf, name, flag).
+        """
+        items = list(server_configs)
+        if mode == "ping":
+            def ping_key(x: Tuple[str, str, str, int | float | None]) -> float:
+                lat = x[3] if len(x) > 3 else None
+                return float(lat) if (isinstance(lat, (int, float)) and lat > 0) else 999999.0
+            items.sort(key=ping_key)
+        elif mode == "name":
+            items.sort(key=lambda x: (x[1] or "").lower())
+
+        return [(item[0], item[1], item[2]) for item in items]
+
     @classmethod
     def build_subscription_body(
         cls,

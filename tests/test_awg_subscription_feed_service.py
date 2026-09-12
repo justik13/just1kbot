@@ -211,6 +211,38 @@ class AWGSubscriptionFeedServiceTests(unittest.TestCase):
         self.assertEqual(lines[1], "#announce-url: https://t.me/just1kbot")
         self.assertTrue(lines[2].startswith("awg://"))
 
+    def test_sort_servers_by_ping(self):
+        configs = [
+            ("conf_nl", "Netherlands", "🇳🇱", 99),
+            ("conf_de", "Germany", "🇩🇪", 51),
+            ("conf_pl", "Poland", "🇵🇱", 71),
+            ("conf_unknown", "Unknown", "❓", None),
+        ]
+        sorted_cfgs = AWGSubscriptionFeedService.sort_servers(configs, mode="ping")
+        names = [c[1] for c in sorted_cfgs]
+        self.assertEqual(names, ["Germany", "Poland", "Netherlands", "Unknown"])
+        # Ensure returned tuples are 3 items: (conf, name, flag)
+        self.assertEqual(len(sorted_cfgs[0]), 3)
+
+    def test_sort_servers_by_name(self):
+        configs = [
+            ("conf_pl", "Poland", "🇵🇱", 71),
+            ("conf_de", "Germany", "🇩🇪", 51),
+            ("conf_nl", "Netherlands", "🇳🇱", 99),
+        ]
+        sorted_cfgs = AWGSubscriptionFeedService.sort_servers(configs, mode="name")
+        names = [c[1] for c in sorted_cfgs]
+        self.assertEqual(names, ["Germany", "Netherlands", "Poland"])
+
+    def test_sort_servers_default_preserves_order(self):
+        configs = [
+            ("conf_pl", "Poland", "🇵🇱", 71),
+            ("conf_de", "Germany", "🇩🇪", 51),
+        ]
+        sorted_cfgs = AWGSubscriptionFeedService.sort_servers(configs, mode="none")
+        names = [c[1] for c in sorted_cfgs]
+        self.assertEqual(names, ["Poland", "Germany"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,28 @@ class AWGSubscriptionFeedService:
 
         return f"awg://{b64_conf}#{fragment}"
 
+    @staticmethod
+    def sort_servers(
+        server_configs: Sequence[Tuple[str, str, str, int | float | None]],
+        mode: str = "ping",
+    ) -> list[Tuple[str, str, str]]:
+        """Sort server configs by mode:
+        - 'ping': lowest latency first (servers with None or <= 0 latency placed at end)
+        - 'name': alphabetical by server name (case-insensitive)
+        - 'none' | 'default': preserve incoming order
+        Returns list of (conf, name, flag).
+        """
+        items = list(server_configs)
+        if mode == "ping":
+            def ping_key(x: Tuple[str, str, str, int | float | None]) -> float:
+                lat = x[3] if len(x) > 3 else None
+                return float(lat) if (isinstance(lat, (int, float)) and lat > 0) else 999999.0
+            items.sort(key=ping_key)
+        elif mode == "name":
+            items.sort(key=lambda x: (x[1] or "").lower())
+
+        return [(item[0], item[1], item[2]) for item in items]
+
     @classmethod
     def build_subscription_body(
         cls,
@@ -399,6 +421,13 @@ REGISTERED_DEVICES: dict[str, dict] = {}
 DEVICE_LIMIT = 2
 VALID_TOKEN = "test_awg_vip_token"
 
+SERVER_LATENCIES = {
+    "Germany": 51,
+    "Poland": 71,
+    "Sweden": 89,
+    "Netherlands": 99,
+}
+
 TEST_STATE = {
     "nl": True,
     "pl": True,
@@ -410,9 +439,10 @@ TEST_STATE = {
     "stub_mode": True,          # True = Smart Stub (200 OK + notice server), False = Raw HTTP 403
     "title_suffix": "",
     "btn_web": True,            # profile-web-page-url (Кнопка «Личный кабинет / Сайт»)
-    "btn_email": True,          # support-email (Кнопка «Email поддержки»)
-    "btn_premium": True,        # premium-url (Кнопка «Премиум / Продлить»)
-    "sort_mode": "ping",        # "ping" | "name" | "none" | "server_de_first"
+    "btn_tg": True,             # support-url (Кнопка «Поддержка в Telegram» - приоритет в INCY)
+    "btn_email": True,          # support-email (Кнопка «Email» - видна, когда TG выключен)
+    "btn_premium": False,       # premium-url (Резерв INCY Store)
+    "sort_mode": "ping",        # "ping" | "name" | "none"
     "show_banner": True,        # In-App интерактивное объявление / баннер (announce + announce-url)
     "hide_check": False,        # hide-check: 1 (Скрыть кнопку «Проверить» на главном экране)
 }
@@ -426,27 +456,18 @@ def get_slot_configs(slot: int) -> list[tuple[str, str, str]]:
     servers = []
     if TEST_STATE.get("nl"):
         conf = SLOT_1_NETHERLANDS if slot == 1 else SLOT_2_NETHERLANDS
-        servers.append(("Netherlands", "🇳🇱", conf))
+        servers.append((conf, f"Netherlands {suffix}", "🇳🇱", SERVER_LATENCIES.get("Netherlands", 99)))
     if TEST_STATE.get("pl"):
         conf = SLOT_1_POLAND if slot == 1 else SLOT_2_POLAND
-        servers.append(("Poland", "🇵🇱", conf))
+        servers.append((conf, f"Poland {suffix}", "🇵🇱", SERVER_LATENCIES.get("Poland", 71)))
     if TEST_STATE.get("de"):
         conf = SLOT_1_GERMANY if slot == 1 else SLOT_2_GERMANY
-        servers.append(("Germany", "🇩🇪", conf))
+        servers.append((conf, f"Germany {suffix}", "🇩🇪", SERVER_LATENCIES.get("Germany", 51)))
     if TEST_STATE.get("se"):
         conf = SLOT_1_SWEDEN if slot == 1 else SLOT_2_SWEDEN
-        servers.append(("Sweden", "🇸🇪", conf))
+        servers.append((conf, f"Sweden {suffix}", "🇸🇪", SERVER_LATENCIES.get("Sweden", 89)))
 
-    if sort_mode == "server_de_first":
-        order = {"Germany": 1, "Poland": 2, "Sweden": 3, "Netherlands": 4}
-        servers.sort(key=lambda s: order.get(s[0], 99))
-    elif sort_mode == "name":
-        servers.sort(key=lambda s: s[0])
-
-    for country, flag, conf in servers:
-        result.append((conf, f"{country} {suffix}", flag))
-
-    return result
+    return AWGSubscriptionFeedService.sort_servers(servers, mode=sort_mode)
 
 
 
@@ -542,12 +563,13 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         return web.Response(status=200, text=html_content, headers={"Content-Type": "text/html; charset=utf-8"})
 
     web_url = "https://t.me/just1kbot" if TEST_STATE.get("btn_web", True) else None
+    tg_url = "https://t.me/just1k_support" if TEST_STATE.get("btn_tg", True) else None
     email_addr = "support@just1k.best" if TEST_STATE.get("btn_email", True) else None
-    prem_url = "https://t.me/just1kbot?start=renew" if TEST_STATE.get("btn_premium", True) else None
+    prem_url = "https://t.me/just1kbot?start=renew" if TEST_STATE.get("btn_premium", False) else None
 
     # Sorting resolution
     sort_mode = TEST_STATE.get("sort_mode", "ping")
-    sort_ord = None if sort_mode in ("none", "server_de_first") else sort_mode
+    sort_ord = None if sort_mode == "none" else sort_mode
 
     # Banner and Announce resolution
     ann_text = None
@@ -589,11 +611,14 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         inline_meta.append(f"#announce: {ann_text}")
     if ann_url:
         inline_meta.append(f"#announce-url: {ann_url}")
+    if tg_url:
+        inline_meta.append(f"#support-url: {tg_url}")
     if email_addr:
         inline_meta.append(f"#support-email: {email_addr}")
     if web_url:
         inline_meta.append(f"#profile-web-page-url: {web_url}")
-    inline_meta.append("#support-url: https://t.me/just1k_support")
+    if prem_url:
+        inline_meta.append(f"#premium-url: {prem_url}")
     if TEST_STATE.get("hide_check"):
         inline_meta.append("#hide-check: 1")
 
@@ -614,7 +639,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
                 download_bytes=1048576,
                 total_quota_bytes=1048576,
                 update_interval_hours=1,
-                support_url="https://t.me/just1k_support",
+                support_url=tg_url,
                 support_email=email_addr,
                 web_page_url=web_url,
                 premium_url=prem_url,
@@ -684,7 +709,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
                     download_bytes=1048576,
                     total_quota_bytes=1048576,
                     update_interval_hours=1,
-                    support_url="https://t.me/just1k_support",
+                    support_url=tg_url,
                     support_email=email_addr,
                     web_page_url=web_url,
                     premium_url=prem_url,
@@ -786,7 +811,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         download_bytes=download,
         total_quota_bytes=total_quota,
         update_interval_hours=1 if (TEST_STATE.get("expired") or TEST_STATE.get("quota_exhausted")) else 6,
-        support_url="https://t.me/just1k_support",
+        support_url=tg_url,
         support_email=email_addr,
         web_page_url=web_url,
         premium_url=prem_url,
@@ -852,25 +877,29 @@ async def handle_control_action(request: web.Request) -> web.Response:
         state_text = "ВКЛЮЧЕНА" if TEST_STATE["btn_web"] else "ОТКЛЮЧЕНА"
         msg = f"Кнопка «Личный кабинет / Сайт»: {state_text}"
         logger.info("🎛️ [CONTROL] Btn Web: %s", TEST_STATE["btn_web"])
+    elif act == "toggle_tg":
+        TEST_STATE["btn_tg"] = not TEST_STATE.get("btn_tg", True)
+        state_text = "ВКЛЮЧЕНА (скрывает кнопку Email в INCY)" if TEST_STATE["btn_tg"] else "ОТКЛЮЧЕНА (кнопка Email теперь активна в INCY!)"
+        msg = f"Кнопка «Telegram-поддержка»: {state_text}"
+        logger.info("🎛️ [CONTROL] Btn TG: %s", TEST_STATE["btn_tg"])
     elif act == "toggle_email":
         TEST_STATE["btn_email"] = not TEST_STATE.get("btn_email", True)
         state_text = "ВКЛЮЧЕНА" if TEST_STATE["btn_email"] else "ОТКЛЮЧЕНА"
         msg = f"Кнопка «Email поддержки»: {state_text}"
         logger.info("🎛️ [CONTROL] Btn Email: %s", TEST_STATE["btn_email"])
     elif act == "toggle_premium":
-        TEST_STATE["btn_premium"] = not TEST_STATE.get("btn_premium", True)
+        TEST_STATE["btn_premium"] = not TEST_STATE.get("btn_premium", False)
         state_text = "ВКЛЮЧЕНА" if TEST_STATE["btn_premium"] else "ОТКЛЮЧЕНА"
-        msg = f"Кнопка «Премиум / Продлить»: {state_text}"
+        msg = f"Кнопка «Премиум (Store)»: {state_text}"
         logger.info("🎛️ [CONTROL] Btn Premium: %s", TEST_STATE["btn_premium"])
     elif act == "set_sort":
         mode = request.query.get("mode", "ping")
-        if mode in ("ping", "name", "none", "server_de_first"):
+        if mode in ("ping", "name", "none"):
             TEST_STATE["sort_mode"] = mode
             labels = {
-                "ping": "Заголовок sort-order: ping (по задержке)",
-                "name": "Заголовок sort-order: name (по алфавиту А-Я)",
-                "none": "Заголовок sort-order: none (как в файле)",
-                "server_de_first": "Серверная сортировка (Германия 51ms первой)",
+                "ping": "⚡ По пингу (DE: 51ms ➔ PL: 71ms ➔ SE: 89ms ➔ NL: 99ms)",
+                "name": "🔤 По имени (А-Я)",
+                "none": "📄 По умолчанию (исходный порядок)",
             }
             msg = f"Сортировка установлена: {labels.get(mode, mode)}"
             logger.info("🎛️ [CONTROL] Sort mode: %s", mode)
@@ -900,13 +929,14 @@ async def handle_control_action(request: web.Request) -> web.Response:
         TEST_STATE["stub_mode"] = True
         TEST_STATE["title_suffix"] = ""
         TEST_STATE["btn_web"] = True
+        TEST_STATE["btn_tg"] = True
         TEST_STATE["btn_email"] = True
-        TEST_STATE["btn_premium"] = True
+        TEST_STATE["btn_premium"] = False
         TEST_STATE["sort_mode"] = "ping"
         TEST_STATE["show_banner"] = True
         TEST_STATE["hide_check"] = False
         REGISTERED_DEVICES.clear()
-        msg = "Все настройки сброшены к стандарту (Все 4 сервера, Заглушка, Кнопки Сайт/Поддержка/Email, Объявление ВКЛ)!"
+        msg = "Все настройки сброшены к стандарту (Все 4 сервера, Заглушка, Кнопки TG/Сайт/Email, Сортировка по пингу, Баннер ВКЛ)!"
         logger.info("🎛️ [CONTROL] Reset ALL state to defaults")
 
     raise web.HTTPFound(f"/control?msg={msg}")
@@ -1034,27 +1064,26 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
     <!-- Sorting Section -->
     <div class="section">
       <div class="section-title">
-        <span>📶 Порядок сортировки серверов</span>
+        <span>📶 Порядок сортировки серверов в подписке</span>
       </div>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 12px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px;">
         <a href="/control/action?act=set_sort&mode=ping" class="btn {'btn-active' if cur_sort == 'ping' else 'btn-gray'}">
-          ⚡ По пингу (sort-order)
-        </a>
-        <a href="/control/action?act=set_sort&mode=server_de_first" class="btn {'btn-active' if cur_sort == 'server_de_first' else 'btn-gray'}">
-          🇩🇪 Германия первой (51ms)
+          ⚡ По пингу (DE 51ms ➔ PL 71ms...)
         </a>
         <a href="/control/action?act=set_sort&mode=name" class="btn {'btn-active' if cur_sort == 'name' else 'btn-gray'}">
-          🔤 По имени (А-Я)
+          🔤 По имени (А-Я: DE ➔ NL ➔ PL ➔ SE)
         </a>
         <a href="/control/action?act=set_sort&mode=none" class="btn {'btn-active' if cur_sort == 'none' else 'btn-gray'}">
-          📄 По умолчанию
+          📄 По умолчанию (NL ➔ PL ➔ DE ➔ SE)
         </a>
       </div>
       <div class="hint">
-        <b>💡 Как работает сортировка в INCY:</b><br>
-        • <b>По пингу (sort-order: ping)</b>: задаёт клиенту режим сортировки по задержке. Однако в момент загрузки пинг ещё не измерен (показывается «-- ms»). Сортировка по пингу применяется в клиенте <i>после нажатия кнопки замера пинга</i>.<br>
-        • <b>Германия первой</b>: серверная сортировка. Стенд сразу отдаёт Германию (51 мс) первой в теле подписки, затем Польшу (71 мс), Швецию (89 мс) и Нидерланды (99 мс). Серверы сразу стоят от быстрых к медленным даже до замера!<br>
-        • <b>По имени (sort-order: name)</b>: клиент сортирует локации по алфавиту (Германия ➔ Нидерланды ➔ Польша ➔ Швеция).
+        <b>💡 Как устроена сортировка серверов:</b><br>
+        • <b>⚡ По пингу (sort-order: ping + серверная расстановка):</b> стенд сразу отдаёт узлы в порядке возрастания эталонной задержки (Германия 51мс ➔ Польша 71мс ➔ Швеция 89мс ➔ Нидерланды 99мс). Самый быстрый сервер сразу стоит первым в INCY без ожидания замера!<br>
+        • <b>🔤 По имени (sort-order: name):</b> сервер и клиент сортируют серверы строго по алфавиту (Германия ➔ Нидерланды ➔ Польша ➔ Швеция).<br>
+        • <b>📄 По умолчанию:</b> серверы выдаются в исходном порядке добавления (Нидерланды ➔ Польша ➔ Германия ➔ Швеция).<br>
+        <br>
+        <i>ℹ️ Задержки в стенде (51/71/89/99 мс) — это эталонные RTT до ЦОД. В реальном боте эти значения берутся из БД PostgreSQL (servers.latency_ms), которую обновляет фоновый воркер здоровья нод.</i>
       </div>
     </div>
 
@@ -1079,11 +1108,22 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
         <!-- Web Page / Site -->
         <div class="item-card">
           <div>
-            <div style="font-weight: 600; font-size: 14px;">🌐 Кнопка «Сайт» (profile-web-page-url)</div>
-            <div class="hint">Добавляет круглую кнопку «Сайт» со ссылкой на бота @just1kbot в карточку подписки</div>
+            <div style="font-weight: 600; font-size: 14px;">🌐 Кнопка «Сайт / Бот» (profile-web-page-url)</div>
+            <div class="hint">Добавляет круглую нативную кнопку «Сайт» со ссылкой на бота @just1kbot в карточку подписки</div>
           </div>
           <a href="/control/action?act=toggle_web" class="btn {'btn-red' if TEST_STATE.get('btn_web') else 'btn-green'}">
             {'Отключить' if TEST_STATE.get('btn_web') else 'Включить'}
+          </a>
+        </div>
+
+        <!-- Telegram Support -->
+        <div class="item-card">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">💬 Кнопка «Telegram-поддержка» (support-url)</div>
+            <div class="hint">Основной канал поддержки. <b>Важно:</b> если Telegram включен, INCY скрывает кнопку Email (приоритет TG). Отключите Telegram, чтобы на карточке появилась кнопка Email.</div>
+          </div>
+          <a href="/control/action?act=toggle_tg" class="btn {'btn-red' if TEST_STATE.get('btn_tg') else 'btn-green'}">
+            {'Отключить TG' if TEST_STATE.get('btn_tg') else 'Включить TG'}
           </a>
         </div>
 
@@ -1091,18 +1131,18 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
         <div class="item-card">
           <div>
             <div style="font-weight: 600; font-size: 14px;">✉️ Кнопка «Email» (support-email)</div>
-            <div class="hint">Заголовок <code>support-email: support@just1k.best</code>. Добавляет 3-ю нативную кнопку в карточку профиля</div>
+            <div class="hint">Заголовок <code>support-email: support@just1k.best</code>. <b>Видна в INCY как нативная кнопка</b> только когда Telegram (support-url) выключен выше.</div>
           </div>
           <a href="/control/action?act=toggle_email" class="btn {'btn-red' if TEST_STATE.get('btn_email') else 'btn-green'}">
-            {'Отключить' if TEST_STATE.get('btn_email') else 'Включить'}
+            {'Отключить Email' if TEST_STATE.get('btn_email') else 'Включить Email'}
           </a>
         </div>
 
         <!-- Premium / Renew -->
-        <div class="item-card">
+        <div class="item-card" style="opacity: 0.85;">
           <div>
-            <div style="font-weight: 600; font-size: 14px;">⭐ Кнопка «Премиум / Продлить» (premium-url)</div>
-            <div class="hint">Заголовок <code>premium-url</code>. В стандартном INCY зарезервирована для Lite Mode и партнерских аккаунтов.</div>
+            <div style="font-weight: 600; font-size: 14px;">⭐ Кнопка «Премиум / Продлить» (premium-url) <span class="badge badge-off">Резерв INCY</span></div>
+            <div class="hint">Заголовок <code>premium-url</code>. Внешние подписки игнорируют его (резерв Incy Store). Для продления используйте кнопку «Сайт» или баннер.</div>
           </div>
           <a href="/control/action?act=toggle_premium" class="btn {'btn-red' if TEST_STATE.get('btn_premium') else 'btn-green'}">
             {'Отключить' if TEST_STATE.get('btn_premium') else 'Включить'}
