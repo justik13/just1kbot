@@ -587,7 +587,7 @@ async def settle_succeeded_topup(
                             raise ValueError("Missing pack_gb in topup_context for white_internet_pack")
                         from services.white_internet_service import WhiteInternetService
                         actor_tg = user.telegram_id if user else None
-                        ok, msg, _sub = await WhiteInternetService.purchase_traffic_pack(
+                        ok, msg, _sub = await WhiteInternetService.topup_quota(
                             session, user_id=payment.user_id, pack_gb=int(pack_gb), actor_telegram_id=actor_tg
                         )
                         if not ok:
