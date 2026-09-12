@@ -132,6 +132,25 @@ async def ensure_subscription_token(session: AsyncSession, user: User) -> str:
     return new_token
 
 
+async def rotate_subscription_token(session: AsyncSession, user: User) -> str:
+    """Generate a new unique subscription token for user, invalidating the previous one."""
+    target_user = user
+    if getattr(user, "id", None) is not None:
+        locked_user = await session.scalar(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        if locked_user is not None:
+            target_user = locked_user
+
+    new_token = secrets.token_hex(32)
+    target_user.subscription_token = new_token
+    if target_user is not user:
+        user.subscription_token = new_token
+    await session.flush()
+    return new_token
+
+
+
 async def create_user(
     session: AsyncSession,
     telegram_id: int,

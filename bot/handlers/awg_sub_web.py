@@ -22,6 +22,7 @@ from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import is_expired, now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
+from utils.user_agent_parser import parse_device_model_from_ua
 from utils.vpn_parser import build_conf_file
 
 logger = logging.getLogger(__name__)
@@ -138,9 +139,15 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
             while device_idx in existing_indices:
                 device_idx += 1
 
+            raw_ua = request.headers.get("User-Agent", "")
+            detected_label = parse_device_model_from_ua(
+                raw_ua,
+                fallback_index=device_idx,
+                fallback_template=texts.AWG_SUB_DEVICE_LABEL_TEMPLATE,
+            )
             new_sub_device_record = {
                 "device_index": device_idx,
-                "label": texts.AWG_SUB_DEVICE_LABEL_TEMPLATE.format(index=device_idx),
+                "label": detected_label,
                 "first_seen": now.isoformat(),
                 "last_seen": now.isoformat(),
             }
@@ -238,7 +245,20 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
             user.active_sub_devices = active_sub_devices
             await session.flush()
         elif is_existing:
-            active_sub_devices[hwid_hash]["last_seen"] = now.isoformat()
+            existing_dev = dict(active_sub_devices.get(hwid_hash) or {})
+            curr_label = existing_dev.get("label", "")
+            if curr_label.startswith(texts.AWG_DEFAULT_DEVICE_PREFIX) or curr_label.startswith(texts.AWG_LEGACY_DEVICE_PREFIX):
+                raw_ua = request.headers.get("User-Agent", "")
+                friendly = parse_device_model_from_ua(
+                    raw_ua,
+                    fallback_index=device_idx,
+                    fallback_template=texts.AWG_SUB_DEVICE_LABEL_TEMPLATE,
+                )
+                if not (friendly.startswith(texts.AWG_DEFAULT_DEVICE_PREFIX) or friendly.startswith(texts.AWG_LEGACY_DEVICE_PREFIX)):
+                    existing_dev["label"] = friendly
+            existing_dev["last_seen"] = now.isoformat()
+            existing_dev["notified_inactive_at"] = None
+            active_sub_devices[hwid_hash] = existing_dev
             user.active_sub_devices = active_sub_devices
             await session.flush()
 

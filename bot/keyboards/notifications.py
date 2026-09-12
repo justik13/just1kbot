@@ -20,6 +20,7 @@ from bot.texts.common.buttons import (
     BTN_SUPPORT,
     BTN_TO_SERVER,
 )
+from bot.texts.connection.config import BTN_DISCONNECT_DEVICE_TEMPLATE
 
 
 def get_pre_expiry_keyboard() -> InlineKeyboardMarkup:
@@ -45,6 +46,18 @@ def get_devices_deleted_keyboard() -> InlineKeyboardMarkup:
     builder.button(text=BTN_DISMISS, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def get_inactive_sub_device_keyboard(label: str, hwid_prefix: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=BTN_DISCONNECT_DEVICE_TEMPLATE.format(label=label),
+        callback_data=f"awg_disconnect_sub:{hwid_prefix}",
+    )
+    builder.button(text=BTN_DISMISS, callback_data="dismiss_notification")
+    builder.adjust(1)
+    return builder.as_markup()
+
 
 
 def get_purchase_completed_notification_keyboard() -> InlineKeyboardMarkup:

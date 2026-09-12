@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from aiogram import F, Router
@@ -16,6 +16,7 @@ from sqlalchemy.orm import selectinload
 from bot import texts
 from bot.constants import AMNEZIA_PROTOCOL
 from database.models import User, VPNProfile
+from database.repositories import users_repo
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
@@ -31,6 +32,7 @@ from services.maintenance_service import MaintenanceService
 from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
+from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import render_hub, safe
 from utils.vpn_parser import build_conf_file
@@ -289,20 +291,29 @@ async def _render_manage_devices(
             callback_data="awg_download_conf_menu",
         )
 
+    now = now_utc()
     # 1. Sub devices
     for hwid_hash, data in active_sub_devices.items():
         label = data.get("label") or texts.AWG_SUB_DEVICE_LABEL_TEMPLATE.format(index=data.get("device_index", 1))
         last_seen_raw = data.get("last_seen", "")
         last_seen_display = last_seen_raw
+        is_inactive_7d = False
         if "T" in str(last_seen_raw):
             try:
                 dt = datetime.fromisoformat(last_seen_raw)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
                 last_seen_display = format_datetime(dt)
+                if (now - dt).total_seconds() > 7 * 86400:
+                    is_inactive_7d = True
             except Exception:
                 pass
+        activity_str = safe(last_seen_display) or texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
+        if is_inactive_7d:
+            activity_str += texts.AWG_DEVICE_INACTIVE_7D_TAG
         items_text.append(texts.AWG_SUB_DEVICE_ITEM.format(
             label=safe(label),
-            last_seen=safe(last_seen_display) or texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY,
+            last_seen=activity_str,
         ))
         builder.button(
             text=texts.BTN_DISCONNECT_DEVICE_TEMPLATE.format(label=label),
@@ -345,6 +356,7 @@ async def _render_manage_devices(
         devices_list=devices_list,
     )
 
+    builder.button(text=texts.BTN_RESET_SUB_LINK, callback_data="awg_reset_sub_prompt")
     builder.button(text=texts.BTN_BACK, callback_data="back_to_connections")
     builder.adjust(1)
 
@@ -354,6 +366,48 @@ async def _render_manage_devices(
         rendered,
         builder.as_markup(),
     )
+
+
+@router.callback_query(F.data == "awg_reset_sub_prompt")
+async def awg_reset_sub_prompt(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    """Show confirmation for resetting subscription token."""
+    await callback.answer(show_alert=False)
+    await state.clear()
+    builder = InlineKeyboardBuilder()
+    builder.button(text=texts.BTN_CONFIRM_RESET_SUB, callback_data="awg_reset_sub_execute")
+    builder.button(text=texts.BTN_CANCEL_ACTION, callback_data="awg_manage_devices")
+    builder.adjust(1)
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        texts.AWG_RESET_SUB_CONFIRM_TEXT,
+        builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "awg_reset_sub_execute")
+async def awg_reset_sub_execute(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+):
+    """Execute reset/rotation of subscription token."""
+    await state.clear()
+    user = db_user or await get_user_by_telegram_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    await users_repo.rotate_subscription_token(session, user)
+    await session.commit()
+    await callback.answer(texts.AWG_RESET_SUB_SUCCESS, show_alert=True)
+    await session.refresh(user)
+    await _render_manage_devices(callback.message, user, session)
+
 
 
 @router.callback_query(F.data == "awg_manage_devices")

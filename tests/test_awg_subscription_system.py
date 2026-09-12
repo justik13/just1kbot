@@ -1252,5 +1252,115 @@ class TestAWGSubscriptionEndToEndLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(user.active_sub_devices), 0)
 
 
+class TestAWGDeviceUAAndInactivity(unittest.IsolatedAsyncioTestCase):
+    """Tests for User-Agent friendly naming and inactive device highlighting."""
+
+    async def test_sub_feed_handler_uses_user_agent(self):
+        from aiohttp import web
+        from bot.handlers.awg_sub_web import awg_subscription_feed_handler
+        from utils.datetime_helpers import now_utc
+
+        user = User(
+            id=1,
+            telegram_id=123,
+            subscription_end=now_utc() + timedelta(days=30),
+            device_limit=2,
+            active_sub_devices={},
+        )
+        server = Server(
+            id=1,
+            name="DE1",
+            protocol="awg",
+            is_active=True,
+            health_state="online",
+            capabilities=[],
+        )
+        profile = VPNProfile(
+            id=10,
+            user_id=1,
+            server_id=1,
+            device_type="sub",
+            sub_device_hash="some_hwid_hash",
+            provisioning_status="active",
+            raw_config={"Address": "10.0.0.2/32", "PrivateKey": "key="},
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = [
+            MagicMock(scalar_one=lambda: 0),  # manual_count
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [profile])),  # profiles
+        ]
+
+        req = MagicMock(spec=web.Request)
+        req.match_info = {"token": "valid_sub_token_12345678"}
+        req.headers = {
+            "X-HWID": "Device12345",
+            "User-Agent": "INCY/1.4.2 (iPhone; iOS 18.2)",
+        }
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope") as mock_scope,
+            patch("bot.handlers.awg_sub_web.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user,
+            patch("bot.handlers.awg_sub_web.SubscriptionService.get_effective_device_limit", new_callable=AsyncMock) as mock_limit,
+            patch("bot.handlers.awg_sub_web.build_conf_file", return_value="[Interface]\nPrivateKey=..."),
+        ):
+            mock_scope.return_value.__aenter__.return_value = mock_session
+            mock_get_user.return_value = user
+            mock_limit.return_value = 2
+
+            resp = await awg_subscription_feed_handler(req)
+            self.assertEqual(resp.status, 200)
+
+            # Check that registered device got friendly iPhone label!
+            hwid_hash = hashlib.sha256(b"device12345").hexdigest()
+            self.assertIn(hwid_hash, user.active_sub_devices)
+            self.assertEqual(user.active_sub_devices[hwid_hash]["label"], "📱 iPhone")
+
+    async def test_render_manage_devices_shows_inactivity_warning(self):
+        from bot.handlers.connection.awg_subscription_routes import _render_manage_devices
+        from utils.datetime_helpers import now_utc
+
+        now = now_utc()
+        user = User(
+            id=1,
+            telegram_id=123,
+            subscription_end=now + timedelta(days=30),
+            device_limit=2,
+            active_sub_devices={
+                "hwid_old": {
+                    "device_index": 1,
+                    "label": "📱 iPhone",
+                    "last_seen": (now - timedelta(days=10)).isoformat(),
+                },
+                "hwid_new": {
+                    "device_index": 2,
+                    "label": "💻 Mac",
+                    "last_seen": (now - timedelta(hours=1)).isoformat(),
+                },
+            },
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: []))
+        mock_msg = MagicMock()
+        mock_msg.chat.id = 123
+
+        with (
+            patch("bot.handlers.connection.awg_subscription_routes.render_hub", new_callable=AsyncMock) as mock_render,
+            patch("bot.handlers.connection.awg_subscription_routes._get_effective_device_limit", new_callable=AsyncMock) as mock_limit,
+        ):
+            mock_limit.return_value = 2
+            await _render_manage_devices(mock_msg, user, mock_session)
+
+            mock_render.assert_awaited_once()
+            rendered_text = mock_render.call_args[0][2]
+            self.assertIn("📱 iPhone", rendered_text)
+            self.assertIn("(не активно > 7 дн.)", rendered_text)
+            self.assertIn("💻 Mac", rendered_text)
+            self.assertNotIn("💻 Mac</b>\n• Тип: Через подписку (INCY)\n• Активность: ⚠️", rendered_text)
+
+
 if __name__ == "__main__":
     unittest.main()
+
