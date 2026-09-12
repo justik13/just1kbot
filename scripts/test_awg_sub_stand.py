@@ -268,7 +268,7 @@ H4 = 213000000-2140000000
 [Peer]
 PublicKey = cnYPD+G2GyFNF0eziL3H6/2TVu0I1KxWp62i3xQghzp=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 185.220.1.50:443
+Endpoint = 212.77.98.9:443
 PersistentKeepalive = 25
 """
 
@@ -316,7 +316,7 @@ H4 = 213000000-2140000000
 [Peer]
 PublicKey = cnYPD+G2GyFNF0eziL3H6/2TVu0I1KxWp62i3xQghzp=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 185.220.1.50:443
+Endpoint = 212.77.98.9:443
 PersistentKeepalive = 25
 """
 
@@ -340,7 +340,7 @@ H4 = 213000000-2140000000
 [Peer]
 PublicKey = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 142.132.1.80:443
+Endpoint = 159.69.0.1:443
 PersistentKeepalive = 25
 """
 
@@ -364,7 +364,7 @@ H4 = 213000000-2140000000
 [Peer]
 PublicKey = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 142.132.1.80:443
+Endpoint = 159.69.0.1:443
 PersistentKeepalive = 25
 """
 
@@ -388,7 +388,7 @@ H4 = 218000000-2190000000
 [Peer]
 PublicKey = cnYPD+G2GyFNF0eziL3H6/2TVu0I1KxWp62i3xQghzp=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 193.180.1.20:443
+Endpoint = 194.58.112.18:443
 PersistentKeepalive = 25
 """
 
@@ -412,7 +412,7 @@ H4 = 218000000-2190000000
 [Peer]
 PublicKey = cnYPD+G2GyFNF0eziL3H6/2TVu0I1KxWp62i3xQghzp=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 193.180.1.20:443
+Endpoint = 194.58.112.18:443
 PersistentKeepalive = 25
 """
 
@@ -421,12 +421,45 @@ REGISTERED_DEVICES: dict[str, dict] = {}
 DEVICE_LIMIT = 2
 VALID_TOKEN = "test_awg_vip_token"
 
-SERVER_LATENCIES = {
-    "Germany": 51,
-    "Poland": 71,
-    "Sweden": 89,
-    "Netherlands": 99,
-}
+ENDPOINT_LATENCY_CACHE: dict[str, tuple[float | None, float]] = {}
+
+
+async def measure_endpoint_latency(endpoint: str, timeout: float = 1.2) -> float | None:
+    """Measure real TCP connection latency in milliseconds to host:port."""
+    try:
+        host, port_str = endpoint.strip().split(":")
+        t0 = asyncio.get_event_loop().time()
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, int(port_str)),
+            timeout=timeout,
+        )
+        writer.close()
+        await writer.wait_closed()
+        return round((asyncio.get_event_loop().time() - t0) * 1000, 1)
+    except Exception:
+        return None
+
+
+async def get_real_latency(endpoint: str) -> float | None:
+    now = asyncio.get_event_loop().time()
+    if endpoint in ENDPOINT_LATENCY_CACHE:
+        val, ts = ENDPOINT_LATENCY_CACHE[endpoint]
+        if now - ts < 15.0:  # 15 seconds TTL for fast cache
+            return val
+    val = await measure_endpoint_latency(endpoint)
+    ENDPOINT_LATENCY_CACHE[endpoint] = (val, now)
+    return val
+
+
+def extract_endpoint_from_conf(conf: str) -> str:
+    for line in conf.splitlines():
+        clean = line.strip()
+        if clean.startswith("Endpoint"):
+            parts = clean.split("=", 1)
+            if len(parts) == 2:
+                return parts[1].strip()
+    return ""
+
 
 TEST_STATE = {
     "nl": True,
@@ -448,24 +481,35 @@ TEST_STATE = {
 }
 
 
-def get_slot_configs(slot: int) -> list[tuple[str, str, str]]:
-    result = []
+async def get_slot_configs(slot: int) -> list[tuple[str, str, str]]:
     suffix = f"(Slot {slot})"
     sort_mode = TEST_STATE.get("sort_mode", "ping")
 
-    servers = []
-    if TEST_STATE.get("nl"):
-        conf = SLOT_1_NETHERLANDS if slot == 1 else SLOT_2_NETHERLANDS
-        servers.append((conf, f"Netherlands {suffix}", "🇳🇱", SERVER_LATENCIES.get("Netherlands", 99)))
-    if TEST_STATE.get("pl"):
-        conf = SLOT_1_POLAND if slot == 1 else SLOT_2_POLAND
-        servers.append((conf, f"Poland {suffix}", "🇵🇱", SERVER_LATENCIES.get("Poland", 71)))
-    if TEST_STATE.get("de"):
-        conf = SLOT_1_GERMANY if slot == 1 else SLOT_2_GERMANY
-        servers.append((conf, f"Germany {suffix}", "🇩🇪", SERVER_LATENCIES.get("Germany", 51)))
+    raw_candidates = []
     if TEST_STATE.get("se"):
         conf = SLOT_1_SWEDEN if slot == 1 else SLOT_2_SWEDEN
-        servers.append((conf, f"Sweden {suffix}", "🇸🇪", SERVER_LATENCIES.get("Sweden", 89)))
+        raw_candidates.append((conf, f"Sweden {suffix}", "🇸🇪"))
+    if TEST_STATE.get("nl"):
+        conf = SLOT_1_NETHERLANDS if slot == 1 else SLOT_2_NETHERLANDS
+        raw_candidates.append((conf, f"Netherlands {suffix}", "🇳🇱"))
+    if TEST_STATE.get("pl"):
+        conf = SLOT_1_POLAND if slot == 1 else SLOT_2_POLAND
+        raw_candidates.append((conf, f"Poland {suffix}", "🇵🇱"))
+    if TEST_STATE.get("de"):
+        conf = SLOT_1_GERMANY if slot == 1 else SLOT_2_GERMANY
+        raw_candidates.append((conf, f"Germany {suffix}", "🇩🇪"))
+
+    servers = []
+    if sort_mode == "ping":
+        # Measure real live latency to endpoints concurrently
+        tasks = [get_real_latency(extract_endpoint_from_conf(c)) for c, _, _ in raw_candidates]
+        latencies = await asyncio.gather(*tasks)
+        for (c, name, flag), lat in zip(raw_candidates, latencies):
+            logger.info("📡 [PING PROBE] %s -> %s ms", name, lat)
+            servers.append((c, name, flag, lat))
+    else:
+        for c, name, flag in raw_candidates:
+            servers.append((c, name, flag, None))
 
     return AWGSubscriptionFeedService.sort_servers(servers, mode=sort_mode)
 
@@ -759,7 +803,7 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         )
 
     # Build feed
-    configs = get_slot_configs(assigned_slot)
+    configs = await get_slot_configs(assigned_slot)
 
     # Quotas & metadata customization via TEST_STATE
     total_quota = 0
@@ -945,6 +989,13 @@ async def handle_control_action(request: web.Request) -> web.Response:
 async def handle_control_dashboard(request: web.Request) -> web.Response:
     flash_msg = request.query.get("msg", "")
 
+    # Measure real live socket latency for all 4 servers
+    real_latencies = {}
+    for srv_code, conf in [("se", SLOT_1_SWEDEN), ("nl", SLOT_1_NETHERLANDS), ("pl", SLOT_1_POLAND), ("de", SLOT_1_GERMANY)]:
+        ep = extract_endpoint_from_conf(conf)
+        lat = await get_real_latency(ep)
+        real_latencies[srv_code] = f"{lat} мс" if lat is not None else "n/a"
+
     # Count active servers
     active_servers = [k.upper() for k, v in TEST_STATE.items() if k in ("nl", "pl", "de", "se") and v]
 
@@ -1014,11 +1065,22 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
         <span>Серверы в подписке ({len(active_servers)})</span>
       </div>
       <div class="server-grid">
+        <!-- Sweden -->
+        <div class="item-card">
+          <div class="item-info">
+            <span style="font-size: 20px;">🇸🇪</span>
+            <div>Швеция <span class="badge {'badge-on' if TEST_STATE['se'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['se'] else 'ВЫКЛ'}</span> <span style="font-size: 11px; color: #34d399; margin-left: 6px;">• {real_latencies.get('se', '...')}</span></div>
+          </div>
+          <a href="/control/action?act=toggle_server&server=se" class="btn {'btn-red' if TEST_STATE['se'] else 'btn-green'}">
+            {'Отключить' if TEST_STATE['se'] else 'Включить'}
+          </a>
+        </div>
+
         <!-- Netherlands -->
         <div class="item-card">
           <div class="item-info">
             <span style="font-size: 20px;">🇳🇱</span>
-            <div>Нидерланды <span class="badge {'badge-on' if TEST_STATE['nl'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['nl'] else 'ВЫКЛ'}</span></div>
+            <div>Нидерланды <span class="badge {'badge-on' if TEST_STATE['nl'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['nl'] else 'ВЫКЛ'}</span> <span style="font-size: 11px; color: #34d399; margin-left: 6px;">• {real_latencies.get('nl', '...')}</span></div>
           </div>
           <a href="/control/action?act=toggle_server&server=nl" class="btn {'btn-red' if TEST_STATE['nl'] else 'btn-green'}">
             {'Отключить' if TEST_STATE['nl'] else 'Включить'}
@@ -1029,7 +1091,7 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
         <div class="item-card">
           <div class="item-info">
             <span style="font-size: 20px;">🇵🇱</span>
-            <div>Польша <span class="badge {'badge-on' if TEST_STATE['pl'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['pl'] else 'ВЫКЛ'}</span></div>
+            <div>Польша <span class="badge {'badge-on' if TEST_STATE['pl'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['pl'] else 'ВЫКЛ'}</span> <span style="font-size: 11px; color: #34d399; margin-left: 6px;">• {real_latencies.get('pl', '...')}</span></div>
           </div>
           <a href="/control/action?act=toggle_server&server=pl" class="btn {'btn-red' if TEST_STATE['pl'] else 'btn-green'}">
             {'Отключить' if TEST_STATE['pl'] else 'Включить'}
@@ -1040,25 +1102,14 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
         <div class="item-card">
           <div class="item-info">
             <span style="font-size: 20px;">🇩🇪</span>
-            <div>Германия <span class="badge {'badge-on' if TEST_STATE['de'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['de'] else 'ВЫКЛ'}</span></div>
+            <div>Германия <span class="badge {'badge-on' if TEST_STATE['de'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['de'] else 'ВЫКЛ'}</span> <span style="font-size: 11px; color: #34d399; margin-left: 6px;">• {real_latencies.get('de', '...')}</span></div>
           </div>
           <a href="/control/action?act=toggle_server&server=de" class="btn {'btn-red' if TEST_STATE['de'] else 'btn-green'}">
             {'Отключить' if TEST_STATE['de'] else 'Включить'}
           </a>
         </div>
-
-        <!-- Sweden -->
-        <div class="item-card">
-          <div class="item-info">
-            <span style="font-size: 20px;">🇸🇪</span>
-            <div>Швеция <span class="badge {'badge-on' if TEST_STATE['se'] else 'badge-off'}">{'ВКЛ' if TEST_STATE['se'] else 'ВЫКЛ'}</span></div>
-          </div>
-          <a href="/control/action?act=toggle_server&server=se" class="btn {'btn-red' if TEST_STATE['se'] else 'btn-green'}">
-            {'Отключить' if TEST_STATE['se'] else 'Включить'}
-          </a>
-        </div>
       </div>
-      <div class="hint">💡 При добавлении или удалении сервера перейдите в INCY и нажмите 🔄 (обновить подписку). Список обновится мгновенно без пересоздания профиля.</div>
+      <div class="hint">💡 Зелёные цифры задержки замеряются живым TCP-сокетом в реальном времени. При изменении перейдите в INCY и нажмите 🔄 (обновить подписку).</div>
     </div>
 
     <!-- Sorting Section -->
@@ -1068,22 +1119,20 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
       </div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px;">
         <a href="/control/action?act=set_sort&mode=ping" class="btn {'btn-active' if cur_sort == 'ping' else 'btn-gray'}">
-          ⚡ По пингу (DE 51ms ➔ PL 71ms...)
+          ⚡ По пингу (живой замер)
         </a>
         <a href="/control/action?act=set_sort&mode=name" class="btn {'btn-active' if cur_sort == 'name' else 'btn-gray'}">
-          🔤 По имени (А-Я: DE ➔ NL ➔ PL ➔ SE)
+          🔤 По имени (А-Я)
         </a>
         <a href="/control/action?act=set_sort&mode=none" class="btn {'btn-active' if cur_sort == 'none' else 'btn-gray'}">
-          📄 По умолчанию (NL ➔ PL ➔ DE ➔ SE)
+          📄 По умолчанию
         </a>
       </div>
       <div class="hint">
         <b>💡 Как устроена сортировка серверов:</b><br>
-        • <b>⚡ По пингу (sort-order: ping + серверная расстановка):</b> стенд сразу отдаёт узлы в порядке возрастания эталонной задержки (Германия 51мс ➔ Польша 71мс ➔ Швеция 89мс ➔ Нидерланды 99мс). Самый быстрый сервер сразу стоит первым в INCY без ожидания замера!<br>
-        • <b>🔤 По имени (sort-order: name):</b> сервер и клиент сортируют серверы строго по алфавиту (Германия ➔ Нидерланды ➔ Польша ➔ Швеция).<br>
-        • <b>📄 По умолчанию:</b> серверы выдаются в исходном порядке добавления (Нидерланды ➔ Польша ➔ Германия ➔ Швеция).<br>
-        <br>
-        <i>ℹ️ Задержки в стенде (51/71/89/99 мс) — это эталонные RTT до ЦОД. В реальном боте эти значения берутся из БД PostgreSQL (servers.latency_ms), которую обновляет фоновый воркер здоровья нод.</i>
+        • <b>⚡ По пингу (sort-order: ping + реальный замер сокетов):</b> стенд опрашивает сетевые порты каждого сервера в реальном времени и расставляет их по фактическому времени отклика (RTT). Самый быстрый сервер всегда встаёт на 1-е место!<br>
+        • <b>🔤 По имени (sort-order: name):</b> сервер и клиент сортируют серверы строго по алфавиту.<br>
+        • <b>📄 По умолчанию:</b> серверы выдаются в исходном порядке добавления.<br>
       </div>
     </div>
 
