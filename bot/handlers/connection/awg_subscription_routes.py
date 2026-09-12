@@ -78,7 +78,7 @@ async def awg_download_conf_menu(
             callback.bot,
             callback.message.chat.id,
             texts.ERROR_NO_FREE_SLOTS,
-            InlineKeyboardBuilder().button(text=texts.BTN_BACK, callback_data="back_to_connections").as_markup(),
+            InlineKeyboardBuilder().button(text=texts.BTN_BACK, callback_data="awg_manage_devices").as_markup(),
         )
         return
 
@@ -89,7 +89,7 @@ async def awg_download_conf_menu(
             text=f"{flag} {server.name}",
             callback_data=f"awg_get_conf:{server.id}",
         )
-    builder.button(text=texts.BTN_BACK, callback_data="back_to_connections")
+    builder.button(text=texts.BTN_BACK, callback_data="awg_manage_devices")
     builder.adjust(1)
 
     await render_hub(
@@ -245,8 +245,8 @@ async def awg_get_conf(
     doc = BufferedInputFile(conf_text.encode("utf-8"), filename=clean_filename)
 
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections")
-    builder.button(text=texts.BTN_MANAGE_DEVICES, callback_data="awg_manage_devices")
+    builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="awg_manage_devices")
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
     builder.adjust(1)
 
     await callback.message.answer_document(
@@ -262,10 +262,10 @@ async def _render_manage_devices(
     user: User,
     session: AsyncSession,
 ):
-    """Render the device management screen showing both INCY and manual devices."""
+    """Render unified device management screen showing sub devices and manual .conf profiles."""
     active_sub_devices = dict(getattr(user, "active_sub_devices", None) or {})
 
-    manual_profiles = (await session.execute(
+    stmt = (
         select(VPNProfile)
         .options(selectinload(VPNProfile.server))
         .where(
@@ -273,13 +273,21 @@ async def _render_manage_devices(
             VPNProfile.device_type == "manual",
             VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
         )
-    )).scalars().all()
+    )
+    res = await session.execute(stmt)
+    manual_profiles = res.scalars().all()
 
     total_active = len(active_sub_devices) + len(manual_profiles)
     limit = await _get_effective_device_limit(session, user)
 
     items_text = []
     builder = InlineKeyboardBuilder()
+
+    if total_active < limit:
+        builder.button(
+            text=texts.BTN_DOWNLOAD_CONF,
+            callback_data="awg_download_conf_menu",
+        )
 
     # 1. Sub devices
     for hwid_hash, data in active_sub_devices.items():

@@ -224,16 +224,8 @@ async def _build_connections_screen(
             copy_text=CopyTextButton(text=sub_url),
         )
     builder.button(
-        text=texts.BTN_DOWNLOAD_CONF,
-        callback_data="awg_download_conf_menu",
-    )
-    builder.button(
         text=texts.BTN_MANAGE_DEVICES,
         callback_data="awg_manage_devices",
-    )
-    builder.button(
-        text=texts.BTN_REFRESH_SUB,
-        callback_data="back_to_connections",
     )
     builder.button(
         text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,

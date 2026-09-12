@@ -989,9 +989,9 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
 
             buttons = [b.text for row in builder.export() for b in row]
             self.assertIn(texts.BTN_COPY_SUB_LINK, buttons)
-            self.assertIn(texts.BTN_DOWNLOAD_CONF, buttons)
             self.assertIn(texts.BTN_MANAGE_DEVICES, buttons)
-            self.assertIn(texts.BTN_REFRESH_SUB, buttons)
+            self.assertNotIn(texts.BTN_DOWNLOAD_CONF, buttons)
+            self.assertNotIn(texts.BTN_REFRESH_SUB, buttons)
 
     async def test_render_manage_devices_shows_both_types(self):
         """Verify _render_manage_devices lists both INCY sub-device and manual .conf profiles."""
@@ -1035,6 +1035,43 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Мой Телефон (INCY)", rendered_text)
             self.assertIn("Мой ПК", rendered_text)
             self.assertIn("Подключено 2 из 2", rendered_text)
+
+            # When limit reached (2/2), BTN_DOWNLOAD_CONF should not be rendered
+            buttons = [b.text for row in args[3].inline_keyboard for b in row]
+            self.assertNotIn(texts.BTN_DOWNLOAD_CONF, buttons)
+
+    async def test_render_manage_devices_shows_download_conf_when_slots_available(self):
+        """Verify _render_manage_devices includes BTN_DOWNLOAD_CONF button when active_count < limit."""
+        from bot.handlers.connection.awg_subscription_routes import _render_manage_devices
+
+        now = datetime.now(timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=987654321,
+            subscription_end=now + timedelta(days=30),
+            device_limit=3,
+            active_sub_devices={"device_hwid_123456": {"device_index": 1, "label": "Мой Телефон (INCY)"}},
+        )
+
+        mock_session = AsyncMock()
+        mock_profiles_exec = MagicMock()
+        mock_profiles_exec.scalars.return_value.all.return_value = []
+        mock_session.execute.return_value = mock_profiles_exec
+
+        mock_msg = MagicMock()
+        mock_msg.chat.id = 12345
+        mock_msg.bot = MagicMock()
+
+        with patch("bot.handlers.connection.awg_subscription_routes.render_hub", new_callable=AsyncMock) as mock_render_hub, \
+             patch("bot.handlers.connection.awg_subscription_routes._get_effective_device_limit", new_callable=AsyncMock) as mock_limit:
+            mock_limit.return_value = 3
+
+            await _render_manage_devices(mock_msg, user, mock_session)
+
+            mock_render_hub.assert_awaited_once()
+            args = mock_render_hub.await_args[0]
+            buttons = [b.text for row in args[3].inline_keyboard for b in row]
+            self.assertIn(texts.BTN_DOWNLOAD_CONF, buttons)
 
     async def test_disconnect_sub_device_callback(self):
         """Verify awg_disconnect_sub properly finds device by prefix and calls delete_sub_device."""
