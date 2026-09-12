@@ -149,16 +149,16 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
 
         # 5. Check tariff change quote calculation: MUST succeed and be tracked
         async with self.sessions.begin() as session:
-            quote, failure_code = await create_tariff_change_quote(
+            quote_res = await create_tariff_change_quote(
                 session,
                 user_id=user_id,
                 target_tariff_id=t2_id,
                 as_of=now,
             )
-            self.assertIsNone(failure_code)
-            self.assertIsNotNone(quote)
-            self.assertEqual(quote.status, "pending")
-            self.assertGreater(quote.final_price_rub, Decimal("0.00"))
+            self.assertIsNone(quote_res.failure_code)
+            self.assertIsNotNone(quote_res.quote)
+            self.assertEqual(quote_res.quote.status, "pending")
+            self.assertGreater(quote_res.quote.final_price_rub, Decimal("0.00"))
 
     async def test_exact_hours_and_payment_linking_backfill_logic(self) -> None:
         now = now_utc().replace(microsecond=0)
