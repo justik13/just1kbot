@@ -17,200 +17,14 @@ import asyncio
 import json
 import logging
 import os
-import base64
 import sys
 from datetime import datetime, timezone
-from typing import Sequence, Tuple
 from aiohttp import web
 
-class AWGSubscriptionFeedService:
-    """Generates subscription feeds with multi-server AmneziaWG profiles for INCY."""
+# Ensure repository root is on sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-    @staticmethod
-    def encode_config_to_awg_uri(conf: str, server_name: str, country_flag: str = "") -> str:
-        if not conf or not conf.strip():
-            raise ValueError("Configuration text cannot be empty")
-
-        clean_conf = conf.strip()
-        b64_conf = base64.urlsafe_b64encode(clean_conf.encode("utf-8")).decode("ascii")
-
-        clean_name = (server_name or "Server").strip()
-        clean_flag = (country_flag or "").strip()
-        fragment = f"{clean_flag} {clean_name}".strip() if clean_flag else clean_name
-
-        return f"awg://{b64_conf}#{fragment}"
-
-    @staticmethod
-    def sort_servers(
-        server_configs: Sequence[Tuple[str, str, str, int | float | None]],
-        mode: str = "ping",
-    ) -> list[Tuple[str, str, str]]:
-        """Sort server configs by mode:
-        - 'ping': lowest latency first (servers with None or <= 0 latency placed at end)
-        - 'name': alphabetical by server name (case-insensitive)
-        - 'none' | 'default': preserve incoming order
-        Returns list of (conf, name, flag).
-        """
-        items = list(server_configs)
-        if mode == "ping":
-            def ping_key(x: Tuple[str, str, str, int | float | None]) -> float:
-                lat = x[3] if len(x) > 3 else None
-                return float(lat) if (isinstance(lat, (int, float)) and lat > 0) else 999999.0
-            items.sort(key=ping_key)
-        elif mode == "name":
-            items.sort(key=lambda x: (x[1] or "").lower())
-
-        return [(item[0], item[1], item[2]) for item in items]
-
-    @classmethod
-    def build_subscription_body(
-        cls,
-        server_configs: Sequence[Tuple[str, str, str]],
-        inline_metadata: list[str] | None = None,
-    ) -> str:
-        if not server_configs and not inline_metadata:
-            return ""
-
-        lines = []
-        if inline_metadata:
-            for meta in inline_metadata:
-                if meta and meta.strip():
-                    lines.append(meta.strip())
-
-        for item in server_configs:
-            conf, name, flag = item
-            try:
-                uri = cls.encode_config_to_awg_uri(conf, name, flag)
-                lines.append(uri)
-            except Exception as exc:
-                continue
-
-        if not lines:
-            return ""
-
-        raw_payload = "\n".join(lines)
-        return base64.b64encode(raw_payload.encode("utf-8")).decode("ascii")
-
-    @staticmethod
-    def build_subscription_headers(
-        *,
-        profile_title: str = "JUST1K VPN",
-        expire_ts: int = 0,
-        upload_bytes: int = 0,
-        download_bytes: int = 0,
-        total_quota_bytes: int = 0,
-        update_interval_hours: int = 6,
-        support_url: str | None = None,
-        hide_url: bool = True,
-        hide_check: bool = False,
-        web_page_url: str | None = None,
-        premium_url: str | None = None,
-        support_email: str | None = None,
-        announce: str | None = None,
-        announce_url: str | None = None,
-        sort_order: str | None = None,
-        profile_description: str | None = None,
-        banner_text: str | None = None,
-        banner_button_text: str | None = None,
-        banner_button_url: str | None = None,
-        banner_bg_color: str | None = None,
-        banner_button_color: str | None = None,
-    ) -> dict[str, str]:
-        title_b64 = base64.b64encode(profile_title.strip().encode("utf-8")).decode("ascii")
-
-        headers = {
-            "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "no-store, private, no-cache, must-revalidate",
-            "Pragma": "no-cache",
-            "X-Content-Type-Options": "nosniff",
-            "Profile-Title": f"base64:{title_b64}",
-            "Profile-Update-Interval": str(max(1, update_interval_hours)),
-            "Subscription-Userinfo": (
-                f"upload={max(0, upload_bytes)};"
-                f"download={max(0, download_bytes)};"
-                f"total={max(0, total_quota_bytes)};"
-                f"expire={max(0, expire_ts)}"
-            ),
-        }
-
-        if hide_url:
-            headers["hide-url"] = "1"
-
-        if hide_check:
-            headers["hide-check"] = "1"
-
-        if profile_description and profile_description.strip():
-            desc_b64 = base64.b64encode(profile_description.strip().encode("utf-8")).decode("ascii")
-            headers["profile-description"] = f"base64:{desc_b64}"
-
-        if support_url and support_url.strip():
-            headers["support-url"] = support_url.strip()
-
-        if web_page_url and web_page_url.strip():
-            headers["profile-web-page-url"] = web_page_url.strip()
-
-        if premium_url and premium_url.strip():
-            headers["premium-url"] = premium_url.strip()
-
-        if support_email and support_email.strip():
-            headers["support-email"] = support_email.strip()
-
-        if sort_order and sort_order.strip():
-            headers["sort-order"] = sort_order.strip()
-
-        if announce and announce.strip():
-            ann_b64 = base64.b64encode(announce.strip().encode("utf-8")).decode("ascii")
-            headers["announce"] = f"base64:{ann_b64}"
-
-        if announce_url and announce_url.strip():
-            headers["announce-url"] = announce_url.strip()
-
-        if banner_text and banner_text.strip():
-            b_b64 = base64.b64encode(banner_text.strip().encode("utf-8")).decode("ascii")
-            headers["banner-text"] = f"base64:{b_b64}"
-
-        if banner_button_text and banner_button_text.strip():
-            headers["banner-button-text"] = banner_button_text.strip()
-
-        if banner_button_url and banner_button_url.strip():
-            headers["banner-button-url"] = banner_button_url.strip()
-
-        if banner_bg_color and banner_bg_color.strip():
-            headers["banner-bg-color"] = banner_bg_color.strip()
-
-        if banner_button_color and banner_button_color.strip():
-            headers["banner-button-color"] = banner_button_color.strip()
-
-        return headers
-
-    DUMMY_SINKHOLE_CONFIG: str = """[Interface]
-Address = 10.255.255.2/32
-DNS = 127.0.0.1
-MTU = 1280
-PrivateKey = aAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-Jc = 4
-Jmin = 10
-Jmax = 50
-S1 = 79
-S2 = 115
-S3 = 5
-S4 = 1
-H1 = 169154911-1234371153
-H2 = 2057051984-2121122945
-H3 = 2132872968-2133668229
-H4 = 2136455412-2141801388
-
-[Peer]
-PublicKey = aAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 127.0.0.1:1
-PersistentKeepalive = 25
-"""
-
-    @classmethod
-    def create_stub_server(cls, message: str, flag: str = "🛑") -> Tuple[str, str, str]:
-        """Create a non-routable stub server item for informative paywalls/notices."""
-        return (cls.DUMMY_SINKHOLE_CONFIG, message, flag)
+from services.awg_subscription_feed_service import AWGSubscriptionFeedService
 
 
 logging.basicConfig(
@@ -462,19 +276,17 @@ def extract_endpoint_from_conf(conf: str) -> str:
 
 
 TEST_STATE = {
+    "se": True,
     "nl": True,
     "pl": True,
     "de": True,
-    "se": True,
     "quota_exhausted": False,
     "expired": False,
     "block_403": False,
-    "stub_mode": True,          # True = Smart Stub (200 OK + notice server), False = Raw HTTP 403
     "title_suffix": "",
-    "btn_web": True,            # profile-web-page-url (Кнопка «Личный кабинет / Сайт»)
-    "btn_tg": True,             # support-url (Кнопка «Поддержка в Telegram» - приоритет в INCY)
-    "btn_email": True,          # support-email (Кнопка «Email» - видна, когда TG выключен)
-    "btn_premium": False,       # premium-url (Резерв INCY Store)
+    "btn_web": True,            # profile-web-page-url (Кнопка «Сайт / Бот»)
+    "btn_tg": True,             # support-url (Кнопка «Telegram-поддержка»)
+    "btn_email": True,          # support-email (Кнопка «Email»)
     "sort_mode": "ping",        # "ping" | "name" | "none"
     "show_banner": True,        # In-App интерактивное объявление / баннер (announce + announce-url)
     "hide_check": False,        # hide-check: 1 (Скрыть кнопку «Проверить» на главном экране)
@@ -609,7 +421,6 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
     web_url = "https://t.me/just1kbot" if TEST_STATE.get("btn_web", True) else None
     tg_url = "https://t.me/just1k_support" if TEST_STATE.get("btn_tg", True) else None
     email_addr = "support@just1k.best" if TEST_STATE.get("btn_email", True) else None
-    prem_url = "https://t.me/just1kbot?start=renew" if TEST_STATE.get("btn_premium", False) else None
 
     # Sorting resolution
     sort_mode = TEST_STATE.get("sort_mode", "ping")
@@ -632,16 +443,16 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         b_btn_url = ann_url
         b_bg = "#064e3b"
         b_btn_color = "#10b981"
-    elif TEST_STATE.get("expired") and TEST_STATE.get("stub_mode"):
-        ann_text = "Подписка истекла. Продлите доступ в Telegram-боте."
+    elif TEST_STATE.get("expired"):
+        ann_text = "Подписка истекла. Продлите доступ в Telegram-боте @just1kbot."
         ann_url = "https://t.me/just1kbot"
         b_text = ann_text
         b_btn_text = "Продлить в боте"
         b_btn_url = ann_url
         b_bg = "#450a0a"
         b_btn_color = "#ef4444"
-    elif TEST_STATE.get("quota_exhausted") and TEST_STATE.get("stub_mode"):
-        ann_text = "Трафик 100% исчерпан. Пополните баланс в Telegram-боте."
+    elif TEST_STATE.get("quota_exhausted"):
+        ann_text = "Трафик 100% исчерпан. Пополните баланс в Telegram-боте @just1kbot."
         ann_url = "https://t.me/just1kbot"
         b_text = ann_text
         b_btn_text = "Пополнить в боте"
@@ -661,58 +472,23 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         inline_meta.append(f"#support-email: {email_addr}")
     if web_url:
         inline_meta.append(f"#profile-web-page-url: {web_url}")
-    if prem_url:
-        inline_meta.append(f"#premium-url: {prem_url}")
     if TEST_STATE.get("hide_check"):
         inline_meta.append("#hide-check: 1")
 
     # Simulation: Forced Device Limit
     if TEST_STATE.get("block_403"):
-        if TEST_STATE.get("stub_mode", True):
-            logger.warning("🚫 [SMART STUB] Forced limit exceeded: delivering 200 OK notice stub for HWID %s", hwid)
-            stub_configs = [
-                AWGSubscriptionFeedService.create_stub_server(
-                    "Превышен лимит устройств — отключите в @just1kbot", "🚫"
-                )
-            ]
-            stub_body = AWGSubscriptionFeedService.build_subscription_body(stub_configs, inline_metadata=inline_meta)
-            stub_headers = AWGSubscriptionFeedService.build_subscription_headers(
-                profile_title="JUST1K [ЛИМИТ УСТРОЙСТВ]",
-                expire_ts=0,
-                upload_bytes=1048576,
-                download_bytes=1048576,
-                total_quota_bytes=1048576,
-                update_interval_hours=1,
-                support_url=tg_url,
-                support_email=email_addr,
-                web_page_url=web_url,
-                premium_url=prem_url,
-                sort_order=sort_ord,
-                announce="Превышен лимит устройств! Отключите неактивное устройство в боте.",
-                announce_url="https://t.me/just1kbot",
-                banner_text="Превышен лимит устройств! Отключите неактивное устройство в боте.",
-                banner_button_text="Управление в боте",
-                banner_button_url="https://t.me/just1kbot",
-                banner_bg_color="#450a0a",
-                banner_button_color="#ef4444",
-                hide_url=True,
-                hide_check=TEST_STATE.get("hide_check", False),
-            )
-            stub_headers["Device-Limit-Exceeded"] = "1"
-            return web.Response(status=200, text=stub_body, headers=stub_headers)
-        else:
-            logger.warning("🚫 [SIMULATION] Returning 403 Device Limit Exceeded for HWID %s", hwid)
-            return web.Response(
-                status=403,
-                text="Device limit exceeded (2/2). Remove an old device to connect.",
-                headers={
-                    "Content-Type": "text/plain; charset=utf-8",
-                    "Device-Limit-Exceeded": "1",
-                    "Device-Limit": "2",
-                    "Device-Active-Count": "2",
-                    "x-hwid-max-devices-reached": "true",
-                },
-            )
+        logger.warning("🚫 [SIMULATION] Returning 403 Device Limit Exceeded for HWID %s", hwid)
+        return web.Response(
+            status=403,
+            text="Device limit exceeded (2/2). Remove an old device to connect in @just1kbot.\n",
+            headers={
+                "Content-Type": "text/plain; charset=utf-8",
+                "Device-Limit-Exceeded": "1",
+                "Device-Limit": "2",
+                "Device-Active-Count": "2",
+                "x-hwid-max-devices-reached": "true",
+            },
+        )
 
     # HWID / Slot Assignment Logic
     assigned_slot = None
@@ -722,7 +498,6 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         logger.info("ℹ️ No HWID detected (raw client request). Delivering Slot 1.")
         assigned_slot = 1
     elif hwid in REGISTERED_DEVICES:
-        # Existing device: refresh last_seen
         device_entry = REGISTERED_DEVICES[hwid]
         device_entry["last_seen"] = now_iso
         device_entry["device_os"] = device_os
@@ -730,7 +505,6 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         assigned_slot = device_entry["slot"]
         logger.info("✅ Recognized existing device: Slot #%d (%s)", assigned_slot, hwid[:8])
     else:
-        # New device: check limit
         active_count = len(REGISTERED_DEVICES)
         if active_count >= DEVICE_LIMIT:
             logger.warning(
@@ -739,50 +513,17 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
                 DEVICE_LIMIT,
                 hwid,
             )
-            if TEST_STATE.get("stub_mode", True):
-                stub_configs = [
-                    AWGSubscriptionFeedService.create_stub_server(
-                        f"Лимит устройств ({active_count}/{DEVICE_LIMIT}) — отключите в @just1kbot", "🚫"
-                    )
-                ]
-                stub_body = AWGSubscriptionFeedService.build_subscription_body(stub_configs, inline_metadata=inline_meta)
-                stub_headers = AWGSubscriptionFeedService.build_subscription_headers(
-                    profile_title=f"JUST1K [ЛИМИТ {active_count}/{DEVICE_LIMIT}]",
-                    expire_ts=0,
-                    upload_bytes=1048576,
-                    download_bytes=1048576,
-                    total_quota_bytes=1048576,
-                    update_interval_hours=1,
-                    support_url=tg_url,
-                    support_email=email_addr,
-                    web_page_url=web_url,
-                    premium_url=prem_url,
-                    sort_order=sort_ord,
-                    announce=f"Достигнут лимит устройств ({active_count}/{DEVICE_LIMIT}). Отключите неактивное в боте.",
-                    announce_url="https://t.me/just1kbot",
-                    banner_text=f"Достигнут лимит устройств ({active_count}/{DEVICE_LIMIT}). Отключите неактивное в боте.",
-                    banner_button_text="Управление слотами",
-                    banner_button_url="https://t.me/just1kbot",
-                    banner_bg_color="#450a0a",
-                    banner_button_color="#ef4444",
-                    hide_url=True,
-                    hide_check=TEST_STATE.get("hide_check", False),
-                )
-                stub_headers["Device-Limit-Exceeded"] = "1"
-                return web.Response(status=200, text=stub_body, headers=stub_headers)
-            else:
-                response_headers = {
+            return web.Response(
+                status=403,
+                text=f"Device limit exceeded ({active_count}/{DEVICE_LIMIT}). Remove an old device to connect in @just1kbot.\n",
+                headers={
                     "Content-Type": "text/plain; charset=utf-8",
                     "Device-Limit-Exceeded": "1",
                     "Device-Limit": str(DEVICE_LIMIT),
                     "Device-Active-Count": str(active_count),
                     "x-hwid-max-devices-reached": "true",
-                }
-                return web.Response(
-                    status=403,
-                    text=f"Device limit exceeded ({active_count}/{DEVICE_LIMIT}). Remove an old device to connect.",
-                    headers=response_headers,
-                )
+                },
+            )
 
         # Allocate next available slot (1 or 2)
         used_slots = {d["slot"] for d in REGISTERED_DEVICES.values()}
@@ -803,9 +544,6 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         )
 
     # Build feed
-    configs = await get_slot_configs(assigned_slot)
-
-    # Quotas & metadata customization via TEST_STATE
     total_quota = 0
     upload = 1048576
     download = 10485760
@@ -814,35 +552,18 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
 
     if TEST_STATE.get("expired"):
         expire_ts = 1577836800  # 2020-01-01 (Expired in the past)
-        if TEST_STATE.get("stub_mode", True):
-            configs = [
-                AWGSubscriptionFeedService.create_stub_server(
-                    "Срок подписки истёк — продлите в @just1kbot", "🛑"
-                )
-            ]
-            title = "JUST1K [ПОДПИСКА ИСТЕКЛА]"
-            logger.info("🛑 [SMART STUB] Subscription expired! Replaced servers with expiration notice stub.")
-
+        configs = []
+        title = "JUST1K [ПОДПИСКА ИСТЕКЛА]"
+        logger.info("🛑 Subscription expired: delivering empty server list and expire timestamp.")
     elif TEST_STATE.get("quota_exhausted"):
         total_quota = 10 * 1024 * 1024 * 1024  # 10 GB
         upload = 2 * 1024 * 1024 * 1024       # 2 GB
         download = 8 * 1024 * 1024 * 1024     # 8 GB (100% total)
-        if TEST_STATE.get("stub_mode", True):
-            configs = [
-                AWGSubscriptionFeedService.create_stub_server(
-                    "Трафик исчерпан — пополните в @just1kbot", "⚠️"
-                )
-            ]
-            title = "JUST1K [ТРАФИК 100%]"
-            logger.info("⚠️ [SMART STUB] Quota exhausted! Replaced servers with quota notice stub.")
-
-    if not configs:
-        configs = [
-            AWGSubscriptionFeedService.create_stub_server(
-                "Нет доступных серверов — @just1kbot", "⚠️"
-            )
-        ]
-        title = "JUST1K [НЕТ СЕРВЕРОВ]"
+        configs = []
+        title = "JUST1K [ТРАФИК 100%]"
+        logger.info("⚠️ Quota exhausted: delivering empty server list and 100% quota.")
+    else:
+        configs = await get_slot_configs(assigned_slot)
 
     if TEST_STATE.get("title_suffix") and not TEST_STATE.get("expired") and not TEST_STATE.get("quota_exhausted"):
         title += f" {TEST_STATE['title_suffix']}"
@@ -858,7 +579,6 @@ async def handle_subscription_feed(request: web.Request) -> web.Response:
         support_url=tg_url,
         support_email=email_addr,
         web_page_url=web_url,
-        premium_url=prem_url,
         sort_order=sort_ord,
         announce=ann_text,
         announce_url=ann_url,
@@ -931,17 +651,12 @@ async def handle_control_action(request: web.Request) -> web.Response:
         state_text = "ВКЛЮЧЕНА" if TEST_STATE["btn_email"] else "ОТКЛЮЧЕНА"
         msg = f"Кнопка «Email поддержки»: {state_text}"
         logger.info("🎛️ [CONTROL] Btn Email: %s", TEST_STATE["btn_email"])
-    elif act == "toggle_premium":
-        TEST_STATE["btn_premium"] = not TEST_STATE.get("btn_premium", False)
-        state_text = "ВКЛЮЧЕНА" if TEST_STATE["btn_premium"] else "ОТКЛЮЧЕНА"
-        msg = f"Кнопка «Премиум (Store)»: {state_text}"
-        logger.info("🎛️ [CONTROL] Btn Premium: %s", TEST_STATE["btn_premium"])
     elif act == "set_sort":
         mode = request.query.get("mode", "ping")
         if mode in ("ping", "name", "none"):
             TEST_STATE["sort_mode"] = mode
             labels = {
-                "ping": "⚡ По пингу (DE: 51ms ➔ PL: 71ms ➔ SE: 89ms ➔ NL: 99ms)",
+                "ping": "⚡ По пингу (динамический TCP-замер RTT)",
                 "name": "🔤 По имени (А-Я)",
                 "none": "📄 По умолчанию (исходный порядок)",
             }
@@ -963,24 +678,22 @@ async def handle_control_action(request: web.Request) -> web.Response:
         msg = f"Сброшено {count} зарегистрированных устройств!"
         logger.info("🎛️ [CONTROL] Reset %d devices", count)
     elif act == "reset_all":
+        TEST_STATE["se"] = True
         TEST_STATE["nl"] = True
         TEST_STATE["pl"] = True
         TEST_STATE["de"] = True
-        TEST_STATE["se"] = True
         TEST_STATE["quota_exhausted"] = False
         TEST_STATE["expired"] = False
         TEST_STATE["block_403"] = False
-        TEST_STATE["stub_mode"] = True
         TEST_STATE["title_suffix"] = ""
         TEST_STATE["btn_web"] = True
         TEST_STATE["btn_tg"] = True
         TEST_STATE["btn_email"] = True
-        TEST_STATE["btn_premium"] = False
         TEST_STATE["sort_mode"] = "ping"
         TEST_STATE["show_banner"] = True
         TEST_STATE["hide_check"] = False
         REGISTERED_DEVICES.clear()
-        msg = "Все настройки сброшены к стандарту (Все 4 сервера, Заглушка, Кнопки TG/Сайт/Email, Сортировка по пингу, Баннер ВКЛ)!"
+        msg = "Все настройки сброшены к стандарту!"
         logger.info("🎛️ [CONTROL] Reset ALL state to defaults")
 
     raise web.HTTPFound(f"/control?msg={msg}")
@@ -1187,17 +900,6 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
           </a>
         </div>
 
-        <!-- Premium / Renew -->
-        <div class="item-card" style="opacity: 0.85;">
-          <div>
-            <div style="font-weight: 600; font-size: 14px;">⭐ Кнопка «Премиум / Продлить» (premium-url) <span class="badge badge-off">Резерв INCY</span></div>
-            <div class="hint">Заголовок <code>premium-url</code>. Внешние подписки игнорируют его (резерв Incy Store). Для продления используйте кнопку «Сайт» или баннер.</div>
-          </div>
-          <a href="/control/action?act=toggle_premium" class="btn {'btn-red' if TEST_STATE.get('btn_premium') else 'btn-green'}">
-            {'Отключить' if TEST_STATE.get('btn_premium') else 'Включить'}
-          </a>
-        </div>
-
         <!-- Hide Check Button -->
         <div class="item-card">
           <div>
@@ -1214,31 +916,15 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
     <!-- Scenarios Section -->
     <div class="section">
       <div class="section-title">
-        <span>Симуляция сценариев и обработка ограничений</span>
+        <span>Симуляция сценариев и ограничений</span>
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 10px;">
-        <!-- Smart Stub Mode vs Raw 403 -->
-        <div class="item-card" style="background: {'rgba(16,185,129,0.08)' if TEST_STATE['stub_mode'] else 'rgba(239,68,68,0.08)'}; border: 1px solid {'#10b981' if TEST_STATE['stub_mode'] else '#ef4444'};">
-          <div>
-            <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px;">
-              <span>{'💡 Режим «Умная заглушка (200 OK)»' if TEST_STATE['stub_mode'] else '⚠️ Режим «Сырая ошибка (HTTP 403)»'}</span>
-              <span class="badge {'badge-on' if TEST_STATE['stub_mode'] else 'badge-off'}">{'Рекомендуется' if TEST_STATE['stub_mode'] else 'Классический'}</span>
-            </div>
-            <div class="hint" style="color: {'#6ee7b7' if TEST_STATE['stub_mode'] else '#fca5a5'}; margin-top: 4px;">
-              {'✅ Вместо сбоев INCY получает HTTP 200 OK, заменяя серверы на понятные плашки: «🛑 Подписка истекла / ⚠️ Трафик исчерпан / 🚫 Лимит устройств — продлите в @just1kbot». Работает одинаково на телефонах и ПК!' if TEST_STATE['stub_mode'] else '❌ Выдаёт HTTP 403. Телефон показывает пугающую «ошибку 403», а ПК тихо игнорирует запрос.'}
-            </div>
-          </div>
-          <a href="/control/action?act=toggle_stub" class="btn {'btn-blue' if TEST_STATE['stub_mode'] else 'btn-green'}">
-            {'Переключить на 403' if TEST_STATE['stub_mode'] else 'Включить заглушку 200 OK'}
-          </a>
-        </div>
-
         <!-- Quota -->
         <div class="item-card">
           <div>
             <div style="font-weight: 600; font-size: 14px;">⚠️ Исчерпание квоты трафика (10 ГБ / 10 ГБ)</div>
-            <div class="hint">В режиме заглушки заменяет сервер на «⚠️ Трафик исчерпан — пополните в @just1kbot» и ставит 100% прогресс-бар</div>
+            <div class="hint">Отдаёт 100% заполненный прогресс-бар в заголовке Subscription-Userinfo и объявление о пополнении баланса</div>
           </div>
           <a href="/control/action?act=toggle_quota" class="btn {'btn-red' if TEST_STATE['quota_exhausted'] else 'btn-gray'}">
             {'🔴 Отключить' if TEST_STATE['quota_exhausted'] else 'Включить'}
@@ -1249,7 +935,7 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
         <div class="item-card">
           <div>
             <div style="font-weight: 600; font-size: 14px;">⏳ Истечение срока подписки</div>
-            <div class="hint">В режиме заглушки заменяет сервер на «🛑 Срок подписки истёк — продлите в @just1kbot» и меняет название профиля</div>
+            <div class="hint">Устанавливает дату expire в прошлом и выводит баннер продления в боте</div>
           </div>
           <a href="/control/action?act=toggle_expired" class="btn {'btn-red' if TEST_STATE['expired'] else 'btn-gray'}">
             {'🔴 Отключить' if TEST_STATE['expired'] else 'Включить'}
@@ -1259,8 +945,8 @@ async def handle_control_dashboard(request: web.Request) -> web.Response:
         <!-- 403 Forbidden / Limit -->
         <div class="item-card">
           <div>
-            <div style="font-weight: 600; font-size: 14px;">🚫 Превышение лимита устройств (2/2)</div>
-            <div class="hint">В режиме заглушки отдаёт сервер «🚫 Превышен лимит устройств». В режиме 403 отдаёт сырой HTTP 403.</div>
+            <div style="font-weight: 600; font-size: 14px;">🚫 Превышение лимита устройств (2/2) — HTTP 403</div>
+            <div class="hint">Возвращает HTTP 403 Forbidden с заголовком <code>Device-Limit-Exceeded: 1</code></div>
           </div>
           <a href="/control/action?act=toggle_block" class="btn {'btn-red' if TEST_STATE['block_403'] else 'btn-gray'}">
             {'🔴 Отключить' if TEST_STATE['block_403'] else 'Включить'}

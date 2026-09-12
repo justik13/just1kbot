@@ -140,26 +140,11 @@ class AWGSubscriptionFeedServiceTests(unittest.TestCase):
         body = AWGSubscriptionFeedService.build_subscription_body([])
         self.assertEqual(body, "")
 
-    def test_create_stub_server(self):
-        conf, name, flag = AWGSubscriptionFeedService.create_stub_server(
-            "Подписка истекла (Продлите: @just1kbot)",
-            "🛑",
-        )
-        self.assertIn("127.0.0.1:1", conf)
-        self.assertEqual(name, "Подписка истекла (Продлите: @just1kbot)")
-        self.assertEqual(flag, "🛑")
-
-        body = AWGSubscriptionFeedService.build_subscription_body([(conf, name, flag)])
-        decoded = base64.b64decode(body).decode("utf-8")
-        self.assertTrue(decoded.startswith("awg://"))
-        self.assertIn("#🛑 Подписка истекла (Продлите: @just1kbot)", decoded)
-
     def test_rich_button_and_banner_headers(self):
         headers = AWGSubscriptionFeedService.build_subscription_headers(
             profile_title="JUST1K VPN",
             support_url="https://t.me/just1k_support",
             web_page_url="https://t.me/just1kbot",
-            premium_url="https://t.me/just1kbot?start=renew",
             support_email="support@just1k.best",
             sort_order="ping",
             announce="Техработы завершены",
@@ -174,7 +159,6 @@ class AWGSubscriptionFeedServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(headers["profile-web-page-url"], "https://t.me/just1kbot")
-        self.assertEqual(headers["premium-url"], "https://t.me/just1kbot?start=renew")
         self.assertEqual(headers["support-email"], "support@just1k.best")
         self.assertEqual(headers["sort-order"], "ping")
         self.assertEqual(headers["announce-url"], "https://t.me/just1kbot?start=news")
