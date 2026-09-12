@@ -258,6 +258,16 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
         awg_sub_web._token_rate_limiter.buckets.clear()
         super().tearDown()
 
+    def _make_mock_session(self):
+        @asynccontextmanager
+        async def fake_nested():
+            yield
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.begin_nested = MagicMock(side_effect=fake_nested)
+        return mock_session
+
     async def get_application(self) -> web.Application:
         app = web.Application()
         setup_awg_subscription_web_routes(app)
@@ -434,7 +444,7 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[],
         )
 
-        mock_session = AsyncMock()
+        mock_session = self._make_mock_session()
 
         @asynccontextmanager
         async def fake_session_scope():
@@ -498,7 +508,7 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             provisioning_status="pending_create", raw_config=None,
         )
 
-        mock_session = AsyncMock()
+        mock_session = self._make_mock_session()
 
         @asynccontextmanager
         async def fake_session_scope():
@@ -557,7 +567,7 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             provisioning_status="create_cleanup_pending", raw_config=None,
         )
 
-        mock_session = AsyncMock()
+        mock_session = self._make_mock_session()
 
         @asynccontextmanager
         async def fake_session_scope():
@@ -611,7 +621,7 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             provisioning_status="create_failed", raw_config=None,
         )
 
-        mock_session = AsyncMock()
+        mock_session = self._make_mock_session()
 
         @asynccontextmanager
         async def fake_session_scope():
@@ -667,7 +677,7 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             provisioning_status="pending_create", raw_config=None,
         )
 
-        mock_session = AsyncMock()
+        mock_session = self._make_mock_session()
 
         @asynccontextmanager
         async def fake_session_scope():
@@ -701,6 +711,138 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             # Assert registered device got index 1 (not 2 or 3)
             self.assertIn(hwid_hash, user.active_sub_devices)
             self.assertEqual(user.active_sub_devices[hwid_hash]["device_index"], 1)
+
+    async def test_provisioning_savepoint_rollback_on_partial_failure(self):
+        """Verify that failure creating profile on server 1 triggers begin_nested savepoint rollback."""
+        valid_token = "f" * 32
+        headers = {"X-HWID": "savepoint-phone"}
+        active_time = datetime.now(timezone.utc) + timedelta(days=30)
+        hwid_hash = hashlib.sha256(b"savepoint-phone").hexdigest()
+        user = User(
+            id=1,
+            telegram_id=111,
+            subscription_end=active_time,
+            device_limit=2,
+            active_sub_devices={},
+        )
+        s1 = Server(id=1, name="S1", country_flag="🇵🇱", protocol=AMNEZIA_PROTOCOL, is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[])
+        s2 = Server(id=2, name="S2", country_flag="🇩🇪", protocol=AMNEZIA_PROTOCOL, is_active=True, health_state=ServerHealthState.ONLINE, capabilities=[])
+
+        p2 = VPNProfile(
+            id=202, user_id=1, server_id=2, device_type="sub", sub_device_hash=hwid_hash,
+            provisioning_status="pending_create", raw_config=None,
+        )
+
+        mock_session = self._make_mock_session()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope), \
+             patch("database.repositories.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user, \
+             patch("bot.handlers.awg_sub_web.capture_server_peer_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("bot.handlers.awg_sub_web.DeviceService.create_device", new_callable=AsyncMock) as mock_create_device:
+            mock_get_user.return_value = user
+            mock_snap.return_value = ServerPeerSnapshot(server_id=1, peer_ids=frozenset(), captured_at=active_time)
+
+            mock_count_exec = MagicMock()
+            mock_count_exec.scalar_one.return_value = 0
+
+            mock_servers_exec = MagicMock()
+            mock_servers_exec.scalars.return_value.all.return_value = [s1, s2]
+            mock_profiles_exec = MagicMock()
+            mock_profiles_exec.scalars.return_value.all.return_value = []
+
+            mock_session.execute.side_effect = [
+                mock_count_exec,
+                mock_servers_exec,
+                mock_profiles_exec,
+            ]
+
+            # Server 1 fails with RuntimeError during create_device, Server 2 succeeds
+            mock_create_device.side_effect = [
+                RuntimeError("Enqueue API operation failed"),
+                p2,
+            ]
+
+            resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers)
+            self.assertEqual(resp.status, 503)
+
+            # begin_nested must be called for each server iteration
+            self.assertEqual(mock_session.begin_nested.call_count, 2)
+            # user must still be registered because Server 2 succeeded
+            self.assertIn(hwid_hash, user.active_sub_devices)
+
+    async def test_create_device_atomicity_rolls_back_on_enqueue_failure(self):
+        """DeviceService.create_device rolls back savepoint if enqueue_api_operation raises."""
+        now = datetime.now(timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=123,
+            subscription_end=now + timedelta(days=30),
+            device_limit=5,
+            active_sub_devices={},
+            is_banned=False,
+            is_bot_blocked=False,
+        )
+        server = Server(
+            id=1,
+            name="S1",
+            max_clients=10,
+            is_active=True,
+            protocol=AMNEZIA_PROTOCOL,
+            api_url="http://node",
+            api_key="k",
+        )
+        snapshot = ServerPeerSnapshot(server_id=1, peer_ids=frozenset(), captured_at=now)
+
+        mock_session = self._make_mock_session()
+
+        mock_user_exec = MagicMock()
+        mock_user_exec.scalar_one.return_value = user
+        mock_user_exec.scalar_one_or_none.return_value = user
+
+        mock_server_exec = MagicMock()
+        mock_server_exec.scalar_one.return_value = server
+        mock_server_exec.scalar_one_or_none.return_value = server
+
+        mock_dupe_exec = MagicMock()
+        mock_dupe_exec.scalar_one_or_none.return_value = None
+
+        mock_manual_count_exec = MagicMock()
+        mock_manual_count_exec.scalar_one.return_value = 0
+
+        mock_server_count_exec = MagicMock()
+        mock_server_count_exec.scalar_one.return_value = 0
+
+        mock_peers_exec = MagicMock()
+        mock_peers_exec.scalars.return_value.all.return_value = []
+
+        mock_session.execute.side_effect = [
+            mock_user_exec,
+            mock_server_exec,
+            mock_dupe_exec,
+            mock_manual_count_exec,
+            mock_server_count_exec,
+            mock_peers_exec,
+        ]
+
+        with patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock), \
+             patch("services.device_service.enqueue_api_operation", new_callable=AsyncMock) as mock_enqueue:
+            mock_enqueue.side_effect = RuntimeError("Enqueue operation database error")
+
+            with self.assertRaises(RuntimeError):
+                await DeviceService.create_device(
+                    mock_session,
+                    user_id=1,
+                    server_id=1,
+                    device_name="Test Dev #1",
+                    snapshot=snapshot,
+                )
+
+            # Verify begin_nested was used
+            mock_session.begin_nested.assert_called_once()
 
 
 class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):

@@ -162,7 +162,8 @@ class DeviceService:
             manual_count = (await session.execute(manual_query)).scalar_one()
 
             sub_count = len(user.active_sub_devices or {})
-            if manual_count + sub_count >= user.device_limit:
+            effective_device_limit = user.device_limit or 5
+            if manual_count + sub_count >= effective_device_limit:
                 raise DeviceLimitExceeded("Device limit reached")
         server_count = (
             await session.execute(
@@ -220,6 +221,37 @@ class DeviceService:
             async with session.begin_nested():
                 session.add(profile)
                 await session.flush()
+
+                m = re.search(r'#(\d+)$', profile.device_name)
+                slot_suffix = f"_n{m.group(1)}" if m else ""
+                profile.client_name = f"tg_{user.telegram_id}_p{profile.id}{slot_suffix}"
+                await enqueue_api_operation(
+                    session,
+                    operation_type="create_peer",
+                    idempotency_key=f"create-peer:{profile.id}:v1",
+                    server_id=server.id,
+                    profile_id=profile.id,
+                    client_name=profile.client_name,
+                    server_name_snapshot=server.name,
+                    api_url_snapshot=server.api_url,
+                    api_key_snapshot=server.api_key,
+                    payload={"desired_version": 1},
+                )
+                if device_type != "sub" and not is_admin(user.telegram_id):
+                    user.device_creations_today += 1
+
+                await AuditService.log_action(
+                    session,
+                    admin_id=0,
+                    action=AdminAuditAction.DEVICE_CREATE,
+                    target_type="user",
+                    target_id=user.id,
+                    details={
+                        "device_name": profile.device_name,
+                        "server_name": server.name,
+                        "profile_id": profile.id,
+                    },
+                )
         except IntegrityError as e:
             error_str = str(e.orig).lower() if e.orig else ""
             if (
@@ -232,36 +264,6 @@ class DeviceService:
                 ) from e
             raise DeviceCreationError("Database integrity error") from e
 
-        m = re.search(r'#(\d+)$', profile.device_name)
-        slot_suffix = f"_n{m.group(1)}" if m else ""
-        profile.client_name = f"tg_{user.telegram_id}_p{profile.id}{slot_suffix}"
-        await enqueue_api_operation(
-            session,
-            operation_type="create_peer",
-            idempotency_key=f"create-peer:{profile.id}:v1",
-            server_id=server.id,
-            profile_id=profile.id,
-            client_name=profile.client_name,
-            server_name_snapshot=server.name,
-            api_url_snapshot=server.api_url,
-            api_key_snapshot=server.api_key,
-            payload={"desired_version": 1},
-        )
-        if device_type != "sub" and not is_admin(user.telegram_id):
-            user.device_creations_today += 1
-
-        await AuditService.log_action(
-            session,
-            admin_id=0,
-            action=AdminAuditAction.DEVICE_CREATE,
-            target_type="user",
-            target_id=user.id,
-            details={
-                "device_name": profile.device_name,
-                "server_name": server.name,
-                "profile_id": profile.id,
-            },
-        )
         return profile
 
     @staticmethod

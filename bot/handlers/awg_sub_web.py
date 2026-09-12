@@ -198,20 +198,21 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                         continue
 
                 try:
-                    snapshot = await capture_server_peer_snapshot(srv.id)
-                    dev_name = texts.AWG_SUB_PROFILE_NAME_TEMPLATE.format(server_name=srv.name or "AWG")
-                    profile = await DeviceService.create_device(
-                        session,
-                        user_id=user.id,
-                        server_id=srv.id,
-                        device_name=dev_name,
-                        snapshot=snapshot,
-                        device_type="sub",
-                        sub_device_hash=hwid_hash,
-                        replaces_profile_id=replaces_id,
-                    )
-                    profiles_by_server[srv.id] = profile
-                    newly_created = True
+                    async with session.begin_nested():
+                        snapshot = await capture_server_peer_snapshot(srv.id)
+                        dev_name = texts.AWG_SUB_PROFILE_NAME_TEMPLATE.format(server_name=srv.name or "AWG")
+                        profile = await DeviceService.create_device(
+                            session,
+                            user_id=user.id,
+                            server_id=srv.id,
+                            device_name=dev_name,
+                            snapshot=snapshot,
+                            device_type="sub",
+                            sub_device_hash=hwid_hash,
+                            replaces_profile_id=replaces_id,
+                        )
+                        profiles_by_server[srv.id] = profile
+                        newly_created = True
                 except Exception as exc:
                     logger.warning("Failed to create sub profile for server %s: %s", srv.id, exc)
 

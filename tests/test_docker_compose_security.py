@@ -78,3 +78,11 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("vm.overcommit_memory=1", setup_sh)
         self.assertIn("vm.overcommit_memory", cli_sh)
 
+    def test_caddy_environment_contains_subscription_prefixes(self):
+        """Verify Caddy service environment in compose files passes both subscription path prefixes."""
+        root = Path(__file__).parents[1]
+        for compose_name in ("docker-compose.yml", "docker-compose.ci.yml"):
+            compose = (root / compose_name).read_text(encoding="utf-8")
+            self.assertIn("AWG_SUB_PATH_PREFIX:", compose)
+            self.assertIn("WHITE_INTERNET_SUB_PATH_PREFIX:", compose)
+
