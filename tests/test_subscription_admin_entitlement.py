@@ -10,7 +10,7 @@ import os
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from database.models import EntitlementEntry, Payment, Tariff, User
+from database.models import EntitlementEntry, Tariff, User
 from services.subscription import SubscriptionService
 from services.subscription_balance_service import get_subscription_balance_snapshot
 from services.tariff_change_quote import create_tariff_change_quote
