@@ -332,10 +332,22 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
 
     async def test_ck_entitlement_entries_shape_strict_validation(self) -> None:
         from sqlalchemy.exc import IntegrityError
+        now = now_utc()
+        async with self.sessions.begin() as session:
+            test_user = User(
+                telegram_id=999888777,
+                username="constraint_test_user",
+                device_limit=1,
+                subscription_end=now + timedelta(days=10),
+            )
+            session.add(test_user)
+            await session.flush()
+            user_id = test_user.id
+
         # 1. Invalid combination: days_delta = 30 and hours_delta = 5 must be rejected
         async with self.sessions.begin() as session:
             bad_entry = EntitlementEntry(
-                beneficiary_user_id=1,
+                beneficiary_user_id=user_id,
                 source_type="admin",
                 source_id="test_invalid_shape_1",
                 entry_type="manual_grant",
@@ -351,7 +363,7 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
         # 2. Valid combination: sub-day grant with days_delta = 0 and hours_delta = 5 must succeed
         async with self.sessions.begin() as session:
             valid_subday = EntitlementEntry(
-                beneficiary_user_id=1,
+                beneficiary_user_id=user_id,
                 source_type="admin",
                 source_id="test_valid_subday_2",
                 entry_type="manual_grant",
@@ -366,7 +378,7 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
         # 3. Valid combination: exact days grant with days_delta = 2 and hours_delta = 48 must succeed
         async with self.sessions.begin() as session:
             valid_days = EntitlementEntry(
-                beneficiary_user_id=1,
+                beneficiary_user_id=user_id,
                 source_type="admin",
                 source_id="test_valid_days_3",
                 entry_type="manual_grant",
