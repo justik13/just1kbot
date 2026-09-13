@@ -92,6 +92,42 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(updated_user, user)
         self.assertFalse(session.add.called)
 
+    async def test_extend_subscription_permanent_matches_effective_days(self) -> None:
+        from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
+        session = AsyncMock()
+        session.add = unittest.mock.MagicMock()
+        now = now_utc()
+        user = User(
+            id=42,
+            telegram_id=123456,
+            device_limit=2,
+            current_tariff_id=10,
+            subscription_end=now,
+        )
+        session.scalar.return_value = user
+
+        with (
+            patch("services.subscription.get_user_profiles_count", new_callable=AsyncMock) as mock_profiles,
+            patch.object(SubscriptionService, "_sync_access_state", new_callable=AsyncMock),
+            patch("services.subscription.invalidate_user_cache"),
+            patch("services.subscription.now_utc", return_value=now),
+        ):
+            mock_profiles.return_value = 1
+            updated_user = await SubscriptionService.extend_subscription(
+                session=session,
+                telegram_id=123456,
+                days=PERMANENT_SUBSCRIPTION_DAYS,
+                create_entitlement=True,
+                admin_id=999,
+                reason="permanent_grant",
+            )
+
+        self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
+        added_obj = session.add.call_args[0][0]
+        expected_days = max(1, (PERMANENT_END_DATE - now).days)
+        self.assertEqual(added_obj.days_delta, expected_days)
+        self.assertEqual(added_obj.hours_delta, expected_days * 24)
+
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -160,45 +196,28 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
             self.assertEqual(quote_res.quote.status, "active")
             self.assertGreater(quote_res.quote.amount_due_rub, Decimal("0.00"))
 
-    async def test_exact_hours_and_payment_linking_backfill_logic(self) -> None:
+    async def test_exact_hours_and_honest_legacy_backfill_logic(self) -> None:
         now = now_utc().replace(microsecond=0)
         async with self.sessions.begin() as session:
             # User 1: Has active sub with 5 hours remaining (less than 24h, would fail if CEIL to 24h)
-            # and has a succeeded payment.
             user1 = User(
                 telegram_id=111222333,
-                username="paid_user_5h",
+                username="legacy_user_5h",
                 device_limit=2,
                 subscription_end=now + timedelta(hours=5),
             )
-            # User 2: Has active sub with 50 hours remaining and NO payment.
+            # User 2: Has active sub with 48 hours remaining (2 days)
             user2 = User(
                 telegram_id=444555666,
-                username="admin_user_50h",
+                username="legacy_user_48h",
                 device_limit=3,
-                subscription_end=now + timedelta(hours=50),
+                subscription_end=now + timedelta(hours=48),
             )
             session.add_all([user1, user2])
             await session.flush()
 
-            # Payment for User 1
-            payment1 = Payment(
-                user_id=user1.id,
-                amount=Decimal("300.00"),
-                currency="RUB",
-                public_order_id="ord_test_123",
-                provider_idempotency_key="idemp_test_123",
-                provider_status="succeeded",
-                fulfillment_status="succeeded",
-                paid_at=now - timedelta(days=25),
-                credited_at=now - timedelta(days=25),
-            )
-            session.add(payment1)
-            await session.flush()
-
             user1_id = user1.id
             user2_id = user2.id
-            payment1_id = payment1.id
 
         # Run migration 0027 backfill SQL directly
         async with self.sessions.begin() as session:
@@ -211,8 +230,12 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
                     """
                     ALTER TABLE entitlement_entries ADD CONSTRAINT ck_entitlement_entries_shape CHECK (
                       (entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
-                       AND days_delta >= 0 AND reversed_entry_id IS NULL
-                       AND ((hours_delta IS NULL AND days_delta > 0) OR hours_delta > 0))
+                       AND reversed_entry_id IS NULL
+                       AND (
+                         (days_delta = 0 AND hours_delta > 0)
+                         OR
+                         (days_delta > 0 AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
+                       ))
                       OR 
                       (entry_type = 'tariff_change' AND source_type = 'quote'
                        AND days_delta = 0 AND hours_delta > 0 AND reversed_entry_id IS NULL)
@@ -225,7 +248,7 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
                 )
             )
 
-            # Backfill active users without entitlements
+            # Backfill active users without entitlements honestly
             await session.execute(
                 text(
                     """
@@ -235,18 +258,8 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
                             u.device_limit,
                             u.current_tariff_id,
                             u.subscription_end,
-                            GREATEST(1, FLOOR(EXTRACT(EPOCH FROM (u.subscription_end - NOW())) / 3600)::int) AS exact_hours,
-                            p.id AS payment_id,
-                            p.amount AS payment_amount,
-                            COALESCE(p.paid_at, p.credited_at, p.created_at) AS payment_time
+                            GREATEST(1, CEIL(EXTRACT(EPOCH FROM (u.subscription_end - NOW())) / 3600)::int) AS exact_hours
                         FROM users u
-                        LEFT JOIN LATERAL (
-                            SELECT p.id, p.amount, p.paid_at, p.credited_at, p.created_at
-                            FROM payments p
-                            WHERE p.user_id = u.id AND p.provider_status = 'succeeded'
-                            ORDER BY COALESCE(p.paid_at, p.credited_at, p.created_at) DESC
-                            LIMIT 1
-                        ) p ON true
                         WHERE u.subscription_end > NOW()
                           AND u.is_deleted = false
                           AND NOT EXISTS (
@@ -268,27 +281,14 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
                     )
                     SELECT 
                         mu.user_id,
-                        CASE WHEN mu.payment_id IS NOT NULL THEN 'payment' ELSE 'admin' END,
-                        CASE 
-                            WHEN mu.payment_id IS NOT NULL THEN 'legacy_payment_' || mu.payment_id
-                            ELSE 'legacy_admin_grant_' || mu.user_id
-                        END,
+                        'admin',
+                        'legacy_0027_grant_' || mu.user_id,
                         'manual_grant',
-                        mu.exact_hours / 24,
+                        CASE WHEN mu.exact_hours % 24 = 0 THEN mu.exact_hours / 24 ELSE 0 END,
                         mu.exact_hours,
                         COALESCE(mu.device_limit, 1),
                         mu.current_tariff_id,
-                        CASE 
-                            WHEN mu.payment_id IS NOT NULL THEN 
-                                jsonb_build_object(
-                                    'reason', 'legacy_payment_backfill',
-                                    'payment_id', mu.payment_id,
-                                    'payment_amount', mu.payment_amount,
-                                    'payment_time', mu.payment_time
-                                )
-                            ELSE 
-                                jsonb_build_object('reason', 'legacy_admin_grant_backfill')
-                        END,
+                        jsonb_build_object('reason', 'legacy_active_subscription_backfill'),
                         mu.subscription_end - (mu.exact_hours * INTERVAL '1 hour')
                     FROM missing_users mu
                     ON CONFLICT (beneficiary_user_id, source_type, source_id, entry_type) DO NOTHING
@@ -302,24 +302,22 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
                 select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id == user1_id)
             )
             self.assertIsNotNone(e1)
-            self.assertEqual(e1.source_type, "payment")
-            self.assertEqual(e1.source_id, f"legacy_payment_{payment1_id}")
+            self.assertEqual(e1.source_type, "admin")
+            self.assertEqual(e1.source_id, f"legacy_0027_grant_{user1_id}")
             self.assertEqual(e1.entry_type, "manual_grant")
-            self.assertIn(e1.hours_delta, (4, 5))
+            self.assertIn(e1.hours_delta, (5, 6))
             self.assertEqual(e1.days_delta, 0)
-            self.assertEqual(e1.metadata_["reason"], "legacy_payment_backfill")
-            self.assertEqual(e1.metadata_["payment_id"], payment1_id)
+            self.assertEqual(e1.metadata_["reason"], "legacy_active_subscription_backfill")
 
             e2 = await session.scalar(
                 select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id == user2_id)
             )
             self.assertIsNotNone(e2)
             self.assertEqual(e2.source_type, "admin")
-            self.assertEqual(e2.source_id, f"legacy_admin_grant_{user2_id}")
+            self.assertEqual(e2.source_id, f"legacy_0027_grant_{user2_id}")
             self.assertEqual(e2.entry_type, "manual_grant")
-            self.assertIn(e2.hours_delta, (49, 50))
-            self.assertEqual(e2.days_delta, 2)
-            self.assertEqual(e2.metadata_["reason"], "legacy_admin_grant_backfill")
+            self.assertIn(e2.hours_delta, (48, 49))
+            self.assertEqual(e2.metadata_["reason"], "legacy_active_subscription_backfill")
 
             # Balance projection verification: both must be tracked, no mismatch!
             snap1 = await get_subscription_balance_snapshot(session, user_id=user1_id, as_of=now)
@@ -330,4 +328,52 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
             snap2 = await get_subscription_balance_snapshot(session, user_id=user2_id, as_of=now)
             self.assertTrue(snap2.tracked)
             self.assertIsNone(snap2.failure_code)
-            self.assertIn(snap2.remaining_bonus_hours, (49, 50))
+            self.assertIn(snap2.remaining_bonus_hours, (47, 48))
+
+    async def test_ck_entitlement_entries_shape_strict_validation(self) -> None:
+        from sqlalchemy.exc import IntegrityError
+        # 1. Invalid combination: days_delta = 30 and hours_delta = 5 must be rejected
+        async with self.sessions.begin() as session:
+            bad_entry = EntitlementEntry(
+                beneficiary_user_id=1,
+                source_type="admin",
+                source_id="test_invalid_shape_1",
+                entry_type="manual_grant",
+                days_delta=30,
+                hours_delta=5,
+                device_limit_snapshot=1,
+                tariff_id_snapshot=1,
+            )
+            session.add(bad_entry)
+            with self.assertRaises(IntegrityError):
+                await session.flush()
+
+        # 2. Valid combination: sub-day grant with days_delta = 0 and hours_delta = 5 must succeed
+        async with self.sessions.begin() as session:
+            valid_subday = EntitlementEntry(
+                beneficiary_user_id=1,
+                source_type="admin",
+                source_id="test_valid_subday_2",
+                entry_type="manual_grant",
+                days_delta=0,
+                hours_delta=5,
+                device_limit_snapshot=1,
+                tariff_id_snapshot=1,
+            )
+            session.add(valid_subday)
+            await session.flush()
+
+        # 3. Valid combination: exact days grant with days_delta = 2 and hours_delta = 48 must succeed
+        async with self.sessions.begin() as session:
+            valid_days = EntitlementEntry(
+                beneficiary_user_id=1,
+                source_type="admin",
+                source_id="test_valid_days_3",
+                entry_type="manual_grant",
+                days_delta=2,
+                hours_delta=48,
+                device_limit_snapshot=1,
+                tariff_id_snapshot=1,
+            )
+            session.add(valid_days)
+            await session.flush()

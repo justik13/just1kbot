@@ -341,27 +341,39 @@ class SubscriptionService:
         # - даунгрейд запрещён выше по коду.
         if days == 0:
             new_end = user.subscription_end
+            effective_days = 0
         else:
             base_end = user.subscription_end if had_active_subscription else now
 
-            new_end = (
-                PERMANENT_END_DATE
-                if days >= PERMANENT_SUBSCRIPTION_DAYS
-                else base_end + timedelta(days=days)
-            )
+            if days >= PERMANENT_SUBSCRIPTION_DAYS:
+                new_end = PERMANENT_END_DATE
+                effective_days = max(1, (PERMANENT_END_DATE - base_end).days)
+            else:
+                new_end = base_end + timedelta(days=days)
+                effective_days = days
 
         user.subscription_end = new_end
 
         if days > 0 and create_entitlement:
+            device_limit_val = (
+                new_device_limit
+                if new_device_limit is not None
+                else (user.device_limit if user.device_limit is not None else 1)
+            )
+            tariff_id_val = (
+                new_tariff_id
+                if new_tariff_id is not None
+                else user.current_tariff_id
+            )
             entitlement = EntitlementEntry(
                 beneficiary_user_id=user.id,
                 source_type="admin",
                 source_id=f"admin_{admin_id or 'system'}_{uuid.uuid4().hex[:12]}",
                 entry_type="manual_grant",
-                days_delta=days,
-                hours_delta=days * 24,
-                device_limit_snapshot=new_device_limit or user.device_limit or 1,
-                tariff_id_snapshot=new_tariff_id or user.current_tariff_id,
+                days_delta=effective_days,
+                hours_delta=effective_days * 24,
+                device_limit_snapshot=device_limit_val,
+                tariff_id_snapshot=tariff_id_val,
                 metadata_={"admin_id": admin_id, "reason": reason} if (admin_id or reason) else None,
             )
             session.add(entitlement)

@@ -1,4 +1,4 @@
-"""Backfill active subscriptions into entitlement entries with exact hours and payment linking.
+"""Backfill active subscriptions into entitlement entries with exact hours and honest legacy provenance.
 
 Revision ID: 0027_backfill_entitlements
 Revises: 0026_wi_trial_semantics
@@ -17,14 +17,18 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # 1. Update check constraint to allow exact hours_delta without strict days_delta * 24
+    # 1. Update check constraint to strictly preserve days_delta * 24 invariant while permitting sub-day (days_delta = 0, hours_delta > 0)
     op.execute("ALTER TABLE entitlement_entries DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape")
     op.execute(
         """
         ALTER TABLE entitlement_entries ADD CONSTRAINT ck_entitlement_entries_shape CHECK (
           (entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
-           AND days_delta >= 0 AND reversed_entry_id IS NULL
-           AND ((hours_delta IS NULL AND days_delta > 0) OR hours_delta > 0))
+           AND reversed_entry_id IS NULL
+           AND (
+             (days_delta = 0 AND hours_delta > 0)
+             OR
+             (days_delta > 0 AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
+           ))
           OR 
           (entry_type = 'tariff_change' AND source_type = 'quote'
            AND days_delta = 0 AND hours_delta > 0 AND reversed_entry_id IS NULL)
@@ -36,53 +40,9 @@ def upgrade() -> None:
         """
     )
 
-    # 2. Fix existing rows created via previous manual backfill queries (source_id LIKE 'legacy_backfill%')
-    op.execute(
-        """
-        WITH user_target AS (
-            SELECT 
-                e.id AS entry_id,
-                u.id AS user_id,
-                u.subscription_end,
-                GREATEST(1, FLOOR(EXTRACT(EPOCH FROM (u.subscription_end - NOW())) / 3600)::int) AS exact_hours,
-                p.id AS payment_id,
-                p.amount AS payment_amount,
-                COALESCE(p.paid_at, p.credited_at, p.created_at) AS payment_time
-            FROM entitlement_entries e
-            JOIN users u ON u.id = e.beneficiary_user_id
-            LEFT JOIN LATERAL (
-                SELECT p.id, p.amount, p.paid_at, p.credited_at, p.created_at
-                FROM payments p
-                WHERE p.user_id = u.id AND p.provider_status = 'succeeded'
-                ORDER BY COALESCE(p.paid_at, p.credited_at, p.created_at) DESC
-                LIMIT 1
-            ) p ON true
-            WHERE e.source_type = 'admin'
-              AND (e.source_id LIKE 'legacy_backfill%' OR e.source_id = 'legacy_backfill')
-              AND u.subscription_end > NOW()
-        )
-        UPDATE entitlement_entries e
-        SET 
-            hours_delta = ut.exact_hours,
-            days_delta = ut.exact_hours / 24,
-            created_at = ut.subscription_end - (ut.exact_hours * INTERVAL '1 hour'),
-            metadata = CASE 
-                WHEN ut.payment_id IS NOT NULL THEN 
-                    jsonb_build_object(
-                        'reason', 'legacy_payment_backfill',
-                        'payment_id', ut.payment_id,
-                        'payment_amount', ut.payment_amount,
-                        'payment_time', ut.payment_time
-                    )
-                ELSE 
-                    jsonb_build_object('reason', 'legacy_admin_grant_backfill')
-            END
-        FROM user_target ut
-        WHERE e.id = ut.entry_id
-        """
-    )
-
-    # 3. Backfill active users who have NO existing entitlement entries
+    # 2. Backfill active users who have NO existing entitlement entries.
+    # We do NOT invent false payment links from wallet top-ups; legacy active subscriptions
+    # are recorded honestly as admin/legacy manual grants so balance projection is tracked and non-destructive.
     op.execute(
         """
         WITH missing_users AS (
@@ -91,18 +51,8 @@ def upgrade() -> None:
                 u.device_limit,
                 u.current_tariff_id,
                 u.subscription_end,
-                GREATEST(1, FLOOR(EXTRACT(EPOCH FROM (u.subscription_end - NOW())) / 3600)::int) AS exact_hours,
-                p.id AS payment_id,
-                p.amount AS payment_amount,
-                COALESCE(p.paid_at, p.credited_at, p.created_at) AS payment_time
+                GREATEST(1, CEIL(EXTRACT(EPOCH FROM (u.subscription_end - NOW())) / 3600)::int) AS exact_hours
             FROM users u
-            LEFT JOIN LATERAL (
-                SELECT p.id, p.amount, p.paid_at, p.credited_at, p.created_at
-                FROM payments p
-                WHERE p.user_id = u.id AND p.provider_status = 'succeeded'
-                ORDER BY COALESCE(p.paid_at, p.credited_at, p.created_at) DESC
-                LIMIT 1
-            ) p ON true
             WHERE u.subscription_end > NOW()
               AND u.is_deleted = false
               AND NOT EXISTS (
@@ -124,27 +74,14 @@ def upgrade() -> None:
         )
         SELECT 
             mu.user_id,
-            CASE WHEN mu.payment_id IS NOT NULL THEN 'payment' ELSE 'admin' END,
-            CASE 
-                WHEN mu.payment_id IS NOT NULL THEN 'legacy_payment_' || mu.payment_id
-                ELSE 'legacy_admin_grant_' || mu.user_id
-            END,
+            'admin',
+            'legacy_0027_grant_' || mu.user_id,
             'manual_grant',
-            mu.exact_hours / 24,
+            CASE WHEN mu.exact_hours % 24 = 0 THEN mu.exact_hours / 24 ELSE 0 END,
             mu.exact_hours,
             COALESCE(mu.device_limit, 1),
             mu.current_tariff_id,
-            CASE 
-                WHEN mu.payment_id IS NOT NULL THEN 
-                    jsonb_build_object(
-                        'reason', 'legacy_payment_backfill',
-                        'payment_id', mu.payment_id,
-                        'payment_amount', mu.payment_amount,
-                        'payment_time', mu.payment_time
-                    )
-                ELSE 
-                    jsonb_build_object('reason', 'legacy_admin_grant_backfill')
-            END,
+            jsonb_build_object('reason', 'legacy_active_subscription_backfill'),
             mu.subscription_end - (mu.exact_hours * INTERVAL '1 hour')
         FROM missing_users mu
         ON CONFLICT (beneficiary_user_id, source_type, source_id, entry_type) DO NOTHING
@@ -153,13 +90,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # 1. Clean up only the records created by this migration
     op.execute(
         """
         DELETE FROM entitlement_entries
-        WHERE (source_type = 'admin' AND (source_id LIKE 'legacy_admin_grant_%' OR source_id LIKE 'legacy_backfill%' OR source_id = 'legacy_backfill'))
-           OR (source_type = 'payment' AND source_id LIKE 'legacy_payment_%')
+        WHERE source_type = 'admin' AND source_id LIKE 'legacy_0027_grant_%'
         """
     )
+    # 2. Restore strict pre-0027 constraint
     op.execute("ALTER TABLE entitlement_entries DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape")
     op.execute(
         """

@@ -43,9 +43,8 @@ class Migration0027Tests(unittest.TestCase):
         self.assertIn("def downgrade()", content)
         self.assertIn("ck_entitlement_entries_shape", content)
         self.assertIn("exact_hours", content)
-        self.assertIn("legacy_backfill", content)
-        self.assertIn("legacy_payment_", content)
-        self.assertIn("payments", content)
+        self.assertIn("legacy_0027_grant_", content)
+        self.assertIn("legacy_active_subscription_backfill", content)
 
     def test_entitlement_entry_model_shape_constraint(self):
         constraint = next(
@@ -53,5 +52,6 @@ class Migration0027Tests(unittest.TestCase):
             if c.name == "ck_entitlement_entries_shape"
         )
         sqltext = str(constraint.sqltext)
-        self.assertIn("hours_delta > 0", sqltext)
+        self.assertIn("days_delta = 0 AND hours_delta > 0", sqltext)
+        self.assertIn("hours_delta = days_delta * 24", sqltext)
         self.assertIn("manual_grant", sqltext)

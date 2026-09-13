@@ -1042,9 +1042,9 @@ class EntitlementEntry(Base):
         ),
         CheckConstraint(
             "(entry_type IN ('account_purchase_grant','referral_user_bonus',"
-            "'referral_referrer_bonus','manual_grant') AND days_delta >= 0 "
+            "'referral_referrer_bonus','manual_grant') "
             "AND reversed_entry_id IS NULL "
-            "AND ((hours_delta IS NULL AND days_delta > 0) OR hours_delta > 0)) OR "
+            "AND ((days_delta = 0 AND hours_delta > 0) OR (days_delta > 0 AND (hours_delta IS NULL OR hours_delta = days_delta * 24)))) OR "
             "(entry_type = 'tariff_change' AND source_type = 'quote' "
             "AND days_delta = 0 AND hours_delta > 0 "
             "AND reversed_entry_id IS NULL) OR "
