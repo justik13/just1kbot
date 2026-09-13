@@ -1,5 +1,6 @@
 from datetime import timedelta
 import inspect
+import uuid
 
 from sqlalchemy import and_, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +13,15 @@ from config.constants import (
     XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Payment, Server, Tariff, User, VPNProfile, WhiteInternetSubscription
+from database.models import (
+    EntitlementEntry,
+    Payment,
+    Server,
+    Tariff,
+    User,
+    VPNProfile,
+    WhiteInternetSubscription,
+)
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from utils.datetime_helpers import now_utc
 
@@ -128,8 +137,28 @@ async def extend_subscription(session: AsyncSession, user: User, days: int) -> U
 
     if days >= PERMANENT_SUBSCRIPTION_DAYS:
         new_end = PERMANENT_END_DATE
+        total_seconds = (PERMANENT_END_DATE - current_end).total_seconds()
+        exact_hours = max(1, int(round(total_seconds / 3600)))
+        effective_days = exact_hours // 24 if exact_hours % 24 == 0 else 0
+        effective_hours = exact_hours
     else:
         new_end = current_end + timedelta(days=days)
+        effective_days = days
+        effective_hours = days * 24
+
+    if days > 0:
+        entitlement = EntitlementEntry(
+            beneficiary_user_id=user.id,
+            source_type="admin",
+            source_id=f"repo_extend_{uuid.uuid4().hex[:12]}",
+            entry_type="manual_grant",
+            days_delta=effective_days,
+            hours_delta=effective_hours,
+            device_limit_snapshot=user.device_limit or 1,
+            tariff_id_snapshot=user.current_tariff_id,
+            metadata_={"reason": "repo_extend_subscription"},
+        )
+        session.add(entitlement)
 
     return await update_user(session, user, subscription_end=new_end)
 

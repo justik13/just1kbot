@@ -1,13 +1,13 @@
 """Tests for subscription admin entitlement tracking and backfill."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import os
 import unittest
 from unittest.mock import AsyncMock, patch
+import uuid
 
-import os
-
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import EntitlementEntry, Tariff, User
@@ -96,7 +96,7 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
         from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
         session = AsyncMock()
         session.add = unittest.mock.MagicMock()
-        now = now_utc()
+        now = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         user = User(
             id=42,
             telegram_id=123456,
@@ -124,9 +124,48 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
         added_obj = session.add.call_args[0][0]
-        expected_days = max(1, (PERMANENT_END_DATE - now).days)
+        exact_hours = max(1, int(round((PERMANENT_END_DATE - now).total_seconds() / 3600)))
+        expected_days = exact_hours // 24 if exact_hours % 24 == 0 else 0
+        self.assertEqual(added_obj.hours_delta, exact_hours)
         self.assertEqual(added_obj.days_delta, expected_days)
-        self.assertEqual(added_obj.hours_delta, expected_days * 24)
+
+    async def test_extend_subscription_permanent_with_active_hours_base_end(self) -> None:
+        from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
+        session = AsyncMock()
+        session.add = unittest.mock.MagicMock()
+        now = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        active_end = datetime(2030, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        user = User(
+            id=42,
+            telegram_id=123456,
+            device_limit=2,
+            current_tariff_id=10,
+            subscription_end=active_end,
+        )
+        session.scalar.return_value = user
+
+        with (
+            patch("services.subscription.get_user_profiles_count", new_callable=AsyncMock) as mock_profiles,
+            patch.object(SubscriptionService, "_sync_access_state", new_callable=AsyncMock),
+            patch("services.subscription.invalidate_user_cache"),
+            patch("services.subscription.now_utc", return_value=now),
+        ):
+            mock_profiles.return_value = 1
+            updated_user = await SubscriptionService.extend_subscription(
+                session=session,
+                telegram_id=123456,
+                days=PERMANENT_SUBSCRIPTION_DAYS,
+                create_entitlement=True,
+                admin_id=999,
+                reason="permanent_grant",
+            )
+
+        self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
+        added_obj = session.add.call_args[0][0]
+        exact_hours = max(1, int(round((PERMANENT_END_DATE - active_end).total_seconds() / 3600)))
+        self.assertEqual(added_obj.hours_delta, exact_hours)
+        self.assertEqual(added_obj.days_delta, 0)
+        self.assertEqual(active_end + timedelta(hours=added_obj.hours_delta), PERMANENT_END_DATE)
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
@@ -134,23 +173,33 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
     async def asyncSetUp(self) -> None:
         self.engine = create_async_engine(DB, pool_pre_ping=True)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.created_user_ids: list[int] = []
 
     async def asyncTearDown(self) -> None:
+        if self.created_user_ids:
+            async with self.sessions.begin() as session:
+                await session.execute(
+                    delete(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id.in_(self.created_user_ids))
+                )
+                await session.execute(
+                    delete(User).where(User.id.in_(self.created_user_ids))
+                )
         await self.engine.dispose()
 
     async def test_manual_grant_allows_quote_calculation_and_settlement(self) -> None:
         now = now_utc().replace(microsecond=0)
+        tg_id = int(uuid.uuid4().int % 1000000000)
         async with self.sessions.begin() as session:
             # 1. Create base and upgrade tariffs
             t1 = Tariff(
-                name="Base Tariff",
+                name=f"Base Tariff {tg_id}",
                 price_rub=Decimal("300.00"),
                 duration_days=30,
                 device_limit=2,
                 is_active=True,
             )
             t2 = Tariff(
-                name="Pro Tariff",
+                name=f"Pro Tariff {tg_id}",
                 price_rub=Decimal("600.00"),
                 duration_days=30,
                 device_limit=5,
@@ -160,14 +209,15 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
             await session.flush()
             # 3. Create user
             user = User(
-                telegram_id=888999111,
-                username="manual_grant_user",
+                telegram_id=tg_id,
+                username=f"manual_grant_user_{tg_id}",
                 device_limit=t1.device_limit,
                 current_tariff_id=t1.id,
                 subscription_end=now,
             )
             session.add(user)
             await session.flush()
+            self.created_user_ids.append(user.id)
 
             # 4. Extend subscription via SubscriptionService with manual grant
             await SubscriptionService.extend_subscription(
@@ -198,18 +248,20 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
 
     async def test_exact_hours_and_honest_legacy_backfill_logic(self) -> None:
         now = now_utc().replace(microsecond=0)
+        tg_id_1 = int(uuid.uuid4().int % 1000000000)
+        tg_id_2 = int(uuid.uuid4().int % 1000000000)
         async with self.sessions.begin() as session:
             # User 1: Has active sub with 5 hours remaining (less than 24h, would fail if CEIL to 24h)
             user1 = User(
-                telegram_id=111222333,
-                username="legacy_user_5h",
+                telegram_id=tg_id_1,
+                username=f"legacy_user_5h_{tg_id_1}",
                 device_limit=2,
                 subscription_end=now + timedelta(hours=5),
             )
             # User 2: Has active sub with 48 hours remaining (2 days)
             user2 = User(
-                telegram_id=444555666,
-                username="legacy_user_48h",
+                telegram_id=tg_id_2,
+                username=f"legacy_user_48h_{tg_id_2}",
                 device_limit=3,
                 subscription_end=now + timedelta(hours=48),
             )
@@ -218,6 +270,7 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
 
             user1_id = user1.id
             user2_id = user2.id
+            self.created_user_ids.extend([user1_id, user2_id])
 
         # Run migration 0027 backfill SQL directly
         async with self.sessions.begin() as session:
@@ -305,7 +358,7 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
             self.assertEqual(e1.source_type, "admin")
             self.assertEqual(e1.source_id, f"legacy_0027_grant_{user1_id}")
             self.assertEqual(e1.entry_type, "manual_grant")
-            self.assertIn(e1.hours_delta, (5, 6))
+            self.assertEqual(e1.hours_delta, 5)
             self.assertEqual(e1.days_delta, 0)
             self.assertEqual(e1.metadata_["reason"], "legacy_active_subscription_backfill")
 
@@ -316,33 +369,81 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
             self.assertEqual(e2.source_type, "admin")
             self.assertEqual(e2.source_id, f"legacy_0027_grant_{user2_id}")
             self.assertEqual(e2.entry_type, "manual_grant")
-            self.assertIn(e2.hours_delta, (48, 49))
+            self.assertEqual(e2.hours_delta, 48)
             self.assertEqual(e2.metadata_["reason"], "legacy_active_subscription_backfill")
 
             # Balance projection verification: both must be tracked, no mismatch!
             snap1 = await get_subscription_balance_snapshot(session, user_id=user1_id, as_of=now)
             self.assertTrue(snap1.tracked)
             self.assertIsNone(snap1.failure_code)
-            self.assertIn(snap1.remaining_bonus_hours, (4, 5))
+            self.assertEqual(snap1.remaining_bonus_hours, 5)
 
             snap2 = await get_subscription_balance_snapshot(session, user_id=user2_id, as_of=now)
             self.assertTrue(snap2.tracked)
             self.assertIsNone(snap2.failure_code)
-            self.assertIn(snap2.remaining_bonus_hours, (47, 48))
+            self.assertEqual(snap2.remaining_bonus_hours, 48)
+
+    async def test_extend_subscription_permanent_active_hours_integration(self) -> None:
+        from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
+        now = now_utc().replace(microsecond=0)
+        # Active subscription with 10 days and 12 hours remaining (non-zero hours)
+        active_end = now + timedelta(days=10, hours=12)
+        tg_id = int(uuid.uuid4().int % 1000000000)
+
+        async with self.sessions.begin() as session:
+            user = User(
+                telegram_id=tg_id,
+                username=f"perm_user_{tg_id}",
+                device_limit=2,
+                subscription_end=active_end,
+            )
+            session.add(user)
+            await session.flush()
+            user_id = user.id
+            self.created_user_ids.append(user_id)
+
+            updated_user = await SubscriptionService.extend_subscription(
+                session,
+                telegram_id=tg_id,
+                days=PERMANENT_SUBSCRIPTION_DAYS,
+                create_entitlement=True,
+                admin_id=999,
+                reason="permanent_active_hours",
+            )
+            self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
+
+        async with self.sessions() as session:
+            ent = await session.scalar(
+                select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id == user_id)
+            )
+            self.assertIsNotNone(ent)
+            total_seconds = (PERMANENT_END_DATE - active_end).total_seconds()
+            expected_hours = max(1, int(round(total_seconds / 3600)))
+            self.assertEqual(ent.hours_delta, expected_hours)
+            self.assertEqual(ent.days_delta, 0)  # non-multiple of 24 has days_delta = 0
+            self.assertEqual(active_end + timedelta(hours=ent.hours_delta), PERMANENT_END_DATE)
+
+            # Projector must track successfully with exact match to PERMANENT_END_DATE
+            snapshot = await get_subscription_balance_snapshot(session, user_id=user_id, as_of=now)
+            self.assertTrue(snapshot.tracked)
+            self.assertIsNone(snapshot.failure_code)
+            self.assertEqual(snapshot.coverage_end, PERMANENT_END_DATE)
 
     async def test_ck_entitlement_entries_shape_strict_validation(self) -> None:
         from sqlalchemy.exc import IntegrityError
         now = now_utc()
+        tg_id = int(uuid.uuid4().int % 1000000000)
         async with self.sessions.begin() as session:
             test_user = User(
-                telegram_id=999888777,
-                username="constraint_test_user",
+                telegram_id=tg_id,
+                username=f"constraint_test_user_{tg_id}",
                 device_limit=1,
                 subscription_end=now + timedelta(days=10),
             )
             session.add(test_user)
             await session.flush()
             user_id = test_user.id
+            self.created_user_ids.append(user_id)
 
         # 1. Invalid combination: days_delta = 30 and hours_delta = 5 must be rejected
         async with self.sessions.begin() as session:

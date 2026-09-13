@@ -97,7 +97,17 @@ def downgrade() -> None:
         WHERE source_type = 'admin' AND source_id LIKE 'legacy_0027_grant_%'
         """
     )
-    # 2. Restore strict pre-0027 constraint
+    # 2. Normalize remaining sub-day entries to satisfy pre-0027 constraint (days_delta > 0)
+    op.execute(
+        """
+        UPDATE entitlement_entries
+        SET days_delta = GREATEST(1, CEIL(COALESCE(hours_delta, 1)::float / 24)::int),
+            hours_delta = GREATEST(1, CEIL(COALESCE(hours_delta, 1)::float / 24)::int) * 24
+        WHERE entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
+          AND days_delta = 0
+        """
+    )
+    # 3. Restore strict pre-0027 constraint
     op.execute("ALTER TABLE entitlement_entries DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape")
     op.execute(
         """
