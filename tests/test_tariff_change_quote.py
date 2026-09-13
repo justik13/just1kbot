@@ -11,7 +11,6 @@ from services.subscription_balance_projector import (
 from services.tariff_change_quote import (
     SnapshotCanonicalizationError,
     balance_snapshot_fingerprint,
-    calculate_subscription_remaining_value,
     calculate_surcharge_option,
     calculate_transfer_option,
 )
@@ -157,30 +156,6 @@ class TariffChangeQuoteTests(unittest.TestCase):
         second = balance_snapshot_fingerprint(user_id=7, subscription_end=value.coverage_end,
             snapshot=replace(value, as_of=value.as_of + timedelta(seconds=1)))
         self.assertNotEqual(first, second)
-
-    def test_daily_rate_precision_and_no_integer_truncation(self):
-        # 250 RUB / 30 days = 8.333333333333333... RUB/day (previously 8 RUB/day via //)
-        rem = calculate_subscription_remaining_value(
-            subscription_end=T0 + timedelta(days=29),
-            price_rub=250,
-            duration_days=30,
-            as_of=T0,
-        )
-        self.assertEqual(rem.remaining_days, 29)
-        self.assertEqual(rem.daily_rate, Decimal(250) / Decimal(30))
-        self.assertAlmostEqual(float(rem.remaining_value), 241.666667, places=4)
-        # Verify no truncation loss: previously 29 * 8 = 232 RUB (loss of ~9.67 RUB)
-        self.assertGreater(rem.remaining_value, Decimal(240))
-
-        # Promo tariff: 15 RUB / 30 days = 0.5 RUB/day (previously 0 via //)
-        promo = calculate_subscription_remaining_value(
-            subscription_end=T0 + timedelta(days=10),
-            price_rub=15,
-            duration_days=30,
-            as_of=T0,
-        )
-        self.assertEqual(promo.daily_rate, Decimal("0.5"))
-        self.assertEqual(promo.remaining_value, Decimal("5.0"))
 
     def test_transfer_option_precision_and_minimum_days(self):
         # Available: target_days >= 7

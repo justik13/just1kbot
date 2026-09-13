@@ -9,7 +9,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,6 +18,7 @@ from bot.constants import AMNEZIA_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import User, VPNProfile
 from database.repositories import users_repo
+from database.repositories.profiles_repo import get_user_effective_device_count
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
@@ -174,18 +175,9 @@ async def awg_get_conf(
 
     if not profile:
         # Check quota before creating
-        active_sub_devices = dict(getattr(user, "active_sub_devices", None) or {})
-        manual_count = (
-            await session.execute(
-                select(func.count(VPNProfile.id)).where(
-                    VPNProfile.user_id == user.id,
-                    VPNProfile.device_type == "manual",
-                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
-                )
-            )
-        ).scalar_one()
-
-        total_active = len(active_sub_devices) + manual_count
+        total_active = await get_user_effective_device_count(
+            session, user.id, getattr(user, "active_sub_devices", None)
+        )
         if total_active >= limit:
             builder = InlineKeyboardBuilder()
             builder.button(text=texts.BTN_MANAGE_DEVICES, callback_data="awg_manage_devices")
@@ -248,17 +240,9 @@ async def awg_get_conf(
         return
 
     # Calculate active devices for caption
-    active_sub_devices = dict(getattr(user, "active_sub_devices", None) or {})
-    manual_count = (
-        await session.execute(
-            select(func.count(VPNProfile.id)).where(
-                VPNProfile.user_id == user.id,
-                VPNProfile.device_type == "manual",
-                VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
-            )
-        )
-    ).scalar_one()
-    total_active = len(active_sub_devices) + manual_count
+    total_active = await get_user_effective_device_count(
+        session, user.id, getattr(user, "active_sub_devices", None)
+    )
 
     country_label = f"{server.country_flag or ''} {server.name or 'Server'}".strip()
     caption = texts.AWG_CONF_READY_CAPTION.format(

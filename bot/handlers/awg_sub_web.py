@@ -8,7 +8,7 @@ import logging
 import os
 
 from aiohttp import web
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from bot import texts
 from config.constants import AMNEZIA_PROTOCOL
@@ -16,6 +16,7 @@ from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.connection import session_scope
 from database.models import Server, VPNProfile
 from database.repositories import users_repo
+from database.repositories.profiles_repo import get_user_effective_device_count
 from services.awg_subscription_feed_service import AWGSubscriptionFeedService
 from services.device_service import DeviceService, RESERVING_STATUSES
 from services.slots_cache import capture_server_peer_snapshot
@@ -97,17 +98,9 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
         new_sub_device_record = None
 
         if not is_existing:
-            manual_count = (
-                await session.execute(
-                    select(func.count(VPNProfile.id)).where(
-                        VPNProfile.user_id == user.id,
-                        VPNProfile.device_type == "manual",
-                        VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
-                    )
-                )
-            ).scalar_one()
-
-            total_active = manual_count + len(active_sub_devices)
+            total_active = await get_user_effective_device_count(
+                session, user.id, active_sub_devices
+            )
             effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
             limit = effective_limit or getattr(user, "device_limit", 2) or 2
 

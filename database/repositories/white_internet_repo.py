@@ -284,6 +284,10 @@ async def renew_subscription_atomic(
     sub.status_reason = None
     sub.desired_version += 1
     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+    sub.notified_3d = False
+    sub.notified_1d = False
+    sub.notified_2h = False
+    sub.notified_expired = False
 
     # Reset period usage counters; DO NOT reset last_uplink_snapshot / last_downlink_snapshot / last_device_reset_at!
     sub.traffic_used_bytes = 0

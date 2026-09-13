@@ -281,6 +281,7 @@ class WhiteInternetTrafficWorker:
 
                 if telegram_id:
                     try:
+                        from aiogram.utils.keyboard import InlineKeyboardBuilder
                         from bot import texts
 
                         alert_text = (
@@ -288,9 +289,16 @@ class WhiteInternetTrafficWorker:
                             if is_sub_trial
                             else texts.WL_TRAFFIC_EXHAUSTED_ALERT
                         )
+                        kb = InlineKeyboardBuilder()
+                        if is_sub_trial:
+                            kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
+                        else:
+                            kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+
                         await self.bot.send_message(
                             chat_id=telegram_id,
                             text=alert_text,
+                            reply_markup=kb.as_markup(),
                             parse_mode="HTML",
                         )
                     except Exception as exc:

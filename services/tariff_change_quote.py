@@ -54,39 +54,10 @@ class TariffChangeOptions:
 
 
 @dataclass(frozen=True)
-class SubscriptionRemainingValue:
-    remaining_days: int
-    daily_rate: Decimal
-    remaining_value: Decimal
-
-
-@dataclass(frozen=True)
 class TransferOptionCalculation:
     target_days: int
     leftover_rub: int
     is_available: bool
-
-
-def calculate_subscription_remaining_value(
-    *,
-    subscription_end: datetime | None,
-    price_rub: int | Decimal,
-    duration_days: int,
-    as_of: datetime,
-) -> SubscriptionRemainingValue:
-    """Canonical single engine for calculating active remaining days and ruble value."""
-    if subscription_end is None or subscription_end <= as_of or duration_days <= 0:
-        return SubscriptionRemainingValue(
-            remaining_days=0, daily_rate=Decimal(0), remaining_value=Decimal(0)
-        )
-    remaining_days = max(0, (subscription_end - as_of).days)
-    daily_rate = Decimal(str(price_rub)) / Decimal(duration_days)
-    remaining_value = Decimal(remaining_days) * daily_rate
-    return SubscriptionRemainingValue(
-        remaining_days=remaining_days,
-        daily_rate=daily_rate,
-        remaining_value=remaining_value,
-    )
 
 
 def calculate_transfer_option(
@@ -459,17 +430,6 @@ async def create_tariff_change_quote(
     resulting_bonus_hours = snapshot.remaining_bonus_hours
 
     if existing_change:
-        existing_option = (
-            existing_change.diagnostic_reason.removeprefix("option:")
-            if existing_change.diagnostic_reason
-            and existing_change.diagnostic_reason.startswith("option:")
-            else (
-                "transfer"
-                if existing_change.amount_due_rub == 0
-                and existing_change.resulting_paid_hours != target_version.duration_hours
-                else "surcharge"
-            )
-        )
         same_target = (existing_change.target_tariff_version_id == target_version.id)
         same_sub_end = (
             existing_change.source_subscription_end is not None
@@ -482,7 +442,7 @@ async def create_tariff_change_quote(
             and sorted(existing_change.source_ledger_entry_ids or [])
                 == sorted(snapshot.source_ledger_entry_ids)
         )
-        same_option = (existing_option == option_type)
+        same_option = (existing_change.option_type == option_type)
         if same_target and same_history and same_option:
             return TariffChangeQuoteResult(
                 quote=existing_change,
@@ -526,7 +486,7 @@ async def create_tariff_change_quote(
         balance_as_of=as_of,
         source_subscription_end=user.subscription_end,
         source_balance_fingerprint=fingerprint,
-        diagnostic_reason=f"option:{option_type}",
+        option_type=option_type,
         source_entitlement_entry_ids=sorted(snapshot.source_entitlement_entry_ids),
         source_ledger_entry_ids=sorted(snapshot.source_ledger_entry_ids),
     )

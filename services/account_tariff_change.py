@@ -256,21 +256,7 @@ async def _settle_account_tariff_change(
             if was_last_downgrade and (now - last_change_at) < timedelta(hours=24):
                 raise AccountTariffChangeError("change_cooldown_active")
 
-    option_type = (
-        quote.diagnostic_reason.removeprefix("option:")
-        if quote.diagnostic_reason
-        and quote.diagnostic_reason.startswith("option:")
-        else (
-            quote.source_entitlement_entry_ids[0]
-            if quote.source_entitlement_entry_ids
-            and isinstance(quote.source_entitlement_entry_ids[0], str)
-            else (
-                "transfer"
-                if quote.amount_due_rub == 0 and quote.resulting_paid_hours != target.duration_hours
-                else "surcharge"
-            )
-        )
-    )
+    option_type = quote.option_type
     current_snapshot = await get_subscription_balance_snapshot(
         session,
         user_id=user.id,

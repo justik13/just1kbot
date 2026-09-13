@@ -531,6 +531,7 @@ class TariffQuote(Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     manual_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     diagnostic_reason: Mapped[str | None] = mapped_column(String(255))
+    option_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     balance_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_subscription_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_balance_fingerprint: Mapped[str | None] = mapped_column(String(64))
@@ -1393,6 +1394,14 @@ class WhiteInternetSubscription(Base):
             "active_hwids",
             postgresql_using="gin",
         ),
+        Index(
+            "ix_wi_subs_expiring_notify",
+            "expires_at",
+            "user_id",
+            postgresql_where=text(
+                "status IN ('ACTIVE', 'EXHAUSTED') AND (notified_3d = false OR notified_1d = false OR notified_2h = false OR notified_expired = false)"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -1501,6 +1510,19 @@ class WhiteInternetSubscription(Base):
     # (SYNCED_INACTIVE with matching versions). Never delete rows that still
     # have an unconfirmed presence on the node — that would orphan credentials.
     pending_hard_delete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+    notified_3d: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_1d: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_2h: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_expired: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
 

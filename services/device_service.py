@@ -10,7 +10,10 @@ from bot import texts
 from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT, AdminAuditAction
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import APIOperation, Server, User, VPNProfile
-from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
+from database.repositories.profiles_repo import (
+    ALLOWED_DELETE_STATES,
+    get_user_effective_device_count,
+)
 from services.amnezia_capacity import (
     ServerAtCapacity,
     ServerCapacityUnavailable,
@@ -156,18 +159,14 @@ class DeviceService:
             and sub_device_hash in (user.active_sub_devices or {})
         )
         if not is_existing_sub_device:
-            manual_query = select(func.count(VPNProfile.id)).where(
-                VPNProfile.user_id == user.id,
-                VPNProfile.device_type == "manual",
-                VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+            total_active = await get_user_effective_device_count(
+                session,
+                user.id,
+                active_sub_devices=getattr(user, "active_sub_devices", None),
+                exclude_profile_id=replaces_profile_id,
             )
-            if replaces_profile_id:
-                manual_query = manual_query.where(VPNProfile.id != replaces_profile_id)
-            manual_count = (await session.execute(manual_query)).scalar_one()
-
-            sub_count = len(user.active_sub_devices or {})
             effective_device_limit = user.device_limit if user.device_limit is not None else 2
-            if manual_count + sub_count >= effective_device_limit:
+            if total_active >= effective_device_limit:
                 raise DeviceLimitExceeded("Device limit reached")
         server_count = (
             await session.execute(

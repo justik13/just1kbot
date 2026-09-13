@@ -968,11 +968,12 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         with patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(200, True, 0, None)):
             await worker.run_traffic_cycle(mock_session)
 
-        mock_bot.send_message.assert_awaited_once_with(
-            chat_id=777777,
-            text=texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT,
-            parse_mode="HTML",
-        )
+        mock_bot.send_message.assert_awaited_once()
+        call_kwargs = mock_bot.send_message.await_args.kwargs
+        self.assertEqual(call_kwargs["chat_id"], 777777)
+        self.assertEqual(call_kwargs["text"], texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT)
+        self.assertEqual(call_kwargs["parse_mode"], "HTML")
+        self.assertIsNotNone(call_kwargs.get("reply_markup"))
 
 
 class TestReconciliationQueryRegression(unittest.IsolatedAsyncioTestCase):

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 
 from bot.keyboards.notifications import (
     get_inactive_sub_device_keyboard,
@@ -13,12 +13,17 @@ from bot.keyboards.notifications import (
     get_pre_expiry_keyboard,
 )
 from bot.texts.runtime.notifications import (
+    BTN_EXTEND_WHITE_INTERNET,
     NOTIFY_1D,
     NOTIFY_2H,
     NOTIFY_3D,
     NOTIFY_EXPIRED,
     NOTIFY_GRACE_12H,
     NOTIFY_INACTIVE_SUB_DEVICE,
+    NOTIFY_WI_1D,
+    NOTIFY_WI_2H,
+    NOTIFY_WI_3D,
+    NOTIFY_WI_EXPIRED,
     TIME_DAYS_HOURS_FORMAT,
     TIME_HOURS_MINUTES_FORMAT,
     TIME_SOON_LABEL,
@@ -30,8 +35,8 @@ from config.constants import (
     WORKER_ERROR_SLEEP_INTERVAL,
 )
 from database.connection import session_scope
-from database.models import User, VPNProfile
-from services.device_service import RESERVING_STATUSES
+from database.models import User
+from database.repositories.profiles_repo import get_user_effective_device_count
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
@@ -130,6 +135,11 @@ async def subscription_notifications_loop(
             )
 
             await _send_inactive_sub_device_notifications(
+                bot,
+                current_time,
+            )
+
+            await _send_white_internet_notifications(
                 bot,
                 current_time,
             )
@@ -502,13 +512,9 @@ async def _send_inactive_sub_device_notifications(
             if not active_sub_devices:
                 continue
 
-            manual_count_stmt = select(func.count(VPNProfile.id)).where(
-                VPNProfile.user_id == user.id,
-                VPNProfile.device_type == "manual",
-                VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+            total_active = await get_user_effective_device_count(
+                session, user.id, active_sub_devices
             )
-            manual_count = (await session.execute(manual_count_stmt)).scalar_one()
-            total_active = manual_count + len(active_sub_devices)
 
             effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
             limit = effective_limit or getattr(user, "device_limit", 2) or 2
@@ -577,3 +583,143 @@ async def _send_inactive_sub_device_notifications(
                 if modified:
                     user.active_sub_devices = active_sub_devices
                 await session.flush()
+
+
+async def _send_white_internet_notifications(
+    bot: Bot | None,
+    current_time: datetime,
+) -> None:
+    if bot is None:
+        return
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from config.enums import WhiteInternetStatus
+    from database.models import User, WhiteInternetSubscription
+
+    cutoff = current_time + timedelta(days=3)
+
+    async with session_scope() as session:
+        stmt = (
+            select(WhiteInternetSubscription.id)
+            .join(User, WhiteInternetSubscription.user_id == User.id)
+            .where(
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                ]),
+                WhiteInternetSubscription.expires_at.is_not(None),
+                WhiteInternetSubscription.expires_at <= cutoff,
+                or_(
+                    WhiteInternetSubscription.notified_3d.is_(False),
+                    WhiteInternetSubscription.notified_1d.is_(False),
+                    WhiteInternetSubscription.notified_2h.is_(False),
+                    WhiteInternetSubscription.notified_expired.is_(False),
+                ),
+                User.is_bot_blocked.is_(False),
+                User.is_banned.is_(False),
+                User.is_deleted.is_(False),
+            )
+            .order_by(WhiteInternetSubscription.expires_at.asc())
+            .limit(500)
+        )
+        result = await session.execute(stmt)
+        sub_ids = [row[0] for row in result.all()]
+
+    if not sub_ids:
+        return
+
+    for i in range(0, len(sub_ids), NOTIFICATION_BATCH_SIZE):
+        batch_ids = sub_ids[i : i + NOTIFICATION_BATCH_SIZE]
+        for sid in batch_ids:
+            async with session_scope() as session:
+                sub = await session.scalar(
+                    select(WhiteInternetSubscription)
+                    .where(WhiteInternetSubscription.id == sid)
+                    .with_for_update(skip_locked=True)
+                )
+                if sub is None:
+                    continue
+
+                if sub.status not in (
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                ):
+                    continue
+
+                if not sub.expires_at or sub.expires_at > cutoff:
+                    continue
+
+                user = await session.scalar(
+                    select(User).where(User.id == sub.user_id)
+                )
+                if (
+                    not user
+                    or user.is_bot_blocked
+                    or user.is_banned
+                    or user.is_deleted
+                ):
+                    continue
+
+                time_left = sub.expires_at - current_time
+                notify_type = None
+                msg = None
+
+                if time_left.total_seconds() <= 0:
+                    if not sub.notified_expired:
+                        notify_type = "expired"
+                        msg = NOTIFY_WI_EXPIRED
+                elif time_left <= timedelta(hours=2):
+                    if not sub.notified_2h:
+                        notify_type = "2h"
+                        msg = NOTIFY_WI_2H.format(countdown=_format_countdown(time_left))
+                elif time_left <= timedelta(days=1):
+                    if not sub.notified_1d:
+                        notify_type = "1d"
+                        msg = NOTIFY_WI_1D.format(countdown=_format_countdown(time_left))
+                elif time_left <= timedelta(days=3):
+                    if not sub.notified_3d:
+                        notify_type = "3d"
+                        msg = NOTIFY_WI_3D.format(
+                            date=sub.expires_at.strftime("%d.%m.%Y %H:%M")
+                        )
+
+                if not notify_type or not msg:
+                    continue
+
+                kb = InlineKeyboardBuilder()
+                kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="white_internet")
+
+                try:
+                    await global_send_limiter.acquire()
+                    await bot.send_message(
+                        user.telegram_id,
+                        msg,
+                        reply_markup=kb.as_markup(),
+                        parse_mode="HTML",
+                    )
+                    if notify_type == "expired":
+                        sub.notified_expired = True
+                    elif notify_type == "2h":
+                        sub.notified_2h = True
+                        sub.notified_1d = True
+                        sub.notified_3d = True
+                    elif notify_type == "1d":
+                        sub.notified_1d = True
+                        sub.notified_3d = True
+                    elif notify_type == "3d":
+                        sub.notified_3d = True
+                    await session.flush()
+                except TelegramForbiddenError:
+                    user.is_bot_blocked = True
+                    sub.notified_expired = True
+                    sub.notified_2h = True
+                    sub.notified_1d = True
+                    sub.notified_3d = True
+                    await session.flush()
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send WI notification to %s: %s",
+                        user.telegram_id,
+                        e,
+                    )
+

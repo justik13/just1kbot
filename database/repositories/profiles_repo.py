@@ -130,7 +130,10 @@ get_user_quota_profiles_count = get_user_profiles_count
 
 
 async def get_user_effective_device_count(
-    session: AsyncSession, user_id: int, active_sub_devices: dict | None = None
+    session: AsyncSession,
+    user_id: int,
+    active_sub_devices: dict | None = None,
+    exclude_profile_id: int | None = None,
 ) -> int:
     """Return total effective devices: manual profiles + len(active_sub_devices).
 
@@ -143,6 +146,8 @@ async def get_user_effective_device_count(
         or_(VPNProfile.device_type == "manual", VPNProfile.device_type.is_(None)),
         VPNProfile.provisioning_status.notin_(PROFILE_QUOTA_EXCLUDED_STATUSES),
     )
+    if exclude_profile_id is not None:
+        stmt = stmt.where(VPNProfile.id != exclude_profile_id)
     result = await session.execute(stmt)
     manual_count = result.scalar_one()
     sub_count = len(active_sub_devices or {})
