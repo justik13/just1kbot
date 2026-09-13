@@ -65,15 +65,22 @@ class AWGSubscriptionFeedService:
     def build_subscription_body(
         cls,
         server_configs: Sequence[Tuple[str, str, str]],
+        inline_metadata: list[str] | None = None,
     ) -> str:
         """
         Build base64 multi-server feed body for INCY.
         Each server is represented as awg://<urlsafe_base64_conf>#{flag} {name}.
+        Optionally prepends inline subscription metadata (e.g. #announce: ..., #announce-url: ...).
         """
-        if not server_configs:
+        if not server_configs and not inline_metadata:
             return ""
 
         lines = []
+        if inline_metadata:
+            for meta in inline_metadata:
+                if meta and meta.strip():
+                    lines.append(meta.strip())
+
         for item in server_configs:
             conf, name, flag = item
             try:
@@ -98,9 +105,20 @@ class AWGSubscriptionFeedService:
         download_bytes: int = 0,
         total_quota_bytes: int = 0,
         update_interval_hours: int = 6,
-        sort_order: str | None = None,
+        support_url: str | None = None,
         hide_url: bool = True,
+        hide_check: bool = False,
+        web_page_url: str | None = None,
+        support_email: str | None = None,
+        announce: str | None = None,
+        announce_url: str | None = None,
+        sort_order: str | None = None,
         profile_description: str | None = None,
+        banner_text: str | None = None,
+        banner_button_text: str | None = None,
+        banner_button_url: str | None = None,
+        banner_bg_color: str | None = None,
+        banner_button_color: str | None = None,
     ) -> dict[str, str]:
         """Generate standardized HTTP headers for INCY client."""
         title_b64 = base64.b64encode(profile_title.strip().encode("utf-8")).decode("ascii")
@@ -123,11 +141,46 @@ class AWGSubscriptionFeedService:
         if hide_url:
             headers["hide-url"] = "1"
 
+        if hide_check:
+            headers["hide-check"] = "1"
+
         if profile_description and profile_description.strip():
             desc_b64 = base64.b64encode(profile_description.strip().encode("utf-8")).decode("ascii")
             headers["profile-description"] = f"base64:{desc_b64}"
 
+        if support_url and support_url.strip():
+            headers["support-url"] = support_url.strip()
+
+        if web_page_url and web_page_url.strip():
+            headers["profile-web-page-url"] = web_page_url.strip()
+
+        if support_email and support_email.strip():
+            headers["support-email"] = support_email.strip()
+
         if sort_order and sort_order.strip():
             headers["sort-order"] = sort_order.strip()
+
+        if announce and announce.strip():
+            ann_b64 = base64.b64encode(announce.strip().encode("utf-8")).decode("ascii")
+            headers["announce"] = f"base64:{ann_b64}"
+
+        if announce_url and announce_url.strip():
+            headers["announce-url"] = announce_url.strip()
+
+        if banner_text and banner_text.strip():
+            b_b64 = base64.b64encode(banner_text.strip().encode("utf-8")).decode("ascii")
+            headers["banner-text"] = f"base64:{b_b64}"
+
+        if banner_button_text and banner_button_text.strip():
+            headers["banner-button-text"] = banner_button_text.strip()
+
+        if banner_button_url and banner_button_url.strip():
+            headers["banner-button-url"] = banner_button_url.strip()
+
+        if banner_bg_color and banner_bg_color.strip():
+            headers["banner-bg-color"] = banner_bg_color.strip()
+
+        if banner_button_color and banner_button_color.strip():
+            headers["banner-button-color"] = banner_button_color.strip()
 
         return headers
