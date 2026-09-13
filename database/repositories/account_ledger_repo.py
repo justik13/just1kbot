@@ -128,6 +128,9 @@ async def get_account_balance(
     real_available = max(ZERO, real_pos)
     bonus_available = max(ZERO, bonus_pos)
 
+    if debt > ZERO:
+        bonus_available = max(ZERO, bonus_available - debt)
+
     if reserved > ZERO:
         if real_available >= reserved:
             real_available -= reserved

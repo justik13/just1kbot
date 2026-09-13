@@ -157,7 +157,6 @@ async def choose_tariff_change_option(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer(show_alert=False)
     if db_user is None:
         await callback.answer(
             texts.PAYMENT_CHANGE_TARIFF_INVALID_OPERATION,
@@ -167,6 +166,7 @@ async def choose_tariff_change_option(
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
+        await callback.answer()
         await _render_maintenance(callback, session, back_to="payment_change_tariff")
         return
 
@@ -181,6 +181,7 @@ async def choose_tariff_change_option(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
+    await callback.answer()
     quote_result = await create_tariff_change_quote(
         session,
         user_id=db_user.id,
@@ -223,7 +224,6 @@ async def review_tariff_change(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer(show_alert=False)
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         await callback.answer(
@@ -234,8 +234,10 @@ async def review_tariff_change(
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
+        await callback.answer()
         await _render_maintenance(callback, session, back_to="payment_change_tariff")
         return
+    await callback.answer()
     await render_tariff_change_review(callback, session, db_user, quote_id)
 
 

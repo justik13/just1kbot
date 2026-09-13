@@ -599,6 +599,39 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 0,
             )
 
+    async def test_surcharge_excess_value_preserved_as_extra_days(self):
+        # User has remaining value 90 RUB from source (duration 30d, 90 RUB)
+        # Target tariff is cheaper: 30 RUB for 30 days (daily rate = 1 RUB/day)
+        user, _, _, as_of = await self.seed()
+        async with self.sessions.begin() as session:
+            cheap_target = (
+                await session.execute(
+                    text(
+                        "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) "
+                        "VALUES('cheap_target',30,3,30,true,3,:created_at) RETURNING id"
+                    ),
+                    {"created_at": as_of},
+                )
+            ).scalar_one()
+
+            res = await create_tariff_change_quote(
+                session,
+                user_id=user,
+                target_tariff_id=cheap_target,
+                as_of=as_of,
+                option_type="surcharge",
+            )
+            self.assertIsNone(res.failure_code)
+            quote = res.quote
+            self.assertEqual(quote.amount_due_rub, Decimal(0))
+            # Surcharge excess = 90 - 30 = 60 RUB.
+            # Target daily rate = 30 / 30 = 1 RUB/day -> extra 60 days.
+            # Total days = 30 + 60 = 90 days = 2160 hours.
+            self.assertEqual(quote.resulting_paid_hours, 2160)
+            self.assertEqual(quote.resulting_paid_value_rub, Decimal(90))
+            self.assertEqual(quote.rounding_loss_value_rub, Decimal(0))
+
 
 if __name__ == "__main__":
     unittest.main()
+

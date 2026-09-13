@@ -510,7 +510,7 @@ async def _send_inactive_sub_device_notifications(
     for uid in user_ids:
         async with session_scope() as session:
             user = await session.scalar(
-                select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                select(User).where(User.id == uid)
             )
             if user is None:
                 continue
@@ -592,10 +592,24 @@ async def _send_inactive_sub_device_notifications(
                         e,
                     )
 
-            if modified or user.is_bot_blocked:
-                if modified:
-                    user.active_sub_devices = active_sub_devices
-                await session.flush()
+            if modified:
+                fresh_user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update()
+                )
+                if fresh_user:
+                    fresh_active = dict(getattr(fresh_user, "active_sub_devices", None) or {})
+                    for hwid, info in active_sub_devices.items():
+                        notified = info.get("notified_inactive_at") if isinstance(info, dict) else None
+                        if notified and hwid in fresh_active and isinstance(fresh_active[hwid], dict):
+                            fresh_active[hwid]["notified_inactive_at"] = notified
+                    fresh_user.active_sub_devices = fresh_active
+            if user.is_bot_blocked:
+                fresh_user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update()
+                )
+                if fresh_user:
+                    fresh_user.is_bot_blocked = True
+            await session.flush()
 
 
 async def _send_white_internet_notifications(
@@ -651,7 +665,6 @@ async def _send_white_internet_notifications(
                 sub = await session.scalar(
                     select(WhiteInternetSubscription)
                     .where(WhiteInternetSubscription.id == sid)
-                    .with_for_update(skip_locked=True)
                 )
                 if sub is None:
                     continue

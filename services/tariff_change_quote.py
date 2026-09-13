@@ -426,9 +426,23 @@ async def create_tariff_change_quote(
             target_price_rub=target_version.price_rub,
         )
         required = Decimal(surcharge)
-        resulting_paid_hours = target_version.duration_hours
-        rounding_loss_value_rub = Decimal(0)
-        resulting_paid_value_rub = target_version.price_rub
+        if remaining_value > target_version.price_rub and target_version.duration_days > 0:
+            target_daily_rate = Decimal(str(target_version.price_rub)) / Decimal(target_version.duration_days)
+            if target_daily_rate > Decimal(0):
+                excess = remaining_value - target_version.price_rub
+                extra_days = int(excess // target_daily_rate)
+                leftover = excess - (Decimal(extra_days) * target_daily_rate)
+                resulting_paid_hours = (target_version.duration_days + extra_days) * 24
+                rounding_loss_value_rub = leftover
+                resulting_paid_value_rub = remaining_value - rounding_loss_value_rub
+            else:
+                resulting_paid_hours = target_version.duration_hours
+                rounding_loss_value_rub = Decimal(0)
+                resulting_paid_value_rub = target_version.price_rub
+        else:
+            resulting_paid_hours = target_version.duration_hours
+            rounding_loss_value_rub = Decimal(0)
+            resulting_paid_value_rub = target_version.price_rub
 
     resulting_bonus_hours = snapshot.remaining_bonus_hours
 

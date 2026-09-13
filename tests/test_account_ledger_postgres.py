@@ -973,6 +973,31 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             self.assertEqual(str(ctx.exception), "too_many_devices")
 
+    async def test_debt_reduces_bonus_available(self):
+        async with self.sessions.begin() as session:
+            user = await session.get(User, self.user_id)
+            user.balance = Decimal("-300.00")
+            user.bonus_balance = Decimal("200.00")
+            await session.flush()
+
+            bal = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(bal.debt, Decimal("300.00"))
+            self.assertEqual(bal.real_available, Decimal("0.00"))
+            # Debt 300 exceeds bonus 200 -> bonus_available = 0, available = 0
+            self.assertEqual(bal.bonus_available, Decimal("0.00"))
+            self.assertEqual(bal.available, Decimal("0.00"))
+
+            # When bonus exceeds debt: debt 300, bonus 500 -> bonus_available = 200, available = 200
+            user.bonus_balance = Decimal("500.00")
+            await session.flush()
+
+            bal2 = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(bal2.debt, Decimal("300.00"))
+            self.assertEqual(bal2.real_available, Decimal("0.00"))
+            self.assertEqual(bal2.bonus_available, Decimal("200.00"))
+            self.assertEqual(bal2.available, Decimal("200.00"))
+
 
 if __name__ == "__main__":
     unittest.main()
+

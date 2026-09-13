@@ -82,7 +82,7 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
     now = now_utc()
 
     async with session_scope() as session:
-        user = await users_repo.get_user_by_subscription_token(session, token, for_update=True)
+        user = await users_repo.get_user_by_subscription_token(session, token, for_update=False)
         if user is None:
             return web.Response(status=404, text="Not Found", headers=common_headers)
 
@@ -106,7 +106,11 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                 session, user.id, active_sub_devices
             )
             effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
-            limit = effective_limit or getattr(user, "device_limit", 2) or 2
+            if effective_limit is not None:
+                limit = effective_limit
+            else:
+                user_lim = getattr(user, "device_limit", None)
+                limit = user_lim if user_lim is not None else 2
 
             if total_active >= limit:
                 headers = dict(common_headers)
