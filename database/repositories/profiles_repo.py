@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import VPNProfile
+from database.models import User, VPNProfile
 
 ALLOWED_PROFILE_UPDATE_FIELDS = {
     'device_name',
@@ -140,6 +140,9 @@ async def get_user_effective_device_count(
     Strictly additive formula as required by PR #259 and billing invariants.
     """
     from sqlalchemy import or_
+
+    if active_sub_devices is None:
+        active_sub_devices = await session.scalar(select(User.active_sub_devices).where(User.id == user_id)) or {}
 
     stmt = select(func.count(VPNProfile.id)).where(
         VPNProfile.user_id == user_id,

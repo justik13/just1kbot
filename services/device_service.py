@@ -115,7 +115,12 @@ class DeviceService:
             or "xray_origin" in (getattr(server, "capabilities", None) or [])
         ):
             raise ServerUnavailable("Invalid or disabled server")
-        if user.is_banned or not user.subscription_end or is_expired(user.subscription_end):
+        if (
+            user.is_banned
+            or getattr(user, "financial_hold", False)
+            or not user.subscription_end
+            or is_expired(user.subscription_end)
+        ):
             raise NoActiveSubscription("No active subscription")
         if not device_name:
             user_profiles = (

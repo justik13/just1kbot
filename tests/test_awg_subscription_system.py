@@ -2078,5 +2078,98 @@ class TestAWGAllocationInvariantsHardening(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("sub.just1k.best", rendered)
 
 
+    async def test_feed_handler_blocks_financial_hold(self):
+        """Verify awg_subscription_feed_handler returns 403 Forbidden when user has financial_hold."""
+        from bot.handlers.awg_sub_web import awg_subscription_feed_handler
+        from contextlib import asynccontextmanager
+        from datetime import datetime, timezone, timedelta
+
+        now = datetime.now(timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=12345,
+            subscription_end=now + timedelta(days=30),
+            financial_hold=True,
+            is_banned=False,
+            is_deleted=False,
+            subscription_token="token_with_financial_hold_12345",
+        )
+        req = MagicMock()
+        req.match_info = {"token": "token_with_financial_hold_12345"}
+        req.headers = {"X-HWID": "hwid_device_uuid_12345", "User-Agent": "INCY/1.0 (iOS)"}
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch("bot.handlers.awg_sub_web.users_repo.get_user_by_subscription_token", new_callable=AsyncMock) as mock_get_user,
+        ):
+            mock_get_user.return_value = user
+
+            resp = await awg_subscription_feed_handler(req)
+            self.assertEqual(resp.status, 403)
+            self.assertEqual(resp.text, "Forbidden")
+
+    async def test_device_service_create_device_blocks_financial_hold(self):
+        """Verify DeviceService.create_device raises NoActiveSubscription when user has financial_hold."""
+        from services.device_service import DeviceService, NoActiveSubscription, ServerPeerSnapshot
+        from database.models import Server, ServerHealthState, ServerLifecycleStatus
+        from datetime import datetime, timezone, timedelta
+
+        now = datetime.now(timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=12345,
+            subscription_end=now + timedelta(days=30),
+            financial_hold=True,
+            is_banned=False,
+        )
+        server = Server(
+            id=1,
+            protocol="amneziawg2",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=[],
+        )
+        snapshot = ServerPeerSnapshot(
+            server_id=1,
+            peer_ids=frozenset(),
+            captured_at=now,
+        )
+        mock_session = AsyncMock()
+        mock_user_exec = MagicMock()
+        mock_user_exec.scalar_one.return_value = user
+        mock_server_exec = MagicMock()
+        mock_server_exec.scalar_one_or_none.return_value = server
+        mock_session.execute.side_effect = [mock_user_exec, mock_server_exec]
+
+        with self.assertRaises(NoActiveSubscription):
+            await DeviceService.create_device(
+                session=mock_session,
+                user_id=1,
+                server_id=1,
+                snapshot=snapshot,
+                device_type="sub",
+            )
+
+    async def test_get_user_effective_device_count_fallback_db(self):
+        """Verify get_user_effective_device_count queries User.active_sub_devices when active_sub_devices is None."""
+        from database.repositories.profiles_repo import get_user_effective_device_count
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = {"hwid1": {"device_index": 1}}
+        mock_result = MagicMock()
+        mock_result.scalar_one.return_value = 1
+        mock_session.execute.return_value = mock_result
+
+        count = await get_user_effective_device_count(mock_session, user_id=10)
+        self.assertEqual(count, 2)  # 1 manual + 1 sub-device
+
+
 if __name__ == "__main__":
     unittest.main()

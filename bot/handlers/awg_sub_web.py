@@ -86,7 +86,11 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
         if user is None:
             return web.Response(status=404, text="Not Found", headers=common_headers)
 
-        if getattr(user, "is_banned", False) is True or getattr(user, "is_deleted", False) is True:
+        if (
+            getattr(user, "is_banned", False) is True
+            or getattr(user, "is_deleted", False) is True
+            or getattr(user, "financial_hold", False) is True
+        ):
             return web.Response(status=403, text="Forbidden", headers=common_headers)
 
         if not user.subscription_end or is_expired(user.subscription_end):
@@ -287,7 +291,7 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
         server_configs = []
         for srv in awg_servers:
             p = profiles_by_server.get(srv.id)
-            if not p or not p.raw_config or p.provisioning_status != "active":
+            if not p or not p.raw_config or getattr(p, "is_active", None) is False or p.provisioning_status != "active":
                 continue
             conf = build_conf_file(p.raw_config)
             if conf:

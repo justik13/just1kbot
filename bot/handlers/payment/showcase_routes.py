@@ -486,7 +486,7 @@ async def render_tariff_duration_selection(
 
     if db_user:
         effective_devices = await get_user_profiles_count(
-            session, db_user.id
+            session, db_user.id, getattr(db_user, "active_sub_devices", None)
         )
 
         if effective_devices > device_limit:
