@@ -300,8 +300,6 @@ class SubscriptionService:
         new_tariff_id: int | None = None,
         create_entitlement: bool = True,
         admin_id: int | None = None,
-        source_type: str = "admin",
-        source_id: str | None = None,
         reason: str | None = None,
     ) -> User | None:
         if days < 0:
@@ -357,8 +355,8 @@ class SubscriptionService:
         if days > 0 and create_entitlement:
             entitlement = EntitlementEntry(
                 beneficiary_user_id=user.id,
-                source_type=source_type,
-                source_id=source_id or f"admin_{admin_id or 'system'}_{uuid.uuid4().hex[:12]}",
+                source_type="admin",
+                source_id=f"admin_{admin_id or 'system'}_{uuid.uuid4().hex[:12]}",
                 entry_type="manual_grant",
                 days_delta=days,
                 hours_delta=days * 24,
