@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction, PERMANENT_SUBSCRIPTION_DAYS
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
@@ -184,7 +184,7 @@ async def admin_sub_apply_reduce(
         telegram_id is None
         or days is None
         or days < 1
-        or days > PERMANENT_SUBSCRIPTION_DAYS
+        or days > 365
     ):
         await callback.answer(
             texts.ERROR_INVALID_DAYS_COUNT,

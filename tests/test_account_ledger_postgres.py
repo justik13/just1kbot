@@ -28,8 +28,10 @@ from database.models import (
 )
 from database.repositories.account_ledger_repo import (
     InsufficientAccountBalanceError,
+    create_admin_adjustment,
     create_payment_debit,
     create_purchase_debit,
+    create_purchase_reversal,
     credit_succeeded_topup,
     get_account_balance,
     get_payment_refundable_amount,
@@ -772,6 +774,204 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(net_balance, Decimal("-100.00"))
             self.assertEqual(snapshot.available, Decimal("0.00"))
             self.assertEqual(snapshot.debt, Decimal("100.00"))
+
+    async def test_create_purchase_reversal_with_allocations(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 500)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            quote = await self.quote(session, 200)
+            debit, debit_created = await create_purchase_debit(
+                session, user_id=self.user_id, quote_id=quote.id, amount=200
+            )
+            self.assertTrue(debit_created)
+            self.assertEqual(debit.amount, Decimal("-200.00"))
+
+            user = await session.get(User, self.user_id)
+            self.assertEqual(user.balance, Decimal("300.00"))
+
+            reversal, rev_created = await create_purchase_reversal(
+                session, debit_id=debit.id, metadata={"reason": "test_refund"}
+            )
+            self.assertTrue(rev_created)
+            self.assertEqual(reversal.amount, Decimal("200.00"))
+            self.assertEqual(reversal.entry_type, "purchase_reversal")
+            self.assertEqual(reversal.reversal_of_id, debit.id)
+
+            user = await session.get(User, self.user_id)
+            self.assertEqual(user.balance, Decimal("500.00"))
+
+            # Idempotency check: second invocation returns existing entry and created=False
+            repeated, repeated_created = await create_purchase_reversal(
+                session, debit_id=debit.id
+            )
+            self.assertFalse(repeated_created)
+            self.assertEqual(repeated.id, reversal.id)
+            user = await session.get(User, self.user_id)
+            self.assertEqual(user.balance, Decimal("500.00"))
+
+    async def test_create_purchase_reversal_fallback_without_allocations(self):
+        async with self.sessions.begin() as session:
+            # Setup user balance to 300.00
+            user = await session.get(User, self.user_id)
+            user.balance = Decimal("300.00")
+            await session.flush()
+
+            # Create a purchase debit entry directly without allocations (legacy/unallocated debit)
+            quote = await self.quote(session, 200)
+            debit = AccountLedgerEntry(
+                user_id=self.user_id,
+                entry_type="purchase_debit",
+                amount=Decimal("-200.00"),
+                currency="RUB",
+                payment_id=None,
+                quote_id=quote.id,
+                reversal_of_id=None,
+                idempotency_key=f"purchase-debit-fallback:{quote.id}",
+                metadata_={},
+            )
+            session.add(debit)
+            await session.flush()
+
+            reversal, rev_created = await create_purchase_reversal(
+                session, debit_id=debit.id
+            )
+            self.assertTrue(rev_created)
+            self.assertEqual(reversal.amount, Decimal("200.00"))
+            self.assertEqual(reversal.entry_type, "purchase_reversal")
+            self.assertEqual(reversal.reversal_of_id, debit.id)
+
+            # In fallback branch, user.balance must increase by abs(debit.amount): 300 + 200 = 500
+            user = await session.get(User, self.user_id)
+            self.assertEqual(user.balance, Decimal("500.00"))
+
+            # Idempotency check
+            repeated, repeated_created = await create_purchase_reversal(
+                session, debit_id=debit.id
+            )
+            self.assertFalse(repeated_created)
+            self.assertEqual(repeated.id, reversal.id)
+            user = await session.get(User, self.user_id)
+            self.assertEqual(user.balance, Decimal("500.00"))
+
+    async def test_create_purchase_reversal_invalid_inputs(self):
+        async with self.sessions.begin() as session:
+            with self.assertRaises(LookupError):
+                await create_purchase_reversal(session, debit_id=999999)
+
+            payment = await self.topup(session, 100)
+            credit, _ = await credit_succeeded_topup(session, payment_id=payment.id)
+            with self.assertRaises(LookupError):
+                await create_purchase_reversal(session, debit_id=credit.id)
+
+    async def test_create_purchase_reversal_with_mixed_bonus_and_real_allocations(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 100)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            await create_admin_adjustment(
+                session,
+                user_id=self.user_id,
+                signed_amount=50,
+                idempotency_key=f"bonus-grant:{self.user_id}",
+                metadata={"reason": "test_bonus"},
+            )
+            user = await session.get(User, self.user_id)
+            self.assertEqual(user.balance, Decimal("100.00"))
+            self.assertEqual(user.bonus_balance, Decimal("50.00"))
+
+            # Purchase for 120 RUB (50 bonus + 70 real)
+            quote = await self.quote(session, 120)
+            debit, created = await create_purchase_debit(
+                session, user_id=self.user_id, quote_id=quote.id, amount=120
+            )
+            self.assertTrue(created)
+            user = await session.get(User, self.user_id)
+            self.assertEqual(user.bonus_balance, Decimal("0.00"))
+            self.assertEqual(user.balance, Decimal("30.00"))
+
+            reversal, rev_created = await create_purchase_reversal(
+                session, debit_id=debit.id
+            )
+            self.assertTrue(rev_created)
+            self.assertEqual(reversal.amount, Decimal("120.00"))
+
+            user = await session.get(User, self.user_id)
+            self.assertEqual(user.bonus_balance, Decimal("50.00"))
+            self.assertEqual(user.balance, Decimal("100.00"))
+
+            snapshot = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(snapshot.available, Decimal("150.00"))
+            self.assertEqual(snapshot.bonus_available, Decimal("50.00"))
+            self.assertEqual(snapshot.real_available, Decimal("100.00"))
+
+    async def test_create_purchase_reversal_concurrent_deduplication(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 300)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            quote = await self.quote(session, 200)
+            debit, _ = await create_purchase_debit(
+                session, user_id=self.user_id, quote_id=quote.id, amount=200
+            )
+            debit_id = debit.id
+
+        async def reverse_one():
+            async with self.sessions.begin() as session:
+                return await create_purchase_reversal(session, debit_id=debit_id)
+
+        results = await asyncio.gather(reverse_one(), reverse_one())
+        self.assertEqual(sum(created for _, created in results), 1)
+
+        async with self.sessions() as session:
+            reversals_count = await session.scalar(
+                select(func.count(AccountLedgerEntry.id)).where(
+                    AccountLedgerEntry.entry_type == "purchase_reversal",
+                    AccountLedgerEntry.reversal_of_id == debit_id,
+                )
+            )
+            self.assertEqual(reversals_count, 1)
+            user = await session.get(User, self.user_id)
+            self.assertEqual(user.balance, Decimal("300.00"))
+
+    async def test_settle_account_purchase_enforces_effective_device_count(self):
+        # Version and Tariff device_limit is 2
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 500)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            user = await session.get(User, self.user_id)
+            # User has 2 active sub devices: <= limit (2), purchase must succeed
+            user.active_sub_devices = {
+                "dev1": {"name": "Phone"},
+                "dev2": {"name": "Laptop"},
+            }
+            await session.flush()
+
+            intent = await prepare_account_purchase(
+                session, user_id=self.user_id, tariff_id=self.tariff_id
+            )
+            result = await settle_account_purchase(
+                session, user_id=self.user_id, quote_public_id=intent.quote.public_id
+            )
+            self.assertTrue(result.created)
+
+        async with self.sessions.begin() as session:
+            user = await session.get(User, self.user_id)
+            # User adds 3rd device: 3 > limit (2)
+            user.active_sub_devices = {
+                "dev1": {"name": "Phone"},
+                "dev2": {"name": "Laptop"},
+                "dev3": {"name": "Tablet"},
+            }
+            await session.flush()
+
+            intent = await prepare_account_purchase(
+                session, user_id=self.user_id, tariff_id=self.tariff_id
+            )
+            with self.assertRaises(AccountPurchaseError) as ctx:
+                await settle_account_purchase(
+                    session,
+                    user_id=self.user_id,
+                    quote_public_id=intent.quote.public_id,
+                )
+            self.assertEqual(str(ctx.exception), "too_many_devices")
 
 
 if __name__ == "__main__":

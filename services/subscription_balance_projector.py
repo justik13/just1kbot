@@ -294,7 +294,11 @@ def project_subscription_balance(
                     ).quantize(Decimal("1.000000"))
                 else:
                     source_bonus_hours += whole
-            if (
+            is_daily_calendar_change = (
+                metadata.get("option_type") in ("transfer", "surcharge")
+                or (not source_paid_hours and not current_paid_hours)
+            )
+            if not is_daily_calendar_change and (
                 source_paid_hours != current_paid_hours
                 or source_paid_value.quantize(Decimal("1.000000"))
                 != current_paid_value.quantize(Decimal("1.000000"))

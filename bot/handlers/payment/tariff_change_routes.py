@@ -24,6 +24,7 @@ from services.account_tariff_change import (
     settle_account_tariff_change,
 )
 from services.maintenance_service import MaintenanceService
+from services.tariff_change_quote import create_tariff_change_quote
 from utils.datetime_helpers import now_utc
 from bot.formatters import get_tariff_display_name
 from utils.telegram import EFFECT_CONFETTI, render_hub
@@ -117,6 +118,10 @@ async def render_tariff_change_review(
         before=before,
         after=after
     )
+    if quote.rounding_loss_value_rub and quote.rounding_loss_value_rub > 0:
+        text += texts.PAYMENT_TARIFF_CHANGE_LEFTOVER_NOTE.format(
+            amount=int(quote.rounding_loss_value_rub)
+        )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
         exact = max(int(intent.shortage), minimum)
@@ -143,6 +148,72 @@ async def render_tariff_change_review(
         callback.message.chat.id,
         text,
         keyboard,
+    )
+
+
+@router.callback_query(F.data.startswith("tariff_change_choose:"))
+async def choose_tariff_change_option(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    await callback.answer(show_alert=False)
+    if db_user is None:
+        await callback.answer(
+            texts.PAYMENT_CHANGE_TARIFF_INVALID_OPERATION,
+            show_alert=True,
+        )
+        return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="payment_change_tariff")
+        return
+
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+    option_type = parts[1]
+    try:
+        target_tariff_id = int(parts[2])
+    except ValueError:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    quote_result = await create_tariff_change_quote(
+        session,
+        user_id=db_user.id,
+        target_tariff_id=target_tariff_id,
+        as_of=now_utc(),
+        option_type=option_type,
+    )
+    if quote_result.failure_code:
+        errors = {
+            "target_device_limit_too_small": texts.PAYMENT_DEVICES_BLOCKED_NOTICE,
+            "same_tariff_requires_renew": texts.PAYMENT_SHOWCASE,
+            "financial_hold": texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+            "account_debt": texts.PAYMENT_DEBT_BLOCKED_NOTICE,
+            "transfer_below_minimum_days": texts.PAYMENT_TARIFF_CHANGE_TRANSFER_MINIMUM_ALERT,
+            "target_tariff_not_found": texts.ERROR_TARIFF_UNAVAILABLE,
+            "target_tariff_inactive": texts.ERROR_TARIFF_UNAVAILABLE,
+            "subscription_inactive": texts.PAYMENT_SUBSCRIPTION_INACTIVE,
+            "current_tariff_unknown": texts.PAYMENT_CURRENT_TARIFF_UNKNOWN,
+            "change_cooldown_active": texts.PAYMENT_DOWNGRADE_COOLDOWN_ALERT,
+        }
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            errors.get(
+                quote_result.failure_code,
+                texts.PAYMENT_SHOWCASE_PREPARE_CHANGE_FAILED,
+            ),
+            get_back_button(f"select_tariff:{target_tariff_id}:change"),
+        )
+        return
+
+    await render_tariff_change_review(
+        callback, session, db_user, quote_result.quote.public_id
     )
 
 

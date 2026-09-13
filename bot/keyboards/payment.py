@@ -386,6 +386,54 @@ def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_downgrade_blocked_keyboard(back_to: str = "payment_change_tariff") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_PAYMENT_GO_TO_DEVICES,
+        callback_data="menu_connections",
+        style="success",
+    )
+    builder.button(
+        text=texts.BTN_PAYMENT_CHOOSE_ANOTHER_TARIFF,
+        callback_data=back_to,
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_tariff_change_options_keyboard(
+    *,
+    target_tariff_id: int,
+    option1_available: bool,
+    option1_days: int,
+    option2_1m_surcharge: int,
+    option2_1m_tariff_id: int,
+    option2_3m_surcharge: int | None = None,
+    option2_3m_tariff_id: int | None = None,
+    back_callback: str = "payment_change_tariff",
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if option1_available:
+        builder.button(
+            text=texts.BTN_PAYMENT_TRANSFER_DAYS.format(days=option1_days),
+            callback_data=f"tariff_change_choose:transfer:{target_tariff_id}",
+            style="success",
+        )
+    builder.button(
+        text=texts.BTN_PAYMENT_SURCHARGE_1M.format(amount=option2_1m_surcharge),
+        callback_data=f"tariff_change_choose:surcharge:{option2_1m_tariff_id}",
+    )
+    if option2_3m_surcharge is not None and option2_3m_tariff_id is not None:
+        builder.button(
+            text=texts.BTN_PAYMENT_SURCHARGE_3M.format(amount=option2_3m_surcharge),
+            callback_data=f"tariff_change_choose:surcharge:{option2_3m_tariff_id}",
+        )
+    builder.button(text=texts.BTN_BACK, callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+
 def get_balance_shortage_keyboard(
     quote_public_id: str, exact_amount: int, _back_callback: str | None = None
 ) -> InlineKeyboardMarkup:

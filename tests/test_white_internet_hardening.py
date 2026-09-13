@@ -142,7 +142,11 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0026_wi_trial_semantics"])
+        self.assertEqual(heads, ["0028_two_balance_system"])
+        rev = scripts.get_revision("0028_two_balance_system")
+        self.assertEqual(rev.down_revision, "0027_awg_subscription_system")
+        rev = scripts.get_revision("0027_awg_subscription_system")
+        self.assertEqual(rev.down_revision, "0026_wi_trial_semantics")
         rev = scripts.get_revision("0026_wi_trial_semantics")
         self.assertEqual(rev.down_revision, "0025_admin_qol_and_idempotency")
         rev = scripts.get_revision("0025_admin_qol_and_idempotency")

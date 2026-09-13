@@ -89,16 +89,30 @@ async def get_account_balance(
     for_update: bool = False,
     locked_user: User | None = None,
 ) -> AccountBalanceSnapshot:
-    if for_update:
-        await lock_account_user(session, user_id, locked_user=locked_user)
-    position = Decimal(
-        await session.scalar(
-            select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
-                AccountLedgerEntry.user_id == user_id
+    user = locked_user
+    if user is None and for_update:
+        user = await lock_account_user(session, user_id)
+    elif user is None:
+        user_res = await session.scalar(select(User).where(User.id == user_id))
+        if isinstance(user_res, User):
+            user = user_res
+
+    if user is not None and hasattr(user, "balance") and isinstance(user.balance, (Decimal, int, float, str)):
+        real_pos = Decimal(str(user.balance or ZERO))
+        bonus_pos = Decimal(str(user.bonus_balance or ZERO))
+    else:
+        real_pos = Decimal(
+            await session.scalar(
+                select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
+                    AccountLedgerEntry.user_id == user_id
+                )
             )
+            or ZERO
         )
-        or ZERO
-    )
+        bonus_pos = ZERO
+
+    debt = max(ZERO, -real_pos)
+
     reserved = Decimal(
         await session.scalar(
             select(
@@ -110,59 +124,9 @@ async def get_account_balance(
         )
         or ZERO
     )
-    debt = max(ZERO, -position)
 
-    credits = (
-        await session.scalars(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.user_id == user_id,
-                AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.entry_type.in_(
-                    ("payment_credit", "admin_adjustment")
-                ),
-            )
-        )
-    ).all()
-
-    real_available = ZERO
-    bonus_available = ZERO
-    real_negative = ZERO
-    bonus_negative = ZERO
-
-    capacities = await _batch_credit_capacities(session, list(credits))
-    for credit in credits:
-        cap = capacities.get(credit.id, ZERO)
-        if cap < ZERO:
-            if credit.entry_type == "payment_credit":
-                real_negative += -cap
-            elif credit.entry_type == "admin_adjustment":
-                bonus_negative += -cap
-        else:
-            if credit.entry_type == "payment_credit":
-                real_available += cap
-            elif credit.entry_type == "admin_adjustment":
-                bonus_available += cap
-
-    # Deduct real_negative from real_available, then bonus_available
-    if real_negative > ZERO:
-        if real_available >= real_negative:
-            real_available -= real_negative
-        else:
-            rem = real_negative - real_available
-            real_available = ZERO
-            bonus_available = max(ZERO, bonus_available - rem)
-            
-    # Deduct bonus_negative from bonus_available, then real_available
-    if bonus_negative > ZERO:
-        if bonus_available >= bonus_negative:
-            bonus_available -= bonus_negative
-        else:
-            rem = bonus_negative - bonus_available
-            bonus_available = ZERO
-            real_available = max(ZERO, real_available - rem)
-
-    real_position = real_available
-    bonus_position = bonus_available
+    real_available = max(ZERO, real_pos)
+    bonus_available = max(ZERO, bonus_pos)
 
     if reserved > ZERO:
         if real_available >= reserved:
@@ -173,24 +137,15 @@ async def get_account_balance(
             bonus_available = max(ZERO, bonus_available - rem_res)
 
     available = max(ZERO, real_available + bonus_available)
-    accounting_available = max(ZERO, position - reserved)
-    if available > accounting_available:
-        reduction = available - accounting_available
-        if bonus_available >= reduction:
-            bonus_available -= reduction
-        else:
-            reduction -= bonus_available
-            bonus_available = ZERO
-            real_available = max(ZERO, real_available - reduction)
-        available = accounting_available
+    position = real_pos + bonus_pos
 
     return AccountBalanceSnapshot(
         accounting_position=position,
         available=available,
         reserved=reserved,
         debt=debt,
-        real_position=real_position,
-        bonus_position=bonus_position,
+        real_position=real_pos,
+        bonus_position=bonus_pos,
         real_available=real_available,
         bonus_available=bonus_available,
     )
@@ -287,6 +242,7 @@ async def credit_succeeded_topup(
     )
     if created:
         payment.credited_at = payment.credited_at or now_utc()
+        user.balance = (user.balance or ZERO) + amount
     return entry, created
 
 
@@ -323,10 +279,19 @@ async def create_admin_adjustment(
         values=values,
         economic_lookup=AccountLedgerEntry.idempotency_key == idempotency_key,
     )
-    if created and amount < 0:
-        await _allocate_fifo(
-            session, user_id=user_id, debit=entry, amount=abs(amount)
-        )
+    if created:
+        user = await lock_account_user(session, user_id)
+        if amount > 0:
+            user.bonus_balance = (user.bonus_balance or ZERO) + amount
+        else:
+            abs_amt = abs(amount)
+            bonus_deduct = min(user.bonus_balance or ZERO, abs_amt)
+            real_deduct = abs_amt - bonus_deduct
+            user.bonus_balance = (user.bonus_balance or ZERO) - bonus_deduct
+            user.balance = (user.balance or ZERO) - real_deduct
+            await _allocate_fifo(
+                session, user_id=user_id, debit=entry, amount=abs_amt
+            )
     return entry, created
 
 
@@ -482,66 +447,95 @@ async def create_purchase_debit(
     session: AsyncSession,
     *,
     user_id: int,
-    quote_id: int,
+    quote_id: int | None = None,
     amount: object,
+    idempotency_key: str | None = None,
+    metadata: dict | None = None,
 ) -> tuple[AccountLedgerEntry | None, bool]:
     amount = whole_rubles(amount, allow_zero=True)
     user = await lock_account_user(session, user_id)
-    quote = await session.scalar(
-        select(TariffQuote)
-        .where(TariffQuote.id == quote_id, TariffQuote.user_id == user.id)
-        .with_for_update()
-    )
-    if quote is None:
-        raise LookupError("purchase_quote_not_found")
-    if quote.amount_due_rub != amount:
-        raise AccountLedgerConflictError("purchase_quote_amount_mismatch")
+    quote = None
+    if quote_id is not None:
+        quote = await session.scalar(
+            select(TariffQuote)
+            .where(TariffQuote.id == quote_id, TariffQuote.user_id == user.id)
+            .with_for_update()
+        )
+        if quote is None:
+            raise LookupError("purchase_quote_not_found")
+        if quote.amount_due_rub != amount:
+            raise AccountLedgerConflictError("purchase_quote_amount_mismatch")
     if amount == 0:
         return None, False
+
+    effective_idempotency_key = (
+        idempotency_key or (f"purchase-debit:{quote.id}" if quote else None)
+    )
+    if not effective_idempotency_key:
+        raise ValueError("quote_id or idempotency_key is required")
+
     existing = await session.scalar(
         select(AccountLedgerEntry).where(
             AccountLedgerEntry.entry_type == "purchase_debit",
-            AccountLedgerEntry.quote_id == quote.id,
+            (AccountLedgerEntry.quote_id == quote.id)
+            if quote
+            else (AccountLedgerEntry.idempotency_key == effective_idempotency_key),
         )
     )
     if existing is not None:
         if existing.user_id != user.id or existing.amount != -amount:
             raise AccountLedgerConflictError("purchase_debit_conflict")
         return existing, False
-    if quote.status != "active":
-        raise LookupError(f"purchase_quote_inactive:{quote.status}")
-    if quote.expires_at is not None and quote.expires_at <= now_utc():
-        raise LookupError("purchase_quote_expired")
+
+    if quote is not None:
+        if quote.status != "active":
+            raise LookupError(f"purchase_quote_inactive:{quote.status}")
+        if quote.expires_at is not None and quote.expires_at <= now_utc():
+            raise LookupError("purchase_quote_expired")
+
     snapshot = await get_account_balance(
         session, user_id=user.id, for_update=False, locked_user=user
     )
     if snapshot.available < amount:
         raise InsufficientAccountBalanceError("insufficient_available_balance")
+
+    meta = dict(metadata or {})
+    if quote:
+        meta["operation_type"] = quote.operation_type
+
     values = {
         "user_id": user.id,
         "entry_type": "purchase_debit",
         "amount": -amount,
         "currency": "RUB",
         "payment_id": None,
-        "quote_id": quote.id,
+        "quote_id": quote.id if quote else None,
         "reversal_of_id": None,
-        "idempotency_key": f"purchase-debit:{quote.id}",
-        "metadata_": {"operation_type": quote.operation_type},
+        "idempotency_key": effective_idempotency_key,
+        "metadata_": meta,
     }
     debit, created = await _insert_or_get_entry(
         session,
         values=values,
         economic_lookup=(
             (AccountLedgerEntry.entry_type == "purchase_debit")
-            & (AccountLedgerEntry.quote_id == quote.id)
+            & (
+                (AccountLedgerEntry.quote_id == quote.id)
+                if quote
+                else (AccountLedgerEntry.idempotency_key == effective_idempotency_key)
+            )
         ),
     )
     if created:
-        # A committed economic debit must never leave its immutable checkout
-        # quote active. Higher-level settlement runs in the same transaction,
-        # so any later failure rolls this transition back with the debit.
-        quote.status = "consumed"
-        quote.consumed_at = quote.consumed_at or now_utc()
+        if quote is not None:
+            quote.status = "consumed"
+            quote.consumed_at = quote.consumed_at or now_utc()
+
+        bonus_deduct = min(user.bonus_balance or ZERO, amount)
+        real_deduct = amount - bonus_deduct
+        user.bonus_balance = (user.bonus_balance or ZERO) - bonus_deduct
+        user.balance = (user.balance or ZERO) - real_deduct
+
         await _allocate_fifo(
             session, user_id=user.id, debit=debit, amount=amount
         )
@@ -576,7 +570,7 @@ async def create_purchase_reversal(
         "idempotency_key": f"purchase-reversal:{debit.id}",
         "metadata_": dict(metadata or {}),
     }
-    return await _insert_or_get_entry(
+    entry, created = await _insert_or_get_entry(
         session,
         values=values,
         economic_lookup=(
@@ -584,6 +578,40 @@ async def create_purchase_reversal(
             & (AccountLedgerEntry.reversal_of_id == debit.id)
         ),
     )
+    if created:
+        user = await lock_account_user(session, debit.user_id)
+        allocations = (
+            await session.scalars(
+                select(AccountLedgerAllocation).where(
+                    AccountLedgerAllocation.debit_entry_id == debit.id
+                )
+            )
+        ).all()
+        if allocations:
+            credit_ids = [a.credit_entry_id for a in allocations]
+            credits = {
+                c.id: c
+                for c in (
+                    await session.scalars(
+                        select(AccountLedgerEntry).where(
+                            AccountLedgerEntry.id.in_(credit_ids)
+                        )
+                    )
+                ).all()
+            }
+            bonus_refund = ZERO
+            real_refund = ZERO
+            for a in allocations:
+                c = credits.get(a.credit_entry_id)
+                if c and c.entry_type == "admin_adjustment":
+                    bonus_refund += Decimal(a.amount)
+                else:
+                    real_refund += Decimal(a.amount)
+            user.bonus_balance = (user.bonus_balance or ZERO) + bonus_refund
+            user.balance = (user.balance or ZERO) + real_refund
+        else:
+            user.balance = (user.balance or ZERO) + abs(Decimal(debit.amount))
+    return entry, created
 
 
 async def get_payment_refundable_amount(
@@ -769,11 +797,15 @@ async def create_payment_debit(
         "idempotency_key": idempotency_key,
         "metadata_": dict(metadata or {}),
     }
-    return await _insert_or_get_entry(
+    entry, created = await _insert_or_get_entry(
         session,
         values=values,
         economic_lookup=AccountLedgerEntry.idempotency_key == idempotency_key,
     )
+    if created:
+        user = await lock_account_user(session, payment.user_id)
+        user.balance = (user.balance or ZERO) - amount
+    return entry, created
 
 
 async def get_account_history(

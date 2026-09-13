@@ -31,8 +31,8 @@ from services.account_tariff_change import (
     AccountTariffChangeError,
     settle_account_tariff_change,
 )
-from services.subscription_balance_service import get_subscription_balance_snapshot
 from services.tariff_change_quote import create_tariff_change_quote
+from tests.db_utils import TRUNCATE_SQL
 from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
@@ -44,12 +44,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "TRUNCATE paid_value_ledger, tariff_quotes, tariff_versions, "
-                    "entitlement_entries, payments, users, tariffs RESTART IDENTITY CASCADE"
-                )
-            )
+            await connection.execute(text(TRUNCATE_SQL))
 
     async def asyncTearDown(self):
         await self.engine.dispose()
@@ -214,10 +209,10 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first.quote.status, "cancelled")
             self.assertEqual(first.quote.diagnostic_reason, "source_balance_changed")
 
-    async def test_untracked_projection_cancels_unbound_active_quote(self):
+    async def test_manual_adjustment_does_not_block_tariff_change(self):
         user, _, target, as_of = await self.seed()
         async with self.sessions.begin() as session:
-            first = await create_tariff_change_quote(
+            await create_tariff_change_quote(
                 session, user_id=user, target_tariff_id=target, as_of=as_of
             )
             await session.execute(
@@ -235,30 +230,14 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                     "created_at": as_of + timedelta(seconds=1),
                 },
             )
-            snapshot = await get_subscription_balance_snapshot(
-                session, user_id=user, as_of=as_of + timedelta(minutes=1)
-            )
-            self.assertFalse(snapshot.tracked)
             repeated = await create_tariff_change_quote(
                 session,
                 user_id=user,
                 target_tariff_id=target,
                 as_of=as_of + timedelta(minutes=1),
             )
-            self.assertIsNone(repeated.quote)
-            self.assertEqual(repeated.failure_code, "subscription_balance_untracked")
-            self.assertEqual(
-                (first.quote.status, first.quote.diagnostic_reason),
-                ("cancelled", "source_balance_untracked"),
-            )
-            self.assertEqual(
-                await session.scalar(
-                    select(func.count(TariffQuote.id)).where(
-                        TariffQuote.operation_type == "change"
-                    )
-                ),
-                1,
-            )
+            self.assertIsNotNone(repeated.quote)
+            self.assertIsNone(repeated.failure_code)
 
     async def test_conflicts_expiry_and_closed_preconditions(self):
         user, source, target, as_of = await self.seed()
@@ -301,7 +280,8 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 target_tariff_id=legacy_target,
                 as_of=legacy_as_of,
             )
-            self.assertEqual(result.failure_code, "subscription_balance_untracked")
+            self.assertIsNotNone(result.quote)
+            self.assertIsNone(result.failure_code)
 
     async def test_concurrent_same_target_serializes_to_one_quote(self):
         user, _, target, as_of = await self.seed()
@@ -493,6 +473,15 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 await session.scalar(select(func.count(PaymentProviderOperation.id))),
                 0,
             )
+            from services.subscription_balance_service import (
+                get_subscription_balance_snapshot,
+            )
+
+            snapshot = await get_subscription_balance_snapshot(
+                session, user_id=user, as_of=as_of
+            )
+            self.assertTrue(snapshot.tracked)
+            self.assertIsNone(snapshot.failure_code)
 
     async def test_zero_due_change_needs_no_account_debit(self):
         user, _, target, as_of = await self.seed()

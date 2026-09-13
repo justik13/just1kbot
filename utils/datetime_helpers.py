@@ -36,7 +36,7 @@ def format_datetime_msk(
 def is_permanent_subscription(dt: datetime | None) -> bool:
     if dt is None:
         return False
-    return dt.year >= 2100 or (dt.replace(tzinfo=timezone.utc) - now_utc()).days >= 36500
+    return dt.year >= 2099
 
 
 def is_expired(dt: datetime | None) -> bool:

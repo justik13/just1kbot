@@ -724,8 +724,13 @@ class TestIntegrationsAndCleanupVerification(unittest.TestCase):
             content = caddyfile_path.read_text(encoding="utf-8")
             self.assertNotIn("/amnezia/open", content, f"{fname} contains /amnezia/open")
             self.assertNotIn("/subscription/", content, f"{fname} contains /subscription/")
-            # Allow /sub/wl/* for White Internet, but ensure no generic legacy /sub/* or /amnezia/
-            non_wl_content = content.replace("/sub/wl/*", "").replace("{$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*", "")
+            # Allow /sub/wl/* for White Internet and /sub/awg/* for AWG, but ensure no generic legacy /sub/* or /amnezia/
+            non_wl_content = (
+                content.replace("/sub/wl/*", "")
+                .replace("{$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*", "")
+                .replace("/sub/awg/*", "")
+                .replace("{$AWG_SUB_PATH_PREFIX:/sub/awg}/*", "")
+            )
             self.assertNotIn("/sub/", non_wl_content, f"{fname} contains legacy /sub/")
 
     def test_device_rename_routes_does_not_use_payment_cancel(self):

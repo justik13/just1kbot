@@ -30,7 +30,7 @@ from database.repositories.paid_value_repo import (
     PaidValueLedgerConflictError,
     get_or_create_account_purchase_entry,
 )
-from database.repositories.profiles_repo import get_user_profiles_count
+from database.repositories.profiles_repo import get_user_effective_device_count
 from database.repositories.tariff_quotes_repo import (
     CheckoutQuoteConflictError,
     get_active_financial_quotes_for_update,
@@ -352,7 +352,9 @@ async def _settle_account_purchase(
             or current_tariff.device_limit != version.device_limit
         ):
             raise AccountPurchaseError("subscription_state_changed")
-    profiles = await get_user_profiles_count(session, user.id)
+    profiles = await get_user_effective_device_count(
+        session, user.id, getattr(user, "active_sub_devices", None)
+    )
     if profiles > version.device_limit:
         raise AccountPurchaseError("too_many_devices")
 

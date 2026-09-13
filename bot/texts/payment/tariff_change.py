@@ -95,4 +95,24 @@ PAYMENT_TARIFF_CHANGE_SUCCESS_CARD = """🎉 <b>Тариф изменён</b>
 💰 Баланс: <b>{real_balance} ₽</b>
 🎁 Бонусный баланс: <b>{bonus_balance} ₽</b>"""
 
+PAYMENT_TARIFF_CHANGE_OPTIONS_HEADER = """⚙️ <b>Смена тарифа</b>
+
+Текущий тариф: <b>{source_tariff_name}</b> (осталось {remaining_days} дн. ≈ {remaining_value} ₽)
+Новый тариф: <b>{target_tariff_name}</b> (лимит {target_device_limit} устр.)
+
+Выберите вариант перехода:
+• <b>Перенос остатка</b> — перевод стоимости в дни нового тарифа (доступен от 7 дней; остаток зачисляется на бонусный баланс).
+• <b>Доплата</b> — перерасчёт остатка и доплата до 1 или 3 месяцев."""
+
+PAYMENT_TARIFF_CHANGE_LEFTOVER_BONUS = "\n\n🎁 Неизрасходованный остаток <b>{bonus_rub} ₽</b> зачислен на ваш бонусный баланс!"
+
 PAYMENT_TARIFF_UNAVAILABLE_NOTICE = "Выбранный тариф больше недоступен."
+
+BTN_PAYMENT_GO_TO_DEVICES = "🔌 Перейти к устройствам"
+BTN_PAYMENT_CHOOSE_ANOTHER_TARIFF = "← Выбрать другой тариф"
+BTN_PAYMENT_TRANSFER_DAYS = "🔄 Перенести остаток ({days} дн.)"
+BTN_PAYMENT_SURCHARGE_1M = "➕ Доплата до 1 мес. ({amount} ₽)"
+BTN_PAYMENT_SURCHARGE_3M = "➕ Доплата до 3 мес. ({amount} ₽)"
+
+PAYMENT_TARIFF_CHANGE_TRANSFER_MINIMUM_ALERT = "Перенос остатка доступен только при остатке от 7 дней."
+PAYMENT_TARIFF_CHANGE_LEFTOVER_NOTE = "\n\n🎁 Неизрасходованный остаток <b>{amount} ₽</b> будет зачислен на бонусный баланс."

@@ -1,13 +1,14 @@
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from bot.keyboards.notifications import (
+    get_inactive_sub_device_keyboard,
     get_post_expiry_keyboard,
     get_pre_expiry_keyboard,
 )
@@ -17,17 +18,21 @@ from bot.texts.runtime.notifications import (
     NOTIFY_3D,
     NOTIFY_EXPIRED,
     NOTIFY_GRACE_12H,
+    NOTIFY_INACTIVE_SUB_DEVICE,
     TIME_DAYS_HOURS_FORMAT,
     TIME_HOURS_MINUTES_FORMAT,
     TIME_SOON_LABEL,
 )
+from bot.texts.connection.config import AWG_SUB_DEVICE_LABEL_TEMPLATE
 from config.constants import (
     GRACE_PERIOD_HOURS,
     NOTIFICATION_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,
 )
 from database.connection import session_scope
-from database.models import User
+from database.models import User, VPNProfile
+from services.device_service import RESERVING_STATUSES
+from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
 
@@ -120,6 +125,11 @@ async def subscription_notifications_loop(
             )
 
             await _send_post_expiry_notifications(
+                bot,
+                current_time,
+            )
+
+            await _send_inactive_sub_device_notifications(
                 bot,
                 current_time,
             )
@@ -445,3 +455,104 @@ async def _send_post_expiry_notifications(
                         user.telegram_id,
                         e,
                     )
+
+
+async def _send_inactive_sub_device_notifications(
+    bot: Bot | None,
+    current_time,
+):
+    if bot is None:
+        return
+
+    threshold_7d = current_time - timedelta(days=7)
+
+    async with session_scope() as session:
+        stmt = (
+            select(User)
+            .where(
+                User.is_banned.is_(False),
+                User.is_bot_blocked.is_(False),
+                User.is_deleted.is_(False),
+                User.subscription_end > current_time,
+                User.active_sub_devices.is_not(None),
+            )
+            .with_for_update(skip_locked=True)
+            .limit(100)
+        )
+        users = (await session.execute(stmt)).scalars().all()
+
+        for user in users:
+            active_sub_devices = dict(getattr(user, "active_sub_devices", None) or {})
+            if not active_sub_devices:
+                continue
+
+            manual_count_stmt = select(func.count(VPNProfile.id)).where(
+                VPNProfile.user_id == user.id,
+                VPNProfile.device_type == "manual",
+                VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+            )
+            manual_count = (await session.execute(manual_count_stmt)).scalar_one()
+            total_active = manual_count + len(active_sub_devices)
+
+            effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
+            limit = effective_limit or getattr(user, "device_limit", 2) or 2
+
+            # Only notify if user has reached or exceeded device quota
+            if total_active < limit:
+                continue
+
+            modified = False
+            for hwid_hash, dev_info in active_sub_devices.items():
+                if not isinstance(dev_info, dict):
+                    continue
+                last_seen_str = dev_info.get("last_seen")
+                if not last_seen_str:
+                    continue
+                try:
+                    dt = datetime.fromisoformat(last_seen_str)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+
+                if dt >= threshold_7d:
+                    continue
+
+                notified_at_str = dev_info.get("notified_inactive_at")
+                if notified_at_str:
+                    try:
+                        ndt = datetime.fromisoformat(notified_at_str)
+                        if ndt.tzinfo is None:
+                            ndt = ndt.replace(tzinfo=timezone.utc)
+                        if (current_time - ndt).total_seconds() < 7 * 86400:
+                            continue
+                    except Exception:
+                        pass
+
+                label = dev_info.get("label") or AWG_SUB_DEVICE_LABEL_TEMPLATE.format(index=dev_info.get("device_index", 1))
+                msg = NOTIFY_INACTIVE_SUB_DEVICE.format(device_label=label)
+                keyboard = get_inactive_sub_device_keyboard(label=label, hwid_prefix=hwid_hash[:16])
+
+                try:
+                    await global_send_limiter.acquire()
+                    await bot.send_message(
+                        user.telegram_id,
+                        msg,
+                        reply_markup=keyboard,
+                        parse_mode="HTML",
+                    )
+                    dev_info["notified_inactive_at"] = current_time.isoformat()
+                    modified = True
+                except TelegramForbiddenError:
+                    user.is_bot_blocked = True
+                    break
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send inactive device notification to %s: %s",
+                        user.telegram_id,
+                        e,
+                    )
+
+            if modified:
+                user.active_sub_devices = active_sub_devices
+                await session.flush()

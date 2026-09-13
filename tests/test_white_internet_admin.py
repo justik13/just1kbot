@@ -378,7 +378,7 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
-             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_profiles_count", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_effective_device_count", new=AsyncMock(return_value=0)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.has_user_any_subscription", new=AsyncMock(return_value=False)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=None)), \
              patch("bot.handlers.admin.users.subscription_menu_routes._get_white_internet_card_info", new=AsyncMock(return_value=None)):
@@ -409,7 +409,7 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch.object(WhiteInternetService, "reset_user_trial", new=AsyncMock(return_value=(True, "ok"))), \
              patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()), \
-             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_profiles_count", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_effective_device_count", new=AsyncMock(return_value=0)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.has_user_any_subscription", new=AsyncMock(return_value=False)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=None)), \
              patch("bot.handlers.admin.users.subscription_menu_routes._get_white_internet_card_info", new=AsyncMock(return_value=None)):
@@ -441,7 +441,7 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch.object(WhiteInternetService, "create_trial_subscription", new=AsyncMock(return_value=(True, "ok", sub))), \
              patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()), \
-             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_profiles_count", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_effective_device_count", new=AsyncMock(return_value=0)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.has_user_any_subscription", new=AsyncMock(return_value=True)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
              patch("bot.handlers.admin.users.subscription_menu_routes._get_white_internet_card_info", new=AsyncMock(return_value="WL Active")):
@@ -489,7 +489,7 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch.object(WhiteInternetService, "reset_user_trial", new=AsyncMock(return_value=(True, "ok"))), \
              patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()), \
-             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_profiles_count", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_effective_device_count", new=AsyncMock(return_value=0)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.has_user_any_subscription", new=AsyncMock(return_value=False)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=None)), \
              patch("bot.handlers.admin.users.subscription_menu_routes._get_white_internet_card_info", new=AsyncMock(return_value=None)):
@@ -518,7 +518,7 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
              patch.object(WhiteInternetService, "create_trial_subscription", new=AsyncMock(return_value=(True, "ok", sub))), \
              patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()), \
-             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_profiles_count", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_effective_device_count", new=AsyncMock(return_value=0)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.has_user_any_subscription", new=AsyncMock(return_value=True)), \
              patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
              patch("bot.handlers.admin.users.subscription_menu_routes._get_white_internet_card_info", new=AsyncMock(return_value="WL Active")):

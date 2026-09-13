@@ -9,22 +9,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import (
     get_back_button,
-    get_balance_change_start_keyboard,
     get_balance_purchase_start_keyboard,
     get_change_tariff_keyboard,
+    get_downgrade_blocked_keyboard,
     get_renew_keyboard,
     get_same_tariff_keyboard,
+    get_tariff_change_options_keyboard,
     get_tariff_duration_keyboard,
 )
-from database.repositories.profiles_repo import get_user_profiles_count
+from database.repositories.profiles_repo import (
+    get_user_effective_device_count,
+)
 from database.repositories.tariffs_repo import (
     get_active_tariffs,
     get_tariff_by_id,
 )
 from services.account_purchase import AccountPurchaseError, prepare_account_purchase
-from services.account_tariff_change import get_account_tariff_change_intent
 from services.maintenance_service import MaintenanceService
-from services.tariff_change_quote import create_tariff_change_quote
+from services.tariff_change_quote import (
+    calculate_tariff_change_options,
+)
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
 from bot.formatters import (
@@ -45,6 +49,9 @@ from .common import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Compatibility alias for legacy tests
+get_user_profiles_count = get_user_effective_device_count
 
 router = Router()
 
@@ -189,110 +196,60 @@ async def select_tariff(
     device_limit = getattr(tariff, "device_limit", 2)
 
     if source == "change":
-        quote_result = await create_tariff_change_quote(
-            session,
-            user_id=db_user.id,
-            target_tariff_id=tariff.id,
-            as_of=now_utc(),
+        effective_devices = await get_user_effective_device_count(
+            session, db_user.id, getattr(db_user, "active_sub_devices", None)
         )
-        if quote_result.failure_code:
-            logger.warning(
-                "Tariff change quote creation failed: user_id=%s, target_tariff_id=%s, failure_code=%s, snapshot_failure_code=%s",
-                db_user.id,
-                tariff.id,
-                quote_result.failure_code,
-                getattr(quote_result, "snapshot_failure_code", None),
-            )
-            errors = {
-                "target_device_limit_too_small": (
-                    texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                        profiles_count=await get_user_profiles_count(
-                            session, db_user.id
-                        ),
-                        new_limit=device_limit,
-                    )
-                ),
-                "same_tariff_requires_renew": (
-                    texts.PAYMENT_SHOWCASE
-                ),
-                "financial_hold": (
-                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE
-                ),
-                "account_debt": (
-                    texts.PAYMENT_DEBT_BLOCKED_NOTICE
-                ),
-                "subscription_balance_untracked": (
-                    texts.PAYMENT_SHOWCASE_CALC_FAILED
-                ),
-                "mixed_source_tariffs": (
-                    texts.PAYMENT_SHOWCASE_CALC_FAILED
-                ),
-                "target_tariff_not_found": (
-                    texts.ERROR_TARIFF_UNAVAILABLE
-                ),
-                "target_tariff_inactive": (
-                    texts.ERROR_TARIFF_UNAVAILABLE
-                ),
-                "user_ineligible": (
-                    texts.PAYMENT_SHOWCASE_CALC_FAILED
-                ),
-                "subscription_inactive": texts.PAYMENT_SUBSCRIPTION_INACTIVE,
-                "current_tariff_unknown": texts.PAYMENT_CURRENT_TARIFF_UNKNOWN,
-                "active_checkout_exists": texts.PAYMENT_ACTIVE_CHECKOUT_EXISTS,
-                # NOTE: active_change_quote_exists is auto-resolved (old quote
-                # is cancelled), kept as defensive fallback for race conditions.
-                "active_change_quote_exists": texts.PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS,
-            }
-            back_button_target = (
-                "payment_showcase"
-                if quote_result.failure_code in {"subscription_inactive", "current_tariff_unknown"}
-                else "payment_change_tariff"
-            )
+        if effective_devices > tariff.device_limit:
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                errors.get(
-                    quote_result.failure_code,
-                    texts.PAYMENT_SHOWCASE_PREPARE_CHANGE_FAILED,
+                texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
+                    profiles_count=effective_devices,
+                    new_limit=tariff.device_limit,
                 ),
-                get_same_tariff_keyboard()
-                if quote_result.failure_code == "same_tariff_requires_renew"
-                else get_back_button(back_button_target),
+                get_downgrade_blocked_keyboard(),
             )
             await callback.answer(show_alert=False)
             return
-        intent = await get_account_tariff_change_intent(
+
+        if db_user.subscription_end is None or db_user.subscription_end <= now_utc():
+            await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                texts.PAYMENT_SUBSCRIPTION_INACTIVE,
+                get_back_button("payment_showcase"),
+            )
+            await callback.answer(show_alert=False)
+            return
+
+        options = await calculate_tariff_change_options(
             session,
-            user_id=db_user.id,
-            quote_public_id=quote_result.quote.public_id,
+            user=db_user,
+            target_tariff=tariff,
+            as_of=now_utc(),
         )
-        due = int(intent.quote.amount_due_rub)
-        before = int(intent.balance.available)
-        after = max(0, before - due)
-        shortage = (
-            texts.PAYMENT_SHORTAGE_WARNING.format(amount_rub=int(intent.shortage))
-            if intent.shortage > 0
-            else ""
+        text = texts.PAYMENT_TARIFF_CHANGE_OPTIONS_HEADER.format(
+            source_tariff_name=options.source_tariff_name,
+            remaining_days=options.remaining_days,
+            remaining_value=options.remaining_value,
+            target_tariff_name=options.target_tariff_name,
+            target_device_limit=options.target_device_limit,
         )
-        resulting_hours = (
-            intent.quote.resulting_paid_hours
-            + intent.quote.resulting_bonus_hours
+        keyboard = get_tariff_change_options_keyboard(
+            target_tariff_id=tariff.id,
+            option1_available=options.option1_available,
+            option1_days=options.option1_days,
+            option2_1m_surcharge=options.option2_1m_surcharge,
+            option2_1m_tariff_id=options.option2_1m_tariff_id,
+            option2_3m_surcharge=options.option2_3m_surcharge,
+            option2_3m_tariff_id=options.option2_3m_tariff_id,
+            back_callback="payment_change_tariff",
         )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_TARIFF_CHANGE_HEADER_CARD.format(
-                tariff_name=get_tariff_display_name(device_limit),
-                device_limit=device_limit,
-                duration_days=_hours_text(resulting_hours),
-                due=due,
-                balance_before=before,
-                balance_after=after,
-                shortage_line=shortage,
-            ),
-            get_balance_change_start_keyboard(
-                str(intent.quote.public_id), "payment_change_tariff", is_shortage=intent.shortage > 0
-            ),
+            text,
+            keyboard,
         )
         await callback.answer(show_alert=False)
         return
@@ -528,19 +485,19 @@ async def render_tariff_duration_selection(
         return
 
     if db_user:
-        profiles_count = await get_user_profiles_count(
+        effective_devices = await get_user_profiles_count(
             session, db_user.id
         )
 
-        if profiles_count > device_limit:
+        if effective_devices > device_limit:
             await render_hub(
                 bot,
                 chat_id,
                 texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                    profiles_count=format_plural(profiles_count, texts.NOUN_DEVICES),
+                    profiles_count=format_plural(effective_devices, texts.NOUN_DEVICES),
                     new_limit=format_plural(device_limit, texts.NOUN_DEVICES),
                 ),
-                get_back_button(back_to),
+                get_downgrade_blocked_keyboard(back_to=back_to),
             )
             return
 

@@ -8,11 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import (
-    AdminAuditAction,
-    PERMANENT_END_DATE,
-    PERMANENT_SUBSCRIPTION_DAYS,
-)
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
@@ -118,7 +114,7 @@ async def admin_sub_confirm_extend(
         telegram_id is None
         or days is None
         or days < 1
-        or days > PERMANENT_SUBSCRIPTION_DAYS
+        or days > 365
     ):
         await callback.answer(
             texts.ERROR_INVALID_DAYS_COUNT,
@@ -147,17 +143,8 @@ async def admin_sub_confirm_extend(
         else current_time
     )
 
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_end + timedelta(days=days)
-    )
-
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    new_end = current_end + timedelta(days=days)
+    days_text = texts.TIME_DAYS_FORMAT.format(days=days)
 
     text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(
         telegram_id=telegram_id,
@@ -214,7 +201,7 @@ async def admin_sub_apply_extend(
         telegram_id is None
         or days is None
         or days < 1
-        or days > PERMANENT_SUBSCRIPTION_DAYS
+        or days > 365
     ):
         await callback.answer(
             texts.ERROR_INVALID_DAYS_COUNT,
@@ -271,11 +258,7 @@ async def admin_sub_apply_extend(
             telegram_id,
         )
 
-        days_text = (
-            texts.ADMIN_SUB_PERMANENT_LABEL
-            if days >= PERMANENT_SUBSCRIPTION_DAYS
-            else texts.TIME_DAYS_FORMAT.format(days=days)
-        )
+        days_text = texts.TIME_DAYS_FORMAT.format(days=days)
 
         await AuditService.log_action(
             session,
@@ -424,17 +407,8 @@ async def admin_sub_extend_custom_process(
         else current_time
     )
 
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_end + timedelta(days=days)
-    )
-
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    new_end = current_end + timedelta(days=days)
+    days_text = texts.TIME_DAYS_FORMAT.format(days=days)
 
     confirm_text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(
         telegram_id=telegram_id,

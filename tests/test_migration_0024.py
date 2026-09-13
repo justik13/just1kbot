@@ -16,7 +16,7 @@ class Migration0024Tests(unittest.TestCase):
         rev = scripts.get_revision("0024_wi_device_limit")
         self.assertIsNotNone(rev)
         self.assertEqual(rev.down_revision, "0023_wi_active_hwids")
-        self.assertEqual(scripts.get_heads(), ["0026_wi_trial_semantics"])
+        self.assertEqual(scripts.get_heads(), ["0028_two_balance_system"])
 
     def test_migration_0024_source_content(self):
         m24_path = Path("alembic/versions/0024_wi_device_limit.py")

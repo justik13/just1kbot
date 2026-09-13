@@ -13,7 +13,7 @@ from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
 )
 from bot.middlewares.user_context import invalidate_user_cache
-from database.repositories.profiles_repo import get_user_profiles_count
+from database.repositories.profiles_repo import get_user_effective_device_count
 from database.repositories.tariffs_repo import get_tariff_by_id
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
@@ -69,7 +69,9 @@ async def admin_sub_change_tariff(
 
     groups = await _get_tariff_groups(session)
 
-    profiles_count = await get_user_profiles_count(session, user.id)
+    profiles_count = await get_user_effective_device_count(
+        session, user.id, getattr(user, "active_sub_devices", None)
+    )
 
     current_tariff_name = texts.PLACEHOLDER_DASH
 
@@ -159,7 +161,9 @@ async def admin_sub_select_group(
     tariffs = groups[device_limit]
     new_tariff = _get_representative_tariff(tariffs)
 
-    profiles_count = await get_user_profiles_count(session, user.id)
+    profiles_count = await get_user_effective_device_count(
+        session, user.id, getattr(user, "active_sub_devices", None)
+    )
 
     new_limit = new_tariff.device_limit
 
@@ -318,7 +322,9 @@ async def admin_sub_apply_tariff(
             )
             return
 
-        profiles_count = await get_user_profiles_count(session, user.id)
+        profiles_count = await get_user_effective_device_count(
+            session, user.id, getattr(user, "active_sub_devices", None)
+        )
 
         if profiles_count > new_tariff.device_limit:
             text = texts.ADMIN_SUB_DOWNGRADE_BLOCKED.format(
