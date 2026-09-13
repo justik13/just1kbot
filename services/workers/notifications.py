@@ -476,6 +476,7 @@ async def _send_inactive_sub_device_notifications(
                 User.subscription_end > current_time,
                 User.active_sub_devices.is_not(None),
             )
+            .with_for_update(skip_locked=True)
             .limit(100)
         )
         users = (await session.execute(stmt)).scalars().all()

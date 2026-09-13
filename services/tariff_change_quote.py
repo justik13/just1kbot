@@ -224,12 +224,12 @@ async def calculate_tariff_change_options(
 
     rem = calculate_subscription_remaining_value(
         subscription_end=user.subscription_end,
-        price_rub=source_tariff.price_rub if source_tariff else Decimal(90),
+        price_rub=source_tariff.price_rub if source_tariff else Decimal(0),
         duration_days=source_tariff.duration_days if source_tariff else 30,
         as_of=as_of,
     )
-    remaining_days = rem.remaining_days
-    remaining_value = rem.remaining_value
+    remaining_days = rem.remaining_days if source_tariff else 0
+    remaining_value = rem.remaining_value if source_tariff else 0
 
     target_tariffs = (await session.scalars(
         select(Tariff).where(
@@ -417,9 +417,9 @@ async def create_tariff_change_quote(
     existing_change = next((q for q in active if q.operation_type == "change"), None)
     if existing_change:
         existing_option = (
-            existing_change.source_entitlement_entry_ids[0]
-            if existing_change.source_entitlement_entry_ids
-            and isinstance(existing_change.source_entitlement_entry_ids[0], str)
+            existing_change.diagnostic_reason.removeprefix("option:")
+            if existing_change.diagnostic_reason
+            and existing_change.diagnostic_reason.startswith("option:")
             else (
                 "transfer"
                 if existing_change.amount_due_rub == 0
@@ -479,7 +479,8 @@ async def create_tariff_change_quote(
         balance_as_of=as_of,
         source_subscription_end=user.subscription_end,
         source_balance_fingerprint=fingerprint,
-        source_entitlement_entry_ids=[option_type],
+        diagnostic_reason=f"option:{option_type}",
+        source_entitlement_entry_ids=[],
         source_ledger_entry_ids=[],
     )
     session.add(quote)

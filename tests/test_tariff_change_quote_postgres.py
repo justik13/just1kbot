@@ -473,6 +473,15 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 await session.scalar(select(func.count(PaymentProviderOperation.id))),
                 0,
             )
+            from services.subscription_balance_service import (
+                get_subscription_balance_snapshot,
+            )
+
+            snapshot = await get_subscription_balance_snapshot(
+                session, user_id=user, as_of=as_of
+            )
+            self.assertTrue(snapshot.tracked)
+            self.assertIsNone(snapshot.failure_code)
 
     async def test_zero_due_change_needs_no_account_debit(self):
         user, _, target, as_of = await self.seed()

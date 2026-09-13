@@ -256,13 +256,18 @@ async def _settle_account_tariff_change(
                 raise AccountTariffChangeError("change_cooldown_active")
 
     option_type = (
-        quote.source_entitlement_entry_ids[0]
-        if quote.source_entitlement_entry_ids
-        and isinstance(quote.source_entitlement_entry_ids[0], str)
+        quote.diagnostic_reason.removeprefix("option:")
+        if quote.diagnostic_reason
+        and quote.diagnostic_reason.startswith("option:")
         else (
-            "transfer"
-            if quote.amount_due_rub == 0 and quote.resulting_paid_hours != target.duration_hours
-            else "surcharge"
+            quote.source_entitlement_entry_ids[0]
+            if quote.source_entitlement_entry_ids
+            and isinstance(quote.source_entitlement_entry_ids[0], str)
+            else (
+                "transfer"
+                if quote.amount_due_rub == 0 and quote.resulting_paid_hours != target.duration_hours
+                else "surcharge"
+            )
         )
     )
     expected_fp = balance_snapshot_fingerprint(
@@ -311,13 +316,16 @@ async def _settle_account_tariff_change(
 
     metadata = {
         "operation_type": "change",
+        "option_type": option_type,
         "balance_as_of": _timestamp(quote.balance_as_of),
         "source_subscription_end": _timestamp(quote.source_subscription_end),
         "source_balance_fingerprint": quote.source_balance_fingerprint,
         "source_entitlement_entry_ids": sorted(
-            quote.source_entitlement_entry_ids or []
+            [i for i in (quote.source_entitlement_entry_ids or []) if isinstance(i, int)]
         ),
-        "source_ledger_entry_ids": sorted(quote.source_ledger_entry_ids or []),
+        "source_ledger_entry_ids": sorted(
+            [i for i in (quote.source_ledger_entry_ids or []) if isinstance(i, int)]
+        ),
         "current_paid_hours": quote.current_paid_hours,
         "current_paid_value_rub": _decimal(quote.current_paid_value_rub),
         "current_bonus_hours": quote.bonus_hours,
