@@ -397,6 +397,7 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
              patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
+             patch("services.white_internet_service.now_utc", return_value=self.now), \
              patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock) as mock_debit:
 
             ok, msg, result = await WhiteInternetService.renew_subscription(mock_session, user_id=42)
