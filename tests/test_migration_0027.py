@@ -75,7 +75,6 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self) -> None:
         db_url = os.getenv("TEST_DATABASE_URL")
-        from sqlalchemy import delete
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
         self.engine = create_async_engine(db_url, pool_pre_ping=True)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
