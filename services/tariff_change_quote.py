@@ -7,12 +7,12 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 
 from sqlalchemy import select
 
 from config.enums import ServiceType
-from database.models import EntitlementEntry, Tariff, TariffQuote, User
+from database.models import EntitlementEntry, Tariff, TariffQuote, TariffVersion, User
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.profiles_repo import (
     get_user_effective_device_count,
@@ -24,6 +24,7 @@ from database.repositories.tariff_quotes_repo import (
     lock_checkout_user,
 )
 from database.repositories.tariffs_repo import get_tariff_by_id
+from services.subscription_balance_service import get_subscription_balance_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class TariffChangeOptions:
 class SubscriptionRemainingValue:
     remaining_days: int
     daily_rate: Decimal
-    remaining_value: int
+    remaining_value: Decimal
 
 
 @dataclass(frozen=True)
@@ -75,10 +76,12 @@ def calculate_subscription_remaining_value(
 ) -> SubscriptionRemainingValue:
     """Canonical single engine for calculating active remaining days and ruble value."""
     if subscription_end is None or subscription_end <= as_of or duration_days <= 0:
-        return SubscriptionRemainingValue(remaining_days=0, daily_rate=Decimal(0), remaining_value=0)
+        return SubscriptionRemainingValue(
+            remaining_days=0, daily_rate=Decimal(0), remaining_value=Decimal(0)
+        )
     remaining_days = max(0, (subscription_end - as_of).days)
-    daily_rate = Decimal(int(price_rub) // duration_days)
-    remaining_value = int(remaining_days * daily_rate)
+    daily_rate = Decimal(str(price_rub)) / Decimal(duration_days)
+    remaining_value = Decimal(remaining_days) * daily_rate
     return SubscriptionRemainingValue(
         remaining_days=remaining_days,
         daily_rate=daily_rate,
@@ -88,18 +91,20 @@ def calculate_subscription_remaining_value(
 
 def calculate_transfer_option(
     *,
-    remaining_value: int,
+    remaining_value: int | Decimal,
     target_price_rub: int | Decimal,
     target_duration_days: int,
 ) -> TransferOptionCalculation:
     """Canonical calculation for Option 1 (Transfer remaining value to target days)."""
     if target_duration_days <= 0 or remaining_value <= 0:
         return TransferOptionCalculation(target_days=0, leftover_rub=0, is_available=False)
-    target_daily_rate = Decimal(int(target_price_rub) // target_duration_days)
+    target_daily_rate = Decimal(str(target_price_rub)) / Decimal(target_duration_days)
     if target_daily_rate <= 0:
         return TransferOptionCalculation(target_days=0, leftover_rub=0, is_available=False)
-    target_days = int(Decimal(remaining_value) // target_daily_rate)
-    leftover_rub = max(0, remaining_value - int(target_days * target_daily_rate))
+    rem_val = Decimal(str(remaining_value))
+    target_days = int(rem_val // target_daily_rate)
+    cost = Decimal(target_days) * target_daily_rate
+    leftover_rub = max(0, int(rem_val - cost))
     return TransferOptionCalculation(
         target_days=target_days,
         leftover_rub=leftover_rub,
@@ -109,11 +114,14 @@ def calculate_transfer_option(
 
 def calculate_surcharge_option(
     *,
-    remaining_value: int,
+    remaining_value: int | Decimal,
     target_price_rub: int | Decimal,
 ) -> int:
     """Canonical calculation for Option 2 (Surcharge to buy target duration)."""
-    return max(0, int(target_price_rub) - remaining_value)
+    val = Decimal(str(remaining_value))
+    target = Decimal(str(target_price_rub))
+    surcharge = target - val
+    return max(0, int(surcharge.quantize(Decimal("1"), rounding=ROUND_CEILING) if surcharge > 0 else 0))
 
 
 class SnapshotCanonicalizationError(ValueError):
@@ -222,14 +230,21 @@ async def calculate_tariff_change_options(
         )
     source_tariff_name = getattr(source_tariff, "name", "") if source_tariff else ""
 
-    rem = calculate_subscription_remaining_value(
-        subscription_end=user.subscription_end,
-        price_rub=source_tariff.price_rub if source_tariff else Decimal(0),
-        duration_days=source_tariff.duration_days if source_tariff else 30,
+    snapshot = await get_subscription_balance_snapshot(
+        session,
+        user_id=user.id,
         as_of=as_of,
+        locked_user=user,
     )
-    remaining_days = rem.remaining_days if source_tariff else 0
-    remaining_value = rem.remaining_value if source_tariff else 0
+
+    if snapshot.tracked and snapshot.remaining_paid_value_rub is not None:
+        remaining_days = snapshot.remaining_paid_hours // 24
+        remaining_value_dec = snapshot.remaining_paid_value_rub
+        remaining_value = int(remaining_value_dec)
+    else:
+        remaining_days = 0
+        remaining_value_dec = Decimal(0)
+        remaining_value = 0
 
     target_tariffs = (await session.scalars(
         select(Tariff).where(
@@ -242,17 +257,17 @@ async def calculate_tariff_change_options(
     target_90d = next((t for t in target_tariffs if t.duration_days == 90), None)
 
     trans = calculate_transfer_option(
-        remaining_value=remaining_value,
+        remaining_value=remaining_value_dec,
         target_price_rub=target_30d.price_rub,
         target_duration_days=target_30d.duration_days,
     )
     due_1m = calculate_surcharge_option(
-        remaining_value=remaining_value,
+        remaining_value=remaining_value_dec,
         target_price_rub=target_30d.price_rub,
     )
     due_3m = (
         calculate_surcharge_option(
-            remaining_value=remaining_value,
+            remaining_value=remaining_value_dec,
             target_price_rub=target_90d.price_rub,
         )
         if target_90d
@@ -314,8 +329,6 @@ async def create_tariff_change_quote(
         )
         if matched_tariff_id is not None:
             current_tariff_id = matched_tariff_id
-            user.current_tariff_id = current_tariff_id
-            await session.flush()
 
     if current_tariff_id is None:
         return TariffChangeQuoteResult(failure_code="current_tariff_unknown")
@@ -376,24 +389,53 @@ async def create_tariff_change_quote(
             if was_last_downgrade and (as_of - last_change_at) < timedelta(hours=24):
                 return TariffChangeQuoteResult(failure_code="change_cooldown_active")
 
+    existing_change = next((q for q in active if q.operation_type == "change"), None)
+    snapshot = await get_subscription_balance_snapshot(
+        session, user_id=user_id, as_of=as_of, locked_user=user
+    )
+    if not snapshot.tracked or snapshot.remaining_paid_value_rub is None:
+        logger.warning(
+            "create_tariff_change_quote untracked balance: user_id=%s, snapshot_failure_code=%s, coverage_end=%s, subscription_end=%s",
+            user_id,
+            snapshot.failure_code,
+            snapshot.coverage_end,
+            user.subscription_end,
+        )
+        if existing_change is not None:
+            existing_change.status = "cancelled"
+            existing_change.diagnostic_reason = "source_balance_untracked"
+            await session.flush()
+        return TariffChangeQuoteResult(
+            failure_code="subscription_balance_untracked",
+            snapshot_failure_code=snapshot.failure_code,
+        )
+
+    version_ids = {lot.tariff_version_id for lot in snapshot.paid_lots}
+    lot_versions = (
+        (await session.scalars(select(TariffVersion).where(TariffVersion.id.in_(version_ids)))).all()
+        if version_ids
+        else []
+    )
+    if len(lot_versions) != len(version_ids):
+        logger.warning(
+            "create_tariff_change_quote missing_tariff_versions: user_id=%s, version_ids=%s",
+            user_id,
+            version_ids,
+        )
+        return TariffChangeQuoteResult(failure_code="mixed_source_tariffs")
+
     source_version = await get_or_create_current_version(session, source)
     target_version = await get_or_create_current_version(session, target)
 
-    # Daily calculation in whole rubles via canonical calculation engine
-    rem = calculate_subscription_remaining_value(
-        subscription_end=user.subscription_end,
-        price_rub=source_version.price_rub,
-        duration_days=source_version.duration_days,
-        as_of=as_of,
-    )
-    remaining_days = rem.remaining_days
-    remaining_value = Decimal(rem.remaining_value)
-    current_paid_hours = remaining_days * 24
-    current_paid_value_rub = remaining_value
+    # Historical remaining value and hours from snapshot
+    current_paid_hours = snapshot.remaining_paid_hours
+    current_paid_value_rub = snapshot.remaining_paid_value_rub
+    current_bonus_hours = snapshot.remaining_bonus_hours
+    remaining_value = snapshot.remaining_paid_value_rub
 
     if option_type == "transfer":
         trans = calculate_transfer_option(
-            remaining_value=rem.remaining_value,
+            remaining_value=remaining_value,
             target_price_rub=target_version.price_rub,
             target_duration_days=target_version.duration_days,
         )
@@ -406,7 +448,7 @@ async def create_tariff_change_quote(
     else:
         # Surcharge option
         surcharge = calculate_surcharge_option(
-            remaining_value=rem.remaining_value,
+            remaining_value=remaining_value,
             target_price_rub=target_version.price_rub,
         )
         required = Decimal(surcharge)
@@ -414,7 +456,8 @@ async def create_tariff_change_quote(
         rounding_loss_value_rub = Decimal(0)
         resulting_paid_value_rub = target_version.price_rub
 
-    existing_change = next((q for q in active if q.operation_type == "change"), None)
+    resulting_bonus_hours = snapshot.remaining_bonus_hours
+
     if existing_change:
         existing_option = (
             existing_change.diagnostic_reason.removeprefix("option:")
@@ -432,8 +475,15 @@ async def create_tariff_change_quote(
             existing_change.source_subscription_end is not None
             and _timestamp(existing_change.source_subscription_end) == _timestamp(user.subscription_end)
         )
+        same_history = (
+            same_sub_end
+            and sorted(existing_change.source_entitlement_entry_ids or [])
+                == sorted(snapshot.source_entitlement_entry_ids)
+            and sorted(existing_change.source_ledger_entry_ids or [])
+                == sorted(snapshot.source_ledger_entry_ids)
+        )
         same_option = (existing_option == option_type)
-        if same_target and same_sub_end and same_option:
+        if same_target and same_history and same_option:
             return TariffChangeQuoteResult(
                 quote=existing_change,
                 created=False,
@@ -443,7 +493,7 @@ async def create_tariff_change_quote(
 
         existing_change.status = "cancelled"
         existing_change.diagnostic_reason = (
-            "source_balance_changed" if not same_sub_end else "superseded_by_new_target"
+            "source_balance_changed" if not same_history else "superseded_by_new_target"
         )
         await session.flush()
         existing_change = None
@@ -451,10 +501,7 @@ async def create_tariff_change_quote(
     fingerprint = balance_snapshot_fingerprint(
         user_id=user_id,
         subscription_end=user.subscription_end,
-        source_version_id=source_version.id,
-        target_version_id=target_version.id,
-        amount_due=required,
-        option_type=option_type,
+        snapshot=snapshot,
     )
     quote = TariffQuote(
         public_id=uuid.uuid4(),
@@ -465,11 +512,11 @@ async def create_tariff_change_quote(
         target_tariff_version_id=target_version.id,
         current_paid_hours=current_paid_hours,
         current_paid_value_rub=current_paid_value_rub,
-        bonus_hours=0,
+        bonus_hours=current_bonus_hours,
         amount_due_rub=required,
         resulting_paid_hours=resulting_paid_hours,
         resulting_paid_value_rub=resulting_paid_value_rub,
-        resulting_bonus_hours=0,
+        resulting_bonus_hours=resulting_bonus_hours,
         rounding_loss_hours=Decimal(0),
         rounding_loss_value_rub=rounding_loss_value_rub,
         currency="RUB",
@@ -480,8 +527,8 @@ async def create_tariff_change_quote(
         source_subscription_end=user.subscription_end,
         source_balance_fingerprint=fingerprint,
         diagnostic_reason=f"option:{option_type}",
-        source_entitlement_entry_ids=[],
-        source_ledger_entry_ids=[],
+        source_entitlement_entry_ids=sorted(snapshot.source_entitlement_entry_ids),
+        source_ledger_entry_ids=sorted(snapshot.source_ledger_entry_ids),
     )
     session.add(quote)
     await session.flush()

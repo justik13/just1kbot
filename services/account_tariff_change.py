@@ -41,6 +41,7 @@ from database.repositories.tariff_quotes_repo import (
 )
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
+from services.subscription_balance_service import get_subscription_balance_snapshot
 from services.tariff_change_quote import balance_snapshot_fingerprint
 from utils.datetime_helpers import now_utc
 
@@ -270,13 +271,19 @@ async def _settle_account_tariff_change(
             )
         )
     )
+    current_snapshot = await get_subscription_balance_snapshot(
+        session,
+        user_id=user.id,
+        as_of=quote.balance_as_of,
+        locked_user=user,
+    )
+    if not current_snapshot.tracked or current_snapshot.failure_code is not None:
+        raise AccountTariffChangeError("quote_source_history_changed")
+
     expected_fp = balance_snapshot_fingerprint(
         user_id=user.id,
         subscription_end=user.subscription_end,
-        source_version_id=source.id,
-        target_version_id=target.id,
-        amount_due=quote.amount_due_rub,
-        option_type=option_type,
+        snapshot=current_snapshot,
     )
     if _timestamp(quote.source_subscription_end) != _timestamp(user.subscription_end):
         raise AccountTariffChangeError("quote_source_history_changed")

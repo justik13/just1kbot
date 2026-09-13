@@ -209,10 +209,10 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first.quote.status, "cancelled")
             self.assertEqual(first.quote.diagnostic_reason, "source_balance_changed")
 
-    async def test_manual_adjustment_does_not_block_tariff_change(self):
+    async def test_untracked_projection_cancels_unbound_active_quote(self):
         user, _, target, as_of = await self.seed()
         async with self.sessions.begin() as session:
-            await create_tariff_change_quote(
+            first = await create_tariff_change_quote(
                 session, user_id=user, target_tariff_id=target, as_of=as_of
             )
             await session.execute(
@@ -236,8 +236,12 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 target_tariff_id=target,
                 as_of=as_of + timedelta(minutes=1),
             )
-            self.assertIsNotNone(repeated.quote)
-            self.assertIsNone(repeated.failure_code)
+            self.assertIsNone(repeated.quote)
+            self.assertEqual(repeated.failure_code, "subscription_balance_untracked")
+            self.assertEqual(
+                (first.quote.status, first.quote.diagnostic_reason),
+                ("cancelled", "source_balance_untracked"),
+            )
 
     async def test_conflicts_expiry_and_closed_preconditions(self):
         user, source, target, as_of = await self.seed()
@@ -280,8 +284,8 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 target_tariff_id=legacy_target,
                 as_of=legacy_as_of,
             )
-            self.assertIsNotNone(result.quote)
-            self.assertIsNone(result.failure_code)
+            self.assertIsNone(result.quote)
+            self.assertEqual(result.failure_code, "subscription_balance_untracked")
 
     async def test_concurrent_same_target_serializes_to_one_quote(self):
         user, _, target, as_of = await self.seed()

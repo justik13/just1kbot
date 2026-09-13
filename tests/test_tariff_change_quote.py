@@ -11,6 +11,9 @@ from services.subscription_balance_projector import (
 from services.tariff_change_quote import (
     SnapshotCanonicalizationError,
     balance_snapshot_fingerprint,
+    calculate_subscription_remaining_value,
+    calculate_surcharge_option,
+    calculate_transfer_option,
 )
 from services.tariff_value_calculator import (
     TariffCalculationError,
@@ -154,6 +157,179 @@ class TariffChangeQuoteTests(unittest.TestCase):
         second = balance_snapshot_fingerprint(user_id=7, subscription_end=value.coverage_end,
             snapshot=replace(value, as_of=value.as_of + timedelta(seconds=1)))
         self.assertNotEqual(first, second)
+
+    def test_daily_rate_precision_and_no_integer_truncation(self):
+        # 250 RUB / 30 days = 8.333333333333333... RUB/day (previously 8 RUB/day via //)
+        rem = calculate_subscription_remaining_value(
+            subscription_end=T0 + timedelta(days=29),
+            price_rub=250,
+            duration_days=30,
+            as_of=T0,
+        )
+        self.assertEqual(rem.remaining_days, 29)
+        self.assertEqual(rem.daily_rate, Decimal(250) / Decimal(30))
+        self.assertAlmostEqual(float(rem.remaining_value), 241.666667, places=4)
+        # Verify no truncation loss: previously 29 * 8 = 232 RUB (loss of ~9.67 RUB)
+        self.assertGreater(rem.remaining_value, Decimal(240))
+
+        # Promo tariff: 15 RUB / 30 days = 0.5 RUB/day (previously 0 via //)
+        promo = calculate_subscription_remaining_value(
+            subscription_end=T0 + timedelta(days=10),
+            price_rub=15,
+            duration_days=30,
+            as_of=T0,
+        )
+        self.assertEqual(promo.daily_rate, Decimal("0.5"))
+        self.assertEqual(promo.remaining_value, Decimal("5.0"))
+
+    def test_transfer_option_precision_and_minimum_days(self):
+        # Available: target_days >= 7
+        calc = calculate_transfer_option(
+            remaining_value=Decimal("241.67"),
+            target_price_rub=Decimal(300),
+            target_duration_days=30,
+        )
+        self.assertTrue(calc.is_available)
+        self.assertEqual(calc.target_days, 24)
+        self.assertEqual(calc.leftover_rub, 1)
+
+        # Below threshold: target_days < 7
+        calc_small = calculate_transfer_option(
+            remaining_value=Decimal(60),
+            target_price_rub=Decimal(300),
+            target_duration_days=30,
+        )
+        self.assertFalse(calc_small.is_available)
+        self.assertEqual(calc_small.target_days, 6)
+
+    def test_surcharge_option_calculation(self):
+        # Surcharge ceiling
+        surcharge = calculate_surcharge_option(
+            remaining_value=Decimal("241.67"),
+            target_price_rub=Decimal(300),
+        )
+        self.assertEqual(surcharge, 59)
+
+        # Zero surcharge when remaining value >= target price
+        zero_surcharge = calculate_surcharge_option(
+            remaining_value=Decimal(300),
+            target_price_rub=Decimal(250),
+        )
+        self.assertEqual(zero_surcharge, 0)
+
+    def test_bonus_lots_have_zero_monetary_value_and_do_not_reduce_surcharge(self):
+        bonus = ProjectedBonusLot(
+            entitlement_entry_id=3,
+            source_type="quote",
+            source_id="201",
+            bonus_type="referral_user_bonus",
+            original_hours=720,
+            remaining_whole_hours=720,
+            segment_start=T0,
+            segment_end=T0 + timedelta(hours=720),
+        )
+        # Bonus lots explicitly have paid_value_rub = 0
+        self.assertEqual(bonus.paid_value_rub, Decimal(0))
+
+        # Snapshot with only bonus hours: paid value is 0
+        bonus_snapshot = SubscriptionBalanceSnapshot(
+            as_of=T0,
+            tracked=True,
+            failure_code=None,
+            coverage_end=T0 + timedelta(hours=720),
+            remaining_paid_hours=0,
+            remaining_paid_value_rub=Decimal(0),
+            remaining_bonus_hours=720,
+            rounding_loss_hours=Decimal(0),
+            paid_lots=(),
+            bonus_lots=(bonus,),
+            source_ledger_entry_ids=(),
+            source_entitlement_entry_ids=(3,),
+        )
+        self.assertEqual(bonus_snapshot.remaining_paid_value_rub, Decimal(0))
+
+        # Surcharge is full target price, not reduced by bonus time
+        surcharge = calculate_surcharge_option(
+            remaining_value=bonus_snapshot.remaining_paid_value_rub,
+            target_price_rub=Decimal(300),
+        )
+        self.assertEqual(surcharge, 300)
+
+        # Transfer is not available with 0 paid value
+        transfer = calculate_transfer_option(
+            remaining_value=bonus_snapshot.remaining_paid_value_rub,
+            target_price_rub=Decimal(300),
+            target_duration_days=30,
+        )
+        self.assertFalse(transfer.is_available)
+        self.assertEqual(transfer.target_days, 0)
+
+    def test_historical_lot_value_evaluated_correctly(self):
+        # User bought at 90 RUB / 720 hours. 360 hours remain -> historical value is 45 RUB.
+        # Even if current catalog price changed to 200 RUB, remaining value is based on lot
+        paid = ProjectedPaidLot(
+            entitlement_entry_id=2,
+            paid_value_ledger_entry_id=20,
+            tariff_version_id=200,
+            original_paid_hours=720,
+            original_paid_value_rub=Decimal(90),
+            remaining_whole_hours=360,
+            remaining_paid_value_rub=Decimal("45.000000"),
+            segment_start=T0,
+            segment_end=T0 + timedelta(hours=720),
+        )
+        hist_snapshot = SubscriptionBalanceSnapshot(
+            as_of=T0,
+            tracked=True,
+            failure_code=None,
+            coverage_end=T0 + timedelta(hours=720),
+            remaining_paid_hours=360,
+            remaining_paid_value_rub=Decimal("45.000000"),
+            remaining_bonus_hours=0,
+            rounding_loss_hours=Decimal(0),
+            paid_lots=(paid,),
+            bonus_lots=(),
+            source_ledger_entry_ids=(20,),
+            source_entitlement_entry_ids=(2,),
+        )
+        # Surcharge against target price 180 is 180 - 45 = 135 RUB
+        surcharge = calculate_surcharge_option(
+            remaining_value=hist_snapshot.remaining_paid_value_rub,
+            target_price_rub=Decimal(180),
+        )
+        self.assertEqual(surcharge, 135)
+
+    def test_full_snapshot_fingerprint_changes_on_lots_and_sources(self):
+        value = snapshot()
+        base_fp = balance_snapshot_fingerprint(
+            user_id=7, subscription_end=value.coverage_end, snapshot=value
+        )
+        # Modify lot details
+        changed_paid_lot = ProjectedPaidLot(
+            entitlement_entry_id=2,
+            paid_value_ledger_entry_id=20,
+            tariff_version_id=201,  # changed version
+            original_paid_hours=720,
+            original_paid_value_rub=Decimal(90),
+            remaining_whole_hours=300,
+            remaining_paid_value_rub=Decimal("37.500000"),
+            segment_start=T0,
+            segment_end=T0 + timedelta(hours=720),
+        )
+        fp_lot_changed = balance_snapshot_fingerprint(
+            user_id=7,
+            subscription_end=value.coverage_end,
+            snapshot=replace(value, paid_lots=(changed_paid_lot,)),
+        )
+        self.assertNotEqual(base_fp, fp_lot_changed)
+
+        # Modify source ledger IDs
+        fp_ledger_changed = balance_snapshot_fingerprint(
+            user_id=7,
+            subscription_end=value.coverage_end,
+            snapshot=replace(value, source_ledger_entry_ids=(20, 21)),
+        )
+        self.assertNotEqual(base_fp, fp_ledger_changed)
 
 
 if __name__ == "__main__":

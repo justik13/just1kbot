@@ -476,12 +476,13 @@ async def _send_inactive_sub_device_notifications(
                 User.subscription_end > current_time,
                 User.active_sub_devices.is_not(None),
             )
-            .with_for_update(skip_locked=True)
+            .order_by(User.id.asc())
             .limit(100)
         )
         users = (await session.execute(stmt)).scalars().all()
 
         for user in users:
+
             active_sub_devices = dict(getattr(user, "active_sub_devices", None) or {})
             if not active_sub_devices:
                 continue
@@ -529,9 +530,13 @@ async def _send_inactive_sub_device_notifications(
                     except Exception:
                         pass
 
-                label = dev_info.get("label") or AWG_SUB_DEVICE_LABEL_TEMPLATE.format(index=dev_info.get("device_index", 1))
+                label = dev_info.get("label") or AWG_SUB_DEVICE_LABEL_TEMPLATE.format(
+                    index=dev_info.get("device_index", 1)
+                )
                 msg = NOTIFY_INACTIVE_SUB_DEVICE.format(device_label=label)
-                keyboard = get_inactive_sub_device_keyboard(label=label, hwid_prefix=hwid_hash[:16])
+                keyboard = get_inactive_sub_device_keyboard(
+                    label=label, hwid_prefix=hwid_hash[:16]
+                )
 
                 try:
                     await global_send_limiter.acquire()
@@ -553,6 +558,7 @@ async def _send_inactive_sub_device_notifications(
                         e,
                     )
 
-            if modified:
-                user.active_sub_devices = active_sub_devices
+            if modified or user.is_bot_blocked:
+                if modified:
+                    user.active_sub_devices = active_sub_devices
                 await session.flush()
