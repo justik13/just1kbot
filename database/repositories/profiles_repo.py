@@ -127,3 +127,23 @@ async def get_user_profiles_count(
 
 
 get_user_quota_profiles_count = get_user_profiles_count
+
+
+async def get_user_effective_device_count(
+    session: AsyncSession, user_id: int, active_sub_devices: dict | None = None
+) -> int:
+    """Return total effective devices: manual profiles + len(active_sub_devices).
+
+    Strictly additive formula as required by PR #259 and billing invariants.
+    """
+    from sqlalchemy import or_
+
+    stmt = select(func.count(VPNProfile.id)).where(
+        VPNProfile.user_id == user_id,
+        or_(VPNProfile.device_type == "manual", VPNProfile.device_type.is_(None)),
+        VPNProfile.provisioning_status.notin_(PROFILE_QUOTA_EXCLUDED_STATUSES),
+    )
+    result = await session.execute(stmt)
+    manual_count = result.scalar_one()
+    sub_count = len(active_sub_devices or {})
+    return manual_count + sub_count

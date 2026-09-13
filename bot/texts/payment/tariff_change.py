@@ -95,4 +95,13 @@ PAYMENT_TARIFF_CHANGE_SUCCESS_CARD = """🎉 <b>Тариф изменён</b>
 💰 Баланс: <b>{real_balance} ₽</b>
 🎁 Бонусный баланс: <b>{bonus_balance} ₽</b>"""
 
+PAYMENT_TARIFF_CHANGE_OPTIONS_HEADER = """⚙️ <b>Смена тарифа</b>
+
+Текущий тариф: <b>{source_tariff_name}</b> (осталось {remaining_days} дн. ≈ {remaining_value} ₽)
+Новый тариф: <b>{target_tariff_name}</b> (лимит {target_device_limit} устр.)
+
+Выберите вариант перехода:
+• <b>Перенос остатка</b> — перевод стоимости в дни нового тарифа (доступен от 7 дней; остаток зачисляется на бонусный баланс).
+• <b>Доплата</b> — перерасчёт остатка и доплата до 1 или 3 месяцев."""
+
 PAYMENT_TARIFF_UNAVAILABLE_NOTICE = "Выбранный тариф больше недоступен."

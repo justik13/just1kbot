@@ -386,6 +386,54 @@ def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_downgrade_blocked_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔌 Перейти к устройствам",
+        callback_data="menu_connections",
+        style="success",
+    )
+    builder.button(
+        text="← Выбрать другой тариф",
+        callback_data="payment_change_tariff",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_tariff_change_options_keyboard(
+    *,
+    target_tariff_id: int,
+    option1_available: bool,
+    option1_days: int,
+    option2_1m_surcharge: int,
+    option2_1m_tariff_id: int,
+    option2_3m_surcharge: int | None = None,
+    option2_3m_tariff_id: int | None = None,
+    back_callback: str = "payment_change_tariff",
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if option1_available:
+        builder.button(
+            text=f"🔄 Перенести остаток ({option1_days} дн.)",
+            callback_data=f"tariff_change_choose:transfer:{target_tariff_id}",
+            style="success",
+        )
+    builder.button(
+        text=f"➕ Доплата до 1 мес. ({option2_1m_surcharge} ₽)",
+        callback_data=f"tariff_change_choose:surcharge:{option2_1m_tariff_id}",
+    )
+    if option2_3m_surcharge is not None and option2_3m_tariff_id is not None:
+        builder.button(
+            text=f"➕ Доплата до 3 мес. ({option2_3m_surcharge} ₽)",
+            callback_data=f"tariff_change_choose:surcharge:{option2_3m_tariff_id}",
+        )
+    builder.button(text=texts.BTN_BACK, callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+
 def get_balance_shortage_keyboard(
     quote_public_id: str, exact_amount: int, _back_callback: str | None = None
 ) -> InlineKeyboardMarkup:

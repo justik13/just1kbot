@@ -8,8 +8,6 @@ from sqlalchemy.orm import selectinload
 
 from config.constants import (
     AMNEZIA_PROTOCOL,
-    PERMANENT_END_DATE,
-    PERMANENT_SUBSCRIPTION_DAYS,
     XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
@@ -194,10 +192,7 @@ async def extend_subscription(session: AsyncSession, user: User, days: int) -> U
     else:
         current_end = now
 
-    if days >= PERMANENT_SUBSCRIPTION_DAYS:
-        new_end = PERMANENT_END_DATE
-    else:
-        new_end = current_end + timedelta(days=days)
+    new_end = current_end + timedelta(days=days)
 
     return await update_user(session, user, subscription_end=new_end)
 

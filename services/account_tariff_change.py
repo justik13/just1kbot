@@ -23,6 +23,7 @@ from database.models import (
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
     InsufficientAccountBalanceError,
+    create_admin_adjustment,
     create_purchase_debit,
     get_account_balance,
     whole_rubles,
@@ -31,20 +32,16 @@ from database.repositories.paid_value_repo import (
     PaidValueLedgerConflictError,
     get_or_create_conversion_entry,
 )
-from database.repositories.profiles_repo import get_user_profiles_count
+from database.repositories.profiles_repo import (
+    get_user_effective_device_count,
+)
 from database.repositories.tariff_quotes_repo import (
     get_or_create_current_version,
     lock_checkout_user,
 )
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
-from services.subscription_balance_service import get_subscription_balance_snapshot
 from services.tariff_change_quote import balance_snapshot_fingerprint
-from services.tariff_value_calculator import (
-    TariffCalculationError,
-    TariffVersionSnapshot,
-    calculate_tariff_value,
-)
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -233,7 +230,9 @@ async def _settle_account_tariff_change(
         raise AccountTariffChangeError("tariff_price_changed")
     if quote.currency != "RUB" or source.currency != "RUB" or target.currency != "RUB":
         raise AccountTariffChangeError("quote_currency_invalid")
-    profiles = await get_user_profiles_count(session, user.id)
+    profiles = await get_user_effective_device_count(
+        session, user.id, getattr(user, "active_sub_devices", None)
+    )
     if profiles > target.device_limit:
         raise AccountTariffChangeError("too_many_devices")
     is_requested_downgrade = target.device_limit < source.device_limit
@@ -256,85 +255,33 @@ async def _settle_account_tariff_change(
             if was_last_downgrade and (now - last_change_at) < timedelta(hours=24):
                 raise AccountTariffChangeError("change_cooldown_active")
 
-    snapshot = await get_subscription_balance_snapshot(
-        session,
-        user_id=user.id,
-        as_of=quote.balance_as_of,
-        locked_user=user,
+    option_type = (
+        "transfer"
+        if quote.amount_due_rub == 0 and quote.resulting_paid_hours != target.duration_hours
+        else "surcharge"
     )
-    if not snapshot.tracked or snapshot.remaining_paid_value_rub is None:
-        logger.warning(
-            "settle_account_tariff_change untracked balance: user_id=%s, snapshot_failure_code=%s, coverage_end=%s, subscription_end=%s",
-            user.id,
-            snapshot.failure_code,
-            snapshot.coverage_end,
-            user.subscription_end,
-        )
-        raise AccountTariffChangeError("subscription_balance_untracked")
     fingerprint = balance_snapshot_fingerprint(
         user_id=user.id,
         subscription_end=user.subscription_end,
-        snapshot=snapshot,
+        source_version_id=source.id,
+        target_version_id=target.id,
+        amount_due=quote.amount_due_rub,
+        option_type=option_type,
     )
-    mismatches = []
     if _timestamp(quote.source_subscription_end) != _timestamp(user.subscription_end):
-        mismatches.append(f"sub_end({_timestamp(quote.source_subscription_end)}!={_timestamp(user.subscription_end)})")
-    if quote.source_balance_fingerprint != fingerprint:
-        mismatches.append(f"fingerprint({quote.source_balance_fingerprint[:8]}!={fingerprint[:8]})")
-    if sorted(quote.source_entitlement_entry_ids or []) != sorted(snapshot.source_entitlement_entry_ids):
-        mismatches.append(f"entitlement_ids({quote.source_entitlement_entry_ids}!={snapshot.source_entitlement_entry_ids})")
-    if sorted(quote.source_ledger_entry_ids or []) != sorted(snapshot.source_ledger_entry_ids):
-        mismatches.append(f"ledger_ids({quote.source_ledger_entry_ids}!={snapshot.source_ledger_entry_ids})")
-    if quote.current_paid_hours != snapshot.remaining_paid_hours:
-        mismatches.append(f"paid_hours({quote.current_paid_hours}!={snapshot.remaining_paid_hours})")
-    if (
-        quote.current_paid_value_rub.quantize(Decimal("1.000000"))
-        != snapshot.remaining_paid_value_rub.quantize(Decimal("1.000000"))
-    ):
-        mismatches.append(f"paid_value({quote.current_paid_value_rub}!={snapshot.remaining_paid_value_rub})")
-    if quote.bonus_hours != snapshot.remaining_bonus_hours:
-        mismatches.append(f"bonus_hours({quote.bonus_hours}!={snapshot.remaining_bonus_hours})")
-
-    if mismatches:
-        logger.warning(
-            "settle_account_tariff_change quote_source_history_changed: user_id=%s, mismatches=%s",
-            user.id,
-            ", ".join(mismatches),
-        )
         raise AccountTariffChangeError("quote_source_history_changed")
-    try:
-        calculation = calculate_tariff_value(
-            operation_type="change",
-            source_paid_hours=snapshot.remaining_paid_hours,
-            source_paid_value_rub=snapshot.remaining_paid_value_rub,
-            source_tariff=TariffVersionSnapshot(
-                source.tariff_id,
-                source.id,
-                source.duration_hours,
-                source.price_rub,
-                source.currency,
-            ),
-            target_tariff=TariffVersionSnapshot(
-                target.tariff_id,
-                target.id,
-                target.duration_hours,
-                target.price_rub,
-                target.currency,
-            ),
-            confirmed_additional_payment_rub=amount,
-            bonus_hours=snapshot.remaining_bonus_hours,
+    if quote.source_balance_fingerprint != fingerprint:
+        alt_option = "transfer" if option_type == "surcharge" else "surcharge"
+        alt_fp = balance_snapshot_fingerprint(
+            user_id=user.id,
+            subscription_end=user.subscription_end,
+            source_version_id=source.id,
+            target_version_id=target.id,
+            amount_due=quote.amount_due_rub,
+            option_type=alt_option,
         )
-    except TariffCalculationError as exc:
-        raise AccountTariffChangeError("quote_economics_invalid") from exc
-    if (
-        calculation.required_payment_rub != amount
-        or calculation.resulting_paid_hours != quote.resulting_paid_hours
-        or calculation.paid_value_after_rub.quantize(Decimal("1.000000")) != quote.resulting_paid_value_rub.quantize(Decimal("1.000000"))
-        or calculation.retained_bonus_hours != quote.resulting_bonus_hours
-        or calculation.rounding_loss_hours.quantize(Decimal("1.000000000000")) != quote.rounding_loss_hours.quantize(Decimal("1.000000000000"))
-        or calculation.rounding_loss_value_rub.quantize(Decimal("1.000000")) != quote.rounding_loss_value_rub.quantize(Decimal("1.000000"))
-    ):
-        raise AccountTariffChangeError("quote_economics_changed")
+        if quote.source_balance_fingerprint != alt_fp:
+            raise AccountTariffChangeError("quote_source_history_changed")
 
     before = await get_account_balance(
         session, user_id=user.id, locked_user=user
@@ -356,6 +303,16 @@ async def _settle_account_tariff_change(
             raise AccountTariffChangeError("insufficient_balance") from exc
         if not debit_created:
             raise AccountTariffChangeError("active_quote_has_existing_debit")
+
+    leftover = int(quote.rounding_loss_value_rub or 0)
+    if leftover > 0:
+        await create_admin_adjustment(
+            session,
+            user_id=user.id,
+            signed_amount=leftover,
+            idempotency_key=f"tariff_change_leftover:{quote.id}",
+            metadata={"operation": "tariff_change_leftover", "quote_id": quote.id},
+        )
 
     metadata = {
         "operation_type": "change",

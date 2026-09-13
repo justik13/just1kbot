@@ -139,6 +139,7 @@ class User(Base):
             text("lower(username)"),
             postgresql_where=text("username IS NOT NULL AND is_deleted = false"),
         ),
+        CheckConstraint("bonus_balance >= 0", name="ck_users_bonus_balance_nonnegative"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -154,6 +155,12 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
     device_limit: Mapped[int] = mapped_column(Integer, default=0)
+    balance: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), nullable=False, default=Decimal("0.00"), server_default=text("'0.00'")
+    )
+    bonus_balance: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), nullable=False, default=Decimal("0.00"), server_default=text("'0.00'")
+    )
 
     current_tariff_id: Mapped[int | None] = mapped_column(
         Integer,
@@ -782,10 +789,10 @@ class AccountLedgerEntry(Base):
             "AND payment_id IS NOT NULL AND quote_id IS NULL "
             "AND reversal_of_id IS NULL) OR "
             "(entry_type = 'purchase_debit' AND amount < 0 "
-            "AND payment_id IS NULL AND quote_id IS NOT NULL "
+            "AND payment_id IS NULL "
             "AND reversal_of_id IS NULL) OR "
             "(entry_type = 'purchase_reversal' AND amount > 0 "
-            "AND payment_id IS NULL AND quote_id IS NOT NULL "
+            "AND payment_id IS NULL "
             "AND reversal_of_id IS NOT NULL) OR "
             "(entry_type IN ('refund_debit','chargeback_debit') "
             "AND amount < 0 AND payment_id IS NOT NULL "

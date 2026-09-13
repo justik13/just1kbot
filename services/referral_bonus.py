@@ -63,6 +63,17 @@ class ReferralBonusGrantResult:
         return other + self.referrer_bonus
 
 
+def _safe_decimal(value: object) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, (int, float, str)):
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return Decimal(0)
+    return Decimal(0)
+
+
 def calculate_referral_bonus(purchase_amount: object) -> Decimal:
     """Return 10% of a purchase, rounded down to whole rubles."""
     amount = Decimal(str(purchase_amount))
@@ -186,6 +197,7 @@ async def grant_referral_bonus_for_topup(
                 },
             )
         )
+        referrer.bonus_balance = _safe_decimal(getattr(referrer, "bonus_balance", 0)) + bonus
         referrer_bonus_granted = bonus
         from services.audit_service import AuditService
         await AuditService.log_action(
@@ -245,6 +257,7 @@ async def grant_referral_bonus_for_topup(
                     },
                 )
             )
+            purchaser.bonus_balance = _safe_decimal(getattr(purchaser, "bonus_balance", 0)) + bonus
             purchaser_welcome_granted = bonus
             from services.audit_service import AuditService
             await AuditService.log_action(
@@ -341,6 +354,15 @@ async def reverse_referral_bonus_for_topup(
                     },
                 )
                 session.add(entry)
+                ref_user = await session.get(User, matching_credit.user_id)
+                if ref_user:
+                    abs_amt = abs(reversal_amount)
+                    ref_bonus = _safe_decimal(getattr(ref_user, "bonus_balance", 0))
+                    ref_real = _safe_decimal(getattr(ref_user, "balance", 0))
+                    bonus_deduct = min(ref_bonus, abs_amt)
+                    real_deduct = abs_amt - bonus_deduct
+                    ref_user.bonus_balance = ref_bonus - bonus_deduct
+                    ref_user.balance = ref_real - real_deduct
                 await session.flush()
                 reversal_capacity = await _credit_capacity(session, matching_credit)
                 allocation_amount = min(abs(reversal_amount), reversal_capacity)
@@ -411,6 +433,15 @@ async def reverse_referral_bonus_for_topup(
                 },
             )
             session.add(p_entry)
+            pur_user = await session.get(User, purchaser.id)
+            if pur_user:
+                abs_amt = abs(p_reversal_amount)
+                pur_bonus = _safe_decimal(getattr(pur_user, "bonus_balance", 0))
+                pur_real = _safe_decimal(getattr(pur_user, "balance", 0))
+                bonus_deduct = min(pur_bonus, abs_amt)
+                real_deduct = abs_amt - bonus_deduct
+                pur_user.bonus_balance = pur_bonus - bonus_deduct
+                pur_user.balance = pur_real - real_deduct
             await session.flush()
             p_reversal_capacity = await _credit_capacity(
                 session, matching_purchaser_credit

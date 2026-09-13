@@ -344,7 +344,7 @@ def get_admin_grant_days_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    for days in (7, 30, 90):
+    for days in (7, 30, 90, 365):
         builder.button(
             text=texts.TIME_DAYS_FULL_FORMAT.format(days=days),
             callback_data=(
@@ -352,14 +352,6 @@ def get_admin_grant_days_keyboard(
                 f"{telegram_id}:{tariff_id}:{days}"
             ),
         )
-
-    builder.button(
-        text=texts.LABEL_FOREVER,
-        callback_data=(
-            f"admin_sub_grant_confirm:"
-            f"{telegram_id}:{tariff_id}:36500"
-        ),
-    )
 
     builder.button(
         text=texts.ADMIN_BTN_INPUT_MANUALLY,
@@ -383,20 +375,13 @@ def get_admin_extend_days_new_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    for days in (7, 30, 90):
+    for days in (7, 30, 90, 365):
         builder.button(
             text=texts.TIME_DAYS_FULL_FORMAT.format(days=days),
             callback_data=(
                 f"admin_sub_confirm_extend:{telegram_id}:{days}"
             ),
         )
-
-    builder.button(
-        text=texts.LABEL_FOREVER,
-        callback_data=(
-            f"admin_sub_confirm_extend:{telegram_id}:36500"
-        ),
-    )
 
     builder.button(
         text=texts.ADMIN_BTN_INPUT_MANUALLY,

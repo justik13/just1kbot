@@ -7,12 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import (
     AdminAuditAction,
-    PERMANENT_END_DATE,
-    PERMANENT_SUBSCRIPTION_DAYS,
     VPN_ACCESS_GRACE_HOURS,
 )
 from database.models import User
 from database.repositories.profiles_repo import (
+    get_user_effective_device_count,
     get_user_profiles,
     get_user_profiles_count,
 )
@@ -340,11 +339,7 @@ class SubscriptionService:
         else:
             base_end = user.subscription_end if had_active_subscription else now
 
-            new_end = (
-                PERMANENT_END_DATE
-                if days >= PERMANENT_SUBSCRIPTION_DAYS
-                else base_end + timedelta(days=days)
-            )
+            new_end = base_end + timedelta(days=days)
 
         user.subscription_end = new_end
 
@@ -403,7 +398,9 @@ class SubscriptionService:
             raise ValueError("subscription_end must be timezone-aware")
         if subscription_end <= now_utc():
             raise ValueError("converted subscription must remain active")
-        profiles_count = await get_user_profiles_count(session, user.id)
+        profiles_count = await get_user_effective_device_count(
+            session, user.id, getattr(user, "active_sub_devices", None)
+        )
         if profiles_count > device_limit:
             raise ValueError(
                 f"Cannot downgrade: {profiles_count} devices > "

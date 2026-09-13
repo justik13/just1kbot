@@ -7,7 +7,6 @@ integrations, services, and bot layers without architectural cycles.
 
 import os
 import re
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -53,8 +52,6 @@ RATE_LIMIT_REQUESTS_PER_MINUTE = 30.0
 RATE_LIMIT_BURST = 10
 
 # Subscriptions & Lifetimes
-PERMANENT_SUBSCRIPTION_DAYS = 36500
-PERMANENT_END_DATE = datetime(2100, 1, 1, tzinfo=timezone.utc)
 GRACE_PERIOD_HOURS = 24
 VPN_ACCESS_GRACE_HOURS = 4
 
@@ -205,8 +202,6 @@ __all__ = [
     "HUB_CACHE_TTL",
     "MAX_RAW_CONFIG_BYTES",
     "NOTIFICATION_INTERVAL",
-    "PERMANENT_END_DATE",
-    "PERMANENT_SUBSCRIPTION_DAYS",
     "PaidValueEntryType",
     "PAYMENT_EXPIRATION_HOURS",
     "PaymentCheckoutStatus",

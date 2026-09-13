@@ -95,7 +95,7 @@ def _validate_positive_int(text: str | None) -> int | None:
 
     value = int(text.strip())
 
-    MAX_DAYS = 36500
+    MAX_DAYS = 365
 
     if value < 1 or value > MAX_DAYS:
         return None
