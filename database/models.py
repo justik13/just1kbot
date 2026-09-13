@@ -161,6 +161,13 @@ class User(Base):
         nullable=True,
     )
 
+    subscription_token: Mapped[str | None] = mapped_column(
+        String(64), unique=True, nullable=True, index=True
+    )
+    active_sub_devices: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, default=dict, server_default=text("'{}'::jsonb")
+    )
+
     referred_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
 
     last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -265,6 +272,12 @@ class VPNProfile(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     provisioning_status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="active", server_default=text("'active'")
+    )
+    device_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="manual", server_default=text("'manual'")
+    )
+    sub_device_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
     )
     desired_is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")

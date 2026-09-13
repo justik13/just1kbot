@@ -223,3 +223,7 @@ def setup_webhook_routes(app: web.Application):
     # Register White Internet subscription feed routes
     from bot.handlers.white_internet_web import setup_white_internet_web_routes
     setup_white_internet_web_routes(app)
+
+    # Register AmneziaWG subscription feed routes
+    from bot.handlers.awg_sub_web import setup_awg_subscription_web_routes
+    setup_awg_subscription_web_routes(app)

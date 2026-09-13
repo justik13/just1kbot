@@ -152,6 +152,8 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
+      WHITE_INTERNET_SUB_PATH_PREFIX: ${WHITE_INTERNET_SUB_PATH_PREFIX:-/sub/wl}
+      AWG_SUB_PATH_PREFIX: ${AWG_SUB_PATH_PREFIX:-/sub/awg}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT, AdminAuditAction
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import APIOperation, Server, User, VPNProfile
 from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
 from services.amnezia_capacity import (
@@ -82,15 +83,16 @@ class DeviceService:
         server_id: int,
         device_name: str | None = None,
         snapshot: ServerPeerSnapshot,
+        device_type: str = "manual",
+        sub_device_hash: str | None = None,
+        replaces_profile_id: int | None = None,
     ) -> VPNProfile:
         if snapshot.server_id != server_id or datetime.now(
             timezone.utc
         ) - snapshot.captured_at > timedelta(minutes=5):
             raise ServerUnavailable("Server capacity snapshot is stale")
         user = (
-            await session.execute(
-                select(User).where(User.id == user_id).with_for_update()
-            )
+            await session.execute(select(User).where(User.id == user_id).with_for_update())
         ).scalar_one()
         server = (
             await session.execute(
@@ -99,26 +101,31 @@ class DeviceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if not server or server.protocol != AMNEZIA_PROTOCOL or not server.is_active:
-            raise ServerUnavailable("Invalid or disabled server")
         if (
-            user.is_banned
-            or not user.subscription_end
-            or is_expired(user.subscription_end)
+            not server
+            or server.protocol != AMNEZIA_PROTOCOL
+            or not server.is_active
+            or (getattr(server, "health_state", None) or ServerHealthState.ONLINE)
+            != ServerHealthState.ONLINE
+            or (getattr(server, "lifecycle_status", None) or ServerLifecycleStatus.ACTIVE)
+            != ServerLifecycleStatus.ACTIVE
+            or "xray_origin" in (getattr(server, "capabilities", None) or [])
         ):
+            raise ServerUnavailable("Invalid or disabled server")
+        if user.is_banned or not user.subscription_end or is_expired(user.subscription_end):
             raise NoActiveSubscription("No active subscription")
         if not device_name:
             user_profiles = (
-                await session.execute(
-                    select(VPNProfile).where(VPNProfile.user_id == user.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(VPNProfile).where(VPNProfile.user_id == user.id)))
+                .scalars()
+                .all()
+            )
             used = set()
             for p in user_profiles:
                 m = re.search(r"#(\d+)$", p.device_name)
                 if m:
                     used.add(int(m.group(1)))
-            limit = user.device_limit or 5
+            limit = user.device_limit if user.device_limit is not None else 2
             slot_index = 1
             for i in range(1, limit + 1):
                 if i not in used:
@@ -127,33 +134,41 @@ class DeviceService:
             else:
                 slot_index = max(used) + 1 if used else 1
             device_name = texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=slot_index)
-        duplicate = (
-            await session.execute(
-                select(VPNProfile.id).where(
-                    VPNProfile.user_id == user.id,
-                    VPNProfile.server_id == server.id,
-                    func.lower(VPNProfile.device_name) == device_name.lower(),
-                )
-            )
-        ).scalar_one_or_none()
+        dup_query = select(VPNProfile.id).where(
+            VPNProfile.user_id == user.id,
+            VPNProfile.server_id == server.id,
+            func.lower(VPNProfile.device_name) == device_name.lower(),
+        )
+        if replaces_profile_id:
+            dup_query = dup_query.where(VPNProfile.id != replaces_profile_id)
+        duplicate = (await session.execute(dup_query)).scalar_one_or_none()
         if duplicate:
             raise DuplicateDeviceName("Duplicate device name")
-        if not is_admin(user.telegram_id):
+        if device_type != "sub" and not is_admin(user.telegram_id):
             today = now_msk().date()
             if not _is_same_day_msk(user.last_creation_date, today):
                 user.device_creations_today, user.last_creation_date = 0, today
             if user.device_creations_today >= DEVICE_DAILY_LIMIT:
                 raise DailyLimitExceeded("Daily limit exceeded")
-        user_count = (
-            await session.execute(
-                select(func.count(VPNProfile.id)).where(
-                    VPNProfile.user_id == user.id,
-                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
-                )
+        is_existing_sub_device = (
+            device_type == "sub"
+            and sub_device_hash is not None
+            and sub_device_hash in (user.active_sub_devices or {})
+        )
+        if not is_existing_sub_device:
+            manual_query = select(func.count(VPNProfile.id)).where(
+                VPNProfile.user_id == user.id,
+                VPNProfile.device_type == "manual",
+                VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
             )
-        ).scalar_one()
-        if user_count >= user.device_limit:
-            raise DeviceLimitExceeded("Device limit reached")
+            if replaces_profile_id:
+                manual_query = manual_query.where(VPNProfile.id != replaces_profile_id)
+            manual_count = (await session.execute(manual_query)).scalar_one()
+
+            sub_count = len(user.active_sub_devices or {})
+            effective_device_limit = user.device_limit if user.device_limit is not None else 2
+            if manual_count + sub_count >= effective_device_limit:
+                raise DeviceLimitExceeded("Device limit reached")
         server_count = (
             await session.execute(
                 select(func.count(VPNProfile.id)).where(
@@ -194,6 +209,8 @@ class DeviceService:
             user_id=user.id,
             server_id=server.id,
             device_name=device_name,
+            device_type=device_type,
+            sub_device_hash=sub_device_hash,
             peer_id=None,
             raw_config=None,
             provisioning_status="pending_create",
@@ -208,48 +225,43 @@ class DeviceService:
             async with session.begin_nested():
                 session.add(profile)
                 await session.flush()
+
+                m = re.search(r"#(\d+)$", profile.device_name)
+                slot_suffix = f"_n{m.group(1)}" if m else ""
+                profile.client_name = f"tg_{user.telegram_id}_p{profile.id}{slot_suffix}"
+                await enqueue_api_operation(
+                    session,
+                    operation_type="create_peer",
+                    idempotency_key=f"create-peer:{profile.id}:v1",
+                    server_id=server.id,
+                    profile_id=profile.id,
+                    client_name=profile.client_name,
+                    server_name_snapshot=server.name,
+                    api_url_snapshot=server.api_url,
+                    api_key_snapshot=server.api_key,
+                    payload={"desired_version": 1},
+                )
+                if device_type != "sub" and not is_admin(user.telegram_id):
+                    user.device_creations_today += 1
+
+                await AuditService.log_action(
+                    session,
+                    admin_id=0,
+                    action=AdminAuditAction.DEVICE_CREATE,
+                    target_type="user",
+                    target_id=user.id,
+                    details={
+                        "device_name": profile.device_name,
+                        "server_name": server.name,
+                        "profile_id": profile.id,
+                    },
+                )
         except IntegrityError as e:
             error_str = str(e.orig).lower() if e.orig else ""
-            if (
-                "duplicate" in error_str
-                or "unique" in error_str
-                or "uq_vpn_profiles" in error_str
-            ):
-                raise DuplicateDeviceName(
-                    "Device name already exists on this server"
-                ) from e
+            if "duplicate" in error_str or "unique" in error_str or "uq_vpn_profiles" in error_str:
+                raise DuplicateDeviceName("Device name already exists on this server") from e
             raise DeviceCreationError("Database integrity error") from e
 
-        m = re.search(r'#(\d+)$', profile.device_name)
-        slot_suffix = f"_n{m.group(1)}" if m else ""
-        profile.client_name = f"tg_{user.telegram_id}_p{profile.id}{slot_suffix}"
-        await enqueue_api_operation(
-            session,
-            operation_type="create_peer",
-            idempotency_key=f"create-peer:{profile.id}:v1",
-            server_id=server.id,
-            profile_id=profile.id,
-            client_name=profile.client_name,
-            server_name_snapshot=server.name,
-            api_url_snapshot=server.api_url,
-            api_key_snapshot=server.api_key,
-            payload={"desired_version": 1},
-        )
-        if not is_admin(user.telegram_id):
-            user.device_creations_today += 1
-
-        await AuditService.log_action(
-            session,
-            admin_id=0,
-            action=AdminAuditAction.DEVICE_CREATE,
-            target_type="user",
-            target_id=user.id,
-            details={
-                "device_name": profile.device_name,
-                "server_name": server.name,
-                "profile_id": profile.id,
-            },
-        )
         return profile
 
     @staticmethod
@@ -272,10 +284,14 @@ class DeviceService:
             if profile.provisioning_status == "deleting":
                 return True
             if profile.provisioning_status not in ALLOWED_DELETE_STATES:
-                raise DeviceCreationError(f"Deletion not allowed in status: {profile.provisioning_status}")
+                raise DeviceCreationError(
+                    f"Deletion not allowed in status: {profile.provisioning_status}"
+                )
 
         # Capture server and device info for audit before deletion
-        server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
+        server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(
+            session, profile
+        )
         device_name = profile.device_name
         profile_id = profile.id
         user_id = profile.user_id
@@ -350,8 +366,7 @@ class DeviceService:
             and create_operation is not None
             and (
                 create_operation.status == "processing"
-                or classify_create_side_effect_risk(create_operation)
-                != "never_started"
+                or classify_create_side_effect_risk(create_operation) != "never_started"
             )
         ):
             # The profile is being force-deleted, but we have a durable CREATE operation
@@ -369,12 +384,16 @@ class DeviceService:
                 create_operation.locked_by = None
                 create_operation.last_error_code = "device_delete_force_revive"
                 create_operation.last_error = "Revived by force delete for orphan cleanup"
-            
+
             await session.delete(profile)
         else:
             await session.delete(profile)
 
-        action = AdminAuditAction.ADMIN_DEVICE_DELETE if (actor_id and is_admin(actor_id)) else AdminAuditAction.DEVICE_DELETE
+        action = (
+            AdminAuditAction.ADMIN_DEVICE_DELETE
+            if (actor_id and is_admin(actor_id))
+            else AdminAuditAction.DEVICE_DELETE
+        )
         admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
         await AuditService.log_action(
             session,
@@ -392,3 +411,44 @@ class DeviceService:
         if server_id:
             invalidate_server_cache(server_id)
         return True
+
+    @staticmethod
+    async def delete_sub_device(
+        session: AsyncSession,
+        *,
+        user_id: int,
+        hwid_hash: str,
+    ) -> int:
+        """Disconnect and delete all server profiles associated with a sub-device."""
+        user = (
+            await session.execute(select(User).where(User.id == user_id).with_for_update())
+        ).scalar_one_or_none()
+        if not user:
+            return 0
+        profiles = (
+            (
+                await session.execute(
+                    select(VPNProfile).where(
+                        VPNProfile.user_id == user_id,
+                        VPNProfile.device_type == "sub",
+                        VPNProfile.sub_device_hash == hwid_hash,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        deleted_count = 0
+        for p in profiles:
+            await DeviceService.delete_device(session, p, actor_id=user.telegram_id, force=True)
+            deleted_count += 1
+
+        # Strict Fail-Closed: Only remove the device from active_sub_devices once all profiles
+        # have been successfully processed and queued for deletion without exceptions.
+        devices = dict(user.active_sub_devices or {})
+        if hwid_hash in devices:
+            del devices[hwid_hash]
+            user.active_sub_devices = devices
+            await session.flush()
+
+        return deleted_count

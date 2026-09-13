@@ -1,5 +1,6 @@
 from datetime import timedelta
 import inspect
+import secrets
 
 from sqlalchemy import and_, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,8 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "notification_retry_count",
     "last_notification_attempt",
     "last_trial_reset_at",
+    "subscription_token",
+    "active_sub_devices",
 }
 
 
@@ -87,18 +90,83 @@ async def get_user_by_id(
     return None
 
 
+async def get_user_by_subscription_token(
+    session: AsyncSession, token: str, for_update: bool = False
+) -> User | None:
+    """Retrieve user by unique subscription token with optional row lock."""
+    if not token or not isinstance(token, str) or len(token) < 16:
+        return None
+    stmt = select(User).where(
+        User.subscription_token == token,
+        User.is_deleted.is_(False),
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def ensure_subscription_token(session: AsyncSession, user: User) -> str:
+    """Ensure user has a persistent unique subscription token with row lock against concurrent generation races."""
+    token = getattr(user, "subscription_token", None)
+    if token:
+        return token
+
+    target_user = user
+    if session is not None and getattr(user, "id", None) is not None:
+        locked_user = await session.scalar(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        if locked_user is not None:
+            target_user = locked_user
+            if locked_user.subscription_token:
+                user.subscription_token = locked_user.subscription_token
+                return locked_user.subscription_token
+
+    new_token = secrets.token_hex(32)
+    target_user.subscription_token = new_token
+    if target_user is not user:
+        user.subscription_token = new_token
+    if session is not None:
+        await session.flush()
+    return new_token
+
+
+async def rotate_subscription_token(session: AsyncSession, user: User) -> str:
+    """Generate a new unique subscription token for user, invalidating the previous one."""
+    target_user = user
+    if getattr(user, "id", None) is not None:
+        locked_user = await session.scalar(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        if locked_user is not None:
+            target_user = locked_user
+
+    new_token = secrets.token_hex(32)
+    target_user.subscription_token = new_token
+    if target_user is not user:
+        user.subscription_token = new_token
+    await session.flush()
+    return new_token
+
+
+
 async def create_user(
     session: AsyncSession,
     telegram_id: int,
     username: str = None,
     first_name: str = None,
     referred_by: int = None,
+    subscription_token: str = None,
 ) -> User:
+    if not subscription_token:
+        subscription_token = secrets.token_hex(32)
     user = User(
         telegram_id=telegram_id,
         username=username,
         first_name=first_name,
         referred_by=referred_by,
+        subscription_token=subscription_token,
     )
     session.add(user)
     await session.flush()
