@@ -39,6 +39,7 @@ from database.models import User
 from database.repositories.profiles_repo import get_user_effective_device_count
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
+from utils.formatters import format_datetime
 from utils.rate_limiter import global_send_limiter
 
 logger = logging.getLogger("BackgroundWorker")
@@ -596,6 +597,7 @@ async def _send_white_internet_notifications(
     from config.enums import WhiteInternetStatus
     from database.models import User, WhiteInternetSubscription
 
+    expired_cutoff = current_time - timedelta(days=3)
     cutoff = current_time + timedelta(days=3)
 
     async with session_scope() as session:
@@ -606,8 +608,10 @@ async def _send_white_internet_notifications(
                 WhiteInternetSubscription.status.in_([
                     WhiteInternetStatus.ACTIVE,
                     WhiteInternetStatus.EXHAUSTED,
+                    WhiteInternetStatus.EXPIRED,
                 ]),
                 WhiteInternetSubscription.expires_at.is_not(None),
+                WhiteInternetSubscription.expires_at >= expired_cutoff,
                 WhiteInternetSubscription.expires_at <= cutoff,
                 or_(
                     WhiteInternetSubscription.notified_3d.is_(False),
@@ -643,10 +647,11 @@ async def _send_white_internet_notifications(
                 if sub.status not in (
                     WhiteInternetStatus.ACTIVE,
                     WhiteInternetStatus.EXHAUSTED,
+                    WhiteInternetStatus.EXPIRED,
                 ):
                     continue
 
-                if not sub.expires_at or sub.expires_at > cutoff:
+                if not sub.expires_at or sub.expires_at > cutoff or sub.expires_at < expired_cutoff:
                     continue
 
                 user = await session.scalar(
@@ -680,10 +685,16 @@ async def _send_white_internet_notifications(
                     if not sub.notified_3d:
                         notify_type = "3d"
                         msg = NOTIFY_WI_3D.format(
-                            date=sub.expires_at.strftime("%d.%m.%Y %H:%M")
+                            date=format_datetime(sub.expires_at)
                         )
 
                 if not notify_type or not msg:
+                    if time_left.total_seconds() <= 0:
+                        sub.notified_expired = True
+                        sub.notified_2h = True
+                        sub.notified_1d = True
+                        sub.notified_3d = True
+                        await session.flush()
                     continue
 
                 kb = InlineKeyboardBuilder()
@@ -699,6 +710,9 @@ async def _send_white_internet_notifications(
                     )
                     if notify_type == "expired":
                         sub.notified_expired = True
+                        sub.notified_2h = True
+                        sub.notified_1d = True
+                        sub.notified_3d = True
                     elif notify_type == "2h":
                         sub.notified_2h = True
                         sub.notified_1d = True

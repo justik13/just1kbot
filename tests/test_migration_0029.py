@@ -64,6 +64,8 @@ class Migration0029Tests(unittest.TestCase):
 
         index_names = {idx.name for idx in sub_table.indexes}
         self.assertIn("ix_wi_subs_expiring_notify", index_names)
+        idx = next(i for i in sub_table.indexes if i.name == "ix_wi_subs_expiring_notify")
+        self.assertIn("EXPIRED", str(idx.dialect_options["postgresql"]["where"]))
 
 
 if __name__ == "__main__":

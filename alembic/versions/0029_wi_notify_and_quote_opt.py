@@ -62,13 +62,33 @@ def upgrade() -> None:
         ),
     )
 
-    # 3. Create partial index for WI expiration notification polling
+    # 3. Backfill notification flags for subscriptions that already expired before this migration
+    wi_subs = sa.table(
+        "white_internet_subscriptions",
+        sa.column("expires_at", sa.DateTime(timezone=True)),
+        sa.column("notified_3d", sa.Boolean()),
+        sa.column("notified_1d", sa.Boolean()),
+        sa.column("notified_2h", sa.Boolean()),
+        sa.column("notified_expired", sa.Boolean()),
+    )
+    op.execute(
+        wi_subs.update()
+        .where(wi_subs.c.expires_at < sa.func.now())
+        .values(
+            notified_3d=True,
+            notified_1d=True,
+            notified_2h=True,
+            notified_expired=True,
+        )
+    )
+
+    # 4. Create partial index for WI expiration notification polling
     op.create_index(
         "ix_wi_subs_expiring_notify",
         "white_internet_subscriptions",
         ["expires_at", "user_id"],
         postgresql_where=sa.text(
-            "status IN ('ACTIVE', 'EXHAUSTED') AND (notified_3d = false OR notified_1d = false OR notified_2h = false OR notified_expired = false)"
+            "status IN ('ACTIVE', 'EXHAUSTED', 'EXPIRED') AND (notified_3d = false OR notified_1d = false OR notified_2h = false OR notified_expired = false)"
         ),
     )
 
