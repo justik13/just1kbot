@@ -34,8 +34,9 @@ def format_datetime_msk(
 
 
 def is_permanent_subscription(dt: datetime | None) -> bool:
-    # Permanent subscriptions are completely deprecated and removed
-    return False
+    if dt is None:
+        return False
+    return dt.year >= 2099
 
 
 def is_expired(dt: datetime | None) -> bool:

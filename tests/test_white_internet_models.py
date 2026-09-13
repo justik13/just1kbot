@@ -50,7 +50,10 @@ class WhiteInternetModelsTests(unittest.TestCase):
         rev_0027 = scripts.get_revision("0027_awg_subscription_system")
         self.assertIsNotNone(rev_0027)
         self.assertEqual(rev_0027.down_revision, "0026_wi_trial_semantics")
-        self.assertEqual(scripts.get_heads(), ["0027_awg_subscription_system"])
+        rev_0028 = scripts.get_revision("0028_two_balance_system")
+        self.assertIsNotNone(rev_0028)
+        self.assertEqual(rev_0028.down_revision, "0027_awg_subscription_system")
+        self.assertEqual(scripts.get_heads(), ["0028_two_balance_system"])
 
     def test_server_lifecycle_status_field_and_constraints(self):
         self.assertEqual(ServerLifecycleStatus.ACTIVE, "ACTIVE")

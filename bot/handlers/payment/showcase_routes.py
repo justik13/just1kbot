@@ -50,6 +50,9 @@ from .common import (
 
 logger = logging.getLogger(__name__)
 
+# Compatibility alias for legacy tests
+get_user_profiles_count = get_user_effective_device_count
+
 router = Router()
 
 
@@ -482,7 +485,7 @@ async def render_tariff_duration_selection(
         return
 
     if db_user:
-        effective_devices = await get_user_effective_device_count(
+        effective_devices = await get_user_profiles_count(
             session, db_user.id
         )
 

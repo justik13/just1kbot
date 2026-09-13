@@ -136,6 +136,7 @@ async def grant_referral_bonus_for_topup(
             User.id == purchaser_user_id,
             User.is_deleted.is_(False),
         )
+        .with_for_update()
     )
     if purchaser is None or purchaser.referred_by is None:
         return ReferralBonusGrantResult(
@@ -155,6 +156,7 @@ async def grant_referral_bonus_for_topup(
             User.telegram_id == purchaser.referred_by,
             User.is_deleted.is_(False),
         )
+        .with_for_update()
     )
     if referrer is None or referrer.is_banned:
         return ReferralBonusGrantResult(
@@ -354,15 +356,12 @@ async def reverse_referral_bonus_for_topup(
                     },
                 )
                 session.add(entry)
-                ref_user = await session.get(User, matching_credit.user_id)
+                ref_user = await session.get(User, matching_credit.user_id, with_for_update=True)
                 if ref_user:
                     abs_amt = abs(reversal_amount)
                     ref_bonus = _safe_decimal(getattr(ref_user, "bonus_balance", 0))
-                    ref_real = _safe_decimal(getattr(ref_user, "balance", 0))
                     bonus_deduct = min(ref_bonus, abs_amt)
-                    real_deduct = abs_amt - bonus_deduct
                     ref_user.bonus_balance = ref_bonus - bonus_deduct
-                    ref_user.balance = ref_real - real_deduct
                 await session.flush()
                 reversal_capacity = await _credit_capacity(session, matching_credit)
                 allocation_amount = min(abs(reversal_amount), reversal_capacity)
@@ -433,15 +432,12 @@ async def reverse_referral_bonus_for_topup(
                 },
             )
             session.add(p_entry)
-            pur_user = await session.get(User, purchaser.id)
+            pur_user = await session.get(User, purchaser.id, with_for_update=True)
             if pur_user:
                 abs_amt = abs(p_reversal_amount)
                 pur_bonus = _safe_decimal(getattr(pur_user, "bonus_balance", 0))
-                pur_real = _safe_decimal(getattr(pur_user, "balance", 0))
                 bonus_deduct = min(pur_bonus, abs_amt)
-                real_deduct = abs_amt - bonus_deduct
                 pur_user.bonus_balance = pur_bonus - bonus_deduct
-                pur_user.balance = pur_real - real_deduct
             await session.flush()
             p_reversal_capacity = await _credit_capacity(
                 session, matching_purchaser_credit

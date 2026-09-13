@@ -119,7 +119,9 @@ async def render_tariff_change_review(
         after=after
     )
     if quote.rounding_loss_value_rub and quote.rounding_loss_value_rub > 0:
-        text += f"\n\n🎁 Неизрасходованный остаток <b>{int(quote.rounding_loss_value_rub)} ₽</b> будет зачислен на бонусный баланс."
+        text += texts.PAYMENT_TARIFF_CHANGE_LEFTOVER_NOTE.format(
+            amount=int(quote.rounding_loss_value_rub)
+        )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
         exact = max(int(intent.shortage), minimum)
@@ -192,7 +194,7 @@ async def choose_tariff_change_option(
             "same_tariff_requires_renew": texts.PAYMENT_SHOWCASE,
             "financial_hold": texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
             "account_debt": texts.PAYMENT_DEBT_BLOCKED_NOTICE,
-            "transfer_below_minimum_days": "Перенос остатка доступен только при остатке от 7 дней.",
+            "transfer_below_minimum_days": texts.PAYMENT_TARIFF_CHANGE_TRANSFER_MINIMUM_ALERT,
             "target_tariff_not_found": texts.ERROR_TARIFF_UNAVAILABLE,
             "target_tariff_inactive": texts.ERROR_TARIFF_UNAVAILABLE,
             "subscription_inactive": texts.PAYMENT_SUBSCRIPTION_INACTIVE,

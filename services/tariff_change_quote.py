@@ -7,7 +7,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import ROUND_CEILING, Decimal
+from decimal import Decimal
 
 from sqlalchemy import select
 
@@ -52,12 +52,81 @@ class TariffChangeOptions:
     option2_3m_tariff_id: int | None = None
 
 
+@dataclass(frozen=True)
+class SubscriptionRemainingValue:
+    remaining_days: int
+    daily_rate: Decimal
+    remaining_value: int
+
+
+@dataclass(frozen=True)
+class TransferOptionCalculation:
+    target_days: int
+    leftover_rub: int
+    is_available: bool
+
+
+def calculate_subscription_remaining_value(
+    *,
+    subscription_end: datetime | None,
+    price_rub: int | Decimal,
+    duration_days: int,
+    as_of: datetime,
+) -> SubscriptionRemainingValue:
+    """Canonical single engine for calculating active remaining days and ruble value."""
+    if subscription_end is None or subscription_end <= as_of or duration_days <= 0:
+        return SubscriptionRemainingValue(remaining_days=0, daily_rate=Decimal(0), remaining_value=0)
+    remaining_days = max(0, (subscription_end - as_of).days)
+    daily_rate = Decimal(int(price_rub) // duration_days)
+    remaining_value = int(remaining_days * daily_rate)
+    return SubscriptionRemainingValue(
+        remaining_days=remaining_days,
+        daily_rate=daily_rate,
+        remaining_value=remaining_value,
+    )
+
+
+def calculate_transfer_option(
+    *,
+    remaining_value: int,
+    target_price_rub: int | Decimal,
+    target_duration_days: int,
+) -> TransferOptionCalculation:
+    """Canonical calculation for Option 1 (Transfer remaining value to target days)."""
+    if target_duration_days <= 0 or remaining_value <= 0:
+        return TransferOptionCalculation(target_days=0, leftover_rub=0, is_available=False)
+    target_daily_rate = Decimal(int(target_price_rub) // target_duration_days)
+    if target_daily_rate <= 0:
+        return TransferOptionCalculation(target_days=0, leftover_rub=0, is_available=False)
+    target_days = int(Decimal(remaining_value) // target_daily_rate)
+    leftover_rub = max(0, remaining_value - int(target_days * target_daily_rate))
+    return TransferOptionCalculation(
+        target_days=target_days,
+        leftover_rub=leftover_rub,
+        is_available=target_days >= 7,
+    )
+
+
+def calculate_surcharge_option(
+    *,
+    remaining_value: int,
+    target_price_rub: int | Decimal,
+) -> int:
+    """Canonical calculation for Option 2 (Surcharge to buy target duration)."""
+    return max(0, int(target_price_rub) - remaining_value)
+
+
 class SnapshotCanonicalizationError(ValueError):
     """A snapshot contains a value without a safe canonical representation."""
 
 
-def _decimal(value: Decimal) -> str:
-    value = Decimal(value)
+def _decimal(value: Decimal | int | float | None) -> str:
+    if value is None:
+        return "0"
+    if isinstance(value, float):
+        value = Decimal(str(value))
+    elif not isinstance(value, Decimal):
+        value = Decimal(value)
     if not value.is_finite():
         raise SnapshotCanonicalizationError("Decimal must be finite")
     if value == 0:
@@ -76,40 +145,58 @@ def _timestamp(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def balance_snapshot_fingerprint(*, user_id: int, subscription_end: datetime, snapshot=None, **kwargs) -> str:
-    """SHA-256 of stable JSON: UTC timestamps, fixed decimals and sorted lots/IDs."""
-    if snapshot is not None and hasattr(snapshot, "paid_lots") and snapshot.paid_lots:
-        paid = [{
-            "entitlement_id": x.entitlement_entry_id, "ledger_id": x.paid_value_ledger_entry_id,
-            "tariff_version_id": x.tariff_version_id,
-            "quote_id": x.quote_id,
-            "remaining_hours": x.remaining_whole_hours,
-            "remaining_value": _decimal(x.remaining_paid_value_rub),
-            "segment_start": _timestamp(x.segment_start), "segment_end": _timestamp(x.segment_end),
-        } for x in snapshot.paid_lots]
-        bonus = [{
-            "entitlement_id": x.entitlement_entry_id, "source_type": x.source_type,
-            "source_id": x.source_id, "type": x.bonus_type,
-            "remaining_hours": x.remaining_whole_hours,
-            "segment_start": _timestamp(x.segment_start), "segment_end": _timestamp(x.segment_end),
-        } for x in snapshot.bonus_lots]
+def balance_snapshot_fingerprint(
+    *,
+    user_id: int,
+    subscription_end: datetime,
+    snapshot=None,
+    **kwargs,
+) -> str:
+    """SHA-256 of stable JSON: UTC timestamps, fixed decimals, and sorted aggregates."""
+    if snapshot is not None:
+        paid = [
+            {
+                "entitlement_id": getattr(x, "entitlement_entry_id", None),
+                "ledger_id": getattr(x, "paid_value_ledger_entry_id", None),
+                "payment_id": getattr(x, "payment_id", None),
+                "tariff_version_id": getattr(x, "tariff_version_id", None),
+                "remaining_hours": getattr(x, "remaining_whole_hours", 0),
+                "remaining_value": _decimal(getattr(x, "remaining_paid_value_rub", 0)),
+                "segment_start": _timestamp(getattr(x, "segment_start", None)),
+                "segment_end": _timestamp(getattr(x, "segment_end", None)),
+            }
+            for x in getattr(snapshot, "paid_lots", ())
+        ]
+        bonus = [
+            {
+                "entitlement_id": getattr(x, "entitlement_entry_id", None),
+                "source_type": getattr(x, "source_type", None),
+                "source_id": getattr(x, "source_id", None),
+                "type": getattr(x, "bonus_type", None),
+                "remaining_hours": getattr(x, "remaining_whole_hours", 0),
+                "segment_start": _timestamp(getattr(x, "segment_start", None)),
+                "segment_end": _timestamp(getattr(x, "segment_end", None)),
+            }
+            for x in getattr(snapshot, "bonus_lots", ())
+        ]
         body = {
-            "user_id": user_id, "balance_as_of": _timestamp(snapshot.as_of),
+            "user_id": user_id,
+            "balance_as_of": _timestamp(getattr(snapshot, "as_of", None)),
             "subscription_end": _timestamp(subscription_end),
-            "remaining_paid_hours": snapshot.remaining_paid_hours,
-            "remaining_paid_value": _decimal(snapshot.remaining_paid_value_rub),
-            "remaining_bonus_hours": snapshot.remaining_bonus_hours,
-            "rounding_loss_hours": _decimal(snapshot.rounding_loss_hours),
-            "paid_lots": sorted(paid, key=lambda x: (x["entitlement_id"], x["ledger_id"])),
-            "bonus_lots": sorted(bonus, key=lambda x: (x["entitlement_id"], x["source_type"], x["source_id"])),
-            "source_entitlement_ids": sorted(snapshot.source_entitlement_entry_ids),
-            "source_ledger_ids": sorted(snapshot.source_ledger_entry_ids),
+            "remaining_paid_hours": getattr(snapshot, "remaining_paid_hours", 0),
+            "remaining_paid_value": _decimal(getattr(snapshot, "remaining_paid_value_rub", Decimal(0))),
+            "remaining_bonus_hours": getattr(snapshot, "remaining_bonus_hours", 0),
+            "rounding_loss_hours": _decimal(getattr(snapshot, "rounding_loss_hours", Decimal(0))),
+            "paid_lots": sorted(paid, key=lambda x: (x["entitlement_id"] or 0, x["ledger_id"] or 0)),
+            "bonus_lots": sorted(bonus, key=lambda x: (x["entitlement_id"] or 0, str(x["source_type"]), str(x["source_id"]))),
+            "source_entitlement_ids": sorted(getattr(snapshot, "source_entitlement_entry_ids", ())),
+            "source_ledger_ids": sorted(getattr(snapshot, "source_ledger_entry_ids", ())),
         }
     else:
         body = {
             "user_id": user_id,
             "subscription_end": _timestamp(subscription_end),
-            **{k: str(v) for k, v in sorted(kwargs.items())},
+            **{k: (_decimal(v) if isinstance(v, (Decimal, float)) else str(v)) for k, v in sorted(kwargs.items()) if v is not None},
         }
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode()).hexdigest()
@@ -133,16 +220,16 @@ async def calculate_tariff_change_options(
                 Tariff.is_active.is_(True),
             ).order_by(Tariff.duration_days.asc()).limit(1)
         )
-    if source_tariff is None:
-        source_daily_rate = Decimal(3)
-        source_tariff_name = "Базовый"
-    else:
-        source_daily_rate = Decimal(source_tariff.price_rub) / Decimal(source_tariff.duration_days)
-        source_tariff_name = getattr(source_tariff, "name", "Текущий")
+    source_tariff_name = getattr(source_tariff, "name", "") if source_tariff else ""
 
-    remaining_seconds = max(0, (user.subscription_end - as_of).total_seconds()) if user.subscription_end else 0
-    remaining_days = max(1, int(round(remaining_seconds / 86400))) if remaining_seconds > 0 else 0
-    remaining_value = int(round(Decimal(remaining_days) * source_daily_rate))
+    rem = calculate_subscription_remaining_value(
+        subscription_end=user.subscription_end,
+        price_rub=source_tariff.price_rub if source_tariff else Decimal(90),
+        duration_days=source_tariff.duration_days if source_tariff else 30,
+        as_of=as_of,
+    )
+    remaining_days = rem.remaining_days
+    remaining_value = rem.remaining_value
 
     target_tariffs = (await session.scalars(
         select(Tariff).where(
@@ -154,13 +241,23 @@ async def calculate_tariff_change_options(
     target_30d = next((t for t in target_tariffs if t.duration_days == 30), target_tariff)
     target_90d = next((t for t in target_tariffs if t.duration_days == 90), None)
 
-    target_daily_rate = Decimal(target_30d.price_rub) / Decimal(target_30d.duration_days)
-    opt1_days = int(Decimal(remaining_value) // target_daily_rate)
-    opt1_leftover = max(0, remaining_value - int(round(Decimal(opt1_days) * target_daily_rate)))
-    opt1_available = opt1_days >= 7
-
-    due_1m = max(0, int(target_30d.price_rub) - remaining_value)
-    due_3m = max(0, int(target_90d.price_rub) - remaining_value) if target_90d else None
+    trans = calculate_transfer_option(
+        remaining_value=remaining_value,
+        target_price_rub=target_30d.price_rub,
+        target_duration_days=target_30d.duration_days,
+    )
+    due_1m = calculate_surcharge_option(
+        remaining_value=remaining_value,
+        target_price_rub=target_30d.price_rub,
+    )
+    due_3m = (
+        calculate_surcharge_option(
+            remaining_value=remaining_value,
+            target_price_rub=target_90d.price_rub,
+        )
+        if target_90d
+        else None
+    )
 
     return TariffChangeOptions(
         remaining_days=remaining_days,
@@ -168,9 +265,9 @@ async def calculate_tariff_change_options(
         source_tariff_name=source_tariff_name,
         target_tariff_name=target_30d.name,
         target_device_limit=target_tariff.device_limit,
-        option1_available=opt1_available,
-        option1_days=opt1_days,
-        option1_leftover_rub=opt1_leftover,
+        option1_available=trans.is_available,
+        option1_days=trans.target_days,
+        option1_leftover_rub=trans.leftover_rub,
         option2_1m_surcharge=due_1m,
         option2_1m_tariff_id=target_30d.id,
         option2_3m_surcharge=due_3m,
@@ -282,43 +379,61 @@ async def create_tariff_change_quote(
     source_version = await get_or_create_current_version(session, source)
     target_version = await get_or_create_current_version(session, target)
 
-    # Daily calculation in whole rubles
-    remaining_seconds = max(0, (user.subscription_end - as_of).total_seconds())
-    remaining_days = max(1, int(round(remaining_seconds / 86400)))
-    source_daily_rate = Decimal(source_version.price_rub) / Decimal(source_version.duration_days)
-    remaining_value = Decimal(int(round(Decimal(remaining_days) * source_daily_rate)))
-
+    # Daily calculation in whole rubles via canonical calculation engine
+    rem = calculate_subscription_remaining_value(
+        subscription_end=user.subscription_end,
+        price_rub=source_version.price_rub,
+        duration_days=source_version.duration_days,
+        as_of=as_of,
+    )
+    remaining_days = rem.remaining_days
+    remaining_value = Decimal(rem.remaining_value)
     current_paid_hours = remaining_days * 24
     current_paid_value_rub = remaining_value
 
     if option_type == "transfer":
-        target_daily_rate = Decimal(target_version.price_rub) / Decimal(target_version.duration_days)
-        new_days = int(remaining_value // target_daily_rate)
-        if new_days < 7:
+        trans = calculate_transfer_option(
+            remaining_value=rem.remaining_value,
+            target_price_rub=target_version.price_rub,
+            target_duration_days=target_version.duration_days,
+        )
+        if not trans.is_available:
             return TariffChangeQuoteResult(failure_code="transfer_below_minimum_days")
-        leftover_rub = max(Decimal(0), remaining_value - int(round(Decimal(new_days) * target_daily_rate)))
         required = Decimal(0)
-        resulting_paid_hours = new_days * 24
-        rounding_loss_value_rub = leftover_rub
-        resulting_paid_value_rub = remaining_value - leftover_rub
+        resulting_paid_hours = trans.target_days * 24
+        rounding_loss_value_rub = Decimal(trans.leftover_rub)
+        resulting_paid_value_rub = remaining_value - rounding_loss_value_rub
     else:
         # Surcharge option
-        required = max(Decimal(0), target_version.price_rub - remaining_value).quantize(
-            Decimal(1), rounding=ROUND_CEILING
+        surcharge = calculate_surcharge_option(
+            remaining_value=rem.remaining_value,
+            target_price_rub=target_version.price_rub,
         )
+        required = Decimal(surcharge)
         resulting_paid_hours = target_version.duration_hours
         rounding_loss_value_rub = Decimal(0)
         resulting_paid_value_rub = target_version.price_rub
 
     existing_change = next((q for q in active if q.operation_type == "change"), None)
     if existing_change:
+        existing_option = (
+            existing_change.source_entitlement_entry_ids[0]
+            if existing_change.source_entitlement_entry_ids
+            and isinstance(existing_change.source_entitlement_entry_ids[0], str)
+            else (
+                "transfer"
+                if existing_change.amount_due_rub == 0
+                and existing_change.resulting_paid_hours != target_version.duration_hours
+                else "surcharge"
+            )
+        )
         same_target = (existing_change.target_tariff_version_id == target_version.id)
         same_sub_end = (
             existing_change.source_subscription_end is not None
             and _timestamp(existing_change.source_subscription_end) == _timestamp(user.subscription_end)
         )
-        same_amount = (existing_change.amount_due_rub == required)
-        if same_target and same_sub_end and same_amount:
+        same_option = (existing_option == option_type)
+        if same_target and same_sub_end and same_option:
             return TariffChangeQuoteResult(
                 quote=existing_change,
                 created=False,
@@ -364,7 +479,7 @@ async def create_tariff_change_quote(
         balance_as_of=as_of,
         source_subscription_end=user.subscription_end,
         source_balance_fingerprint=fingerprint,
-        source_entitlement_entry_ids=[],
+        source_entitlement_entry_ids=[option_type],
         source_ledger_entry_ids=[],
     )
     session.add(quote)

@@ -89,12 +89,28 @@ async def get_account_balance(
     for_update: bool = False,
     locked_user: User | None = None,
 ) -> AccountBalanceSnapshot:
-    user = locked_user or await lock_account_user(session, user_id)
-    if for_update and locked_user is None:
+    user = locked_user
+    if user is None and for_update:
         user = await lock_account_user(session, user_id)
+    elif user is None:
+        user_res = await session.scalar(select(User).where(User.id == user_id))
+        if isinstance(user_res, User):
+            user = user_res
 
-    real_pos = Decimal(str(user.balance or ZERO))
-    bonus_pos = Decimal(str(user.bonus_balance or ZERO))
+    if user is not None and hasattr(user, "balance") and isinstance(user.balance, (Decimal, int, float, str)):
+        real_pos = Decimal(str(user.balance or ZERO))
+        bonus_pos = Decimal(str(user.bonus_balance or ZERO))
+    else:
+        real_pos = Decimal(
+            await session.scalar(
+                select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
+                    AccountLedgerEntry.user_id == user_id
+                )
+            )
+            or ZERO
+        )
+        bonus_pos = ZERO
+
     debt = max(ZERO, -real_pos)
 
     reserved = Decimal(

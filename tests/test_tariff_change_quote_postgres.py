@@ -32,6 +32,7 @@ from services.account_tariff_change import (
     settle_account_tariff_change,
 )
 from services.tariff_change_quote import create_tariff_change_quote
+from tests.db_utils import TRUNCATE_SQL
 from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
@@ -43,12 +44,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "TRUNCATE paid_value_ledger, tariff_quotes, tariff_versions, "
-                    "entitlement_entries, payments, users, tariffs RESTART IDENTITY CASCADE"
-                )
-            )
+            await connection.execute(text(TRUNCATE_SQL))
 
     async def asyncTearDown(self):
         await self.engine.dispose()

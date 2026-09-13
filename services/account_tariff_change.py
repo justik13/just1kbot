@@ -256,11 +256,16 @@ async def _settle_account_tariff_change(
                 raise AccountTariffChangeError("change_cooldown_active")
 
     option_type = (
-        "transfer"
-        if quote.amount_due_rub == 0 and quote.resulting_paid_hours != target.duration_hours
-        else "surcharge"
+        quote.source_entitlement_entry_ids[0]
+        if quote.source_entitlement_entry_ids
+        and isinstance(quote.source_entitlement_entry_ids[0], str)
+        else (
+            "transfer"
+            if quote.amount_due_rub == 0 and quote.resulting_paid_hours != target.duration_hours
+            else "surcharge"
+        )
     )
-    fingerprint = balance_snapshot_fingerprint(
+    expected_fp = balance_snapshot_fingerprint(
         user_id=user.id,
         subscription_end=user.subscription_end,
         source_version_id=source.id,
@@ -270,18 +275,8 @@ async def _settle_account_tariff_change(
     )
     if _timestamp(quote.source_subscription_end) != _timestamp(user.subscription_end):
         raise AccountTariffChangeError("quote_source_history_changed")
-    if quote.source_balance_fingerprint != fingerprint:
-        alt_option = "transfer" if option_type == "surcharge" else "surcharge"
-        alt_fp = balance_snapshot_fingerprint(
-            user_id=user.id,
-            subscription_end=user.subscription_end,
-            source_version_id=source.id,
-            target_version_id=target.id,
-            amount_due=quote.amount_due_rub,
-            option_type=alt_option,
-        )
-        if quote.source_balance_fingerprint != alt_fp:
-            raise AccountTariffChangeError("quote_source_history_changed")
+    if quote.source_balance_fingerprint != expected_fp:
+        raise AccountTariffChangeError("quote_source_history_changed")
 
     before = await get_account_balance(
         session, user_id=user.id, locked_user=user
