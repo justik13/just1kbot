@@ -46,6 +46,19 @@ class Migration0027Tests(unittest.TestCase):
         self.assertIn("legacy_0027_grant_", content)
         self.assertIn("legacy_active_subscription_backfill", content)
 
+    def test_migration_0027_sql_constants(self):
+        self.assertTrue(hasattr(self.migration, "UPGRADE_CONSTRAINT_SQL"))
+        self.assertTrue(hasattr(self.migration, "BACKFILL_SQL"))
+        self.assertTrue(hasattr(self.migration, "DISABLE_TRIGGER_SQL"))
+        self.assertTrue(hasattr(self.migration, "ENABLE_TRIGGER_SQL"))
+        self.assertTrue(hasattr(self.migration, "DOWNGRADE_CLEANUP_SQL"))
+        self.assertTrue(hasattr(self.migration, "DOWNGRADE_FAIL_CLOSED_CHECK_SQL"))
+        self.assertTrue(hasattr(self.migration, "DOWNGRADE_CONSTRAINT_SQL"))
+        self.assertIn("ck_entitlement_entries_shape", self.migration.UPGRADE_CONSTRAINT_SQL)
+        self.assertIn("legacy_0027_grant_", self.migration.BACKFILL_SQL)
+        self.assertIn("legacy_0027_grant_", self.migration.DOWNGRADE_CLEANUP_SQL)
+        self.assertIn("RAISE EXCEPTION", self.migration.DOWNGRADE_FAIL_CLOSED_CHECK_SQL)
+
     def test_entitlement_entry_model_shape_constraint(self):
         constraint = next(
             c for c in EntitlementEntry.__table__.constraints
@@ -81,6 +94,46 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.created_user_ids: list[int] = []
 
     async def asyncTearDown(self) -> None:
+        # Clean up any test rows by temporarily disabling append-only trigger
+        if self.created_user_ids:
+            async with self.engine.connect() as conn:
+                def _cleanup_test_rows(sync_conn):
+                    sync_conn.exec_driver_sql(
+                        """
+                        DO $$
+                        BEGIN
+                          IF EXISTS (
+                            SELECT 1 FROM pg_trigger t
+                            JOIN pg_class c ON t.tgrelid = c.oid
+                            WHERE c.relname = 'entitlement_entries' AND t.tgname = 'entitlement_entries_append_only'
+                          ) THEN
+                            ALTER TABLE entitlement_entries DISABLE TRIGGER entitlement_entries_append_only;
+                          END IF;
+                        END $$;
+                        """
+                    )
+                    try:
+                        user_ids_str = ",".join(str(uid) for uid in self.created_user_ids)
+                        sync_conn.exec_driver_sql(f"DELETE FROM entitlement_entries WHERE beneficiary_user_id IN ({user_ids_str})")
+                        sync_conn.exec_driver_sql(f"DELETE FROM users WHERE id IN ({user_ids_str})")
+                    finally:
+                        sync_conn.exec_driver_sql(
+                            """
+                            DO $$
+                            BEGIN
+                              IF EXISTS (
+                                SELECT 1 FROM pg_trigger t
+                                JOIN pg_class c ON t.tgrelid = c.oid
+                                WHERE c.relname = 'entitlement_entries' AND t.tgname = 'entitlement_entries_append_only'
+                              ) THEN
+                                ALTER TABLE entitlement_entries ENABLE TRIGGER entitlement_entries_append_only;
+                              END IF;
+                            END $$;
+                            """
+                        )
+                await conn.run_sync(_cleanup_test_rows)
+                await conn.commit()
+
         # Ensure DB is left at upgraded head state
         async with self.engine.connect() as conn:
             def _ensure_upgrade(sync_conn):
@@ -94,7 +147,7 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
             await conn.commit()
         await self.engine.dispose()
 
-    async def test_downgrade_with_subday_entries_succeeds(self) -> None:
+    async def test_downgrade_clean_succeeds(self) -> None:
         import uuid
         from datetime import timedelta
         from sqlalchemy import select
@@ -115,11 +168,11 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
             await conn.run_sync(_run_up)
             await conn.commit()
 
-        # 2. Create user and insert a sub-day grant (days_delta = 0, hours_delta = 5)
+        # 2. Create user and run upgrade so user receives legacy_0027_grant_
         async with self.sessions.begin() as session:
             user = User(
                 telegram_id=tg_id,
-                username=f"subday_downgrade_{tg_id}",
+                username=f"clean_down_{tg_id}",
                 device_limit=1,
                 subscription_end=now + timedelta(hours=5),
             )
@@ -128,20 +181,18 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
             user_id = user.id
             self.created_user_ids.append(user_id)
 
-            subday_entry = EntitlementEntry(
-                beneficiary_user_id=user_id,
-                source_type="admin",
-                source_id="subday_grant_before_downgrade",
-                entry_type="manual_grant",
-                days_delta=0,
-                hours_delta=5,
-                device_limit_snapshot=1,
-                tariff_id_snapshot=None,
-            )
-            session.add(subday_entry)
-            await session.flush()
+        async with self.engine.connect() as conn:
+            def _run_up2(sync_conn):
+                from alembic.migration import MigrationContext
+                from alembic.operations import Operations
+                import alembic.op as op
+                ctx = MigrationContext.configure(sync_conn)
+                op._proxy = Operations(ctx)
+                self.migration.upgrade()
+            await conn.run_sync(_run_up2)
+            await conn.commit()
 
-        # 3. Execute downgrade() - MUST NOT fail with CheckViolation!
+        # 3. Execute downgrade() - MUST succeed and remove only migration-owned rows
         async with self.engine.connect() as conn:
             def _run_down(sync_conn):
                 from alembic.migration import MigrationContext
@@ -153,17 +204,75 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
             await conn.run_sync(_run_down)
             await conn.commit()
 
-        # 4. Verify that the entry was normalized to satisfy pre-0027 constraint (days_delta >= 1)
+        # 4. Verify that legacy grant was removed
         async with self.sessions() as session:
-            norm_entry = await session.scalar(
+            grant = await session.scalar(
                 select(EntitlementEntry).where(
                     EntitlementEntry.beneficiary_user_id == user_id,
-                    EntitlementEntry.source_id == "subday_grant_before_downgrade",
+                    EntitlementEntry.source_id == f"legacy_0027_grant_{user_id}",
                 )
             )
-            self.assertIsNotNone(norm_entry)
-            self.assertEqual(norm_entry.days_delta, 1)
-            self.assertEqual(norm_entry.hours_delta, 24)
+            self.assertIsNone(grant)
+
+    async def test_downgrade_with_unowned_subday_entries_fails_closed(self) -> None:
+        import uuid
+        from datetime import timedelta
+        from database.models import User
+        from utils.datetime_helpers import now_utc
+        now = now_utc().replace(microsecond=0)
+        tg_id = int(uuid.uuid4().int % 1000000000)
+
+        # 1. Ensure upgrade has run
+        async with self.engine.connect() as conn:
+            def _run_up(sync_conn):
+                from alembic.migration import MigrationContext
+                from alembic.operations import Operations
+                import alembic.op as op
+                ctx = MigrationContext.configure(sync_conn)
+                op._proxy = Operations(ctx)
+                self.migration.upgrade()
+            await conn.run_sync(_run_up)
+            await conn.commit()
+
+        # 2. Create user and insert an unowned sub-day grant (days_delta = 0, hours_delta = 5)
+        async with self.sessions.begin() as session:
+            user = User(
+                telegram_id=tg_id,
+                username=f"subday_failclosed_{tg_id}",
+                device_limit=1,
+                subscription_end=now + timedelta(hours=5),
+            )
+            session.add(user)
+            await session.flush()
+            user_id = user.id
+            self.created_user_ids.append(user_id)
+
+            subday_entry = EntitlementEntry(
+                beneficiary_user_id=user_id,
+                source_type="admin",
+                source_id="unowned_subday_grant",
+                entry_type="manual_grant",
+                days_delta=0,
+                hours_delta=5,
+                device_limit_snapshot=1,
+                tariff_id_snapshot=None,
+            )
+            session.add(subday_entry)
+            await session.flush()
+
+        # 3. Execute downgrade() - MUST FAIL with fail-closed exception!
+        async with self.engine.connect() as conn:
+            def _run_down(sync_conn):
+                from alembic.migration import MigrationContext
+                from alembic.operations import Operations
+                import alembic.op as op
+                ctx = MigrationContext.configure(sync_conn)
+                op._proxy = Operations(ctx)
+                self.migration.downgrade()
+
+            with self.assertRaises(Exception) as ctx:
+                await conn.run_sync(_run_down)
+            self.assertIn("Cannot downgrade migration 0027: sub-day entitlement entries", str(ctx.exception))
 
     async def test_upgrade_backfills_missing_users_honestly(self) -> None:
         import uuid

@@ -342,24 +342,29 @@ class SubscriptionService:
         if days == 0:
             new_end = user.subscription_end
             effective_days = 0
-            effective_hours = 0
+            effective_hours: int | None = 0
         else:
             base_end = user.subscription_end if had_active_subscription else now
 
             if days >= PERMANENT_SUBSCRIPTION_DAYS:
                 new_end = PERMANENT_END_DATE
-                total_seconds = (PERMANENT_END_DATE - base_end).total_seconds()
-                exact_hours = max(1, int(round(total_seconds / 3600)))
-                effective_days = exact_hours // 24 if exact_hours % 24 == 0 else 0
-                effective_hours = exact_hours
             else:
                 new_end = base_end + timedelta(days=days)
+
+            delta = new_end - base_end
+            if delta.total_seconds() <= 0:
+                effective_days = 0
+                effective_hours = None
+            elif days >= PERMANENT_SUBSCRIPTION_DAYS:
+                effective_days = max(1, delta.days)
+                effective_hours = None
+            else:
                 effective_days = days
                 effective_hours = days * 24
 
         user.subscription_end = new_end
 
-        if days > 0 and create_entitlement:
+        if days > 0 and effective_days > 0 and create_entitlement:
             device_limit_val = (
                 new_device_limit
                 if new_device_limit is not None
@@ -379,7 +384,7 @@ class SubscriptionService:
                 hours_delta=effective_hours,
                 device_limit_snapshot=device_limit_val,
                 tariff_id_snapshot=tariff_id_val,
-                metadata_={"admin_id": admin_id, "reason": reason} if (admin_id or reason) else None,
+                metadata_={"admin_id": admin_id, "reason": reason} if (admin_id or reason) else {},
             )
             session.add(entitlement)
 

@@ -124,10 +124,42 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
         added_obj = session.add.call_args[0][0]
-        exact_hours = max(1, int(round((PERMANENT_END_DATE - now).total_seconds() / 3600)))
-        expected_days = exact_hours // 24 if exact_hours % 24 == 0 else 0
-        self.assertEqual(added_obj.hours_delta, exact_hours)
+        expected_days = (PERMANENT_END_DATE - now).days
+        self.assertIsNone(added_obj.hours_delta)
         self.assertEqual(added_obj.days_delta, expected_days)
+        self.assertEqual(added_obj.metadata_, {"admin_id": 999, "reason": "permanent_grant"})
+
+    async def test_extend_subscription_permanent_already_permanent_no_grant(self) -> None:
+        from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
+        session = AsyncMock()
+        session.add = unittest.mock.MagicMock()
+        user = User(
+            id=42,
+            telegram_id=123456,
+            device_limit=2,
+            current_tariff_id=10,
+            subscription_end=PERMANENT_END_DATE,
+        )
+        session.scalar.return_value = user
+
+        with (
+            patch("services.subscription.get_user_profiles_count", new_callable=AsyncMock) as mock_profiles,
+            patch.object(SubscriptionService, "_sync_access_state", new_callable=AsyncMock),
+            patch("services.subscription.invalidate_user_cache"),
+            patch("services.subscription.now_utc", return_value=datetime(2026, 1, 1, tzinfo=timezone.utc)),
+        ):
+            mock_profiles.return_value = 1
+            updated_user = await SubscriptionService.extend_subscription(
+                session=session,
+                telegram_id=123456,
+                days=PERMANENT_SUBSCRIPTION_DAYS,
+                create_entitlement=True,
+                admin_id=999,
+                reason="permanent_regrant",
+            )
+
+        self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
+        session.add.assert_not_called()
 
     async def test_extend_subscription_permanent_with_active_hours_base_end(self) -> None:
         from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
@@ -162,10 +194,10 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
         added_obj = session.add.call_args[0][0]
-        exact_hours = max(1, int(round((PERMANENT_END_DATE - active_end).total_seconds() / 3600)))
-        self.assertEqual(added_obj.hours_delta, exact_hours)
-        self.assertEqual(added_obj.days_delta, 0)
-        self.assertEqual(active_end + timedelta(hours=added_obj.hours_delta), PERMANENT_END_DATE)
+        expected_days = (PERMANENT_END_DATE - active_end).days
+        self.assertIsNone(added_obj.hours_delta)
+        self.assertEqual(added_obj.days_delta, expected_days)
+        self.assertGreater(added_obj.days_delta, 0)
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
@@ -405,17 +437,15 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
                 select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id == user_id)
             )
             self.assertIsNotNone(ent)
-            total_seconds = (PERMANENT_END_DATE - active_end).total_seconds()
-            expected_hours = max(1, int(round(total_seconds / 3600)))
-            self.assertEqual(ent.hours_delta, expected_hours)
-            self.assertEqual(ent.days_delta, 0)  # non-multiple of 24 has days_delta = 0
-            self.assertEqual(active_end + timedelta(hours=ent.hours_delta), PERMANENT_END_DATE)
+            expected_days = (PERMANENT_END_DATE - active_end).days
+            self.assertIsNone(ent.hours_delta)
+            self.assertEqual(ent.days_delta, expected_days)
+            self.assertGreater(ent.days_delta, 0)
 
-            # Projector must track successfully with exact match to PERMANENT_END_DATE
+            # Projector must track successfully
             snapshot = await get_subscription_balance_snapshot(session, user_id=user_id, as_of=now)
             self.assertTrue(snapshot.tracked)
             self.assertIsNone(snapshot.failure_code)
-            self.assertEqual(snapshot.coverage_end, PERMANENT_END_DATE)
 
     async def test_ck_entitlement_entries_shape_strict_validation(self) -> None:
         from sqlalchemy.exc import IntegrityError
