@@ -81,16 +81,6 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.created_user_ids: list[int] = []
 
     async def asyncTearDown(self) -> None:
-        from sqlalchemy import delete
-        from database.models import User
-        if self.created_user_ids:
-            async with self.sessions.begin() as session:
-                await session.execute(
-                    delete(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id.in_(self.created_user_ids))
-                )
-                await session.execute(
-                    delete(User).where(User.id.in_(self.created_user_ids))
-                )
         # Ensure DB is left at upgraded head state
         async with self.engine.connect() as conn:
             def _ensure_upgrade(sync_conn):

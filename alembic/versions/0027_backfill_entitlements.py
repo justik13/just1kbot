@@ -90,23 +90,54 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # 1. Clean up only the records created by this migration
+    # Temporarily disable append-only trigger to allow migration cleanup/normalization
     op.execute(
         """
-        DELETE FROM entitlement_entries
-        WHERE source_type = 'admin' AND source_id LIKE 'legacy_0027_grant_%'
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM pg_trigger t
+            JOIN pg_class c ON t.tgrelid = c.oid
+            WHERE c.relname = 'entitlement_entries' AND t.tgname = 'entitlement_entries_append_only'
+          ) THEN
+            ALTER TABLE entitlement_entries DISABLE TRIGGER entitlement_entries_append_only;
+          END IF;
+        END $$;
         """
     )
-    # 2. Normalize remaining sub-day entries to satisfy pre-0027 constraint (days_delta > 0)
-    op.execute(
-        """
-        UPDATE entitlement_entries
-        SET days_delta = GREATEST(1, CEIL(COALESCE(hours_delta, 1)::float / 24)::int),
-            hours_delta = GREATEST(1, CEIL(COALESCE(hours_delta, 1)::float / 24)::int) * 24
-        WHERE entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
-          AND days_delta = 0
-        """
-    )
+    try:
+        # 1. Clean up only the records created by this migration
+        op.execute(
+            """
+            DELETE FROM entitlement_entries
+            WHERE source_type = 'admin' AND source_id LIKE 'legacy_0027_grant_%'
+            """
+        )
+        # 2. Normalize remaining sub-day entries to satisfy pre-0027 constraint (days_delta > 0)
+        op.execute(
+            """
+            UPDATE entitlement_entries
+            SET days_delta = GREATEST(1, CEIL(COALESCE(hours_delta, 1)::float / 24)::int),
+                hours_delta = GREATEST(1, CEIL(COALESCE(hours_delta, 1)::float / 24)::int) * 24
+            WHERE entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
+              AND days_delta = 0
+            """
+        )
+    finally:
+        op.execute(
+            """
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM pg_trigger t
+                JOIN pg_class c ON t.tgrelid = c.oid
+                WHERE c.relname = 'entitlement_entries' AND t.tgname = 'entitlement_entries_append_only'
+              ) THEN
+                ALTER TABLE entitlement_entries ENABLE TRIGGER entitlement_entries_append_only;
+              END IF;
+            END $$;
+            """
+        )
     # 3. Restore strict pre-0027 constraint
     op.execute("ALTER TABLE entitlement_entries DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape")
     op.execute(

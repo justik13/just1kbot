@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import EntitlementEntry, Tariff, User
@@ -173,17 +173,8 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
     async def asyncSetUp(self) -> None:
         self.engine = create_async_engine(DB, pool_pre_ping=True)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
-        self.created_user_ids: list[int] = []
 
     async def asyncTearDown(self) -> None:
-        if self.created_user_ids:
-            async with self.sessions.begin() as session:
-                await session.execute(
-                    delete(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id.in_(self.created_user_ids))
-                )
-                await session.execute(
-                    delete(User).where(User.id.in_(self.created_user_ids))
-                )
         await self.engine.dispose()
 
     async def test_manual_grant_allows_quote_calculation_and_settlement(self) -> None:
@@ -217,7 +208,6 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
             )
             session.add(user)
             await session.flush()
-            self.created_user_ids.append(user.id)
 
             # 4. Extend subscription via SubscriptionService with manual grant
             await SubscriptionService.extend_subscription(
@@ -270,7 +260,6 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
 
             user1_id = user1.id
             user2_id = user2.id
-            self.created_user_ids.extend([user1_id, user2_id])
 
         # Run migration 0027 backfill SQL directly
         async with self.sessions.begin() as session:
@@ -385,7 +374,7 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
 
     async def test_extend_subscription_permanent_active_hours_integration(self) -> None:
         from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
-        now = now_utc().replace(microsecond=0)
+        now = now_utc().replace(minute=0, second=0, microsecond=0)
         # Active subscription with 10 days and 12 hours remaining (non-zero hours)
         active_end = now + timedelta(days=10, hours=12)
         tg_id = int(uuid.uuid4().int % 1000000000)
@@ -400,7 +389,6 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
             session.add(user)
             await session.flush()
             user_id = user.id
-            self.created_user_ids.append(user_id)
 
             updated_user = await SubscriptionService.extend_subscription(
                 session,
@@ -443,7 +431,6 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
             session.add(test_user)
             await session.flush()
             user_id = test_user.id
-            self.created_user_ids.append(user_id)
 
         # 1. Invalid combination: days_delta = 30 and hours_delta = 5 must be rejected
         async with self.sessions.begin() as session:
