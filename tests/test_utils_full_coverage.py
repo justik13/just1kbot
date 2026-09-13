@@ -217,14 +217,20 @@ class TestUtilsFormatters(unittest.TestCase):
         unix_ts = int(dt_utc.timestamp())
         self.assertEqual(
             format_tg_time(dt_utc),
-            f'<tg-time unix="{unix_ts}" format="d t">13.09.2026 23:00</tg-time>',
+            f'<tg-time unix="{unix_ts}" format="dt">13.09.2026 23:00</tg-time>',
         )
 
         # Naive datetime (treated as UTC in our system)
         dt_naive = datetime.datetime(2026, 9, 13, 20, 0, 0)
         self.assertEqual(
             format_tg_time(dt_naive),
-            f'<tg-time unix="{unix_ts}" format="d t">13.09.2026 23:00</tg-time>',
+            f'<tg-time unix="{unix_ts}" format="dt">13.09.2026 23:00</tg-time>',
+        )
+
+        # Space-stripped format_spec
+        self.assertEqual(
+            format_tg_time(dt_utc, format_spec="d t"),
+            f'<tg-time unix="{unix_ts}" format="dt">13.09.2026 23:00</tg-time>',
         )
 
         # Custom format_spec and fallback_format

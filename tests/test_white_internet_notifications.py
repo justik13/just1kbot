@@ -263,7 +263,7 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         call2_args = bot.send_message.await_args_list[1]
 
         # Verify tg-time formatting in 3d notification: 20:00 UTC -> 23:00 MSK fallback
-        self.assertIn('<tg-time unix="1789502400" format="d t">15.09.2026 23:00</tg-time>', call1_args[0][1])
+        self.assertIn('<tg-time unix="1789502400" format="dt">15.09.2026 23:00</tg-time>', call1_args[0][1])
         # Verify Russian grammar 'через' in 1d notification
         self.assertIn("истекает через", call2_args[0][1])
 

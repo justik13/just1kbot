@@ -220,6 +220,7 @@ async def calculate_tariff_change_options(
     target_tariffs = (await session.scalars(
         select(Tariff).where(
             Tariff.device_limit == target_tariff.device_limit,
+            Tariff.service_type == target_tariff.service_type,
             Tariff.is_active.is_(True),
         ).order_by(Tariff.duration_days.asc())
     )).all()
@@ -269,6 +270,8 @@ async def create_tariff_change_quote(
     as_of: datetime,
     option_type: str = "surcharge",
 ) -> TariffChangeQuoteResult:
+    if option_type not in ("transfer", "surcharge"):
+        return TariffChangeQuoteResult(failure_code="invalid_option_type")
     if as_of.tzinfo is None:
         raise ValueError("as_of must be timezone-aware")
     user = await lock_checkout_user(session, user_id)

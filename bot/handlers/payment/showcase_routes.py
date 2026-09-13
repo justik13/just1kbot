@@ -236,7 +236,7 @@ async def select_tariff(
             target_device_limit=options.target_device_limit,
         )
         keyboard = get_tariff_change_options_keyboard(
-            target_tariff_id=tariff.id,
+            target_tariff_id=options.option2_1m_tariff_id,
             option1_available=options.option1_available,
             option1_days=options.option1_days,
             option2_1m_surcharge=options.option2_1m_surcharge,

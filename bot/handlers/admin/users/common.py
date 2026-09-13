@@ -70,7 +70,7 @@ def format_user_card_text(
         bonus_balance=bonus_balance,
         valid_until=format_tg_time(user.subscription_end),
         days_left=format_days_left(user.subscription_end),
-        devices_count=len(profiles),
+        devices_count=len(profiles) + len(getattr(user, "active_sub_devices", None) or {}),
         device_limit=user.device_limit or 0,
         referrals_count=referrals_count,
         created_at=format_tg_time(user.created_at),

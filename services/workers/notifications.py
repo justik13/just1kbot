@@ -468,6 +468,9 @@ async def _send_post_expiry_notifications(
                     )
 
 
+_last_inactive_sub_device_user_id: int = 0
+
+
 async def _send_inactive_sub_device_notifications(
     bot: Bot | None,
     current_time,
@@ -475,12 +478,14 @@ async def _send_inactive_sub_device_notifications(
     if bot is None:
         return
 
+    global _last_inactive_sub_device_user_id
     threshold_7d = current_time - timedelta(days=7)
 
     async with session_scope() as session:
         stmt = (
             select(User.id)
             .where(
+                User.id > _last_inactive_sub_device_user_id,
                 User.is_banned.is_(False),
                 User.is_bot_blocked.is_(False),
                 User.is_deleted.is_(False),
@@ -493,7 +498,14 @@ async def _send_inactive_sub_device_notifications(
         user_ids = (await session.execute(stmt)).scalars().all()
 
     if not user_ids:
+        if _last_inactive_sub_device_user_id > 0:
+            _last_inactive_sub_device_user_id = 0
         return
+
+    if len(user_ids) < 100:
+        _last_inactive_sub_device_user_id = 0
+    else:
+        _last_inactive_sub_device_user_id = user_ids[-1]
 
     for uid in user_ids:
         async with session_scope() as session:

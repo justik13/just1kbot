@@ -21,12 +21,16 @@ LOCKED_ACTION_PREFIXES = (
     "download_conf:",
     "alt_connection:",
     "show_config:",
-    # Платежи.
+    "awg_get_conf:",
+    "awg_disconnect_sub:",
+    "awg_reset_sub_execute",
+    # Платежи и смена тарифа.
     "balance_create:",
     "balance_check:",
     "balance_cancel:",
     "balance_purchase_confirm:",
     "balance_change_confirm:",
+    "tariff_change_choose:",
     "balance_resume_purchase:",
     "bal_short_exact:",
     "bal_chg_short_exact:",
@@ -128,6 +132,8 @@ STALE_ACTION_PREFIXES = (
     "admin_wi_hwid_reset_apply:",
     "admin_wl_reset_apply:",
     "admin_wl_grant_trial:",
+    "awg_reset_sub_execute",
+    "tariff_change_choose:",
 )
 
 STALE_MAX_AGE_SECONDS = 600

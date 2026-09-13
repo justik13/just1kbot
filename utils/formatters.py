@@ -28,7 +28,7 @@ def format_datetime(dt: datetime | None) -> str:
 
 def format_tg_time(
     dt: datetime | date | None,
-    format_spec: str = "d t",
+    format_spec: str = "dt",
     fallback_format: str = "%d.%m.%Y %H:%M",
 ) -> str:
     """Render a datetime into a localized Telegram <tg-time> HTML tag.
@@ -53,7 +53,8 @@ def format_tg_time(
         return fallback
 
     if format_spec:
-        return f'<tg-time unix="{unix_ts}" format="{format_spec}">{fallback}</tg-time>'
+        clean_spec = format_spec.replace(" ", "")
+        return f'<tg-time unix="{unix_ts}" format="{clean_spec}">{fallback}</tg-time>'
     return f'<tg-time unix="{unix_ts}">{fallback}</tg-time>'
 
 

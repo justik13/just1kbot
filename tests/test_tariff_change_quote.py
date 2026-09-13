@@ -13,6 +13,7 @@ from services.tariff_change_quote import (
     balance_snapshot_fingerprint,
     calculate_surcharge_option,
     calculate_transfer_option,
+    create_tariff_change_quote,
 )
 from services.tariff_value_calculator import (
     TariffCalculationError,
@@ -61,7 +62,7 @@ def snapshot():
     )
 
 
-class TariffChangeQuoteTests(unittest.TestCase):
+class TariffChangeQuoteTests(unittest.IsolatedAsyncioTestCase):
     def test_change_calculation_contract(self):
         upgrade = calculate_tariff_value(operation_type="change", source_paid_hours=360,
             source_paid_value_rub=Decimal(150), source_tariff=TariffVersionSnapshot(1, 1, 720, Decimal(300)),
@@ -451,6 +452,18 @@ class TariffChangeQuoteTests(unittest.TestCase):
         )
         self.assertFalse(transfer.is_available)
         self.assertEqual(transfer.target_days, 4)
+
+    async def test_create_tariff_change_quote_invalid_option_type(self):
+        from unittest.mock import AsyncMock
+        mock_session = AsyncMock()
+        res = await create_tariff_change_quote(
+            mock_session,
+            user_id=1,
+            target_tariff_id=2,
+            as_of=T0,
+            option_type="invalid_option",
+        )
+        self.assertEqual(res.failure_code, "invalid_option_type")
 
 
 if __name__ == "__main__":
