@@ -18,8 +18,8 @@ from database.repositories.users_repo import (
     get_user_referrals_count,
     get_user_referrals_paginated,
 )
+from database.repositories.account_ledger_repo import get_account_balance
 from services.payment_status import payment_display_status
-from services.referral_bonus import get_referral_bonus_balance
 from utils.formatters import format_tg_time
 from utils.telegram import render_hub, safe
 
@@ -115,7 +115,8 @@ async def show_referral(
         return
 
     invited_count = await get_user_referrals_count(session, db_user.telegram_id)
-    bonus_balance = await get_referral_bonus_balance(session, user_id=db_user.id)
+    account = await get_account_balance(session, user_id=db_user.id, locked_user=db_user)
+    bonus_balance = account.bonus_available
 
     bot_info = await callback.bot.get_me()
     referral_link = f"https://t.me/{bot_info.username}?start=ref_{db_user.telegram_id}"

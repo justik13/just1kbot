@@ -42,7 +42,11 @@ from database.repositories.tariff_quotes_repo import (
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from services.subscription_balance_service import get_subscription_balance_snapshot
-from services.tariff_change_quote import balance_snapshot_fingerprint
+from services.tariff_change_quote import (
+    _decimal,
+    _timestamp,
+    balance_snapshot_fingerprint,
+)
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -73,21 +77,6 @@ class AccountTariffChangeSettlement:
     balance_before: AccountBalanceSnapshot
     balance_after: AccountBalanceSnapshot
     created: bool
-
-
-def _timestamp(value) -> str | None:
-    if value is None:
-        return None
-    return (
-        value.astimezone(timezone.utc)
-        .isoformat(timespec="microseconds")
-        .replace("+00:00", "Z")
-    )
-
-
-def _decimal(value) -> str:
-    fixed = format(Decimal(value), "f")
-    return fixed.rstrip("0").rstrip(".") if "." in fixed else fixed
 
 
 async def get_account_tariff_change_intent(
