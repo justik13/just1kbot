@@ -239,6 +239,21 @@ class TestUtilsFormatters(unittest.TestCase):
             f'<tg-time unix="{unix_ts}">13.09.2026 23:00</tg-time>',
         )
 
+        # Date object input
+        d = datetime.date(2026, 9, 13)
+        res_d = format_tg_time(d)
+        self.assertTrue(res_d.startswith('<tg-time unix="'))
+        self.assertTrue(res_d.endswith('</tg-time>'))
+
+        # Non-positive unix timestamp (year < 1970)
+        dt_old = datetime.datetime(1969, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        self.assertNotIn('<tg-time', format_tg_time(dt_old))
+        self.assertEqual(format_tg_time(dt_old), "01.01.1969 03:00")
+
+        # Invalid type input
+        self.assertEqual(format_tg_time("not_a_date"), "—")
+        self.assertEqual(format_tg_time(12345), "—")
+
     def test_format_subscription_date_tg_time(self):
         self.assertEqual(format_subscription_date(None), "—")
 
@@ -263,6 +278,39 @@ class TestUtilsFormatters(unittest.TestCase):
         self.assertTrue(res_next.startswith(f'<tg-time unix="{next_ts}" format="d">'))
         self.assertTrue(res_next.endswith('</tg-time>'))
         self.assertIn(f"25 сентября {now.year + 1}", res_next)
+
+        # Date object input
+        d_cur = datetime.date(now.year, 9, 25)
+        res_d_cur = format_subscription_date(d_cur)
+        self.assertTrue(res_d_cur.startswith('<tg-time unix="'))
+        self.assertIn("25 сентября", res_d_cur)
+
+    def test_admin_templates_no_nested_tg_time_in_code(self):
+        """Ensure no admin templates wrap tg-time tags inside <code>."""
+        from bot import texts
+        dt_sample = datetime.datetime(2026, 9, 13, 20, 0, 0, tzinfo=datetime.timezone.utc)
+        tg_time_str = format_tg_time(dt_sample)
+
+        templates_to_test = [
+            texts.ADMIN_SUB_CONFIRM_EXTEND.format(telegram_id=123, days_text="30 дн.", current_end=tg_time_str, new_end=tg_time_str),
+            texts.ADMIN_SUB_CONFIRM_GRANT.format(telegram_id=123, tariff_name="Pro", days_text="30 дн.", new_end=tg_time_str),
+            texts.ADMIN_SUB_CONFIRM_REDUCE.format(telegram_id=123, days=5, current_end=tg_time_str, new_end=tg_time_str),
+            texts.ADMIN_SUB_EXTEND_HEADER.format(telegram_id=123, valid_until=tg_time_str),
+            texts.ADMIN_SUB_EXTEND_SUCCESS.format(telegram_id=123, days_text="30 дн.", new_end=tg_time_str),
+            texts.ADMIN_SUB_GRANT_SUCCESS.format(telegram_id=123, tariff_name="Pro", days_text="30 дн.", new_end=tg_time_str),
+            texts.ADMIN_SUB_REDUCED.format(telegram_id=123, new_end=tg_time_str),
+            texts.ADMIN_SUB_REDUCE_PROMPT.format(telegram_id=123, valid_until=tg_time_str),
+            texts.COMMON_OTKLYUCHEN.format(disabled_at_str=tg_time_str),
+            texts.COMMON_POSLEDNIY_OTKLIK.format(last_check_str=tg_time_str),
+        ]
+
+        import re
+        nested_pattern = re.compile(r"<code>[^<]*<tg-time", re.IGNORECASE)
+        for rendered in templates_to_test:
+            self.assertFalse(
+                nested_pattern.search(rendered),
+                f"Found illegal nested <tg-time> inside <code> in rendered text: {rendered}",
+            )
 
 
 class TestUtilsLoggingSecurity(unittest.TestCase):

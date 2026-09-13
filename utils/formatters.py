@@ -1,5 +1,5 @@
 """General formatting helpers for traffic, datetime, breadcrumbs, and audit logs."""
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 
 from utils.datetime_helpers import format_datetime_msk
 
@@ -27,7 +27,7 @@ def format_datetime(dt: datetime | None) -> str:
 
 
 def format_tg_time(
-    dt: datetime | None,
+    dt: datetime | date | None,
     format_spec: str = "d t",
     fallback_format: str = "%d.%m.%Y %H:%M",
 ) -> str:
@@ -39,15 +39,22 @@ def format_tg_time(
     if dt is None:
         return "—"
 
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+    elif isinstance(dt, date):
+        dt = datetime.combine(dt, time.min, tzinfo=timezone.utc)
+    else:
+        return "—"
 
     unix_ts = int(dt.timestamp())
     fallback = format_datetime_msk(dt, fallback_format)
+    if unix_ts <= 0:
+        return fallback
+
     if format_spec:
         return f'<tg-time unix="{unix_ts}" format="{format_spec}">{fallback}</tg-time>'
     return f'<tg-time unix="{unix_ts}">{fallback}</tg-time>'
-
 
 
 def get_country_display(country_flag: str | None, default_text: str = "🌐") -> str:

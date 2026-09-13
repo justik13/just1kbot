@@ -41,12 +41,12 @@ COMMON_NE_AKTIVIROVAN = "Не активирован"
 
 COMMON_NOVYE_7D = "🆕 Новые (7д)"
 
-COMMON_OTKLYUCHEN = """• Отключён: <code>{disabled_at_str}</code>
+COMMON_OTKLYUCHEN = """• Отключён: {disabled_at_str}
 """
 
 COMMON_OTKLYUCHEN_VRUCHNUYU = "🔴 <b>Отключён вручную</b>"
 
-COMMON_POSLEDNIY_OTKLIK = """• Последний отклик: <code>{last_check_str}</code>
+COMMON_POSLEDNIY_OTKLIK = """• Последний отклик: {last_check_str}
 """
 
 COMMON_PROTOKOL = """• Протокол: <code>{safe_server_protocol}</code>

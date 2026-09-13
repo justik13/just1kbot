@@ -11,11 +11,11 @@ ADMIN_SUB_CHANGE_TARIFF_HEADER = """⚙️ Смена тарифа для <code>
 Текущий тариф: <b>{current_tariff}</b> ({devices_count} устр.)
 Выберите новый тариф:"""
 
-ADMIN_SUB_CONFIRM_EXTEND = "Продлить подписку пользователю <code>{telegram_id}</code> на <b>{days_text}</b> (текущий: <code>{current_end}</code>, новый: <code>{new_end}</code>)?"
+ADMIN_SUB_CONFIRM_EXTEND = "Продлить подписку пользователю <code>{telegram_id}</code> на <b>{days_text}</b> (текущий: {current_end}, новый: {new_end})?"
 
-ADMIN_SUB_CONFIRM_GRANT = "Выдать тариф <b>{tariff_name}</b> пользователю <code>{telegram_id}</code> на <b>{days_text}</b> (до <code>{new_end}</code>)?"
+ADMIN_SUB_CONFIRM_GRANT = "Выдать тариф <b>{tariff_name}</b> пользователю <code>{telegram_id}</code> на <b>{days_text}</b> (до {new_end})?"
 
-ADMIN_SUB_CONFIRM_REDUCE = "Сократить подписку пользователю <code>{telegram_id}</code> на <b>{days}</b> дн. (текущий: <code>{current_end}</code>, новый: <code>{new_end}</code>)?"
+ADMIN_SUB_CONFIRM_REDUCE = "Сократить подписку пользователю <code>{telegram_id}</code> на <b>{days}</b> дн. (текущий: {current_end}, новый: {new_end})?"
 
 ADMIN_SUB_CONFIRM_TARIFF = "Сменить тариф пользователю <code>{telegram_id}</code> с <b>{old_tariff}</b> на <b>{new_tariff}</b> ({devices_count} устр.)?"
 
@@ -24,11 +24,11 @@ ADMIN_SUB_DOWNGRADE_BLOCKED = "❌ Нельзя понизить тариф дл
 ADMIN_SUB_EXTEND_FAILED = "❌ Не удалось продлить подписку."
 
 ADMIN_SUB_EXTEND_HEADER = """⏳ Продление подписки для <code>{telegram_id}</code>
-Текущий срок: <code>{valid_until}</code>"""
+Текущий срок: {valid_until}"""
 
 ADMIN_SUB_EXTEND_PROMPT = "На сколько дней продлить подписку для <code>{telegram_id}</code>?"
 
-ADMIN_SUB_EXTEND_SUCCESS = "✅ Подписка пользователя <code>{telegram_id}</code> продлена на <b>{days_text}</b> (до <code>{new_end}</code>)."
+ADMIN_SUB_EXTEND_SUCCESS = "✅ Подписка пользователя <code>{telegram_id}</code> продлена на <b>{days_text}</b> (до {new_end})."
 
 ADMIN_SUB_GRANT_CUSTOM_PROMPT = "Введите количество дней для тарифа <b>{tariff_name}</b> (пользователь <code>{telegram_id}</code>):"
 
@@ -40,7 +40,7 @@ ADMIN_SUB_GRANT_FAILED = "❌ Ошибка при выдаче подписки.
 ADMIN_SUB_GRANT_HEADER = """🎁 Выдача подписки для <code>{telegram_id}</code>
 Выберите тариф:"""
 
-ADMIN_SUB_GRANT_SUCCESS = "✅ Пользователю <code>{telegram_id}</code> выдан тариф <b>{tariff_name}</b> на <b>{days_text}</b> (до <code>{new_end}</code>)."
+ADMIN_SUB_GRANT_SUCCESS = "✅ Пользователю <code>{telegram_id}</code> выдан тариф <b>{tariff_name}</b> на <b>{days_text}</b> (до {new_end})."
 
 ADMIN_SUB_GROUP_NOT_FOUND = "❌ Группа тарифов не найдена."
 
@@ -50,12 +50,12 @@ ADMIN_SUB_NO_SUBSCRIPTION = "У пользователя нет активной
 
 ADMIN_SUB_PERMANENT_LABEL = "Навсегда"
 
-ADMIN_SUB_REDUCED = "✅ Подписка пользователя <code>{telegram_id}</code> сокращена до <code>{new_end}</code>."
+ADMIN_SUB_REDUCED = "✅ Подписка пользователя <code>{telegram_id}</code> сокращена до {new_end}."
 
 ADMIN_SUB_REDUCE_FAILED = "❌ Не удалось сократить подписку."
 
 ADMIN_SUB_REDUCE_PROMPT = """✂️ Сокращение подписки для <code>{telegram_id}</code>
-Текущий срок: <code>{valid_until}</code>
+Текущий срок: {valid_until}
 На сколько дней сократить?"""
 
 ADMIN_SUB_STATUS_ACTIVE = """<b>Статус:</b> 🟢 Активна ({valid_until}, {time_left})

@@ -105,12 +105,16 @@ def get_tariff_group_name(device_limit: int) -> str:
 
 
 def format_subscription_date(dt) -> str:
+    from datetime import date, datetime, time, timezone
     from utils.datetime_helpers import is_permanent_subscription, now_msk, to_msk
 
     if dt is None:
         return texts.PLACEHOLDER_DASH
     if is_permanent_subscription(dt):
         return texts.TIME_FOREVER
+
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        dt = datetime.combine(dt, time.min, tzinfo=timezone.utc)
 
     msk_dt = to_msk(dt)
     if msk_dt is None:
@@ -124,6 +128,8 @@ def format_subscription_date(dt) -> str:
         fallback = texts.DATE_DAY_MONTH_YEAR_FORMAT.format(day=msk_dt.day, month=month_name, year=msk_dt.year)
 
     unix_ts = int(msk_dt.timestamp())
+    if unix_ts <= 0:
+        return fallback
     return f'<tg-time unix="{unix_ts}" format="d">{fallback}</tg-time>'
 
 
