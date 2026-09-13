@@ -556,4 +556,3 @@ async def _send_inactive_sub_device_notifications(
             if modified:
                 user.active_sub_devices = active_sub_devices
                 await session.flush()
-

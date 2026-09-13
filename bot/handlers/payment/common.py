@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button, get_tariff_showcase_keyboard
 from database.repositories.profiles_repo import (
+    get_user_effective_device_count,
     get_user_profiles,
-    get_user_profiles_count,
 )
 from database.repositories.tariffs_repo import (
     get_active_tariffs,
@@ -61,7 +61,9 @@ async def _check_tariff_change_allowed(
         current_limit = await _get_effective_device_limit(session, db_user)
         if new_limit != current_limit:
             return texts.PAYMENT_CHANGE_TARIFF_TEMPORARILY_UNAVAILABLE
-        profiles_count = await get_user_profiles_count(session, db_user.id)
+        profiles_count = await get_user_effective_device_count(
+            session, db_user.id, getattr(db_user, "active_sub_devices", None)
+        )
         if profiles_count > new_limit:
             return texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
                 profiles_count=profiles_count,

@@ -272,6 +272,3 @@ AWG_RESET_SUB_SUCCESS = "Ссылка успешно сброшена! Скоп�
 AWG_DEFAULT_DEVICE_PREFIX = "Устройство #"
 AWG_LEGACY_DEVICE_PREFIX = "INCY Device #"
 AWG_DEVICE_INACTIVE_7D_TAG = " ⚠️ <i>(не активно > 7 дн.)</i>"
-
-
-

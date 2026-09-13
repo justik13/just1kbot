@@ -191,4 +191,4 @@ jobs:
       - run: alembic upgrade head
       - name: Compile all tracked Python trees
         run: python -m compileall -q bot config database services utils alembic scripts tests integrations
-      - run: git diff --check
+      - run: git diff --check origin/main...HEAD

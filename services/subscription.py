@@ -13,7 +13,6 @@ from database.models import User
 from database.repositories.profiles_repo import (
     get_user_effective_device_count,
     get_user_profiles,
-    get_user_profiles_count,
 )
 from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
@@ -315,7 +314,9 @@ class SubscriptionService:
             return None
 
         if new_device_limit is not None:
-            profiles_count = await get_user_profiles_count(session, user.id)
+            profiles_count = await get_user_effective_device_count(
+                session, user.id, getattr(user, "active_sub_devices", None)
+            )
 
             if profiles_count > new_device_limit:
                 raise ValueError(

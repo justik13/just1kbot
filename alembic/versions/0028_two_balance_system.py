@@ -34,32 +34,32 @@ NEW_SHAPE_CONSTRAINT = """
 
 BACKFILL_BALANCES_SQL = """
 WITH user_balances AS (
-    SELECT 
+    SELECT
         u.id AS user_id,
         COALESCE(SUM(CASE WHEN e.entry_type = 'payment_credit' THEN e.amount ELSE 0 END), 0) -
         COALESCE(SUM(CASE WHEN e.entry_type IN ('refund_debit', 'chargeback_debit') THEN ABS(e.amount) ELSE 0 END), 0) -
         COALESCE((
-            SELECT SUM(a.amount) 
-            FROM account_ledger_allocations a 
-            JOIN account_ledger_entries cred ON a.credit_entry_id = cred.id 
-            WHERE a.user_id = u.id 
+            SELECT SUM(a.amount)
+            FROM account_ledger_allocations a
+            JOIN account_ledger_entries cred ON a.credit_entry_id = cred.id
+            WHERE a.user_id = u.id
               AND cred.entry_type = 'payment_credit'
               AND a.debit_entry_id NOT IN (
-                  SELECT rev.reversal_of_id 
-                  FROM account_ledger_entries rev 
+                  SELECT rev.reversal_of_id
+                  FROM account_ledger_entries rev
                   WHERE rev.entry_type = 'purchase_reversal' AND rev.reversal_of_id IS NOT NULL
               )
         ), 0) AS real_avail,
         COALESCE(SUM(CASE WHEN e.entry_type = 'admin_adjustment' AND e.amount > 0 THEN e.amount ELSE 0 END), 0) -
         COALESCE((
-            SELECT SUM(a.amount) 
-            FROM account_ledger_allocations a 
-            JOIN account_ledger_entries cred ON a.credit_entry_id = cred.id 
-            WHERE a.user_id = u.id 
+            SELECT SUM(a.amount)
+            FROM account_ledger_allocations a
+            JOIN account_ledger_entries cred ON a.credit_entry_id = cred.id
+            WHERE a.user_id = u.id
               AND cred.entry_type = 'admin_adjustment'
               AND a.debit_entry_id NOT IN (
-                  SELECT rev.reversal_of_id 
-                  FROM account_ledger_entries rev 
+                  SELECT rev.reversal_of_id
+                  FROM account_ledger_entries rev
                   WHERE rev.entry_type = 'purchase_reversal' AND rev.reversal_of_id IS NOT NULL
               )
         ), 0) AS bonus_avail
@@ -68,7 +68,7 @@ WITH user_balances AS (
     GROUP BY u.id
 )
 UPDATE users u
-SET 
+SET
     balance = ub.real_avail,
     bonus_balance = GREATEST(0, ub.bonus_avail)
 FROM user_balances ub

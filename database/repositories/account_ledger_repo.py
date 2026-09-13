@@ -610,7 +610,7 @@ async def create_purchase_reversal(
             user.bonus_balance = (user.bonus_balance or ZERO) + bonus_refund
             user.balance = (user.balance or ZERO) + real_refund
         else:
-            user.balance = (user.balance or ZERO) + Decimal(debit.amount)
+            user.balance = (user.balance or ZERO) + abs(Decimal(debit.amount))
     return entry, created
 
 
