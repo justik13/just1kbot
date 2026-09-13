@@ -15,6 +15,7 @@ from database.models import Server, Tariff, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
+    get_user_effective_device_count,
     get_user_profiles,
 )
 from database.repositories.tariffs_repo import get_tariff_by_id
@@ -42,6 +43,7 @@ def format_user_card_text(
     referrer_info: str = "—",
     white_internet_info: str | None = None,
     ban_reason: str | None = None,
+    devices_count: int | None = None,
 ) -> str:
     from datetime import timezone
     from utils.telegram import safe
@@ -70,7 +72,9 @@ def format_user_card_text(
         bonus_balance=bonus_balance,
         valid_until=format_tg_time(user.subscription_end),
         days_left=format_days_left(user.subscription_end),
-        devices_count=len(profiles) + len(getattr(user, "active_sub_devices", None) or {}),
+        devices_count=devices_count if devices_count is not None else (
+            len(profiles) + len(getattr(user, "active_sub_devices", None) or {})
+        ),
         device_limit=user.device_limit or 0,
         referrals_count=referrals_count,
         created_at=format_tg_time(user.created_at),
@@ -274,10 +278,14 @@ async def _build_users_list_text_and_kb(
                 f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
             )
             days = format_days_left(user.subscription_end)
-            profiles_count = (
-                len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
-                if user.profiles
-                else 0
+            raw_profiles = list(user.profiles or [])
+            manual_count = len([
+                p for p in raw_profiles
+                if (getattr(p, "device_type", None) or "manual") == "manual"
+                and getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES
+            ])
+            profiles_count = manual_count + len(
+                getattr(user, "active_sub_devices", None) or {}
             )
 
             button_text = truncate_button_text(
@@ -465,6 +473,9 @@ async def _render_user_card(
         referrer_info=referrer_info,
         white_internet_info=wl_info,
         ban_reason=ban_reason,
+        devices_count=await get_user_effective_device_count(
+            session, user.id, getattr(user, "active_sub_devices", None)
+        ),
     )
 
     try:
@@ -512,6 +523,9 @@ async def _show_user_card_edit(
         referrer_info=referrer_info,
         white_internet_info=wl_info,
         ban_reason=ban_reason,
+        devices_count=await get_user_effective_device_count(
+            session, user.id, getattr(user, "active_sub_devices", None)
+        ),
     )
 
     if notice:

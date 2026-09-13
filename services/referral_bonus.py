@@ -360,6 +360,11 @@ async def reverse_referral_bonus_for_topup(
                 if ref_user:
                     abs_amt = abs(reversal_amount)
                     ref_bonus = _safe_decimal(getattr(ref_user, "bonus_balance", 0))
+                    # Deliberately clamped at zero: ck_users_bonus_balance_nonnegative
+                    # forbids negative materialized bonus. Whatever was already spent
+                    # is an absorbed platform loss; the ledger entry above remains
+                    # as the audit trail. Never rebuild balances from SUM(ledger)
+                    # without replicating this clamp.
                     bonus_deduct = min(ref_bonus, abs_amt)
                     ref_user.bonus_balance = ref_bonus - bonus_deduct
                 await session.flush()
@@ -436,6 +441,8 @@ async def reverse_referral_bonus_for_topup(
             if pur_user:
                 abs_amt = abs(p_reversal_amount)
                 pur_bonus = _safe_decimal(getattr(pur_user, "bonus_balance", 0))
+                # Same absorbed-loss clamp as the referrer leg above (see comment):
+                # materialized bonus never goes negative, ledger keeps the trail.
                 bonus_deduct = min(pur_bonus, abs_amt)
                 pur_user.bonus_balance = pur_bonus - bonus_deduct
             await session.flush()

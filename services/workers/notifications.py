@@ -530,7 +530,13 @@ async def _send_inactive_sub_device_notifications(
             )
 
             effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
-            limit = effective_limit or getattr(user, "device_limit", 2) or 2
+            # Mirror the AWG feed quota resolution (bot/handlers/awg_sub_web.py):
+            # an explicit 0 means deny-all and must NOT fall back to 2.
+            if effective_limit is not None:
+                limit = effective_limit
+            else:
+                user_lim = getattr(user, "device_limit", None)
+                limit = user_lim if user_lim is not None else 2
 
             # Only notify if user has reached or exceeded device quota
             if total_active < limit:
@@ -715,6 +721,14 @@ async def _send_white_internet_notifications(
 
                 if not notify_type or not msg:
                     if time_left.total_seconds() <= 0:
+                        logger.warning(
+                            "WI sub %s expired without notify_type "
+                            "(status=%s, flags 3d=%s 1d=%s 2h=%s expired=%s); "
+                            "marking notified to avoid rescan loop",
+                            sub.id, sub.status,
+                            sub.notified_3d, sub.notified_1d,
+                            sub.notified_2h, sub.notified_expired,
+                        )
                         sub.notified_expired = True
                         sub.notified_2h = True
                         sub.notified_1d = True
