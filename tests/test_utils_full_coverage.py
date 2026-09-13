@@ -20,8 +20,8 @@ from utils.datetime_helpers import (
 from utils.encryption import (
     EncryptedString,
 )
-from bot.formatters import format_days_left
-from utils.formatters import format_datetime, format_traffic
+from bot.formatters import format_days_left, format_subscription_date
+from utils.formatters import format_datetime, format_tg_time, format_traffic
 from utils.logging_security import (
     SensitiveDataFilter,
     safe_url_target,
@@ -208,6 +208,61 @@ class TestUtilsFormatters(unittest.TestCase):
 
     def test_format_days_left(self):
         self.assertEqual(format_days_left(None), "—")
+
+    def test_format_tg_time(self):
+        self.assertEqual(format_tg_time(None), "—")
+
+        # UTC aware datetime
+        dt_utc = datetime.datetime(2026, 9, 13, 20, 0, 0, tzinfo=datetime.timezone.utc)
+        unix_ts = int(dt_utc.timestamp())
+        self.assertEqual(
+            format_tg_time(dt_utc),
+            f'<tg-time unix="{unix_ts}" format="d t">13.09.2026 23:00</tg-time>',
+        )
+
+        # Naive datetime (treated as UTC in our system)
+        dt_naive = datetime.datetime(2026, 9, 13, 20, 0, 0)
+        self.assertEqual(
+            format_tg_time(dt_naive),
+            f'<tg-time unix="{unix_ts}" format="d t">13.09.2026 23:00</tg-time>',
+        )
+
+        # Custom format_spec and fallback_format
+        self.assertEqual(
+            format_tg_time(dt_utc, format_spec="d", fallback_format="%d.%m.%Y"),
+            f'<tg-time unix="{unix_ts}" format="d">13.09.2026</tg-time>',
+        )
+
+        # Empty format_spec
+        self.assertEqual(
+            format_tg_time(dt_utc, format_spec=""),
+            f'<tg-time unix="{unix_ts}">13.09.2026 23:00</tg-time>',
+        )
+
+    def test_format_subscription_date_tg_time(self):
+        self.assertEqual(format_subscription_date(None), "—")
+
+        from bot import texts
+        dt_perm = datetime.datetime(2099, 1, 1, 0, 0, tzinfo=datetime.timezone.utc)
+        self.assertEqual(format_subscription_date(dt_perm), texts.TIME_FOREVER)
+
+        # Current year subscription date
+        from utils.datetime_helpers import now_msk
+        now = now_msk()
+        dt_cur = datetime.datetime(now.year, 9, 25, 12, 0, tzinfo=datetime.timezone.utc)
+        cur_ts = int(dt_cur.timestamp())
+        res_cur = format_subscription_date(dt_cur)
+        self.assertTrue(res_cur.startswith(f'<tg-time unix="{cur_ts}" format="d">'))
+        self.assertTrue(res_cur.endswith('</tg-time>'))
+        self.assertIn("25 сентября", res_cur)
+
+        # Next year subscription date
+        dt_next = datetime.datetime(now.year + 1, 9, 25, 12, 0, tzinfo=datetime.timezone.utc)
+        next_ts = int(dt_next.timestamp())
+        res_next = format_subscription_date(dt_next)
+        self.assertTrue(res_next.startswith(f'<tg-time unix="{next_ts}" format="d">'))
+        self.assertTrue(res_next.endswith('</tg-time>'))
+        self.assertIn(f"25 сентября {now.year + 1}", res_next)
 
 
 class TestUtilsLoggingSecurity(unittest.TestCase):

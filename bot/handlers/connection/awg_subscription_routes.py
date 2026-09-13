@@ -35,7 +35,7 @@ from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime, format_traffic
+from utils.formatters import format_tg_time, format_traffic
 from utils.telegram import render_hub, safe
 from utils.vpn_parser import build_conf_file
 
@@ -306,19 +306,21 @@ async def _render_manage_devices(
             index=data.get("device_index", 1)
         )
         last_seen_raw = data.get("last_seen", "")
-        last_seen_display = last_seen_raw
+        last_seen_display = None
         is_inactive_7d = False
         if "T" in str(last_seen_raw):
             try:
                 dt = datetime.fromisoformat(last_seen_raw)
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
-                last_seen_display = format_datetime(dt)
+                last_seen_display = format_tg_time(dt)
                 if (now - dt).total_seconds() > 7 * 86400:
                     is_inactive_7d = True
             except Exception:
                 pass
-        activity_str = safe(last_seen_display) or texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
+        if last_seen_display is None:
+            last_seen_display = safe(last_seen_raw) if last_seen_raw else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
+        activity_str = last_seen_display
         if is_inactive_7d:
             activity_str += texts.AWG_DEVICE_INACTIVE_7D_TAG
         items_text.append(

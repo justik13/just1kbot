@@ -39,7 +39,7 @@ from database.models import User
 from database.repositories.profiles_repo import get_user_effective_device_count
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime
+from utils.formatters import format_tg_time
 from utils.rate_limiter import global_send_limiter
 
 logger = logging.getLogger("BackgroundWorker")
@@ -685,7 +685,7 @@ async def _send_white_internet_notifications(
                     if not sub.notified_3d:
                         notify_type = "3d"
                         msg = NOTIFY_WI_3D.format(
-                            date=format_datetime(sub.expires_at)
+                            date=format_tg_time(sub.expires_at)
                         )
 
                 if not notify_type or not msg:

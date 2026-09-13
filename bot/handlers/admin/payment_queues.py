@@ -22,7 +22,7 @@ from services.payment_queue_admin import (
 )
 from services.payment_queue_health import get_payment_queue_health_snapshot
 from utils.admin import is_admin
-from utils.formatters import format_datetime
+from utils.formatters import format_tg_time
 from utils.telegram import safe
 
 router = Router()
@@ -167,10 +167,10 @@ def _card_text(row) -> str:
             texts.QUEUE_CARD_STATUS.format(status=safe(row.status)),
             texts.QUEUE_CARD_ATTEMPTS.format(attempts=row.attempts, max_attempts=row.max_attempts),
             texts.ADMIN_QUEUE_CARD_ERROR.format(error_code=safe(row.last_error_code or texts.PLACEHOLDER_DASH)),
-            texts.QUEUE_CARD_CREATED.format(created_at=format_datetime(row.created_at)),
-            texts.QUEUE_CARD_UPDATED.format(updated_at=format_datetime(row.updated_at)),
-            texts.QUEUE_CARD_TERMINATED.format(terminated_at=format_datetime(row.terminal_at)),
-            texts.ADMIN_QUEUE_CARD_LOCK.format(locked_at=format_datetime(row.locked_at)),
+            texts.QUEUE_CARD_CREATED.format(created_at=format_tg_time(row.created_at)),
+            texts.QUEUE_CARD_UPDATED.format(updated_at=format_tg_time(row.updated_at)),
+            texts.QUEUE_CARD_TERMINATED.format(terminated_at=format_tg_time(row.terminal_at)),
+            texts.ADMIN_QUEUE_CARD_LOCK.format(locked_at=format_tg_time(row.locked_at)),
             texts.ADMIN_QUEUE_CARD_LEASE.format(lease=row.lease_status),
             texts.QUEUE_RETRY_STATUS.format(retry_status=texts.QUEUE_RETRY_AVAILABLE if row.retry_allowed else texts.QUEUE_RETRY_UNAVAILABLE),
         )

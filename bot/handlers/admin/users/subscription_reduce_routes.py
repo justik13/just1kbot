@@ -24,7 +24,7 @@ from utils.callbacks import (
     parse_callback_int,
     parse_callback_parts,
 )
-from utils.formatters import format_datetime
+from utils.formatters import format_datetime, format_tg_time
 from utils.telegram import render_hub
 
 from .common import _validate_positive_int
@@ -72,7 +72,7 @@ async def admin_sub_reduce_start(
 
     text = texts.ADMIN_SUB_REDUCE_PROMPT.format(
         telegram_id=telegram_id,
-        valid_until=format_datetime(user.subscription_end),
+        valid_until=format_tg_time(user.subscription_end),
     )
 
     try:
@@ -136,9 +136,9 @@ async def admin_sub_reduce_process(
 
     confirm_text = texts.ADMIN_SUB_CONFIRM_REDUCE.format(
         telegram_id=telegram_id,
-        current_end=format_datetime(current_end),
+        current_end=format_tg_time(current_end),
         days=days,
-        new_end=format_datetime(new_end),
+        new_end=format_tg_time(new_end),
     )
 
     await render_hub(
@@ -255,7 +255,7 @@ async def admin_sub_apply_reduce(
 
         text = texts.ADMIN_SUB_REDUCED.format(
             telegram_id=telegram_id,
-            new_end=format_datetime(new_end),
+            new_end=format_tg_time(new_end),
         )
 
         try:

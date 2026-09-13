@@ -30,7 +30,7 @@ from database.repositories.profiles_repo import (
 from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.formatters import format_datetime, format_traffic
+from utils.formatters import format_tg_time, format_traffic
 from utils.telegram import (
     _append_hub_document_unlocked,
     _append_hub_message_unlocked,
@@ -150,7 +150,7 @@ async def render_device_screen(
         country_display=safe(country_display),
         traffic_total=format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)),
         last_connected=(
-            format_datetime(profile.last_connected)
+            format_tg_time(profile.last_connected)
             if getattr(profile, "last_connected", None)
             else texts.DEVICE_DATA_NONE
         ),

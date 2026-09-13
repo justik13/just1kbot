@@ -28,7 +28,7 @@ from utils.callbacks import (
     parse_callback_parts,
 )
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime
+from utils.formatters import format_tg_time
 from bot.formatters import get_tariff_group_name
 from utils.telegram import render_hub
 
@@ -231,7 +231,7 @@ async def admin_sub_grant_confirm(
         telegram_id=telegram_id,
         tariff_name=tariff_name,
         days_text=days_text,
-        new_end=format_datetime(new_end),
+        new_end=format_tg_time(new_end),
     )
 
     try:
@@ -384,7 +384,7 @@ async def admin_sub_grant_custom_process(
         telegram_id=telegram_id,
         tariff_name=tariff_name,
         days_text=days_text,
-        new_end=format_datetime(new_end),
+        new_end=format_tg_time(new_end),
     )
 
     await render_hub(
@@ -513,7 +513,7 @@ async def admin_sub_grant_apply(
         )
 
         new_end_str = (
-            format_datetime(user.subscription_end)
+            format_tg_time(user.subscription_end)
             if user and user.subscription_end
             else texts.PLACEHOLDER_DASH
         )

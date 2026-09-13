@@ -35,7 +35,7 @@ from services.account_topup import (
 from services.maintenance_service import MaintenanceService
 from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime
+from utils.formatters import format_tg_time
 from utils.telegram import EFFECT_CONFETTI, render_hub
 
 from .common import _render_maintenance
@@ -87,7 +87,7 @@ def _history_lines(entries: list) -> str:
         sign = "+" if entry.amount > 0 else texts.BALANCE_SIGN_MINUS
         amount = abs(int(entry.amount))
         lines.append(
-            texts.BALANCE_HISTORY_ROW_FORMAT.format(value_0=format_datetime(entry.created_at), value_1=label, value_2=sign, value_3=amount)
+            texts.BALANCE_HISTORY_ROW_FORMAT.format(value_0=format_tg_time(entry.created_at), value_1=label, value_2=sign, value_3=amount)
         )
     return "\n".join(lines)
 

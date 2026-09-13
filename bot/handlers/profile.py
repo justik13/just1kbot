@@ -20,7 +20,7 @@ from database.repositories.users_repo import (
 )
 from services.payment_status import payment_display_status
 from services.referral_bonus import get_referral_bonus_balance
-from utils.formatters import format_datetime
+from utils.formatters import format_tg_time
 from utils.telegram import render_hub, safe
 
 router = Router()
@@ -78,7 +78,7 @@ async def show_history(
                 display_status,
                 texts.PAYMENT_STATUS_PENDING_ICON,
             )
-            date = format_datetime(payment.paid_at or payment.created_at)
+            date = format_tg_time(payment.paid_at or payment.created_at)
             currency = texts.CURRENCY_RUB_SYMBOL
             rendered += (
                 f"{status_icon} {date} | "
@@ -183,7 +183,11 @@ async def show_referrals_list(
                 if referral.username
                 else texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
             )
-            created_str = referral.created_at.strftime("%d.%m.%Y") if referral.created_at else ""
+            created_str = (
+                format_tg_time(referral.created_at, format_spec="d", fallback_format="%d.%m.%Y")
+                if referral.created_at
+                else ""
+            )
             rendered += texts.REFERRAL_LIST_ITEM_FORMAT.format(idx=idx, user=safe_user, date=created_str)
 
         rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(

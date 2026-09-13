@@ -146,15 +146,15 @@ async def _show_server_card(
 
     flag = server.country_flag or texts.EMOJI_GLOBE
 
-    from utils.datetime_helpers import format_datetime_msk
+    from utils.formatters import format_tg_time
 
     if server.is_active:
         status_line = texts.COMMON_AKTIVEN
         extra_status_info = ""
     elif server.disabled_reason == "AUTO_UNAVAILABLE":
         status_line = texts.COMMON_AVTOMATICHESKI_OTKLYUCHEN
-        disabled_at_str = format_datetime_msk(server.disabled_at) if server.disabled_at else "—"
-        last_check_str = format_datetime_msk(server.last_successful_check) if server.last_successful_check else "—"
+        disabled_at_str = format_tg_time(server.disabled_at)
+        last_check_str = format_tg_time(server.last_successful_check)
         extra_status_info = (
             texts.COMMON_REASON_API_NEDOSTUPEN_NESTAB.format()+
             texts.COMMON_OTKLYUCHEN.format(disabled_at_str=disabled_at_str)+

@@ -21,7 +21,7 @@ from services.provider_refunds import (
 )
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from utils.formatters import format_datetime
+from utils.formatters import format_datetime, format_tg_time
 from utils.telegram import safe
 from utils.text_limits import truncate_button_text
 
@@ -396,8 +396,8 @@ async def show_payment_card(
             status_name=status_name,
             provider_status=safe(payment.provider_status),
             fulfillment_status=safe(payment.fulfillment_status),
-            created_at=format_datetime(payment.created_at),
-            paid_at=format_datetime(payment.paid_at),
+            created_at=format_tg_time(payment.created_at),
+            paid_at=format_tg_time(payment.paid_at),
             external_id=safe(payment.external_id or texts.PLACEHOLDER_DASH),
             refundable_line=refundable_line,
             reason_line=reason_line,

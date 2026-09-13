@@ -21,7 +21,7 @@ from utils.callbacks import (
 )
 from utils.datetime_helpers import now_utc
 from bot.formatters import format_admin_breadcrumbs
-from utils.formatters import format_datetime, format_traffic
+from utils.formatters import format_tg_time, format_traffic
 from utils.telegram import safe
 
 from .common import _get_user_with_profiles
@@ -100,7 +100,7 @@ async def admin_user_devices(
 
             status_hs = texts.ADMIN_USERS_DEVICE_V_SETI_AKTIVNOST_3_MIN if is_online else texts.ADMIN_USERS_DEVICE_OFLAYN
             traffic_total = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
-            last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.ADMIN_USERS_DEVICE_NE_BYLO_PODKLYUCHENIYA
+            last_conn = format_tg_time(profile.last_connected) if getattr(profile, "last_connected", None) else texts.ADMIN_USERS_DEVICE_NE_BYLO_PODKLYUCHENIYA
 
             lines.append(
                 f"• 📱 <b>{safe(name)}</b>\n"+

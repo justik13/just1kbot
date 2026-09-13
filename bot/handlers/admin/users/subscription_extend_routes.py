@@ -26,7 +26,7 @@ from utils.callbacks import (
     parse_callback_parts,
 )
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime
+from utils.formatters import format_tg_time
 from utils.telegram import render_hub
 
 from .common import _validate_positive_int
@@ -67,7 +67,7 @@ async def admin_sub_extend(
         )
         return
 
-    valid_until = format_datetime(user.subscription_end)
+    valid_until = format_tg_time(user.subscription_end)
 
     text = texts.ADMIN_SUB_EXTEND_HEADER.format(
         telegram_id=telegram_id,
@@ -148,9 +148,9 @@ async def admin_sub_confirm_extend(
 
     text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(
         telegram_id=telegram_id,
-        current_end=format_datetime(current_end),
+        current_end=format_tg_time(current_end),
         days_text=days_text,
-        new_end=format_datetime(new_end),
+        new_end=format_tg_time(new_end),
     )
 
     try:
@@ -270,7 +270,7 @@ async def admin_sub_apply_extend(
         )
 
         new_end_str = (
-            format_datetime(user.subscription_end)
+            format_tg_time(user.subscription_end)
             if user and user.subscription_end
             else texts.PLACEHOLDER_DASH
         )
@@ -412,9 +412,9 @@ async def admin_sub_extend_custom_process(
 
     confirm_text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(
         telegram_id=telegram_id,
-        current_end=format_datetime(current_end),
+        current_end=format_tg_time(current_end),
         days_text=days_text,
-        new_end=format_datetime(new_end),
+        new_end=format_tg_time(new_end),
     )
 
     await render_hub(

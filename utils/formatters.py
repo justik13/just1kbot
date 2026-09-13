@@ -1,5 +1,5 @@
 """General formatting helpers for traffic, datetime, breadcrumbs, and audit logs."""
-from datetime import datetime
+from datetime import datetime, timezone
 
 from utils.datetime_helpers import format_datetime_msk
 
@@ -24,6 +24,29 @@ def format_traffic(bytes_value: int) -> str:
 
 def format_datetime(dt: datetime | None) -> str:
     return format_datetime_msk(dt, "%d.%m.%Y %H:%M")
+
+
+def format_tg_time(
+    dt: datetime | None,
+    format_spec: str = "d t",
+    fallback_format: str = "%d.%m.%Y %H:%M",
+) -> str:
+    """Render a datetime into a localized Telegram <tg-time> HTML tag.
+
+    Telegram clients automatically convert the unix timestamp into the user's
+    local time zone and language format.
+    """
+    if dt is None:
+        return "—"
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    unix_ts = int(dt.timestamp())
+    fallback = format_datetime_msk(dt, fallback_format)
+    if format_spec:
+        return f'<tg-time unix="{unix_ts}" format="{format_spec}">{fallback}</tg-time>'
+    return f'<tg-time unix="{unix_ts}">{fallback}</tg-time>'
 
 
 

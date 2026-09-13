@@ -9,6 +9,7 @@ from utils.datetime_helpers import (
 from utils.encryption import EncryptedString
 from utils.formatters import (
     format_datetime,
+    format_tg_time,
     format_traffic,
 )
 from utils.vpn_parser import (
@@ -24,6 +25,7 @@ __all__ = [
     "decode_vpn_uri_to_json",
     "format_datetime",
     "format_datetime_msk",
+    "format_tg_time",
     "format_traffic",
     "is_expired",
     "is_valid_vpn_uri",

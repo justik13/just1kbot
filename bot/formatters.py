@@ -119,8 +119,12 @@ def format_subscription_date(dt) -> str:
     month_name = texts.MONTH_NAMES_LABELS[msk_dt.month - 1]
     now_dt = now_msk()
     if msk_dt.year == now_dt.year:
-        return texts.DATE_DAY_MONTH_FORMAT.format(day=msk_dt.day, month=month_name)
-    return texts.DATE_DAY_MONTH_YEAR_FORMAT.format(day=msk_dt.day, month=month_name, year=msk_dt.year)
+        fallback = texts.DATE_DAY_MONTH_FORMAT.format(day=msk_dt.day, month=month_name)
+    else:
+        fallback = texts.DATE_DAY_MONTH_YEAR_FORMAT.format(day=msk_dt.day, month=month_name, year=msk_dt.year)
+
+    unix_ts = int(msk_dt.timestamp())
+    return f'<tg-time unix="{unix_ts}" format="d">{fallback}</tg-time>'
 
 
 def format_days_left(dt) -> str:

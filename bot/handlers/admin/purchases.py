@@ -16,7 +16,7 @@ from database.repositories.purchases_repo import (
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from bot.formatters import format_admin_breadcrumbs
-from utils.formatters import format_datetime
+from utils.formatters import format_tg_time
 from utils.telegram import safe
 from utils.text_limits import truncate_button_text
 
@@ -49,7 +49,7 @@ async def _show_purchases_list(
         rendered += texts.ADMIN_PURCHASES_EMPTY_NOTICE
     else:
         for idx, entry in enumerate(entries, start=1):
-            dt_str = format_datetime(entry.created_at)
+            dt_str = format_tg_time(entry.created_at)
             amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_PURCHASES_AMOUNT_ZERO_BONUS
             rendered += (
                 texts.ADMIN_PURCHASES_ROW_FORMAT.format(
@@ -166,7 +166,7 @@ async def show_purchase_card(
 
     header = format_admin_breadcrumbs(texts.ADMIN_PURCHASES_TAB_TITLE, texts.ADMIN_PURCHASES_DETAILS_LINK.format(entry_numeric_id=entry.numeric_id))
     amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_PURCHASES_AMOUNT_ZERO_BONUS_GRANT
-    dt_str = format_datetime(entry.created_at)
+    dt_str = format_tg_time(entry.created_at)
 
     rendered = (
         f"{header}"+

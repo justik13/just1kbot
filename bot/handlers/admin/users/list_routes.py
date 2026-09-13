@@ -386,7 +386,7 @@ async def show_user_audit(
         get_user_audit_logs,
         get_user_audit_logs_count,
     )
-    from utils.formatters import format_datetime
+    from utils.formatters import format_tg_time
 
     page_size = 10
     total_count = await get_user_audit_logs_count(session, user_id=user.id, telegram_id=user.telegram_id)
@@ -404,10 +404,10 @@ async def show_user_audit(
         lines.append(texts.ADMIN_USERS_LIST_HISTORY_DEYSTVIY_PUSTA)
     else:
         for item in logs:
-            dt = format_datetime(item.created_at)
+            dt = format_tg_time(item.created_at)
             action_text = safe(action_map.get(item.action, item.action or texts.ADMIN_USERS_LIST_ACTION))
             details_text = safe(format_audit_details(item.details))
-            lines.append(f"• <code>[{dt}]</code> {action_text}{details_text}")
+            lines.append(f"• [{dt}] {action_text}{details_text}")
 
     builder = InlineKeyboardBuilder()
     if total_pages > 1:

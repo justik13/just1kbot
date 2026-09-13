@@ -41,7 +41,7 @@ from services.maintenance_service import MaintenanceService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 from bot.formatters import format_admin_breadcrumbs, format_audit_details
-from utils.formatters import format_datetime, format_traffic
+from utils.formatters import format_tg_time, format_traffic
 from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_details
 
@@ -377,7 +377,7 @@ async def show_admin_audit(
                 details = f"\n{safe(truncate_details(formatted_d, 300))}"
 
             text += texts.AUDIT_ENTRY.format(
-                date=format_datetime(log.created_at),
+                date=format_tg_time(log.created_at),
                 admin_id=log.admin_id,
                 action=action_label,
                 target=target,

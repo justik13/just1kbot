@@ -45,7 +45,7 @@ from services.white_internet_service import (
 )
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_traffic
+from utils.formatters import format_tg_time, format_traffic
 from utils.security import normalize_public_domain
 
 logger = logging.getLogger(__name__)
@@ -354,7 +354,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         status_str = status_text_map.get(sub.status, str(sub.status))
         used_bytes = max(0, total_limit - available_bytes)
         progress_bar = _render_progress_bar(used_bytes, total_limit)
-        expiry_str = sub.expires_at.strftime(texts.WL_DATETIME_FORMAT) if sub.expires_at else texts.TIME_FOREVER
+        expiry_str = format_tg_time(sub.expires_at) if sub.expires_at else texts.TIME_FOREVER
 
         current_hwids = dict(sub.active_hwids or {})
         cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()

@@ -23,7 +23,7 @@ from database.repositories.users_repo import (
     get_user_referrals_count,
 )
 from utils.datetime_helpers import is_expired, now_utc
-from utils.formatters import format_datetime, format_traffic
+from utils.formatters import format_tg_time, format_traffic
 from bot.formatters import format_days_left
 from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_button_text
@@ -68,12 +68,12 @@ def format_user_card_text(
         referrer_info=safe(referrer_info),
         real_balance=real_balance,
         bonus_balance=bonus_balance,
-        valid_until=format_datetime(user.subscription_end),
+        valid_until=format_tg_time(user.subscription_end),
         days_left=format_days_left(user.subscription_end),
         devices_count=len(profiles),
         device_limit=user.device_limit or 0,
         referrals_count=referrals_count,
-        created_at=format_datetime(user.created_at),
+        created_at=format_tg_time(user.created_at),
     )
     if white_internet_info:
         card_text = f"{card_text}\n\n{white_internet_info}"
@@ -371,7 +371,7 @@ async def _get_white_internet_card_info(
 
     used_str = format_traffic(sub.traffic_used_bytes or 0)
     total_str = format_traffic(sub.traffic_limit_bytes)
-    expires_str = format_datetime(sub.expires_at) if sub.expires_at else "—"
+    expires_str = format_tg_time(sub.expires_at) if sub.expires_at else "—"
 
     status_badge_map = {
         "ACTIVE": texts.ADMIN_USER_CARD_WL_BADGE_ACTIVE,

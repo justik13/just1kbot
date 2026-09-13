@@ -19,7 +19,7 @@ from database.repositories.profiles_repo import (
 )
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime, format_traffic
+from utils.formatters import format_tg_time, format_traffic
 from utils.telegram import render_hub, safe
 
 logger = logging.getLogger(__name__)
@@ -146,7 +146,7 @@ async def _build_connections_screen(
                     (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
                 )
                 last_conn_str = (
-                    format_datetime(profile.last_connected)
+                    format_tg_time(profile.last_connected)
                     if getattr(profile, "last_connected", None)
                     else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
                 )
@@ -194,7 +194,7 @@ async def _build_connections_screen(
         now = now_utc()
         delta = sub_end - now
         days_left = max(0, delta.days)
-        end_date_str = sub_end.strftime("%d.%m.%Y")
+        end_date_str = format_tg_time(sub_end, format_spec="d", fallback_format="%d.%m.%Y")
 
     token = await users_repo.ensure_subscription_token(session, user)
     try:

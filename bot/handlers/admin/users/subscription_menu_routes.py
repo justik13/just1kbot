@@ -29,7 +29,7 @@ from services.white_internet_service import WhiteInternetService
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime
+from utils.formatters import format_tg_time
 
 from .common import (
     _format_time_left,
@@ -94,7 +94,7 @@ async def admin_subscription_menu(
     if has_active:
         status_block = texts.ADMIN_SUB_STATUS_ACTIVE.format(
             tariff_name=tariff_name,
-            valid_until=format_datetime(user.subscription_end),
+            valid_until=format_tg_time(user.subscription_end),
             time_left=_format_time_left(user.subscription_end),
             devices_count=profiles_count,
             device_limit=device_limit,
@@ -102,7 +102,7 @@ async def admin_subscription_menu(
     elif user.subscription_end:
         status_block = texts.ADMIN_SUB_STATUS_INACTIVE.format(
             tariff_name=tariff_name,
-            valid_until=format_datetime(user.subscription_end),
+            valid_until=format_tg_time(user.subscription_end),
         )
     else:
         status_block = texts.ADMIN_SUB_STATUS_NONE.format(
