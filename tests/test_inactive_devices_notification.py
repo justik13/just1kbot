@@ -30,11 +30,11 @@ class TestInactiveDevicesNotification(unittest.IsolatedAsyncioTestCase):
         mock_bot.send_message = AsyncMock()
 
         mock_session = AsyncMock()
-        # users query
         mock_session.execute.side_effect = [
-            MagicMock(scalars=lambda: MagicMock(all=lambda: [user])),
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [user.id])),
             MagicMock(scalar_one=lambda: 0),  # manual_count = 0 -> total_active = 1 < limit (2)
         ]
+        mock_session.scalar.return_value = user
 
         with (
             patch("services.workers.notifications.session_scope") as mock_scope,
@@ -71,9 +71,10 @@ class TestInactiveDevicesNotification(unittest.IsolatedAsyncioTestCase):
 
         mock_session = AsyncMock()
         mock_session.execute.side_effect = [
-            MagicMock(scalars=lambda: MagicMock(all=lambda: [user])),
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [user.id])),
             MagicMock(scalar_one=lambda: 0),  # manual_count = 0 -> total_active = 2 == limit (2)
         ]
+        mock_session.scalar.return_value = user
 
         with (
             patch("services.workers.notifications.session_scope") as mock_scope,
@@ -116,9 +117,10 @@ class TestInactiveDevicesNotification(unittest.IsolatedAsyncioTestCase):
 
         mock_session = AsyncMock()
         mock_session.execute.side_effect = [
-            MagicMock(scalars=lambda: MagicMock(all=lambda: [user])),
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [user.id])),
             MagicMock(scalar_one=lambda: 0),  # total_active = 1 == limit (1)
         ]
+        mock_session.scalar.return_value = user
 
         with (
             patch("services.workers.notifications.session_scope") as mock_scope,
@@ -129,6 +131,74 @@ class TestInactiveDevicesNotification(unittest.IsolatedAsyncioTestCase):
 
             await _send_inactive_sub_device_notifications(mock_bot, now)
             mock_bot.send_message.assert_not_called()
+
+    async def test_processes_multiple_users_in_individual_sessions(self):
+        now = datetime(2026, 9, 12, 12, 0, 0, tzinfo=timezone.utc)
+        user1 = User(
+            id=1,
+            telegram_id=101,
+            subscription_end=now + timedelta(days=30),
+            device_limit=1,
+            active_sub_devices={
+                "hwid_1": {
+                    "device_index": 1,
+                    "label": "Old iPad",
+                    "last_seen": (now - timedelta(days=10)).isoformat(),
+                }
+            },
+        )
+        user2 = User(
+            id=2,
+            telegram_id=102,
+            subscription_end=now + timedelta(days=30),
+            device_limit=1,
+            active_sub_devices={
+                "hwid_2": {
+                    "device_index": 1,
+                    "label": "Old Phone",
+                    "last_seen": (now - timedelta(days=10)).isoformat(),
+                }
+            },
+        )
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock()
+
+        session_scope_count = 0
+
+        class MockSessionContext:
+            async def __aenter__(self):
+                nonlocal session_scope_count
+                session_scope_count += 1
+                session = AsyncMock()
+                if session_scope_count == 1:
+                    # Initial ID query
+                    session.execute.return_value = MagicMock(
+                        scalars=lambda: MagicMock(all=lambda: [1, 2])
+                    )
+                elif session_scope_count == 2:
+                    # User 1
+                    session.scalar.return_value = user1
+                    session.execute.return_value = MagicMock(scalar_one=lambda: 0)
+                elif session_scope_count == 3:
+                    # User 2
+                    session.scalar.return_value = user2
+                    session.execute.return_value = MagicMock(scalar_one=lambda: 0)
+                return session
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        with (
+            patch("services.workers.notifications.session_scope", return_value=MockSessionContext()),
+            patch("services.workers.notifications.SubscriptionService.get_effective_device_limit", new_callable=AsyncMock) as mock_limit,
+            patch("services.workers.notifications.global_send_limiter.acquire", new_callable=AsyncMock),
+        ):
+            mock_limit.return_value = 1
+            await _send_inactive_sub_device_notifications(mock_bot, now)
+
+            # 1 initial ID session + 2 user sessions = 3 distinct sessions
+            self.assertEqual(session_scope_count, 3)
+            self.assertEqual(mock_bot.send_message.call_count, 2)
 
 
 if __name__ == "__main__":

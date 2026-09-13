@@ -331,6 +331,152 @@ class TariffChangeQuoteTests(unittest.TestCase):
         )
         self.assertNotEqual(base_fp, fp_ledger_changed)
 
+    def test_multi_lot_historical_valuation_and_calculation(self):
+        lot1 = ProjectedPaidLot(
+            entitlement_entry_id=1,
+            paid_value_ledger_entry_id=10,
+            tariff_version_id=101,
+            original_paid_hours=720,
+            original_paid_value_rub=Decimal(90),
+            remaining_whole_hours=360,
+            remaining_paid_value_rub=Decimal("45.000000"),
+            segment_start=T0,
+            segment_end=T0 + timedelta(hours=360),
+        )
+        lot2 = ProjectedPaidLot(
+            entitlement_entry_id=2,
+            paid_value_ledger_entry_id=20,
+            tariff_version_id=102,
+            original_paid_hours=720,
+            original_paid_value_rub=Decimal(150),
+            remaining_whole_hours=720,
+            remaining_paid_value_rub=Decimal("150.000000"),
+            segment_start=T0 + timedelta(hours=360),
+            segment_end=T0 + timedelta(hours=1080),
+        )
+        multi_snapshot = SubscriptionBalanceSnapshot(
+            as_of=T0,
+            tracked=True,
+            failure_code=None,
+            coverage_end=T0 + timedelta(hours=1080),
+            remaining_paid_hours=1080,
+            remaining_paid_value_rub=lot1.remaining_paid_value_rub + lot2.remaining_paid_value_rub,
+            remaining_bonus_hours=0,
+            rounding_loss_hours=Decimal(0),
+            paid_lots=(lot1, lot2),
+            bonus_lots=(),
+            source_ledger_entry_ids=(10, 20),
+            source_entitlement_entry_ids=(1, 2),
+        )
+        self.assertEqual(multi_snapshot.remaining_paid_value_rub, Decimal("195.000000"))
+
+        # Transfer calculation with 195 RUB towards 300 RUB / 30d (10 RUB/d)
+        transfer = calculate_transfer_option(
+            remaining_value=multi_snapshot.remaining_paid_value_rub,
+            target_price_rub=Decimal(300),
+            target_duration_days=30,
+        )
+        self.assertTrue(transfer.is_available)
+        self.assertEqual(transfer.target_days, 19)
+        self.assertEqual(transfer.leftover_rub, 5)
+
+        # Surcharge calculation: 300 - 195 = 105 RUB
+        surcharge = calculate_surcharge_option(
+            remaining_value=multi_snapshot.remaining_paid_value_rub,
+            target_price_rub=Decimal(300),
+        )
+        self.assertEqual(surcharge, 105)
+
+    def test_sub_ruble_residue_and_precision_boundaries(self):
+        # Sub-ruble: 0.99 RUB cannot buy any days, surcharge ceiling rounds up
+        transfer_sub = calculate_transfer_option(
+            remaining_value=Decimal("0.99"),
+            target_price_rub=Decimal(300),
+            target_duration_days=30,
+        )
+        self.assertFalse(transfer_sub.is_available)
+        self.assertEqual(transfer_sub.target_days, 0)
+        self.assertEqual(transfer_sub.leftover_rub, 0)
+
+        surcharge_sub = calculate_surcharge_option(
+            remaining_value=Decimal("0.99"),
+            target_price_rub=Decimal(300),
+        )
+        # 300 - 0.99 = 299.01 -> ceiling = 300
+        self.assertEqual(surcharge_sub, 300)
+
+        # Exact boundary: 70.01 RUB -> target_days = 7, available!
+        transfer_boundary = calculate_transfer_option(
+            remaining_value=Decimal("70.01"),
+            target_price_rub=Decimal(300),
+            target_duration_days=30,
+        )
+        self.assertTrue(transfer_boundary.is_available)
+        self.assertEqual(transfer_boundary.target_days, 7)
+        self.assertEqual(transfer_boundary.leftover_rub, 0)
+
+        # 69.99 RUB -> target_days = 6, below 7 days threshold!
+        transfer_below = calculate_transfer_option(
+            remaining_value=Decimal("69.99"),
+            target_price_rub=Decimal(300),
+            target_duration_days=30,
+        )
+        self.assertFalse(transfer_below.is_available)
+        self.assertEqual(transfer_below.target_days, 6)
+        self.assertEqual(transfer_below.leftover_rub, 9)
+
+    def test_mixed_paid_and_bonus_lots_zero_monetization(self):
+        paid = ProjectedPaidLot(
+            entitlement_entry_id=1,
+            paid_value_ledger_entry_id=10,
+            tariff_version_id=101,
+            original_paid_hours=720,
+            original_paid_value_rub=Decimal(90),
+            remaining_whole_hours=360,
+            remaining_paid_value_rub=Decimal("45.000000"),
+            segment_start=T0,
+            segment_end=T0 + timedelta(hours=360),
+        )
+        bonus = ProjectedBonusLot(
+            entitlement_entry_id=2,
+            source_type="quote",
+            source_id="202",
+            bonus_type="referral_user_bonus",
+            original_hours=720,
+            remaining_whole_hours=720,
+            segment_start=T0 + timedelta(hours=360),
+            segment_end=T0 + timedelta(hours=1080),
+        )
+        mixed_snapshot = SubscriptionBalanceSnapshot(
+            as_of=T0,
+            tracked=True,
+            failure_code=None,
+            coverage_end=T0 + timedelta(hours=1080),
+            remaining_paid_hours=360,
+            remaining_paid_value_rub=Decimal("45.000000"),
+            remaining_bonus_hours=720,
+            rounding_loss_hours=Decimal(0),
+            paid_lots=(paid,),
+            bonus_lots=(bonus,),
+            source_ledger_entry_ids=(10,),
+            source_entitlement_entry_ids=(1, 2),
+        )
+        # Surcharge against 300 RUB must only deduct the 45 RUB paid lot, not the 720 bonus hours
+        surcharge = calculate_surcharge_option(
+            remaining_value=mixed_snapshot.remaining_paid_value_rub,
+            target_price_rub=Decimal(300),
+        )
+        self.assertEqual(surcharge, 255)
+
+        # Transfer option uses only paid value: 45 // 10 = 4 days (< 7d threshold)
+        transfer = calculate_transfer_option(
+            remaining_value=mixed_snapshot.remaining_paid_value_rub,
+            target_price_rub=Decimal(300),
+            target_duration_days=30,
+        )
+        self.assertFalse(transfer.is_available)
+        self.assertEqual(transfer.target_days, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

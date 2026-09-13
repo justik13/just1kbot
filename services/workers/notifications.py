@@ -468,7 +468,7 @@ async def _send_inactive_sub_device_notifications(
 
     async with session_scope() as session:
         stmt = (
-            select(User)
+            select(User.id)
             .where(
                 User.is_banned.is_(False),
                 User.is_bot_blocked.is_(False),
@@ -479,9 +479,24 @@ async def _send_inactive_sub_device_notifications(
             .order_by(User.id.asc())
             .limit(100)
         )
-        users = (await session.execute(stmt)).scalars().all()
+        user_ids = (await session.execute(stmt)).scalars().all()
 
-        for user in users:
+    if not user_ids:
+        return
+
+    for uid in user_ids:
+        async with session_scope() as session:
+            user = await session.scalar(
+                select(User).where(User.id == uid).with_for_update(skip_locked=True)
+            )
+            if user is None:
+                continue
+
+            if user.is_banned or user.is_bot_blocked or user.is_deleted:
+                continue
+
+            if not user.subscription_end or user.subscription_end <= current_time:
+                continue
 
             active_sub_devices = dict(getattr(user, "active_sub_devices", None) or {})
             if not active_sub_devices:
