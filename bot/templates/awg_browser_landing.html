@@ -346,9 +346,21 @@
         }
 
         function handleOpenClick(e) {
-            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
-                window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+            if (window.Telegram && window.Telegram.WebApp) {
+                try {
+                    if (window.Telegram.WebApp.HapticFeedback) {
+                        window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+                    }
+                } catch (err) {}
+
+                if (window.Telegram.WebApp.openLink) {
+                    e.preventDefault();
+                    var separator = subUrl.indexOf('?') >= 0 ? '&' : '?';
+                    window.Telegram.WebApp.openLink(subUrl + separator + 'open=app');
+                    return;
+                }
             }
+            window.location.href = deepLink;
         }
 
         function copySubscriptionUrl() {

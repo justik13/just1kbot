@@ -45,7 +45,8 @@ def is_browser_request(request: web.Request) -> bool:
     """Detect if the incoming HTTP request originates from a standard web browser."""
     action = (request.query.get("action") or "").lower()
     fmt = (request.query.get("format") or "").lower()
-    if fmt == "html" or action in ("browser", "web", "view"):
+    open_param = (request.query.get("open") or "").lower()
+    if fmt == "html" or action in ("browser", "web", "view", "open") or open_param in ("app", "1", "incy"):
         return True
 
     accept = (request.headers.get("Accept") or "").lower()
@@ -295,6 +296,10 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                     )
 
                 sub_url = get_subscription_public_url(request, token)
+
+                if request.query.get("open") in ("app", "1", "incy") or request.query.get("action") == "open":
+                    raise web.HTTPFound(f"incy://add/{sub_url}")
+
                 html_body = render_awg_browser_landing_page(
                     sub_url=sub_url,
                     bot_username=bot_username,

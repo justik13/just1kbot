@@ -420,6 +420,42 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             # Invariant: zero slot consumption / user was only read
             self.assertEqual(len(user.active_sub_devices), 0)
 
+    async def test_feed_browser_open_app_redirects_to_incy(self):
+        """Verify request with ?open=app returns 302 redirect with Location: incy://add/..."""
+        valid_token = "valid_token_1234567890123456"
+        active_time = datetime.now(timezone.utc) + timedelta(days=10)
+        user = User(
+            id=1,
+            telegram_id=12345,
+            subscription_end=active_time,
+            subscription_token=valid_token,
+            active_sub_devices=[],
+        )
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
+            mock_get_user.return_value = user
+
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}?open=app",
+                allow_redirects=False,
+            )
+            self.assertEqual(resp.status, 302)
+            location = resp.headers.get("Location", "")
+            self.assertTrue(location.startswith("incy://add/"))
+            self.assertIn(valid_token, location)
+
     async def test_feed_browser_token_not_found(self):
         """Verify browser requests with unknown token render 404 HTML error page."""
         valid_token = "notfound_token_12345678901234"
