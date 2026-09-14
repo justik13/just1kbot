@@ -1378,7 +1378,7 @@ class WhiteInternetSubscription(Base):
             "expires_at",
             "user_id",
             postgresql_where=text(
-                "status IN ('ACTIVE', 'EXHAUSTED') AND (notified_3d = false OR notified_1d = false OR notified_2h = false OR notified_expired = false)"
+                "status IN ('ACTIVE', 'EXHAUSTED', 'EXPIRED') AND (notified_3d = false OR notified_1d = false OR notified_2h = false OR notified_expired = false)"
             ),
         ),
     )

@@ -464,6 +464,7 @@ async def _send_white_internet_notifications(
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from config.enums import WhiteInternetStatus
     from database.models import User, WhiteInternetSubscription
+    from utils.formatters import format_datetime
 
     cutoff = current_time + timedelta(days=3)
 
@@ -475,6 +476,7 @@ async def _send_white_internet_notifications(
                 WhiteInternetSubscription.status.in_([
                     WhiteInternetStatus.ACTIVE,
                     WhiteInternetStatus.EXHAUSTED,
+                    WhiteInternetStatus.EXPIRED,
                 ]),
                 WhiteInternetSubscription.expires_at.isnot(None),
                 WhiteInternetSubscription.expires_at <= cutoff,
@@ -512,6 +514,7 @@ async def _send_white_internet_notifications(
                 if sub.status not in (
                     WhiteInternetStatus.ACTIVE,
                     WhiteInternetStatus.EXHAUSTED,
+                    WhiteInternetStatus.EXPIRED,
                 ):
                     continue
 
@@ -549,10 +552,27 @@ async def _send_white_internet_notifications(
                     if not sub.notified_3d:
                         notify_type = "3d"
                         msg = NOTIFY_WI_3D.format(
-                            date=sub.expires_at.strftime("%d.%m.%Y %H:%M")
+                            date=format_datetime(sub.expires_at)
                         )
 
                 if not notify_type or not msg:
+                    if time_left.total_seconds() <= 0:
+                        logger.warning(
+                            "WI sub %s expired without notify_type "
+                            "(status=%s, flags 3d=%s 1d=%s 2h=%s expired=%s); "
+                            "marking notified to avoid rescan loop",
+                            sub.id,
+                            sub.status,
+                            sub.notified_3d,
+                            sub.notified_1d,
+                            sub.notified_2h,
+                            sub.notified_expired,
+                        )
+                        sub.notified_expired = True
+                        sub.notified_2h = True
+                        sub.notified_1d = True
+                        sub.notified_3d = True
+                        await session.flush()
                     continue
 
                 kb = InlineKeyboardBuilder()
@@ -568,6 +588,9 @@ async def _send_white_internet_notifications(
                     )
                     if notify_type == "expired":
                         sub.notified_expired = True
+                        sub.notified_2h = True
+                        sub.notified_1d = True
+                        sub.notified_3d = True
                     elif notify_type == "2h":
                         sub.notified_2h = True
                         sub.notified_1d = True

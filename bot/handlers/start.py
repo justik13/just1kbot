@@ -147,7 +147,19 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
 
     if is_active and is_wi_active:
         status_str = texts.STATUS_SUBSCRIPTION_ACTIVE_DUAL
-        end_date = max(db_user.subscription_end, wi_sub.expires_at)
+        from datetime import timezone
+        end_1 = (
+            db_user.subscription_end.replace(tzinfo=timezone.utc)
+            if db_user.subscription_end and db_user.subscription_end.tzinfo is None
+            else db_user.subscription_end
+        )
+        end_2 = (
+            wi_sub.expires_at.replace(tzinfo=timezone.utc)
+            if wi_sub.expires_at and wi_sub.expires_at.tzinfo is None
+            else wi_sub.expires_at
+        )
+        dates = [d for d in (end_1, end_2) if d is not None]
+        end_date = max(dates) if dates else None
         valid_until_str = format_subscription_date(end_date)
         days_left_str = format_days_left(end_date)
     elif is_active and is_wi_exhausted:
