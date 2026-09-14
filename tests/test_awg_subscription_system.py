@@ -2509,5 +2509,75 @@ class TestAWGBrowserHelpers(unittest.TestCase):
         self.assertIn("@testbot", html_out)
 
 
+class TestAWGMockServerFeed(unittest.IsolatedAsyncioTestCase):
+    """Unit tests for mock:// server subscription provisioning."""
+
+    async def test_sub_feed_handler_provisions_mock_server(self):
+        from aiohttp import web
+        from bot.handlers.awg_sub_web import awg_subscription_feed_handler
+        from utils.datetime_helpers import now_utc
+
+        user = User(
+            id=1,
+            telegram_id=123,
+            subscription_end=now_utc() + timedelta(days=30),
+            device_limit=2,
+            active_sub_devices={},
+        )
+        mock_server = Server(
+            id=1,
+            name="Польша",
+            country_flag="🇵🇱",
+            protocol="amneziawg",
+            api_url="mock://poland",
+            is_active=True,
+            health_state="online",
+            lifecycle_status="active",
+            capabilities=[],
+        )
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.flush = AsyncMock()
+        mock_session.execute.side_effect = [
+            MagicMock(scalar_one=lambda: 0),  # manual_count
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [mock_server])),  # servers
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [])),  # existing profiles
+        ]
+
+        req = MagicMock(spec=web.Request)
+        req.match_info = {"token": "valid_sub_token_12345678"}
+        req.headers = {
+            "X-HWID": "TestDeviceHWID123",
+            "User-Agent": "INCY/1.4.2",
+        }
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope") as mock_scope,
+            patch(
+                "bot.handlers.awg_sub_web.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+            patch(
+                "bot.handlers.awg_sub_web.SubscriptionService.get_effective_device_limit",
+                new_callable=AsyncMock,
+            ) as mock_limit,
+        ):
+            mock_scope.return_value.__aenter__.return_value = mock_session
+            mock_get_user.return_value = user
+            mock_limit.return_value = 2
+
+            resp = await awg_subscription_feed_handler(req)
+            self.assertEqual(resp.status, 200)
+            feed_lines = resp.text.strip().splitlines()
+            self.assertTrue(len(feed_lines) >= 1)
+            first_line = feed_lines[0]
+            # Feed line format: base64(awg://...) or base64(awg://...#display_name)
+            # When decoded from base64:
+            decoded_feed = base64.b64decode(first_line).decode("utf-8")
+            self.assertIn("awg://", decoded_feed)
+            self.assertIn(hashlib.sha256(b"testdevicehwid123").hexdigest(), user.active_sub_devices)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -258,7 +258,9 @@ async def ping_server(
 
     start_t = time.monotonic()
     try:
-        if server.protocol == "amneziawg2":
+        if (server.api_url or "").startswith("mock://"):
+            is_healthy = True
+        elif server.protocol == "amneziawg2":
             from services.amnezia_client import AmneziaClient
 
             client = AmneziaClient(server.api_url, server.api_key)

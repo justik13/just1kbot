@@ -456,6 +456,32 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
                         # Skip recreation on this server if cleanup failed to avoid orphaned state or capacity breach
                         continue
 
+                api_url = getattr(srv, "api_url", "") or ""
+                if api_url.startswith("mock://"):
+                    dev_name = texts.AWG_SUB_PROFILE_NAME_TEMPLATE.format(
+                        server_name=srv.name or "AWG",
+                        index=device_idx,
+                    )
+                    mock_conf = (srv.extra_data or {}).get("static_conf") if srv.extra_data else None
+                    if not mock_conf:
+                        mock_conf = AWGSubscriptionFeedService.get_mock_awg_config(device_idx + 10)
+                    profile = VPNProfile(
+                        user_id=user.id,
+                        server_id=srv.id,
+                        device_name=dev_name,
+                        device_type="sub",
+                        sub_device_hash=hwid_hash,
+                        peer_id=f"mock_peer_{user.id}_{srv.id}_{device_idx}",
+                        raw_config=mock_conf,
+                        provisioning_status="active",
+                        is_active=True,
+                    )
+                    session.add(profile)
+                    await session.flush()
+                    profiles_by_server[srv.id] = profile
+                    newly_created = True
+                    continue
+
                 try:
                     snapshot = await capture_server_peer_snapshot(srv.id)
                     async with session.begin_nested():

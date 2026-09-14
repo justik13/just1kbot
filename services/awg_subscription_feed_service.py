@@ -9,8 +9,40 @@ from typing import Sequence, Tuple
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_MOCK_AWG_CONFIG_TEMPLATE = (
+    "[Interface]\n"
+    "DNS = 1.1.1.1, 8.8.8.8\n"
+    "MTU = 1280\n"
+    "Address = 10.8.1.{ip_suffix}/32\n"
+    "PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=\n"
+    "Jc = 3\n"
+    "Jmin = 40\n"
+    "Jmax = 80\n"
+    "S1 = 50\n"
+    "S2 = 40\n"
+    "S3 = 12\n"
+    "S4 = 8\n"
+    "H1 = 234567-345678\n"
+    "H2 = 3456789-4567890\n"
+    "H3 = 56789012-67890123\n"
+    "H4 = 456789012-567890123\n"
+    "I1 = <r 64>\n\n"
+    "[Peer]\n"
+    "PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=\n"
+    "PresharedKey = ccccccccccccccccccccccccccccccccccccccccccc=\n"
+    "AllowedIPs = 0.0.0.0/0, ::/0\n"
+    "Endpoint = 198.51.100.1:51820\n"
+    "PersistentKeepalive = 25\n"
+)
+
+
 class AWGSubscriptionFeedService:
     """Generates subscription feeds with multi-server AmneziaWG profiles for INCY."""
+
+    @staticmethod
+    def get_mock_awg_config(ip_suffix: int = 10) -> str:
+        """Return a valid mock AmneziaWG configuration text for simulation/test nodes."""
+        return DEFAULT_MOCK_AWG_CONFIG_TEMPLATE.format(ip_suffix=ip_suffix)
 
     @staticmethod
     def encode_config_to_awg_uri(conf: str, server_name: str, country_flag: str = "") -> str:

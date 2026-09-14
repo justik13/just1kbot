@@ -240,8 +240,11 @@ async def check_node_resources_and_alerts(bot: Bot):
         xray_epoch = None
         xray_data = None
         client = None
+        is_mock_node = (getattr(server, "api_url", "") or "").startswith("mock://")
         try:
-            if is_xray_node:
+            if is_mock_node:
+                is_healthy = True
+            elif is_xray_node:
                 from services.xray_node_client import XrayNodeClient
                 async with XrayNodeClient(timeout=10.0) as xray_client:
                     is_healthy, xray_epoch, xray_data = await xray_client.check_health(
@@ -447,7 +450,14 @@ async def check_node_resources_and_alerts(bot: Bot):
                             await update_server(session, fresh, extra_data=cur_extra)
 
         if is_healthy:
-            if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
+            if is_mock_node:
+                st.health_state = ServerHealthState.ONLINE
+                st.consecutive_fails = 0
+                st.consecutive_successes = 1
+                st.next_check_at = None
+                st.problem_started_at = None
+
+            elif st.health_state == ServerHealthState.WAITING_CONFIRMATION:
                 # Восстановление после кратковременной ошибки (FAIL #1)
                 st.health_state = ServerHealthState.ONLINE
                 st.consecutive_fails = 0
@@ -506,7 +516,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.consecutive_fails = 0
                 st.consecutive_successes += 1
 
-                if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES:
+                if is_mock_node or st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES:
                     st.health_state = ServerHealthState.ONLINE
                     st.problem_started_at = None
                     st.next_check_at = None
@@ -522,18 +532,24 @@ async def check_node_resources_and_alerts(bot: Bot):
 
             elif st.health_state == ServerHealthState.AUTO_DISABLED:
                 st.consecutive_successes += 1
-                # Запланировать следующую проверку в режиме AUTO_DISABLED через 15 минут
-                st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
+                if is_mock_node:
+                    st.health_state = ServerHealthState.ONLINE
+                    st.consecutive_fails = 0
+                    st.problem_started_at = None
+                    st.next_check_at = None
+                else:
+                    # Запланировать следующую проверку в режиме AUTO_DISABLED через 15 минут
+                    st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
 
-                if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
-                    alerts_to_send.append({
-                        "text": ALERT_SERVER_AUTO_DISABLED_RECOVERED.format(
-                            server_name=safe(server.name),
-                            server_id=server.id,
-                        ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
-                        "is_recovery_notice": True,
-                    })
+                    if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
+                        alerts_to_send.append({
+                            "text": ALERT_SERVER_AUTO_DISABLED_RECOVERED.format(
+                                server_name=safe(server.name),
+                                server_id=server.id,
+                            ),
+                            "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
+                            "is_recovery_notice": True,
+                        })
 
         else:
             # Ошибка проверки (FAIL)

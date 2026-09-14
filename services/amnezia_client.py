@@ -383,6 +383,15 @@ class AmneziaClient:
                 ambiguous=False,
             )
 
+        if (self.api_url or "").startswith("mock://"):
+            if path in ("/healthz", "/health"):
+                return self._success({"status": "ok"}, status_code=200)
+            if path.startswith("/clients"):
+                return self._success([], status_code=200)
+            if path.startswith("/server"):
+                return self._success({"disk_percent": 10.0, "cpu_percent": 5.0}, status_code=200)
+            return self._success({}, status_code=200)
+
         url = f"{self.api_url}{path}"
         cb = _get_circuit_breaker(self.api_url)
 
@@ -832,9 +841,9 @@ class AmneziaClient:
         )
         return result.ok
 
-    async def get_server_info(
-        self,
-    ) -> AmneziaServerInfo | None:
+    async def get_server_info(self) -> AmneziaServerInfo | None:
+        if (self.api_url or "").startswith("mock://"):
+            return AmneziaServerInfo(name="Mock Node", protocols=[AMNEZIA_PROTOCOL], maxPeers=100)
         result = await self._request(
             "GET",
             "/server",
@@ -852,6 +861,8 @@ class AmneziaClient:
         return None
 
     async def healthcheck(self) -> bool:
+        if (self.api_url or "").startswith("mock://"):
+            return True
         return (
             await self._request(
                 "GET",
@@ -866,6 +877,8 @@ class AmneziaClient:
         Возвращает словарь с cpu_percent, ram_percent, disk_percent, uptime_seconds и т.д.
         Ограничен таймаутом в 10 секунд.
         """
+        if (self.api_url or "").startswith("mock://"):
+            return {"disk_percent": 10.0, "cpu_percent": 5.0, "ram_percent": 10.0}
         try:
             return await asyncio.wait_for(self._get_server_load_internal(), timeout=timeout)
         except Exception as exc:
@@ -886,6 +899,8 @@ class AmneziaClient:
         self,
     ) -> list[AmneziaClientListItem] | None:
         """Возвращает полный список клиентов со всех страниц через подсистему пагинации."""
+        if (self.api_url or "").startswith("mock://"):
+            return []
         from services.amnezia_client_pagination import get_all_clients_with_retry
         return await get_all_clients_with_retry(self)
 
