@@ -619,4 +619,3 @@ async def _send_white_internet_notifications(
                         user.telegram_id,
                         e,
                     )
-

@@ -784,4 +784,3 @@ async def balance_new_topup(
                 exc,
             )
     await choose_topup_amount(callback, state, session, db_user)
-
