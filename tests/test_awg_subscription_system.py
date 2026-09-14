@@ -408,16 +408,20 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 headers=headers,
                 allow_redirects=False,
             )
-            self.assertEqual(resp.status, 302)
-            location = resp.headers.get("Location", "")
-            self.assertTrue(location.startswith("incy://add/"))
-            self.assertIn(valid_token, location)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+            html_text = await resp.text()
+            self.assertIn("incy://add/", html_text)
+            self.assertIn(valid_token, html_text)
+            self.assertIn("apps.apple.com/app/incy", html_text)
+            self.assertIn("play.google.com/store/apps/details?id=llc.itdev.incy", html_text)
+            self.assertIn("github.com/INCY-DEV/incy-platforms", html_text)
 
             # Invariant: zero slot consumption / user was only read
             self.assertEqual(len(user.active_sub_devices), 0)
 
     async def test_feed_browser_token_not_found(self):
-        """Verify browser requests with unknown token return 404."""
+        """Verify browser requests with unknown token render 404 HTML error page."""
         valid_token = "notfound_token_12345678901234"
         headers = {"Accept": "text/html"}
 
@@ -442,9 +446,12 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 allow_redirects=False,
             )
             self.assertEqual(resp.status, 404)
+            self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+            html_text = await resp.text()
+            self.assertIn("Подписка не найдена", html_text)
 
     async def test_feed_browser_token_short(self):
-        """Verify browser requests with token < 16 chars return 404."""
+        """Verify browser requests with token < 16 chars render 404 HTML error page."""
         headers = {"Accept": "text/html"}
         resp = await self.client.get(
             f"{DEFAULT_AWG_SUB_PATH_PREFIX}/short",
@@ -452,9 +459,12 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             allow_redirects=False,
         )
         self.assertEqual(resp.status, 404)
+        self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+        html_text = await resp.text()
+        self.assertIn("Подписка не найдена", html_text)
 
     async def test_feed_browser_expired_subscription(self):
-        """Verify browser requests with expired subscription return 403."""
+        """Verify browser requests with expired subscription render 403 HTML error page."""
         valid_token = "expired_token_12345678901234"
         headers = {"Accept": "text/html"}
         expired_time = datetime.now(timezone.utc) - timedelta(days=2)
@@ -486,10 +496,12 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 allow_redirects=False,
             )
             self.assertEqual(resp.status, 403)
-            self.assertEqual(await resp.text(), texts.AWG_WEB_EXPIRED)
+            self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+            html_text = await resp.text()
+            self.assertIn(texts.AWG_BROWSER_ERR_EXPIRED_TITLE, html_text)
 
     async def test_feed_browser_banned_or_hold_user(self):
-        """Verify browser requests for banned or hold users return 403."""
+        """Verify browser requests for banned or hold users render 403 HTML error page."""
         valid_token = "banned_token_123456789012345"
         headers = {"Accept": "text/html"}
         active_time = datetime.now(timezone.utc) + timedelta(days=10)
@@ -521,9 +533,12 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 allow_redirects=False,
             )
             self.assertEqual(resp.status, 403)
+            self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+            html_text = await resp.text()
+            self.assertIn(texts.AWG_BROWSER_ERR_BANNED_TITLE, html_text)
 
     async def test_feed_browser_sec_fetch_dest_and_format_html(self):
-        """Verify Sec-Fetch-Dest: document and ?format=html override non-HTML Accept headers and redirect."""
+        """Verify Sec-Fetch-Dest: document and ?format=html override non-HTML Accept headers and render HTML."""
         valid_token = "override_token_1234567890123"
         active_time = datetime.now(timezone.utc) + timedelta(days=10)
         user = User(
@@ -553,16 +568,16 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
                 headers={"Sec-Fetch-Dest": "document"},
                 allow_redirects=False,
             )
-            self.assertEqual(resp1.status, 302)
-            self.assertTrue(resp1.headers.get("Location", "").startswith("incy://add/"))
+            self.assertEqual(resp1.status, 200)
+            self.assertEqual(resp1.headers.get("Content-Type"), "text/html; charset=utf-8")
 
             # 2. ?format=html
             resp2 = await self.client.get(
                 f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}?format=html",
                 allow_redirects=False,
             )
-            self.assertEqual(resp2.status, 302)
-            self.assertTrue(resp2.headers.get("Location", "").startswith("incy://add/"))
+            self.assertEqual(resp2.status, 200)
+            self.assertEqual(resp2.headers.get("Content-Type"), "text/html; charset=utf-8")
 
 
     async def test_feed_pending_provisioning_returns_503(self):
@@ -2431,6 +2446,31 @@ class TestAWGBrowserHelpers(unittest.TestCase):
             url2 = get_subscription_public_url(req2, "sample_token_456")
             self.assertEqual(url2, "https://forwarded.domain.com/sub/awg/sample_token_456")
 
+    def test_render_awg_browser_landing_page(self):
+        from bot.handlers.awg_sub_web import render_awg_browser_landing_page
+
+        html_out = render_awg_browser_landing_page(
+            sub_url="https://vpn.example.com/sub/awg/my_token",
+            bot_username="testbot",
+        )
+        self.assertIn("incy://add/https://vpn.example.com/sub/awg/my_token", html_out)
+        self.assertIn("@testbot", html_out)
+        self.assertIn("copySubscriptionUrl", html_out)
+        self.assertIn("apps.apple.com/app/incy", html_out)
+        self.assertIn("play.google.com/store/apps/details?id=llc.itdev.incy", html_out)
+        self.assertIn("github.com/INCY-DEV/incy-platforms", html_out)
+
+    def test_render_awg_browser_error_page(self):
+        from bot.handlers.awg_sub_web import render_awg_browser_error_page
+
+        html_out = render_awg_browser_error_page(
+            title="Ошибка подписки",
+            message="Тестовое сообщение",
+            bot_username="testbot",
+        )
+        self.assertIn("Ошибка подписки", html_out)
+        self.assertIn("Тестовое сообщение", html_out)
+        self.assertIn("@testbot", html_out)
 
 
 if __name__ == "__main__":

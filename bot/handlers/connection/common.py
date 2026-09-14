@@ -3,7 +3,7 @@ import os
 import re
 from datetime import timedelta
 
-from aiogram.types import CopyTextButton
+from aiogram.types import CopyTextButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -227,7 +227,12 @@ async def _build_connections_screen(
     )
 
     builder = InlineKeyboardBuilder()
-    if sub_url.startswith(("http://", "https://")):
+    if sub_url.startswith("https://"):
+        builder.button(
+            text=texts.BTN_OPEN_INCY_APP,
+            web_app=WebAppInfo(url=sub_url),
+        )
+    elif sub_url.startswith("http://"):
         builder.button(
             text=texts.BTN_OPEN_INCY_APP,
             url=sub_url,

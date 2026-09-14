@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
+import html
+import json
 import logging
 import os
+from pathlib import Path
+from string import Template
 
 from aiohttp import web
 from sqlalchemy import select
@@ -99,6 +104,78 @@ def get_subscription_public_url(request: web.Request, token: str) -> str:
     return f"{sub_base_url}{sub_prefix}/{token}"
 
 
+def _resolve_bot_username() -> str:
+    try:
+        from config.settings import get_settings
+
+        return (getattr(get_settings(), "SUPPORT_USERNAME", "just1kbot") or "just1kbot").strip().lstrip("@")
+    except Exception:
+        return "just1kbot"
+
+
+@functools.lru_cache(maxsize=1)
+def _get_landing_template() -> Template:
+    template_path = Path(__file__).resolve().parent.parent / "templates" / "awg_browser_landing.html"
+    return Template(template_path.read_text(encoding="utf-8"))
+
+
+@functools.lru_cache(maxsize=1)
+def _get_error_template() -> Template:
+    template_path = Path(__file__).resolve().parent.parent / "templates" / "awg_browser_error.html"
+    return Template(template_path.read_text(encoding="utf-8"))
+
+
+def render_awg_browser_landing_page(sub_url: str, bot_username: str = "just1kbot") -> str:
+    """Render a modern, responsive HTML landing page that auto-launches INCY via deep link."""
+    deep_link = f"incy://add/{sub_url}"
+    sub_url_safe = html.escape(sub_url)
+    deep_link_safe = html.escape(deep_link)
+    bot_username_safe = html.escape(bot_username)
+    deep_link_js = json.dumps(deep_link)
+    sub_url_js = json.dumps(sub_url)
+
+    template = _get_landing_template()
+    return template.substitute(
+        title=texts.AWG_BROWSER_LANDING_TITLE,
+        subtitle=texts.AWG_BROWSER_LANDING_SUBTITLE,
+        status_badge=texts.AWG_BROWSER_BADGE_OPENING,
+        btn_open_incy=texts.AWG_BROWSER_BTN_OPEN_INCY,
+        btn_copy_sub=texts.AWG_BROWSER_BTN_COPY_SUB,
+        url_label=texts.AWG_BROWSER_URL_LABEL,
+        copy_hint=texts.AWG_BROWSER_COPY_HINT,
+        not_installed_title=texts.AWG_BROWSER_NOT_INSTALLED,
+        step_1=texts.AWG_BROWSER_STEP_1,
+        step_2=texts.AWG_BROWSER_STEP_2,
+        step_3=texts.AWG_BROWSER_STEP_3,
+        footer_text=texts.AWG_BROWSER_FOOTER_BACK_TO_BOT.format(
+            bot_username=bot_username_safe,
+        ),
+        bot_username_safe=bot_username_safe,
+        deep_link_safe=deep_link_safe,
+        sub_url_safe=sub_url_safe,
+        deep_link_js=deep_link_js,
+        sub_url_js=sub_url_js,
+    )
+
+
+def render_awg_browser_error_page(
+    title: str,
+    message: str,
+    bot_username: str = "just1kbot",
+) -> str:
+    """Render a clean, responsive HTML error page for failed browser subscription accesses."""
+    bot_username_safe = html.escape(bot_username)
+    template = _get_error_template()
+    return template.substitute(
+        title=html.escape(title),
+        message=html.escape(message),
+        bot_username_safe=bot_username_safe,
+        btn_back_to_bot=texts.AWG_BROWSER_ERR_BTN_BACK_TO_BOT.format(
+            bot_username=bot_username_safe,
+        ),
+    )
+
+
 async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
     """Serve the no-store Base64 AmneziaWG multi-server subscription feed for INCY."""
     client_ip = get_trusted_client_ip(request)
@@ -112,6 +189,20 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
 
     token = request.match_info.get("token", "").strip()
     if not token or len(token) < 16:
+        if is_browser_request(request):
+            bot_username = _resolve_bot_username()
+            html_body = render_awg_browser_error_page(
+                title=texts.AWG_BROWSER_ERR_NOT_FOUND_TITLE,
+                message=texts.AWG_BROWSER_ERR_NOT_FOUND_MSG,
+                bot_username=bot_username,
+            )
+            return web.Response(
+                status=404,
+                text=html_body,
+                content_type="text/html",
+                charset="utf-8",
+                headers={"Cache-Control": "no-store"},
+            )
         return web.Response(status=404, text="Not Found", headers={"Cache-Control": "no-store"})
 
     allowed_tok, retry_after_tok = _token_rate_limiter.check(token)
@@ -139,27 +230,80 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
 
     if not raw_hwid:
         if is_browser_request(request):
+            bot_username = _resolve_bot_username()
             async with session_scope() as session:
                 user = await users_repo.get_user_by_subscription_token(
                     session, token, for_update=False
                 )
                 if user is None:
-                    return web.Response(status=404, text="Not Found", headers=common_headers)
+                    html_body = render_awg_browser_error_page(
+                        title=texts.AWG_BROWSER_ERR_NOT_FOUND_TITLE,
+                        message=texts.AWG_BROWSER_ERR_NOT_FOUND_MSG,
+                        bot_username=bot_username,
+                    )
+                    return web.Response(
+                        status=404,
+                        text=html_body,
+                        content_type="text/html",
+                        charset="utf-8",
+                        headers=common_headers,
+                    )
+
+                if getattr(user, "financial_hold", False) is True:
+                    html_body = render_awg_browser_error_page(
+                        title=texts.AWG_BROWSER_ERR_HOLD_TITLE,
+                        message=texts.AWG_BROWSER_ERR_HOLD_MSG,
+                        bot_username=bot_username,
+                    )
+                    return web.Response(
+                        status=403,
+                        text=html_body,
+                        content_type="text/html",
+                        charset="utf-8",
+                        headers=common_headers,
+                    )
 
                 if (
                     getattr(user, "is_banned", False) is True
                     or getattr(user, "is_deleted", False) is True
-                    or getattr(user, "financial_hold", False) is True
                 ):
-                    return web.Response(status=403, text="Forbidden", headers=common_headers)
+                    html_body = render_awg_browser_error_page(
+                        title=texts.AWG_BROWSER_ERR_BANNED_TITLE,
+                        message=texts.AWG_BROWSER_ERR_BANNED_MSG,
+                        bot_username=bot_username,
+                    )
+                    return web.Response(
+                        status=403,
+                        text=html_body,
+                        content_type="text/html",
+                        charset="utf-8",
+                        headers=common_headers,
+                    )
 
                 if not user.subscription_end or is_expired(user.subscription_end):
-                    return web.Response(status=403, text=texts.AWG_WEB_EXPIRED, headers=common_headers)
+                    html_body = render_awg_browser_error_page(
+                        title=texts.AWG_BROWSER_ERR_EXPIRED_TITLE,
+                        message=texts.AWG_BROWSER_ERR_EXPIRED_MSG,
+                        bot_username=bot_username,
+                    )
+                    return web.Response(
+                        status=403,
+                        text=html_body,
+                        content_type="text/html",
+                        charset="utf-8",
+                        headers=common_headers,
+                    )
 
                 sub_url = get_subscription_public_url(request, token)
-                deep_link = f"incy://add/{sub_url}"
-                raise web.HTTPFound(
-                    location=deep_link,
+                html_body = render_awg_browser_landing_page(
+                    sub_url=sub_url,
+                    bot_username=bot_username,
+                )
+                return web.Response(
+                    status=200,
+                    text=html_body,
+                    content_type="text/html",
+                    charset="utf-8",
                     headers=common_headers,
                 )
 
