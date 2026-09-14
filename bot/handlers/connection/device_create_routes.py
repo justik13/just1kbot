@@ -15,7 +15,10 @@ from bot.keyboards import get_back_button
 from bot.states import DeviceCreationStates
 from database.connection import get_session
 from database.models import User, VPNProfile
-from database.repositories.profiles_repo import get_user_profiles
+from database.repositories.profiles_repo import (
+    get_user_effective_device_count,
+    get_user_profiles,
+)
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
@@ -39,7 +42,6 @@ from utils.telegram import EFFECT_FIRE, render_hub, safe
 
 from .common import (
     _get_effective_device_limit,
-    _render_connections,
     _render_maintenance,
 )
 
@@ -94,7 +96,7 @@ def _get_device_limit_keyboard(can_upgrade: bool = True):
     builder = InlineKeyboardBuilder()
     if can_upgrade:
         builder.button(text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff")
-    builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections")
+    builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="awg_manage_devices")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -165,6 +167,23 @@ async def start_add_device(
         await callback.answer(show_alert=False)
         return
 
+    limit = await _get_effective_device_limit(session, user)
+    total_active = await get_user_effective_device_count(
+        session, user.id, getattr(user, "active_sub_devices", None)
+    )
+    if total_active >= limit:
+        from database.repositories.tariffs_repo import get_active_tariffs
+        active_tariffs = await get_active_tariffs(session, service_type="awg")
+        can_upgrade = any(getattr(t, "device_limit", 1) > limit for t in active_tariffs)
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=limit),
+            _get_device_limit_keyboard(can_upgrade=can_upgrade),
+        )
+        await callback.answer(show_alert=False)
+        return
+
     await callback.answer(show_alert=False)
     await state.clear()
 
@@ -175,7 +194,7 @@ async def start_add_device(
             callback.bot,
             callback.message.chat.id,
             texts.ERROR_NO_FREE_SLOTS,
-            get_back_button("back_to_connections"),
+            get_back_button("awg_manage_devices"),
         )
         return
 
@@ -188,7 +207,7 @@ async def start_add_device(
             callback_data=f"select_server:{server.id}",
         )
 
-    builder.button(text=texts.BTN_BACK, callback_data="back_to_connections")
+    builder.button(text=texts.BTN_BACK, callback_data="awg_manage_devices")
     builder.adjust(1)
 
     await render_hub(
@@ -412,7 +431,7 @@ async def _process_server_selection(
                 callback.bot,
                 callback.message.chat.id,
                 error_text,
-                get_back_button("back_to_connections"),
+                get_back_button("awg_manage_devices"),
             )
             await state.clear()
             return
@@ -430,7 +449,7 @@ async def _process_server_selection(
                 callback.bot,
                 callback.message.chat.id,
                 texts.ERROR_TECHNICAL_MESSAGE,
-                get_back_button("back_to_connections"),
+                get_back_button("awg_manage_devices"),
                 parse_mode="HTML",
             )
             await state.clear()
@@ -446,7 +465,7 @@ async def _process_server_selection(
                 callback.bot,
                 callback.message.chat.id,
                 texts.ERROR_TECHNICAL_MESSAGE,
-                get_back_button("back_to_connections"),
+                get_back_button("awg_manage_devices"),
                 parse_mode="HTML",
             )
             await state.clear()
@@ -472,12 +491,18 @@ async def _process_server_selection(
                     message_effect_id=EFFECT_FIRE if ready_profile.provisioning_status == "active" else None,
                 )
             else:
-                # Timeout reached or creation still pending -> render connections
+                # Timeout reached or creation still pending -> render devices list
+                try:
+                    await callback.answer(texts.DEVICE_CREATION_PENDING_TOAST, show_alert=False)
+                except Exception:
+                    pass
                 await session.refresh(user)
-                await _render_connections(callback.message, user, session)
+                from .awg_subscription_routes import _render_manage_devices
+                await _render_manage_devices(callback.message, user, session)
         else:
             await session.refresh(user)
-            await _render_connections(callback.message, user, session)
+            from .awg_subscription_routes import _render_manage_devices
+            await _render_manage_devices(callback.message, user, session)
 
     finally:
         _creating_devices.pop(telegram_user_id, None)

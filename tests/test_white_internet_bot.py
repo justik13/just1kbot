@@ -68,17 +68,27 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
         )
+        fake_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=False,
+            token="test-token",
+        )
 
         with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user):
             with patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance) as mock_balance:
-                with patch("services.white_internet_service.WhiteInternetService.purchase_subscription", return_value=(True, "OK", MagicMock())) as mock_buy:
-                    with patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock) as mock_menu:
+                with patch("services.white_internet_service.WhiteInternetService.purchase_subscription", return_value=(True, "OK", fake_sub)) as mock_buy:
+                    with patch("bot.handlers.white_internet._render_white_internet_success_card", new_callable=AsyncMock) as mock_render:
                         await process_white_internet_buy(query, self.session)
 
-                        mock_balance.assert_awaited_once_with(self.session, user_id=self.user.id)
+                        mock_balance.assert_awaited()
                         mock_buy.assert_awaited_once_with(self.session, self.user.id)
                         self.session.commit.assert_awaited_once()
-                        mock_menu.assert_awaited_once_with(query, self.session)
+                        mock_render.assert_awaited_once()
+                        _, kwargs = mock_render.call_args
+                        self.assertIn("Подписка «Белый Интернет» успешно оформлена!", kwargs["text"])
 
     async def test_renew_confirm_with_sufficient_balance_success(self):
         query = MagicMock(spec=CallbackQuery)
@@ -93,18 +103,70 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
         )
-
+        fake_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=False,
+            token="test-token",
+        )
 
         with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user):
             with patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance) as mock_balance:
-                with patch("services.white_internet_service.WhiteInternetService.renew_subscription", return_value=(True, "OK", MagicMock())) as mock_renew:
-                    with patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock) as mock_menu:
+                with patch("services.white_internet_service.WhiteInternetService.renew_subscription", return_value=(True, "OK", fake_sub)) as mock_renew:
+                    with patch("bot.handlers.white_internet._render_white_internet_success_card", new_callable=AsyncMock) as mock_render:
                         await process_white_internet_renew(query, self.session)
 
-                        mock_balance.assert_awaited_once_with(self.session, user_id=self.user.id)
+                        mock_balance.assert_awaited()
                         mock_renew.assert_awaited_once_with(self.session, self.user.id)
                         self.session.commit.assert_awaited_once()
-                        mock_menu.assert_awaited_once_with(query, self.session)
+                        mock_render.assert_awaited_once()
+                        _, kwargs = mock_render.call_args
+                        self.assertIn("Подписка «Белый Интернет» успешно продлена!", kwargs["text"])
+
+    async def test_renew_confirm_converts_trial_to_paid_renders_convert_card(self):
+        query = MagicMock(spec=CallbackQuery)
+        query.from_user = self.tg_user
+        query.message = MagicMock()
+        query.message.edit_text = AsyncMock()
+        query.answer = AsyncMock()
+
+        high_balance = AccountBalanceSnapshot(
+            accounting_position=Decimal("500.00"),
+            available=Decimal("500.00"),
+            reserved=Decimal("0.00"),
+            debt=Decimal("0.00"),
+        )
+        trial_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=True,
+            token="test-token",
+        )
+        paid_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=False,
+            token="test-token",
+        )
+
+        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=trial_sub), \
+             patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance), \
+             patch("services.white_internet_service.WhiteInternetService.renew_subscription", return_value=(True, "OK", paid_sub)) as mock_renew, \
+             patch("bot.handlers.white_internet._render_white_internet_success_card", new_callable=AsyncMock) as mock_render:
+            await process_white_internet_renew(query, self.session)
+
+            mock_renew.assert_awaited_once_with(self.session, self.user.id)
+            self.session.commit.assert_awaited_once()
+            mock_render.assert_awaited_once()
+            _, kwargs = mock_render.call_args
+            self.assertIn("Вы успешно перешли на полный тариф «Белый Интернет»!", kwargs["text"])
 
     async def test_topup_pack_with_sufficient_balance_success(self):
         query = MagicMock(spec=CallbackQuery)
@@ -125,13 +187,15 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
              patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance) as mock_balance, \
              patch("services.white_internet_service.WhiteInternetService.topup_quota", return_value=(True, "OK", MagicMock())) as mock_topup, \
-             patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock) as mock_menu:
+             patch("bot.handlers.white_internet._render_white_internet_success_card", new_callable=AsyncMock) as mock_render:
             await process_topup_pack(query, self.session)
 
-            mock_balance.assert_awaited_once_with(self.session, user_id=self.user.id)
+            mock_balance.assert_awaited()
             mock_topup.assert_awaited_once_with(self.session, self.user.id, 25, actor_telegram_id=self.tg_user.id)
             self.session.commit.assert_awaited_once()
-            mock_menu.assert_awaited_once_with(query, self.session)
+            mock_render.assert_awaited_once()
+            _, kwargs = mock_render.call_args
+            self.assertIn("Пакет трафика успешно добавлен!", kwargs["text"])
 
     async def test_topup_pack_allows_repeated_purchases(self):
         """Users can repeatedly buy quota packs without being trapped by message_id idempotency."""
@@ -153,7 +217,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
              patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance), \
              patch("services.white_internet_service.WhiteInternetService.topup_quota", return_value=(True, "OK", MagicMock())) as mock_topup, \
-             patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock):
+             patch("bot.handlers.white_internet._render_white_internet_success_card", new_callable=AsyncMock):
             # First purchase
             await process_topup_pack(query, self.session)
             self.assertEqual(mock_topup.await_count, 1)
@@ -191,7 +255,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
              patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance), \
              patch("services.white_internet_service.WhiteInternetService.purchase_device_slot", return_value=(True, "OK", sub)) as mock_buy_slot, \
-             patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock):
+             patch("bot.handlers.white_internet._render_white_internet_success_card", new_callable=AsyncMock):
             # First device slot purchase
             await process_add_device_confirm(query, self.session)
             self.assertEqual(mock_buy_slot.await_count, 1)
@@ -686,4 +750,110 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(settled)
             mock_buy.assert_awaited_once_with(self.session, user_id=self.user.id)
             self.assertEqual(payment.topup_context.get("auto_fulfill_status"), "succeeded")
+
+    async def test_process_white_internet_trial_activate_renders_success_card(self):
+        from bot.handlers.white_internet import process_white_internet_trial_activate
+        query = MagicMock(spec=CallbackQuery)
+        query.from_user = self.tg_user
+        query.message = MagicMock()
+        query.message.edit_text = AsyncMock()
+        query.answer = AsyncMock()
+
+        trial_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=True,
+            token="trial-token",
+        )
+
+        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("bot.handlers.white_internet.MaintenanceService.can_user_perform_action", return_value=True), \
+             patch("services.white_internet_service.WhiteInternetService.create_trial_subscription", return_value=(True, "OK", trial_sub)) as mock_create, \
+             patch("bot.handlers.white_internet._render_white_internet_success_card", new_callable=AsyncMock) as mock_render:
+            await process_white_internet_trial_activate(query, self.session)
+
+            mock_create.assert_awaited_once_with(self.session, self.user.id)
+            self.session.commit.assert_awaited_once()
+            mock_render.assert_awaited_once()
+            _, kwargs = mock_render.call_args
+            self.assertIn("Пробный доступ «Белый Интернет» активирован!", kwargs["text"])
+
+    async def test_process_white_internet_renew_preview_trial(self):
+        from bot.handlers.white_internet import process_white_internet_renew_preview
+        query = MagicMock(spec=CallbackQuery)
+        query.from_user = self.tg_user
+        query.message = MagicMock()
+        query.message.edit_text = AsyncMock()
+        query.answer = AsyncMock()
+
+        trial_sub = WhiteInternetSubscription(
+            id=11,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=True,
+            token="trial-token",
+        )
+        balance_snapshot = AccountBalanceSnapshot(
+            accounting_position=Decimal("500.00"),
+            available=Decimal("500.00"),
+            reserved=Decimal("0.00"),
+            debt=Decimal("0.00"),
+        )
+
+        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=trial_sub), \
+             patch("bot.handlers.white_internet.get_account_balance", return_value=balance_snapshot):
+            await process_white_internet_renew_preview(query, self.session)
+
+            query.message.edit_text.assert_awaited_once()
+            args, kwargs = query.message.edit_text.call_args
+            text = args[0]
+            kb = kwargs.get("reply_markup")
+            self.assertIn("Переход на полный тариф: Белый Интернет", text)
+            self.assertIn("Вы переходите с бесплатного пробного периода", text)
+            self.assertIn("250 ₽", text)
+            # Verify button text
+            btn_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+            self.assertTrue(any("Оплатить и перейти" in t for t in btn_texts))
+
+    async def test_process_white_internet_renew_preview_regular(self):
+        from bot.handlers.white_internet import process_white_internet_renew_preview
+        query = MagicMock(spec=CallbackQuery)
+        query.from_user = self.tg_user
+        query.message = MagicMock()
+        query.message.edit_text = AsyncMock()
+        query.answer = AsyncMock()
+
+        regular_sub = WhiteInternetSubscription(
+            id=12,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=False,
+            token="regular-token",
+        )
+        balance_snapshot = AccountBalanceSnapshot(
+            accounting_position=Decimal("500.00"),
+            available=Decimal("500.00"),
+            reserved=Decimal("0.00"),
+            debt=Decimal("0.00"),
+        )
+
+        with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=self.user), \
+             patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=regular_sub), \
+             patch("bot.handlers.white_internet.get_account_balance", return_value=balance_snapshot):
+            await process_white_internet_renew_preview(query, self.session)
+
+            query.message.edit_text.assert_awaited_once()
+            args, kwargs = query.message.edit_text.call_args
+            text = args[0]
+            kb = kwargs.get("reply_markup")
+            self.assertIn("Продление доступа: Белый Интернет", text)
+            self.assertNotIn("Вы переходите с бесплатного пробного периода", text)
+            btn_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+            self.assertTrue(any("Подтвердить продление" in t for t in btn_texts))
+
 

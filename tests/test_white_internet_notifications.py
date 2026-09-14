@@ -21,6 +21,7 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         sub_3d.user_id = 101
         sub_3d.expires_at = now + timedelta(days=2)
         sub_3d.status = WhiteInternetStatus.ACTIVE
+        sub_3d.is_trial = False
         sub_3d.notified_3d = False
         sub_3d.notified_1d = False
         sub_3d.notified_2h = False
@@ -39,6 +40,7 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         sub_exp.user_id = 102
         sub_exp.expires_at = now - timedelta(minutes=10)
         sub_exp.status = WhiteInternetStatus.EXPIRED
+        sub_exp.is_trial = False
         sub_exp.notified_3d = False
         sub_exp.notified_1d = False
         sub_exp.notified_2h = False
@@ -203,6 +205,7 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         sub_3d.user_id = 101
         sub_3d.expires_at = now + timedelta(days=2)  # 15.09.2026 23:00 MSK
         sub_3d.status = WhiteInternetStatus.ACTIVE
+        sub_3d.is_trial = False
         sub_3d.notified_3d = False
         sub_3d.notified_1d = False
         sub_3d.notified_2h = False
@@ -221,6 +224,7 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         sub_1d.user_id = 102
         sub_1d.expires_at = now + timedelta(hours=20)
         sub_1d.status = WhiteInternetStatus.ACTIVE
+        sub_1d.is_trial = False
         sub_1d.notified_3d = True
         sub_1d.notified_1d = False
         sub_1d.notified_2h = False

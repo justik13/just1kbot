@@ -712,7 +712,7 @@ async def _send_white_internet_notifications(
                     if not sub.notified_1d:
                         notify_type = "1d"
                         msg = NOTIFY_WI_1D.format(countdown=_format_countdown(time_left))
-                elif time_left <= timedelta(days=3):
+                elif time_left <= timedelta(days=3) and not getattr(sub, "is_trial", False):
                     if not sub.notified_3d:
                         notify_type = "3d"
                         msg = NOTIFY_WI_3D.format(
@@ -737,7 +737,7 @@ async def _send_white_internet_notifications(
                     continue
 
                 kb = InlineKeyboardBuilder()
-                kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="white_internet")
+                kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="wl_renew_preview")
 
                 try:
                     await global_send_limiter.acquire()

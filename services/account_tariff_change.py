@@ -370,6 +370,7 @@ async def _settle_account_tariff_change(
         raise AccountTariffChangeError("subscription_state_changed") from exc
     quote.status = "consumed"
     quote.consumed_at = now
+    quote.purchase_notified_at = now
     user.last_payment_at = now
     await AuditService.log_action(
         session,

@@ -25,7 +25,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = "• На сай�
 
 CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "• Заблокированные сервисы и зарубежные сайты станут доступны."
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл .vpn / .conf для роутера или ПК? Нажмите кнопку ниже:</i>"
+CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Для настройки роутера или ПК файл .vpn / .conf можно скачать в меню «⚙️ Управление устройствами».</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
 <b>2. Откройте приложение:</b>
@@ -135,7 +135,8 @@ CONNECTION_CONFIG_ESTIMATED_TIME_HOURS = "{v0} дн. {v1} ч."
 
 CONNECTION_CONFIG_PROTOCOL_FORMAT = "{v0} ч. {v1} мин."
 
-CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "➕ Добавить устройство"
+BTN_ADD_DEVICE = "➕ Добавить устройство"
+CONNECTION_CONFIG_UNKNOWN_PROTOCOL = BTN_ADD_DEVICE
 
 CONNECTION_EMPTY = "<i>У вас пока нет подключённых устройств.</i>"
 
@@ -159,7 +160,7 @@ CONNECTION_GUIDE_SAVE_CONF_FILE = """1. Сохраните прикреплён�
 """
 
 CONNECTION_KEY_BLOCK_FORMAT = """🔑 <b>Ключ подключения:</b>
-<code>{escaped_key}</code>
+<blockquote expandable><code>{escaped_key}</code></blockquote>
 """
 
 CONNECTION_LIST_HEADER = """🔌 <b>Ваши устройства</b> ({count}/{limit})
@@ -194,12 +195,12 @@ BTN_OPEN_INCY_APP = "🚀 Открыть в приложении INCY"
 
 AWG_SUB_CARD_TEMPLATE = """🛡 <b>Ваша подписка</b>
 Тариф: «{limit} устройства» | До: {end_date} (осталось {days_left} дн.)
-Статус: <b>Активна ✅</b>
+Статус: <b>Активна</b>
 
-🔗 <b>Ссылка подписки (нажмите, чтобы скопировать):</b>
+🔗 <b>Ссылка подписки (нажмите для копирования):</b>
 <code>{sub_url}</code>
 
-💡 <i>Нажмите кнопку ниже, чтобы открыть подписку в приложении INCY на телефоне, либо перейдите в «⚙️ Управление устройствами», чтобы скачать .conf файл для ПК или роутера.</i>
+💡 <i>Откройте ссылку в приложении INCY на телефоне или перейдите в «⚙️ Управление устройствами» для настройки ПК или роутера.</i>
 
 📊 <b>Подключено устройств:</b> {active_count} из {limit}"""
 
@@ -216,7 +217,7 @@ AWG_CONF_READY_CAPTION = """✅ <b>Конфиг готов!</b>
 🌍 Локация: <b>{country}</b>
 📊 Занято: <b>{active_count} из {limit} устройств</b>
 
-<i>Импортируйте этот файл в приложение AmneziaWG или AmneziaVPN на вашем компьютере, телефоне или роутере.</i>"""
+<i>Импортируйте файл в приложение AmneziaWG или AmneziaVPN.</i>"""
 
 AWG_CONF_LIMIT_EXCEEDED = """❌ <b>Все устройства заняты ({active_count} из {limit})</b>
 
@@ -229,7 +230,7 @@ AWG_MANAGE_DEVICES_HEADER = """⚙️ <b>Ваши устройства</b> (По
 AWG_SUB_DEVICE_ITEM = """📱 <b>{label}</b>
 • Тип: Через подписку (INCY)
 • Активность: {last_seen}
-• Статус: Активно ✅
+• Статус: Активно
 """
 
 AWG_MANUAL_DEVICE_ITEM = """💻 <b>{device_name}</b>
@@ -254,9 +255,10 @@ AWG_WEB_NO_CONFIGS = "No ready configurations"
 AWG_PROFILE_NAME = "JUST1K AWG"
 
 BTN_DISCONNECT_DEVICE_TEMPLATE = "🗑 Отключить {label}"
-DEVICE_STATUS_ACTIVE_LABEL = "Активен ✅"
+DEVICE_STATUS_ACTIVE_LABEL = "Активен"
 ERROR_DEVICE_NOT_FOUND_LABEL = "⚠️ Устройство не найдено"
 DEVICE_DISCONNECTED_SUCCESS = "✅ Устройство отключено. Слот освобождён."
+DEVICE_CREATION_PENDING_TOAST = "⏳ Устройство создаётся в фоне. Обновите список через несколько секунд."
 
 BTN_RESET_SUB_LINK = "🔄 Сбросить ссылку"
 AWG_RESET_SUB_CONFIRM_TEXT = """⚠️ <b>Сброс ссылки подписки</b>
@@ -273,3 +275,8 @@ AWG_RESET_SUB_SUCCESS = "Ссылка успешно сброшена! Скоп�
 AWG_DEFAULT_DEVICE_PREFIX = "Устройство #"
 AWG_LEGACY_DEVICE_PREFIX = "INCY Device #"
 AWG_DEVICE_INACTIVE_7D_TAG = " ⚠️ <i>(не активно > 7 дн.)</i>"
+DEVICE_CONF_DOCUMENT_CAPTION = """<b>📟 Устройство: {device_name}</b>
+• Локация: {country_display}
+• Трафик: {traffic}
+• Статус: {status}{key_block}"""
+DEVICE_CONF_DOCUMENT_KEY_BLOCK = "\n\n<b>Ключ для AmneziaVPN:</b>\n<blockquote expandable><code>{key}</code></blockquote>"

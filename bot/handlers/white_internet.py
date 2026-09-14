@@ -47,6 +47,7 @@ from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_tg_time, format_traffic
 from utils.security import normalize_public_domain
+from utils.telegram import EFFECT_CONFETTI, render_hub
 
 logger = logging.getLogger(__name__)
 router = Router(name="white_internet")
@@ -205,6 +206,50 @@ def get_topup_keyboard() -> InlineKeyboardMarkup:
     builder.button(text=texts.BTN_BACK, callback_data="white_internet")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def get_white_internet_success_keyboard(sub_url: str | None = None) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if sub_url:
+        builder.button(
+            text=texts.BTN_WL_COPY_LINK,
+            copy_text=CopyTextButton(text=sub_url),
+        )
+        builder.button(
+            text=texts.BTN_WL_INCY_INSTRUCTIONS,
+            callback_data="wl_show_link",
+        )
+    builder.button(
+        text=texts.BTN_WL_MANAGE_SUBSCRIPTION,
+        callback_data="white_internet",
+    )
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+async def _render_white_internet_success_card(
+    query: CallbackQuery,
+    session: AsyncSession,
+    *,
+    text: str,
+    sub_url: str | None = None,
+):
+    kb = get_white_internet_success_keyboard(sub_url=sub_url)
+    await render_hub(
+        query.bot,
+        query.message.chat.id,
+        text,
+        kb,
+        message_effect_id=EFFECT_CONFETTI,
+        force_new=True,
+        trigger_message_id=query.message.message_id if query.message else None,
+        session=session,
+    )
+
 
 
 async def _get_effective_tariff_info(
@@ -442,7 +487,31 @@ async def process_white_internet_trial_activate(query: CallbackQuery, session: A
         return
 
     await session.commit()
-    await show_white_internet_menu(query, session)
+    sub = _sub or await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    sub_domain, sub_prefix = await _resolve_subscription_target(session, sub)
+    sub_url = (
+        _build_subscription_url(sub_domain, sub.token, sub_prefix=sub_prefix)
+        if sub_domain and sub and getattr(sub, "token", None)
+        else None
+    )
+    valid_until = format_tg_time(sub.expires_at) if sub and sub.expires_at else texts.TIME_FOREVER
+    device_limit = max(1, getattr(sub, "device_limit", 1) or 1) if sub else 1
+    traffic_gb = int(WHITE_INTERNET_TRIAL_TRAFFIC_BYTES // (1024**3))
+    sub_url_block = texts.WL_SUCCESS_LINK_BLOCK.format(url=sub_url) if sub_url else ""
+
+    text = texts.WL_TRIAL_SUCCESS_CARD.format(
+        duration_days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
+        valid_until=valid_until,
+        traffic_gb=traffic_gb,
+        device_limit=device_limit,
+        sub_url_block=sub_url_block,
+    )
+    await _render_white_internet_success_card(
+        query,
+        session,
+        text=text,
+        sub_url=sub_url,
+    )
 
 
 @router.callback_query(F.data == "wl_buy_preview")
@@ -541,7 +610,39 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup())
         return
     await session.commit()
-    await show_white_internet_menu(query, session)
+    sub = _sub or await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    sub_domain, sub_prefix = await _resolve_subscription_target(session, sub)
+    sub_url = (
+        _build_subscription_url(sub_domain, sub.token, sub_prefix=sub_prefix)
+        if sub_domain and sub and getattr(sub, "token", None)
+        else None
+    )
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
+    real_balance = int(balance_snapshot.real_available)
+    bonus_balance = int(balance_snapshot.bonus_available)
+    bonus_line = texts.TOPUP_BONUS_BALANCE_LINE.format(bonus_balance=bonus_balance) if bonus_balance > 0 else ""
+    valid_until = format_tg_time(sub.expires_at) if sub and sub.expires_at else texts.TIME_FOREVER
+    device_limit = max(1, getattr(sub, "device_limit", 1) or 1) if sub else 1
+    _base_p, _base_p_int, duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
+    traffic_gb = int((getattr(sub, "base_traffic_bytes", None) or base_quota_bytes) // (1024**3))
+    sub_url_block = texts.WL_SUCCESS_LINK_BLOCK.format(url=sub_url) if sub_url else ""
+
+    text = texts.WL_BUY_SUCCESS_CARD.format(
+        duration_days=duration_days,
+        valid_until=valid_until,
+        traffic_gb=traffic_gb,
+        device_limit=device_limit,
+        charged=base_price_int,
+        real_balance=real_balance,
+        bonus_line=bonus_line,
+        sub_url_block=sub_url_block,
+    )
+    await _render_white_internet_success_card(
+        query,
+        session,
+        text=text,
+        sub_url=sub_url,
+    )
 
 
 @router.callback_query(F.data == "wl_renew_preview")
@@ -565,13 +666,17 @@ async def process_white_internet_renew_preview(query: CallbackQuery, session: As
     balance = balance_snapshot.available
 
     is_trial = getattr(sub, "is_trial", False)
-    trial_note = texts.WL_RENEW_TRIAL_NOTE if is_trial else ""
+    confirm_btn_text = (
+        texts.BTN_WL_CONFIRM_CONVERT.format(price=tier_price_int)
+        if is_trial
+        else texts.BTN_WL_CONFIRM_RENEW.format(price=tier_price_int)
+    )
 
     builder = InlineKeyboardBuilder()
     if balance >= tier_price:
         balance_details = texts.WL_PREVIEW_BALANCE_OK.format(remaining=(balance - tier_price))
         builder.button(
-            text=texts.BTN_WL_CONFIRM_RENEW.format(price=tier_price_int),
+            text=confirm_btn_text,
             callback_data="wl_renew_execute",
             style="success",
         )
@@ -586,14 +691,23 @@ async def process_white_internet_renew_preview(query: CallbackQuery, session: As
     builder.button(text=texts.BTN_BACK, callback_data="white_internet")
     builder.adjust(1, 1)
 
-    text = texts.WL_RENEW_PREVIEW_TEXT.format(
-        price=tier_price_int,
-        devices=sub_limit,
-        traffic=traffic_gb,
-        trial_note=trial_note,
-        balance=balance,
-        balance_details=balance_details,
-    )
+    if is_trial:
+        text = texts.WL_CONVERT_TRIAL_PREVIEW_TEXT.format(
+            price=tier_price_int,
+            devices=sub_limit,
+            traffic=traffic_gb,
+            balance=balance,
+            balance_details=balance_details,
+        )
+    else:
+        text = texts.WL_RENEW_PREVIEW_TEXT.format(
+            price=tier_price_int,
+            devices=sub_limit,
+            traffic=traffic_gb,
+            trial_note="",
+            balance=balance,
+            balance_details=balance_details,
+        )
     await query.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
@@ -613,6 +727,7 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
     if user is None:
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    was_trial = bool(getattr(sub, "is_trial", False)) if sub else False
     sub_limit = max(1, getattr(sub, "device_limit", 1) or 1) if sub else 1
     _base_price, _base_price_int, _duration_days, _ = await _get_effective_tariff_info(session)
     tier_price = get_white_internet_tier_price(sub_limit, base_price=Decimal(_base_price))
@@ -653,7 +768,52 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup())
         return
     await session.commit()
-    await show_white_internet_menu(query, session)
+    sub = _sub or await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    sub_domain, sub_prefix = await _resolve_subscription_target(session, sub)
+    sub_url = (
+        _build_subscription_url(sub_domain, sub.token, sub_prefix=sub_prefix)
+        if sub_domain and sub and getattr(sub, "token", None)
+        else None
+    )
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
+    real_balance = int(balance_snapshot.real_available)
+    bonus_balance = int(balance_snapshot.bonus_available)
+    bonus_line = texts.TOPUP_BONUS_BALANCE_LINE.format(bonus_balance=bonus_balance) if bonus_balance > 0 else ""
+    valid_until = format_tg_time(sub.expires_at) if sub and sub.expires_at else texts.TIME_FOREVER
+    device_limit = max(1, getattr(sub, "device_limit", 1) or 1) if sub else 1
+    _base_p, _base_p_int, duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
+    traffic_gb = int((getattr(sub, "base_traffic_bytes", None) or base_quota_bytes) // (1024**3))
+    sub_url_block = texts.WL_SUCCESS_LINK_BLOCK_RENEW.format(url=sub_url) if sub_url else ""
+
+    if was_trial:
+        text = texts.WL_CONVERT_TRIAL_SUCCESS_CARD.format(
+            duration_days=duration_days,
+            valid_until=valid_until,
+            traffic_gb=traffic_gb,
+            device_limit=device_limit,
+            charged=int(tier_price),
+            real_balance=real_balance,
+            bonus_line=bonus_line,
+            sub_url_block=sub_url_block,
+        )
+    else:
+        text = texts.WL_RENEW_SUCCESS_CARD.format(
+            duration_days=duration_days,
+            valid_until=valid_until,
+            traffic_gb=traffic_gb,
+            device_limit=device_limit,
+            charged=int(tier_price),
+            real_balance=real_balance,
+            bonus_line=bonus_line,
+            sub_url_block=sub_url_block,
+        )
+
+    await _render_white_internet_success_card(
+        query,
+        session,
+        text=text,
+        sub_url=sub_url,
+    )
 
 
 @router.callback_query(F.data == "wl_topup_menu")
@@ -795,7 +955,31 @@ async def process_topup_execute(query: CallbackQuery, session: AsyncSession):
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup())
         return
     await session.commit()
-    await show_white_internet_menu(query, session)
+    sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    available_bytes = (
+        await white_internet_repo.get_available_quota_bytes(session, sub.id, now_utc())
+        if sub
+        else 0
+    )
+    available_gb = int(available_bytes // (1024**3))
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
+    real_balance = int(balance_snapshot.real_available)
+    bonus_balance = int(balance_snapshot.bonus_available)
+    bonus_line = texts.TOPUP_BONUS_BALANCE_LINE.format(bonus_balance=bonus_balance) if bonus_balance > 0 else ""
+
+    text = texts.WL_TOPUP_PACK_SUCCESS_CARD.format(
+        pack_gb=pack_gb,
+        available_gb=available_gb,
+        charged=int(pack_price),
+        real_balance=real_balance,
+        bonus_line=bonus_line,
+    )
+    await _render_white_internet_success_card(
+        query,
+        session,
+        text=text,
+        sub_url=None,
+    )
 
 
 # Backward-compatibility alias
@@ -958,7 +1142,24 @@ async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession
         return
 
     await session.commit()
-    await show_white_internet_menu(query, session)
+    sub = _sub or await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    device_limit = max(1, getattr(sub, "device_limit", 1) or 1) if sub else 1
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
+    real_balance = int(balance_snapshot.real_available)
+    bonus_balance = int(balance_snapshot.bonus_available)
+    bonus_line = texts.TOPUP_BONUS_BALANCE_LINE.format(bonus_balance=bonus_balance) if bonus_balance > 0 else ""
+
+    text = texts.WL_ADD_DEVICE_SUCCESS_CARD.format(
+        device_limit=device_limit,
+        real_balance=real_balance,
+        bonus_line=bonus_line,
+    )
+    await _render_white_internet_success_card(
+        query,
+        session,
+        text=text,
+        sub_url=None,
+    )
 
 
 @router.callback_query(F.data == "wl_show_link")

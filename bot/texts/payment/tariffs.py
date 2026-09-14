@@ -1,13 +1,13 @@
 """Domain texts for payment/tariffs.py."""
 from __future__ import annotations
 
-BTN_DURATION_HALF_YEAR_DISCOUNT = "⚡️ {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
+BTN_DURATION_HALF_YEAR_DISCOUNT = "⚡️ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
 BTN_DURATION_MONTH_DISCOUNT = "⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
 BTN_DURATION_STANDARD = "⏱ {days} дн. — {display_price} ₽"
 
-BTN_DURATION_YEAR_DISCOUNT = "💎 {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
+BTN_DURATION_YEAR_DISCOUNT = "💎 {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
 BTN_PAYMENT_BUY_FROM_BALANCE = "💰 Купить с баланса"
 
@@ -126,9 +126,7 @@ PAYMENT_SHOWCASE = "У вас уже подключён этот тариф. Д�
 
 PAYMENT_SHOWCASE_CALC_FAILED = "Не удалось надёжно рассчитать остаток подписки. Обратитесь в поддержку."
 
-PAYMENT_SHOWCASE_HEADER = """🛡 <b>Выберите формат подписки</b>
-
-Выберите тариф, который подходит под ваши задачи.
+PAYMENT_SHOWCASE_HEADER = """🛡 <b>Выберите тариф</b>
 """
 
 PAYMENT_SHOWCASE_ORDER_CARD = """💳 <b>Оформление заказа</b>

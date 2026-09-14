@@ -60,6 +60,9 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
         async def capture_render_hub(_bot, _chat_id, _text, keyboard, **_kwargs):
             rendered_keyboards.append(keyboard)
 
+        async def capture_send_hub_document(_bot, _chat_id, document=None, caption=None, reply_markup=None, **_kwargs):
+            rendered_keyboards.append(reply_markup)
+
         state = AsyncMock()
         session = AsyncMock()
 
@@ -80,6 +83,10 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
                 "bot.handlers.connection.device_view_routes.render_hub",
                 new=AsyncMock(side_effect=capture_render_hub),
             ),
+            patch(
+                "bot.handlers.connection.device_view_routes.send_hub_document",
+                new=AsyncMock(side_effect=capture_send_hub_document),
+            ),
         ):
             await manage_device(make_callback(), state, session, db_user)
             await manage_device(make_callback(), state, session, db_user)
@@ -94,8 +101,8 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
         }
         self.assertNotIn("alt_connection:1", pending_callback_data)
         self.assertNotIn("request_delete_device:1", pending_callback_data)
-        self.assertIn("rename_device:1", pending_callback_data)
         self.assertIn("support_help:device_1", pending_callback_data)
+        self.assertIn("awg_manage_devices", pending_callback_data)
 
         ready_callback_data = {
             button.callback_data
@@ -103,10 +110,10 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
             for button in row
             if button.callback_data
         }
-        self.assertIn("alt_connection:1", ready_callback_data)
         self.assertIn("request_delete_device:1", ready_callback_data)
-        self.assertIn("rename_device:1", ready_callback_data)
         self.assertIn("support_help:device_1", ready_callback_data)
+        self.assertIn("awg_manage_devices", ready_callback_data)
+        self.assertNotIn("rename_device:1", ready_callback_data)
 
     async def test_device_help_topic_buttons_keep_device_context(self):
         callback = MagicMock()

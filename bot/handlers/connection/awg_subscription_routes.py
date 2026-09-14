@@ -9,7 +9,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,7 +20,6 @@ from database.models import User, VPNProfile
 from database.repositories import users_repo
 from database.repositories.profiles_repo import get_user_effective_device_count
 from database.repositories.servers_repo import (
-    get_available_servers,
     get_server_by_id,
 )
 from database.repositories.users_repo import get_user_by_telegram_id
@@ -57,55 +56,9 @@ async def awg_download_conf_menu(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    """Show country selection menu for downloading .conf file."""
-    await callback.answer(show_alert=False)
-    await state.clear()
-
-    telegram_user_id = callback.from_user.id
-    if not await MaintenanceService.can_user_perform_action(session, telegram_user_id):
-        await _render_maintenance(callback.message, session, back_to="back_to_connections")
-        return
-
-    user = db_user or await get_user_by_telegram_id(session, telegram_user_id)
-    if not user or not await SubscriptionService.check_access(session, user.telegram_id):
-        await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            texts.ERROR_NO_SUBSCRIPTION,
-            InlineKeyboardBuilder()
-            .button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy")
-            .as_markup(),
-        )
-        return
-
-    servers = await get_available_servers(session)
-    if not servers:
-        await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            texts.ERROR_NO_FREE_SLOTS,
-            InlineKeyboardBuilder()
-            .button(text=texts.BTN_BACK, callback_data="awg_manage_devices")
-            .as_markup(),
-        )
-        return
-
-    builder = InlineKeyboardBuilder()
-    for server in servers:
-        flag = server.country_flag or texts.EMOJI_GLOBE
-        builder.button(
-            text=f"{flag} {server.name}",
-            callback_data=f"awg_get_conf:{server.id}",
-        )
-    builder.button(text=texts.BTN_BACK, callback_data="awg_manage_devices")
-    builder.adjust(1)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        texts.AWG_DOWNLOAD_CONF_SELECT_SERVER,
-        builder.as_markup(),
-    )
+    """Redirect to canonical device creation flow."""
+    from .device_create_routes import start_add_device
+    await start_add_device(callback, state, session, db_user)
 
 
 @router.callback_query(F.data.startswith("awg_get_conf:"))
@@ -280,7 +233,7 @@ async def _render_manage_devices(
         .options(selectinload(VPNProfile.server))
         .where(
             VPNProfile.user_id == user.id,
-            VPNProfile.device_type == "manual",
+            or_(VPNProfile.device_type == "manual", VPNProfile.device_type.is_(None)),
             VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
         )
     )
@@ -292,12 +245,6 @@ async def _render_manage_devices(
 
     items_text = []
     builder = InlineKeyboardBuilder()
-
-    if total_active < limit:
-        builder.button(
-            text=texts.BTN_DOWNLOAD_CONF,
-            callback_data="awg_download_conf_menu",
-        )
 
     now = now_utc()
     # 1. Sub devices
@@ -356,9 +303,17 @@ async def _render_manage_devices(
                 status=status_label,
             )
         )
+        raw_device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=1)
+        btn_text = f"{flag} {server_name} — {raw_device_name}"
         builder.button(
-            text=texts.BTN_DISCONNECT_DEVICE_TEMPLATE.format(label=profile.device_name),
-            callback_data=f"request_delete_device:{profile.id}",
+            text=btn_text,
+            callback_data=f"manage_device:{profile.id}",
+        )
+
+    if total_active < limit:
+        builder.button(
+            text=texts.BTN_ADD_DEVICE,
+            callback_data="add_device",
         )
 
     if not items_text:

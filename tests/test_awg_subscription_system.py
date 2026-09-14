@@ -1636,7 +1636,7 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
             mock_render_hub.assert_awaited_once()
             args = mock_render_hub.await_args[0]
             buttons = [b.text for row in args[3].inline_keyboard for b in row]
-            self.assertIn(texts.BTN_DOWNLOAD_CONF, buttons)
+            self.assertIn(texts.BTN_ADD_DEVICE, buttons)
 
     async def test_disconnect_sub_device_callback(self):
         """Verify awg_disconnect_sub properly finds device by prefix and calls delete_sub_device."""

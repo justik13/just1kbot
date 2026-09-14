@@ -92,7 +92,7 @@ DEVICE_RENAME_PROMPT = """✏️ <b>Переименование устройс�
 
 DEVICE_SHOW_KEY = """🔑 <b>Ключ подключения для {device_name}:</b>
 
-<code>{raw_config}</code>
+<blockquote expandable><code>{raw_config}</code></blockquote>
 
 <i>💡 Нажмите на моноширинный текст выше, чтобы скопировать ключ в буфер обмена.</i>"""
 

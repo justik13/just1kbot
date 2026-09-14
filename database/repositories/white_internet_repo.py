@@ -205,6 +205,7 @@ async def create_white_internet_subscription(
         base_traffic_bytes=base_bytes,
         extra_traffic_bytes=0,
         is_trial=is_trial,
+        notified_3d=is_trial,
         traffic_used_bytes=0,
         traffic_uplink_bytes=0,
         traffic_downlink_bytes=0,

@@ -82,17 +82,17 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
              patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
              patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
              patch('bot.handlers.connection.device_view_routes.get_hub_ids', new=AsyncMock(return_value=[99, 100])), \
-             patch('bot.handlers.connection.device_view_routes._append_hub_document_unlocked', new=AsyncMock(side_effect=[101, 102])), \
+             patch('bot.handlers.connection.device_view_routes._append_hub_document_unlocked', new=AsyncMock(side_effect=[101])), \
              patch('bot.handlers.connection.device_view_routes._append_hub_message_unlocked', new=AsyncMock(side_effect=RuntimeError('Network dropped'))), \
              patch('bot.handlers.connection.device_view_routes._delete_hub_messages', new=AsyncMock()) as mock_delete:
 
             await alt_connection(callback, state, session, db_user)
 
             # Invariant: If append_hub_message fails, old_hub_ids [99, 100] MUST NOT be deleted,
-            # and partial sent docs [101, 102] MUST be cleaned up!
+            # and partial sent doc [101] MUST be cleaned up!
             self.assertTrue(mock_delete.called)
             deleted_ids = mock_delete.call_args[0][2]
-            self.assertEqual(deleted_ids, [101, 102])
+            self.assertEqual(deleted_ids, [101])
             self.assertNotIn(99, deleted_ids)
             self.assertNotIn(100, deleted_ids)
 
@@ -106,10 +106,7 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
         callback.message.chat = MagicMock(id=999222)
         callback.message.message_id = 50
         callback.bot = MagicMock()
-        callback.bot.send_document = AsyncMock(side_effect=[
-            SimpleNamespace(message_id=51),
-            SimpleNamespace(message_id=52),
-        ])
+        callback.bot.send_document = AsyncMock(return_value=SimpleNamespace(message_id=51))
         callback.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=53))
         callback.bot.delete_messages = AsyncMock()
         callback.bot.delete_message = AsyncMock()
@@ -127,7 +124,6 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
              patch('bot.handlers.connection.device_view_routes.decode_vpn_uri_to_json', return_value={'containers': [{'awg': {'last_config': '{}'}}]}), \
              patch('bot.handlers.connection.device_view_routes.get_server_by_id', new=AsyncMock(return_value=server)), \
              patch('bot.handlers.connection.device_view_routes.customize_vpn_config_dict', return_value={}), \
-             patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
              patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
              patch('utils.telegram._load_hub_ids_from_db', new=AsyncMock(return_value=[49, 50])), \
              patch('utils.telegram._store_hub_id_in_db', new=AsyncMock()), \
@@ -136,7 +132,7 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
             # Must finish within 2 seconds without deadlocking on _get_hub_render_lock!
             await asyncio.wait_for(alt_connection(callback, state, session, db_user), timeout=2.0)
 
-            self.assertEqual(callback.bot.send_document.await_count, 2)
+            self.assertEqual(callback.bot.send_document.await_count, 1)
             self.assertEqual(callback.bot.send_message.await_count, 1)
 
     def test_build_conf_fallback_omits_empty_i_parameters(self):

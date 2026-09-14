@@ -326,6 +326,8 @@ async def confirm_tariff_change(
         get_payment_success_keyboard(),
         message_effect_id=EFFECT_CONFETTI,
         force_new=True,
+        trigger_message_id=callback.message.message_id,
+        session=session,
     )
     result.quote.purchase_notified_at = (
         result.quote.purchase_notified_at or now_utc()

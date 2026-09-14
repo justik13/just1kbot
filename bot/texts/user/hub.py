@@ -6,7 +6,7 @@ BOT_START_DESCRIPTION = "🚀 Запустить бота"
 CURRENCY_RUB_SYMBOL = "₽"
 
 HUB_HEADER = """🏠 <b>Главное меню</b>
-
+────────────────────────────
 👋 Привет, <b>{name}</b>!
 🆔 <b>Telegram ID:</b> <code>{telegram_id}</code>
 
@@ -14,9 +14,7 @@ HUB_HEADER = """🏠 <b>Главное меню</b>
 <b>⏳ Действует до:</b> {valid_until} ({days_left})
 <b>📱 Подключено устройств:</b> {devices_count}/{device_limit}
 
-<b>💰 Баланс:</b> {real_balance} ₽{bonus_line}{inviter_line}
-
-Выберите нужный раздел:"""
+<b>💰 Баланс:</b> {real_balance} ₽{bonus_line}{inviter_line}"""
 
 HUB_BONUS_LINE_FORMAT = "\n<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽"
 

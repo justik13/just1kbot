@@ -182,8 +182,16 @@ def queue_post_commit_task(
     session.info["post_commit_tasks"].append(task)
 
 
+_session_scope_override = None
+
+
 @asynccontextmanager
 async def session_scope():
+    if _session_scope_override is not None:
+        async with _session_scope_override() as session:
+            yield session
+        return
+
     session = await get_session()
     try:
         yield session

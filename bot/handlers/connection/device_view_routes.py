@@ -52,6 +52,9 @@ from utils.vpn_parser import (
 
 from .common import _render_connections
 
+_ = build_vpn_file_from_dict
+_ = _render_connections
+
 # Kept in sync with bot/handlers/support.py::AMNEZIA_DOCS
 _AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs?m-path=/"
 
@@ -181,8 +184,60 @@ async def render_device_screen(
         config_ready = can_show_config_actions(profile)
         display_key = None
         raw_cfg = getattr(profile, "raw_config", None)
+        conf_content = None
         if config_ready and raw_cfg:
             display_key = build_display_vpn_key(raw_cfg, profile, server)
+            try:
+                decoded = decode_vpn_uri_to_json(raw_cfg)
+                if decoded is not None:
+                    client_description = _client_description(profile, server)
+                    customized_data = customize_vpn_config_dict(
+                        decoded,
+                        description=client_description,
+                        dns1="8.8.8.8",
+                        dns2="8.8.4.4",
+                        mtu="1280",
+                    )
+                    conf_content = build_conf_file_from_dict(customized_data)
+            except Exception as exc:
+                logger.warning("Failed to prepare .conf file for profile %s: %s", profile.id, exc)
+                conf_content = None
+
+        keyboard = get_device_keyboard(
+            profile.id,
+            config_ready=config_ready,
+            show_delete=show_delete,
+        )
+
+        if config_ready and conf_content and getattr(profile, "provisioning_status", "") == "active":
+            safe_device_name = await _get_safe_device_name(session, profile)
+            conf_file = BufferedInputFile(conf_content.encode("utf-8"), filename=f"{safe_device_name}.conf")
+            key_block = (
+                texts.DEVICE_CONF_DOCUMENT_KEY_BLOCK.format(key=safe(display_key))
+                if display_key
+                else ""
+            )
+            caption = texts.DEVICE_CONF_DOCUMENT_CAPTION.format(
+                device_name=safe(profile.device_name),
+                country_display=safe(country_display),
+                traffic=format_traffic(
+                    (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
+                ),
+                status=texts.DEVICE_STATUS_ACTIVE_LABEL,
+                key_block=key_block,
+            )
+            if notice:
+                caption = f"{notice}\n\n{caption}"
+
+            await send_hub_document(
+                bot,
+                chat_id,
+                document=conf_file,
+                caption=caption,
+                reply_markup=keyboard,
+                session=session,
+            )
+            return
 
         if display_key:
             copy_hint = texts.CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU
@@ -212,19 +267,13 @@ async def render_device_screen(
             )
         if len(rendered) + len(guide_block) <= 4000:
             rendered += guide_block
-
-        keyboard = get_device_keyboard(
-            profile.id,
-            config_ready=config_ready,
-            show_delete=show_delete,
-        )
     else:
         rendered += texts.DEVICE_ACCESS_INACTIVE_NOTICE
 
         builder = InlineKeyboardBuilder()
         if show_delete:
             builder.button(text=texts.BTN_DELETE_DEVICE, callback_data=f"request_delete_device:{profile.id}")
-        builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections")
+        builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="awg_manage_devices")
         builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
         builder.adjust(1)
         keyboard = builder.as_markup()
@@ -459,11 +508,10 @@ async def alt_connection(
             mtu="1280",
         )
 
-        vpn_content = build_vpn_file_from_dict(customized_data)
         conf_content = build_conf_file_from_dict(customized_data)
 
-        if not vpn_content or not conf_content:
-            raise ValueError("Empty vpn or conf file content")
+        if not conf_content:
+            raise ValueError("Empty conf file content")
     except Exception as exc:
         logger.warning("Failed to prepare alt connection files for profile %s: %s", profile.id, exc)
         await render_hub(
@@ -474,7 +522,6 @@ async def alt_connection(
         )
         return
 
-    vpn_file = BufferedInputFile(vpn_content.encode("utf-8"), filename=f"{safe_device_name}.vpn")
     conf_file = BufferedInputFile(conf_content.encode("utf-8"), filename=f"{safe_device_name}.conf")
 
     chat_lock = _get_hub_render_lock(callback.message.chat.id)
@@ -483,47 +530,18 @@ async def alt_connection(
         old_hub_ids = await get_hub_ids(callback.message.chat.id, session=session)
 
         sent_doc_ids = []
-        vpn_sent = False
         conf_sent = False
         guide_sent = False
 
         try:
             try:
-                doc_msg_1 = await _append_hub_document_unlocked(
-                    callback.bot, callback.message.chat.id,
-                    document=vpn_file,
-                    caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
-                    parse_mode="HTML",
-                )
-                sent_doc_ids.append(doc_msg_1)
-                vpn_sent = True
-            except (
-                TelegramNetworkError,
-                TelegramServerError,
-                TelegramRetryAfter,
-                TelegramForbiddenError,
-                asyncio.TimeoutError,
-            ) as e:
-                # Ambiguous delivery or transient server/network/flood failure:
-                # fail-closed to abort operation and preserve old hub.
-                logger.warning(
-                    "hub_orphan_suspected profile=%s context=alt_vpn: %s", profile.id, e,
-                )
-                raise
-            except TelegramBadRequest as e:
-                # Deterministic format/rejection error from Telegram:
-                # graceful degradation to text/key instructions.
-                logger.warning("Telegram rejected .vpn file for profile %s: %s", profile.id, e)
-                # Continue without setting vpn_sent = True
-
-            try:
-                doc_msg_2 = await _append_hub_document_unlocked(
+                doc_msg = await _append_hub_document_unlocked(
                     callback.bot, callback.message.chat.id,
                     document=conf_file,
                     caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
                     parse_mode="HTML",
                 )
-                sent_doc_ids.append(doc_msg_2)
+                sent_doc_ids.append(doc_msg)
                 conf_sent = True
             except (
                 TelegramNetworkError,
@@ -540,20 +558,8 @@ async def alt_connection(
                 logger.warning("Telegram rejected .conf file for profile %s: %s", profile.id, e)
                 # Continue without setting conf_sent = True
 
-            if vpn_sent and conf_sent:
-                files_info = (
-                    texts.CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_ODIN_IZ_PRIKREPLE+
-                    texts.CONNECTION_CONFIG_DEVICE_VIEW_VPN_FOR_PRILOZHENIYA_AMNEZIAV+
-                    texts.CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN
-                )
-            elif vpn_sent:
-                files_info = (
-                    texts.CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY
-                )
-            elif conf_sent:
-                files_info = (
-                    texts.CONNECTION_GUIDE_SAVE_CONF_FILE
-                )
+            if conf_sent:
+                files_info = texts.CONNECTION_GUIDE_SAVE_CONF_FILE
             else:
                 escaped_key = safe(profile.raw_config or "")
                 key_block = (

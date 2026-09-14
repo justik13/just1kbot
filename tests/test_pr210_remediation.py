@@ -305,8 +305,8 @@ class TestKeyboardSerialization(unittest.IsolatedAsyncioTestCase):
 
         kb = self._roundtrip(get_device_keyboard(profile_id=7, config_ready=True, show_delete=True))
         flat = [btn for row in kb.inline_keyboard for btn in row]
-        alt_btn = next(b for b in flat if b.callback_data and b.callback_data.startswith("alt_connection"))
-        self.assertIsNone(alt_btn.style)
+        help_btn = next(b for b in flat if b.callback_data and b.callback_data.startswith("support_help"))
+        self.assertIsNotNone(help_btn)
         delete_btn = next(b for b in flat if b.callback_data and b.callback_data.startswith("request_delete_device"))
         self.assertEqual(delete_btn.style, "danger")
 
@@ -788,18 +788,20 @@ class TestIntegrationsAndCleanupVerification(unittest.TestCase):
         self.assertEqual(back_inactive[0].callback_data, "back_to_main_menu")
 
     def test_device_keyboard_layout_and_button_order(self):
-        """Verify device card keyboard places rename/instructions in row 1, alt connection in row 2."""
+        """Verify device card keyboard layout with direct instructions and delete buttons."""
         from bot.keyboards.device import get_device_keyboard
 
         kb = get_device_keyboard(profile_id=42, config_ready=True, show_delete=True)
         rows = kb.inline_keyboard
-        self.assertEqual(len(rows[0]), 2)  # Rename, Instructions
-        self.assertTrue(rows[0][0].callback_data.startswith("rename_device"))
-        self.assertTrue(rows[0][1].callback_data.startswith("support_help"))
+        self.assertEqual(len(rows[0]), 1)  # Instructions
+        self.assertTrue(rows[0][0].callback_data.startswith("support_help"))
 
-        self.assertEqual(len(rows[1]), 1)  # Alt connection
-        self.assertTrue(rows[1][0].callback_data.startswith("alt_connection"))
-        self.assertIsNone(rows[1][0].style)  # Not primary!
+        self.assertEqual(len(rows[1]), 1)  # Delete device
+        self.assertTrue(rows[1][0].callback_data.startswith("request_delete_device"))
+
+        self.assertEqual(len(rows[2]), 2)  # Back to devices, Main menu
+        self.assertEqual(rows[2][0].callback_data, "awg_manage_devices")
+        self.assertEqual(rows[2][1].callback_data, "back_to_main_menu")
 
 
 if __name__ == "__main__":

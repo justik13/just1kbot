@@ -244,8 +244,8 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
             for button in row
             if button.callback_data
         ]
-        self.assertIn("alt_connection:123", ready_callbacks)
         self.assertIn("support_help:device_123", ready_callbacks)
+        self.assertIn("awg_manage_devices", ready_callbacks)
 
         pending = get_device_keyboard(profile_id=123, config_ready=False)
         pending_callbacks = [
@@ -254,7 +254,8 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
             for button in row
             if button.callback_data
         ]
-        self.assertNotIn("alt_connection:123", pending_callbacks)
+        self.assertIn("support_help:device_123", pending_callbacks)
+        self.assertIn("awg_manage_devices", pending_callbacks)
 
     def test_legal_urls_and_faq_match_current_navigation(self):
         tos_url = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"

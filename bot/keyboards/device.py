@@ -15,21 +15,10 @@ def get_device_keyboard(
     adjustments = []
 
     builder.button(
-        text=texts.BTN_CHANGE_NAME,
-        callback_data=f"rename_device:{profile_id}",
-    )
-    builder.button(
         text=texts.BTN_HELP_INSTRUCTIONS,
         callback_data=f"support_help:device_{profile_id}",
     )
-    adjustments.append(2)
-
-    if config_ready:
-        builder.button(
-            text=texts.CONNECTION_DEVICES_DEVICE_ALT_CONNECTION,
-            callback_data=f"alt_connection:{profile_id}",
-        )
-        adjustments.append(1)
+    adjustments.append(1)
 
     if show_delete:
         builder.button(
@@ -41,7 +30,7 @@ def get_device_keyboard(
 
     builder.button(
         text=texts.BTN_BACK_TO_DEVICES,
-        callback_data="back_to_connections",
+        callback_data="awg_manage_devices",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
