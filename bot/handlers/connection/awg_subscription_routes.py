@@ -187,6 +187,8 @@ async def awg_get_conf(
         return
 
     conf_text = build_conf_file(profile.raw_config)
+    if not conf_text and profile.raw_config and profile.raw_config.strip().startswith("[Interface]"):
+        conf_text = profile.raw_config.strip()
     if not conf_text:
         await callback.answer(texts.DEVICE_CONFIG_UNAVAILABLE, show_alert=True)
         await _render_connections(callback.message, user, session)

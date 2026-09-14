@@ -562,6 +562,8 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
             if not p or not p.raw_config or getattr(p, "is_active", None) is False or p.provisioning_status != "active":
                 continue
             conf = build_conf_file(p.raw_config)
+            if not conf and p.raw_config and p.raw_config.strip().startswith("[Interface]"):
+                conf = p.raw_config.strip()
             if conf:
                 server_configs.append(
                     (

@@ -292,7 +292,7 @@ AWG_BROWSER_ERR_EXPIRED_TITLE = "Срок подписки истёк"
 AWG_BROWSER_ERR_EXPIRED_MSG = (
     "Срок действия вашей подписки завершился. Продлите её в Telegram-боте."
 )
-AWG_BROWSER_LANDING_TITLE = "Подключение к VPN"
+AWG_BROWSER_LANDING_TITLE = "Подключение AmneziaWG"
 AWG_BROWSER_LANDING_SUBTITLE = "Подписка AmneziaWG готова к подключению"
 AWG_BROWSER_BADGE_OPENING = "Открываем приложение..."
 AWG_BROWSER_BTN_OPEN_INCY = BTN_OPEN_INCY_APP
