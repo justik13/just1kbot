@@ -494,7 +494,7 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             self.assertEqual(resp.status, 403)
             self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
             html_text = await resp.text()
-            self.assertIn("Подписка истекла", html_text)
+            self.assertIn(texts.AWG_BROWSER_ERR_EXPIRED_TITLE, html_text)
 
     async def test_feed_browser_banned_or_hold_user(self):
         """Verify browser requests for banned or hold users render 403 HTML error page."""
@@ -529,7 +529,7 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             self.assertEqual(resp.status, 403)
             self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
             html_text = await resp.text()
-            self.assertIn("Доступ ограничен", html_text)
+            self.assertIn(texts.AWG_BROWSER_ERR_BANNED_TITLE, html_text)
 
     async def test_feed_browser_sec_fetch_dest_and_format_html(self):
         """Verify Sec-Fetch-Dest: document and ?format=html override non-HTML Accept headers."""
@@ -2417,14 +2417,18 @@ class TestAWGBrowserHelpers(unittest.TestCase):
     def test_get_subscription_public_url(self):
         from bot.handlers.awg_sub_web import get_subscription_public_url
 
-        # With env DOMAIN
-        with patch.dict(os.environ, {"DOMAIN": "vpn.myexample.com"}):
+        # With configured domain in settings
+        mock_settings = MagicMock()
+        mock_settings.DOMAIN = "vpn.myexample.com"
+        with patch("config.settings.get_settings", return_value=mock_settings):
             req = MagicMock()
             url = get_subscription_public_url(req, "sample_token_123")
             self.assertEqual(url, "https://vpn.myexample.com/sub/awg/sample_token_123")
 
-        # With forwarded headers fallback
-        with patch.dict(os.environ, {}, clear=True):
+        # With forwarded headers fallback when domain is empty
+        mock_empty_settings = MagicMock()
+        mock_empty_settings.DOMAIN = ""
+        with patch("config.settings.get_settings", return_value=mock_empty_settings), patch.dict(os.environ, {}, clear=True):
             req2 = MagicMock()
             req2.headers = {
                 "X-Forwarded-Proto": "https",

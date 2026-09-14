@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f172a">
+    <title>$title</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --card-border: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --primary: #38bdf8;
+            --accent: #22c55e;
+            --accent-bg: rgba(34, 197, 94, 0.15);
+            --code-bg: #0b1120;
+            --btn-sec-bg: #334155;
+            --btn-sec-hover: #475569;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .container {
+            width: 100%;
+            max-width: 480px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 28px 24px;
+            box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.5);
+            text-align: center;
+        }
+        .app-icon {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 16px;
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 34px;
+            box-shadow: 0 8px 16px -4px rgba(56, 189, 248, 0.4);
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            letter-spacing: -0.3px;
+        }
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--accent-bg);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            border-radius: 9999px;
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 22px;
+        }
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 14px 18px;
+            border-radius: 14px;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.15s ease-in-out;
+            border: none;
+            outline: none;
+        }
+        .btn-primary {
+            background: #0284c7;
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+        }
+        .btn-primary:hover, .btn-primary:active {
+            background: #0369a1;
+            transform: translateY(-1px);
+        }
+        .btn-secondary {
+            background: var(--btn-sec-bg);
+            color: var(--text-primary);
+        }
+        .btn-secondary:hover, .btn-secondary:active {
+            background: var(--btn-sec-hover);
+        }
+        .btn-copied {
+            background: var(--accent) !important;
+            color: #ffffff !important;
+        }
+        .url-box {
+            background: var(--code-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 24px;
+            text-align: left;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+        .url-box:hover {
+            border-color: var(--primary);
+        }
+        .url-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+        .url-code {
+            display: block;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            color: var(--primary);
+            word-break: break-all;
+            line-height: 1.4;
+        }
+        .copy-hint {
+            display: block;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            text-align: right;
+        }
+        .divider {
+            height: 1px;
+            background: var(--card-border);
+            margin: 20px 0;
+        }
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .dl-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .dl-btn {
+            background: var(--code-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 10px 6px;
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 500;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s;
+        }
+        .dl-btn:hover {
+            border-color: var(--primary);
+            background: rgba(56, 189, 248, 0.05);
+        }
+        .dl-btn .icon {
+            font-size: 18px;
+        }
+        .steps {
+            text-align: left;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        .step-num {
+            background: var(--btn-sec-bg);
+            color: var(--text-primary);
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .footer {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        .footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="app-icon">&#x1F6E1;&#xFE0F;</div>
+        <h1>$title</h1>
+        <p class="subtitle">$subtitle</p>
+
+        <div class="status-badge">
+            <span class="pulse-dot"></span>
+            <span>$status_badge</span>
+        </div>
+
+        <div class="btn-group">
+            <a href="$deep_link_safe" id="open-btn" class="btn btn-primary">
+                $btn_open_incy
+            </a>
+            <button type="button" id="copy-btn" class="btn btn-secondary" onclick="copySubscriptionUrl()">
+                $btn_copy_sub
+            </button>
+        </div>
+
+        <div class="url-box" onclick="copySubscriptionUrl()">
+            <div class="url-label">$url_label</div>
+            <code class="url-code">$sub_url_safe</code>
+            <span class="copy-hint" id="hint-text">$copy_hint</span>
+        </div>
+
+        <div class="section-title">$not_installed_title</div>
+        <div class="dl-grid">
+            <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener noreferrer" class="dl-btn">
+                <span class="icon">&#x1F34F;</span>
+                <span>App Store</span>
+            </a>
+            <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener noreferrer" class="dl-btn">
+                <span class="icon">&#x1F916;</span>
+                <span>Google Play</span>
+            </a>
+            <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener noreferrer" class="dl-btn">
+                <span class="icon">&#x1F4E6;</span>
+                <span>GitHub APK</span>
+            </a>
+        </div>
+
+        <div class="steps">
+            <div class="step-item">
+                <div class="step-num">1</div>
+                <div>$step_1</div>
+            </div>
+            <div class="step-item">
+                <div class="step-num">2</div>
+                <div>$step_2</div>
+            </div>
+            <div class="step-item">
+                <div class="step-num">3</div>
+                <div>$step_3</div>
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="footer">
+            <a href="https://t.me/$bot_username_safe" target="_blank" rel="noopener noreferrer">
+                $footer_text
+            </a>
+        </div>
+    </div>
+
+    <script>
+        var deepLink = $deep_link_js;
+        var subUrl = $sub_url_js;
+
+        (function() {
+            var redirected = false;
+            function autoLaunch() {
+                if (redirected) return;
+                redirected = true;
+                window.location.href = deepLink;
+            }
+            if (document.readyState === "complete" || document.readyState === "interactive") {
+                setTimeout(autoLaunch, 150);
+            } else {
+                window.addEventListener("DOMContentLoaded", function() {
+                    setTimeout(autoLaunch, 150);
+                });
+            }
+        })();
+
+        function copySubscriptionUrl() {
+            var copyBtn = document.getElementById("copy-btn");
+            var hintText = document.getElementById("hint-text");
+            var success = function() {
+                copyBtn.innerText = "\u2705 \u0421\u0441\u044b\u043b\u043a\u0430 \u0441\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u043d\u0430!";
+                copyBtn.classList.add("btn-copied");
+                if (hintText) hintText.innerText = "\u0421\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u043d\u043e \u0432 \u0431\u0443\u0444\u0435\u0440 \u043e\u0431\u043c\u0435\u043d\u0430!";
+                setTimeout(function() {
+                    copyBtn.innerText = "$btn_copy_sub";
+                    copyBtn.classList.remove("btn-copied");
+                    if (hintText) hintText.innerText = "$copy_hint";
+                }, 2500);
+            };
+            var fallback = function() {
+                var ta = document.createElement("textarea");
+                ta.value = subUrl;
+                ta.style.position = "fixed";
+                ta.style.opacity = "0";
+                document.body.appendChild(ta);
+                ta.select();
+                try {
+                    document.execCommand("copy");
+                    success();
+                } catch (e) {}
+                document.body.removeChild(ta);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(subUrl).then(success).catch(fallback);
+            } else {
+                fallback();
+            }
+        }
+    </script>
+</body>
+</html>

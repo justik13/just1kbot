@@ -272,3 +272,33 @@ AWG_RESET_SUB_SUCCESS = "Ссылка успешно сброшена! Скоп�
 AWG_DEFAULT_DEVICE_PREFIX = "Устройство #"
 AWG_LEGACY_DEVICE_PREFIX = "INCY Device #"
 AWG_DEVICE_INACTIVE_7D_TAG = " ⚠️ <i>(не активно > 7 дн.)</i>"
+
+AWG_BROWSER_ERR_NOT_FOUND_TITLE = "Подписка не найдена"
+AWG_BROWSER_ERR_NOT_FOUND_MSG = (
+    "Ссылка недействительна или была сброшена. Получите актуальную ссылку в Telegram-боте."
+)
+AWG_BROWSER_ERR_BANNED_TITLE = "Доступ заблокирован"
+AWG_BROWSER_ERR_BANNED_MSG = (
+    "Действие вашей учётной записи заблокировано администратором сервиса."
+)
+AWG_BROWSER_ERR_HOLD_TITLE = "Доступ приостановлен"
+AWG_BROWSER_ERR_HOLD_MSG = (
+    "Подписка находится на временном финансовом удержании сервиса."
+)
+AWG_BROWSER_ERR_EXPIRED_TITLE = "Срок подписки истёк"
+AWG_BROWSER_ERR_EXPIRED_MSG = (
+    "Срок действия вашей подписки завершился. Продлите её в Telegram-боте."
+)
+AWG_BROWSER_LANDING_TITLE = "Добавление в INCY"
+AWG_BROWSER_LANDING_SUBTITLE = "Подписка AmneziaWG готова к подключению"
+AWG_BROWSER_BADGE_OPENING = "Открываем приложение..."
+AWG_BROWSER_BTN_OPEN_INCY = "🚀 Открыть в приложении INCY"
+AWG_BROWSER_BTN_COPY_SUB = "📋 Скопировать URL подписки"
+AWG_BROWSER_URL_LABEL = "Ссылка подписки:"
+AWG_BROWSER_COPY_HINT = "Нажмите для копирования"
+AWG_BROWSER_NOT_INSTALLED = "Приложение ещё не установлено?"
+AWG_BROWSER_STEP_1 = "Установите <b>INCY</b> на ваш телефон или ПК."
+AWG_BROWSER_STEP_2 = "Нажмите <b>«Открыть в приложении INCY»</b> выше (или вставьте скопированную ссылку через «+» в приложении)."
+AWG_BROWSER_STEP_3 = "Нажмите большую кнопку подключения на главном экране INCY."
+AWG_BROWSER_FOOTER_BACK_TO_BOT = "← Вернуться в Telegram-бот (@{bot_username})"
+AWG_BROWSER_ERR_BTN_BACK_TO_BOT = "Открыть Telegram-бот (@{bot_username})"
