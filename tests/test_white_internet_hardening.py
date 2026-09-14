@@ -142,7 +142,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0029_wi_notify_and_quote_opt"])
+        self.assertEqual(heads, ["0030_wi_notify_90p"])
+        rev = scripts.get_revision("0030_wi_notify_90p")
+        self.assertEqual(rev.down_revision, "0029_wi_notify_and_quote_opt")
         rev = scripts.get_revision("0029_wi_notify_and_quote_opt")
         self.assertEqual(rev.down_revision, "0028_two_balance_system")
         rev = scripts.get_revision("0028_two_balance_system")
@@ -386,6 +388,40 @@ class TestGroupHWhiteInternetRepoAtomicDeduplication(unittest.IsolatedAsyncioTes
             self.assertEqual(sub.traffic_used_bytes, 500)
             self.assertEqual(sub.last_uplink_snapshot, 200)
             self.assertEqual(sub.last_downlink_snapshot, 300)
+
+    async def test_record_and_deduct_triggers_90p_warning(self):
+        session = AsyncMock(spec=AsyncSession)
+        sub = WhiteInternetSubscription(
+            id=1,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=1000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=0,
+            notified_90p=False,
+            expires_at=now_utc() + timedelta(days=10),
+        )
+
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
+        ):
+            (
+                allocated,
+                became_exhausted,
+                available,
+                event,
+            ) = await white_internet_repo.record_and_deduct_traffic_atomic(
+                session,
+                subscription_id=1,
+                node_epoch="ep-1",
+                snapshot_uplink_after=450,
+                snapshot_downlink_after=450,
+            )
+
+            self.assertEqual(allocated, 900)
+            self.assertFalse(became_exhausted)
+            self.assertEqual(available, 100)
+            self.assertTrue(sub.notified_90p)
+            self.assertEqual(event, "traffic_90p")
 
     async def test_record_and_deduct_duplicate_returns_noop(self):
         session = AsyncMock(spec=AsyncSession)

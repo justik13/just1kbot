@@ -56,7 +56,10 @@ class WhiteInternetModelsTests(unittest.TestCase):
         rev_0029 = scripts.get_revision("0029_wi_notify_and_quote_opt")
         self.assertIsNotNone(rev_0029)
         self.assertEqual(rev_0029.down_revision, "0028_two_balance_system")
-        self.assertEqual(scripts.get_heads(), ["0029_wi_notify_and_quote_opt"])
+        rev_0030 = scripts.get_revision("0030_wi_notify_90p")
+        self.assertIsNotNone(rev_0030)
+        self.assertEqual(rev_0030.down_revision, "0029_wi_notify_and_quote_opt")
+        self.assertEqual(scripts.get_heads(), ["0030_wi_notify_90p"])
 
     def test_server_lifecycle_status_field_and_constraints(self):
         self.assertEqual(ServerLifecycleStatus.ACTIVE, "ACTIVE")

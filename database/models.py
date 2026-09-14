@@ -1525,6 +1525,9 @@ class WhiteInternetSubscription(Base):
     notified_expired: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    notified_90p: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")

@@ -13,12 +13,12 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_head_is_0029_wi_notify_and_quote_opt(self):
+    def test_alembic_head_is_0030_wi_notify_90p(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0029_wi_notify_and_quote_opt"])
+        self.assertEqual(scripts.get_heads(), ["0030_wi_notify_90p"])
         self.assertEqual(
-            scripts.get_revision("0029_wi_notify_and_quote_opt").down_revision,
-            "0028_two_balance_system",
+            scripts.get_revision("0030_wi_notify_90p").down_revision,
+            "0029_wi_notify_and_quote_opt",
         )
         self.assertEqual(
             scripts.get_revision("0026_wi_trial_semantics").down_revision,

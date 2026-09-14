@@ -1525,12 +1525,13 @@ class TestAWGSubscriptionBotUI(unittest.IsolatedAsyncioTestCase):
                 read_only=False,
             )
 
-            self.assertIn("Ваша подписка: AmneziaWG", rendered_text)
+            self.assertIn("Ваша подписка", rendered_text)
+            self.assertNotIn("AmneziaWG", rendered_text)
             self.assertIn("test_token_1234567890abcdef", rendered_text)
             self.assertIn("2 из 2", rendered_text)
 
             buttons = [b.text for row in builder.export() for b in row]
-            self.assertIn(texts.BTN_COPY_SUB_LINK, buttons)
+            self.assertIn(texts.BTN_OPEN_INCY_APP, buttons)
             self.assertIn(texts.BTN_MANAGE_DEVICES, buttons)
             self.assertNotIn(texts.BTN_DOWNLOAD_CONF, buttons)
             self.assertNotIn(texts.BTN_REFRESH_SUB, buttons)

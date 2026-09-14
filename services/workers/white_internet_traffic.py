@@ -100,7 +100,8 @@ class WhiteInternetTrafficWorker:
             ]
 
         total_processed = 0
-        exhausted_users_to_notify: list[int] = []
+        exhausted_users_to_notify: list[tuple[int, bool]] = []
+        warn_90p_users_to_notify: list[tuple[int, bool]] = []
 
         for server_id, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime in server_list:
             # Network I/O outside DB transaction
@@ -263,6 +264,8 @@ class WhiteInternetTrafficWorker:
 
                         if became_exhausted:
                             exhausted_users_to_notify.append((sub.user_id, bool(getattr(sub, "is_trial", False))))
+                        elif event == "traffic_90p":
+                            warn_90p_users_to_notify.append((sub.user_id, bool(getattr(sub, "is_trial", False))))
                 except Exception as client_exc:
                     logger.error(
                         "Error processing traffic deduction for client %s on server %d: %s",
@@ -304,6 +307,41 @@ class WhiteInternetTrafficWorker:
                     except Exception as exc:
                         logger.warning(
                             "Failed to send quota exhaustion alert to user %d: %s",
+                            uid,
+                            exc,
+                        )
+
+        if self.bot is not None and warn_90p_users_to_notify:
+            for uid, is_sub_trial in set(warn_90p_users_to_notify):
+                async with sf() as sess:
+                    user = await sess.scalar(select(User).where(User.id == uid))
+                    telegram_id = user.telegram_id if user else None
+
+                if telegram_id:
+                    try:
+                        from aiogram.utils.keyboard import InlineKeyboardBuilder
+                        from bot import texts
+
+                        alert_text = (
+                            texts.WL_TRAFFIC_90P_TRIAL_ALERT
+                            if is_sub_trial
+                            else texts.WL_TRAFFIC_90P_ALERT
+                        )
+                        kb = InlineKeyboardBuilder()
+                        if is_sub_trial:
+                            kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
+                        else:
+                            kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+
+                        await self.bot.send_message(
+                            chat_id=telegram_id,
+                            text=alert_text,
+                            reply_markup=kb.as_markup(),
+                            parse_mode="HTML",
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to send 90%% traffic warning alert to user %d: %s",
                             uid,
                             exc,
                         )

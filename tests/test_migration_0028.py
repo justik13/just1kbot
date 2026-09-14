@@ -30,7 +30,7 @@ class Migration0028Tests(unittest.TestCase):
         rev = scripts.get_revision("0028_two_balance_system")
         self.assertIsNotNone(rev)
         self.assertEqual(rev.down_revision, "0027_awg_subscription_system")
-        self.assertEqual(scripts.get_heads(), ["0029_wi_notify_and_quote_opt"])
+        self.assertEqual(scripts.get_heads(), ["0030_wi_notify_90p"])
         self.assertEqual(self.migration.revision, "0028_two_balance_system")
         self.assertEqual(self.migration.down_revision, "0027_awg_subscription_system")
 

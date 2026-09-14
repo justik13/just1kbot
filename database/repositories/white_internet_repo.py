@@ -485,15 +485,22 @@ async def record_and_deduct_traffic_atomic(
     used_after = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
     available_after = max(0, total_quota - used_after)
     became_exhausted = False
+    event = None
+
     if available_after == 0 and sub.status == WhiteInternetStatus.ACTIVE:
         sub.status = WhiteInternetStatus.EXHAUSTED
         sub.status_reason = "quota_exhausted"
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
         became_exhausted = True
+        sub.notified_90p = True
+    elif total_quota > 0 and sub.status == WhiteInternetStatus.ACTIVE and not getattr(sub, "notified_90p", False):
+        if used_after >= 0.90 * total_quota:
+            sub.notified_90p = True
+            event = "traffic_90p"
 
     await session.flush()
-    return total_delta, became_exhausted, available_after, None
+    return total_delta, became_exhausted, available_after, event
 
 
 async def finalize_hard_delete_subscription(
@@ -739,6 +746,7 @@ async def reset_traffic_used_atomic(
     sub.traffic_overage_bytes = 0
     sub.traffic_uplink_bytes = 0
     sub.traffic_downlink_bytes = 0
+    sub.notified_90p = False
     # Preserves last_uplink_snapshot, last_downlink_snapshot, and traffic_stats_epoch
 
     if sub.status == WhiteInternetStatus.EXHAUSTED:
@@ -784,6 +792,9 @@ async def add_extra_traffic_atomic(
         sub.status_reason = None
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+
+    if total_quota > 0 and used < 0.90 * total_quota:
+        sub.notified_90p = False
 
     await session.flush()
     return sub

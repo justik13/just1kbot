@@ -227,9 +227,14 @@ async def _build_connections_screen(
     )
 
     builder = InlineKeyboardBuilder()
-    if len(sub_url) <= 256:
+    if sub_url.startswith(("http://", "https://")):
         builder.button(
-            text=texts.BTN_COPY_SUB_LINK,
+            text=texts.BTN_OPEN_INCY_APP,
+            url=sub_url,
+        )
+    elif len(sub_url) <= 256:
+        builder.button(
+            text=texts.BTN_OPEN_INCY_APP,
             copy_text=CopyTextButton(text=sub_url),
         )
     builder.button(
