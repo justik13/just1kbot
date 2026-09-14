@@ -855,5 +855,3 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("Вы переходите с бесплатного пробного периода", text)
             btn_texts = [btn.text for row in kb.inline_keyboard for btn in row]
             self.assertTrue(any("Подтвердить продление" in t for t in btn_texts))
-
-
