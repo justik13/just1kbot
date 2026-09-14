@@ -268,3 +268,57 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         self.assertIn("15.09.2026 23:00 (МСК)", call1_args[0][1])
         # Verify Russian grammar 'через' in 1d notification
         self.assertIn("истекает через", call2_args[0][1])
+
+    async def test_send_white_internet_notifications_skips_older_than_3_days(self):
+        bot = AsyncMock()
+        now = datetime.now(timezone.utc)
+
+        # Sub expired 4 days ago -> past expired_cutoff (3 days), must be skipped
+        sub_old = MagicMock(spec=WhiteInternetSubscription)
+        sub_old.id = 99
+        sub_old.user_id = 999
+        sub_old.expires_at = now - timedelta(days=4)
+        sub_old.status = WhiteInternetStatus.EXPIRED
+        sub_old.notified_3d = False
+        sub_old.notified_1d = False
+        sub_old.notified_2h = False
+        sub_old.notified_expired = False
+
+        user_old = MagicMock(spec=User)
+        user_old.id = 999
+        user_old.telegram_id = 999999
+        user_old.is_bot_blocked = False
+        user_old.is_banned = False
+        user_old.is_deleted = False
+
+        mock_id_result = MagicMock()
+        mock_id_result.all.return_value = [(99,)]
+
+        mock_session_query = AsyncMock()
+        mock_session_query.execute.return_value = mock_id_result
+
+        mock_session_sub = AsyncMock()
+        mock_session_sub.scalar.side_effect = [sub_old, user_old]
+
+        sessions = [mock_session_query, mock_session_sub]
+
+        def get_session():
+            ctx = AsyncMock()
+            ctx.__aenter__.return_value = sessions.pop(0)
+            return ctx
+
+        with (
+            patch("services.workers.notifications.session_scope", side_effect=get_session),
+            patch("services.workers.notifications.global_send_limiter.acquire", new_callable=AsyncMock),
+        ):
+            await _send_white_internet_notifications(bot, now)
+
+        self.assertEqual(bot.send_message.call_count, 0)
+        self.assertFalse(sub_old.notified_expired)
+
+    async def test_send_white_internet_notifications_bot_none(self):
+        # When bot is None, returns early without DB interaction
+        now = datetime.now(timezone.utc)
+        with patch("services.workers.notifications.session_scope") as mock_scope:
+            await _send_white_internet_notifications(None, now)
+            mock_scope.assert_not_called()

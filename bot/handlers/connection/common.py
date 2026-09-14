@@ -205,6 +205,8 @@ async def _build_connections_screen(
             if profile.provisioning_status in labels:
                 rendered += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
 
+        rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
+
     if is_wi_active:
         builder.button(
             text=texts.BTN_WHITE_INTERNET_CONNECTIONS.format(

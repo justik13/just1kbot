@@ -820,3 +820,39 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row if btn.callback_data]
             self.assertIn("white_internet", callbacks)
             self.assertIn("Белый Интернет", text)
+
+    async def test_connections_screen_with_profiles_includes_instruction_and_wi_button(self):
+        from bot.handlers.connection.common import _build_connections_screen
+        from config.enums import WhiteInternetStatus
+        from utils.datetime_helpers import now_utc
+
+        now = now_utc()
+        future = now + timedelta(days=10)
+        user = MagicMock(id=201, subscription_end=future)
+        wi_sub = MagicMock(
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=future,
+            active_hwids={"hwid1": now.isoformat()},
+            device_limit=2,
+        )
+
+        mock_profile = MagicMock(
+            id=1,
+            server=MagicMock(country_flag="🇩🇪", name="DE-1"),
+            device_name="My iPhone",
+            provisioning_status="active",
+            traffic_down=1000,
+            traffic_up=2000,
+            last_connected=now,
+        )
+
+        with (
+            patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=wi_sub)),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", new=AsyncMock(return_value=2)),
+        ):
+            text, builder = await _build_connections_screen(user, self.session, profiles=[mock_profile])
+            markup = builder.as_markup()
+            callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row if btn.callback_data]
+            self.assertIn("white_internet", callbacks)
+            self.assertIn("Нажмите на устройство ниже", text)
+

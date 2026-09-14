@@ -458,14 +458,18 @@ async def _send_post_expiry_notifications(
 
 
 async def _send_white_internet_notifications(
-    bot: Bot,
+    bot: Bot | None,
     current_time: datetime,
 ) -> None:
+    if bot is None:
+        return
+
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from config.enums import WhiteInternetStatus
     from database.models import User, WhiteInternetSubscription
     from utils.formatters import format_datetime
 
+    expired_cutoff = current_time - timedelta(days=3)
     cutoff = current_time + timedelta(days=3)
 
     async with session_scope() as session:
@@ -479,6 +483,7 @@ async def _send_white_internet_notifications(
                     WhiteInternetStatus.EXPIRED,
                 ]),
                 WhiteInternetSubscription.expires_at.isnot(None),
+                WhiteInternetSubscription.expires_at >= expired_cutoff,
                 WhiteInternetSubscription.expires_at <= cutoff,
                 or_(
                     WhiteInternetSubscription.notified_3d.is_(False),
@@ -518,7 +523,7 @@ async def _send_white_internet_notifications(
                 ):
                     continue
 
-                if not sub.expires_at or sub.expires_at > cutoff:
+                if not sub.expires_at or sub.expires_at > cutoff or sub.expires_at < expired_cutoff:
                     continue
 
                 user = await session.scalar(
