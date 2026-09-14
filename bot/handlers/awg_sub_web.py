@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import html
+import json
 import logging
 import os
 
@@ -36,6 +38,542 @@ _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 DEFAULT_AWG_SUB_PATH_PREFIX = "/sub/awg"
 
 
+def is_browser_request(request: web.Request) -> bool:
+    """Detect if the incoming HTTP request originates from a standard web browser."""
+    action = (request.query.get("action") or "").lower()
+    fmt = (request.query.get("format") or "").lower()
+    if fmt == "html" or action in ("browser", "web", "view"):
+        return True
+
+    accept = (request.headers.get("Accept") or "").lower()
+    if "text/html" in accept or "application/xhtml+xml" in accept:
+        return True
+
+    sec_dest = (request.headers.get("Sec-Fetch-Dest") or "").lower()
+    if sec_dest == "document":
+        return True
+
+    ua = (request.headers.get("User-Agent") or "").lower()
+    if "mozilla/" in ua and any(
+        br in ua for br in ("safari", "chrome", "firefox", "edge", "opera", "telegram")
+    ):
+        if not any(
+            tool in ua
+            for tool in ("python", "aiohttp", "curl", "wget", "httpie", "postman", "pytest")
+        ):
+            return True
+
+    return False
+
+
+def get_subscription_public_url(request: web.Request, token: str) -> str:
+    """Determine the canonical public subscription URL for the current feed."""
+    try:
+        from config.settings import get_settings
+
+        settings = get_settings()
+        domain = (getattr(settings, "DOMAIN", "") or "").strip()
+    except Exception:
+        domain = ""
+    if not domain:
+        domain = os.getenv("DOMAIN", "").strip()
+
+    sub_base_url = (
+        os.getenv("PUBLIC_URL")
+        or os.getenv("SUB_BASE_URL")
+        or os.getenv("APP_BASE_URL")
+        or (f"https://{domain}" if domain else "")
+    ).rstrip("/")
+
+    if not sub_base_url:
+        forwarded_proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip()
+        proto = forwarded_proto or ("https" if request.secure else "http")
+        forwarded_host = (request.headers.get("X-Forwarded-Host") or "").split(",")[0].strip()
+        host = forwarded_host or (request.headers.get("Host") or "").strip() or request.host
+        sub_base_url = f"{proto}://{host}"
+
+    sub_prefix = (
+        os.getenv("AWG_SUB_PATH_PREFIX") or DEFAULT_AWG_SUB_PATH_PREFIX
+    ).strip().rstrip("/")
+    if not sub_prefix.startswith("/"):
+        sub_prefix = f"/{sub_prefix}"
+
+    return f"{sub_base_url}{sub_prefix}/{token}"
+
+
+def render_awg_browser_landing_page(sub_url: str, bot_username: str = "just1kbot") -> str:
+    """Render a modern, responsive HTML landing page that auto-launches INCY via deep link."""
+    deep_link = f"incy://add/{sub_url}"
+    sub_url_safe = html.escape(sub_url)
+    deep_link_safe = html.escape(deep_link)
+    bot_username_safe = html.escape(bot_username)
+    deep_link_js = json.dumps(deep_link)
+    sub_url_js = json.dumps(sub_url)
+
+    return f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f172a">
+    <title>Добавление подписки в INCY</title>
+    <style>
+        :root {{
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --card-border: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --primary: #38bdf8;
+            --accent: #22c55e;
+            --accent-bg: rgba(34, 197, 94, 0.15);
+            --code-bg: #0b1120;
+            --btn-sec-bg: #334155;
+            --btn-sec-hover: #475569;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }}
+        .container {{
+            width: 100%;
+            max-width: 480px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 28px 24px;
+            box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.5);
+            text-align: center;
+        }}
+        .app-icon {{
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 16px;
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 34px;
+            box-shadow: 0 8px 16px -4px rgba(56, 189, 248, 0.4);
+        }}
+        h1 {{
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            letter-spacing: -0.3px;
+        }}
+        .subtitle {{
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }}
+        .status-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--accent-bg);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            border-radius: 9999px;
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }}
+        .pulse-dot {{
+            width: 8px;
+            height: 8px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }}
+        @keyframes pulse {{
+            0% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }}
+            70% {{ transform: scale(1); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }}
+            100% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }}
+        }}
+        .btn-group {{
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 22px;
+        }}
+        .btn {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 14px 18px;
+            border-radius: 14px;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.15s ease-in-out;
+            border: none;
+            outline: none;
+        }}
+        .btn-primary {{
+            background: #0284c7;
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+        }}
+        .btn-primary:hover, .btn-primary:active {{
+            background: #0369a1;
+            transform: translateY(-1px);
+        }}
+        .btn-secondary {{
+            background: var(--btn-sec-bg);
+            color: var(--text-primary);
+        }}
+        .btn-secondary:hover, .btn-secondary:active {{
+            background: var(--btn-sec-hover);
+        }}
+        .btn-copied {{
+            background: var(--accent) !important;
+            color: #ffffff !important;
+        }}
+        .url-box {{
+            background: var(--code-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 24px;
+            text-align: left;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }}
+        .url-box:hover {{
+            border-color: var(--primary);
+        }}
+        .url-label {{
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            font-weight: 600;
+        }}
+        .url-code {{
+            display: block;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            color: var(--primary);
+            word-break: break-all;
+            line-height: 1.4;
+        }}
+        .copy-hint {{
+            display: block;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            text-align: right;
+        }}
+        .divider {{
+            height: 1px;
+            background: var(--card-border);
+            margin: 20px 0;
+        }}
+        .section-title {{
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .dl-grid {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 20px;
+        }}
+        .dl-btn {{
+            background: var(--code-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 10px 6px;
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 500;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s;
+        }}
+        .dl-btn:hover {{
+            border-color: var(--primary);
+            background: rgba(56, 189, 248, 0.05);
+        }}
+        .dl-btn .icon {{
+            font-size: 18px;
+        }}
+        .steps {{
+            text-align: left;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+        .step-item {{
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }}
+        .step-num {{
+            background: var(--btn-sec-bg);
+            color: var(--text-primary);
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }}
+        .footer {{
+            font-size: 13px;
+            color: var(--text-muted);
+        }}
+        .footer a {{
+            color: var(--primary);
+            text-decoration: none;
+        }}
+        .footer a:hover {{
+            text-decoration: underline;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="app-icon">🛡️</div>
+        <h1>Добавление в INCY</h1>
+        <p class="subtitle">Подписка AmneziaWG готова к подключению</p>
+
+        <div class="status-badge">
+            <span class="pulse-dot"></span>
+            <span>Открываем приложение...</span>
+        </div>
+
+        <div class="btn-group">
+            <a href="{deep_link_safe}" id="open-btn" class="btn btn-primary">
+                🚀 Открыть в приложении INCY
+            </a>
+            <button type="button" id="copy-btn" class="btn btn-secondary" onclick="copySubscriptionUrl()">
+                📋 Скопировать ссылку подписки
+            </button>
+        </div>
+
+        <div class="url-box" onclick="copySubscriptionUrl()">
+            <div class="url-label">Ссылка подписки:</div>
+            <code class="url-code">{sub_url_safe}</code>
+            <span class="copy-hint" id="hint-text">Нажмите для копирования</span>
+        </div>
+
+        <div class="section-title">Приложение еще не установлено?</div>
+        <div class="dl-grid">
+            <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener noreferrer" class="dl-btn">
+                <span class="icon">🍏</span>
+                <span>App Store</span>
+            </a>
+            <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener noreferrer" class="dl-btn">
+                <span class="icon">🤖</span>
+                <span>Google Play</span>
+            </a>
+            <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener noreferrer" class="dl-btn">
+                <span class="icon">📦</span>
+                <span>GitHub APK</span>
+            </a>
+        </div>
+
+        <div class="steps">
+            <div class="step-item">
+                <div class="step-num">1</div>
+                <div>Установите <b>INCY</b> на ваш телефон или ПК.</div>
+            </div>
+            <div class="step-item">
+                <div class="step-num">2</div>
+                <div>Нажмите <b>«Открыть в приложении INCY»</b> выше (или вставьте скопированную ссылку через «+» в приложении).</div>
+            </div>
+            <div class="step-item">
+                <div class="step-num">3</div>
+                <div>Нажмите большую кнопку подключения на главном экране INCY.</div>
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="footer">
+            <a href="https://t.me/{bot_username_safe}" target="_blank" rel="noopener noreferrer">
+                ← Вернуться в Telegram-бот (@{bot_username_safe})
+            </a>
+        </div>
+    </div>
+
+    <script>
+        var deepLink = {deep_link_js};
+        var subUrl = {sub_url_js};
+
+        (function() {{
+            var redirected = false;
+            function autoLaunch() {{
+                if (redirected) return;
+                redirected = true;
+                window.location.href = deepLink;
+            }}
+            if (document.readyState === "complete" || document.readyState === "interactive") {{
+                setTimeout(autoLaunch, 150);
+            }} else {{
+                window.addEventListener("DOMContentLoaded", function() {{
+                    setTimeout(autoLaunch, 150);
+                }});
+            }}
+        }})();
+
+        function copySubscriptionUrl() {{
+            var copyBtn = document.getElementById("copy-btn");
+            var hintText = document.getElementById("hint-text");
+            var success = function() {{
+                copyBtn.innerText = "✅ Ссылка скопирована!";
+                copyBtn.classList.add("btn-copied");
+                if (hintText) hintText.innerText = "Скопировано в буфер обмена!";
+                setTimeout(function() {{
+                    copyBtn.innerText = "📋 Скопировать ссылку подписки";
+                    copyBtn.classList.remove("btn-copied");
+                    if (hintText) hintText.innerText = "Нажмите для копирования";
+                }}, 2500);
+            }};
+            var fallback = function() {{
+                var ta = document.createElement("textarea");
+                ta.value = subUrl;
+                ta.style.position = "fixed";
+                ta.style.opacity = "0";
+                document.body.appendChild(ta);
+                ta.select();
+                try {{
+                    document.execCommand("copy");
+                    success();
+                }} catch (e) {{}}
+                document.body.removeChild(ta);
+            }};
+            if (navigator.clipboard && navigator.clipboard.writeText) {{
+                navigator.clipboard.writeText(subUrl).then(success).catch(fallback);
+            }} else {{
+                fallback();
+            }}
+        }}
+    </script>
+</body>
+</html>"""
+
+
+def render_awg_browser_error_page(
+    title: str, message: str, bot_username: str = "just1kbot"
+) -> str:
+    """Render a styled HTML error page for browser requests."""
+    title_safe = html.escape(title)
+    message_safe = html.escape(message)
+    bot_username_safe = html.escape(bot_username)
+
+    return f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0f172a">
+    <title>{title_safe}</title>
+    <style>
+        :root {{
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --card-border: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --error: #ef4444;
+            --btn-bg: #334155;
+            --btn-hover: #475569;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }}
+        .card {{
+            width: 100%;
+            max-width: 440px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 32px 24px;
+            box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.5);
+            text-align: center;
+        }}
+        .icon {{
+            font-size: 44px;
+            margin-bottom: 16px;
+        }}
+        h1 {{
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--error);
+            margin-bottom: 10px;
+        }}
+        p {{
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 24px;
+        }}
+        .btn {{
+            display: inline-block;
+            padding: 12px 24px;
+            background: var(--btn-bg);
+            color: var(--text-primary);
+            text-decoration: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.15s;
+        }}
+        .btn:hover {{
+            background: var(--btn-hover);
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">⚠️</div>
+        <h1>{title_safe}</h1>
+        <p>{message_safe}</p>
+        <a href="https://t.me/{bot_username_safe}" class="btn">Открыть Telegram-бот (@{bot_username_safe})</a>
+    </div>
+</body>
+</html>"""
+
+
 async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
     """Serve the no-store Base64 AmneziaWG multi-server subscription feed for INCY."""
     client_ip = get_trusted_client_ip(request)
@@ -49,6 +587,19 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
 
     token = request.match_info.get("token", "").strip()
     if not token or len(token) < 16:
+        if is_browser_request(request):
+            bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+            return web.Response(
+                status=404,
+                text=render_awg_browser_error_page(
+                    title="Подписка не найдена",
+                    message="Ссылка подписки недействительна или не существует.",
+                    bot_username=bot_username,
+                ),
+                content_type="text/html",
+                charset="utf-8",
+                headers={"Cache-Control": "no-store"},
+            )
         return web.Response(status=404, text="Not Found", headers={"Cache-Control": "no-store"})
 
     allowed_tok, retry_after_tok = _token_rate_limiter.check(token)
@@ -73,7 +624,70 @@ async def awg_subscription_feed_handler(request: web.Request) -> web.Response:
         or request.headers.get("X-Device-ID")
         or ""
     ).strip()
+
     if not raw_hwid:
+        if is_browser_request(request):
+            bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+            async with session_scope() as session:
+                user = await users_repo.get_user_by_subscription_token(
+                    session, token, for_update=False
+                )
+                if user is None:
+                    return web.Response(
+                        status=404,
+                        text=render_awg_browser_error_page(
+                            title="Подписка не найдена",
+                            message="Ссылка подписки недействительна или не существует.",
+                            bot_username=bot_username,
+                        ),
+                        content_type="text/html",
+                        charset="utf-8",
+                        headers=common_headers,
+                    )
+
+                if (
+                    getattr(user, "is_banned", False) is True
+                    or getattr(user, "is_deleted", False) is True
+                    or getattr(user, "financial_hold", False) is True
+                ):
+                    return web.Response(
+                        status=403,
+                        text=render_awg_browser_error_page(
+                            title="Доступ ограничен",
+                            message="Действие подписки приостановлено администратором.",
+                            bot_username=bot_username,
+                        ),
+                        content_type="text/html",
+                        charset="utf-8",
+                        headers=common_headers,
+                    )
+
+                if not user.subscription_end or is_expired(user.subscription_end):
+                    return web.Response(
+                        status=403,
+                        text=render_awg_browser_error_page(
+                            title="Подписка истекла",
+                            message="Срок действия вашей подписки закончился. Продлите её в Telegram-боте.",
+                            bot_username=bot_username,
+                        ),
+                        content_type="text/html",
+                        charset="utf-8",
+                        headers=common_headers,
+                    )
+
+                sub_url = get_subscription_public_url(request, token)
+                html_body = render_awg_browser_landing_page(
+                    sub_url=sub_url,
+                    bot_username=bot_username,
+                )
+                return web.Response(
+                    status=200,
+                    text=html_body,
+                    content_type="text/html",
+                    charset="utf-8",
+                    headers=common_headers,
+                )
+
         headers = dict(common_headers)
         headers["x-hwid-required"] = "true"
         return web.Response(status=403, text=texts.AWG_WEB_HWID_REQUIRED, headers=headers)

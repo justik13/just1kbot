@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -373,6 +374,203 @@ class TestAWGSubscriptionWeb(AioHTTPTestCase):
             self.assertEqual(resp.status, 403)
             text = await resp.text()
             self.assertIn("Subscription expired", text)
+
+    async def test_feed_browser_landing_page_success(self):
+        """Verify browser requests without HWID render the INCY HTML landing page with deep link."""
+        valid_token = "landing_token_123456789012345"
+        headers = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
+        active_time = datetime.now(timezone.utc) + timedelta(days=30)
+        user = User(
+            id=1,
+            telegram_id=111,
+            subscription_end=active_time,
+            device_limit=2,
+            active_sub_devices={},
+        )
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
+            mock_get_user.return_value = user
+
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+            html_text = await resp.text()
+
+            # Verify HTML landing page essentials
+            self.assertIn("<!DOCTYPE html>", html_text)
+            self.assertIn("Добавление в INCY", html_text)
+            self.assertIn("incy://add/", html_text)
+            self.assertIn(valid_token, html_text)
+            self.assertIn("window.location.href = deepLink", html_text)
+            self.assertIn("copySubscriptionUrl", html_text)
+            self.assertIn("apps.apple.com/app/incy", html_text)
+            self.assertIn("play.google.com/store/apps/details?id=llc.itdev.incy", html_text)
+            self.assertIn("github.com/INCY-DEV/incy-platforms", html_text)
+
+            # Invariant: zero slot consumption / user was only read
+            self.assertEqual(len(user.active_sub_devices), 0)
+
+    async def test_feed_browser_token_not_found(self):
+        """Verify browser requests with unknown token render 404 HTML error page."""
+        valid_token = "notfound_token_12345678901234"
+        headers = {"Accept": "text/html"}
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
+            mock_get_user.return_value = None
+
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
+            self.assertEqual(resp.status, 404)
+            self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+            html_text = await resp.text()
+            self.assertIn("Подписка не найдена", html_text)
+
+    async def test_feed_browser_token_short(self):
+        """Verify browser requests with token < 16 chars render 404 HTML error page."""
+        headers = {"Accept": "text/html"}
+        resp = await self.client.get(f"{DEFAULT_AWG_SUB_PATH_PREFIX}/short", headers=headers)
+        self.assertEqual(resp.status, 404)
+        self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+        html_text = await resp.text()
+        self.assertIn("Подписка не найдена", html_text)
+
+    async def test_feed_browser_expired_subscription(self):
+        """Verify browser requests with expired subscription render 403 HTML error page."""
+        valid_token = "expired_token_12345678901234"
+        headers = {"Accept": "text/html"}
+        expired_time = datetime.now(timezone.utc) - timedelta(days=2)
+        user = User(
+            id=1,
+            telegram_id=111,
+            subscription_end=expired_time,
+            device_limit=2,
+        )
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
+            mock_get_user.return_value = user
+
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
+            self.assertEqual(resp.status, 403)
+            self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+            html_text = await resp.text()
+            self.assertIn("Подписка истекла", html_text)
+
+    async def test_feed_browser_banned_or_hold_user(self):
+        """Verify browser requests for banned or hold users render 403 HTML error page."""
+        valid_token = "banned_token_123456789012345"
+        headers = {"Accept": "text/html"}
+        active_time = datetime.now(timezone.utc) + timedelta(days=10)
+        banned_user = User(
+            id=1,
+            telegram_id=111,
+            subscription_end=active_time,
+            is_banned=True,
+        )
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
+            mock_get_user.return_value = banned_user
+
+            resp = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}", headers=headers
+            )
+            self.assertEqual(resp.status, 403)
+            self.assertEqual(resp.headers.get("Content-Type"), "text/html; charset=utf-8")
+            html_text = await resp.text()
+            self.assertIn("Доступ ограничен", html_text)
+
+    async def test_feed_browser_sec_fetch_dest_and_format_html(self):
+        """Verify Sec-Fetch-Dest: document and ?format=html override non-HTML Accept headers."""
+        valid_token = "override_token_1234567890123"
+        active_time = datetime.now(timezone.utc) + timedelta(days=10)
+        user = User(
+            id=1,
+            telegram_id=111,
+            subscription_end=active_time,
+        )
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.awg_sub_web.session_scope", fake_session_scope),
+            patch(
+                "database.repositories.users_repo.get_user_by_subscription_token",
+                new_callable=AsyncMock,
+            ) as mock_get_user,
+        ):
+            mock_get_user.return_value = user
+
+            # 1. Sec-Fetch-Dest: document
+            resp1 = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}",
+                headers={"Sec-Fetch-Dest": "document"},
+            )
+            self.assertEqual(resp1.status, 200)
+            self.assertEqual(resp1.headers.get("Content-Type"), "text/html; charset=utf-8")
+
+            # 2. ?format=html
+            resp2 = await self.client.get(
+                f"{DEFAULT_AWG_SUB_PATH_PREFIX}/{valid_token}?format=html"
+            )
+            self.assertEqual(resp2.status, 200)
+            self.assertEqual(resp2.headers.get("Content-Type"), "text/html; charset=utf-8")
+
 
     async def test_feed_pending_provisioning_returns_503(self):
         """Verify pending profiles return 503 with Retry-After: 3."""
@@ -2169,6 +2367,95 @@ class TestAWGAllocationInvariantsHardening(unittest.IsolatedAsyncioTestCase):
 
         count = await get_user_effective_device_count(mock_session, user_id=10)
         self.assertEqual(count, 2)  # 1 manual + 1 sub-device
+
+
+class TestAWGBrowserHelpers(unittest.TestCase):
+    """Unit tests for browser detection, URL builder, and landing page renderers."""
+
+    def test_is_browser_request(self):
+        from bot.handlers.awg_sub_web import is_browser_request
+
+        # 1. Accept text/html
+        req1 = MagicMock()
+        req1.query = {}
+        req1.headers = {"Accept": "text/html,application/xhtml+xml"}
+        self.assertTrue(is_browser_request(req1))
+
+        # 2. Sec-Fetch-Dest: document
+        req2 = MagicMock()
+        req2.query = {}
+        req2.headers = {"Accept": "*/*", "Sec-Fetch-Dest": "document"}
+        self.assertTrue(is_browser_request(req2))
+
+        # 3. Query format=html
+        req3 = MagicMock()
+        req3.query = {"format": "html"}
+        req3.headers = {"Accept": "*/*"}
+        self.assertTrue(is_browser_request(req3))
+
+        # 4. Standard mobile browser user agent
+        req4 = MagicMock()
+        req4.query = {}
+        req4.headers = {
+            "Accept": "*/*",
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1",
+        }
+        self.assertTrue(is_browser_request(req4))
+
+        # 5. Non-browser tool (curl)
+        req5 = MagicMock()
+        req5.query = {}
+        req5.headers = {"Accept": "*/*", "User-Agent": "curl/8.1.2"}
+        self.assertFalse(is_browser_request(req5))
+
+        # 6. Non-browser tool (python aiohttp)
+        req6 = MagicMock()
+        req6.query = {}
+        req6.headers = {"Accept": "*/*", "User-Agent": "Python/3.11 aiohttp/3.9.5"}
+        self.assertFalse(is_browser_request(req6))
+
+    def test_get_subscription_public_url(self):
+        from bot.handlers.awg_sub_web import get_subscription_public_url
+
+        # With env DOMAIN
+        with patch.dict(os.environ, {"DOMAIN": "vpn.myexample.com"}):
+            req = MagicMock()
+            url = get_subscription_public_url(req, "sample_token_123")
+            self.assertEqual(url, "https://vpn.myexample.com/sub/awg/sample_token_123")
+
+        # With forwarded headers fallback
+        with patch.dict(os.environ, {}, clear=True):
+            req2 = MagicMock()
+            req2.headers = {
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "forwarded.domain.com",
+            }
+            url2 = get_subscription_public_url(req2, "sample_token_456")
+            self.assertEqual(url2, "https://forwarded.domain.com/sub/awg/sample_token_456")
+
+    def test_render_awg_browser_landing_page(self):
+        from bot.handlers.awg_sub_web import render_awg_browser_landing_page
+
+        html_out = render_awg_browser_landing_page(
+            sub_url="https://vpn.example.com/sub/awg/my_token",
+            bot_username="testbot",
+        )
+        self.assertIn("incy://add/https://vpn.example.com/sub/awg/my_token", html_out)
+        self.assertIn("@testbot", html_out)
+        self.assertIn("window.location.href = deepLink", html_out)
+        self.assertIn("copySubscriptionUrl", html_out)
+
+    def test_render_awg_browser_error_page(self):
+        from bot.handlers.awg_sub_web import render_awg_browser_error_page
+
+        html_out = render_awg_browser_error_page(
+            title="Ошибка подписки",
+            message="Тестовое сообщение",
+            bot_username="testbot",
+        )
+        self.assertIn("Ошибка подписки", html_out)
+        self.assertIn("Тестовое сообщение", html_out)
+        self.assertIn("@testbot", html_out)
 
 
 if __name__ == "__main__":
