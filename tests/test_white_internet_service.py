@@ -11,6 +11,7 @@ from config.enums import WhiteInternetStatus
 from database.models import WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from services.white_internet_service import WhiteInternetService
+from utils.datetime_helpers import now_utc
 
 
 class TestWhiteInternetVlessGeneration(unittest.TestCase):
@@ -112,7 +113,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sub.desired_version, 2)
 
     async def test_topup_cap_150_gib_enforcement(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
