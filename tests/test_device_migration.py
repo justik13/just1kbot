@@ -111,8 +111,8 @@ class TestDeviceMigrationService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_profile.device_name, "Phone #1")
         self.assertEqual(new_profile.provisioning_status, "pending_create")
 
-        # Verify old profile was NOT modified to deleting yet (remains active until finalizer)
-        self.assertEqual(old_profile.provisioning_status, "active")
+        # Verify user.device_creations_today was NOT incremented by migration
+        self.assertEqual(user.device_creations_today, 0)
 
         # Verify enqueue_api_operation was called with migrating_from_id in payload
         mock_enqueue.assert_called_once()
@@ -120,6 +120,79 @@ class TestDeviceMigrationService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["operation_type"], "create_peer")
         self.assertEqual(kwargs["server_id"], 200)
         self.assertEqual(kwargs["payload"]["migrating_from_id"], 10)
+
+    @patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock)
+    @patch("services.device_service.AuditService.log_action", new_callable=AsyncMock)
+    @patch("services.device_service.enqueue_api_operation", new_callable=AsyncMock)
+    async def test_migrate_device_ignores_daily_creation_limit(
+        self, mock_enqueue, mock_audit, mock_ensure_capacity
+    ):
+        mock_session = AsyncMock()
+        user = User(
+            id=1,
+            telegram_id=12345,
+            device_limit=1,
+            subscription_end=self.now + timedelta(days=30),
+            is_banned=False,
+            device_creations_today=999,
+            last_creation_date=self.now.date(),
+        )
+        old_profile = VPNProfile(
+            id=10,
+            user_id=1,
+            server_id=100,
+            device_name="Phone #1",
+            peer_id="peer-old-123",
+            provisioning_status="active",
+            created_at=self.now - timedelta(minutes=20),
+        )
+        target_server = Server(
+            id=200,
+            name="Germany",
+            protocol="amneziawg2",
+            is_active=True,
+            max_clients=50,
+            api_url="https://vpn.example.com",
+            api_key="secret",
+        )
+        async def mock_execute(query, *args, **kwargs):
+            m = MagicMock()
+            m.scalar_one_or_none.return_value = None
+            q_str = str(query).lower()
+            if "from users" in q_str:
+                m.scalar_one.return_value = user
+            elif "from vpn_profiles" in q_str and "where vpn_profiles.id =" in q_str:
+                m.scalar_one_or_none.return_value = old_profile
+            elif "from servers" in q_str:
+                m.scalar_one_or_none.return_value = target_server
+            elif "count(vpn_profiles.id)" in q_str:
+                m.scalar_one.return_value = 0
+            elif "vpn_profiles.peer_id" in q_str:
+                m.scalars.return_value.all.return_value = []
+            elif "lower(vpn_profiles.device_name)" in q_str:
+                m.scalar_one_or_none.return_value = None
+            return m
+        mock_session.execute = mock_execute
+        mock_session.add = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_session.begin_nested = MagicMock(return_value=mock_ctx)
+
+        snapshot = ServerPeerSnapshot(
+            server_id=200,
+            peer_ids=set(),
+            captured_at=self.now,
+        )
+        new_profile = await DeviceService.migrate_device(
+            mock_session,
+            user_id=1,
+            profile_id=10,
+            target_server_id=200,
+            snapshot=snapshot,
+        )
+        self.assertEqual(new_profile.server_id, 200)
+        self.assertEqual(user.device_creations_today, 999)
 
     @patch.object(DeviceService, "get_last_migration_time", new_callable=AsyncMock)
     @patch.object(DeviceService, "has_active_migration", new_callable=AsyncMock)

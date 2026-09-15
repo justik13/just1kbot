@@ -36,7 +36,20 @@ ALTER TABLE entitlement_entries ADD CONSTRAINT ck_entitlement_entries_shape CHEC
 """
 
 BACKFILL_SQL = """
-WITH missing_users AS (
+WITH user_entitlement_summary AS (
+    SELECT
+        beneficiary_user_id,
+        COALESCE(SUM(
+            CASE
+                WHEN entry_type = 'referral_reversal' THEN -COALESCE(hours_delta, days_delta * 24)
+                ELSE COALESCE(hours_delta, days_delta * 24)
+            END
+        ), 0) AS total_hours,
+        BOOL_OR(entry_type IN ('account_purchase_grant', 'manual_grant', 'tariff_change')) AS has_subscription_grant
+    FROM entitlement_entries
+    GROUP BY beneficiary_user_id
+),
+missing_users AS (
     SELECT
         u.id AS user_id,
         u.device_limit,
@@ -44,11 +57,15 @@ WITH missing_users AS (
         u.subscription_end,
         GREATEST(1, CEIL(EXTRACT(EPOCH FROM (u.subscription_end - NOW())) / 3600)::int) AS exact_hours
     FROM users u
+    LEFT JOIN user_entitlement_summary s ON s.beneficiary_user_id = u.id
     WHERE u.subscription_end > NOW()
       AND u.is_deleted = false
-      AND NOT EXISTS (
-          SELECT 1 FROM entitlement_entries e
-          WHERE e.beneficiary_user_id = u.id
+      AND (
+          s.beneficiary_user_id IS NULL
+          OR (
+              NOT COALESCE(s.has_subscription_grant, false)
+              AND s.total_hours < GREATEST(1, CEIL(EXTRACT(EPOCH FROM (u.subscription_end - NOW())) / 3600)::int)
+          )
       )
 )
 INSERT INTO entitlement_entries (
@@ -106,7 +123,10 @@ END $$;
 
 DOWNGRADE_CLEANUP_SQL = """
 DELETE FROM entitlement_entries
-WHERE source_type = 'admin' AND source_id LIKE 'legacy_0027_grant_%'
+WHERE source_type = 'admin'
+  AND entry_type = 'manual_grant'
+  AND source_id LIKE 'legacy_0027_grant_%'
+  AND (metadata->>'reason') = 'legacy_active_subscription_backfill'
 """
 
 DOWNGRADE_FAIL_CLOSED_CHECK_SQL = """

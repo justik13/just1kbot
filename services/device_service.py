@@ -378,13 +378,6 @@ class DeviceService:
             if elapsed < cooldown_seconds:
                 raise MigrationCooldownActive(int(cooldown_seconds - elapsed))
 
-        if not is_admin(user.telegram_id):
-            today = now_msk().date()
-            if not _is_same_day_msk(user.last_creation_date, today):
-                user.device_creations_today, user.last_creation_date = 0, today
-            if user.device_creations_today >= DEVICE_DAILY_LIMIT:
-                raise DailyLimitExceeded("Daily limit exceeded")
-
         # Quota check discounts old_profile.id because target profile replaces it
         user_count = (
             await session.execute(
@@ -496,9 +489,6 @@ class DeviceService:
                 "migrating_from_id": old_profile.id,
             },
         )
-
-        if not is_admin(user.telegram_id):
-            user.device_creations_today += 1
 
         await AuditService.log_action(
             session,

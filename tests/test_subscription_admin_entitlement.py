@@ -86,7 +86,6 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
                 session=session,
                 telegram_id=123456,
                 days=30,
-                create_entitlement=False,
             )
 
         self.assertIs(updated_user, user)
@@ -125,7 +124,7 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
         added_obj = session.add.call_args[0][0]
         expected_days = (PERMANENT_END_DATE - now).days
-        self.assertIsNone(added_obj.hours_delta)
+        self.assertEqual(added_obj.hours_delta, expected_days * 24)
         self.assertEqual(added_obj.days_delta, expected_days)
         self.assertEqual(added_obj.metadata_, {"admin_id": 999, "reason": "permanent_grant"})
 
@@ -192,10 +191,19 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
                 reason="permanent_grant",
             )
 
-        self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
+        expected_end = datetime(
+            PERMANENT_END_DATE.year,
+            PERMANENT_END_DATE.month,
+            PERMANENT_END_DATE.day,
+            active_end.hour,
+            active_end.minute,
+            active_end.second,
+            tzinfo=timezone.utc,
+        )
+        self.assertEqual(updated_user.subscription_end, expected_end)
         added_obj = session.add.call_args[0][0]
-        expected_days = (PERMANENT_END_DATE - active_end).days
-        self.assertIsNone(added_obj.hours_delta)
+        expected_days = (expected_end - active_end).days
+        self.assertEqual(added_obj.hours_delta, expected_days * 24)
         self.assertEqual(added_obj.days_delta, expected_days)
         self.assertGreater(added_obj.days_delta, 0)
 
@@ -430,15 +438,24 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
                 admin_id=999,
                 reason="permanent_active_hours",
             )
-            self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
+            expected_end = datetime(
+                PERMANENT_END_DATE.year,
+                PERMANENT_END_DATE.month,
+                PERMANENT_END_DATE.day,
+                active_end.hour,
+                active_end.minute,
+                active_end.second,
+                tzinfo=timezone.utc,
+            )
+            self.assertEqual(updated_user.subscription_end, expected_end)
 
         async with self.sessions() as session:
             ent = await session.scalar(
                 select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id == user_id)
             )
             self.assertIsNotNone(ent)
-            expected_days = (PERMANENT_END_DATE - active_end).days
-            self.assertIsNone(ent.hours_delta)
+            expected_days = (expected_end - active_end).days
+            self.assertEqual(ent.hours_delta, expected_days * 24)
             self.assertEqual(ent.days_delta, expected_days)
             self.assertGreater(ent.days_delta, 0)
 
