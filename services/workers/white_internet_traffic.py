@@ -13,7 +13,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import XRAY_PROTOCOL
-from config.enums import ServerHealthState, ServerLifecycleStatus
+from config.enums import ServerHealthState, ServerLifecycleStatus, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
@@ -101,7 +101,7 @@ class WhiteInternetTrafficWorker:
 
         total_processed = 0
         exhausted_users_to_notify: list[tuple[int, bool]] = []
-        warn_90p_users_to_notify: list[tuple[int, bool]] = []
+        warn_90p_users_to_notify: list[tuple[int, int, bool]] = []
 
         for server_id, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime in server_list:
             # Network I/O outside DB transaction
@@ -234,6 +234,26 @@ class WhiteInternetTrafficWorker:
                         delta_down = downlink - before_down
                         delta = delta_up + delta_down
                         if delta <= 0:
+                            limit = getattr(sub, "traffic_limit_bytes", None)
+                            if limit is None:
+                                limit = (getattr(sub, "base_traffic_bytes", 0) or 0) + (
+                                    getattr(sub, "extra_traffic_bytes", 0) or 0
+                                )
+                            total_quota = limit or 0
+                            used = max(
+                                0,
+                                (getattr(sub, "traffic_used_bytes", 0) or 0)
+                                - (getattr(sub, "traffic_overage_bytes", 0) or 0),
+                            )
+                            if (
+                                not getattr(sub, "notified_90p", False)
+                                and getattr(sub, "status", None) == WhiteInternetStatus.ACTIVE
+                                and total_quota > 0
+                                and used >= (0.90 * total_quota)
+                            ):
+                                warn_90p_users_to_notify.append(
+                                    (sub.id, sub.user_id, bool(getattr(sub, "is_trial", False)))
+                                )
                             continue
 
                         logger.debug(
@@ -341,11 +361,23 @@ class WhiteInternetTrafficWorker:
                             reply_markup=kb.as_markup(),
                             parse_mode="HTML",
                         )
+                        async with sf() as sess:
+                            await sess.execute(
+                                update(WhiteInternetSubscription)
+                                .where(WhiteInternetSubscription.id == sub_id)
+                                .values(notified_90p=True)
+                            )
+                            await sess.commit()
                     except TelegramForbiddenError:
                         logger.info("User %d blocked bot; marking blocked in database", uid)
                         async with sf() as sess:
                             await sess.execute(
                                 update(User).where(User.id == uid).values(is_bot_blocked=True)
+                            )
+                            await sess.execute(
+                                update(WhiteInternetSubscription)
+                                .where(WhiteInternetSubscription.id == sub_id)
+                                .values(notified_90p=True)
                             )
                             await sess.commit()
                     except Exception as exc:
@@ -361,6 +393,18 @@ class WhiteInternetTrafficWorker:
                                 .values(notified_90p=False)
                             )
                             await sess.commit()
+                else:
+                    logger.warning(
+                        "No telegram_id found for user %d; marking notified_90p=True to avoid retry loop",
+                        uid,
+                    )
+                    async with sf() as sess:
+                        await sess.execute(
+                            update(WhiteInternetSubscription)
+                            .where(WhiteInternetSubscription.id == sub_id)
+                            .values(notified_90p=True)
+                        )
+                        await sess.commit()
 
         return total_processed
 

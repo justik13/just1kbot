@@ -1113,6 +1113,80 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(len(blocked_calls) > 0)
 
+    async def test_traffic_worker_90p_retries_and_delivers_when_delta_is_zero(self):
+        """When sub reached 90% in earlier cycle but transient error left notified_90p=False,
+
+        worker must retry and deliver warning even if delta is zero in subsequent cycle.
+        """
+        mock_bot = AsyncMock()
+        mock_client = AsyncMock()
+        # Node returns counters matching sub's last snapshots -> delta is 0
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1",
+            "boot-1",
+            1000,
+            {"client-uuid-1": {"uplink": 500, "downlink": 400}},
+        )
+
+        server = Server(
+            id=1,
+            name="NL",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://s1:8444",
+            api_key="k1",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+        sub = WhiteInternetSubscription(
+            id=42,
+            user_id=10,
+            origin_node_id=1,
+            uuid="client-uuid-1",
+            status=WhiteInternetStatus.ACTIVE,
+            is_trial=False,
+            notified_90p=False,
+            base_traffic_bytes=1000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=900,
+            traffic_overage_bytes=0,
+            last_uplink_snapshot=500,
+            last_downlink_snapshot=400,
+            traffic_stats_epoch="epoch-1",
+        )
+        user = User(id=10, telegram_id=888888)
+
+        worker = WhiteInternetTrafficWorker(bot=mock_bot, node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
+        mock_session.scalar.side_effect = [sub, user]
+
+        with (
+            patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic") as mock_atomic,
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
+        ):
+            await worker.run_traffic_cycle(mock_session)
+            mock_atomic.assert_not_called()
+
+        mock_bot.send_message.assert_awaited_once()
+        call_kwargs = mock_bot.send_message.await_args.kwargs
+        self.assertEqual(call_kwargs["chat_id"], 888888)
+        self.assertEqual(call_kwargs["text"], texts.WL_TRAFFIC_90P_ALERT)
+
+        notified_calls = [
+            c
+            for c in mock_session.execute.call_args_list
+            if c.args
+            and "white_internet_subscriptions" in str(c.args[0]).lower()
+            and "notified_90p" in str(c.args[0]).lower()
+        ]
+        self.assertTrue(len(notified_calls) > 0)
+
+
 
 class TestReconciliationQueryRegression(unittest.IsolatedAsyncioTestCase):
     """Regression test ensuring SQL query in WhiteInternetReconciliationWorker selects overdue subscriptions."""
