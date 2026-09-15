@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -158,6 +158,7 @@ async def enqueue_api_operation(
     client_name: str | None = None,
     payload: dict | None = None,
     max_attempts: int = 10,
+    next_attempt_at: datetime | None = None,
 ) -> APIOperation:
     """Atomically enqueue a command without committing the caller's transaction."""
     if not isinstance(idempotency_key, str):
@@ -184,6 +185,8 @@ async def enqueue_api_operation(
         "payload": deepcopy(payload or {}),
         "max_attempts": max_attempts,
     }
+    if next_attempt_at is not None:
+        values["next_attempt_at"] = next_attempt_at
     _validate_command(values)
 
     statement = (
@@ -223,7 +226,8 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
         server_id: int | None, profile_id: int | None,
         server_name_snapshot: str | None, api_url_snapshot: str | None,
         api_key_snapshot: str | None, peer_id: str, client_name: str | None = None,
-        audit_reason: str | None = None) -> APIOperation:
+        audit_reason: str | None = None,
+        next_attempt_at: datetime | None = None) -> APIOperation:
     """Ensure a stable delete command; audit reason is deliberately not identity."""
     operation = (await session.execute(select(APIOperation).where(
         APIOperation.idempotency_key == idempotency_key).with_for_update())).scalar_one_or_none()
@@ -232,11 +236,12 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
             idempotency_key=idempotency_key, server_id=server_id, profile_id=profile_id,
             server_name_snapshot=server_name_snapshot, api_url_snapshot=api_url_snapshot,
             api_key_snapshot=api_key_snapshot, peer_id=peer_id, client_name=client_name,
-            payload={"managed_workflow": True})
+            payload={"managed_workflow": True},
+            next_attempt_at=next_attempt_at)
     if operation.status in {"dead", "cancelled"}:
         operation.status = "retry"
         operation.attempts = 0
-        operation.next_attempt_at = func.now()
+        operation.next_attempt_at = next_attempt_at or func.now()
         operation.completed_at = None
         operation.locked_at = operation.locked_by = None
         operation.last_error_code = "delete_requeued"
@@ -245,7 +250,7 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
         operation.status = "retry"
         operation.attempts = 0
         operation.completed_at = None
-        operation.next_attempt_at = func.now()
+        operation.next_attempt_at = next_attempt_at or func.now()
         operation.last_error_code = "delete_profile_discrepancy"
     return operation
 

@@ -1,0 +1,15 @@
+# Сторонние проекты и идеи (Projects & References)
+# Дополнительный внешний источник идей и справочных материалов, не источник фактов о текущем проекте
+
+https://github.com/PRVTPRO/Amnezia-Web-Panel
+https://github.com/coinman-dev/3ax-ui
+https://github.com/fqof/amneziatgbot
+https://github.com/Vadim-Khristenko/awg-containers-and-tools
+https://github.com/mihsergeev/amnezia-control
+https://github.com/hoaxisr/awg-manager
+https://github.com/bivlked/amneziawg-installer
+https://github.com/ekuraev/awgram
+https://github.com/kuzzrus/3x-ui-awg
+https://github.com/MHSanaei/3x-ui
+https://github.com/BoriskaGlebov/vpn_bot
+https://github.com/justik13?tab=stars

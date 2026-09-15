@@ -1042,9 +1042,9 @@ class EntitlementEntry(Base):
         ),
         CheckConstraint(
             "(entry_type IN ('account_purchase_grant','referral_user_bonus',"
-            "'referral_referrer_bonus','manual_grant') AND days_delta > 0 "
+            "'referral_referrer_bonus','manual_grant') "
             "AND reversed_entry_id IS NULL "
-            "AND (hours_delta IS NULL OR hours_delta = days_delta * 24)) OR "
+            "AND ((days_delta = 0 AND hours_delta > 0) OR (days_delta > 0 AND (hours_delta IS NULL OR hours_delta = days_delta * 24)))) OR "
             "(entry_type = 'tariff_change' AND source_type = 'quote' "
             "AND days_delta = 0 AND hours_delta > 0 "
             "AND reversed_entry_id IS NULL) OR "
@@ -1373,6 +1373,14 @@ class WhiteInternetSubscription(Base):
             "active_hwids",
             postgresql_using="gin",
         ),
+        Index(
+            "ix_wi_subs_expiring_notify",
+            "expires_at",
+            "user_id",
+            postgresql_where=text(
+                "status IN ('ACTIVE', 'EXHAUSTED', 'EXPIRED') AND (notified_3d = false OR notified_1d = false OR notified_2h = false OR notified_expired = false)"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -1481,6 +1489,22 @@ class WhiteInternetSubscription(Base):
     # (SYNCED_INACTIVE with matching versions). Never delete rows that still
     # have an unconfirmed presence on the node — that would orphan credentials.
     pending_hard_delete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+    notified_3d: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_1d: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_2h: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_expired: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_90p: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
 

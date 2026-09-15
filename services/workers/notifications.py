@@ -1,11 +1,11 @@
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 
 from bot.keyboards.notifications import (
     get_post_expiry_keyboard,
@@ -120,6 +120,11 @@ async def subscription_notifications_loop(
             )
 
             await _send_post_expiry_notifications(
+                bot,
+                current_time,
+            )
+
+            await _send_white_internet_notifications(
                 bot,
                 current_time,
             )
@@ -442,6 +447,207 @@ async def _send_post_expiry_notifications(
 
                     logger.warning(
                         "Failed to send post-expiry notification to %s: %s",
+                        user.telegram_id,
+                        e,
+                    )
+
+
+async def _send_white_internet_notifications(
+    bot: Bot | None,
+    current_time: datetime,
+) -> None:
+    if bot is None:
+        return
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from config.enums import WhiteInternetStatus
+    from database.models import User, WhiteInternetSubscription
+    from utils.formatters import format_tg_time
+    from bot.texts.runtime.notifications import (
+        BTN_EXTEND_WHITE_INTERNET,
+        NOTIFY_WI_1D,
+        NOTIFY_WI_2H,
+        NOTIFY_WI_3D,
+        NOTIFY_WI_EXPIRED,
+    )
+
+    expired_cutoff = current_time - timedelta(days=14)
+    cutoff = current_time + timedelta(days=3)
+
+    async with session_scope() as session:
+        # Sweep stale subscriptions older than expired_cutoff so they exit ix_wi_subs_expiring_notify
+        await session.execute(
+            update(WhiteInternetSubscription)
+            .where(
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                    WhiteInternetStatus.EXPIRED,
+                ]),
+                WhiteInternetSubscription.expires_at.is_not(None),
+                WhiteInternetSubscription.expires_at < expired_cutoff,
+                or_(
+                    WhiteInternetSubscription.notified_3d.is_(False),
+                    WhiteInternetSubscription.notified_1d.is_(False),
+                    WhiteInternetSubscription.notified_2h.is_(False),
+                    WhiteInternetSubscription.notified_expired.is_(False),
+                ),
+            )
+            .values(
+                notified_3d=True,
+                notified_1d=True,
+                notified_2h=True,
+                notified_expired=True,
+            )
+        )
+
+        stmt = (
+            select(WhiteInternetSubscription.id)
+            .join(User, WhiteInternetSubscription.user_id == User.id)
+            .where(
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                    WhiteInternetStatus.EXPIRED,
+                ]),
+                WhiteInternetSubscription.expires_at.is_not(None),
+                WhiteInternetSubscription.expires_at >= expired_cutoff,
+                WhiteInternetSubscription.expires_at <= cutoff,
+                or_(
+                    WhiteInternetSubscription.notified_3d.is_(False),
+                    WhiteInternetSubscription.notified_1d.is_(False),
+                    WhiteInternetSubscription.notified_2h.is_(False),
+                    WhiteInternetSubscription.notified_expired.is_(False),
+                ),
+                User.is_bot_blocked.is_(False),
+                User.is_banned.is_(False),
+                User.is_deleted.is_(False),
+            )
+            .order_by(WhiteInternetSubscription.expires_at.asc())
+            .limit(500)
+        )
+        result = await session.execute(stmt)
+        sub_ids = [row[0] for row in result.all()]
+
+    if not sub_ids:
+        return
+
+    for i in range(0, len(sub_ids), NOTIFICATION_BATCH_SIZE):
+        batch_ids = sub_ids[i : i + NOTIFICATION_BATCH_SIZE]
+        for sid in batch_ids:
+            async with session_scope() as session:
+                sub = await session.scalar(
+                    select(WhiteInternetSubscription)
+                    .where(WhiteInternetSubscription.id == sid)
+                    .with_for_update(skip_locked=True)
+                )
+                if sub is None:
+                    continue
+
+                if sub.status not in (
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                    WhiteInternetStatus.EXPIRED,
+                ):
+                    continue
+
+                if not sub.expires_at or sub.expires_at > cutoff or sub.expires_at < expired_cutoff:
+                    continue
+
+                user = await session.scalar(
+                    select(User).where(User.id == sub.user_id)
+                )
+                if (
+                    not user
+                    or user.is_bot_blocked
+                    or user.is_banned
+                    or user.is_deleted
+                ):
+                    continue
+
+                if getattr(sub, "is_trial", False) and not sub.notified_3d:
+                    sub.notified_3d = True
+                    await session.flush()
+
+                time_left = sub.expires_at - current_time
+                notify_type = None
+                msg = None
+
+                if time_left.total_seconds() <= 0:
+                    if not sub.notified_expired:
+                        notify_type = "expired"
+                        msg = NOTIFY_WI_EXPIRED
+                elif time_left <= timedelta(hours=2):
+                    if not sub.notified_2h:
+                        notify_type = "2h"
+                        msg = NOTIFY_WI_2H.format(countdown=_format_countdown(time_left))
+                elif time_left <= timedelta(days=1):
+                    if not sub.notified_1d:
+                        notify_type = "1d"
+                        msg = NOTIFY_WI_1D.format(countdown=_format_countdown(time_left))
+                elif time_left <= timedelta(days=3) and not getattr(sub, "is_trial", False):
+                    if not sub.notified_3d:
+                        notify_type = "3d"
+                        msg = NOTIFY_WI_3D.format(
+                            date=format_tg_time(sub.expires_at)
+                        )
+
+                if not notify_type or not msg:
+                    if time_left.total_seconds() <= 0:
+                        logger.warning(
+                            "WI sub %s expired without notify_type "
+                            "(status=%s, flags 3d=%s 1d=%s 2h=%s expired=%s); "
+                            "marking notified to avoid rescan loop",
+                            sub.id,
+                            sub.status,
+                            sub.notified_3d,
+                            sub.notified_1d,
+                            sub.notified_2h,
+                            sub.notified_expired,
+                        )
+                        sub.notified_expired = True
+                        sub.notified_2h = True
+                        sub.notified_1d = True
+                        sub.notified_3d = True
+                        await session.flush()
+                    continue
+
+                kb = InlineKeyboardBuilder()
+                kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="wl_renew_preview")
+
+                try:
+                    await global_send_limiter.acquire()
+                    await bot.send_message(
+                        user.telegram_id,
+                        msg,
+                        reply_markup=kb.as_markup(),
+                        parse_mode="HTML",
+                    )
+                    if notify_type == "expired":
+                        sub.notified_expired = True
+                        sub.notified_2h = True
+                        sub.notified_1d = True
+                        sub.notified_3d = True
+                    elif notify_type == "2h":
+                        sub.notified_2h = True
+                        sub.notified_1d = True
+                        sub.notified_3d = True
+                    elif notify_type == "1d":
+                        sub.notified_1d = True
+                        sub.notified_3d = True
+                    elif notify_type == "3d":
+                        sub.notified_3d = True
+                    await session.flush()
+                except TelegramForbiddenError:
+                    user.is_bot_blocked = True
+                    sub.notified_expired = True
+                    sub.notified_2h = True
+                    sub.notified_1d = True
+                    sub.notified_3d = True
+                    await session.flush()
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send WI notification to %s: %s",
                         user.telegram_id,
                         e,
                     )

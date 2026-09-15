@@ -18,6 +18,8 @@ FORBIDDEN_USER_WORDING = (
     "обход блокировок",
     "обход блокировки",
     "обход блокиров",
+    "защиты от блокировок",
+    "защита от блокировок",
     "глушил",
     "белый список",
     "белые списки",
@@ -55,6 +57,7 @@ class TestUserTextAudit(unittest.TestCase):
         assert "AmneziaVPN" in faq
         assert "AmneziaWG" in faq
         assert "DefaultVPN" in faq
+        assert "INCY" in faq
         assert "vpn://" in faq
         assert ".vpn" in faq
         assert ".conf" in faq

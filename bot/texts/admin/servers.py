@@ -130,7 +130,6 @@ ADMIN_SERVER_RENAMED = "✅ Сервер успешно переименован
 
 ADMIN_SERVER_RENAME_PROMPT = "Введите новое имя сервера:"
 
-ADMIN_SERVER_SLOTS_DB_NOTE = " <i>(в БД: {db_used})</i>"
 ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE = " <i>(на узле: {cached_used}, в БД: {db_used})</i>"
 
 ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"

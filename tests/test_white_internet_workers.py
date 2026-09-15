@@ -965,14 +965,273 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
         mock_session.scalar.side_effect = [sub, user]
 
-        with patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(200, True, 0, None)):
+        with (
+            patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(200, True, 0, None)),
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
+        ):
             await worker.run_traffic_cycle(mock_session)
 
-        mock_bot.send_message.assert_awaited_once_with(
-            chat_id=777777,
-            text=texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT,
-            parse_mode="HTML",
+        mock_bot.send_message.assert_awaited_once()
+        call_kwargs = mock_bot.send_message.await_args.kwargs
+        self.assertEqual(call_kwargs["chat_id"], 777777)
+        self.assertEqual(call_kwargs["text"], texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT)
+        self.assertEqual(call_kwargs["parse_mode"], "HTML")
+        self.assertIsNotNone(call_kwargs.get("reply_markup"))
+
+    async def test_traffic_worker_notifies_90p_alert(self):
+        """When 90% consumed, worker sends WL_TRAFFIC_90P_ALERT with inline keyboard."""
+        mock_bot = AsyncMock()
+        mock_client = AsyncMock()
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1", "boot-1", 1000,
+            {"client-uuid-1": {"uplink": 900, "downlink": 0}},
         )
+
+        server = Server(
+            id=1, name="NL", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s1:8444", api_key="k1", is_active=True,
+            health_state=ServerHealthState.ONLINE, lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+        sub = WhiteInternetSubscription(
+            id=1, user_id=42, origin_node_id=1, uuid="client-uuid-1",
+            status=WhiteInternetStatus.ACTIVE,
+            is_trial=False,
+            notified_90p=False,
+        )
+        user = User(id=42, telegram_id=777777)
+
+        worker = WhiteInternetTrafficWorker(bot=mock_bot, node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
+        mock_session.scalar.side_effect = [sub, user]
+
+        with (
+            patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(900, False, 100, "traffic_90p")),
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
+        ):
+            await worker.run_traffic_cycle(mock_session)
+
+        mock_bot.send_message.assert_awaited_once()
+        call_kwargs = mock_bot.send_message.await_args.kwargs
+        self.assertEqual(call_kwargs["chat_id"], 777777)
+        self.assertEqual(call_kwargs["text"], texts.WL_TRAFFIC_90P_ALERT)
+        self.assertEqual(call_kwargs["parse_mode"], "HTML")
+        self.assertIsNotNone(call_kwargs.get("reply_markup"))
+
+    async def test_traffic_worker_90p_leaves_flag_false_on_transient_telegram_error(self):
+        """When Telegram send fails on transient exception, sub.notified_90p is NOT set to True in DB and remains False for retry."""
+        mock_bot = AsyncMock()
+        mock_bot.send_message.side_effect = Exception("Telegram connection timeout")
+        mock_client = AsyncMock()
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1", "boot-1", 1000,
+            {"client-uuid-1": {"uplink": 900, "downlink": 0}},
+        )
+
+        server = Server(
+            id=1, name="NL", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s1:8444", api_key="k1", is_active=True,
+            health_state=ServerHealthState.ONLINE, lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+        sub = WhiteInternetSubscription(
+            id=42, user_id=10, origin_node_id=1, uuid="client-uuid-1",
+            status=WhiteInternetStatus.ACTIVE,
+            is_trial=False,
+            notified_90p=False,
+        )
+        user = User(id=10, telegram_id=888888)
+
+        worker = WhiteInternetTrafficWorker(bot=mock_bot, node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
+        mock_session.scalar.side_effect = [sub, user]
+
+        with (
+            patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(900, False, 100, "traffic_90p")),
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
+        ):
+            await worker.run_traffic_cycle(mock_session)
+
+        mock_bot.send_message.assert_awaited_once()
+        # Verify execute was NOT called to mark notified_90p = True
+        true_updates = [
+            c for c in mock_session.execute.call_args_list
+            if c.args and "white_internet_subscriptions" in str(c.args[0]).lower() and "notified_90p" in str(c.args[0]).lower()
+        ]
+        self.assertEqual(len(true_updates), 0)
+        self.assertFalse(sub.notified_90p)
+
+    async def test_traffic_worker_90p_marks_bot_blocked_on_forbidden_error(self):
+        """When user blocks bot, TelegramForbiddenError sets user.is_bot_blocked = True."""
+        from aiogram.exceptions import TelegramForbiddenError
+        mock_bot = AsyncMock()
+        mock_bot.send_message.side_effect = TelegramForbiddenError(
+            method="sendMessage", message="Forbidden: bot was blocked by the user"
+        )
+        mock_client = AsyncMock()
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1", "boot-1", 1000,
+            {"client-uuid-1": {"uplink": 900, "downlink": 0}},
+        )
+
+        server = Server(
+            id=1, name="NL", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s1:8444", api_key="k1", is_active=True,
+            health_state=ServerHealthState.ONLINE, lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+        sub = WhiteInternetSubscription(
+            id=42, user_id=10, origin_node_id=1, uuid="client-uuid-1",
+            status=WhiteInternetStatus.ACTIVE,
+            is_trial=False,
+            notified_90p=True,
+        )
+        user = User(id=10, telegram_id=888888)
+
+        worker = WhiteInternetTrafficWorker(bot=mock_bot, node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
+        mock_session.scalar.side_effect = [sub, user]
+
+        with (
+            patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(900, False, 100, "traffic_90p")),
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
+        ):
+            await worker.run_traffic_cycle(mock_session)
+
+        mock_bot.send_message.assert_awaited_once()
+        blocked_calls = [
+            c for c in mock_session.execute.call_args_list
+            if c.args and "users" in str(c.args[0]).lower() and "is_bot_blocked" in str(c.args[0]).lower()
+        ]
+        self.assertTrue(len(blocked_calls) > 0)
+
+    async def test_traffic_worker_90p_retries_and_delivers_when_delta_is_zero(self):
+        """When sub reached 90% in earlier cycle but transient error left notified_90p=False,
+
+        worker must retry and deliver warning even if delta is zero in subsequent cycle.
+        """
+        mock_bot = AsyncMock()
+        mock_client = AsyncMock()
+        # Node returns counters matching sub's last snapshots -> delta is 0
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1",
+            "boot-1",
+            1000,
+            {"client-uuid-1": {"uplink": 500, "downlink": 400}},
+        )
+
+        server = Server(
+            id=1,
+            name="NL",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://s1:8444",
+            api_key="k1",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+        sub = WhiteInternetSubscription(
+            id=42,
+            user_id=10,
+            origin_node_id=1,
+            uuid="client-uuid-1",
+            status=WhiteInternetStatus.ACTIVE,
+            is_trial=False,
+            notified_90p=False,
+            base_traffic_bytes=1000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=900,
+            traffic_overage_bytes=0,
+            last_uplink_snapshot=500,
+            last_downlink_snapshot=400,
+            traffic_stats_epoch="epoch-1",
+        )
+        user = User(id=10, telegram_id=888888)
+
+        worker = WhiteInternetTrafficWorker(bot=mock_bot, node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
+        mock_session.scalar.side_effect = [sub, user]
+
+        with (
+            patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic") as mock_atomic,
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
+        ):
+            await worker.run_traffic_cycle(mock_session)
+            mock_atomic.assert_not_called()
+
+        mock_bot.send_message.assert_awaited_once()
+        call_kwargs = mock_bot.send_message.await_args.kwargs
+        self.assertEqual(call_kwargs["chat_id"], 888888)
+        self.assertEqual(call_kwargs["text"], texts.WL_TRAFFIC_90P_ALERT)
+
+        notified_calls = [
+            c
+            for c in mock_session.execute.call_args_list
+            if c.args
+            and "white_internet_subscriptions" in str(c.args[0]).lower()
+            and "notified_90p" in str(c.args[0]).lower()
+        ]
+        self.assertTrue(len(notified_calls) > 0)
+
+    async def test_traffic_worker_90p_cas_version_in_update_statement(self):
+        """Verify that notified_90p update statement includes desired_version CAS filter to prevent renew overwrite."""
+        mock_bot = AsyncMock()
+        mock_client = AsyncMock()
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1", "boot-1", 1000,
+            {"client-uuid-1": {"uplink": 900, "downlink": 0}},
+        )
+
+        server = Server(
+            id=1, name="NL", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s1:8444", api_key="k1", is_active=True,
+            health_state=ServerHealthState.ONLINE, lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+        sub = WhiteInternetSubscription(
+            id=42, user_id=10, origin_node_id=1, uuid="client-uuid-1",
+            status=WhiteInternetStatus.ACTIVE,
+            is_trial=False,
+            notified_90p=False,
+            desired_version=3,
+        )
+        user = User(id=10, telegram_id=888888)
+
+        worker = WhiteInternetTrafficWorker(bot=mock_bot, node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
+        mock_session.scalar.side_effect = [sub, user]
+
+        with (
+            patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(900, False, 100, "traffic_90p")),
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
+        ):
+            await worker.run_traffic_cycle(mock_session)
+
+        mock_bot.send_message.assert_awaited_once()
+        notified_calls = [
+            c for c in mock_session.execute.call_args_list
+            if c.args and "white_internet_subscriptions" in str(c.args[0]).lower() and "notified_90p" in str(c.args[0]).lower()
+        ]
+        self.assertTrue(len(notified_calls) > 0)
+        stmt_sql = str(notified_calls[0].args[0])
+        self.assertIn("white_internet_subscriptions.desired_version", stmt_sql)
 
 
 class TestReconciliationQueryRegression(unittest.IsolatedAsyncioTestCase):

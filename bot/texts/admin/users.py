@@ -4,8 +4,6 @@ from bot.texts.admin.common import COMMON_ALL_USERS_LABEL
 from bot.texts.admin.common import COMMON_VSE, COMMON_NOVYE_7D, COMMON_3_DAYS, COMMON_BEZ_SUBSCRIPTION, COMMON_ZABANENNYE
 
 
-ADMIN_BAN_CONFIRM = "Вы уверены, что хотите забанить пользователя <code>{telegram_id}</code>?"
-
 ADMIN_BAN_FAILED = """❌ Ошибка при попытке забанить пользователя:
 {message}"""
 
@@ -44,7 +42,6 @@ ADMIN_MANUAL_GRANT_USER_DELETED = "❌ Невозможно выдать под�
 
 ADMIN_USER_ID_FORMAT = "ID: {telegram_id}"
 ADMIN_USER_ID_NO_COLON_FORMAT = "ID {telegram_id}"
-ADMIN_USER_PAREN_ID_FORMAT = " (ID: {telegram_id})"
 
 
 ADMIN_MASS_BONUS_AUDIENCE_LABELS = {
@@ -361,8 +358,6 @@ ADMIN_DEVICE_NAME_TEMPLATE = "Устройство #{v0}"
 
 ADMIN_DEVICE_DELETE_BUTTON_LABEL = "🗑 {v0}"
 
-ADMIN_BTN_SUBSCRIPTION = "📅 Подписка"
-
 ADMIN_USER_DEBIT_REASON_PROMPT = """Введите текстовое примечание (причину списания) для лога аудита:
 """
 
@@ -405,9 +400,6 @@ LABEL_NOT_SET_LINK_HIDDEN = "Не задано (ссылка скрыта от �
 STATUS_EXPIRED_LABEL = "истекла"
 
 TIME_DAYS_FULL_FORMAT = "{days} дней"
-
-
-ADMIN_USERS_DEVICE_ROW_HEADER = "  • 📱 <b>{name}</b>\n"
 
 
 ADMIN_USERS_FILTER_SERVER_BUTTON = "🖥 {flag} {server_name}"

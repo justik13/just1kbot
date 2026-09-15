@@ -165,8 +165,6 @@ ERROR_VALIDATION = """❌ Ошибка валидации: {error}
 
 Введите заново:"""
 
-FALLBACK_SECTION_IN_DEVELOPMENT = "🔨 Раздел находится в разработке"
-
 FALLBACK_STALE_CALLBACK = "Сессия устарела. Вернитесь в меню."
 
 FALLBACK_UNKNOWN_TEXT = """🤖 <b>Я не понимаю произвольный текст.</b>

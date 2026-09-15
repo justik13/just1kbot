@@ -721,28 +721,3 @@ async def cancel_all_topups_ui(
         db_user,
         notice=texts.BALANCE_OTMENENO_SSYLOK.format(count=count) if count > 0 else None,
     )
-
-
-@router.callback_query(F.data.startswith("balance_later:"))
-async def return_later(
-    callback: CallbackQuery,
-    session: AsyncSession,
-    db_user: User | None = None,
-) -> None:
-    await callback.answer(show_alert=False)
-    payment_id = parse_callback_id(callback.data, 1)
-    if db_user is None or payment_id is None:
-        return
-    payment = await _owned_topup(session, db_user, payment_id)
-    if payment:
-        payment.topup_context = {
-            **(payment.topup_context or {}),
-            "auto_show": False,
-        }
-    await _render_balance(
-        callback.bot,
-        callback.message.chat.id,
-        session,
-        db_user,
-        notice=texts.TOPUP_SAVED_NOTICE,
-    )

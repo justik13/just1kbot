@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -11,7 +12,7 @@ from config.constants import (
     PERMANENT_SUBSCRIPTION_DAYS,
     VPN_ACCESS_GRACE_HOURS,
 )
-from database.models import User
+from database.models import EntitlementEntry, User
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
@@ -297,6 +298,9 @@ class SubscriptionService:
         days: int,
         new_device_limit: int | None = None,
         new_tariff_id: int | None = None,
+        create_entitlement: bool = False,
+        admin_id: int | None = None,
+        reason: str | None = None,
     ) -> User | None:
         if days < 0:
             raise ValueError("days must be >= 0")
@@ -337,16 +341,54 @@ class SubscriptionService:
         # - даунгрейд запрещён выше по коду.
         if days == 0:
             new_end = user.subscription_end
+            effective_days = 0
+            effective_hours: int | None = 0
         else:
             base_end = user.subscription_end if had_active_subscription else now
 
-            new_end = (
-                PERMANENT_END_DATE
-                if days >= PERMANENT_SUBSCRIPTION_DAYS
-                else base_end + timedelta(days=days)
-            )
+            if days >= PERMANENT_SUBSCRIPTION_DAYS:
+                new_end = PERMANENT_END_DATE
+            else:
+                new_end = base_end + timedelta(days=days)
+
+            delta = new_end - base_end
+            if delta.total_seconds() <= 0:
+                effective_days = 0
+                effective_hours = 0
+            elif days >= PERMANENT_SUBSCRIPTION_DAYS:
+                # Floor permanent grant delta to whole days (effective_days * 24)
+                # to satisfy ck_entitlement_entries_shape (hours_delta = days_delta * 24).
+                effective_days = max(1, delta.days)
+                effective_hours = effective_days * 24
+            else:
+                effective_days = days
+                effective_hours = days * 24
 
         user.subscription_end = new_end
+
+        if days > 0 and effective_days > 0 and create_entitlement:
+            device_limit_val = (
+                new_device_limit
+                if new_device_limit is not None
+                else (user.device_limit if user.device_limit is not None else 1)
+            )
+            tariff_id_val = (
+                new_tariff_id
+                if new_tariff_id is not None
+                else user.current_tariff_id
+            )
+            entitlement = EntitlementEntry(
+                beneficiary_user_id=user.id,
+                source_type="admin",
+                source_id=f"admin_{admin_id or 'system'}_{uuid.uuid4().hex[:12]}",
+                entry_type="manual_grant",
+                days_delta=effective_days,
+                hours_delta=effective_hours,
+                device_limit_snapshot=device_limit_val,
+                tariff_id_snapshot=tariff_id_val,
+                metadata_={"admin_id": admin_id, "reason": reason} if (admin_id or reason) else {},
+            )
+            session.add(entitlement)
 
         user.notified_3d = False
         user.notified_1d = False
