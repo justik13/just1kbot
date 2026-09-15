@@ -111,7 +111,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
 
     from database.repositories.white_internet_repo import get_subscription_by_user_id
     from config.enums import WhiteInternetStatus
-    from utils.datetime_helpers import now_utc
+    from utils.datetime_helpers import is_expired, now_utc
 
     is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
     import inspect
@@ -123,21 +123,20 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     except Exception:
         wi_sub = None
     now = now_utc()
+    wi_exp = getattr(wi_sub, "expires_at", None) if wi_sub else None
     is_wi_active = bool(
         wi_sub
         and not inspect.iscoroutine(wi_sub)
         and getattr(wi_sub, "status", None) == WhiteInternetStatus.ACTIVE
-        and getattr(wi_sub, "expires_at", None)
-        and not inspect.iscoroutine(getattr(wi_sub, "expires_at", None))
-        and wi_sub.expires_at > now
+        and isinstance(wi_exp, datetime)
+        and not is_expired(wi_exp)
     )
     is_wi_exhausted = bool(
         wi_sub
         and not inspect.iscoroutine(wi_sub)
         and getattr(wi_sub, "status", None) == WhiteInternetStatus.EXHAUSTED
-        and getattr(wi_sub, "expires_at", None)
-        and not inspect.iscoroutine(getattr(wi_sub, "expires_at", None))
-        and wi_sub.expires_at > now
+        and isinstance(wi_exp, datetime)
+        and not is_expired(wi_exp)
     )
 
     is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
@@ -150,15 +149,15 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         from datetime import timezone
         end_1 = (
             db_user.subscription_end.replace(tzinfo=timezone.utc)
-            if db_user.subscription_end and db_user.subscription_end.tzinfo is None
-            else db_user.subscription_end
+            if isinstance(getattr(db_user, "subscription_end", None), datetime) and db_user.subscription_end.tzinfo is None
+            else getattr(db_user, "subscription_end", None)
         )
         end_2 = (
             wi_sub.expires_at.replace(tzinfo=timezone.utc)
-            if wi_sub.expires_at and wi_sub.expires_at.tzinfo is None
-            else wi_sub.expires_at
+            if isinstance(getattr(wi_sub, "expires_at", None), datetime) and wi_sub.expires_at.tzinfo is None
+            else getattr(wi_sub, "expires_at", None)
         )
-        dates = [d for d in (end_1, end_2) if d is not None]
+        dates = [d for d in (end_1, end_2) if isinstance(d, datetime)]
         end_date = max(dates) if dates else None
         valid_until_str = format_subscription_date(end_date)
         days_left_str = format_days_left(end_date)
@@ -196,8 +195,25 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         )
     else:
         status_str = texts.STATUS_SUBSCRIPTION_INACTIVE
-        valid_until_str = texts.PLACEHOLDER_DASH
-        days_left_str = texts.ZERO_DAYS_LABEL
+        last_end = (
+            db_user.subscription_end
+            if isinstance(getattr(db_user, "subscription_end", None), datetime)
+            else (
+                wi_sub.expires_at
+                if wi_sub and isinstance(getattr(wi_sub, "expires_at", None), datetime)
+                else None
+            )
+        )
+        valid_until_str = (
+            format_subscription_date(last_end)
+            if last_end
+            else texts.PLACEHOLDER_DASH
+        )
+        days_left_str = (
+            format_days_left(last_end)
+            if last_end
+            else texts.ZERO_DAYS_LABEL
+        )
 
     inviter_line = ""
     if db_user.referred_by:
@@ -235,10 +251,10 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         raw_limit = getattr(wi_sub, "device_limit", 1)
         wi_limit = raw_limit if isinstance(raw_limit, int) and raw_limit > 0 else 1
 
-    if is_active and is_wi_active:
+    if is_active and (is_wi_active or is_wi_exhausted):
         devices_count = len(profiles) + wi_active_devices
         device_limit = (db_user.device_limit or 0) + wi_limit
-    elif is_wi_active:
+    elif is_wi_active or is_wi_exhausted:
         devices_count = wi_active_devices
         device_limit = wi_limit
     else:
@@ -264,7 +280,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     kb = get_hub_keyboard(
         is_admin=is_admin,
         is_active=is_active,
-        is_wi_active=is_wi_active,
+        is_wi_active=(is_wi_active or is_wi_exhausted),
         mtproto_url=mtproto_url,
     )
 

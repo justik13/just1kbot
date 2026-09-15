@@ -435,6 +435,10 @@ class WhiteInternetService:
         sub_locked.status_reason = None
         sub_locked.desired_version += 1
         sub_locked.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        sub_locked.notified_3d = False
+        sub_locked.notified_1d = False
+        sub_locked.notified_2h = False
+        sub_locked.notified_expired = False
         await session.flush()
         await session.refresh(sub_locked)
 

@@ -140,18 +140,29 @@ async def _build_connections_screen(
     except Exception:
         wi_sub = None
 
+    from utils.datetime_helpers import is_expired
+
     now = now_utc()
+    wi_exp = getattr(wi_sub, "expires_at", None) if wi_sub else None
     is_wi_active = bool(
         wi_sub
         and not inspect.iscoroutine(wi_sub)
         and getattr(wi_sub, "status", None) == WhiteInternetStatus.ACTIVE
-        and getattr(wi_sub, "expires_at", None)
-        and not inspect.iscoroutine(getattr(wi_sub, "expires_at", None))
-        and wi_sub.expires_at > now
+        and isinstance(wi_exp, datetime)
+        and not is_expired(wi_exp)
     )
+    is_wi_exhausted = bool(
+        wi_sub
+        and not inspect.iscoroutine(wi_sub)
+        and getattr(wi_sub, "status", None) == WhiteInternetStatus.EXHAUSTED
+        and isinstance(wi_exp, datetime)
+        and not is_expired(wi_exp)
+    )
+    wi_has_access = is_wi_active or is_wi_exhausted
+
     wi_active_devices = 0
     wi_device_limit = 1
-    if is_wi_active and wi_sub:
+    if wi_has_access and wi_sub:
         raw_hwids = getattr(wi_sub, "active_hwids", None)
         current_hwids = dict(raw_hwids) if isinstance(raw_hwids, dict) else {}
         cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
@@ -162,7 +173,7 @@ async def _build_connections_screen(
         wi_device_limit = raw_limit if isinstance(raw_limit, int) and raw_limit > 0 else 1
 
     if visible_profiles_count == 0:
-        if is_wi_active:
+        if wi_has_access:
             rendered += texts.CONNECTION_EMPTY_WI_ACTIVE.format(
                 active_devices=wi_active_devices,
                 device_limit=wi_device_limit,
@@ -207,7 +218,7 @@ async def _build_connections_screen(
 
         rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
 
-    if is_wi_active:
+    if wi_has_access:
         builder.button(
             text=texts.BTN_WHITE_INTERNET_CONNECTIONS.format(
                 active=wi_active_devices,

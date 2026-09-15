@@ -700,7 +700,10 @@ async def settle_succeeded_topup(
                         text += texts.TOPUP_WELCOME_BONUS_LINE.format(welcome_bonus=wb)
                     builder.button(text=texts.BTN_MY_BALANCE, callback_data="menu_balance")
                     context_source = (payment.topup_context or {}).get("source")
-                    if context_source == "white_internet":
+                    auto_action = (payment.topup_context or {}).get("auto_fulfill_action")
+                    if context_source == "white_internet" or (
+                        auto_action and str(auto_action).startswith("white_internet")
+                    ):
                         builder.button(
                             text=texts.BTN_WHITE_INTERNET,
                             callback_data="white_internet",

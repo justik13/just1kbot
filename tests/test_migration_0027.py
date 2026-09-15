@@ -48,3 +48,14 @@ class Migration0027Tests(unittest.TestCase):
         self.assertIn("ix_wi_subs_expiring_notify", index_names)
         idx = next(i for i in table.indexes if i.name == "ix_wi_subs_expiring_notify")
         self.assertIn("EXPIRED", str(idx.dialect_options["postgresql"]["where"]))
+
+    def test_migration_0027_module_attributes(self):
+        import importlib.util
+        file_path = Path("alembic/versions/0027_wi_notification_flags.py")
+        spec = importlib.util.spec_from_file_location("migration_0027", file_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.assertEqual(mod.revision, "0027_wi_notification_flags")
+        self.assertEqual(mod.down_revision, "0026_wi_trial_semantics")
+        self.assertTrue(callable(getattr(mod, "upgrade", None)))
+        self.assertTrue(callable(getattr(mod, "downgrade", None)))

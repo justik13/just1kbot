@@ -383,6 +383,54 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(already_active), 9)
             self.assertEqual(mock_create.call_count, 1)
 
+    async def test_convert_trial_to_paid_resets_notification_flags(self):
+        """Converting trial subscription to paid must reset all notification flags to False."""
+        now = datetime.now(timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.ACTIVE,
+            is_trial=True,
+            desired_version=1,
+            notified_3d=True,
+            notified_1d=True,
+            notified_2h=True,
+            notified_expired=True,
+            device_limit=1,
+            origin_node_id=self.origin_server.id,
+            expires_at=now + timedelta(hours=1),
+        )
+
+        from config.constants import XRAY_PROTOCOL
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+
+        self.origin_server.protocol = XRAY_PROTOCOL
+        self.origin_server.is_active = True
+        self.origin_server.health_state = ServerHealthState.ONLINE
+        self.origin_server.lifecycle_status = ServerLifecycleStatus.ACTIVE
+        self.origin_server.extra_data = {"relays": [{"code": "de"}]}
+        self.tariff_version.base_quota_bytes = 50 * 1024**3
+        self.tariff_version.duration_hours = 720
+
+        with (
+            patch("services.white_internet_service.lock_checkout_user", new=AsyncMock(return_value=self.user)),
+            patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", new=AsyncMock(return_value=sub)),
+            patch.object(self.session, "scalar", new=AsyncMock(return_value=self.origin_server)),
+            patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", new=AsyncMock(return_value=self.tariff)),
+            patch("services.white_internet_service.get_or_create_current_version", new=AsyncMock(return_value=self.tariff_version)),
+            patch("services.white_internet_service.create_purchase_debit", new=AsyncMock()),
+            patch.object(WhiteInternetService, "_try_inline_sync", new=AsyncMock(return_value=True)),
+        ):
+            ok, msg, res = await WhiteInternetService.convert_trial_to_paid(self.session, self.user.id)
+            self.assertTrue(ok)
+            self.assertFalse(sub.notified_3d)
+            self.assertFalse(sub.notified_1d)
+            self.assertFalse(sub.notified_2h)
+            self.assertFalse(sub.notified_expired)
+            self.assertFalse(sub.is_trial)
+            self.assertEqual(sub.status, WhiteInternetStatus.ACTIVE)
+
 
 class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
     """Test suite for Telegram Bot UI in trial mode."""
