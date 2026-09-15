@@ -510,6 +510,7 @@ async def admin_sub_grant_apply(
             days,
             new_device_limit=tariff.device_limit,
             new_tariff_id=tariff.id,
+            create_entitlement=True,
             admin_id=callback.from_user.id,
             reason="admin_sub_grant",
         )

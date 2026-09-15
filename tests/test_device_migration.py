@@ -259,6 +259,45 @@ class TestDeviceMigrationService(unittest.IsolatedAsyncioTestCase):
             )
         self.assertTrue(ctx.exception.remaining_seconds > 0)
 
+    @patch("services.api_operations_finalizer._schedule_migration_grace_deletion", new_callable=AsyncMock)
+    @patch("services.api_operations_finalizer._lock_operation_and_profile", new_callable=AsyncMock)
+    async def test_finalize_existing_create_success_schedules_migration_grace_deletion(
+        self, mock_lock, mock_schedule_grace
+    ):
+        from services.api_operations_finalizer import finalize_existing_create_success
+        operation = APIOperation(
+            id=101,
+            status="processing",
+            operation_type="create_peer",
+            locked_by="worker-1",
+            attempts=1,
+            payload={"migrating_from_id": 10},
+        )
+        profile = VPNProfile(
+            id=20,
+            user_id=1,
+            server_id=200,
+            peer_id="peer-new-20",
+            raw_config="config-20",
+            provisioning_status="active",
+        )
+        mock_lock.return_value = (operation, profile)
+        mock_session = MagicMock()
+        mock_ctx = AsyncMock()
+        mock_session.begin = MagicMock(return_value=mock_ctx)
+        mock_session.close = AsyncMock()
+        mock_session_factory = MagicMock(return_value=mock_session)
+
+        await finalize_existing_create_success(
+            101,
+            worker_id="worker-1",
+            expected_attempt_number=1,
+            session_factory=mock_session_factory,
+        )
+
+        mock_schedule_grace.assert_awaited_once_with(mock_session, operation, profile)
+        self.assertEqual(operation.status, "succeeded")
+
     @patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock)
     @patch("services.device_service.AuditService.log_action", new_callable=AsyncMock)
     @patch("services.device_service.enqueue_api_operation", new_callable=AsyncMock)

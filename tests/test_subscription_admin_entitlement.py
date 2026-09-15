@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import importlib.util
 import os
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -17,6 +18,13 @@ from services.tariff_change_quote import create_tariff_change_quote
 from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
+
+_spec = importlib.util.spec_from_file_location(
+    "migration_0027",
+    os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "0027_backfill_entitlements.py"),
+)
+migration_0027 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(migration_0027)
 
 
 class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
@@ -90,6 +98,73 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(updated_user, user)
         self.assertFalse(session.add.called)
+
+    @patch("bot.handlers.admin.users.subscription_grant_routes.is_admin", return_value=True)
+    @patch("bot.handlers.admin.users.subscription_grant_routes.get_user_by_telegram_id")
+    @patch("bot.handlers.admin.users.subscription_grant_routes.get_tariff_by_id")
+    @patch("bot.handlers.admin.users.subscription_grant_routes.SubscriptionService.extend_subscription", new_callable=AsyncMock)
+    @patch("bot.handlers.admin.users.subscription_grant_routes.invalidate_user_cache")
+    @patch("bot.handlers.admin.users.subscription_grant_routes.render_hub", new_callable=AsyncMock)
+    async def test_admin_sub_grant_apply_passes_create_entitlement_true(
+        self, mock_render_hub, mock_invalidate, mock_extend, mock_get_tariff, mock_get_user, mock_is_admin
+    ) -> None:
+        from bot.handlers.admin.users.subscription_grant_routes import admin_sub_grant_apply
+
+        callback = AsyncMock()
+        callback.data = "admin_sub_grant_apply:123456:10:30"
+        callback.from_user.id = 999
+        callback.message.chat.id = 999
+
+        user = User(id=1, telegram_id=123456, is_deleted=False, is_banned=False)
+        tariff = Tariff(id=10, name="Basic", device_limit=2)
+        mock_get_user.return_value = user
+        mock_get_tariff.return_value = tariff
+        session = AsyncMock()
+
+        await admin_sub_grant_apply(callback, session)
+
+        mock_extend.assert_awaited_once_with(
+            session,
+            123456,
+            30,
+            new_device_limit=2,
+            new_tariff_id=10,
+            create_entitlement=True,
+            admin_id=999,
+            reason="admin_sub_grant",
+        )
+
+    @patch("bot.handlers.admin.users.subscription_extend_routes.is_admin", return_value=True)
+    @patch("bot.handlers.admin.users.subscription_extend_routes.get_user_by_telegram_id")
+    @patch("bot.handlers.admin.users.subscription_extend_routes.SubscriptionService.extend_subscription", new_callable=AsyncMock)
+    @patch("bot.handlers.admin.users.subscription_extend_routes.invalidate_user_cache")
+    @patch("bot.handlers.admin.users.subscription_extend_routes.render_hub", new_callable=AsyncMock)
+    async def test_admin_sub_apply_extend_passes_create_entitlement_true(
+        self, mock_render_hub, mock_invalidate, mock_extend, mock_get_user, mock_is_admin
+    ) -> None:
+        from bot.handlers.admin.users.subscription_extend_routes import admin_sub_apply_extend
+
+        callback = AsyncMock()
+        callback.data = "admin_sub_apply_extend:123456:15"
+        callback.from_user.id = 999
+        callback.message.chat.id = 999
+
+        user = User(id=1, telegram_id=123456, is_deleted=False, is_banned=False)
+        mock_get_user.return_value = user
+        session = AsyncMock()
+
+        await admin_sub_apply_extend(callback, session)
+
+        mock_extend.assert_awaited_once_with(
+            session,
+            123456,
+            15,
+            new_device_limit=None,
+            new_tariff_id=None,
+            create_entitlement=True,
+            admin_id=999,
+            reason="admin_sub_extend",
+        )
 
     async def test_extend_subscription_permanent_matches_effective_days(self) -> None:
         from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
@@ -321,53 +396,8 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
                 )
             )
 
-            # Backfill active users without entitlements honestly
-            await session.execute(
-                text(
-                    """
-                    WITH missing_users AS (
-                        SELECT
-                            u.id AS user_id,
-                            u.device_limit,
-                            u.current_tariff_id,
-                            u.subscription_end,
-                            GREATEST(1, CEIL(EXTRACT(EPOCH FROM (u.subscription_end - NOW())) / 3600)::int) AS exact_hours
-                        FROM users u
-                        WHERE u.subscription_end > NOW()
-                          AND u.is_deleted = false
-                          AND NOT EXISTS (
-                              SELECT 1 FROM entitlement_entries e
-                              WHERE e.beneficiary_user_id = u.id
-                          )
-                    )
-                    INSERT INTO entitlement_entries (
-                        beneficiary_user_id,
-                        source_type,
-                        source_id,
-                        entry_type,
-                        days_delta,
-                        hours_delta,
-                        device_limit_snapshot,
-                        tariff_id_snapshot,
-                        metadata,
-                        created_at
-                    )
-                    SELECT
-                        mu.user_id,
-                        'admin',
-                        'legacy_0027_grant_' || mu.user_id,
-                        'manual_grant',
-                        CASE WHEN mu.exact_hours % 24 = 0 THEN mu.exact_hours / 24 ELSE 0 END,
-                        mu.exact_hours,
-                        COALESCE(mu.device_limit, 1),
-                        mu.current_tariff_id,
-                        jsonb_build_object('reason', 'legacy_active_subscription_backfill'),
-                        mu.subscription_end - (mu.exact_hours * INTERVAL '1 hour')
-                    FROM missing_users mu
-                    ON CONFLICT (beneficiary_user_id, source_type, source_id, entry_type) DO NOTHING
-                    """
-                )
-            )
+            # Backfill active users without entitlements honestly using actual migration 0027 SQL
+            await session.execute(text(migration_0027.BACKFILL_SQL))
 
         # Verify results in DB
         async with self.sessions() as session:

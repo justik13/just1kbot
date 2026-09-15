@@ -356,6 +356,8 @@ class SubscriptionService:
                 effective_days = 0
                 effective_hours = 0
             elif days >= PERMANENT_SUBSCRIPTION_DAYS:
+                # Floor permanent grant delta to whole days (effective_days * 24)
+                # to satisfy ck_entitlement_entries_shape (hours_delta = days_delta * 24).
                 effective_days = max(1, delta.days)
                 effective_hours = effective_days * 24
             else:

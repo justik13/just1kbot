@@ -202,6 +202,7 @@ async def finalize_existing_create_success(
             or not profile.raw_config
         ):
             raise RuntimeError("profile is not a finalized create")
+        await _schedule_migration_grace_deletion(session, operation, profile)
         _complete(operation)
 
 

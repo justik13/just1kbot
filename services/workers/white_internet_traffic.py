@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from aiogram import Bot
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import XRAY_PROTOCOL
@@ -265,7 +265,7 @@ class WhiteInternetTrafficWorker:
                         if became_exhausted:
                             exhausted_users_to_notify.append((sub.user_id, bool(getattr(sub, "is_trial", False))))
                         elif event == "traffic_90p":
-                            warn_90p_users_to_notify.append((sub.user_id, bool(getattr(sub, "is_trial", False))))
+                            warn_90p_users_to_notify.append((sub.id, sub.user_id, bool(getattr(sub, "is_trial", False))))
                 except Exception as client_exc:
                     logger.error(
                         "Error processing traffic deduction for client %s on server %d: %s",
@@ -312,7 +312,9 @@ class WhiteInternetTrafficWorker:
                         )
 
         if self.bot is not None and warn_90p_users_to_notify:
-            for uid, is_sub_trial in set(warn_90p_users_to_notify):
+            from aiogram.exceptions import TelegramForbiddenError
+
+            for sub_id, uid, is_sub_trial in set(warn_90p_users_to_notify):
                 async with sf() as sess:
                     user = await sess.scalar(select(User).where(User.id == uid))
                     telegram_id = user.telegram_id if user else None
@@ -339,12 +341,26 @@ class WhiteInternetTrafficWorker:
                             reply_markup=kb.as_markup(),
                             parse_mode="HTML",
                         )
+                    except TelegramForbiddenError:
+                        logger.info("User %d blocked bot; marking blocked in database", uid)
+                        async with sf() as sess:
+                            await sess.execute(
+                                update(User).where(User.id == uid).values(is_bot_blocked=True)
+                            )
+                            await sess.commit()
                     except Exception as exc:
                         logger.warning(
-                            "Failed to send 90%% traffic warning alert to user %d: %s",
+                            "Failed to send 90%% traffic warning alert to user %d: %s; resetting notified_90p for retry",
                             uid,
                             exc,
                         )
+                        async with sf() as sess:
+                            await sess.execute(
+                                update(WhiteInternetSubscription)
+                                .where(WhiteInternetSubscription.id == sub_id)
+                                .values(notified_90p=False)
+                            )
+                            await sess.commit()
 
         return total_processed
 

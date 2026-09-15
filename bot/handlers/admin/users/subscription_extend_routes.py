@@ -262,6 +262,7 @@ async def admin_sub_apply_extend(
             days,
             new_device_limit=None,
             new_tariff_id=None,
+            create_entitlement=True,
             admin_id=callback.from_user.id,
             reason="admin_sub_extend",
         )

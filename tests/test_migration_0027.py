@@ -395,17 +395,16 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(grant.days_delta, 0)
             self.assertEqual(grant.metadata_["reason"], "legacy_active_subscription_backfill")
 
-            # user_ref with only referral bonus must also be backfilled because active sub exceeds referral
+            # user_ref already has entitlement history -> conservative migration does NOT backfill
             ref_grant = await session.scalar(
                 select(EntitlementEntry).where(
                     EntitlementEntry.beneficiary_user_id == user_ref_id,
                     EntitlementEntry.source_id == f"legacy_0027_grant_{user_ref_id}",
                 )
             )
-            self.assertIsNotNone(ref_grant)
-            self.assertEqual(ref_grant.entry_type, "manual_grant")
+            self.assertIsNone(ref_grant)
 
-            # user_paid already has account_purchase_grant covering duration - must NOT be backfilled
+            # user_paid already has account_purchase_grant -> must NOT be backfilled
             paid_grant = await session.scalar(
                 select(EntitlementEntry).where(
                     EntitlementEntry.beneficiary_user_id == user_paid_id,
@@ -414,13 +413,11 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIsNone(paid_grant)
 
-            # user_rev had bonus + reversal (net 0) -> must be backfilled for active sub
+            # user_rev already has entitlement entries -> must NOT be backfilled
             rev_grant = await session.scalar(
                 select(EntitlementEntry).where(
                     EntitlementEntry.beneficiary_user_id == user_rev_id,
                     EntitlementEntry.source_id == f"legacy_0027_grant_{user_rev_id}",
                 )
             )
-            self.assertIsNotNone(rev_grant)
-            self.assertEqual(rev_grant.entry_type, "manual_grant")
-            self.assertEqual(rev_grant.hours_delta, 5)
+            self.assertIsNone(rev_grant)
