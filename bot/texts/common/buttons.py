@@ -7,11 +7,7 @@ BTN_ADMIN_MENU = "🔙 В админ-меню"
 
 BTN_ADMIN_SERVER_PING = "⚡ Проверить доступность (Ping)"
 
-BTN_ADMIN_USER_ADD_BALANCE = "➕ Начислить баланс (Бонус)"
-
 BTN_ADMIN_USER_BALANCE = "💳 Баланс пользователя"
-
-BTN_ADMIN_USER_DEDUCT_BALANCE = "➖ Списать баланс"
 
 BTN_ADMIN_USER_LOGS = "📜 История действий (Логи)"
 
@@ -22,8 +18,6 @@ BTN_AMNEZIA_DOCS = "📚 Документация Amnezia"
 BTN_BACK = "← Назад"
 
 BTN_BACK_TO_DEVICE = "← Назад в устройство"
-
-BTN_BACK_TO_SUPPORT = "← Назад в поддержку"
 
 BTN_BALANCE = "💰 Баланс"
 
@@ -175,7 +169,6 @@ BUTTON_CUSTOM_AMOUNT = "Другая сумма"
 
 BUTTON_OPEN_PAYMENT = "💳 Перейти к оплате"
 
-BUTTON_REFERRAL_LIST = "👥 Список рефералов"
 BUTTON_REFERRAL_LIST_COUNT = "👥 Мои рефералы ({count})"
 
 BUTTON_RESUME_TOPUP = "💳 Продолжить пополнение"

@@ -3,9 +3,6 @@ from __future__ import annotations
 from bot.texts.admin.common import COMMON_ALL_USERS_LABEL, COMMON_ACTIVE_SUBSCRIPTIONS_LABEL
 from bot.texts.common import BTN_BROADCAST_EXPIRING, BTN_BROADCAST_NO_SUB
 
-ADMIN_BROADCAST = "Всего"
-
-
 BROADCAST_AUDIENCE_LABEL_EXPIRING_3D = 'Подписки истекают менее чем за 3 дня'
 BROADCAST_AUDIENCE_LABEL_EXPIRED = 'Истекшие подписки'
 BROADCAST_AUDIENCE_LABEL_NEVER = 'Без подписок'
@@ -27,14 +24,10 @@ BROADCAST_NOT_STARTED_STATUS = "Рассылка не запущена"
 
 BROADCAST_ERR_CAPTION_TOO_LONG = "⚠️ Подпись к медиа слишком длинная. Максимум {error_summary} символов."
 
-BROADCAST_ACTIVE_LABEL = "Активных"
-
 BROADCAST_ALREADY_RUNNING = "⏳ Рассылка уже идёт, дождитесь завершения"
 
 BROADCAST_AUDIENCE = """👥 <b>Аудитория:</b> {aud_label}
 """
-
-ADMIN_BROADCAST_TITLE_BROADCAST = "📢 Управление рассылками"
 
 ADMIN_AUDIT_LOG_DETAILS_BROADCAST = "to {label}: {success} success, {fail} fail, status={status}"
 

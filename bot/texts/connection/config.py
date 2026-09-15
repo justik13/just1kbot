@@ -15,13 +15,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_ODIN_IZ_PRIKREPLE = """1. Сохра�
 CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY = """1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).
 """
 
-CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS = "• В приложении статус изменится на <b>«Подключено»</b>;"
-
 CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER = "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
-
-CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT = "• В строке состояния появится значок соединения (или 🔑);"
-
-CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = "• На сайте <b>2ip.io</b> страна сменится на локацию сервера;"
 
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл .vpn / .conf для роутера или ПК? Нажмите кнопку ниже:</i>"
 
@@ -43,8 +37,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DOSTUPNA_CHEREZ = "<i>Конфигурац�
 
 CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN = """   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG (Keenetic AWG)
 """
-
-CONNECTION_CONFIG_DEVICE_VIEW_DELETE_OTOZVAT_KEY_I_OSVOBO = "• <b>🗑 Удалить</b> — отозвать ключ и освободить слот"
 
 CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_NE_NAYDENO_ILI_BYLO = "Устройство не найдено или было удалено"
 
@@ -72,11 +64,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV = """📖 <b>Инс
 
 """
 
-CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO = "• <b>📖 Инструкция</b> — пошаговое руководство по настройке"
-
 CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT = "🚀 <b>Как подключиться и проверить:</b>"
-
-CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET = "✅ <b>Как понять, что всё работает:</b>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA = """
 
@@ -107,12 +95,8 @@ CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_SOZDAT_DEVICE_NA = """
 
 ❌ <b>Не удалось создать устройство на сервере.</b>"""
 
-CONNECTION_CONFIG_DEVICE_VIEW_OTKROYTE_PRILOZHENIE_NAZHMITE = "откройте приложение → нажмите «Вставить» → «Подключиться»."
-
 CONNECTION_CONFIG_DEVICE_VIEW_PRAVILA_I_OSOBENNOSTI_RABOTY = """⚠️ <b>Правила и особенности работы:</b>
 """
-
-CONNECTION_CONFIG_DEVICE_VIEW_RENAME_IZMENIT_NAZVANIE = "• <b>✏️ Переименовать</b> — изменить название устройства"
 
 CONNECTION_CONFIG_DEVICE_VIEW_SELECT_NUZHNUYU_TEMU_BELOW = "Выберите нужную тему ниже:"
 

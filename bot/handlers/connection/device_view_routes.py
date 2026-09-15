@@ -16,7 +16,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import (
     get_alt_connection_keyboard,
     get_back_button,
@@ -40,7 +39,6 @@ from utils.telegram import (
     get_hub_ids,
     render_hub,
     safe,
-    send_hub_document,
 )
 from utils.vpn_parser import (
     build_conf_file_from_dict,
@@ -270,17 +268,6 @@ async def manage_device(
     await callback.answer(show_alert=False)
 
 
-def _get_device_config_keyboard(profile_id: int):
-    # NOTE: this keyboard is shown after "Скачать файлом" and "Показать ключ".
-    # - "Инструкция и помощь" uses device_help:{profile_id} (NOT support_help/menu_support)
-    #   so the user stays in the device flow with a contextual back button to manage_device.
-    # - Back button returns directly to the device card.
-    builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_INSTRUKTSIYA_I_POMOSCH, callback_data=f"device_help:{profile_id}")
-    builder.button(text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
-    builder.adjust(1)
-    return builder.as_markup()
-
 
 @router.callback_query(F.data.startswith("device_help:"))
 async def device_help(
@@ -333,71 +320,6 @@ async def device_help(
     )
     await callback.answer(show_alert=False)
 
-
-@router.callback_query(F.data.startswith("show_config:"))
-async def show_config(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User | None = None,
-):
-    await state.clear()
-
-    profile_id = parse_callback_id(callback.data, 1)
-    if profile_id is None:
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
-        return
-
-    profile = await get_profile_by_id(session, profile_id)
-    if not profile or not db_user or profile.user_id != db_user.id:
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-
-    has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
-    if not has_access:
-        await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
-        return
-
-    raw_config = profile.raw_config or ""
-    if not can_show_config_actions(profile) or not raw_config:
-        await callback.answer(texts.DEVICE_CONFIG_UNAVAILABLE, show_alert=True)
-        return
-
-    server = await get_server_by_id(session, profile.server_id)
-    display_key = build_display_vpn_key(raw_config, profile, server) or raw_config
-
-    if len(display_key) > TELEGRAM_MESSAGE_LIMIT - 300:
-        safe_device_name = await _get_safe_device_name(session, profile)
-
-        key_file = BufferedInputFile(
-            display_key.encode("utf-8"),
-            filename=f"{safe_device_name}_key.txt",
-        )
-
-        caption = texts.DEVICE_KEY_TOO_LONG_CAPTION.format(device_name=safe(profile.device_name))
-
-        await send_hub_document(
-            callback.bot,
-            callback.message.chat.id,
-            document=key_file,
-            caption=caption,
-            reply_markup=_get_device_config_keyboard(profile.id),
-            parse_mode="HTML",
-        )
-        await callback.answer(show_alert=False)
-        return
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        texts.DEVICE_SHOW_KEY.format(
-            device_name=safe(profile.device_name),
-            raw_config=safe(display_key),
-        ),
-        _get_device_config_keyboard(profile.id),
-        trigger_message_id=callback.message.message_id,
-    )
-    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("alt_connection:") | F.data.startswith("download_conf:"))

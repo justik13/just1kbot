@@ -68,10 +68,6 @@ DEVICE_DELETE_IN_PROGRESS = "⏳ Уже удаляем устройство..."
 
 DEVICE_DELETING_PROGRESS = "⏳ Удаляю устройство..."
 
-DEVICE_KEY_TOO_LONG_CAPTION = """🔑 <b>Ключ подключения для {device_name}:</b>
-
-<i>Ключ слишком длинный для текстового сообщения, поэтому отправлен файлом.</i>"""
-
 DEVICE_MANAGE_HEADER = """📱 <b>{device_name}</b>
 
 🌍 Локация: <b>{country_display}</b>
@@ -89,12 +85,6 @@ DEVICE_RENAMED_SUCCESS = "✅ Устройство переименовано в
 DEVICE_RENAME_PROMPT = """✏️ <b>Переименование устройства</b>
 
 Введите новое имя (буквы, цифры, пробелы, дефисы, подчёркивания, до 16 символов):"""
-
-DEVICE_SHOW_KEY = """🔑 <b>Ключ подключения для {device_name}:</b>
-
-<code>{raw_config}</code>
-
-<i>💡 Нажмите на моноширинный текст выше, чтобы скопировать ключ в буфер обмена.</i>"""
 
 DEVICE_STATUS_CREATING_LABEL = "🗑 Да, удалить"
 

@@ -20,7 +20,6 @@ LOCKED_ACTION_PREFIXES = (
     # Генерация конфигураций.
     "download_conf:",
     "alt_connection:",
-    "show_config:",
     # Платежи.
     "balance_create:",
     "balance_check:",
@@ -58,11 +57,6 @@ LOCKED_ACTION_PREFIXES = (
     "admin_maintenance_toggle_apply",
     # Рассылка.
     "broadcast_confirm_launch",
-    "broadcast_send_all",
-    "broadcast_send_active",
-    "broadcast_send_expired",
-    "broadcast_send_never",
-    "broadcast_send_test",
     # Белый Интернет.
     "wl_trial_activate",
     "wl_buy_execute",
@@ -106,11 +100,6 @@ STALE_ACTION_PREFIXES = (
     "admin_tariff_toggle_apply:",
     "admin_maintenance_toggle_apply",
     "broadcast_confirm_launch",
-    "broadcast_send_all",
-    "broadcast_send_active",
-    "broadcast_send_expired",
-    "broadcast_send_never",
-    "broadcast_send_test",
     "balance_resume_purchase:",
     "aq:x:",
     "wl_add_device_confirm",

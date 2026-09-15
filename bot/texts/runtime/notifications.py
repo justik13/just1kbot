@@ -55,7 +55,7 @@ NOTIFY_GRACE_12H = """🚨 <b>Внимание: Скоро удаление ус
 
 
 
-REFERRAL_BONUS_ACCREDITED = "🎁 Вам начислен реферальный бонус: <b>+{bonus} ₽</b>!"
+REFERRAL_BONUS_ACCREDITED = "🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{bonus} ₽</b> бонусов на баланс."
 
 TIME_DAYS_FORMAT = "{days} дн."
 
