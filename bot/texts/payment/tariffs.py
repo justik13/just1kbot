@@ -157,8 +157,6 @@ PAYMENT_SUBSCRIPTION_INACTIVE = """⚠️ Смена тарифа с перер�
 
 Ваша подписка неактивна. Перейдите в раздел «Купить подписку» для оформления нового тарифа."""
 
-PAYMENT_TARIFFS_SERVICES_WORKERS_PAYMENTS = "🧪"
-
 PAYMENT_TARIFF_CHANGE_HEADER_CARD = """💱 <b>Смена тарифа</b>
 
 Новый тариф: <b>{tariff_name}</b>

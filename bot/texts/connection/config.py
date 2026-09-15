@@ -23,8 +23,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT = "• В стро�
 
 CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = "• На сайте <b>2ip.io</b> страна сменится на локацию сервера;"
 
-CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "• Заблокированные сервисы и зарубежные сайты станут доступны."
-
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл .vpn / .conf для роутера или ПК? Нажмите кнопку ниже:</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
@@ -112,10 +110,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_SOZDAT_DEVICE_NA = """
 CONNECTION_CONFIG_DEVICE_VIEW_OTKROYTE_PRILOZHENIE_NAZHMITE = "откройте приложение → нажмите «Вставить» → «Подключиться»."
 
 CONNECTION_CONFIG_DEVICE_VIEW_PRAVILA_I_OSOBENNOSTI_RABOTY = """⚠️ <b>Правила и особенности работы:</b>
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_REKOMENDUEM_ISPOLZOVAT_PROTOKO = """• <b>Рекомендуем использовать протокол AmneziaWG для максимальной защиты от блокировок.</b>
-
 """
 
 CONNECTION_CONFIG_DEVICE_VIEW_RENAME_IZMENIT_NAZVANIE = "• <b>✏️ Переименовать</b> — изменить название устройства"

@@ -26,7 +26,8 @@ FAQ_TEXT = """❓ <b>Частые вопросы (FAQ)</b>
 <blockquote expandable>📌 <b>2. Какие приложения использовать для подключения?</b>
 • <b>AmneziaVPN (Рекомендуется)</b> — основное приложение. Поддерживает файлы .vpn и ключи vpn://. Доступно для iOS, Android, Windows, macOS, Linux.
 • <b>AmneziaWG</b> — лёгкий клиент для протокола AmneziaWG. Файлы .conf.
-• <b>DefaultVPN</b> — альтернативный клиент для iOS. Файлы .conf или ключ vpn://.</blockquote>
+• <b>DefaultVPN</b> — альтернативный клиент для iOS. Файлы .conf или ключ vpn://.
+• <b>INCY</b> — приложение для подключения по подписке «Белый Интернет» (iOS, Android).</blockquote>
 
 <blockquote expandable>📌 <b>3. Как понять, что всё работает?</b>
 • В приложении индикатор станет активным с надписью «Подключено»;

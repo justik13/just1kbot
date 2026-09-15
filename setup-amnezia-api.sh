@@ -529,7 +529,7 @@ server {
     }
 
     # Healthcheck
-    location = /health {
+    location ~ ^/(health|healthz)$ {
         proxy_pass http://127.0.0.1:$AMNEZIA_PORT;
         access_log off;
     }
