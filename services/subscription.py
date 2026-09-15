@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -347,17 +347,7 @@ class SubscriptionService:
             base_end = user.subscription_end if had_active_subscription else now
 
             if days >= PERMANENT_SUBSCRIPTION_DAYS:
-                # Preserve base_end time-of-day so delta is an exact multiple of 24h
-                # eliminating fractional day truncation and maintaining hours_delta == days_delta * 24
-                new_end = datetime(
-                    PERMANENT_END_DATE.year,
-                    PERMANENT_END_DATE.month,
-                    PERMANENT_END_DATE.day,
-                    base_end.hour,
-                    base_end.minute,
-                    base_end.second,
-                    tzinfo=timezone.utc,
-                )
+                new_end = PERMANENT_END_DATE
             else:
                 new_end = base_end + timedelta(days=days)
 

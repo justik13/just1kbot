@@ -142,7 +142,7 @@ async def finalize_create_success(
 async def _schedule_migration_grace_deletion(session, operation, profile) -> None:
     """If profile creation was part of a device migration, schedule delayed deletion of the old peer."""
     migrating_from_id = (operation.payload or {}).get("migrating_from_id")
-    if not migrating_from_id or getattr(profile, "provisioning_status", "") != "active":
+    if not migrating_from_id or getattr(profile, "provisioning_status", "") not in ("active", "pending_update"):
         return
     from datetime import timedelta
     from services.api_operations_queue import (

@@ -288,6 +288,7 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
         # and User with existing purchase grant
         tg_id_ref = int(uuid.uuid4().int % 1000000000)
         tg_id_paid = int(uuid.uuid4().int % 1000000000)
+        tg_id_rev = int(uuid.uuid4().int % 1000000000)
 
         async with self.sessions.begin() as session:
             user = User(
@@ -308,12 +309,19 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
                 device_limit=2,
                 subscription_end=now + timedelta(hours=720),
             )
-            session.add_all([user, user_ref, user_paid])
+            user_rev = User(
+                telegram_id=tg_id_rev,
+                username=f"upgrade_rev_{tg_id_rev}",
+                device_limit=2,
+                subscription_end=now + timedelta(hours=5),
+            )
+            session.add_all([user, user_ref, user_paid, user_rev])
             await session.flush()
             user_id = user.id
             user_ref_id = user_ref.id
             user_paid_id = user_paid.id
-            self.created_user_ids.extend([user_id, user_ref_id, user_paid_id])
+            user_rev_id = user_rev.id
+            self.created_user_ids.extend([user_id, user_ref_id, user_paid_id, user_rev_id])
 
             # Add referral bonus for user_ref
             ref_entry = EntitlementEntry(
@@ -335,7 +343,30 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
                 hours_delta=720,
                 device_limit_snapshot=1,
             )
-            session.add_all([ref_entry, paid_entry])
+            # Add referral bonus + reversal for user_rev (net total 0)
+            rev_bonus = EntitlementEntry(
+                beneficiary_user_id=user_rev_id,
+                source_type="referral",
+                source_id=f"ref_{user_rev_id}",
+                entry_type="referral_user_bonus",
+                days_delta=3,
+                hours_delta=72,
+                device_limit_snapshot=1,
+            )
+            session.add_all([ref_entry, paid_entry, rev_bonus])
+            await session.flush()
+
+            rev_reversal = EntitlementEntry(
+                beneficiary_user_id=user_rev_id,
+                source_type="referral",
+                source_id=f"ref_{user_rev_id}",
+                entry_type="referral_reversal",
+                days_delta=-3,
+                hours_delta=-72,
+                device_limit_snapshot=1,
+                reversed_entry_id=rev_bonus.id,
+            )
+            session.add(rev_reversal)
 
         # 2. Run upgrade()
         async with self.engine.connect() as conn:
@@ -382,3 +413,14 @@ class Migration0027IntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             self.assertIsNone(paid_grant)
+
+            # user_rev had bonus + reversal (net 0) -> must be backfilled for active sub
+            rev_grant = await session.scalar(
+                select(EntitlementEntry).where(
+                    EntitlementEntry.beneficiary_user_id == user_rev_id,
+                    EntitlementEntry.source_id == f"legacy_0027_grant_{user_rev_id}",
+                )
+            )
+            self.assertIsNotNone(rev_grant)
+            self.assertEqual(rev_grant.entry_type, "manual_grant")
+            self.assertEqual(rev_grant.hours_delta, 5)

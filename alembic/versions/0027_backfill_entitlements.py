@@ -39,12 +39,7 @@ BACKFILL_SQL = """
 WITH user_entitlement_summary AS (
     SELECT
         beneficiary_user_id,
-        COALESCE(SUM(
-            CASE
-                WHEN entry_type = 'referral_reversal' THEN -COALESCE(hours_delta, days_delta * 24)
-                ELSE COALESCE(hours_delta, days_delta * 24)
-            END
-        ), 0) AS total_hours,
+        COALESCE(SUM(COALESCE(hours_delta, days_delta * 24)), 0) AS total_hours,
         BOOL_OR(entry_type IN ('account_purchase_grant', 'manual_grant', 'tariff_change')) AS has_subscription_grant
     FROM entitlement_entries
     GROUP BY beneficiary_user_id

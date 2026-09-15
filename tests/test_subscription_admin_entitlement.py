@@ -191,18 +191,9 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
                 reason="permanent_grant",
             )
 
-        expected_end = datetime(
-            PERMANENT_END_DATE.year,
-            PERMANENT_END_DATE.month,
-            PERMANENT_END_DATE.day,
-            active_end.hour,
-            active_end.minute,
-            active_end.second,
-            tzinfo=timezone.utc,
-        )
-        self.assertEqual(updated_user.subscription_end, expected_end)
+        self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
         added_obj = session.add.call_args[0][0]
-        expected_days = (expected_end - active_end).days
+        expected_days = (PERMANENT_END_DATE - active_end).days
         self.assertEqual(added_obj.hours_delta, expected_days * 24)
         self.assertEqual(added_obj.days_delta, expected_days)
         self.assertGreater(added_obj.days_delta, 0)
@@ -438,23 +429,14 @@ class SubscriptionAdminEntitlementIntegrationTests(unittest.IsolatedAsyncioTestC
                 admin_id=999,
                 reason="permanent_active_hours",
             )
-            expected_end = datetime(
-                PERMANENT_END_DATE.year,
-                PERMANENT_END_DATE.month,
-                PERMANENT_END_DATE.day,
-                active_end.hour,
-                active_end.minute,
-                active_end.second,
-                tzinfo=timezone.utc,
-            )
-            self.assertEqual(updated_user.subscription_end, expected_end)
+            self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
 
         async with self.sessions() as session:
             ent = await session.scalar(
                 select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id == user_id)
             )
             self.assertIsNotNone(ent)
-            expected_days = (expected_end - active_end).days
+            expected_days = (PERMANENT_END_DATE - active_end).days
             self.assertEqual(ent.hours_delta, expected_days * 24)
             self.assertEqual(ent.days_delta, expected_days)
             self.assertGreater(ent.days_delta, 0)

@@ -538,6 +538,39 @@ class TestMigrationFinalizerHook(unittest.IsolatedAsyncioTestCase):
         # Session should not even be queried
         mock_session.execute.assert_not_called()
 
+    @patch("services.api_operations_queue.ensure_delete_operation", new_callable=AsyncMock)
+    @patch("services.api_operations_queue.resolve_profile_endpoint_snapshot", new_callable=AsyncMock)
+    async def test_migration_grace_deletion_scheduled_when_pending_update(
+        self, mock_resolve_snapshot, mock_ensure_delete
+    ):
+        from services.api_operations_finalizer import _schedule_migration_grace_deletion
+
+        mock_session = AsyncMock()
+        operation = SimpleNamespace(
+            payload={"migrating_from_id": 55},
+        )
+        new_profile = SimpleNamespace(
+            id=99,
+            provisioning_status="pending_update",
+        )
+        old_profile = VPNProfile(
+            id=55,
+            server_id=10,
+            peer_id="peer-55",
+            client_name="tg_123_p55",
+            provisioning_status="active",
+        )
+
+        mock_execute_res = MagicMock()
+        mock_execute_res.scalar_one_or_none.return_value = old_profile
+        mock_session.execute = AsyncMock(return_value=mock_execute_res)
+        mock_resolve_snapshot.return_value = (10, "OldServer", "https://old.server", "key")
+
+        await _schedule_migration_grace_deletion(mock_session, operation, new_profile)
+
+        self.assertEqual(old_profile.provisioning_status, "deleting")
+        mock_ensure_delete.assert_called_once()
+
 
 class TestDeviceMigrateRoutes(unittest.IsolatedAsyncioTestCase):
     """Test start_migrate_device and route guards."""

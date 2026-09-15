@@ -513,6 +513,7 @@ async def _send_white_internet_notifications(
                 sub = await session.scalar(
                     select(WhiteInternetSubscription)
                     .where(WhiteInternetSubscription.id == sid)
+                    .with_for_update(skip_locked=True)
                 )
                 if sub is None:
                     continue
