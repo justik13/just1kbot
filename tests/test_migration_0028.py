@@ -46,6 +46,7 @@ class Migration0028Tests(unittest.TestCase):
         self.assertIn("notified_2h", content)
         self.assertIn("notified_expired", content)
         self.assertIn("notified_90p", content)
+        self.assertIn("is_trial", content)
         self.assertIn("ix_wi_subs_expiring_notify", content)
 
     def test_white_internet_subscription_model_has_notification_columns_and_index(self):

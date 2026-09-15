@@ -1021,8 +1021,8 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["parse_mode"], "HTML")
         self.assertIsNotNone(call_kwargs.get("reply_markup"))
 
-    async def test_traffic_worker_90p_resets_flag_on_transient_telegram_error(self):
-        """When Telegram send fails on transient exception, sub.notified_90p is reset to False in DB for retry."""
+    async def test_traffic_worker_90p_leaves_flag_false_on_transient_telegram_error(self):
+        """When Telegram send fails on transient exception, sub.notified_90p is NOT set to True in DB and remains False for retry."""
         mock_bot = AsyncMock()
         mock_bot.send_message.side_effect = Exception("Telegram connection timeout")
         mock_client = AsyncMock()
@@ -1043,7 +1043,7 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
             id=42, user_id=10, origin_node_id=1, uuid="client-uuid-1",
             status=WhiteInternetStatus.ACTIVE,
             is_trial=False,
-            notified_90p=True,
+            notified_90p=False,
         )
         user = User(id=10, telegram_id=888888)
 
@@ -1059,12 +1059,13 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
             await worker.run_traffic_cycle(mock_session)
 
         mock_bot.send_message.assert_awaited_once()
-        # Verify execute was called to reset notified_90p to False
-        reset_calls = [
+        # Verify execute was NOT called to mark notified_90p = True
+        true_updates = [
             c for c in mock_session.execute.call_args_list
             if c.args and "white_internet_subscriptions" in str(c.args[0]).lower() and "notified_90p" in str(c.args[0]).lower()
         ]
-        self.assertTrue(len(reset_calls) > 0)
+        self.assertEqual(len(true_updates), 0)
+        self.assertFalse(sub.notified_90p)
 
     async def test_traffic_worker_90p_marks_bot_blocked_on_forbidden_error(self):
         """When user blocks bot, TelegramForbiddenError sets user.is_bot_blocked = True."""

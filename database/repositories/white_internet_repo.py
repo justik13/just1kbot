@@ -502,7 +502,6 @@ async def record_and_deduct_traffic_atomic(
         sub.notified_90p = True
     elif total_quota > 0 and sub.status == WhiteInternetStatus.ACTIVE and not getattr(sub, "notified_90p", False):
         if used_after >= 0.90 * total_quota:
-            sub.notified_90p = True
             event = "traffic_90p"
 
     await session.flush()

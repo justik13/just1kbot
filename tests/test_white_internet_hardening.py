@@ -602,5 +602,47 @@ class TestGroupQProtocolInvariantAndZeroSecrets(unittest.TestCase):
         self.assertNotEqual(vp.device_name, "")
 
 
+class TestGroupRAtomicTraffic90pEmitsWithoutPrematureFlag(unittest.IsolatedAsyncioTestCase):
+    """Group R: 90% Traffic Warning Event Emission Invariant."""
+
+    async def test_record_and_deduct_traffic_atomic_emits_event_without_premature_notified_90p(self):
+        """Deduction reaching >=90% must emit event='traffic_90p' while leaving sub.notified_90p=False."""
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=1000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=0,
+            traffic_overage_bytes=0,
+            notified_90p=False,
+            last_uplink_snapshot=0,
+            last_downlink_snapshot=0,
+        )
+        mock_session = AsyncMock(spec=AsyncSession)
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+            (
+                consumed,
+                became_exhausted,
+                available_after,
+                event,
+            ) = await white_internet_repo.record_and_deduct_traffic_atomic(
+                mock_session,
+                subscription_id=1,
+                node_epoch="epoch-test",
+                snapshot_uplink_after=910,
+                snapshot_downlink_after=0,
+            )
+
+        self.assertEqual(consumed, 910)
+        self.assertFalse(became_exhausted)
+        self.assertEqual(available_after, 90)
+        self.assertEqual(event, "traffic_90p")
+        # Invariant: sub.notified_90p must remain False in repo; flipped only post-send via CAS in worker
+        self.assertFalse(sub.notified_90p)
+        mock_session.flush.assert_awaited()
+
+
 if __name__ == "__main__":
     unittest.main()

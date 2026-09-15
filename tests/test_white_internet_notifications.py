@@ -271,6 +271,55 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         # Verify Russian grammar 'через' in 1d notification
         self.assertIn("истекает через", call2_args[0][1])
 
+    async def test_trial_subscription_closes_notified_3d_without_sending(self):
+        """Trial subscription with 2 days left closes notified_3d = True and sends no 3d message."""
+        bot = AsyncMock()
+        now = datetime.now(timezone.utc)
+
+        sub_trial = MagicMock(spec=WhiteInternetSubscription)
+        sub_trial.id = 99
+        sub_trial.user_id = 999
+        sub_trial.expires_at = now + timedelta(days=2)
+        sub_trial.status = WhiteInternetStatus.ACTIVE
+        sub_trial.is_trial = True
+        sub_trial.notified_3d = False
+        sub_trial.notified_1d = False
+        sub_trial.notified_2h = False
+        sub_trial.notified_expired = False
+
+        user_trial = MagicMock(spec=User)
+        user_trial.id = 999
+        user_trial.telegram_id = 999999
+        user_trial.is_bot_blocked = False
+        user_trial.is_banned = False
+        user_trial.is_deleted = False
+
+        mock_id_result = MagicMock()
+        mock_id_result.all.return_value = [(99,)]
+
+        mock_session_query = AsyncMock()
+        mock_session_query.execute.return_value = mock_id_result
+
+        mock_session_sub = AsyncMock()
+        mock_session_sub.scalar.side_effect = [sub_trial, user_trial]
+
+        sessions = [mock_session_query, mock_session_sub]
+
+        def get_session():
+            ctx = AsyncMock()
+            ctx.__aenter__.return_value = sessions.pop(0)
+            return ctx
+
+        with (
+            patch("services.workers.notifications.session_scope", side_effect=get_session),
+            patch("services.workers.notifications.global_send_limiter.acquire", new_callable=AsyncMock),
+        ):
+            await _send_white_internet_notifications(bot, now)
+
+        bot.send_message.assert_not_awaited()
+        self.assertTrue(sub_trial.notified_3d)
+        mock_session_sub.flush.assert_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

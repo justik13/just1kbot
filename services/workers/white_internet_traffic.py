@@ -400,20 +400,10 @@ class WhiteInternetTrafficWorker:
                             await sess.commit()
                     except Exception as exc:
                         logger.warning(
-                            "Failed to send 90%% traffic warning alert to user %d: %s; resetting notified_90p for retry",
+                            "Failed to send 90%% traffic warning alert to user %d: %s; will retry on next polling cycle",
                             uid,
                             exc,
                         )
-                        async with sf() as sess:
-                            await sess.execute(
-                                update(WhiteInternetSubscription)
-                                .where(
-                                    WhiteInternetSubscription.id == sub_id,
-                                    WhiteInternetSubscription.desired_version == expected_version,
-                                )
-                                .values(notified_90p=False)
-                            )
-                            await sess.commit()
                 else:
                     logger.warning(
                         "No telegram_id found for user %d; marking notified_90p=True to avoid retry loop",

@@ -70,6 +70,7 @@ def upgrade() -> None:
         "white_internet_subscriptions",
         sa.column("expires_at", sa.DateTime(timezone=True)),
         sa.column("status", sa.String()),
+        sa.column("is_trial", sa.Boolean()),
         sa.column("notified_3d", sa.Boolean()),
         sa.column("notified_1d", sa.Boolean()),
         sa.column("notified_2h", sa.Boolean()),
@@ -96,6 +97,16 @@ def upgrade() -> None:
             )
         )
         .values(notified_90p=True)
+    )
+    op.execute(
+        wi_subs.update()
+        .where(
+            sa.and_(
+                wi_subs.c.is_trial.is_(True),
+                wi_subs.c.notified_3d.is_(False),
+            )
+        )
+        .values(notified_3d=True)
     )
 
     # 3. Create partial index for WI expiration notification polling

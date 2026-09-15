@@ -539,6 +539,10 @@ async def _send_white_internet_notifications(
                 ):
                     continue
 
+                if getattr(sub, "is_trial", False) and not sub.notified_3d:
+                    sub.notified_3d = True
+                    await session.flush()
+
                 time_left = sub.expires_at - current_time
                 notify_type = None
                 msg = None
