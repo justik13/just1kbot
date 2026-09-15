@@ -1,0 +1,38 @@
+# Основные ресурсы проекта (Main Sources)
+# Непосредственная работа с проектом, актуальные API и официальная документация
+
+## Репозитории и клиенты
+https://github.com/justik13/just1kbot
+https://github.com/kyoresuas/amnezia-api
+https://github.com/amnezia-vpn/amnezia-client
+https://github.com/amnezia-vpn/DefaultVPN
+https://amnezia.org/
+https://docs.amnezia.org/
+
+##Белый интернет клиент INCY
+https://incy.cc/
+https://github.com/INCY-DEV/incy-platforms
+https://github.com/orgs/INCY-DEV/repositories
+https://docs.incy.cc/
+
+## Платежная система (ЮKassa)
+https://yookassa.ru/developers
+https://yookassa.ru/docs
+
+## Telegram API и Bot API
+https://telegram.org/
+https://telegram.org/faq
+https://core.telegram.org/api
+https://core.telegram.org/bots
+https://core.telegram.org/bots/api
+https://telegram.org/blog
+
+## Архитектура и клиенты AmneziaWG
+https://github.com/Vadim-Khristenko/Any-Tech-ARCHITECT
+https://architect.vai-rice.space/
+https://github.com/orgs/amnezia-vpn/repositories
+https://github.com/amnezia-vpn/amneziawg-windows
+https://github.com/amnezia-vpn/amneziawg-windows-client
+https://github.com/amnezia-vpn/amneziawg-android
+https://github.com/amnezia-vpn/amneziawg-apple
+https://www.reddit.com/r/AmneziaVPN/
