@@ -1186,6 +1186,51 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(len(notified_calls) > 0)
 
+    async def test_traffic_worker_90p_cas_version_in_update_statement(self):
+        """Verify that notified_90p update statement includes desired_version CAS filter to prevent renew overwrite."""
+        mock_bot = AsyncMock()
+        mock_client = AsyncMock()
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1", "boot-1", 1000,
+            {"client-uuid-1": {"uplink": 900, "downlink": 0}},
+        )
+
+        server = Server(
+            id=1, name="NL", protocol="xray", capabilities=["xray_origin"],
+            api_url="https://s1:8444", api_key="k1", is_active=True,
+            health_state=ServerHealthState.ONLINE, lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+        sub = WhiteInternetSubscription(
+            id=42, user_id=10, origin_node_id=1, uuid="client-uuid-1",
+            status=WhiteInternetStatus.ACTIVE,
+            is_trial=False,
+            notified_90p=False,
+            desired_version=3,
+        )
+        user = User(id=10, telegram_id=888888)
+
+        worker = WhiteInternetTrafficWorker(bot=mock_bot, node_client=mock_client)
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: [server]))
+        mock_session.scalar.side_effect = [sub, user]
+
+        with (
+            patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(900, False, 100, "traffic_90p")),
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
+        ):
+            await worker.run_traffic_cycle(mock_session)
+
+        mock_bot.send_message.assert_awaited_once()
+        notified_calls = [
+            c for c in mock_session.execute.call_args_list
+            if c.args and "white_internet_subscriptions" in str(c.args[0]).lower() and "notified_90p" in str(c.args[0]).lower()
+        ]
+        self.assertTrue(len(notified_calls) > 0)
+        stmt_sql = str(notified_calls[0].args[0])
+        self.assertIn("white_internet_subscriptions.desired_version", stmt_sql)
 
 
 class TestReconciliationQueryRegression(unittest.IsolatedAsyncioTestCase):

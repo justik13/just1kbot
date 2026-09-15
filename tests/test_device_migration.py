@@ -709,10 +709,64 @@ class TestDeviceMigrateRoutes(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
         state = AsyncMock()
         session = AsyncMock()
-
         await start_migrate_device(callback, state, session, db_user=user)
 
         callback.answer.assert_called_once_with(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
+
+    @patch("bot.handlers.connection.device_migrate_routes.MaintenanceService.can_user_perform_action", new_callable=AsyncMock)
+    @patch("bot.handlers.connection.device_migrate_routes.get_profile_by_id", new_callable=AsyncMock)
+    @patch("bot.handlers.connection.device_migrate_routes.get_user_by_telegram_id", new_callable=AsyncMock)
+    @patch("bot.handlers.connection.device_migrate_routes.get_server_by_id", new_callable=AsyncMock)
+    @patch("bot.handlers.connection.device_migrate_routes.render_hub", new_callable=AsyncMock)
+    @patch("bot.handlers.connection.device_migrate_routes.capture_server_peer_snapshot", new_callable=AsyncMock)
+    @patch("bot.handlers.connection.device_migrate_routes.DeviceService.migrate_device", new_callable=AsyncMock)
+    @patch("bot.handlers.connection.device_migrate_routes._render_device_screen_safe", new_callable=AsyncMock)
+    async def test_confirm_migrate_device_rollback_renders_screen_safely(
+        self,
+        mock_render_safe,
+        mock_migrate_device,
+        mock_capture_snapshot,
+        mock_render_hub,
+        mock_get_server,
+        mock_get_user,
+        mock_get_profile,
+        mock_can_perform,
+    ):
+        from bot.handlers.connection.device_migrate_routes import confirm_migrate_device
+        from services.device_service import ServerUnavailable
+        from bot import texts
+
+        mock_can_perform.return_value = True
+        user = User(id=1, telegram_id=12345)
+        profile = VPNProfile(
+            id=10,
+            user_id=1,
+            server_id=100,
+            device_name="Phone #1",
+            provisioning_status="active",
+        )
+        target_server = Server(id=200, name="Server 2", is_active=True)
+
+        mock_get_user.return_value = user
+        mock_get_profile.return_value = profile
+        mock_get_server.return_value = target_server
+        mock_capture_snapshot.return_value = MagicMock()
+        mock_migrate_device.side_effect = ServerUnavailable("Server is full")
+
+        callback = MagicMock()
+        callback.from_user.id = 12345
+        callback.data = "confirm_migrate_device:10:200"
+        callback.answer = AsyncMock()
+        callback.bot = MagicMock()
+        callback.message.chat.id = 12345
+        state = AsyncMock()
+        session = AsyncMock()
+
+        await confirm_migrate_device(callback, state, session, db_user=user)
+
+        session.rollback.assert_awaited()
+        mock_render_safe.assert_awaited_once()
+        callback.answer.assert_called_once_with(texts.ERROR_SERVER_FULL, show_alert=True)
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")

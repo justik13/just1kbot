@@ -201,6 +201,37 @@ async def select_migrate_target_server(
     )
 
 
+async def _render_device_screen_safe(
+    bot,
+    chat_id: int,
+    session: AsyncSession,
+    profile_id: int,
+    telegram_user_id: int,
+    fallback_profile,
+    fallback_user,
+    message_effect_id: str | None = None,
+    notice: str | None = None,
+) -> None:
+    fresh_profile = None
+    fresh_user = None
+    try:
+        fresh_profile = await get_profile_by_id(session, profile_id)
+        fresh_user = await get_user_by_telegram_id(session, telegram_user_id)
+    except Exception:
+        pass
+    target_profile = fresh_profile or fallback_profile
+    target_user = fresh_user or fallback_user
+    await render_device_screen(
+        bot,
+        chat_id,
+        target_profile,
+        target_user,
+        session,
+        message_effect_id=message_effect_id,
+        notice=notice,
+    )
+
+
 @router.callback_query(F.data.startswith("confirm_migrate_device:"))
 async def confirm_migrate_device(
     callback: CallbackQuery,
@@ -271,7 +302,9 @@ async def confirm_migrate_device(
             except Exception:
                 pass
             await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
-            await render_device_screen(callback.bot, callback.message.chat.id, profile, user, session)
+            await _render_device_screen_safe(
+                callback.bot, callback.message.chat.id, session, profile.id, telegram_user_id, profile, user
+            )
             return
         except MigrationCooldownActive as e:
             try:
@@ -283,7 +316,9 @@ async def confirm_migrate_device(
                 texts.DEVICE_MIGRATE_COOLDOWN_ALERT.format(minutes=remaining_min),
                 show_alert=True,
             )
-            await render_device_screen(callback.bot, callback.message.chat.id, profile, user, session)
+            await _render_device_screen_safe(
+                callback.bot, callback.message.chat.id, session, profile.id, telegram_user_id, profile, user
+            )
             return
         except ServerUnavailable as e:
             try:
@@ -293,7 +328,9 @@ async def confirm_migrate_device(
             error_type = _classify_server_error(str(e))
             error_text = _get_server_error_text(error_type)
             await callback.answer(error_text, show_alert=True)
-            await render_device_screen(callback.bot, callback.message.chat.id, profile, user, session)
+            await _render_device_screen_safe(
+                callback.bot, callback.message.chat.id, session, profile.id, telegram_user_id, profile, user
+            )
             return
         except (NoActiveSubscription, DeviceLimitExceeded, DuplicateDeviceName) as e:
             try:
@@ -301,7 +338,9 @@ async def confirm_migrate_device(
             except Exception:
                 pass
             await callback.answer(str(e), show_alert=True)
-            await render_device_screen(callback.bot, callback.message.chat.id, profile, user, session)
+            await _render_device_screen_safe(
+                callback.bot, callback.message.chat.id, session, profile.id, telegram_user_id, profile, user
+            )
             return
         except DeviceCreationError as e:
             try:
@@ -310,7 +349,9 @@ async def confirm_migrate_device(
                 pass
             logger.warning("DeviceCreationError during migration: %s", e)
             await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
-            await render_device_screen(callback.bot, callback.message.chat.id, profile, user, session)
+            await _render_device_screen_safe(
+                callback.bot, callback.message.chat.id, session, profile.id, telegram_user_id, profile, user
+            )
             return
         except Exception:
             try:
@@ -319,7 +360,9 @@ async def confirm_migrate_device(
                 pass
             logger.exception("Unexpected error during DeviceService.migrate_device")
             await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
-            await render_device_screen(callback.bot, callback.message.chat.id, profile, user, session)
+            await _render_device_screen_safe(
+                callback.bot, callback.message.chat.id, session, profile.id, telegram_user_id, profile, user
+            )
             return
 
         if new_profile:
@@ -343,13 +386,18 @@ async def confirm_migrate_device(
                 )
             elif ready_profile and ready_profile.provisioning_status in ("create_failed", "create_cleanup_pending"):
                 # Creation genuinely failed on node: original profile was untouched and remains active
-                await session.refresh(user)
-                await render_device_screen(
+                try:
+                    await session.refresh(user)
+                except Exception:
+                    pass
+                await _render_device_screen_safe(
                     callback.bot,
                     callback.message.chat.id,
+                    session,
+                    profile.id,
+                    telegram_user_id,
                     profile,
                     user,
-                    session,
                     notice=texts.DEVICE_MIGRATE_FAILED_NOTICE,
                 )
             else:

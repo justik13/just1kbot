@@ -377,6 +377,11 @@ async def topup_quota_atomic(
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
 
+    total_quota = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)
+    used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
+    if total_quota > 0 and used < 0.90 * total_quota:
+        sub.notified_90p = False
+
     await session.flush()
     return pack_bytes
 
@@ -835,6 +840,9 @@ async def set_base_traffic_quota_atomic(
         sub.status_reason = None
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+
+    if total_quota > 0 and used < 0.90 * total_quota:
+        sub.notified_90p = False
 
     await session.flush()
     return sub

@@ -101,7 +101,7 @@ class WhiteInternetTrafficWorker:
 
         total_processed = 0
         exhausted_users_to_notify: list[tuple[int, bool]] = []
-        warn_90p_users_to_notify: list[tuple[int, int, bool]] = []
+        warn_90p_users_to_notify: list[tuple[int, int, bool, int]] = []
 
         for server_id, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime in server_list:
             # Network I/O outside DB transaction
@@ -252,7 +252,12 @@ class WhiteInternetTrafficWorker:
                                 and used >= (0.90 * total_quota)
                             ):
                                 warn_90p_users_to_notify.append(
-                                    (sub.id, sub.user_id, bool(getattr(sub, "is_trial", False)))
+                                    (
+                                        sub.id,
+                                        sub.user_id,
+                                        bool(getattr(sub, "is_trial", False)),
+                                        int(getattr(sub, "desired_version", 1) or 1),
+                                    )
                                 )
                             continue
 
@@ -285,7 +290,14 @@ class WhiteInternetTrafficWorker:
                         if became_exhausted:
                             exhausted_users_to_notify.append((sub.user_id, bool(getattr(sub, "is_trial", False))))
                         elif event == "traffic_90p":
-                            warn_90p_users_to_notify.append((sub.id, sub.user_id, bool(getattr(sub, "is_trial", False))))
+                            warn_90p_users_to_notify.append(
+                                (
+                                    sub.id,
+                                    sub.user_id,
+                                    bool(getattr(sub, "is_trial", False)),
+                                    int(getattr(sub, "desired_version", 1) or 1),
+                                )
+                            )
                 except Exception as client_exc:
                     logger.error(
                         "Error processing traffic deduction for client %s on server %d: %s",
@@ -334,7 +346,7 @@ class WhiteInternetTrafficWorker:
         if self.bot is not None and warn_90p_users_to_notify:
             from aiogram.exceptions import TelegramForbiddenError
 
-            for sub_id, uid, is_sub_trial in set(warn_90p_users_to_notify):
+            for sub_id, uid, is_sub_trial, expected_version in set(warn_90p_users_to_notify):
                 async with sf() as sess:
                     user = await sess.scalar(select(User).where(User.id == uid))
                     telegram_id = user.telegram_id if user else None
@@ -364,7 +376,10 @@ class WhiteInternetTrafficWorker:
                         async with sf() as sess:
                             await sess.execute(
                                 update(WhiteInternetSubscription)
-                                .where(WhiteInternetSubscription.id == sub_id)
+                                .where(
+                                    WhiteInternetSubscription.id == sub_id,
+                                    WhiteInternetSubscription.desired_version == expected_version,
+                                )
                                 .values(notified_90p=True)
                             )
                             await sess.commit()
@@ -376,7 +391,10 @@ class WhiteInternetTrafficWorker:
                             )
                             await sess.execute(
                                 update(WhiteInternetSubscription)
-                                .where(WhiteInternetSubscription.id == sub_id)
+                                .where(
+                                    WhiteInternetSubscription.id == sub_id,
+                                    WhiteInternetSubscription.desired_version == expected_version,
+                                )
                                 .values(notified_90p=True)
                             )
                             await sess.commit()
@@ -389,7 +407,10 @@ class WhiteInternetTrafficWorker:
                         async with sf() as sess:
                             await sess.execute(
                                 update(WhiteInternetSubscription)
-                                .where(WhiteInternetSubscription.id == sub_id)
+                                .where(
+                                    WhiteInternetSubscription.id == sub_id,
+                                    WhiteInternetSubscription.desired_version == expected_version,
+                                )
                                 .values(notified_90p=False)
                             )
                             await sess.commit()
@@ -401,7 +422,10 @@ class WhiteInternetTrafficWorker:
                     async with sf() as sess:
                         await sess.execute(
                             update(WhiteInternetSubscription)
-                            .where(WhiteInternetSubscription.id == sub_id)
+                            .where(
+                                WhiteInternetSubscription.id == sub_id,
+                                WhiteInternetSubscription.desired_version == expected_version,
+                            )
                             .values(notified_90p=True)
                         )
                         await sess.commit()

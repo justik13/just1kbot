@@ -441,6 +441,46 @@ class TestGroupIWhiteInternetRepoGrantConservation(unittest.IsolatedAsyncioTestC
                     session, subscription_id=1, quote_id=1, pack_gb=25, price_rub=Decimal("100.00")
                 )
 
+    async def test_topup_quota_resets_notified_90p_when_below_threshold(self):
+        session = AsyncMock(spec=AsyncSession)
+        sub = WhiteInternetSubscription(
+            id=1,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=100 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=95 * 1024 * 1024 * 1024,
+            traffic_overage_bytes=0,
+            expires_at=now_utc() + timedelta(days=10),
+            notified_90p=True,
+        )
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
+        ):
+            await white_internet_repo.topup_quota_atomic(
+                session, subscription_id=1, quote_id=1, pack_gb=50, price_rub=Decimal("250.00")
+            )
+            self.assertFalse(sub.notified_90p)
+
+    async def test_set_base_traffic_quota_resets_notified_90p_when_below_threshold(self):
+        session = AsyncMock(spec=AsyncSession)
+        sub = WhiteInternetSubscription(
+            id=1,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=100 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=95 * 1024 * 1024 * 1024,
+            traffic_overage_bytes=0,
+            expires_at=now_utc() + timedelta(days=10),
+            notified_90p=True,
+        )
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
+        ):
+            await white_internet_repo.set_base_traffic_quota_atomic(
+                session, subscription_id=1, base_bytes=130 * 1024 * 1024 * 1024
+            )
+            self.assertFalse(sub.notified_90p)
+
 
 class TestGroupJWhiteInternetServiceDynamicQuotaAndOptions(unittest.TestCase):
     """Group J: White Internet Service Dynamic Quota and VLESS OPTIONS."""
