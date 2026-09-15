@@ -320,6 +320,106 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sub_trial.notified_3d)
         mock_session_sub.flush.assert_awaited()
 
+    async def test_convert_trial_to_paid_resets_notification_flags_and_allows_3d_notify(self):
+        """Converting trial -> paid resets all 5 notification flags to False and allows 3d reminder."""
+        from decimal import Decimal
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+        from database.models import Tariff, TariffVersion, Server
+        from services.white_internet_service import WhiteInternetService
+
+        now = datetime.now(timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=50,
+            user_id=500,
+            origin_node_id=1,
+            uuid="test-uuid",
+            is_trial=True,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            expires_at=now + timedelta(days=1),
+            notified_3d=True,
+            notified_1d=True,
+            notified_2h=True,
+            notified_expired=True,
+            notified_90p=True,
+            desired_version=1,
+            actual_version=1,
+        )
+        user = MagicMock(spec=User)
+        user.id = 500
+        user.telegram_id = 555555
+        user.is_bot_blocked = False
+        user.is_banned = False
+        user.is_deleted = False
+
+        server = MagicMock(spec=Server)
+        server.id = 1
+        server.protocol = "xray"
+        server.is_active = True
+        server.health_state = ServerHealthState.ONLINE
+        server.lifecycle_status = ServerLifecycleStatus.ACTIVE
+        server.extra_data = {"relays": ["r1"]}
+
+        tariff = MagicMock(spec=Tariff)
+        tariff.duration_days = 30
+        tariff_ver = MagicMock(spec=TariffVersion)
+        tariff_ver.id = 1
+        tariff_ver.base_quota_bytes = 50 * 1024 * 1024 * 1024
+        tariff_ver.price_rub = Decimal("250")
+        tariff_ver.duration_hours = 720
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.scalar.return_value = server
+
+        with (
+            patch("services.white_internet_service.lock_checkout_user", return_value=user),
+            patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub),
+            patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
+            patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=tariff),
+            patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_ver),
+            patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock),
+            patch.object(WhiteInternetService, "_try_inline_sync", new_callable=AsyncMock),
+        ):
+            ok, msg, converted_sub = await WhiteInternetService.convert_trial_to_paid(mock_session, 500)
+
+        self.assertTrue(ok)
+        self.assertFalse(sub.is_trial)
+        # All 5 flags must be reset to False
+        self.assertFalse(sub.notified_3d)
+        self.assertFalse(sub.notified_1d)
+        self.assertFalse(sub.notified_2h)
+        self.assertFalse(sub.notified_expired)
+        self.assertFalse(sub.notified_90p)
+
+        # Now verify that when 3-day notification threshold is reached, 3d message is successfully sent
+        bot = AsyncMock()
+        check_now = sub.expires_at - timedelta(days=2)  # 2 days left
+        mock_id_result = MagicMock()
+        mock_id_result.all.return_value = [(50,)]
+
+        mock_session_query = AsyncMock()
+        mock_session_query.execute.return_value = mock_id_result
+
+        mock_session_sub = AsyncMock()
+        mock_session_sub.scalar.side_effect = [sub, user]
+
+        sessions = [mock_session_query, mock_session_sub]
+
+        def get_session():
+            ctx = AsyncMock()
+            ctx.__aenter__.return_value = sessions.pop(0)
+            return ctx
+
+        with (
+            patch("services.workers.notifications.session_scope", side_effect=get_session),
+            patch("services.workers.notifications.global_send_limiter.acquire", new_callable=AsyncMock),
+        ):
+            await _send_white_internet_notifications(bot, check_now)
+
+        bot.send_message.assert_awaited_once()
+        self.assertTrue(sub.notified_3d)
+
 
 if __name__ == "__main__":
     unittest.main()
