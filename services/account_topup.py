@@ -460,9 +460,12 @@ async def settle_succeeded_topup(
             if payment.topup_context and isinstance(payment.topup_context, dict):
                 auto_action = payment.topup_context.get("auto_fulfill_action")
                 quote_raw = payment.topup_context.get("quote_public_id")
-                if auto_action and (quote_raw or str(auto_action).startswith("white_internet_")):
+                import logging
+                import uuid
+
+                quote_uuid = uuid.UUID(str(quote_raw)) if quote_raw else None
+                if auto_action in ("tariff_change", "purchase") and quote_uuid:
                     import inspect
-                    import logging
                     from contextlib import asynccontextmanager
 
                     @asynccontextmanager
@@ -478,11 +481,8 @@ async def settle_succeeded_topup(
                                 return
                         yield
 
-                    import uuid
-
-                    quote_uuid = uuid.UUID(str(quote_raw)) if quote_raw else None
                     async with _safe_begin_nested(session):
-                        if auto_action == "tariff_change" and quote_uuid:
+                        if auto_action == "tariff_change":
                             from services.account_tariff_change import (
                                 settle_account_tariff_change,
                             )
@@ -502,7 +502,7 @@ async def settle_succeeded_topup(
                                 payment.id,
                                 payment.user_id,
                             )
-                        elif auto_action == "purchase" and quote_uuid:
+                        elif auto_action == "purchase":
                             from services.account_purchase import (
                                 settle_account_purchase,
                             )
@@ -522,80 +522,87 @@ async def settle_succeeded_topup(
                                 payment.id,
                                 payment.user_id,
                             )
-                        elif auto_action == "white_internet_buy":
-                            from services.white_internet_service import WhiteInternetService
-                            ok, msg, _sub = await WhiteInternetService.purchase_subscription(
-                                session, user_id=payment.user_id
-                            )
-                            if not ok:
-                                raise RuntimeError(f"White Internet purchase failed: {msg}")
-                            auto_fulfilled_action = "white_internet_buy"
-                            payment.topup_context = {
-                                **payment.topup_context,
-                                "auto_fulfill_status": "succeeded",
-                            }
-                            logging.getLogger(__name__).info(
-                                "Auto-fulfilled White Internet purchase for payment %s, user_id=%s",
-                                payment.id,
-                                payment.user_id,
-                            )
-                        elif auto_action == "white_internet_renew":
-                            from services.white_internet_service import WhiteInternetService
-                            ok, msg, _sub = await WhiteInternetService.renew_subscription(
-                                session, user_id=payment.user_id
-                            )
-                            if not ok:
-                                raise RuntimeError(f"White Internet renewal failed: {msg}")
-                            auto_fulfilled_action = "white_internet_renew"
-                            payment.topup_context = {
-                                **payment.topup_context,
-                                "auto_fulfill_status": "succeeded",
-                            }
-                            logging.getLogger(__name__).info(
-                                "Auto-fulfilled White Internet renewal for payment %s, user_id=%s",
-                                payment.id,
-                                payment.user_id,
-                            )
-                        elif auto_action == "white_internet_add_device":
-                            from services.white_internet_service import WhiteInternetService
-                            actor_tg = user.telegram_id if user else None
-                            ok, msg, _sub = await WhiteInternetService.purchase_device_slot(
-                                session, user_id=payment.user_id, actor_telegram_id=actor_tg
-                            )
-                            if not ok:
-                                raise RuntimeError(f"White Internet device slot purchase failed: {msg}")
-                            auto_fulfilled_action = "white_internet_add_device"
-                            payment.topup_context = {
-                                **payment.topup_context,
-                                "auto_fulfill_status": "succeeded",
-                            }
-                            logging.getLogger(__name__).info(
-                                "Auto-fulfilled White Internet device slot for payment %s, user_id=%s",
-                                payment.id,
-                                payment.user_id,
-                            )
-                        elif auto_action == "white_internet_pack":
-                            pack_gb = payment.topup_context.get("pack_gb")
-                            if not pack_gb:
-                                raise ValueError("Missing pack_gb in topup_context for white_internet_pack")
-                            from services.white_internet_service import WhiteInternetService
-                            actor_tg = user.telegram_id if user else None
-                            ok, msg, _sub = await WhiteInternetService.purchase_traffic_pack(
-                                session, user_id=payment.user_id, pack_gb=int(pack_gb), actor_telegram_id=actor_tg
-                            )
-                            if not ok:
-                                raise RuntimeError(f"White Internet traffic pack purchase failed: {msg}")
-                            auto_fulfilled_action = "white_internet_pack"
-                            payment.topup_context = {
-                                **payment.topup_context,
-                                "auto_fulfill_status": "succeeded",
-                            }
-                            logging.getLogger(__name__).info(
-                                "Auto-fulfilled White Internet traffic pack (%s GB) for payment %s, user_id=%s",
-                                pack_gb,
-                                payment.id,
-                                payment.user_id,
-                            )
+                elif auto_action and str(auto_action).startswith("white_internet_"):
+                    # White Internet operations manage their own transactions (Lock-Before-Mutation:
+                    # commit DB state before external network I/O to Xray node).
+                    # They MUST NOT run inside a savepoint (begin_nested), because committing a
+                    # transaction inside an uncompleted savepoint context manager closes the transaction
+                    # and invalidates subsequent commands on the session.
+                    await session.flush()
+                    if auto_action == "white_internet_buy":
+                        from services.white_internet_service import WhiteInternetService
+                        ok, msg, _sub = await WhiteInternetService.purchase_subscription(
+                            session, user_id=payment.user_id
+                        )
+                        if not ok:
+                            raise RuntimeError(f"White Internet purchase failed: {msg}")
+                        auto_fulfilled_action = "white_internet_buy"
+                        payment.topup_context = {
+                            **payment.topup_context,
+                            "auto_fulfill_status": "succeeded",
+                        }
+                        logging.getLogger(__name__).info(
+                            "Auto-fulfilled White Internet purchase for payment %s, user_id=%s",
+                            payment.id,
+                            payment.user_id,
+                        )
+                    elif auto_action == "white_internet_renew":
+                        from services.white_internet_service import WhiteInternetService
+                        ok, msg, _sub = await WhiteInternetService.renew_subscription(
+                            session, user_id=payment.user_id
+                        )
+                        if not ok:
+                            raise RuntimeError(f"White Internet renewal failed: {msg}")
+                        auto_fulfilled_action = "white_internet_renew"
+                        payment.topup_context = {
+                            **payment.topup_context,
+                            "auto_fulfill_status": "succeeded",
+                        }
+                        logging.getLogger(__name__).info(
+                            "Auto-fulfilled White Internet renewal for payment %s, user_id=%s",
+                            payment.id,
+                            payment.user_id,
+                        )
+                    elif auto_action == "white_internet_add_device":
+                        from services.white_internet_service import WhiteInternetService
+                        actor_tg = user.telegram_id if user else None
+                        ok, msg, _sub = await WhiteInternetService.purchase_device_slot(
+                            session, user_id=payment.user_id, actor_telegram_id=actor_tg
+                        )
+                        if not ok:
+                            raise RuntimeError(f"White Internet device slot purchase failed: {msg}")
+                        auto_fulfilled_action = "white_internet_add_device"
+                        payment.topup_context = {
+                            **payment.topup_context,
+                            "auto_fulfill_status": "succeeded",
+                        }
+                        logging.getLogger(__name__).info(
+                            "Auto-fulfilled White Internet device slot for payment %s, user_id=%s",
+                            payment.id,
+                            payment.user_id,
+                        )
+                    elif auto_action == "white_internet_pack":
+                        pack_gb = payment.topup_context.get("pack_gb")
+                        if not pack_gb:
+                            raise ValueError("Missing pack_gb in topup_context for white_internet_pack")
+                        from services.white_internet_service import WhiteInternetService
+                        actor_tg = user.telegram_id if user else None
+                        ok, msg, _sub = await WhiteInternetService.topup_quota(
+                            session, user_id=payment.user_id, pack_gb=int(pack_gb), actor_telegram_id=actor_tg
+                        )
+                        if not ok:
+                            raise RuntimeError(f"White Internet traffic pack purchase failed: {msg}")
+                        auto_fulfilled_action = "white_internet_pack"
+                        payment.topup_context = {
+                            **payment.topup_context,
+                            "auto_fulfill_status": "succeeded",
+                        }
+                        logging.getLogger(__name__).info(
+                            "Auto-fulfilled White Internet traffic pack (%s GB) for payment %s, user_id=%s",
+                            pack_gb,
+                            payment.id,
+                            payment.user_id,
+                        )
         except Exception as e:
             import logging
 
