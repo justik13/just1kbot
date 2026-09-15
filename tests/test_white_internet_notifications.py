@@ -420,6 +420,91 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         bot.send_message.assert_awaited_once()
         self.assertTrue(sub.notified_3d)
 
+    async def test_expired_notification_delivered_when_sub_expired_5_days_ago(self):
+        """Subscription expired 5 days ago (beyond old 3d cutoff) is delivered NOTIFY_WI_EXPIRED within 14d window."""
+        from bot.texts.runtime.notifications import NOTIFY_WI_EXPIRED
+
+        bot = AsyncMock()
+        now = datetime.now(timezone.utc)
+
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 77
+        sub.user_id = 777
+        sub.expires_at = now - timedelta(days=5)  # 5 days ago (would be lost under old 3d cutoff!)
+        sub.status = WhiteInternetStatus.EXPIRED
+        sub.is_trial = False
+        sub.notified_3d = True
+        sub.notified_1d = True
+        sub.notified_2h = True
+        sub.notified_expired = False
+
+        user = MagicMock(spec=User)
+        user.id = 777
+        user.telegram_id = 777777
+        user.is_bot_blocked = False
+        user.is_banned = False
+        user.is_deleted = False
+
+        mock_id_result = MagicMock()
+        mock_id_result.all.return_value = [(77,)]
+
+        mock_session_query = AsyncMock()
+        mock_session_query.execute.return_value = mock_id_result
+
+        mock_session_sub = AsyncMock()
+        mock_session_sub.scalar.side_effect = [sub, user]
+
+        sessions = [mock_session_query, mock_session_sub]
+
+        def get_session():
+            ctx = AsyncMock()
+            ctx.__aenter__.return_value = sessions.pop(0)
+            return ctx
+
+        with (
+            patch("services.workers.notifications.session_scope", side_effect=get_session),
+            patch("services.workers.notifications.global_send_limiter.acquire", new_callable=AsyncMock),
+        ):
+            await _send_white_internet_notifications(bot, now)
+
+        bot.send_message.assert_awaited_once()
+        call_args = bot.send_message.await_args
+        self.assertEqual(call_args.args[0], 777777)
+        self.assertEqual(call_args.args[1], NOTIFY_WI_EXPIRED)
+        self.assertTrue(sub.notified_expired)
+        self.assertTrue(sub.notified_2h)
+        self.assertTrue(sub.notified_1d)
+        self.assertTrue(sub.notified_3d)
+
+    async def test_expired_sweep_executes_on_initial_session(self):
+        """Worker executes sweep update to close flags for subscriptions older than 14d."""
+        bot = AsyncMock()
+        now = datetime.now(timezone.utc)
+
+        mock_id_result = MagicMock()
+        mock_id_result.all.return_value = []
+
+        mock_session_query = AsyncMock()
+        mock_session_query.execute.return_value = mock_id_result
+
+        def get_session():
+            ctx = AsyncMock()
+            ctx.__aenter__.return_value = mock_session_query
+            return ctx
+
+        with (
+            patch("services.workers.notifications.session_scope", side_effect=get_session),
+            patch("services.workers.notifications.global_send_limiter.acquire", new_callable=AsyncMock),
+        ):
+            await _send_white_internet_notifications(bot, now)
+
+        # Verify that execute was called twice: once for sweep update, once for select query
+        self.assertEqual(mock_session_query.execute.call_count, 2)
+        first_call = mock_session_query.execute.call_args_list[0]
+        # First call is the sweep UPDATE
+        self.assertIn("UPDATE", str(first_call.args[0]).upper())
+        self.assertIn("white_internet_subscriptions", str(first_call.args[0]).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

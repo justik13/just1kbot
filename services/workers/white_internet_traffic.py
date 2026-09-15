@@ -315,33 +315,47 @@ class WhiteInternetTrafficWorker:
                     telegram_id = user.telegram_id if user else None
 
                 if telegram_id:
-                    try:
-                        from aiogram.utils.keyboard import InlineKeyboardBuilder
-                        from bot import texts
+                    from aiogram.exceptions import TelegramForbiddenError
+                    from aiogram.utils.keyboard import InlineKeyboardBuilder
+                    from bot import texts
 
-                        alert_text = (
-                            texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT
-                            if is_sub_trial
-                            else texts.WL_TRAFFIC_EXHAUSTED_ALERT
-                        )
-                        kb = InlineKeyboardBuilder()
-                        if is_sub_trial:
-                            kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
-                        else:
-                            kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+                    alert_text = (
+                        texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT
+                        if is_sub_trial
+                        else texts.WL_TRAFFIC_EXHAUSTED_ALERT
+                    )
+                    kb = InlineKeyboardBuilder()
+                    if is_sub_trial:
+                        kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
+                    else:
+                        kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
 
-                        await self.bot.send_message(
-                            chat_id=telegram_id,
-                            text=alert_text,
-                            reply_markup=kb.as_markup(),
-                            parse_mode="HTML",
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Failed to send quota exhaustion alert to user %d: %s",
-                            uid,
-                            exc,
-                        )
+                    for attempt in range(3):
+                        try:
+                            await self.bot.send_message(
+                                chat_id=telegram_id,
+                                text=alert_text,
+                                reply_markup=kb.as_markup(),
+                                parse_mode="HTML",
+                            )
+                            break
+                        except TelegramForbiddenError:
+                            logger.info("User %d blocked bot; marking blocked in database", uid)
+                            async with sf() as sess:
+                                await sess.execute(
+                                    update(User).where(User.id == uid).values(is_bot_blocked=True)
+                                )
+                                await sess.commit()
+                            break
+                        except Exception as exc:
+                            if attempt == 2:
+                                logger.warning(
+                                    "Failed to send quota exhaustion alert to user %d after 3 attempts: %s",
+                                    uid,
+                                    exc,
+                                )
+                            else:
+                                await asyncio.sleep(1)
 
         if self.bot is not None and warn_90p_users_to_notify:
             from aiogram.exceptions import TelegramForbiddenError

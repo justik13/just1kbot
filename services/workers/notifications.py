@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 
 from bot.keyboards.notifications import (
     get_post_expiry_keyboard,
@@ -471,10 +471,36 @@ async def _send_white_internet_notifications(
         NOTIFY_WI_EXPIRED,
     )
 
-    expired_cutoff = current_time - timedelta(days=3)
+    expired_cutoff = current_time - timedelta(days=14)
     cutoff = current_time + timedelta(days=3)
 
     async with session_scope() as session:
+        # Sweep stale subscriptions older than expired_cutoff so they exit ix_wi_subs_expiring_notify
+        await session.execute(
+            update(WhiteInternetSubscription)
+            .where(
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                    WhiteInternetStatus.EXPIRED,
+                ]),
+                WhiteInternetSubscription.expires_at.is_not(None),
+                WhiteInternetSubscription.expires_at < expired_cutoff,
+                or_(
+                    WhiteInternetSubscription.notified_3d.is_(False),
+                    WhiteInternetSubscription.notified_1d.is_(False),
+                    WhiteInternetSubscription.notified_2h.is_(False),
+                    WhiteInternetSubscription.notified_expired.is_(False),
+                ),
+            )
+            .values(
+                notified_3d=True,
+                notified_1d=True,
+                notified_2h=True,
+                notified_expired=True,
+            )
+        )
+
         stmt = (
             select(WhiteInternetSubscription.id)
             .join(User, WhiteInternetSubscription.user_id == User.id)
