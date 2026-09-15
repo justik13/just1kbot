@@ -18,7 +18,6 @@ from database.repositories.servers_repo import (
 )
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.device_service import (
-    DailyLimitExceeded,
     DeviceCreationError,
     DeviceLimitExceeded,
     DeviceMigrationInProgress,
@@ -225,7 +224,7 @@ async def confirm_migrate_device(
         return
 
     if profile_id in _migrating_devices:
-        await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+        await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
         return
 
     _migrating_devices[profile_id] = True
@@ -296,7 +295,7 @@ async def confirm_migrate_device(
             await callback.answer(error_text, show_alert=True)
             await render_device_screen(callback.bot, callback.message.chat.id, profile, user, session)
             return
-        except (NoActiveSubscription, DailyLimitExceeded, DeviceLimitExceeded, DuplicateDeviceName) as e:
+        except (NoActiveSubscription, DeviceLimitExceeded, DuplicateDeviceName) as e:
             try:
                 await session.rollback()
             except Exception:
