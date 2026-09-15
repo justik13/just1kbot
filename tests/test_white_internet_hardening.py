@@ -142,8 +142,8 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0028_white_internet_notifications"])
-        rev = scripts.get_revision("0028_white_internet_notifications")
+        self.assertEqual(heads, ["0028_wi_notifications"])
+        rev = scripts.get_revision("0028_wi_notifications")
         self.assertEqual(rev.down_revision, "0027_backfill_entitlements")
         rev = scripts.get_revision("0027_backfill_entitlements")
         self.assertEqual(rev.down_revision, "0026_wi_trial_semantics")

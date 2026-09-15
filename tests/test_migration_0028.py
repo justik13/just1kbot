@@ -1,4 +1,4 @@
-"""Unit tests for Alembic migration 0028_white_internet_notifications."""
+"""Unit tests for Alembic migration 0028_wi_notifications."""
 
 import importlib.util
 import os
@@ -11,7 +11,7 @@ from database.models import WhiteInternetSubscription
 
 
 class Migration0028Tests(unittest.TestCase):
-    """Test suite for migration 0028_white_internet_notifications structure and model compliance."""
+    """Test suite for migration 0028_wi_notifications structure and model compliance."""
 
     def setUp(self):
         file_path = os.path.join(
@@ -19,7 +19,7 @@ class Migration0028Tests(unittest.TestCase):
             "..",
             "alembic",
             "versions",
-            "0028_white_internet_notifications.py",
+            "0028_wi_notifications.py",
         )
         spec = importlib.util.spec_from_file_location("migration_0028", file_path)
         self.migration = importlib.util.module_from_spec(spec)
@@ -27,15 +27,15 @@ class Migration0028Tests(unittest.TestCase):
 
     def test_migration_0028_metadata_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        rev = scripts.get_revision("0028_white_internet_notifications")
+        rev = scripts.get_revision("0028_wi_notifications")
         self.assertIsNotNone(rev)
         self.assertEqual(rev.down_revision, "0027_backfill_entitlements")
-        self.assertEqual(scripts.get_heads(), ["0028_white_internet_notifications"])
-        self.assertEqual(self.migration.revision, "0028_white_internet_notifications")
+        self.assertEqual(scripts.get_heads(), ["0028_wi_notifications"])
+        self.assertEqual(self.migration.revision, "0028_wi_notifications")
         self.assertEqual(self.migration.down_revision, "0027_backfill_entitlements")
 
     def test_migration_0028_source_content(self):
-        m28_path = Path("alembic/versions/0028_white_internet_notifications.py")
+        m28_path = Path("alembic/versions/0028_wi_notifications.py")
         self.assertTrue(m28_path.is_file())
         content = m28_path.read_text(encoding="utf-8")
 

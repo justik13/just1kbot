@@ -1,6 +1,6 @@
 """Add expiration and quota notification flags and partial index to white_internet_subscriptions.
 
-Revision ID: 0028_white_internet_notifications
+Revision ID: 0028_wi_notifications
 Revises: 0027_backfill_entitlements
 Create Date: 2026-09-15 00:00:00.000000
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0028_white_internet_notifications"
+revision: str = "0028_wi_notifications"
 down_revision: str | None = "0027_backfill_entitlements"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

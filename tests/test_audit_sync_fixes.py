@@ -13,11 +13,11 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_head_is_0028_white_internet_notifications(self):
+    def test_alembic_head_is_0028_wi_notifications(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0028_white_internet_notifications"])
+        self.assertEqual(scripts.get_heads(), ["0028_wi_notifications"])
         self.assertEqual(
-            scripts.get_revision("0028_white_internet_notifications").down_revision,
+            scripts.get_revision("0028_wi_notifications").down_revision,
             "0027_backfill_entitlements",
         )
         self.assertEqual(
