@@ -343,6 +343,8 @@ async def admin_sub_apply_tariff(
             days=0,
             new_device_limit=new_tariff.device_limit,
             new_tariff_id=new_tariff.id,
+            admin_id=callback.from_user.id,
+            reason="admin_sub_change",
         )
 
         invalidate_user_cache(telegram_id)

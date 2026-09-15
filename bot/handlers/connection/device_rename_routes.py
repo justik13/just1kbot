@@ -58,6 +58,12 @@ async def rename_device_start(
         await callback.answer(msg, show_alert=True)
         return
 
+    from services.device_service import DeviceService
+
+    if await DeviceService.has_active_migration(session, profile.id):
+        await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
+        return
+
     has_access = await SubscriptionService.check_access(
         session,
         db_user.telegram_id,
@@ -160,6 +166,18 @@ async def rename_device_process(
             message.chat.id,
             texts.DEVICE_ACCESS_INACTIVE,
             get_back_button("back_to_connections"),
+        )
+        return
+
+    from services.device_service import DeviceService
+
+    if await DeviceService.has_active_migration(session, profile.id):
+        await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.DEVICE_MIGRATE_IN_PROGRESS,
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 
