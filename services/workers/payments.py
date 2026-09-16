@@ -26,9 +26,10 @@ from services.account_topup import settle_succeeded_topup_by_id
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.payment_status import payment_display_status
 from services.referral_bonus import grant_referral_bonus_for_topup
+from utils.correlation import correlation_scope
 from utils.datetime_helpers import now_utc
 
-logger = logging.getLogger("BackgroundWorker")
+logger = logging.getLogger(__name__)
 _alerted_stale_payments: TTLCache[int, bool] = TTLCache(maxsize=50000, ttl=7200)
 # Chat-hygiene state for the stale payments card: one editable message per
 # admin instead of a new message every reminder cycle, plus the last rendered
@@ -283,6 +284,11 @@ async def _recover_stale_topups(bot: Bot | None = None):
 
 async def _retry_auto_fulfillment(session, payment: Payment) -> None:
     """Retry a failed auto-fulfillment inside a savepoint with bounded attempts."""
+    with correlation_scope(f"fulfill-{payment.id}"):
+        await _do_retry_auto_fulfillment(session, payment)
+
+
+async def _do_retry_auto_fulfillment(session, payment: Payment) -> None:
     from services.account_purchase import (
         AccountPurchaseError,
         settle_account_purchase,

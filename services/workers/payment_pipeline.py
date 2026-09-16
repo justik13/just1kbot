@@ -8,6 +8,7 @@ from database.connection import session_scope
 from services import payment_provider_operations as provider
 from services import provider_refunds
 from services.workers import webhook_inbox
+from utils.correlation import correlation_scope
 
 logger = logging.getLogger(__name__)
 CONCURRENCY = 4
@@ -21,47 +22,49 @@ async def _claim(module, worker_id):
 
 
 async def _run_claim(module, claim, bot=None):
-    try:
-        if module is provider:
-            result = await provider.perform_http(claim)
-            async with session_scope() as session:
-                await provider.finalize(session, claim, result, bot=bot)
-        elif module is provider_refunds:
-            result = await provider_refunds.perform_http(claim)
-            async with session_scope() as session:
-                await provider_refunds.finalize(session, claim, result)
-        elif module is webhook_inbox:
-            result = await webhook_inbox.fetch_provider(claim)
-            async with session_scope() as session:
-                await webhook_inbox.finalize(session, claim, result, bot=bot)
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        logger.error(
-            "Payment operation failed queue=%s id=%s error=%s",
-            module.__name__,
-            getattr(claim, "operation_id", getattr(claim, "inbox_id", None)),
-            type(exc).__name__,
-        )
+    cid = getattr(claim, "operation_id", getattr(claim, "inbox_id", None))
+    with correlation_scope(f"claim-{cid}"):
         try:
-            async with session_scope() as session:
-                if module is provider:
-                    await provider.finalize_provider_failure(
-                        session, claim, error_code=type(exc).__name__, retryable=True
-                    )
-                elif module is provider_refunds:
-                    await provider_refunds.finalize_provider_failure(
-                        session, claim, error_code=type(exc).__name__, retryable=True
-                    )
-                elif module is webhook_inbox:
-                    await webhook_inbox.finalize_webhook_failure(
-                        session, claim, error_code=type(exc).__name__, retryable=True
-                    )
-        except Exception:
+            if module is provider:
+                result = await provider.perform_http(claim)
+                async with session_scope() as session:
+                    await provider.finalize(session, claim, result, bot=bot)
+            elif module is provider_refunds:
+                result = await provider_refunds.perform_http(claim)
+                async with session_scope() as session:
+                    await provider_refunds.finalize(session, claim, result)
+            elif module is webhook_inbox:
+                result = await webhook_inbox.fetch_provider(claim)
+                async with session_scope() as session:
+                    await webhook_inbox.finalize(session, claim, result, bot=bot)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
             logger.error(
-                "Payment failure finalizer rejected stale ownership queue=%s",
+                "Payment operation failed queue=%s id=%s error=%s",
                 module.__name__,
+                getattr(claim, "operation_id", getattr(claim, "inbox_id", None)),
+                type(exc).__name__,
             )
+            try:
+                async with session_scope() as session:
+                    if module is provider:
+                        await provider.finalize_provider_failure(
+                            session, claim, error_code=type(exc).__name__, retryable=True
+                        )
+                    elif module is provider_refunds:
+                        await provider_refunds.finalize_provider_failure(
+                            session, claim, error_code=type(exc).__name__, retryable=True
+                        )
+                    elif module is webhook_inbox:
+                        await webhook_inbox.finalize_webhook_failure(
+                            session, claim, error_code=type(exc).__name__, retryable=True
+                        )
+            except Exception:
+                logger.error(
+                    "Payment failure finalizer rejected stale ownership queue=%s",
+                    module.__name__,
+                )
 
 
 async def payment_pipeline_loop(bot, shutdown_event: asyncio.Event) -> None:

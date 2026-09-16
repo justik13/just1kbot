@@ -37,7 +37,7 @@ from services.subscription import SubscriptionService
 from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
 
-logger = logging.getLogger("BackgroundWorker")
+logger = logging.getLogger(__name__)
 
 _unmanaged_peers_log_cache: TTLCache[tuple[int, str], float] = TTLCache(maxsize=5000, ttl=3600.0)
 _unmanaged_peers_summary_last_logged: float | None = None

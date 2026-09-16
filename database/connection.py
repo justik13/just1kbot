@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import (
 from config.settings import get_settings
 from database.models import Tariff
 
+logger = logging.getLogger(__name__)
+
 _engine = None
 _sessionmaker = None
 _db_lock: asyncio.Lock | None = None
@@ -68,7 +70,7 @@ async def init_db():
         # Seed default tariffs and maintenance mode (migrations are executed by docker-entrypoint.sh or alembic CLI)
         await _seed_default_data()
 
-        logging.info("PostgreSQL database initialized successfully")
+        logger.info("PostgreSQL database initialized successfully")
         return _engine, _sessionmaker
 
 
@@ -91,12 +93,12 @@ async def _run_alembic_migrations(database_url: str) -> None:
         # keeps migrations on the configured asyncpg driver, so startup does not
         # require an undeclared psycopg2 dependency.
         await asyncio.to_thread(upgrade, alembic_cfg, "head")
-        logging.info("Alembic migrations completed successfully.")
+        logger.info("Alembic migrations completed successfully.")
 
         await _seed_default_data()
 
     except Exception as e:
-        logging.error("Failed to run Alembic migrations: %s", e, exc_info=True)
+        logger.error("Failed to run Alembic migrations: %s", e, exc_info=True)
         raise
 
 
@@ -112,7 +114,7 @@ async def _seed_default_data() -> None:
             for tariff in DEFAULT_TARIFFS_SEEDS:
                 session.add(Tariff(**tariff, is_active=True))
             await session.commit()
-            logging.info("Default tariffs seeded successfully.")
+            logger.info("Default tariffs seeded successfully.")
 
         # Seed maintenance mode
         result = await session.execute(select(func.count(MaintenanceMode.id)))
@@ -125,7 +127,7 @@ async def _seed_default_data() -> None:
                 )
             )
             await session.commit()
-            logging.info("Maintenance mode singleton seeded.")
+            logger.info("Maintenance mode singleton seeded.")
 
 
 async def get_session() -> AsyncSession:
@@ -143,12 +145,12 @@ async def _safe_run_post_commit(
     try:
         await asyncio.wait_for(task(), timeout=_POST_COMMIT_TIMEOUT)
     except asyncio.TimeoutError:
-        logging.error(
+        logger.error(
             "Post-commit task timed out after %.0fs",
             _POST_COMMIT_TIMEOUT,
         )
     except Exception as e:
-        logging.error("Post-commit task failed: %s", e, exc_info=True)
+        logger.error("Post-commit task failed: %s", e, exc_info=True)
 
 
 def _handle_task_result(task: asyncio.Task) -> None:
@@ -158,7 +160,7 @@ def _handle_task_result(task: asyncio.Task) -> None:
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        logging.error("Background task failed: %s", e, exc_info=True)
+        logger.error("Background task failed: %s", e, exc_info=True)
 
 
 async def _run_post_commit_tasks(session: AsyncSession) -> None:
@@ -189,7 +191,13 @@ async def session_scope():
         yield session
         await session.commit()
         await _run_post_commit_tasks(session)
-    except (Exception, asyncio.CancelledError):
+    except (Exception, asyncio.CancelledError) as exc:
+        if not isinstance(exc, asyncio.CancelledError):
+            logger.debug(
+                "Database transaction rolled back due to %s: %s",
+                type(exc).__name__,
+                exc,
+            )
         await session.rollback()
         session.info.pop("post_commit_tasks", None)
         raise
