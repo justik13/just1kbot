@@ -73,6 +73,8 @@ BTN_HIDE = "✖ Скрыть"
 
 BTN_INSTALL_WINDOWS = "📥 Установка AmneziaVPN на Windows"
 
+BTN_INSTRUCTION_INCY = "📱 Инструкция INCY (Белый Интернет)"
+
 BTN_INSTRUCTION_IOS = "🍏 Инструкция iOS (для РФ)"
 
 BTN_INSTRUCTION_WINDOWS = "💻 Инструкции Windows"

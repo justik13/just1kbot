@@ -778,4 +778,61 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
         all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
         self.assertNotIn(texts.BTN_WHITE_INTERNET, all_texts)
 
+    def test_faq_covers_white_internet_and_origin_simple_explanation(self):
+        """FAQ clearly covers both Amnezia and White Internet (INCY) in everyday, human language."""
+        from bot import texts
+
+        faq = texts.FAQ_TEXT
+        self.assertIn("INCY", faq)
+        self.assertIn("Белый Интернет", faq)
+        self.assertIn("AmneziaVPN", faq)
+        self.assertIn("AmneziaWG", faq)
+        self.assertIn("DefaultVPN", faq)
+        self.assertIn("Госуслуги", faq)
+        self.assertIn("банковские приложения", faq)
+        self.assertIn("2ip.io", faq)
+        self.assertIn("Сбросить устройства", faq)
+        self.assertIn("Отключать приложение при входе в банк не нужно!", faq)
+
+    async def test_support_help_has_incy_instruction_button(self):
+        """Support help menu includes INCY instruction button and handles callback properly."""
+        from bot import texts
+        from bot.handlers.support import show_support_help, show_help_incy
+
+        query = MagicMock(spec=CallbackQuery)
+        query.data = "support_help"
+        query.bot = MagicMock()
+        query.message = MagicMock()
+        query.message.chat = MagicMock(id=123456)
+        query.answer = AsyncMock()
+
+        with patch("bot.handlers.support.render_hub", new_callable=AsyncMock) as mock_render:
+            await show_support_help(query)
+            mock_render.assert_awaited_once()
+            _, _, rendered_text, markup = mock_render.call_args[0]
+            self.assertEqual(rendered_text, texts.SUPPORT_HELP_ROOT_TEXT)
+            all_buttons = [btn for row in markup.inline_keyboard for btn in row]
+            incy_btn = next((b for b in all_buttons if b.text == texts.BTN_INSTRUCTION_INCY), None)
+            self.assertIsNotNone(incy_btn)
+            self.assertEqual(incy_btn.callback_data, "help_incy")
+
+        # Test show_help_incy callback
+        query.data = "help_incy"
+        with patch("bot.handlers.support.render_hub", new_callable=AsyncMock) as mock_render:
+            await show_help_incy(query)
+            mock_render.assert_awaited_once()
+            _, _, rendered_text, markup = mock_render.call_args[0]
+            self.assertEqual(rendered_text, texts.SUPPORT_INCY_INSTRUCTION_TEXT)
+            all_buttons = [btn for row in markup.inline_keyboard for btn in row]
+            wi_btn = next((b for b in all_buttons if b.text == texts.BTN_WHITE_INTERNET), None)
+            self.assertIsNotNone(wi_btn)
+            self.assertEqual(wi_btn.callback_data, "white_internet")
+
+    def test_hub_white_internet_line_emoji_is_unified(self):
+        """HUB_WHITE_INTERNET_LINE_FORMAT uses the unified ⚪️ emoji."""
+        from bot import texts
+
+        self.assertTrue(texts.HUB_WHITE_INTERNET_LINE_FORMAT.startswith("\n⚪️ <b>Белый Интернет:</b>"))
+
+
 
