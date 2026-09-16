@@ -314,5 +314,6 @@ class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(ok)
             self.assertEqual(res_sub.id, 1)
             mock_repo_extend.assert_awaited_once_with(mock_session, 1, 30)
+            mock_session.commit.assert_awaited_once()
             mock_sync.assert_awaited_once()
 

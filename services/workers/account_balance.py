@@ -263,12 +263,8 @@ async def process_balance_notifications(bot: Bot) -> int:
                     logger.warning("Error checking quote for auto-fulfilled payment %s: %s", payment_id, exc)
 
             balance_snapshot = None
-            has_wi_sub = False
             if not credit_already_notified and not is_auto_fulfilled:
                 balance_snapshot = await get_account_balance(session, user_id=payment_user_id)
-                from database.repositories import white_internet_repo
-                wi_s = await white_internet_repo.get_subscription_by_user_id(session, payment_user_id)
-                has_wi_sub = bool(wi_s)
 
         # Phase 2: Execute Referrer Push (outside DB transaction)
         if ref_needed and ref_id:
@@ -349,7 +345,7 @@ async def process_balance_notifications(bot: Bot) -> int:
                     bot,
                     telegram_id,
                     message,
-                    get_topup_credit_keyboard(ctx, has_wi_sub=has_wi_sub),
+                    get_topup_credit_keyboard(ctx),
                 )
                 if balance_snapshot.real_position > get_settings().BALANCE_MAX_AVAILABLE_RUB:
                     diagnostic = ALERT_BALANCE_LIMIT_EXCEEDED.format(

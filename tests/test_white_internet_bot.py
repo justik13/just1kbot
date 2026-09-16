@@ -760,23 +760,18 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
             # Standard access must remain inactive in top lines
             self.assertIn("Неактивна", text)
 
-    def test_payment_balance_keyboard_has_wi(self):
-        """When has_wi=True, balance keyboard provides direct button to White Internet."""
+    def test_payment_balance_keyboard_does_not_contain_white_internet(self):
+        """Balance keyboard is strictly for finances and never contains White Internet shortcut."""
         from bot import texts
         from bot.keyboards.payment import get_balance_keyboard
 
-        kb = get_balance_keyboard(has_wi=True)
-        all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
-        self.assertIn(texts.BTN_WHITE_INTERNET, all_texts)
-
-    def test_payment_balance_keyboard_no_wi(self):
-        """When has_wi=False, balance keyboard does not include White Internet button."""
-        from bot import texts
-        from bot.keyboards.payment import get_balance_keyboard
-
-        kb = get_balance_keyboard(has_wi=False)
+        kb = get_balance_keyboard()
         all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
         self.assertNotIn(texts.BTN_WHITE_INTERNET, all_texts)
+        self.assertIn(texts.BUTTON_TOPUP, all_texts)
+        self.assertIn(texts.BTN_ISTORIYA_POPOLNENIJ, all_texts)
+        self.assertIn(texts.BTN_ISTORIYA_OPERATSIJ, all_texts)
+        self.assertIn(texts.BTN_MAIN_MENU_NAV, all_texts)
 
     def test_faq_covers_white_internet_and_origin_simple_explanation(self):
         """FAQ clearly covers both Amnezia and White Internet (INCY) in everyday, human language."""

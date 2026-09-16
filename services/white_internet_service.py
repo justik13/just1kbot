@@ -1204,6 +1204,12 @@ class WhiteInternetService:
             await session.rollback()
             return False, str(exc), None
 
+        # Commit DB state before executing external network sync.
+        # This durably persists the extended expiration in PostgreSQL
+        # and releases the SELECT FOR UPDATE row lock so concurrent operations
+        # are not blocked during external network I/O.
+        await session.commit()
+
         if sub.origin_node_id:
             origin_node = await session.get(Server, sub.origin_node_id)
             if origin_node and origin_node.is_active:
