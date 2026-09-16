@@ -1107,7 +1107,7 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
             mock_menu.assert_awaited_once()
 
     async def test_admin_wi_devices_view(self):
-        """admin_wi_devices_view renders HWID list and active devices."""
+        """admin_wi_devices_view renders HWID list and active devices cleanly."""
         callback = MagicMock(spec=CallbackQuery)
         callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
         callback.data = f"admin_wi_devices:{self.user.telegram_id}"
