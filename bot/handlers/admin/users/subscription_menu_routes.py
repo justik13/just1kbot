@@ -148,10 +148,14 @@ async def admin_wi_subscription_menu(
     callback: CallbackQuery,
     session: AsyncSession,
     target_telegram_id: int | None = None,
+    state: FSMContext | None = None,
 ):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
+
+    if state is not None:
+        await state.clear()
 
     telegram_id = (
         target_telegram_id
@@ -761,10 +765,14 @@ async def admin_wl_grant_trial(
 async def admin_wi_extend_menu(
     callback: CallbackQuery,
     session: AsyncSession,
+    state: FSMContext | None = None,
 ):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
+
+    if state is not None:
+        await state.clear()
 
     telegram_id = parse_callback_id(callback.data, 1)
     if telegram_id is None:

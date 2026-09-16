@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-import inspect
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,18 +88,8 @@ async def get_subscription_by_user_id(
         .order_by(WhiteInternetSubscription.id.desc())
         .limit(1)
     )
-    try:
-        res = session.execute(stmt)
-        if inspect.isawaitable(res):
-            res = await res
-        if hasattr(res, "scalar_one_or_none") and callable(res.scalar_one_or_none):
-            val = res.scalar_one_or_none()
-            if inspect.isawaitable(val):
-                val = await val
-            return val
-    except Exception:
-        return None
-    return None
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def has_user_any_subscription(
@@ -896,6 +885,8 @@ async def extend_subscription_atomic(
     """Atomically extend the expiration date of a White Internet subscription under row lock."""
     if not isinstance(subscription_id, int) or subscription_id < 1 or subscription_id > 2_147_483_647:
         raise WhiteInternetSubscriptionNotFoundError(f"Invalid subscription id {subscription_id}")
+    if not isinstance(days, int) or days < 1:
+        raise ValueError(f"Invalid days to extend: {days}. Must be an integer >= 1.")
 
     sub = await session.get(
         WhiteInternetSubscription,

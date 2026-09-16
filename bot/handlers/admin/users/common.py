@@ -43,14 +43,24 @@ def format_user_card_text(
     referrer_info: str = "—",
     white_internet_info: str | None = None,
     ban_reason: str | None = None,
+    wi_sub: WhiteInternetSubscription | None = None,
 ) -> str:
-    from datetime import timezone
+    from datetime import timedelta, timezone
+    from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
+    from config.enums import WhiteInternetStatus
     from utils.telegram import safe
 
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
 
-    has_access = user.subscription_end and user.subscription_end > now
+    has_awg = bool(user.subscription_end and user.subscription_end > now)
+    has_wi = bool(
+        wi_sub
+        and getattr(wi_sub, "status", None) == WhiteInternetStatus.ACTIVE
+        and getattr(wi_sub, "expires_at", None)
+        and wi_sub.expires_at > now
+    )
+    has_access = has_awg or has_wi
     referrals_count = len(referrals) if isinstance(referrals, list) else int(referrals or 0)
 
     status_str = texts.STATUS_ACTIVE_BADGE if has_access else texts.STATUS_INACTIVE_BADGE
@@ -58,6 +68,24 @@ def format_user_card_text(
         ban_str = f"{texts.STATUS_BANNED_BADGE} (<i>{safe(ban_reason)}</i>)" if ban_reason else texts.STATUS_BANNED_BADGE
     else:
         ban_str = texts.STATUS_NOT_BANNED_BADGE
+
+    if has_awg:
+        valid_until_str = format_datetime(user.subscription_end)
+        days_left_str = format_days_left(user.subscription_end)
+        devices_count = len(profiles)
+        device_limit = user.device_limit or 0
+    elif has_wi and wi_sub:
+        valid_until_str = format_datetime(wi_sub.expires_at) if wi_sub.expires_at else "—"
+        days_left_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
+        raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
+        cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
+        devices_count = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
+        device_limit = getattr(wi_sub, "device_limit", 1) or 1
+    else:
+        valid_until_str = format_datetime(user.subscription_end)
+        days_left_str = format_days_left(user.subscription_end)
+        devices_count = len(profiles)
+        device_limit = user.device_limit or 0
 
     card_text = texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,
@@ -69,10 +97,10 @@ def format_user_card_text(
         referrer_info=safe(referrer_info),
         real_balance=real_balance,
         bonus_balance=bonus_balance,
-        valid_until=format_datetime(user.subscription_end),
-        days_left=format_days_left(user.subscription_end),
-        devices_count=len(profiles),
-        device_limit=user.device_limit or 0,
+        valid_until=valid_until_str,
+        days_left=days_left_str,
+        devices_count=devices_count,
+        device_limit=device_limit,
         referrals_count=referrals_count,
         created_at=format_datetime(user.created_at),
     )
@@ -329,7 +357,7 @@ async def _build_users_list_text_and_kb(
                 raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
                 cutoff = (current_time - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
                 wi_active_cnt = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
-                profiles_count = max(1, wi_active_cnt)
+                profiles_count = wi_active_cnt
 
             button_text = truncate_button_text(
                 texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)
@@ -511,7 +539,8 @@ async def _render_user_card(
     )
     balance = await get_account_balance(session, user_id=user.id)
     tariff_info, referrer_info = await _get_user_card_details(session, user)
-    wl_info = await _get_white_internet_card_info(session, user.id)
+    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    wl_info = await _get_white_internet_card_info(session, user.id, sub=wi_sub)
     ban_reason = await _get_user_ban_reason(session, user.id) if user.is_banned else None
 
     current_time = now_utc()
@@ -527,6 +556,7 @@ async def _render_user_card(
         referrer_info=referrer_info,
         white_internet_info=wl_info,
         ban_reason=ban_reason,
+        wi_sub=wi_sub,
     )
 
     try:
@@ -558,7 +588,8 @@ async def _show_user_card_edit(
     )
     balance = await get_account_balance(session, user_id=user.id)
     tariff_info, referrer_info = await _get_user_card_details(session, user)
-    wl_info = await _get_white_internet_card_info(session, user.id)
+    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    wl_info = await _get_white_internet_card_info(session, user.id, sub=wi_sub)
     ban_reason = await _get_user_ban_reason(session, user.id) if user.is_banned else None
 
     current_time = now_utc()
@@ -574,6 +605,7 @@ async def _show_user_card_edit(
         referrer_info=referrer_info,
         white_internet_info=wl_info,
         ban_reason=ban_reason,
+        wi_sub=wi_sub,
     )
 
     if notice:
