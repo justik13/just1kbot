@@ -7,7 +7,7 @@ from pathlib import Path
 from services.amnezia_client import _circuit_breakers
 from utils.logging_security import safe_url_target
 
-logger = logging.getLogger("BackgroundWorker")
+logger = logging.getLogger(__name__)
 
 PRODUCTION_HEARTBEAT_FILE = Path("/run/just1kbot/heartbeat")
 

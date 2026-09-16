@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +23,7 @@ from database.repositories.account_ledger_repo import (
     whole_rubles,
 )
 from database.repositories.tariff_quotes_repo import lock_checkout_user
+from services.audit_service import AuditService
 from services.payment_disputes import refresh_user_dispute_hold
 from services.payment_provider_operations import enqueue_create
 from utils.datetime_helpers import now_utc
@@ -204,6 +208,13 @@ async def create_balance_topup(
         )
     )
     await session.flush()
+    logger.info(
+        "Balance topup created: payment_id=%s, user_id=%s, amount=%s RUB, order_id=%s",
+        payment.id,
+        user.id,
+        rubles,
+        payment.public_order_id,
+    )
     return TopupCreationResult(payment, True, balance)
 
 
@@ -374,7 +385,6 @@ async def settle_succeeded_topup(
                 source=source,
             )
         )
-        from services.audit_service import AuditService
         await AuditService.log_action(
             session,
             admin_id=0,
@@ -386,6 +396,13 @@ async def settle_succeeded_topup(
                 "provider": getattr(payment, "provider", "yookassa"),
                 "payment_id": payment.id,
             },
+        )
+        logger.info(
+            "Balance topup settled: payment_id=%s, user_id=%s, amount=%s RUB, entry_id=%s",
+            payment.id,
+            payment.user_id,
+            payment.amount,
+            entry.id,
         )
         # Do not isolate this in a SAVEPOINT and continue on failure. The
         # top-up, referral bonus and ledger state must commit atomically.

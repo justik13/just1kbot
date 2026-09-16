@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 
+from bot.middlewares.correlation import set_request_id
 from database.connection import session_scope
 from services import payment_provider_operations as provider
 from services import provider_refunds
@@ -21,6 +22,8 @@ async def _claim(module, worker_id):
 
 
 async def _run_claim(module, claim, bot=None):
+    cid = getattr(claim, "operation_id", getattr(claim, "inbox_id", None))
+    set_request_id(f"claim-{cid}")
     try:
         if module is provider:
             result = await provider.perform_http(claim)
@@ -62,6 +65,8 @@ async def _run_claim(module, claim, bot=None):
                 "Payment failure finalizer rejected stale ownership queue=%s",
                 module.__name__,
             )
+    finally:
+        set_request_id("system")
 
 
 async def payment_pipeline_loop(bot, shutdown_event: asyncio.Event) -> None:

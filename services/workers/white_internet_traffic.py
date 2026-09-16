@@ -22,7 +22,7 @@ from utils.datetime_helpers import now_utc
 
 import enum
 
-logger = logging.getLogger("WhiteInternetTraffic")
+logger = logging.getLogger(__name__)
 
 TRAFFIC_SYNC_INTERVAL_SECONDS = 60.0
 
