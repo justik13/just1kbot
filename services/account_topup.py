@@ -7,8 +7,6 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
-logger = logging.getLogger(__name__)
-
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +25,8 @@ from services.audit_service import AuditService
 from services.payment_disputes import refresh_user_dispute_hold
 from services.payment_provider_operations import enqueue_create
 from utils.datetime_helpers import now_utc
+
+logger = logging.getLogger(__name__)
 
 
 def get_topup_description(context: dict | None = None) -> str:
