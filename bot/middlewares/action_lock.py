@@ -76,6 +76,7 @@ LOCKED_ACTION_PREFIXES = (
     "admin_wi_hwid_reset_apply:",
     "admin_wl_reset_apply:",
     "admin_wl_grant_trial:",
+    "admin_wi_apply_extend:",
 )
 
 STALE_ACTION_PREFIXES = (
@@ -117,6 +118,8 @@ STALE_ACTION_PREFIXES = (
     "admin_wi_hwid_reset_apply:",
     "admin_wl_reset_apply:",
     "admin_wl_grant_trial:",
+    "admin_wi_confirm_extend:",
+    "admin_wi_apply_extend:",
 )
 
 STALE_MAX_AGE_SECONDS = 600

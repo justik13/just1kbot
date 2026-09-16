@@ -208,7 +208,6 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     kb = get_hub_keyboard(
         is_admin=is_admin,
         is_active=is_active,
-        is_wi_active=is_wi_active,
         mtproto_url=mtproto_url,
     )
 

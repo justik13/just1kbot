@@ -917,10 +917,10 @@ async def extend_subscription_atomic(
         new_expires_at = base_time + timedelta(days=days)
 
     sub.expires_at = new_expires_at
+    sub.desired_version += 1
     if sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.PENDING):
         sub.status = WhiteInternetStatus.ACTIVE
         sub.status_reason = None
-        sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
 
     sub.notified_3d = False

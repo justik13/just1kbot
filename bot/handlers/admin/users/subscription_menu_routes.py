@@ -909,8 +909,6 @@ async def admin_wi_apply_extend(
         await callback.answer(texts.ERROR_INVALID_DAYS_COUNT, show_alert=True)
         return
 
-    await callback.answer(show_alert=False)
-
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.message.edit_text(texts.ERROR_USER_NOT_FOUND)

@@ -696,7 +696,7 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
         from bot import texts
         from bot.keyboards.common import get_hub_keyboard
 
-        kb = get_hub_keyboard(is_active=False, is_admin=False, is_wi_active=True)
+        kb = get_hub_keyboard(is_active=False, is_admin=False)
         # Row 0 must be BTN_BUY_ACCESS
         self.assertEqual(kb.inline_keyboard[0][0].text, texts.BTN_BUY_ACCESS)
         # Last row before admin (or bottom row) must contain White Internet
@@ -710,7 +710,7 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
         from bot import texts
         from bot.keyboards.common import get_hub_keyboard
 
-        kb = get_hub_keyboard(is_active=True, is_admin=False, is_wi_active=True)
+        kb = get_hub_keyboard(is_active=True, is_admin=False)
         self.assertEqual(kb.inline_keyboard[0][0].text, texts.BTN_MY_SUBSCRIPTION)
         self.assertEqual(kb.inline_keyboard[-1][0].text, texts.BTN_WHITE_INTERNET)
 

@@ -7,7 +7,6 @@ from bot import texts
 def get_hub_keyboard(
     is_admin: bool = False,
     is_active: bool = False,
-    is_wi_active: bool = False,
     mtproto_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()

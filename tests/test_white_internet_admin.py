@@ -1052,7 +1052,9 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
             await admin_wi_apply_extend(callback, self.session)
             mock_ext.assert_awaited_once_with(self.session, self.user.id, 30)
             mock_audit.assert_awaited_once()
-            self.assertEqual(callback.answer.await_count, 2)
+            self.assertEqual(callback.answer.await_count, 1)
+            callback.answer.assert_awaited_once()
+            self.assertTrue(callback.answer.call_args.kwargs.get("show_alert", False))
             mock_menu.assert_awaited_once()
 
     async def test_admin_wi_devices_view(self):

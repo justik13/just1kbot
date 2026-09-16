@@ -239,7 +239,7 @@ class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
     """Test White Internet subscription duration extension."""
 
     async def test_extend_subscription_atomic_active(self):
-        """Extending active subscription adds days to current expires_at."""
+        """Extending active subscription adds days to current expires_at and bumps desired_version."""
         now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
         current_expires = now + timedelta(days=5)
         sub = WhiteInternetSubscription(
@@ -262,8 +262,45 @@ class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(extended.expires_at, current_expires + timedelta(days=30))
+        self.assertEqual(extended.desired_version, 2)
         self.assertFalse(extended.notified_3d)
         mock_session.flush.assert_awaited_once()
+
+    async def test_extend_subscription_atomic_consecutive_active(self):
+        """Consecutive extensions on active subscription monotonically increment desired_version."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        current_expires = now + timedelta(days=5)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=current_expires,
+            desired_version=1,
+            actual_version=1,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        # First extension: +30 days -> version 2
+        ext1 = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+        self.assertEqual(ext1.desired_version, 2)
+        self.assertEqual(ext1.expires_at, current_expires + timedelta(days=30))
+
+        # Second extension: +30 days -> version 3, expires_at +60 days
+        ext2 = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+        self.assertEqual(ext2.desired_version, 3)
+        self.assertEqual(ext2.expires_at, current_expires + timedelta(days=60))
 
     async def test_extend_subscription_atomic_expired(self):
         """Extending expired subscription resets to ACTIVE and counts days from now."""
