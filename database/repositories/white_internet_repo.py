@@ -872,3 +872,61 @@ async def set_device_limit_atomic(
         sub.active_hwids = dict(sorted_hwids[:limit])
     await session.flush()
     return sub
+
+
+async def extend_subscription_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+    days: int,
+    *,
+    now: datetime | None = None,
+) -> WhiteInternetSubscription:
+    """Atomically extend the expiration date of a White Internet subscription under row lock."""
+    if not isinstance(subscription_id, int) or subscription_id < 1 or subscription_id > 2_147_483_647:
+        raise WhiteInternetSubscriptionNotFoundError(f"Invalid subscription id {subscription_id}")
+
+    sub = await session.get(
+        WhiteInternetSubscription,
+        subscription_id,
+        with_for_update=True,
+    )
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+
+    if sub.status == WhiteInternetStatus.DISABLED:
+        raise WhiteInternetInactiveSubscriptionError("Subscription is disabled")
+
+    now = now or now_utc()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    sub_expires_at = sub.expires_at
+    if sub_expires_at is not None and sub_expires_at.tzinfo is None:
+        sub_expires_at = sub_expires_at.replace(tzinfo=timezone.utc)
+
+    base_time = sub_expires_at if (sub_expires_at and sub_expires_at > now) else now
+
+    from bot.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
+
+    if days >= PERMANENT_SUBSCRIPTION_DAYS:
+        new_expires_at = PERMANENT_END_DATE
+    else:
+        new_expires_at = base_time + timedelta(days=days)
+
+    sub.expires_at = new_expires_at
+    if sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.PENDING):
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.status_reason = None
+        sub.desired_version += 1
+        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+
+    sub.notified_3d = False
+    sub.notified_1d = False
+    sub.notified_2h = False
+    sub.notified_expired = False
+    sub.notified_90p = False
+
+    await session.flush()
+    await session.refresh(sub)
+    return sub
+

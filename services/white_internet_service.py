@@ -1184,6 +1184,38 @@ class WhiteInternetService:
 
         return True, texts.ADMIN_WL_RESET_SUCCESS
 
+    @classmethod
+    async def extend_subscription(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        days: int,
+    ) -> tuple[bool, str, WhiteInternetSubscription | None]:
+        """Extend the expiration date of a user's White Internet subscription."""
+        sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+        if sub is None:
+            return False, texts.ADMIN_WI_SUB_NOT_FOUND, None
+
+        try:
+            sub = await white_internet_repo.extend_subscription_atomic(
+                session, sub.id, days
+            )
+        except white_internet_repo.WhiteInternetError as exc:
+            await session.rollback()
+            return False, str(exc), None
+
+        if sub.origin_node_id:
+            origin_node = await session.get(Server, sub.origin_node_id)
+            if origin_node and origin_node.is_active:
+                await cls._try_inline_sync(
+                    session,
+                    sub,
+                    origin_node,
+                    idempotency_key=f"admin_extend:{sub.id}:{sub.desired_version}:{days}",
+                )
+
+        return True, "ok", sub
+
     @staticmethod
     def generate_vless_links(
         subscription: WhiteInternetSubscription,

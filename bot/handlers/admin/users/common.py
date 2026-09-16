@@ -263,22 +263,59 @@ async def _build_users_list_text_and_kb(
     else:
         current_time = now_utc()
 
+        # Batch fetch White Internet subscriptions for users on the current page
+        user_ids = [u.id for u in users]
+        wi_subs_map: dict[int, WhiteInternetSubscription] = {}
+        if user_ids and session is not None:
+            from config.enums import WhiteInternetStatus
+            wi_rows = (
+                await session.scalars(
+                    select(WhiteInternetSubscription).where(
+                        WhiteInternetSubscription.user_id.in_(user_ids),
+                        WhiteInternetSubscription.status.in_([
+                            WhiteInternetStatus.ACTIVE,
+                            WhiteInternetStatus.PENDING,
+                            WhiteInternetStatus.EXHAUSTED,
+                        ]),
+                    )
+                )
+            ).all()
+            for w in wi_rows:
+                wi_subs_map[w.user_id] = w
+
         for user in users:
-            status = (
-                "🟢"
-                if user.subscription_end and user.subscription_end > current_time
-                else "🔴"
+            wi_sub = wi_subs_map.get(user.id)
+            has_awg = bool(user.subscription_end and user.subscription_end > current_time)
+            has_wi = bool(
+                wi_sub
+                and getattr(wi_sub, "status", None) == WhiteInternetStatus.ACTIVE
+                and getattr(wi_sub, "expires_at", None)
+                and wi_sub.expires_at > current_time
             )
+
+            status = "🟢" if (has_awg or has_wi) else "🔴"
             ban = texts.COMMON_BAN if user.is_banned else (texts.COMMON_BLOK_BOTA if user.is_bot_blocked else "")
             username = (
                 f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
             )
-            days = format_days_left(user.subscription_end)
+
+            if has_awg:
+                days = format_days_left(user.subscription_end)
+            elif has_wi and wi_sub and wi_sub.expires_at:
+                days = format_days_left(wi_sub.expires_at)
+            else:
+                days = format_days_left(user.subscription_end)
+
             profiles_count = (
                 len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
                 if user.profiles
                 else 0
             )
+            if profiles_count == 0 and has_wi and wi_sub:
+                raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
+                cutoff = (current_time - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
+                wi_active_cnt = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
+                profiles_count = max(1, wi_active_cnt)
 
             button_text = truncate_button_text(
                 texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)
@@ -401,6 +438,17 @@ async def _get_white_internet_card_info(
             active=active_count, limit=dev_limit
         )
     ]
+    last_seen_ts = max((ts for ts in raw_hwids.values() if isinstance(ts, str)), default=None)
+    if last_seen_ts:
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(last_seen_ts)
+            last_seen_str = format_datetime(dt)
+        except Exception:
+            last_seen_str = last_seen_ts
+        extra_lines.append(texts.ADMIN_USER_CARD_WL_LAST_SEEN.format(last_seen=last_seen_str))
+    else:
+        extra_lines.append(texts.ADMIN_USER_CARD_WL_LAST_SEEN.format(last_seen=texts.PLACEHOLDER_DASH))
     prov_status = getattr(sub, "provisioning_status", None)
     if prov_status and prov_status != "SYNCED_ACTIVE":
         extra_lines.append(

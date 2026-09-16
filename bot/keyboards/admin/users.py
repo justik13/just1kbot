@@ -175,6 +175,14 @@ def get_admin_wi_subscription_keyboard(
 
     if has_wi_sub:
         builder.button(
+            text=texts.ADMIN_BTN_EXTEND_SUBSCRIPTION,
+            callback_data=f"admin_wi_extend_menu:{telegram_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_BTN_USER_DEVICES,
+            callback_data=f"admin_wi_devices:{telegram_id}",
+        )
+        builder.button(
             text=texts.ADMIN_WI_BTN_TRAFFIC_ADD,
             callback_data=f"admin_wi_traffic_add_menu:{telegram_id}",
         )
@@ -211,6 +219,59 @@ def get_admin_wi_subscription_keyboard(
 
     builder.adjust(1)
     return builder.as_markup()
+
+
+def get_admin_wi_extend_days_keyboard(
+    telegram_id: int,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    for days in (7, 30, 90):
+        builder.button(
+            text=texts.TIME_DAYS_FULL_FORMAT.format(days=days),
+            callback_data=f"admin_wi_confirm_extend:{telegram_id}:{days}",
+        )
+
+    builder.button(
+        text=texts.LABEL_FOREVER,
+        callback_data=f"admin_wi_confirm_extend:{telegram_id}:36500",
+    )
+
+    builder.button(
+        text=texts.ADMIN_BTN_INPUT_MANUALLY,
+        callback_data=f"admin_wi_extend_custom:{telegram_id}",
+    )
+
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=f"admin_sub_wi_menu:{telegram_id}",
+    )
+
+    builder.adjust(2, 2, 1, 1)
+
+    return builder.as_markup()
+
+
+def get_admin_wi_devices_keyboard(
+    telegram_id: int,
+    has_hwids: bool = False,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    if has_hwids:
+        builder.button(
+            text=texts.ADMIN_WI_BTN_HWID_RESET,
+            callback_data=f"admin_wi_hwid_reset_confirm:{telegram_id}",
+        )
+
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=f"admin_sub_wi_menu:{telegram_id}",
+    )
+
+    builder.adjust(1)
+    return builder.as_markup()
+
 
 
 def get_admin_wi_traffic_add_keyboard(
@@ -437,6 +498,7 @@ def get_admin_confirm_action_keyboard(
 def get_admin_user_devices_keyboard(
     telegram_id: int,
     profiles: list,
+    has_wi_devices: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -451,6 +513,12 @@ def get_admin_user_devices_keyboard(
             callback_data=(
                 f"admin_delete_device:{telegram_id}:{profile.id}"
             ),
+        )
+
+    if has_wi_devices:
+        builder.button(
+            text=texts.ADMIN_BTN_SUB_WI,
+            callback_data=f"admin_wi_devices:{telegram_id}",
         )
 
     builder.button(

@@ -115,9 +115,41 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     balance = await get_account_balance(session, user_id=db_user.id)
     profiles = await get_user_profiles(session, db_user.id)
 
-    status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
-    valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
-    days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
+    from database.repositories.white_internet_repo import get_subscription_by_user_id
+    from config.enums import WhiteInternetStatus
+    from utils.datetime_helpers import now_utc
+    from datetime import timedelta
+    from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
+
+    wi_sub = await get_subscription_by_user_id(session, db_user.id)
+    now = now_utc()
+    is_wi_active = bool(
+        wi_sub
+        and getattr(wi_sub, "status", None) == WhiteInternetStatus.ACTIVE
+        and getattr(wi_sub, "expires_at", None)
+        and wi_sub.expires_at > now
+    )
+
+    if is_active:
+        status_str = texts.STATUS_SUBSCRIPTION_ACTIVE
+        valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
+        days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
+        devices_count = len(profiles)
+        device_limit = db_user.device_limit or 0
+    elif is_wi_active and wi_sub:
+        status_str = texts.STATUS_SUBSCRIPTION_ACTIVE
+        valid_until_str = format_subscription_date(wi_sub.expires_at) if wi_sub.expires_at else texts.PLACEHOLDER_DASH
+        days_left_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
+        raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
+        cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
+        devices_count = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
+        device_limit = getattr(wi_sub, "device_limit", 1) or 1
+    else:
+        status_str = texts.STATUS_SUBSCRIPTION_INACTIVE
+        valid_until_str = texts.PLACEHOLDER_DASH
+        days_left_str = texts.ZERO_DAYS_LABEL
+        devices_count = len(profiles)
+        device_limit = db_user.device_limit or 0
 
     inviter_line = ""
     if db_user.referred_by:
@@ -147,8 +179,8 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         status=status_str,
         valid_until=valid_until_str,
         days_left=days_left_str,
-        devices_count=len(profiles),
-        device_limit=db_user.device_limit or 0,
+        devices_count=devices_count,
+        device_limit=device_limit,
         real_balance=int(balance.real_available),
         bonus_line=bonus_line,
         inviter_line=inviter_line,
@@ -160,6 +192,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     kb = get_hub_keyboard(
         is_admin=is_admin,
         is_active=is_active,
+        is_wi_active=is_wi_active,
         mtproto_url=mtproto_url,
     )
 

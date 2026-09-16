@@ -125,11 +125,15 @@ async def _render_balance(
         + _history_lines(history)
     )
 
+    from database.repositories import white_internet_repo
+    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    has_wi = bool(wi_sub)
+
     await render_hub(
         bot,
         chat_id,
         text,
-        get_balance_keyboard(has_visible_topup=visible is not None),
+        get_balance_keyboard(has_visible_topup=visible is not None, has_wi=has_wi),
         trigger_message_id=trigger_message_id,
         message_effect_id=message_effect_id,
         force_new=force_new,

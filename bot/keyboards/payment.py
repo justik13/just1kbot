@@ -185,7 +185,7 @@ def get_payment_success_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMarkup:
+def get_balance_keyboard(*, has_visible_topup: bool = False, has_wi: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if has_visible_topup:
         builder.button(
@@ -207,10 +207,19 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
         text=texts.BTN_ISTORIYA_OPERATSIJ,
         callback_data="balance_history",
     )
+    if has_wi:
+        builder.button(
+            text=texts.BTN_WHITE_INTERNET,
+            callback_data="white_internet",
+        )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
     )
-    builder.adjust(1, 2, 1)
+    sizes = [1, 2]
+    if has_wi:
+        sizes.append(1)
+    sizes.append(1)
+    builder.adjust(*sizes)
     return builder.as_markup()
 
 
@@ -425,7 +434,11 @@ def get_balance_change_shortage_keyboard(
     return builder.as_markup()
 
 
-def get_topup_credit_keyboard(context: dict | None = None) -> InlineKeyboardMarkup:
+def get_topup_credit_keyboard(
+    context: dict | None = None,
+    *,
+    has_wi_sub: bool = False,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     context = context or {}
     tariff_id = context.get("tariff_id")
@@ -439,6 +452,11 @@ def get_topup_credit_keyboard(context: dict | None = None) -> InlineKeyboardMark
         builder.button(
             text=texts.BTN_PAYMENT_RETURN_TO_PURCHASE,
             callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
+        )
+    elif has_wi_sub:
+        builder.button(
+            text=texts.BTN_WHITE_INTERNET,
+            callback_data="white_internet",
         )
     builder.button(text=texts.BTN_PAYMENT_TO_BALANCE, callback_data="menu_balance")
     builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")

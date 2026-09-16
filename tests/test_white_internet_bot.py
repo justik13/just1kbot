@@ -687,3 +687,40 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             mock_buy.assert_awaited_once_with(self.session, user_id=self.user.id)
             self.assertEqual(payment.topup_context.get("auto_fulfill_status"), "succeeded")
 
+
+class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
+    """Test Hub and Payment navigation when White Internet is active."""
+
+    def test_hub_keyboard_wi_active_layout(self):
+        """When is_wi_active=True, hub keyboard promotes White Internet to top button."""
+        from bot import texts
+        from bot.keyboards.common import get_hub_keyboard
+
+        kb = get_hub_keyboard(is_active=False, is_admin=False, is_wi_active=True)
+        # First row should be White Internet
+        first_row_texts = [btn.text for btn in kb.inline_keyboard[0]]
+        self.assertIn(texts.BTN_WHITE_INTERNET, first_row_texts)
+        # Should not have redundant "Купить доступ" or extra WI button at the bottom
+        all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertEqual(all_texts.count(texts.BTN_WHITE_INTERNET), 1)
+        self.assertNotIn(texts.BTN_BUY_ACCESS, all_texts)
+
+    def test_payment_balance_keyboard_has_wi(self):
+        """When has_wi=True, balance keyboard provides direct button to White Internet."""
+        from bot import texts
+        from bot.keyboards.payment import get_balance_keyboard
+
+        kb = get_balance_keyboard(has_wi=True)
+        all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertIn(texts.BTN_WHITE_INTERNET, all_texts)
+
+    def test_payment_balance_keyboard_no_wi(self):
+        """When has_wi=False, balance keyboard does not include White Internet button."""
+        from bot import texts
+        from bot.keyboards.payment import get_balance_keyboard
+
+        kb = get_balance_keyboard(has_wi=False)
+        all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertNotIn(texts.BTN_WHITE_INTERNET, all_texts)
+
+

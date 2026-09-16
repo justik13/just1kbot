@@ -28,6 +28,7 @@ class AdminStates(StatesGroup):
     editing_tariff_rub = State()
     admin_reducing_days = State()
     admin_extending_custom = State()
+    admin_wi_extending_custom = State()
     admin_grant_custom_days = State()
     entering_user_balance_topup = State()
     entering_user_balance_deduct = State()
