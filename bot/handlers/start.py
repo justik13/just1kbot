@@ -134,26 +134,37 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         and wi_sub.expires_at > now
     )
 
-    if is_active:
-        status_str = texts.STATUS_SUBSCRIPTION_ACTIVE
-        valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
-        days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
-        devices_count = len(profiles)
-        device_limit = db_user.device_limit or 0
-    elif is_wi_active and wi_sub:
-        status_str = texts.STATUS_SUBSCRIPTION_ACTIVE
-        valid_until_str = format_subscription_date(wi_sub.expires_at) if wi_sub.expires_at else texts.PLACEHOLDER_DASH
-        days_left_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
+    status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
+    valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
+    days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
+    devices_count = len(profiles)
+    device_limit = db_user.device_limit or 0
+
+    white_internet_line = ""
+    if is_wi_active and wi_sub:
         raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
         cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
-        devices_count = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
-        device_limit = getattr(wi_sub, "device_limit", 1) or 1
-    else:
-        status_str = texts.STATUS_SUBSCRIPTION_INACTIVE
-        valid_until_str = texts.PLACEHOLDER_DASH
-        days_left_str = texts.ZERO_DAYS_LABEL
-        devices_count = len(profiles)
-        device_limit = db_user.device_limit or 0
+        wi_active_cnt = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
+
+        limit_bytes = getattr(wi_sub, "traffic_limit_bytes", 0) or 0
+        used_bytes = getattr(wi_sub, "traffic_used_bytes", 0) or 0
+        rem_bytes = max(0, limit_bytes - used_bytes)
+        rem_gb = rem_bytes / (1024 ** 3)
+        tot_gb = limit_bytes / (1024 ** 3)
+
+        rem_str = f"{rem_gb:.1f}" if rem_gb < 100 else f"{int(rem_gb)}"
+        tot_str = f"{tot_gb:.1f}" if tot_gb % 1 != 0 else f"{int(tot_gb)}"
+
+        expiry_str = format_subscription_date(wi_sub.expires_at) if wi_sub.expires_at else texts.PLACEHOLDER_DASH
+        days_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
+
+        white_internet_line = texts.HUB_WHITE_INTERNET_LINE_FORMAT.format(
+            expiry=expiry_str,
+            days_left=days_str,
+            devices_count=wi_active_cnt,
+            traffic_rem=rem_str,
+            traffic_total=tot_str,
+        )
 
     inviter_line = ""
     if db_user.referred_by:
@@ -185,6 +196,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         days_left=days_left_str,
         devices_count=devices_count,
         device_limit=device_limit,
+        white_internet_line=white_internet_line,
         real_balance=int(balance.real_available),
         bonus_line=bonus_line,
         inviter_line=inviter_line,

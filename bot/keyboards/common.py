@@ -18,12 +18,6 @@ def get_hub_keyboard(
             callback_data="menu_subscription",
             style="success",
         )
-    elif is_wi_active:
-        builder.button(
-            text=texts.BTN_WHITE_INTERNET,
-            callback_data="white_internet",
-            style="success",
-        )
     else:
         builder.button(
             text=texts.BTN_BUY_ACCESS,
@@ -62,11 +56,10 @@ def get_hub_keyboard(
             url=mtproto_url,
         )
 
-    if not (is_wi_active and not is_active):
-        builder.button(
-            text=texts.BTN_WHITE_INTERNET,
-            callback_data="white_internet",
-        )
+    builder.button(
+        text=texts.BTN_WHITE_INTERNET,
+        callback_data="white_internet",
+    )
 
     if is_admin:
         builder.button(
@@ -77,8 +70,7 @@ def get_hub_keyboard(
     sizes = [1, 2, 2]
     if mtproto_url:
         sizes.append(1)
-    if not (is_wi_active and not is_active):
-        sizes.append(1)  # White Internet (when not at top)
+    sizes.append(1)  # White Internet (all users)
     if is_admin:
         sizes.append(1)  # Admin
 

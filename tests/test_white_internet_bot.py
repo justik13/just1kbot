@@ -692,18 +692,73 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
     """Test Hub and Payment navigation when White Internet is active."""
 
     def test_hub_keyboard_wi_active_layout(self):
-        """When is_wi_active=True, hub keyboard promotes White Internet to top button."""
+        """Hub keyboard keeps standard purchase button on top and White Internet at the bottom."""
         from bot import texts
         from bot.keyboards.common import get_hub_keyboard
 
         kb = get_hub_keyboard(is_active=False, is_admin=False, is_wi_active=True)
-        # First row should be White Internet
-        first_row_texts = [btn.text for btn in kb.inline_keyboard[0]]
-        self.assertIn(texts.BTN_WHITE_INTERNET, first_row_texts)
-        # Should not have redundant "Купить доступ" or extra WI button at the bottom
+        # Row 0 must be BTN_BUY_ACCESS
+        self.assertEqual(kb.inline_keyboard[0][0].text, texts.BTN_BUY_ACCESS)
+        # Last row before admin (or bottom row) must contain White Internet
         all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
-        self.assertEqual(all_texts.count(texts.BTN_WHITE_INTERNET), 1)
-        self.assertNotIn(texts.BTN_BUY_ACCESS, all_texts)
+        self.assertIn(texts.BTN_BUY_ACCESS, all_texts)
+        self.assertIn(texts.BTN_WHITE_INTERNET, all_texts)
+        self.assertEqual(kb.inline_keyboard[-1][0].text, texts.BTN_WHITE_INTERNET)
+
+    def test_hub_keyboard_is_active_layout(self):
+        """When is_active=True, row 0 is BTN_MY_SUBSCRIPTION and bottom has BTN_WHITE_INTERNET."""
+        from bot import texts
+        from bot.keyboards.common import get_hub_keyboard
+
+        kb = get_hub_keyboard(is_active=True, is_admin=False, is_wi_active=True)
+        self.assertEqual(kb.inline_keyboard[0][0].text, texts.BTN_MY_SUBSCRIPTION)
+        self.assertEqual(kb.inline_keyboard[-1][0].text, texts.BTN_WHITE_INTERNET)
+
+    async def test_hub_text_renders_white_internet_traffic_line(self):
+        """_build_hub_text_and_kb includes dedicated White Internet line with traffic info."""
+        from datetime import datetime, timezone, timedelta
+        from bot.handlers.start import _build_hub_text_and_kb
+        from config.enums import WhiteInternetStatus
+        from database.models import User, WhiteInternetSubscription
+
+        session = AsyncMock()
+        user = User(
+            id=10,
+            telegram_id=123456789,
+            first_name="Иван",
+            subscription_end=None,
+            device_limit=1,
+            referred_by=None,
+        )
+        now = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=user.id,
+            origin_node_id=1,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=10 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=int(1.5 * 1024 * 1024 * 1024),
+            expires_at=now + timedelta(days=30),
+            active_hwids={"dev1": now.isoformat()},
+        )
+
+        mock_balance = MagicMock(real_available=0, bonus_available=0)
+        with patch("bot.handlers.start.SubscriptionService.check_access", new=AsyncMock(return_value=False)), \
+             patch("bot.handlers.start.get_settings", return_value=MagicMock(ADMIN_IDS=[])), \
+             patch("bot.handlers.start.get_account_balance", new=AsyncMock(return_value=mock_balance)), \
+             patch("database.repositories.profiles_repo.get_user_profiles", new=AsyncMock(return_value=[])), \
+             patch("database.repositories.system_settings_repo.get_system_setting", new=AsyncMock(return_value=None)), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
+             patch("utils.datetime_helpers.now_utc", return_value=now):
+
+            text, kb = await _build_hub_text_and_kb(session, user)
+
+            self.assertIn("Белый Интернет:", text)
+            self.assertIn("1 устр.", text)
+            self.assertIn("8.5/10 ГБ", text)
+            # Standard access must remain inactive in top lines
+            self.assertIn("Неактивна", text)
 
     def test_payment_balance_keyboard_has_wi(self):
         """When has_wi=True, balance keyboard provides direct button to White Internet."""
