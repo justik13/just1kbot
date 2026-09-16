@@ -1,5 +1,3 @@
-from datetime import timedelta
-import inspect
 import logging
 
 from aiogram.exceptions import TelegramBadRequest
@@ -11,10 +9,10 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
-from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
 from config.enums import WhiteInternetProvisioningStatus
 from database.models import Server, Tariff, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
+from database.repositories.white_internet_repo import count_active_hwids
 from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
@@ -46,8 +44,7 @@ def format_user_card_text(
     ban_reason: str | None = None,
     wi_sub: WhiteInternetSubscription | None = None,
 ) -> str:
-    from datetime import timedelta, timezone
-    from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
+    from datetime import timezone
     from config.enums import WhiteInternetStatus
     from utils.telegram import safe
 
@@ -78,9 +75,7 @@ def format_user_card_text(
     elif has_wi and wi_sub:
         valid_until_str = format_datetime(wi_sub.expires_at) if wi_sub.expires_at else "—"
         days_left_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
-        raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
-        cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
-        devices_count = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
+        devices_count = count_active_hwids(getattr(wi_sub, "active_hwids", None), now=now)
         device_limit = getattr(wi_sub, "device_limit", 1) or 1
     else:
         valid_until_str = format_datetime(user.subscription_end)
@@ -311,17 +306,11 @@ async def _build_users_list_text_and_kb(
                         WhiteInternetStatus.EXHAUSTED,
                     ]),
                 )
-                res = session.scalars(stmt)
-                if inspect.isawaitable(res):
-                    res = await res
-                if hasattr(res, "all") and callable(res.all):
-                    all_rows = res.all()
-                    if inspect.isawaitable(all_rows):
-                        all_rows = await all_rows
-                    for w in all_rows:
-                        uid = getattr(w, "user_id", None)
-                        if uid is not None:
-                            wi_subs_map[uid] = w
+                result = await session.execute(stmt)
+                for w in result.scalars().all():
+                    uid = getattr(w, "user_id", None)
+                    if uid is not None:
+                        wi_subs_map[uid] = w
             except Exception as e:
                 logger.debug("Failed to batch fetch White Internet subscriptions: %s", e)
 
@@ -355,10 +344,7 @@ async def _build_users_list_text_and_kb(
                 else 0
             )
             if profiles_count == 0 and has_wi and wi_sub:
-                raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
-                cutoff = (current_time - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
-                wi_active_cnt = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
-                profiles_count = wi_active_cnt
+                profiles_count = count_active_hwids(getattr(wi_sub, "active_hwids", None), now=current_time)
 
             button_text = truncate_button_text(
                 texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)
@@ -472,10 +458,7 @@ async def _get_white_internet_card_info(
     dev_limit = max(1, getattr(sub, "device_limit", 1) or 1)
     raw_hwids = getattr(sub, "active_hwids", None) or {}
     now = now_utc()
-    cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
-    active_count = sum(
-        1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff
-    )
+    active_count = count_active_hwids(raw_hwids, now=now)
     extra_lines = [
         texts.ADMIN_USER_CARD_WL_DEVICES.format(
             active=active_count, limit=dev_limit

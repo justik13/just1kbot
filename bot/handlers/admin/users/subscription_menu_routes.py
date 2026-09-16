@@ -25,6 +25,7 @@ from bot.states import AdminStates
 from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
 from config.enums import AdminAuditAction, WhiteInternetStatus
 from database.repositories import white_internet_repo
+from database.repositories.white_internet_repo import count_active_hwids
 from database.repositories.idempotency_repo import (
     check_and_record_admin_op,
     make_admin_op_key,
@@ -914,10 +915,6 @@ async def admin_wi_apply_extend(
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
-    if user.is_deleted:
-        await callback.answer(texts.ADMIN_MANUAL_GRANT_USER_DELETED, show_alert=True)
-        return
-
     if user.is_banned:
         await callback.answer(texts.ADMIN_MANUAL_GRANT_USER_BANNED, show_alert=True)
         return
@@ -1114,7 +1111,7 @@ async def admin_wi_devices_view(
     raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
     now = now_utc()
     cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
-    active_count = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
+    active_count = count_active_hwids(raw_hwids, now=now)
     dev_limit = max(1, getattr(wi_sub, "device_limit", 1) or 1)
 
     if not raw_hwids:

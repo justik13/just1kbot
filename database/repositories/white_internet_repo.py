@@ -77,10 +77,23 @@ async def get_subscription_by_token(
     ).scalar_one_or_none()
 
 
+def count_active_hwids(
+    active_hwids: dict | None,
+    now: datetime | None = None,
+    ttl_hours: int = WHITE_INTERNET_HWID_TTL_HOURS,
+) -> int:
+    """Count number of unique HWID devices with activity within the TTL sliding window."""
+    if not active_hwids or not isinstance(active_hwids, dict):
+        return 0
+    now = now or now_utc()
+    cutoff = (now - timedelta(hours=ttl_hours)).isoformat()
+    return sum(1 for ts in active_hwids.values() if isinstance(ts, str) and ts >= cutoff)
+
+
 async def get_subscription_by_user_id(
     session: AsyncSession, user_id: int
 ) -> WhiteInternetSubscription | None:
-    if session is None or not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
+    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
         return None
     stmt = (
         select(WhiteInternetSubscription)

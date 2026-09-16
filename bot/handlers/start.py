@@ -115,11 +115,9 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     balance = await get_account_balance(session, user_id=db_user.id)
     profiles = await get_user_profiles(session, db_user.id)
 
-    from database.repositories.white_internet_repo import get_subscription_by_user_id
+    from database.repositories.white_internet_repo import count_active_hwids, get_subscription_by_user_id
     from config.enums import WhiteInternetStatus
     from utils.datetime_helpers import now_utc
-    from datetime import timedelta
-    from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
 
     try:
         wi_sub = await get_subscription_by_user_id(session, db_user.id)
@@ -142,9 +140,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
 
     white_internet_line = ""
     if is_wi_active and wi_sub:
-        raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
-        cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
-        wi_active_cnt = sum(1 for ts in raw_hwids.values() if isinstance(ts, str) and ts >= cutoff)
+        wi_active_cnt = count_active_hwids(getattr(wi_sub, "active_hwids", None), now=now)
 
         limit_bytes = getattr(wi_sub, "traffic_limit_bytes", 0) or 0
         used_bytes = getattr(wi_sub, "traffic_used_bytes", 0) or 0

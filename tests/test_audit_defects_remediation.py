@@ -772,6 +772,40 @@ class TestAuditDefectsRemediationXrayAndLedgerAsync(unittest.IsolatedAsyncioTest
         self.assertEqual(AdminAuditAction.WHITE_INTERNET_QUOTA_SET, "WHITE_INTERNET_QUOTA_SET")
         self.assertEqual(AdminAuditAction.WHITE_INTERNET_DEVLIMIT_SET, "WHITE_INTERNET_DEVLIMIT_SET")
 
+    def test_count_active_hwids(self):
+        from datetime import datetime, timezone
+        from database.repositories.white_internet_repo import count_active_hwids
+
+        now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=timezone.utc)
+
+        # None or invalid input
+        self.assertEqual(count_active_hwids(None, now=now), 0)
+        self.assertEqual(count_active_hwids({}, now=now), 0)
+        self.assertEqual(count_active_hwids("invalid", now=now), 0)
+        self.assertEqual(count_active_hwids([1, 2, 3], now=now), 0)
+
+        # Active vs expired HWIDs with 48h TTL
+        hwids = {
+            "hwid_1": "2026-09-17T11:00:00+00:00",  # 1h ago -> active
+            "hwid_2": "2026-09-16T12:00:00+00:00",  # 24h ago -> active
+            "hwid_3": "2026-09-15T12:00:00+00:00",  # exactly 48h ago -> active (>= cutoff)
+            "hwid_4": "2026-09-15T11:59:59+00:00",  # > 48h ago -> expired
+            "hwid_5": "2026-09-10T00:00:00+00:00",  # long expired
+            "hwid_6": None,                          # invalid value
+            "hwid_7": 12345,                         # non-str
+        }
+        self.assertEqual(count_active_hwids(hwids, now=now), 3)
+
+    async def test_white_internet_repo_get_subscription_by_user_id_validation(self):
+        from database.repositories.white_internet_repo import get_subscription_by_user_id
+        session = AsyncMock()
+
+        # Invalid user_id types / ranges
+        self.assertIsNone(await get_subscription_by_user_id(session, 0))
+        self.assertIsNone(await get_subscription_by_user_id(session, -5))
+        self.assertIsNone(await get_subscription_by_user_id(session, 2_147_483_648))
+        self.assertIsNone(await get_subscription_by_user_id(session, "123"))
+
     def test_admin_fallback_parsing(self):
         from utils.admin import is_admin
         with patch("utils.admin.get_settings", side_effect=Exception("no settings")):
