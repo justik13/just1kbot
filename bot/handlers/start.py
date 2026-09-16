@@ -127,7 +127,11 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     now = now_utc()
     is_wi_active = bool(
         wi_sub
-        and getattr(wi_sub, "status", None) in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
+        and getattr(wi_sub, "status", None) in (
+            WhiteInternetStatus.ACTIVE,
+            WhiteInternetStatus.PENDING,
+            WhiteInternetStatus.EXHAUSTED,
+        )
         and getattr(wi_sub, "expires_at", None)
         and wi_sub.expires_at > now
     )
@@ -153,8 +157,10 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
 
         expiry_str = format_subscription_date(wi_sub.expires_at) if wi_sub.expires_at else texts.PLACEHOLDER_DASH
         days_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
+        status_icon = "🔴" if getattr(wi_sub, "status", None) == WhiteInternetStatus.EXHAUSTED else "🟢"
 
         white_internet_line = texts.HUB_WHITE_INTERNET_LINE_FORMAT.format(
+            status_icon=status_icon,
             expiry=expiry_str,
             days_left=days_str,
             devices_count=wi_active_cnt,

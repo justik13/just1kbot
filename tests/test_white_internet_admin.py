@@ -1106,6 +1106,22 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
             self.assertTrue(callback.answer.call_args.kwargs.get("show_alert", False))
             mock_menu.assert_awaited_once()
 
+    async def test_admin_wi_apply_extend_idempotent_duplicate(self):
+        """admin_wi_apply_extend rejects already processed idempotent duplicate requests."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_apply_extend:{self.user.telegram_id}:30"
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.check_and_record_admin_op", new=AsyncMock(return_value=False)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.WhiteInternetService.extend_subscription", new=AsyncMock()) as mock_ext:
+
+            await admin_wi_apply_extend(callback, self.session)
+            mock_ext.assert_not_awaited()
+            callback.answer.assert_awaited_once_with(texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED, show_alert=True)
+
     async def test_admin_wi_devices_view(self):
         """admin_wi_devices_view renders HWID list and active devices cleanly."""
         callback = MagicMock(spec=CallbackQuery)

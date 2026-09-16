@@ -931,7 +931,17 @@ async def extend_subscription_atomic(
 
     sub.expires_at = new_expires_at
     sub.desired_version += 1
-    if sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.PENDING):
+    if sub.status in (
+        WhiteInternetStatus.EXPIRED,
+        WhiteInternetStatus.PENDING,
+        WhiteInternetStatus.EXHAUSTED,
+    ):
+        if sub.status == WhiteInternetStatus.EXHAUSTED:
+            sub.traffic_used_bytes = 0
+            sub.traffic_overage_bytes = 0
+            sub.traffic_uplink_bytes = 0
+            sub.traffic_downlink_bytes = 0
+            sub.notified_90p = False
         sub.status = WhiteInternetStatus.ACTIVE
         sub.status_reason = None
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE

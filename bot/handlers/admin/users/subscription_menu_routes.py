@@ -919,6 +919,31 @@ async def admin_wi_apply_extend(
         await callback.answer(texts.ADMIN_MANUAL_GRANT_USER_BANNED, show_alert=True)
         return
 
+    message = getattr(callback, "message", None)
+    chat_id = (
+        getattr(getattr(message, "chat", None), "id", callback.from_user.id)
+        if message
+        else callback.from_user.id
+    )
+    message_id = getattr(message, "message_id", 0) if message else 0
+    op_key = make_admin_op_key(
+        action="wi_extend",
+        admin_id=callback.from_user.id,
+        target_id=user.id,
+        chat_id=chat_id,
+        message_id=message_id,
+        value=days,
+    )
+    is_new = await check_and_record_admin_op(
+        session,
+        op_key=op_key,
+        admin_id=callback.from_user.id,
+        target_id=user.id,
+    )
+    if not is_new:
+        await callback.answer(texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED, show_alert=True)
+        return
+
     ok, msg, sub = await WhiteInternetService.extend_subscription(session, user.id, days)
     if not ok:
         await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=msg), show_alert=True)

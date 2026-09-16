@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from config.enums import WhiteInternetStatus
+from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.models import WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from services.white_internet_service import WhiteInternetService
@@ -328,6 +328,45 @@ class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extended.expires_at, now + timedelta(days=7))
         self.assertEqual(extended.status, WhiteInternetStatus.ACTIVE)
         self.assertEqual(extended.desired_version, 2)
+        mock_session.flush.assert_awaited_once()
+
+    async def test_extend_subscription_atomic_exhausted(self):
+        """Extending EXHAUSTED subscription resets traffic counters, transitions to ACTIVE and increments desired_version."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.EXHAUSTED,
+            expires_at=now + timedelta(days=5),
+            desired_version=1,
+            actual_version=1,
+            traffic_used_bytes=50 * 1024 * 1024 * 1024,
+            traffic_overage_bytes=1024,
+            traffic_uplink_bytes=20 * 1024 * 1024 * 1024,
+            traffic_downlink_bytes=30 * 1024 * 1024 * 1024,
+            notified_90p=True,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+
+        self.assertEqual(extended.status, WhiteInternetStatus.ACTIVE)
+        self.assertIsNone(extended.status_reason)
+        self.assertEqual(extended.provisioning_status, WhiteInternetProvisioningStatus.PENDING_UPDATE)
+        self.assertEqual(extended.traffic_used_bytes, 0)
+        self.assertEqual(extended.traffic_overage_bytes, 0)
+        self.assertEqual(extended.traffic_uplink_bytes, 0)
+        self.assertEqual(extended.traffic_downlink_bytes, 0)
+        self.assertFalse(extended.notified_90p)
+        self.assertEqual(extended.desired_version, 2)
+        self.assertEqual(extended.expires_at, now + timedelta(days=35))
         mock_session.flush.assert_awaited_once()
 
     async def test_extend_subscription_service_sync(self):
