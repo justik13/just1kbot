@@ -1125,6 +1125,48 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
             callback.answer.assert_awaited_once_with(show_alert=False)
             callback.message.edit_text.assert_awaited_once()
 
+    async def test_admin_wi_devices_view_user_not_found(self):
+        """admin_wi_devices_view answers with error alert once if user is not found."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_devices:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=None)):
+
+            await admin_wi_devices_view(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+
+    async def test_admin_wi_devices_view_sub_not_found(self):
+        """admin_wi_devices_view answers with error alert once if WI subscription is not found."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_devices:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=None)):
+
+            await admin_wi_devices_view(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+
+    async def test_white_internet_card_info_provisioning_status_display(self):
+        """_get_white_internet_card_info omits node status when ACTIVE and includes it when pending."""
+        from bot.handlers.admin.users.common import _get_white_internet_card_info
+        from config.enums import WhiteInternetProvisioningStatus
+
+        self.sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+        block_active = await _get_white_internet_card_info(self.session, self.user.id, sub=self.sub)
+        self.assertNotIn("Узел:", block_active)
+
+        self.sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        block_pending = await _get_white_internet_card_info(self.session, self.user.id, sub=self.sub)
+        self.assertIn(texts.ADMIN_USER_CARD_WL_NODE_STATUS.format(status="PENDING_UPDATE"), block_pending)
+
     async def test_admin_wi_subscription_menu_clears_state(self):
         """admin_wi_subscription_menu clears FSM state when state is passed."""
         callback = MagicMock(spec=CallbackQuery)

@@ -1099,8 +1099,6 @@ async def admin_wi_devices_view(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    await callback.answer(show_alert=False)
-
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
@@ -1110,6 +1108,8 @@ async def admin_wi_devices_view(
     if not wi_sub:
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
         return
+
+    await callback.answer(show_alert=False)
 
     raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
     now = now_utc()

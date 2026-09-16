@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
 from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
+from config.enums import WhiteInternetProvisioningStatus
 from database.models import Server, Tariff, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.profiles_repo import (
@@ -492,7 +493,7 @@ async def _get_white_internet_card_info(
     else:
         extra_lines.append(texts.ADMIN_USER_CARD_WL_LAST_SEEN.format(last_seen=texts.PLACEHOLDER_DASH))
     prov_status = getattr(sub, "provisioning_status", None)
-    if prov_status and prov_status != "SYNCED_ACTIVE":
+    if prov_status and prov_status != WhiteInternetProvisioningStatus.ACTIVE:
         extra_lines.append(
             texts.ADMIN_USER_CARD_WL_NODE_STATUS.format(status=prov_status)
         )

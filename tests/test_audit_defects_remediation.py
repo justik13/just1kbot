@@ -667,7 +667,7 @@ class TestAuditDefectsRemediationXrayAndLedgerAsync(unittest.IsolatedAsyncioTest
         sub.traffic_used_bytes = 0
         sub.traffic_limit_bytes = 10 * 1024 * 1024 * 1024
         sub.expires_at = None
-        sub.provisioning_status = "SYNCED_ACTIVE"
+        sub.provisioning_status = "ACTIVE"
         sub.last_sync_error = None
         sub.last_error = None
         sub.active_hwids = {
