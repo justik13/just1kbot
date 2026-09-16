@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -41,6 +42,8 @@ from database.repositories.tariff_quotes_repo import (
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
+
+logger = logging.getLogger(__name__)
 
 
 class AccountPurchaseError(RuntimeError):
@@ -413,6 +416,14 @@ async def _settle_account_purchase(
             f"amount={int(amount)} RUB"
         ),
     )
+    logger.info(
+        "Account purchase settled: user_id=%s, quote_id=%s, amount=%s RUB, operation=%s, debit_id=%s",
+        user.id,
+        quote.id,
+        amount,
+        quote.operation_type,
+        debit.id,
+    )
     after = await get_account_balance(session, user_id=user.id)
     await session.flush()
     return AccountPurchaseSettlement(quote, debit, before, after, True)
@@ -425,9 +436,18 @@ async def settle_account_purchase(
     quote_public_id,
 ) -> AccountPurchaseSettlement:
     """Rollback every local side effect when a caught domain error is raised."""
-    async with session.begin_nested():
-        return await _settle_account_purchase(
-            session,
-            user_id=user_id,
-            quote_public_id=quote_public_id,
+    try:
+        async with session.begin_nested():
+            return await _settle_account_purchase(
+                session,
+                user_id=user_id,
+                quote_public_id=quote_public_id,
+            )
+    except AccountPurchaseError as exc:
+        logger.warning(
+            "Account purchase rejected: user_id=%s, quote_public_id=%s, error=%s",
+            user_id,
+            quote_public_id,
+            exc.code,
         )
+        raise

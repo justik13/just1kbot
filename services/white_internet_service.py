@@ -312,6 +312,13 @@ class WhiteInternetService:
         await cls._try_inline_sync(
             session, sub, origin_node, idempotency_key=f"purchase:{sub.id}:1:True"
         )
+        logger.info(
+            "White Internet subscription purchased: user_id=%s, sub_id=%s, days=%s, node_id=%s",
+            user.id,
+            sub.id,
+            tariff.duration_days,
+            origin_node.id,
+        )
         return True, texts.WL_BUY_SUCCESS, sub
 
     @classmethod
@@ -467,6 +474,13 @@ class WhiteInternetService:
                 context=f"trial_convert migration sub {sub_locked.id}",
             )
 
+        logger.info(
+            "White Internet trial converted to paid: user_id=%s, sub_id=%s, days=%s, node_id=%s",
+            user.id,
+            sub_locked.id,
+            tariff.duration_days,
+            sub_locked.origin_node_id,
+        )
         return True, texts.WL_BUY_SUCCESS, sub_locked
 
     @classmethod
@@ -608,6 +622,13 @@ class WhiteInternetService:
                 context=f"renew sub {sub.id}",
             )
 
+        logger.info(
+            "White Internet subscription renewed: user_id=%s, sub_id=%s, days=%s, node_id=%s",
+            user.id,
+            renewed.id,
+            tariff.duration_days,
+            renewed.origin_node_id,
+        )
         return True, texts.WL_RENEW_SUCCESS, renewed
 
     @classmethod
@@ -756,6 +777,12 @@ class WhiteInternetService:
                 context=f"add_device_slot sub {sub.id}",
             )
 
+        logger.info(
+            "White Internet device slot purchased: user_id=%s, sub_id=%s, new_limit=%s",
+            user.id,
+            updated_sub.id,
+            updated_sub.device_limit,
+        )
         return True, texts.WL_ADD_DEVICE_SUCCESS.format(limit=updated_sub.device_limit), updated_sub
 
     @classmethod
@@ -902,6 +929,12 @@ class WhiteInternetService:
                 context=f"topup sub {sub.id}",
             )
 
+        logger.info(
+            "White Internet traffic topped up: user_id=%s, sub_id=%s, pack_gb=%s",
+            user.id,
+            sub.id,
+            pack_gb,
+        )
         return True, texts.WL_TOPUP_SUCCESS.format(gb=pack_gb), grant
 
     @classmethod
@@ -986,6 +1019,12 @@ class WhiteInternetService:
             session, sub, origin_node, idempotency_key=f"trial:{sub.id}:1:True"
         )
 
+        logger.info(
+            "White Internet trial activated: user_id=%s, sub_id=%s, node_id=%s",
+            user.id,
+            sub.id,
+            origin_node.id,
+        )
         return True, texts.WL_TRIAL_ACTIVATED_SUCCESS, sub
 
     @classmethod
@@ -1120,6 +1159,12 @@ class WhiteInternetService:
                     context=f"deactivate sub {sub.id}",
                 )
 
+        logger.info(
+            "White Internet subscriptions deactivated: user_id=%s, count=%s, reason=%s",
+            user_id,
+            len(deactivated),
+            reason,
+        )
         return deactivated
 
     @classmethod
@@ -1182,6 +1227,11 @@ class WhiteInternetService:
                     context=f"reset sub {sub.id}",
                 )
 
+        logger.info(
+            "White Internet trial reset: user_id=%s, deactivated_count=%s",
+            user_id,
+            len(trial_subs),
+        )
         return True, texts.ADMIN_WL_RESET_SUCCESS
 
     @classmethod

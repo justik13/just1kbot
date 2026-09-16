@@ -103,7 +103,13 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
         )
         event_key = hashlib.sha256(canonical.encode()).hexdigest()
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "[%s] Rejected invalid YooKassa webhook payload from %s: %s",
+            request_id,
+            peer_ip,
+            exc,
+        )
         return web.Response(status=400, text="Invalid webhook")
     try:
         async with session_scope() as session:

@@ -23,7 +23,7 @@ from database.repositories import servers_repo, white_internet_repo
 from services.xray_node_client import SyncResult, XrayNodeClient
 from utils.datetime_helpers import now_utc
 
-logger = logging.getLogger("WhiteInternetReconciliation")
+logger = logging.getLogger(__name__)
 
 RECONCILIATION_INTERVAL_SECONDS = 15.0
 BATCH_SIZE = 50

@@ -35,12 +35,14 @@ from sqlalchemy.orm.attributes import flag_modified
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import APIOperation, Server, VPNProfile
+from utils.logging_security import install_sensitive_data_filter
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger("reencrypt")
+install_sensitive_data_filter(logger)
 
 BATCH_SIZE = 100
 

@@ -258,8 +258,16 @@ class DeviceService:
             details={
                 "device_name": profile.device_name,
                 "server_name": server.name,
+                "server_id": server.id,
                 "profile_id": profile.id,
             },
+        )
+        logger.info(
+            "Device profile created: profile_id=%s, user_id=%s, server_id=%s, device_name=%s",
+            profile.id,
+            user.id,
+            server.id,
+            profile.device_name,
         )
         return profile
 
@@ -505,6 +513,15 @@ class DeviceService:
                 "new_profile_id": new_profile.id,
             },
         )
+        logger.info(
+            "Device migrated: user_id=%s, device_name=%s, from_server_id=%s, to_server_id=%s, old_profile_id=%s, new_profile_id=%s",
+            user.id,
+            new_profile.device_name,
+            old_profile.server_id,
+            target_server.id,
+            old_profile.id,
+            new_profile.id,
+        )
         return new_profile
 
     @staticmethod
@@ -645,6 +662,14 @@ class DeviceService:
                 "server_name": server_name or "",
                 "force": force,
             },
+        )
+        logger.info(
+            "Device deleted: profile_id=%s, user_id=%s, device_name=%s, server_id=%s, force=%s",
+            profile_id,
+            user_id,
+            device_name,
+            server_id,
+            force,
         )
         if server_id:
             invalidate_server_cache(server_id)
