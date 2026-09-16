@@ -113,7 +113,11 @@ async def admin_user_devices(
         text = "\n".join(lines)
 
     from database.repositories import white_internet_repo
-    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    try:
+        wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    except Exception as e:
+        logger.debug("Failed to get WI subscription for admin devices: %s", e)
+        wi_sub = None
     has_wi_devices = bool(wi_sub and getattr(wi_sub, "active_hwids", None))
 
     try:

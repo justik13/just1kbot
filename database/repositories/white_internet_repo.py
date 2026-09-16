@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import inspect
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,7 +81,7 @@ async def get_subscription_by_token(
 async def get_subscription_by_user_id(
     session: AsyncSession, user_id: int
 ) -> WhiteInternetSubscription | None:
-    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
+    if session is None or not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
         return None
     stmt = (
         select(WhiteInternetSubscription)
@@ -88,7 +89,18 @@ async def get_subscription_by_user_id(
         .order_by(WhiteInternetSubscription.id.desc())
         .limit(1)
     )
-    return (await session.execute(stmt)).scalar_one_or_none()
+    try:
+        res = session.execute(stmt)
+        if inspect.isawaitable(res):
+            res = await res
+        if hasattr(res, "scalar_one_or_none") and callable(res.scalar_one_or_none):
+            val = res.scalar_one_or_none()
+            if inspect.isawaitable(val):
+                val = await val
+            return val
+    except Exception:
+        return None
+    return None
 
 
 async def has_user_any_subscription(

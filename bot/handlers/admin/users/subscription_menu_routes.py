@@ -1126,10 +1126,14 @@ async def admin_wi_devices_view(
                     last_conn = format_datetime(dt)
                 except Exception:
                     last_conn = ts
-                status = "активно" if ts >= cutoff else "неактивно"
+                status = (
+                    texts.ADMIN_WI_DEVICE_STATUS_ACTIVE
+                    if ts >= cutoff
+                    else texts.ADMIN_WI_DEVICE_STATUS_INACTIVE
+                )
             else:
                 last_conn = texts.PLACEHOLDER_DASH
-                status = "неактивно"
+                status = texts.ADMIN_WI_DEVICE_STATUS_INACTIVE
             lines.append(
                 texts.ADMIN_WI_DEVICE_ITEM.format(
                     hwid=safe(hwid),

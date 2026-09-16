@@ -527,6 +527,8 @@ ADMIN_WI_DEVICES_TITLE = """📱 <b>Устройства HWID (Белый Инт
 {devices_list}"""
 ADMIN_WI_NO_DEVICES = "<i>Нет активных привязанных устройств (HWID).</i>"
 ADMIN_WI_DEVICE_ITEM = "• <code>{hwid}</code> — последняя активность: <i>{last_conn}</i> ({status})"
+ADMIN_WI_DEVICE_STATUS_ACTIVE = "активно"
+ADMIN_WI_DEVICE_STATUS_INACTIVE = "неактивно"
 ADMIN_BAN_REASON_LABELS = {
     "spam": "Спам / Абуз",
     "fraud": "Чарджбэк / Фрод",

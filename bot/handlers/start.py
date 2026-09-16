@@ -121,7 +121,11 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     from datetime import timedelta
     from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
 
-    wi_sub = await get_subscription_by_user_id(session, db_user.id)
+    try:
+        wi_sub = await get_subscription_by_user_id(session, db_user.id)
+    except Exception as e:
+        logger.debug("Failed to get White Internet subscription in hub: %s", e)
+        wi_sub = None
     now = now_utc()
     is_wi_active = bool(
         wi_sub
