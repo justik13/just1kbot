@@ -4,11 +4,11 @@ import asyncio
 import logging
 import uuid
 
-from bot.middlewares.correlation import set_request_id
 from database.connection import session_scope
 from services import payment_provider_operations as provider
 from services import provider_refunds
 from services.workers import webhook_inbox
+from utils.correlation import set_request_id
 
 logger = logging.getLogger(__name__)
 CONCURRENCY = 4

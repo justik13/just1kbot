@@ -26,7 +26,7 @@ from services.account_topup import settle_succeeded_topup_by_id
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.payment_status import payment_display_status
 from services.referral_bonus import grant_referral_bonus_for_topup
-from bot.middlewares.correlation import set_request_id
+from utils.correlation import set_request_id
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)

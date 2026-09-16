@@ -1,27 +1,25 @@
 import logging
 import uuid
-from contextvars import ContextVar
 
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
 
+from utils.correlation import (
+    CorrelationFilter,
+    get_current_request_id,
+    request_id_var,
+    set_request_id,
+)
+
+__all__ = [
+    "CorrelationFilter",
+    "CorrelationMiddleware",
+    "get_current_request_id",
+    "request_id_var",
+    "set_request_id",
+]
+
 logger = logging.getLogger(__name__)
-
-request_id_var: ContextVar[str] = ContextVar("request_id", default="system")
-
-
-class CorrelationFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        record.request_id = request_id_var.get("system")
-        return True
-
-
-def get_current_request_id() -> str:
-    return request_id_var.get("system")
-
-
-def set_request_id(request_id: str) -> None:
-    request_id_var.set(request_id)
 
 
 def _redact_callback_data(data: str | None) -> str:
