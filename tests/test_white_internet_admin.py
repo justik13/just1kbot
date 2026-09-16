@@ -1013,6 +1013,20 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
             callback.answer.assert_awaited_once_with(show_alert=False)
             callback.message.edit_text.assert_awaited_once()
 
+    async def test_admin_wi_extend_menu_user_not_found(self):
+        """admin_wi_extend_menu returns error alert when user does not exist."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_extend_menu:{self.user.telegram_id}"
+        callback.answer = AsyncMock()
+
+        state = AsyncMock(spec=FSMContext)
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=None)):
+
+            await admin_wi_extend_menu(callback, self.session, state=state)
+            callback.answer.assert_awaited_once_with(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+
     async def test_admin_wi_confirm_extend(self):
         """admin_wi_confirm_extend prompts admin for confirmation with days count."""
         callback = MagicMock(spec=CallbackQuery)
@@ -1029,6 +1043,41 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
             await admin_wi_confirm_extend(callback, self.session)
             callback.answer.assert_awaited_once_with(show_alert=False)
             callback.message.edit_text.assert_awaited_once()
+
+    async def test_admin_wi_confirm_extend_user_not_found(self):
+        """admin_wi_confirm_extend returns error alert when user does not exist."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_confirm_extend:{self.user.telegram_id}:30"
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=None)):
+
+            await admin_wi_confirm_extend(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+
+    def test_format_user_card_text_pending_status_shows_active_badge(self):
+        """format_user_card_text renders STATUS_ACTIVE_BADGE for PENDING subscription with future expires_at."""
+        from bot.handlers.admin.users.common import format_user_card_text
+        from config.enums import WhiteInternetStatus
+
+        now = now_utc()
+        pending_sub = WhiteInternetSubscription(
+            id=1,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.PENDING,
+            expires_at=now + timedelta(days=10),
+        )
+
+        card = format_user_card_text(
+            self.user,
+            profiles=[],
+            referrals=[],
+            now=now,
+            wi_sub=pending_sub,
+        )
+        self.assertIn(texts.STATUS_ACTIVE_BADGE, card)
 
     async def test_admin_wi_apply_extend(self):
         """admin_wi_apply_extend calls WhiteInternetService.extend_subscription and logs audit."""

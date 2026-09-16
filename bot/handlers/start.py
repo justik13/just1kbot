@@ -129,7 +129,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     now = now_utc()
     is_wi_active = bool(
         wi_sub
-        and getattr(wi_sub, "status", None) == WhiteInternetStatus.ACTIVE
+        and getattr(wi_sub, "status", None) in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
         and getattr(wi_sub, "expires_at", None)
         and wi_sub.expires_at > now
     )

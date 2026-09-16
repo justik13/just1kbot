@@ -56,7 +56,7 @@ def format_user_card_text(
     has_awg = bool(user.subscription_end and user.subscription_end > now)
     has_wi = bool(
         wi_sub
-        and getattr(wi_sub, "status", None) == WhiteInternetStatus.ACTIVE
+        and getattr(wi_sub, "status", None) in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
         and getattr(wi_sub, "expires_at", None)
         and wi_sub.expires_at > now
     )
@@ -330,7 +330,7 @@ async def _build_users_list_text_and_kb(
             has_awg = bool(user.subscription_end and user.subscription_end > current_time)
             has_wi = bool(
                 wi_sub
-                and getattr(wi_sub, "status", None) == WhiteInternetStatus.ACTIVE
+                and getattr(wi_sub, "status", None) in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
                 and getattr(wi_sub, "expires_at", None)
                 and wi_sub.expires_at > current_time
             )

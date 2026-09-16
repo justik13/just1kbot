@@ -779,8 +779,6 @@ async def admin_wi_extend_menu(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    await callback.answer(show_alert=False)
-
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
@@ -790,6 +788,8 @@ async def admin_wi_extend_menu(
     if not wi_sub:
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
         return
+
+    await callback.answer(show_alert=False)
 
     valid_until = format_datetime(wi_sub.expires_at) if wi_sub.expires_at else texts.PLACEHOLDER_DASH
     text = texts.ADMIN_WI_EXTEND_HEADER.format(
@@ -833,17 +833,17 @@ async def admin_wi_confirm_extend(
         await callback.answer(texts.ERROR_INVALID_DAYS_COUNT, show_alert=True)
         return
 
-    await callback.answer(show_alert=False)
-
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
-        await callback.message.edit_text(texts.ERROR_USER_NOT_FOUND)
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
     wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     if not wi_sub:
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
         return
+
+    await callback.answer(show_alert=False)
 
     current_time = now_utc()
     current_end = (
@@ -911,7 +911,7 @@ async def admin_wi_apply_extend(
 
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
-        await callback.message.edit_text(texts.ERROR_USER_NOT_FOUND)
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
     if user.is_deleted:
