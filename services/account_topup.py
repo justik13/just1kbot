@@ -705,7 +705,7 @@ async def settle_succeeded_topup(
                             text=texts.BTN_WHITE_INTERNET,
                             callback_data="white_internet",
                         )
-                    else:
+                    elif context_source in {"showcase", "renew", "change"}:
                         builder.button(
                             text=texts.NOTIF_BUY_NEW_SUBSCRIPTION_BUTTON,
                             callback_data="payment_showcase",
