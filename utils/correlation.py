@@ -3,7 +3,18 @@
 from __future__ import annotations
 
 import logging
-from contextvars import ContextVar
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
+from typing import Iterator
+
+__all__ = [
+    "CorrelationFilter",
+    "correlation_scope",
+    "get_current_request_id",
+    "request_id_var",
+    "reset_request_id",
+    "set_request_id",
+]
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="system")
 
@@ -21,6 +32,22 @@ def get_current_request_id() -> str:
     return request_id_var.get("system")
 
 
-def set_request_id(request_id: str) -> None:
-    """Set the active correlation request_id for the current context."""
-    request_id_var.set(request_id)
+def set_request_id(request_id: str) -> Token[str]:
+    """Set the active correlation request_id for the current context and return the token."""
+    return request_id_var.set(request_id)
+
+
+def reset_request_id(token: Token[str]) -> None:
+    """Reset the correlation request_id to the state before set_request_id."""
+    request_id_var.reset(token)
+
+
+@contextmanager
+def correlation_scope(request_id: str) -> Iterator[str]:
+    """Context manager for setting and safely restoring a correlation request_id."""
+    token = request_id_var.set(request_id)
+    try:
+        yield request_id
+    finally:
+        request_id_var.reset(token)
+

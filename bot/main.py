@@ -40,7 +40,7 @@ from bot.middlewares import (
     PrivateChatMiddleware,
     ThrottlingMiddleware,
     UserContextMiddleware,
-    set_request_id,
+    correlation_scope,
 )
 from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.clean_chat import stop_clean_chat_worker
@@ -398,13 +398,8 @@ class HealthcheckAccessLogger(AccessLogger):
 @web.middleware
 async def _http_correlation_middleware(request: web.Request, handler):
     """Give every public HTTP request the same request_id as Telegram updates."""
-    try:
-        set_request_id(uuid.uuid4().hex[:8])
+    with correlation_scope(uuid.uuid4().hex[:8]):
         return await handler(request)
-    finally:
-        # aiohttp serves each request in its own task; resetting is a
-        # belt-and-braces guard for reused contexts.
-        set_request_id("system")
 
 
 _http_limiter = HttpRateLimiter()

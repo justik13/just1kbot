@@ -269,7 +269,6 @@ class DeviceService:
             server.id,
             profile.device_name,
         )
-        invalidate_server_cache(server.id)
         return profile
 
     @staticmethod

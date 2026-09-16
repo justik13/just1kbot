@@ -26,7 +26,7 @@ from services.account_topup import settle_succeeded_topup_by_id
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.payment_status import payment_display_status
 from services.referral_bonus import grant_referral_bonus_for_topup
-from utils.correlation import set_request_id
+from utils.correlation import correlation_scope
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -284,11 +284,8 @@ async def _recover_stale_topups(bot: Bot | None = None):
 
 async def _retry_auto_fulfillment(session, payment: Payment) -> None:
     """Retry a failed auto-fulfillment inside a savepoint with bounded attempts."""
-    set_request_id(f"fulfill-{payment.id}")
-    try:
+    with correlation_scope(f"fulfill-{payment.id}"):
         await _do_retry_auto_fulfillment(session, payment)
-    finally:
-        set_request_id("system")
 
 
 async def _do_retry_auto_fulfillment(session, payment: Payment) -> None:

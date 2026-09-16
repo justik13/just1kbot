@@ -6,18 +6,23 @@ from aiogram.types import CallbackQuery, Message
 
 from utils.correlation import (
     CorrelationFilter,
+    correlation_scope,
     get_current_request_id,
     request_id_var,
+    reset_request_id,
     set_request_id,
 )
 
 __all__ = [
     "CorrelationFilter",
     "CorrelationMiddleware",
+    "correlation_scope",
     "get_current_request_id",
     "request_id_var",
+    "reset_request_id",
     "set_request_id",
 ]
+
 
 logger = logging.getLogger(__name__)
 
@@ -70,38 +75,37 @@ def _message_log_summary(message: Message) -> str:
 class CorrelationMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         request_id = uuid.uuid4().hex[:8]
-        request_id_var.set(request_id)
+        with correlation_scope(request_id):
+            if isinstance(event, CallbackQuery):
+                event_type = "callback"
+                event_data = _redact_callback_data(event.data)
+                user_id = event.from_user.id if event.from_user else 0
 
-        if isinstance(event, CallbackQuery):
-            event_type = "callback"
-            event_data = _redact_callback_data(event.data)
-            user_id = event.from_user.id if event.from_user else 0
+            elif isinstance(event, Message):
+                event_type = "message"
+                event_data = _message_log_summary(event)
+                user_id = event.from_user.id if event.from_user else 0
 
-        elif isinstance(event, Message):
-            event_type = "message"
-            event_data = _message_log_summary(event)
-            user_id = event.from_user.id if event.from_user else 0
+            else:
+                event_type = type(event).__name__ or "unknown"
+                event_data = ""
+                user_id = 0
 
-        else:
-            event_type = type(event).__name__ or "unknown"
-            event_data = ""
-            user_id = 0
-
-        logger.info(
-            "[%s] %s from user %d: %s",
-            request_id,
-            event_type,
-            user_id,
-            event_data,
-        )
-
-        try:
-            return await handler(event, data)
-        except Exception as e:
-            logger.error(
-                "[%s] Unhandled exception in %s: %s",
+            logger.info(
+                "[%s] %s from user %d: %s",
                 request_id,
                 event_type,
-                type(e).__name__,
+                user_id,
+                event_data,
             )
-            raise
+
+            try:
+                return await handler(event, data)
+            except Exception as e:
+                logger.error(
+                    "[%s] Unhandled exception in %s: %s",
+                    request_id,
+                    event_type,
+                    type(e).__name__,
+                )
+                raise
