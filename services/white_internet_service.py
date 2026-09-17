@@ -1247,6 +1247,8 @@ class WhiteInternetService:
         sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
         if sub is None:
             return False, texts.ADMIN_WI_SUB_NOT_FOUND, None
+        if getattr(sub, "is_trial", False):
+            return False, texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN, None
 
         try:
             sub = await white_internet_repo.extend_subscription_atomic(

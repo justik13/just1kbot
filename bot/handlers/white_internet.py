@@ -161,15 +161,19 @@ def get_white_internet_overview_keyboard(
         )
 
     now = now_utc()
+    is_trial = bool(getattr(sub, "is_trial", False))
+    is_exhausted = sub.status == WhiteInternetStatus.EXHAUSTED
     can_renew = (
-        sub.expires_at is None
+        is_trial
+        or is_exhausted
+        or sub.expires_at is None
         or (sub.expires_at - now).total_seconds() <= 30 * 86400
     )
     sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
     renew_price = int(get_white_internet_tier_price(sub_limit, base_price=Decimal(base_price)))
 
     if can_renew:
-        if getattr(sub, "is_trial", False):
+        if is_trial:
             builder.button(
                 text=texts.BTN_WL_CONVERT_TRIAL.format(price=base_price),
                 callback_data="wl_renew_preview",
