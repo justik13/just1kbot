@@ -895,48 +895,38 @@ async def extend_subscription_atomic(
     *,
     now: datetime | None = None,
 ) -> WhiteInternetSubscription:
-    """Atomically extend the expiration date of a White Internet subscription under row lock."""
+    """Atomically extend the expiration date of a White Internet subscription under row lock.
+
+    Contract:
+    - Active subscriptions: Adds days to the active end date without resetting mid-cycle
+      traffic consumption.
+    - Expired/Exhausted/Pending subscriptions: Reactivates the subscription to ACTIVE, resets
+      cycle usage counters (traffic_used_bytes=0, etc.) for the new period, and schedules
+      node provisioning (PENDING_UPDATE).
+    - Disabled subscriptions: Explicitly rejected with WhiteInternetInactiveSubscriptionError.
+    """
     if not isinstance(subscription_id, int) or subscription_id < 1 or subscription_id > 2_147_483_647:
         raise WhiteInternetSubscriptionNotFoundError(f"Invalid subscription id {subscription_id}")
     if not isinstance(days, int) or days < 1:
         raise ValueError(f"Invalid days to extend: {days}. Must be an integer >= 1.")
 
-    sub = await session.get(
-        WhiteInternetSubscription,
-        subscription_id,
-        with_for_update=True,
-    )
+    sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
 
     if sub.status == WhiteInternetStatus.DISABLED:
         raise WhiteInternetInactiveSubscriptionError("Subscription is disabled")
 
-    now = now or now_utc()
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+    from utils.datetime_helpers import calculate_extension_end
 
-    sub_expires_at = sub.expires_at
-    if sub_expires_at is not None and sub_expires_at.tzinfo is None:
-        sub_expires_at = sub_expires_at.replace(tzinfo=timezone.utc)
-
-    base_time = sub_expires_at if (sub_expires_at and sub_expires_at > now) else now
-
-    from bot.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
-
-    if days >= PERMANENT_SUBSCRIPTION_DAYS:
-        new_expires_at = PERMANENT_END_DATE
-    else:
-        new_expires_at = base_time + timedelta(days=days)
-
-    sub.expires_at = new_expires_at
+    sub.expires_at = calculate_extension_end(sub.expires_at, days, now=now)
     sub.desired_version += 1
     if sub.status in (
         WhiteInternetStatus.EXPIRED,
         WhiteInternetStatus.PENDING,
         WhiteInternetStatus.EXHAUSTED,
     ):
-        if sub.status == WhiteInternetStatus.EXHAUSTED:
+        if sub.status in (WhiteInternetStatus.EXHAUSTED, WhiteInternetStatus.EXPIRED):
             sub.traffic_used_bytes = 0
             sub.traffic_overage_bytes = 0
             sub.traffic_uplink_bytes = 0

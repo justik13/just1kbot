@@ -289,39 +289,29 @@ async def _build_users_list_text_and_kb(
         current_time = now_utc()
 
         # Batch fetch White Internet subscriptions for users on the current page
-        user_ids = [
-            getattr(u, "id", None)
-            for u in users
-            if getattr(u, "id", None) is not None
-        ]
+        user_ids = [u.id for u in users if u.id is not None]
         wi_subs_map: dict[int, WhiteInternetSubscription] = {}
         if user_ids and session is not None:
-            try:
-                from config.enums import WhiteInternetStatus
-                stmt = select(WhiteInternetSubscription).where(
-                    WhiteInternetSubscription.user_id.in_(user_ids),
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.PENDING,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ]),
-                )
-                result = await session.execute(stmt)
-                for w in result.scalars().all():
-                    uid = getattr(w, "user_id", None)
-                    if uid is not None:
-                        wi_subs_map[uid] = w
-            except Exception as e:
-                logger.debug("Failed to batch fetch White Internet subscriptions: %s", e)
+            from config.enums import WhiteInternetStatus
+            stmt = select(WhiteInternetSubscription).where(
+                WhiteInternetSubscription.user_id.in_(user_ids),
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.PENDING,
+                    WhiteInternetStatus.EXHAUSTED,
+                ]),
+            )
+            result = await session.execute(stmt)
+            for w in result.scalars().all():
+                wi_subs_map[w.user_id] = w
 
         for user in users:
-            uid = getattr(user, "id", None)
-            wi_sub = wi_subs_map.get(uid) if uid is not None else None
+            wi_sub = wi_subs_map.get(user.id)
             has_awg = bool(user.subscription_end and user.subscription_end > current_time)
             has_wi = bool(
                 wi_sub
-                and getattr(wi_sub, "status", None) in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
-                and getattr(wi_sub, "expires_at", None)
+                and wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING, WhiteInternetStatus.EXHAUSTED)
+                and wi_sub.expires_at
                 and wi_sub.expires_at > current_time
             )
 
@@ -333,18 +323,21 @@ async def _build_users_list_text_and_kb(
 
             if has_awg:
                 days = format_days_left(user.subscription_end)
+                profiles_count = (
+                    len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
+                    if user.profiles
+                    else 0
+                )
             elif has_wi and wi_sub and wi_sub.expires_at:
                 days = format_days_left(wi_sub.expires_at)
+                profiles_count = count_active_hwids(wi_sub.active_hwids, now=current_time)
             else:
                 days = format_days_left(user.subscription_end)
-
-            profiles_count = (
-                len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
-                if user.profiles
-                else 0
-            )
-            if profiles_count == 0 and has_wi and wi_sub:
-                profiles_count = count_active_hwids(getattr(wi_sub, "active_hwids", None), now=current_time)
+                profiles_count = (
+                    len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
+                    if user.profiles
+                    else 0
+                )
 
             button_text = truncate_button_text(
                 texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)

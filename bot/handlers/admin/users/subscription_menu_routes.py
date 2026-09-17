@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import logging
+import secrets
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -8,7 +9,6 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
 from bot.formatters import get_tariff_display_name
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
@@ -22,7 +22,7 @@ from bot.keyboards.admin.users import (
     get_admin_wi_traffic_add_keyboard,
 )
 from bot.states import AdminStates
-from config.constants import WHITE_INTERNET_HWID_TTL_HOURS
+from config.constants import PERMANENT_SUBSCRIPTION_DAYS, WHITE_INTERNET_HWID_TTL_HOURS
 from config.enums import AdminAuditAction, WhiteInternetStatus
 from database.repositories import white_internet_repo
 from database.repositories.white_internet_repo import count_active_hwids
@@ -37,7 +37,7 @@ from services.audit_service import AuditService
 from services.white_internet_service import WhiteInternetService
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id, parse_callback_int, parse_callback_parts
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import calculate_extension_end, now_utc
 from utils.formatters import format_datetime
 from utils.telegram import render_hub, safe
 
@@ -839,6 +839,10 @@ async def admin_wi_confirm_extend(
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
+    if user.is_banned:
+        await callback.answer(texts.ADMIN_MANUAL_GRANT_USER_BANNED, show_alert=True)
+        return
+
     wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     if not wi_sub:
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
@@ -846,18 +850,7 @@ async def admin_wi_confirm_extend(
 
     await callback.answer(show_alert=False)
 
-    current_time = now_utc()
-    current_end = (
-        wi_sub.expires_at
-        if (wi_sub.expires_at and wi_sub.expires_at > current_time)
-        else current_time
-    )
-
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_end + timedelta(days=days)
-    )
+    new_end = calculate_extension_end(wi_sub.expires_at, days)
 
     days_text = (
         texts.ADMIN_SUB_PERMANENT_LABEL
@@ -871,11 +864,13 @@ async def admin_wi_confirm_extend(
         new_end=format_datetime(new_end),
     )
 
+    token = secrets.token_hex(4)
+
     try:
         await callback.message.edit_text(
             text,
             reply_markup=get_admin_confirm_action_keyboard(
-                confirm_callback=f"admin_wi_apply_extend:{telegram_id}:{days}",
+                confirm_callback=f"admin_wi_apply_extend:{telegram_id}:{days}:{token}",
                 cancel_callback=f"admin_wi_extend_menu:{telegram_id}",
             ),
             parse_mode="HTML",
@@ -900,6 +895,7 @@ async def admin_wi_apply_extend(
 
     telegram_id = parse_callback_int(parts, 1)
     days = parse_callback_int(parts, 2)
+    action_token = parts[3] if len(parts) > 3 else ""
 
     if (
         telegram_id is None
@@ -932,7 +928,7 @@ async def admin_wi_apply_extend(
         target_id=user.id,
         chat_id=chat_id,
         message_id=message_id,
-        value=days,
+        value=f"{days}:{action_token}" if action_token else days,
     )
     is_new = await check_and_record_admin_op(
         session,
@@ -963,6 +959,7 @@ async def admin_wi_apply_extend(
         target_id=user.id,
         details={"telegram_id": telegram_id, "days": days_text},
     )
+    await session.commit()
 
     new_end_str = (
         format_datetime(sub.expires_at)
@@ -1055,6 +1052,15 @@ async def admin_wi_extend_custom_process(
         )
         return
 
+    if user.is_banned:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ADMIN_MANUAL_GRANT_USER_BANNED,
+            get_back_button(f"admin_wi_extend_menu:{telegram_id}"),
+        )
+        return
+
     wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     if not wi_sub:
         await render_hub(
@@ -1065,18 +1071,7 @@ async def admin_wi_extend_custom_process(
         )
         return
 
-    current_time = now_utc()
-    current_end = (
-        wi_sub.expires_at
-        if (wi_sub.expires_at and wi_sub.expires_at > current_time)
-        else current_time
-    )
-
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_end + timedelta(days=days)
-    )
+    new_end = calculate_extension_end(wi_sub.expires_at, days)
 
     days_text = (
         texts.ADMIN_SUB_PERMANENT_LABEL
@@ -1090,12 +1085,13 @@ async def admin_wi_extend_custom_process(
         new_end=format_datetime(new_end),
     )
 
+    token = secrets.token_hex(4)
     await render_hub(
         message.bot,
         message.chat.id,
         confirm_text,
         get_admin_confirm_action_keyboard(
-            confirm_callback=f"admin_wi_apply_extend:{telegram_id}:{days}",
+            confirm_callback=f"admin_wi_apply_extend:{telegram_id}:{days}:{token}",
             cancel_callback=f"admin_wi_extend_menu:{telegram_id}",
         ),
         parse_mode="HTML",
