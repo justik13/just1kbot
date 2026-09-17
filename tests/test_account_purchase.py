@@ -69,6 +69,14 @@ class AccountPurchaseContractTests(unittest.TestCase):
         )
         self.assertNotIn("balance_purchase_confirm", repr(markup))
 
+    def test_topup_credit_plain_has_only_balance_and_dismiss(self):
+        markup = get_topup_credit_keyboard({})
+        self.assertEqual(
+            callbacks(markup),
+            ["menu_balance", "dismiss_notification"],
+        )
+        self.assertNotIn("white_internet", repr(markup))
+
     def test_quote_backed_economic_types_are_in_metadata(self):
         paid_constraint = next(
             item

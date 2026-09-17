@@ -687,3 +687,234 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             mock_buy.assert_awaited_once_with(self.session, user_id=self.user.id)
             self.assertEqual(payment.topup_context.get("auto_fulfill_status"), "succeeded")
 
+
+class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
+    """Test Hub and Payment navigation when White Internet is active."""
+
+    def test_hub_keyboard_wi_active_layout(self):
+        """Hub keyboard keeps standard purchase button on top and White Internet at the bottom."""
+        from bot import texts
+        from bot.keyboards.common import get_hub_keyboard
+
+        kb = get_hub_keyboard(is_active=False, is_admin=False)
+        # Row 0 must be BTN_BUY_ACCESS
+        self.assertEqual(kb.inline_keyboard[0][0].text, texts.BTN_BUY_ACCESS)
+        # Last row before admin (or bottom row) must contain White Internet
+        all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertIn(texts.BTN_BUY_ACCESS, all_texts)
+        self.assertIn(texts.BTN_WHITE_INTERNET, all_texts)
+        self.assertEqual(kb.inline_keyboard[-1][0].text, texts.BTN_WHITE_INTERNET)
+
+    def test_hub_keyboard_is_active_layout(self):
+        """When is_active=True, row 0 is BTN_MY_SUBSCRIPTION and bottom has BTN_WHITE_INTERNET."""
+        from bot import texts
+        from bot.keyboards.common import get_hub_keyboard
+
+        kb = get_hub_keyboard(is_active=True, is_admin=False)
+        self.assertEqual(kb.inline_keyboard[0][0].text, texts.BTN_MY_SUBSCRIPTION)
+        self.assertEqual(kb.inline_keyboard[-1][0].text, texts.BTN_WHITE_INTERNET)
+
+    async def test_hub_text_renders_white_internet_traffic_line(self):
+        """_build_hub_text_and_kb includes dedicated White Internet line with traffic info."""
+        from datetime import datetime, timezone, timedelta
+        from bot.handlers.start import _build_hub_text_and_kb
+        from config.enums import WhiteInternetStatus
+        from database.models import User, WhiteInternetSubscription
+
+        session = AsyncMock()
+        user = User(
+            id=10,
+            telegram_id=123456789,
+            first_name="Иван",
+            subscription_end=None,
+            device_limit=1,
+            referred_by=None,
+        )
+        now = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=user.id,
+            origin_node_id=1,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=10 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=int(1.5 * 1024 * 1024 * 1024),
+            expires_at=now + timedelta(days=30),
+            active_hwids={"dev1": now.isoformat()},
+        )
+
+        mock_balance = MagicMock(real_available=0, bonus_available=0)
+        with patch("bot.handlers.start.SubscriptionService.check_access", new=AsyncMock(return_value=False)), \
+             patch("bot.handlers.start.get_settings", return_value=MagicMock(ADMIN_IDS=[])), \
+             patch("bot.handlers.start.get_account_balance", new=AsyncMock(return_value=mock_balance)), \
+             patch("database.repositories.profiles_repo.get_user_profiles", new=AsyncMock(return_value=[])), \
+             patch("database.repositories.system_settings_repo.get_system_setting", new=AsyncMock(return_value=None)), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
+             patch("utils.datetime_helpers.now_utc", return_value=now):
+
+            text, kb = await _build_hub_text_and_kb(session, user)
+
+            self.assertIn("Белый Интернет:", text)
+            self.assertIn("1 устр.", text)
+            self.assertIn("8.5/10 ГБ", text)
+            # Standard access must remain inactive in top lines
+            self.assertIn("Неактивна", text)
+
+    async def test_hub_text_renders_white_internet_pending_status(self):
+        """_build_hub_text_and_kb treats PENDING subscription with future expires_at as active for Hub display."""
+        from datetime import datetime, timezone, timedelta
+        from bot.handlers.start import _build_hub_text_and_kb
+        from config.enums import WhiteInternetStatus
+        from database.models import User, WhiteInternetSubscription
+
+        session = AsyncMock()
+        user = User(
+            id=10,
+            telegram_id=123456789,
+            first_name="Иван",
+            subscription_end=None,
+            device_limit=1,
+            referred_by=None,
+        )
+        now = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=user.id,
+            origin_node_id=1,
+            status=WhiteInternetStatus.PENDING,
+            base_traffic_bytes=10 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=0,
+            expires_at=now + timedelta(days=3),
+            active_hwids={},
+        )
+
+        mock_balance = MagicMock(real_available=0, bonus_available=0)
+        with patch("bot.handlers.start.SubscriptionService.check_access", new=AsyncMock(return_value=False)), \
+             patch("bot.handlers.start.get_settings", return_value=MagicMock(ADMIN_IDS=[])), \
+             patch("bot.handlers.start.get_account_balance", new=AsyncMock(return_value=mock_balance)), \
+             patch("database.repositories.profiles_repo.get_user_profiles", new=AsyncMock(return_value=[])), \
+             patch("database.repositories.system_settings_repo.get_system_setting", new=AsyncMock(return_value=None)), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
+             patch("utils.datetime_helpers.now_utc", return_value=now):
+
+            text, kb = await _build_hub_text_and_kb(session, user)
+
+            self.assertIn("Белый Интернет:", text)
+            self.assertIn("10.0/10 ГБ", text)
+
+    async def test_hub_text_renders_white_internet_exhausted_status(self):
+        """_build_hub_text_and_kb renders EXHAUSTED subscription with 🔴 icon while still within validity period."""
+        from datetime import datetime, timezone, timedelta
+        from bot.handlers.start import _build_hub_text_and_kb
+        from config.enums import WhiteInternetStatus
+        from database.models import User, WhiteInternetSubscription
+
+        session = AsyncMock()
+        user = User(
+            id=10,
+            telegram_id=123456789,
+            first_name="Иван",
+            subscription_end=None,
+            device_limit=1,
+            referred_by=None,
+        )
+        now = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=user.id,
+            origin_node_id=1,
+            status=WhiteInternetStatus.EXHAUSTED,
+            base_traffic_bytes=10 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=10 * 1024 * 1024 * 1024,
+            expires_at=now + timedelta(days=15),
+            active_hwids={"dev1": now.isoformat()},
+        )
+
+        mock_balance = MagicMock(real_available=0, bonus_available=0)
+        with patch("bot.handlers.start.SubscriptionService.check_access", new=AsyncMock(return_value=False)), \
+             patch("bot.handlers.start.get_settings", return_value=MagicMock(ADMIN_IDS=[])), \
+             patch("bot.handlers.start.get_account_balance", new=AsyncMock(return_value=mock_balance)), \
+             patch("database.repositories.profiles_repo.get_user_profiles", new=AsyncMock(return_value=[])), \
+             patch("database.repositories.system_settings_repo.get_system_setting", new=AsyncMock(return_value=None)), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
+             patch("utils.datetime_helpers.now_utc", return_value=now):
+
+            text, kb = await _build_hub_text_and_kb(session, user)
+
+            self.assertIn("Белый Интернет:", text)
+            self.assertIn("🔴", text)
+            self.assertIn("0.0/10 ГБ", text)
+
+    def test_payment_balance_keyboard_does_not_contain_white_internet(self):
+        """Balance keyboard is strictly for finances and never contains White Internet shortcut."""
+        from bot import texts
+        from bot.keyboards.payment import get_balance_keyboard
+
+        kb = get_balance_keyboard()
+        all_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertNotIn(texts.BTN_WHITE_INTERNET, all_texts)
+        self.assertIn(texts.BUTTON_TOPUP, all_texts)
+        self.assertIn(texts.BTN_ISTORIYA_POPOLNENIJ, all_texts)
+        self.assertIn(texts.BTN_ISTORIYA_OPERATSIJ, all_texts)
+        self.assertIn(texts.BTN_MAIN_MENU_NAV, all_texts)
+
+    def test_faq_covers_white_internet_and_origin_simple_explanation(self):
+        """FAQ clearly covers both Amnezia and White Internet (INCY) in everyday, human language."""
+        from bot import texts
+
+        faq = texts.FAQ_TEXT
+        self.assertIn("INCY", faq)
+        self.assertIn("Белый Интернет", faq)
+        self.assertIn("AmneziaVPN", faq)
+        self.assertIn("AmneziaWG", faq)
+        self.assertIn("DefaultVPN", faq)
+        self.assertIn("Госуслуги", faq)
+        self.assertIn("банковские приложения", faq)
+        self.assertIn("2ip.io", faq)
+        self.assertIn("Сбросить устройства", faq)
+        self.assertIn("Отключать приложение при входе в банк не нужно!", faq)
+
+    async def test_support_help_has_incy_instruction_button(self):
+        """Support help menu includes INCY instruction button and handles callback properly."""
+        from bot import texts
+        from bot.handlers.support import show_support_help, show_help_incy
+
+        query = MagicMock(spec=CallbackQuery)
+        query.data = "support_help"
+        query.bot = MagicMock()
+        query.message = MagicMock()
+        query.message.chat = MagicMock(id=123456)
+        query.answer = AsyncMock()
+
+        with patch("bot.handlers.support.render_hub", new_callable=AsyncMock) as mock_render:
+            await show_support_help(query)
+            mock_render.assert_awaited_once()
+            _, _, rendered_text, markup = mock_render.call_args[0]
+            self.assertEqual(rendered_text, texts.SUPPORT_HELP_ROOT_TEXT)
+            all_buttons = [btn for row in markup.inline_keyboard for btn in row]
+            incy_btn = next((b for b in all_buttons if b.text == texts.BTN_INSTRUCTION_INCY), None)
+            self.assertIsNotNone(incy_btn)
+            self.assertEqual(incy_btn.callback_data, "help_incy")
+
+        # Test show_help_incy callback
+        query.data = "help_incy"
+        with patch("bot.handlers.support.render_hub", new_callable=AsyncMock) as mock_render:
+            await show_help_incy(query)
+            mock_render.assert_awaited_once()
+            _, _, rendered_text, markup = mock_render.call_args[0]
+            self.assertEqual(rendered_text, texts.SUPPORT_INCY_INSTRUCTION_TEXT)
+            all_buttons = [btn for row in markup.inline_keyboard for btn in row]
+            wi_btn = next((b for b in all_buttons if b.text == texts.BTN_WHITE_INTERNET), None)
+            self.assertIsNotNone(wi_btn)
+            self.assertEqual(wi_btn.callback_data, "white_internet")
+
+    def test_hub_white_internet_line_emoji_is_unified(self):
+        """HUB_WHITE_INTERNET_LINE_FORMAT uses the unified ⚪️ emoji."""
+        from bot import texts
+
+        self.assertTrue(texts.HUB_WHITE_INTERNET_LINE_FORMAT.startswith("\n⚪️ <b>Белый Интернет:</b>"))
+
+
+

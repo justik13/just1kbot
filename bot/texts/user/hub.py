@@ -12,12 +12,13 @@ HUB_HEADER = """🏠 <b>Главное меню</b>
 
 <b>📊 Статус подписки:</b> {status}
 <b>⏳ Действует до:</b> {valid_until} ({days_left})
-<b>📱 Подключено устройств:</b> {devices_count}/{device_limit}
+<b>📱 Подключено устройств:</b> {devices_count}/{device_limit}{white_internet_line}
 
 <b>💰 Баланс:</b> {real_balance} ₽{bonus_line}{inviter_line}
 
 Выберите нужный раздел:"""
 
+HUB_WHITE_INTERNET_LINE_FORMAT = "\n⚪️ <b>Белый Интернет:</b> {status_icon} до {expiry} ({days_left}, {devices_count} устр., {traffic_rem}/{traffic_total} ГБ)"
 HUB_BONUS_LINE_FORMAT = "\n<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽"
 
 PAYMENT_STATUS_PENDING_ICON = "⏳"

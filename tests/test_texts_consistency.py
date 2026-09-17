@@ -689,6 +689,8 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertTrue(hasattr(texts, "WL_TOPUP_PREVIEW_TEXT"))
         self.assertTrue(hasattr(texts, "WL_PREVIEW_BALANCE_OK"))
         self.assertTrue(hasattr(texts, "WL_PREVIEW_BALANCE_SHORTAGE"))
+        self.assertTrue(hasattr(texts, "BTN_INSTRUCTION_INCY"))
+        self.assertTrue(hasattr(texts, "SUPPORT_INCY_INSTRUCTION_TEXT"))
 
     def test_dead_white_internet_texts_removed(self):
         self.assertFalse(hasattr(texts, "WL_TRIAL_FINISHED"))

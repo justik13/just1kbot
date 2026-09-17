@@ -115,9 +115,64 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     balance = await get_account_balance(session, user_id=db_user.id)
     profiles = await get_user_profiles(session, db_user.id)
 
+    from database.repositories.white_internet_repo import count_active_hwids, get_subscription_by_user_id
+    from config.enums import WhiteInternetStatus
+    from utils.datetime_helpers import now_utc
+
+    wi_sub = None
+    if session is not None and getattr(db_user, "id", None) is not None:
+        try:
+            wi_sub = await get_subscription_by_user_id(session, db_user.id)
+        except Exception:
+            wi_sub = None
+    now = now_utc()
+    is_wi_active = bool(
+        wi_sub
+        and wi_sub.status in (
+            WhiteInternetStatus.ACTIVE,
+            WhiteInternetStatus.PENDING,
+            WhiteInternetStatus.EXHAUSTED,
+        )
+        and wi_sub.expires_at
+        and wi_sub.expires_at > now
+    )
+
     status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
     valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
     days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
+    devices_count = len(profiles)
+    device_limit = db_user.device_limit or 0
+
+    white_internet_line = ""
+    if is_wi_active and wi_sub:
+        wi_active_cnt = count_active_hwids(wi_sub.active_hwids, now=now)
+
+        base_quota = wi_sub.base_traffic_bytes or 0
+        extra_quota = wi_sub.extra_traffic_bytes or 0
+        total_quota_bytes = base_quota + extra_quota
+        used_quota_bytes = max(
+            0,
+            (wi_sub.traffic_used_bytes or 0) - (wi_sub.traffic_overage_bytes or 0),
+        )
+        rem_bytes = max(0, total_quota_bytes - used_quota_bytes)
+        rem_gb = rem_bytes / (1024 ** 3)
+        tot_gb = total_quota_bytes / (1024 ** 3)
+
+        rem_str = f"{rem_gb:.1f}" if rem_gb < 100 else f"{int(rem_gb)}"
+        tot_str = f"{tot_gb:.1f}" if tot_gb % 1 != 0 else f"{int(tot_gb)}"
+
+        expiry_str = format_subscription_date(wi_sub.expires_at) if wi_sub.expires_at else texts.PLACEHOLDER_DASH
+        days_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
+        status_icon = "🔴" if wi_sub.status == WhiteInternetStatus.EXHAUSTED else "🟢"
+
+        white_internet_line = texts.HUB_WHITE_INTERNET_LINE_FORMAT.format(
+            status_icon=status_icon,
+            expiry=expiry_str,
+            days_left=days_str,
+            devices_count=wi_active_cnt,
+            traffic_rem=rem_str,
+            traffic_total=tot_str,
+        )
 
     inviter_line = ""
     if db_user.referred_by:
@@ -147,8 +202,9 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         status=status_str,
         valid_until=valid_until_str,
         days_left=days_left_str,
-        devices_count=len(profiles),
-        device_limit=db_user.device_limit or 0,
+        devices_count=devices_count,
+        device_limit=device_limit,
+        white_internet_line=white_internet_line,
         real_balance=int(balance.real_available),
         bonus_line=bonus_line,
         inviter_line=inviter_line,

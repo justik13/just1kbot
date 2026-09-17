@@ -57,3 +57,26 @@ def is_vpn_access_expired(dt: datetime | None, grace_hours: int = 4) -> bool:
         dt = dt.replace(tzinfo=timezone.utc)
 
     return (dt + timedelta(hours=grace_hours)) < now_utc()
+
+
+def calculate_extension_end(
+    current_end: datetime | None,
+    days: int,
+    now: datetime | None = None,
+) -> datetime:
+    """Calculate the new expiration datetime given the current expiration and added days."""
+    from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
+
+    if days >= PERMANENT_SUBSCRIPTION_DAYS:
+        return PERMANENT_END_DATE
+
+    current_time = now or now_utc()
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+
+    if current_end is not None and current_end.tzinfo is None:
+        current_end = current_end.replace(tzinfo=timezone.utc)
+
+    base_time = current_end if (current_end and current_end > current_time) else current_time
+    return base_time + timedelta(days=days)
+

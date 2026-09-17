@@ -494,8 +494,41 @@ ADMIN_WI_HWID_RESET_SUCCESS = "✅ Все привязанные HWID польз
 ADMIN_WI_MENU_TITLE = "🛠 Админка › 👥 Пользователи › 🌐 <b>Белый Интернет</b> (ID: <code>{telegram_id}</code>)"
 ADMIN_WI_MENU_NO_SUB = "<i>У пользователя нет подписки Белый Интернет.</i>"
 ADMIN_USER_CARD_WL_DEVICES = "• <b>Устройства:</b> {active} / {limit}"
+ADMIN_USER_CARD_WL_LAST_SEEN = "• <b>Активность:</b> {last_seen}"
 ADMIN_USER_CARD_WL_NODE_STATUS = "• <b>Узел:</b> <code>{status}</code>"
 ADMIN_USER_CARD_WL_ERROR = "• <b>Ошибка:</b> <code>{error}</code>"
+
+ADMIN_WI_EXTEND_HEADER = """➕ <b>Продление подписки (Белый Интернет)</b>
+
+Пользователь: <code>{telegram_id}</code>
+Текущее окончание: <b>{valid_until}</b>
+
+Выберите срок продления:"""
+
+ADMIN_WI_CONFIRM_EXTEND = """⚠️ <b>Подтверждение продления (Белый Интернет)</b>
+
+Пользователь: <code>{telegram_id}</code>
+Срок: <b>+{days_text}</b>
+Новое окончание: <b>{new_end}</b>"""
+
+ADMIN_WI_EXTEND_SUCCESS = """✅ Подписка Белый Интернет пользователя <code>{telegram_id}</code> продлена на <b>{days_text}</b>.
+Новый срок: <b>{new_end}</b>"""
+
+ADMIN_WI_EXTEND_PROMPT = """➕ <b>Продление подписки (Белый Интернет)</b>
+
+Пользователь: <code>{telegram_id}</code>
+Введите количество дней для продления:"""
+
+ADMIN_WI_DEVICES_TITLE = """📱 <b>Устройства HWID (Белый Интернет)</b>
+
+Пользователь: <code>{telegram_id}</code>
+Лимит устройств: <b>{active}/{limit}</b>
+
+{devices_list}"""
+ADMIN_WI_NO_DEVICES = "<i>Нет активных привязанных устройств (HWID).</i>"
+ADMIN_WI_DEVICE_ITEM = "• <code>{hwid}</code> — последняя активность: <i>{last_conn}</i> ({status})"
+ADMIN_WI_DEVICE_STATUS_ACTIVE = "активно"
+ADMIN_WI_DEVICE_STATUS_INACTIVE = "неактивно"
 ADMIN_BAN_REASON_LABELS = {
     "spam": "Спам / Абуз",
     "fraud": "Чарджбэк / Фрод",

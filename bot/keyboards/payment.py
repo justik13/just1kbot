@@ -425,7 +425,9 @@ def get_balance_change_shortage_keyboard(
     return builder.as_markup()
 
 
-def get_topup_credit_keyboard(context: dict | None = None) -> InlineKeyboardMarkup:
+def get_topup_credit_keyboard(
+    context: dict | None = None,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     context = context or {}
     tariff_id = context.get("tariff_id")

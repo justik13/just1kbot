@@ -91,6 +91,10 @@ async def show_support_help(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
+        text=texts.BTN_INSTRUCTION_INCY,
+        callback_data=f"help_incy{suffix}",
+    )
+    builder.button(
         text=texts.BTN_DOWNLOAD_AMNEZIA,
         callback_data=f"help_download{suffix}",
     )
@@ -114,7 +118,34 @@ async def show_support_help(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=f"manage_device:{device_id}" if device_id else "menu_support",
     )
-    builder.adjust(1, 1, 1, 1, 1, 1)
+    builder.adjust(1, 1, 1, 1, 1, 1, 1)
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        text,
+        builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("help_incy"))
+async def show_help_incy(callback: CallbackQuery):
+    await callback.answer(show_alert=False)
+    device_id = _extract_device_id(callback.data)
+    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
+
+    text = texts.SUPPORT_INCY_INSTRUCTION_TEXT
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_WHITE_INTERNET,
+        callback_data="white_internet",
+    )
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=back_cb,
+    )
+    builder.adjust(1, 1)
 
     await render_hub(
         callback.bot,

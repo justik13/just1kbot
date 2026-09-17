@@ -102,10 +102,18 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         else:
             total_quota = WHITE_INTERNET_BASE_TRAFFIC_BYTES
 
-        used_val = (
-            int(sub.traffic_used_bytes)
-            if isinstance(getattr(sub, "traffic_used_bytes", None), (int, float))
-            else 0
+        used_val = max(
+            0,
+            (
+                int(sub.traffic_used_bytes)
+                if isinstance(getattr(sub, "traffic_used_bytes", None), (int, float))
+                else 0
+            )
+            - (
+                int(sub.traffic_overage_bytes)
+                if isinstance(getattr(sub, "traffic_overage_bytes", None), (int, float))
+                else 0
+            ),
         )
         available_bytes = max(0, total_quota - used_val)
         expire_ts = (

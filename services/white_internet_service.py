@@ -1049,6 +1049,7 @@ class WhiteInternetService:
                 expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
         if not expected_inbound_tags:
             expected_inbound_tags.add("just1k-wl-default")
+        target_version = sub.desired_version or 1
         try:
             async with XrayNodeClient(timeout=4.0) as xray_client:
                 resp = await xray_client.sync_client(
@@ -1056,7 +1057,7 @@ class WhiteInternetService:
                     origin_node.api_key,
                     client_uuid=sub.uuid,
                     is_active=True,
-                    version=sub.desired_version or 1,
+                    version=target_version,
                     expected_node_epoch=origin_node.xray_instance_epoch,
                     idempotency_key=idempotency_key,
                 )
@@ -1086,9 +1087,10 @@ class WhiteInternetService:
                         )
                     confirmed = inv_ok and observed == "active" and inbounds_ok
                 if confirmed:
-                    sub.status = WhiteInternetStatus.ACTIVE
-                    sub.actual_version = sub.desired_version or 1
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+                    sub.actual_version = target_version
+                    if (sub.desired_version or 1) == target_version:
+                        sub.status = WhiteInternetStatus.ACTIVE
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
                     sub.last_reconciled_node_epoch = verified_epoch
                     sub.last_synced_at = now_utc()
                     await session.flush()
@@ -1233,6 +1235,44 @@ class WhiteInternetService:
             len(trial_subs),
         )
         return True, texts.ADMIN_WL_RESET_SUCCESS
+
+    @classmethod
+    async def extend_subscription(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        days: int,
+    ) -> tuple[bool, str, WhiteInternetSubscription | None]:
+        """Extend the expiration date of a user's White Internet subscription."""
+        sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+        if sub is None:
+            return False, texts.ADMIN_WI_SUB_NOT_FOUND, None
+
+        try:
+            sub = await white_internet_repo.extend_subscription_atomic(
+                session, sub.id, days
+            )
+        except white_internet_repo.WhiteInternetError as exc:
+            await session.rollback()
+            return False, str(exc), None
+
+        # Commit DB state before executing external network sync.
+        # This durably persists the extended expiration in PostgreSQL
+        # and releases the SELECT FOR UPDATE row lock so concurrent operations
+        # are not blocked during external network I/O.
+        await session.commit()
+
+        if sub.origin_node_id:
+            origin_node = await session.get(Server, sub.origin_node_id)
+            if origin_node and origin_node.is_active:
+                await cls._try_inline_sync(
+                    session,
+                    sub,
+                    origin_node,
+                    idempotency_key=f"admin_extend:{sub.id}:{sub.desired_version}:{days}",
+                )
+
+        return True, "ok", sub
 
     @staticmethod
     def generate_vless_links(
