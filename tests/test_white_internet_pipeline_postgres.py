@@ -208,15 +208,15 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         async with self.sessions.begin() as session:
             sub = await white_internet_repo.get_subscription_by_id(session, sub_id)
-            self.assertEqual(sub.traffic_used_bytes, up_1 + down_1)
+            self.assertEqual(sub.traffic_used_bytes, down_1)
             self.assertEqual(sub.traffic_uplink_bytes, up_1)
             self.assertEqual(sub.traffic_downlink_bytes, down_1)
             available = await white_internet_repo.get_available_quota_bytes(session, sub.id)
-            self.assertEqual(available, WHITE_INTERNET_BASE_TRAFFIC_BYTES - (up_1 + down_1))
+            self.assertEqual(available, WHITE_INTERNET_BASE_TRAFFIC_BYTES - down_1)
 
-        # 4. Traffic Worker consumes remaining 30 GB + 2 GB overage -> Quota Exhaustion
+        # 4. Traffic Worker consumes remaining quota + 2 GB overage -> Quota Exhaustion
         up_2 = 10 * 1024**3
-        down_2 = 42 * 1024**3  # Total 52 GB > 50 GB
+        down_2 = 52 * 1024**3  # Total downlink 52 GB > 50 GB
         mock_client.get_traffic_snapshot.return_value = (
             node_epoch,
             "boot_pipe_01",
@@ -407,14 +407,14 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(processed, 1)
 
         # 4. Verify:
-        # - traffic_overage_bytes increased by 10 GB
-        # - traffic_used_bytes increased by 10 GB
+        # - traffic_overage_bytes increased by 6 GB (downlink only)
+        # - traffic_used_bytes increased by 6 GB (downlink only)
         # - Quota grant bytes_remaining is STILL exactly 50 GB (NOT consumed)
         async with self.sessions.begin() as session:
             sub = await white_internet_repo.get_subscription_by_id(session, sub_id)
             self.assertEqual(sub.status, WhiteInternetStatus.DISABLED)
-            self.assertEqual(sub.traffic_used_bytes, 10 * 1024**3)
-            self.assertEqual(sub.traffic_overage_bytes, 10 * 1024**3)
+            self.assertEqual(sub.traffic_used_bytes, 6 * 1024**3)
+            self.assertEqual(sub.traffic_overage_bytes, 6 * 1024**3)
             self.assertEqual(sub.traffic_uplink_bytes, 4 * 1024**3)
             self.assertEqual(sub.traffic_downlink_bytes, 6 * 1024**3)
 
