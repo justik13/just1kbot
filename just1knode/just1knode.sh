@@ -27,10 +27,10 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
     echo -e "\033[1;34m==>\033[0m \033[1mJUST1KNODE: Инициализация и развертывание модулей в ${INSTALL_DIR}...\033[0m"
     
     if [[ -d "/app/just1knode" && -f "/app/just1knode/lib/common.sh" ]]; then
-        cp -r /app/just1knode/* "$INSTALL_DIR/"
+        cp -a /app/just1knode/. "$INSTALL_DIR/"
         if [[ -d "/app/scripts/xray_api" ]]; then
-            mkdir -p /opt/xray-api
-            cp -r /app/scripts/xray_api/* /opt/xray-api/
+            mkdir -p "${XRAY_API_DIR:-/opt/xray-api}"
+            cp -a /app/scripts/xray_api/. "${XRAY_API_DIR:-/opt/xray-api}/"
         fi
     else
         JUST1KBOT_REPO_URL="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
@@ -57,10 +57,10 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
         fi
         
         tar -xzf "$tmp_tar" -C "$tmp_extract" --strip-components=1
-        cp -r "$tmp_extract/just1knode"/* "$INSTALL_DIR/"
+        cp -a "$tmp_extract/just1knode/." "$INSTALL_DIR/"
         if [[ -d "$tmp_extract/scripts/xray_api" ]]; then
-            mkdir -p /opt/xray-api
-            cp -r "$tmp_extract/scripts/xray_api"/* /opt/xray-api/
+            mkdir -p "${XRAY_API_DIR:-/opt/xray-api}"
+            cp -a "$tmp_extract/scripts/xray_api/." "${XRAY_API_DIR:-/opt/xray-api}/"
         fi
         rm -rf "$tmp_tar" "$tmp_extract"
     fi
