@@ -669,6 +669,9 @@ update_xray
         # Create original /opt/just1knode module
         orig_node_module = self.install_dir / "test_module.sh"
         orig_node_module.write_text("# original_node_sh\n", encoding="utf-8")
+        orig_node_bin = self.install_dir / "just1knode.sh"
+        orig_node_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        orig_node_bin.chmod(0o755)
 
         cmd = """
 # Mock curl to return a tar.gz archive with new xray-api and just1knode files
@@ -687,6 +690,7 @@ with tarfile.open('$dest', 'w:gz') as tar:
         ('package/scripts/xray_api/api.py', b'# new_v2\\n'),
         ('package/scripts/xray_api/new_orphan.py', b'# orphan\\n'),
         ('package/scripts/xray_api/requirements.txt', b'# reqs\\n'),
+        ('package/just1knode/just1knode.sh', b'#!/bin/sh\\nexit 0\\n'),
         ('package/just1knode/test_module.sh', b'# new_node_sh\\n'),
         ('package/just1knode/orphan_node.sh', b'# orphan_node\\n'),
     ]:
@@ -738,9 +742,68 @@ update_node "all"
         orig_api.write_text("#!/usr/bin/env python3\n# original_v1\n", encoding="utf-8")
         orig_node_module = self.install_dir / "test_module.sh"
         orig_node_module.write_text("# original_node_sh\n", encoding="utf-8")
+        orig_node_bin = self.install_dir / "just1knode.sh"
+        orig_node_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        orig_node_bin.chmod(0o755)
 
         cmd = """
 # Mock curl to return valid archive
+curl() {
+    local dest=""
+    local prev=""
+    for arg in "$@"; do
+        if [ "$prev" = "-o" ]; then dest="$arg"; fi
+        prev="$arg"
+    done
+    if [ -n "$dest" ]; then
+        python3 -c "
+import tarfile, io
+with tarfile.open('$dest', 'w:gz') as tar:
+    for path, content in [
+        ('package/scripts/xray_api/api.py', b'# new_v2\\n'),
+        ('package/just1knode/just1knode.sh', b'#!/bin/sh\\nexit 0\\n'),
+        ('package/just1knode/test_module.sh', b'# new_node_sh\\n'),
+    ]:
+        ti = tarfile.TarInfo(name=path)
+        ti.size = len(content)
+        tar.addfile(ti, io.BytesIO(content))
+" 2>/dev/null
+        return 0
+    fi
+    return 1
+}
+
+# Fail cp only during the forward deployment from tmp_dir, NOT during rollback from backup_root
+real_cp=$(which cp)
+DEPLOY_FAILED=0
+cp() {
+    for arg in "$@"; do
+        if [ "$arg" = "$INSTALL_DIR/" ] && [ "$DEPLOY_FAILED" -eq 0 ]; then
+            DEPLOY_FAILED=1
+            echo "cp: simulated disk full failure during deploy" >&2
+            return 1
+        fi
+    done
+    "$real_cp" "$@"
+}
+
+update_node "all"
+"""
+        res = self._run_shell_snippet(cmd)
+        self.assertNotEqual(res.returncode, 0, "update_node must fail when deploy cp fails")
+        self.assertIn("Не удалось скопировать модули", res.stdout + res.stderr)
+        self.assertIn("original_node_sh", orig_node_module.read_text(encoding="utf-8"))
+
+    def test_update_node_preserves_backup_on_rollback_failure(self):
+        """update_node preserves backup directory on disk when rollback restart fails."""
+        self._prepare_base_env()
+
+        orig_api = self.xray_api_dir / "api.py"
+        orig_api.write_text("#!/usr/bin/env python3\n# original_v1\n", encoding="utf-8")
+        orig_node_module = self.install_dir / "test_module.sh"
+        orig_node_module.write_text("# original_node_sh\n", encoding="utf-8")
+
+        cmd = """
 curl() {
     local dest=""
     local prev=""
@@ -765,60 +828,17 @@ with tarfile.open('$dest', 'w:gz') as tar:
     return 1
 }
 
-# Override cp function: fails specifically when deploying to $INSTALL_DIR
-real_cp=$(which cp)
-cp() {
-    for arg in "$@"; do
-        if [ "$arg" = "$INSTALL_DIR/" ]; then
-            echo "cp: simulated disk full failure during deploy" >&2
-            return 1
-        fi
-    done
-    "$real_cp" "$@"
-}
-
-update_node "all"
-"""
-        res = self._run_shell_snippet(cmd)
-        self.assertNotEqual(res.returncode, 0, "update_node must fail when deploy cp fails")
-        self.assertIn("Не удалось скопировать модули", res.stdout + res.stderr)
-        self.assertIn("original_node_sh", orig_node_module.read_text(encoding="utf-8"))
-
-    def test_update_node_preserves_backup_on_rollback_failure(self):
-        """update_node preserves backup directory on disk when rollback restart fails."""
-        self._prepare_base_env()
-
-        orig_api = self.xray_api_dir / "api.py"
-        orig_api.write_text("#!/usr/bin/env python3\n# original_v1\n", encoding="utf-8")
-
-        cmd = """
-curl() {
-    local dest=""
-    local prev=""
-    for arg in "$@"; do
-        if [ "$prev" = "-o" ]; then dest="$arg"; fi
-        prev="$arg"
-    done
-    if [ -n "$dest" ]; then
-        python3 -c "
-import tarfile, io
-with tarfile.open('$dest', 'w:gz') as tar:
-    for path, content in [
-        ('package/scripts/xray_api/api.py', b'# new_v2\\n'),
-    ]:
-        ti = tarfile.TarInfo(name=path)
-        ti.size = len(content)
-        tar.addfile(ti, io.BytesIO(content))
-" 2>/dev/null
-        return 0
-    fi
-    return 1
-}
-
-# systemctl restart fails on both update and rollback (service permanently down)
+# Initially is-active is 0 (service active before update).
+# On restart (during update) it fails.
+# On restart/start (during rollback) it fails.
+# On is-active (after rollback) it returns 1 (service inactive).
+XRAY_API_ATTEMPT=0
 systemctl() {
-    if [ "$1" = "is-active" ]; then return 0; fi
+    if [ "$1" = "is-active" ] && [ "$2" = "xray-api" ]; then
+        [ "$XRAY_API_ATTEMPT" -eq 0 ] && return 0 || return 1
+    fi
     if [ "$1" = "restart" ] || [ "$1" = "start" ]; then
+        XRAY_API_ATTEMPT=$((XRAY_API_ATTEMPT + 1))
         echo "systemctl: service failed to start" >&2
         return 1
     fi

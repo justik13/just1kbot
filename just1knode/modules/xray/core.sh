@@ -191,7 +191,10 @@ update_node() {
                 rm -rf "$tmp_tar" "$tmp_dir"
                 error "Обновление прервано: обнаружены синтаксические ошибки в загруженном релизе."
             fi
+        fi
 
+        # Обновление модулей утилиты и/или API
+        if [[ -d "${tmp_dir}/just1knode" || -d "${tmp_dir}/scripts/xray_api" ]]; then
             # Подготовка безопасного каталога для резервных копий
             local backup_root=""
             local node_backup=""
@@ -207,7 +210,7 @@ update_node() {
             chmod 700 "$backup_root" 2>/dev/null || true
 
             # 1. Резервная копия just1knode
-            if [[ -d "$node_dir" ]]; then
+            if [[ -d "${tmp_dir}/just1knode" && -d "$node_dir" ]]; then
                 node_backup="${backup_root}/just1knode"
                 mkdir -p "$node_backup"
                 if ! cp -a "${node_dir}/." "$node_backup/" 2>/dev/null; then
@@ -250,8 +253,10 @@ update_node() {
                         warn "Критическая ошибка: не удалось восстановить файлы ${node_dir} из бэкапа!"
                         rb_ok=false
                     else
-                        chmod +x "${node_dir}/just1knode.sh" 2>/dev/null || true
-                        ln -sf "${node_dir}/just1knode.sh" /usr/local/bin/just1knode 2>/dev/null || true
+                        if [[ -f "${node_dir}/just1knode.sh" ]]; then
+                            chmod +x "${node_dir}/just1knode.sh" 2>/dev/null || true
+                            ln -sf "${node_dir}/just1knode.sh" /usr/local/bin/just1knode 2>/dev/null || true
+                        fi
                         log "Модули ${node_dir} успешно восстановлены из резервной копии."
                     fi
                 fi
@@ -299,15 +304,19 @@ update_node() {
             }
 
             # 3. Установка обновлений just1knode
-            mkdir -p "$node_dir"
-            if ! cp -a "${tmp_dir}/just1knode/." "${node_dir}/" 2>/dev/null; then
-                rollback_node_components || true
-                rm -rf "$tmp_tar" "$tmp_dir"
-                error "Не удалось скопировать модули в ${node_dir}. Обновление прервано."
+            if [[ -d "${tmp_dir}/just1knode" ]]; then
+                mkdir -p "$node_dir"
+                if ! cp -a "${tmp_dir}/just1knode/." "${node_dir}/" 2>/dev/null; then
+                    rollback_node_components || true
+                    rm -rf "$tmp_tar" "$tmp_dir"
+                    error "Не удалось скопировать модули в ${node_dir}. Обновление прервано."
+                fi
+                if [[ -f "${node_dir}/just1knode.sh" ]]; then
+                    chmod +x "${node_dir}/just1knode.sh" 2>/dev/null || true
+                    ln -sf "${node_dir}/just1knode.sh" /usr/local/bin/just1knode 2>/dev/null || true
+                fi
+                log "Модули ${node_dir} успешно обновлены и проверены."
             fi
-            chmod +x "${node_dir}/just1knode.sh"
-            ln -sf "${node_dir}/just1knode.sh" /usr/local/bin/just1knode 2>/dev/null || true
-            log "Модули ${node_dir} успешно обновлены и проверены."
 
             # 4. Установка обновлений xray-api
             if [[ -d "${tmp_dir}/scripts/xray_api" && -d "$api_dir" ]]; then
