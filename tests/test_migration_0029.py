@@ -167,8 +167,26 @@ class Migration0029Tests(unittest.TestCase):
             "notified_90p": True,
         }
 
+        # 6. Real production EXPIRED subscription (e.g. trial user 4):
+        # Was 2.74 GB (uplink + downlink), downlink is 2.10 GB.
+        # Must stay EXPIRED, used rebased to 2.10 GB, overage=0, effective usage preserved at 2.10 GB.
+        row6 = {
+            "id": 6,
+            "status": "EXPIRED",
+            "status_reason": "period_expired",
+            "expires_at": now - timedelta(days=2),
+            "base_traffic_bytes": 5 * 1024**3,
+            "extra_traffic_bytes": 0,
+            "traffic_used_bytes": int(2.74 * 1024**3),
+            "traffic_downlink_bytes": int(2.10 * 1024**3),
+            "traffic_overage_bytes": 0,
+            "desired_version": 2,
+            "provisioning_status": "SYNCED_INACTIVE",
+            "notified_90p": False,
+        }
+
         with engine.begin() as conn:
-            conn.execute(table.insert(), [row1, row2, row3, row4, row5])
+            conn.execute(table.insert(), [row1, row2, row3, row4, row5, row6])
 
         with engine.begin() as conn:
             with patch("alembic.op.execute", side_effect=conn.execute):
@@ -212,6 +230,15 @@ class Migration0029Tests(unittest.TestCase):
         self.assertEqual(rows[5]["traffic_used_bytes"], 40 * 1024**3)
         self.assertEqual(rows[5]["traffic_overage_bytes"], 0)
         self.assertFalse(rows[5]["notified_90p"])
+
+        # Assert Row 6 (Real production EXPIRED preserved without zeroing effective usage)
+        self.assertEqual(rows[6]["status"], "EXPIRED")
+        self.assertEqual(rows[6]["status_reason"], "period_expired")
+        self.assertEqual(rows[6]["desired_version"], 2)
+        self.assertEqual(rows[6]["provisioning_status"], "SYNCED_INACTIVE")
+        self.assertEqual(rows[6]["traffic_used_bytes"], int(2.10 * 1024**3))
+        self.assertEqual(rows[6]["traffic_overage_bytes"], 0)
+        self.assertEqual(rows[6]["traffic_used_bytes"] - rows[6]["traffic_overage_bytes"], int(2.10 * 1024**3))
 
 
 if __name__ == "__main__":
