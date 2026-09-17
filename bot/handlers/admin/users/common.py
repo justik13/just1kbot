@@ -54,7 +54,7 @@ def format_user_card_text(
     has_awg = bool(user.subscription_end and user.subscription_end > now)
     has_wi = bool(
         wi_sub
-        and getattr(wi_sub, "status", None) in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
+        and getattr(wi_sub, "status", None) in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING, WhiteInternetStatus.EXHAUSTED)
         and getattr(wi_sub, "expires_at", None)
         and wi_sub.expires_at > now
     )

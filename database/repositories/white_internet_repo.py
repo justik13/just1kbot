@@ -917,21 +917,31 @@ async def extend_subscription_atomic(
     if sub.status == WhiteInternetStatus.DISABLED:
         raise WhiteInternetInactiveSubscriptionError("Subscription is disabled")
 
+    current_time = now or now_utc()
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+
+    old_expires_at = sub.expires_at
+    if old_expires_at is not None and old_expires_at.tzinfo is None:
+        old_expires_at = old_expires_at.replace(tzinfo=timezone.utc)
+
+    is_expired_by_time = old_expires_at is not None and old_expires_at <= current_time
+    is_new_cycle = is_expired_by_time or sub.status in (
+        WhiteInternetStatus.EXPIRED,
+        WhiteInternetStatus.EXHAUSTED,
+        WhiteInternetStatus.PENDING,
+    )
+
     from utils.datetime_helpers import calculate_extension_end
 
-    sub.expires_at = calculate_extension_end(sub.expires_at, days, now=now)
+    sub.expires_at = calculate_extension_end(sub.expires_at, days, now=current_time)
     sub.desired_version += 1
-    if sub.status in (
-        WhiteInternetStatus.EXPIRED,
-        WhiteInternetStatus.PENDING,
-        WhiteInternetStatus.EXHAUSTED,
-    ):
-        if sub.status in (WhiteInternetStatus.EXHAUSTED, WhiteInternetStatus.EXPIRED):
-            sub.traffic_used_bytes = 0
-            sub.traffic_overage_bytes = 0
-            sub.traffic_uplink_bytes = 0
-            sub.traffic_downlink_bytes = 0
-            sub.notified_90p = False
+    if is_new_cycle:
+        sub.traffic_used_bytes = 0
+        sub.traffic_overage_bytes = 0
+        sub.traffic_uplink_bytes = 0
+        sub.traffic_downlink_bytes = 0
+        sub.notified_90p = False
         sub.status = WhiteInternetStatus.ACTIVE
         sub.status_reason = None
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE

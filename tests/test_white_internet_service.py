@@ -387,6 +387,46 @@ class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extended.expires_at, now + timedelta(days=35))
         mock_session.flush.assert_awaited_once()
 
+    async def test_extend_subscription_atomic_active_past_expiry_resets_traffic(self):
+        """Extending an ACTIVE subscription that already lapsed calendar-wise resets traffic counters."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        lapsed_expires = now - timedelta(minutes=5)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=lapsed_expires,
+            desired_version=1,
+            actual_version=1,
+            traffic_used_bytes=45 * 1024 * 1024 * 1024,
+            traffic_overage_bytes=1024,
+            traffic_uplink_bytes=20 * 1024 * 1024 * 1024,
+            traffic_downlink_bytes=25 * 1024 * 1024 * 1024,
+            notified_90p=True,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+
+        self.assertEqual(extended.status, WhiteInternetStatus.ACTIVE)
+        self.assertEqual(extended.traffic_used_bytes, 0)
+        self.assertEqual(extended.traffic_overage_bytes, 0)
+        self.assertEqual(extended.traffic_uplink_bytes, 0)
+        self.assertEqual(extended.traffic_downlink_bytes, 0)
+        self.assertFalse(extended.notified_90p)
+        self.assertEqual(extended.desired_version, 2)
+        self.assertEqual(extended.expires_at, now + timedelta(days=30))
+        mock_session.flush.assert_awaited_once()
+
     async def test_extend_subscription_service_sync(self):
         """WhiteInternetService.extend_subscription calls repo and inline node sync."""
         mock_session = AsyncMock()

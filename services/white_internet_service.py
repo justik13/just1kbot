@@ -1049,6 +1049,7 @@ class WhiteInternetService:
                 expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
         if not expected_inbound_tags:
             expected_inbound_tags.add("just1k-wl-default")
+        target_version = sub.desired_version or 1
         try:
             async with XrayNodeClient(timeout=4.0) as xray_client:
                 resp = await xray_client.sync_client(
@@ -1056,7 +1057,7 @@ class WhiteInternetService:
                     origin_node.api_key,
                     client_uuid=sub.uuid,
                     is_active=True,
-                    version=sub.desired_version or 1,
+                    version=target_version,
                     expected_node_epoch=origin_node.xray_instance_epoch,
                     idempotency_key=idempotency_key,
                 )
@@ -1086,9 +1087,10 @@ class WhiteInternetService:
                         )
                     confirmed = inv_ok and observed == "active" and inbounds_ok
                 if confirmed:
-                    sub.status = WhiteInternetStatus.ACTIVE
-                    sub.actual_version = sub.desired_version or 1
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+                    sub.actual_version = target_version
+                    if (sub.desired_version or 1) == target_version:
+                        sub.status = WhiteInternetStatus.ACTIVE
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
                     sub.last_reconciled_node_epoch = verified_epoch
                     sub.last_synced_at = now_utc()
                     await session.flush()
