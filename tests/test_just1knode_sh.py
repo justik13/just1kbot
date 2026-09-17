@@ -646,6 +646,72 @@ update_xray
             "Откат на предыдущую версию успешно выполнен и подтвержден", res.stdout + res.stderr
         )
 
+    def test_update_node_xray_api_rollback_on_restart_failure(self):
+        """update_node rolls back xray-api code, cleans new files, and restores service on failure."""
+        self._prepare_base_env()
+
+        # Create original /opt/xray-api files
+        orig_api = self.xray_api_dir / "api.py"
+        orig_api.write_text("#!/usr/bin/env python3\n# original_v1\n", encoding="utf-8")
+        orig_conf = self.xray_api_dir / ".orig_config"
+        orig_conf.write_text("ACTIVE=1\n", encoding="utf-8")
+        venv_dir = self.xray_api_dir / "venv" / "bin"
+        venv_dir.mkdir(parents=True, exist_ok=True)
+        orig_pip = venv_dir / "pip"
+        orig_pip.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        orig_pip.chmod(0o755)
+
+        cmd = """
+# Mock curl to return a tar.gz archive with new xray-api files
+curl() {
+    local dest=""
+    local prev=""
+    for arg in "$@"; do
+        if [ "$prev" = "-o" ]; then dest="$arg"; fi
+        prev="$arg"
+    done
+    if [ -n "$dest" ]; then
+        python3 -c "
+import tarfile, os, io
+with tarfile.open('$dest', 'w:gz') as tar:
+    for path, content in [
+        ('package/scripts/xray_api/api.py', b'# new_v2\\n'),
+        ('package/scripts/xray_api/new_orphan.py', b'# orphan\\n'),
+        ('package/scripts/xray_api/requirements.txt', b'# reqs\\n'),
+    ]:
+        ti = tarfile.TarInfo(name=path)
+        ti.size = len(content)
+        tar.addfile(ti, io.BytesIO(content))
+" 2>/dev/null
+        return 0
+    fi
+    return 1
+}
+
+# Mock systemctl: initially active, fails restart on v2, succeeds on rollback
+XRAY_API_ACTIVE=1
+systemctl() {
+    if [ "$1" = "is-active" ] && [ "$2" = "xray-api" ]; then
+        [ "$XRAY_API_ACTIVE" -eq 1 ] && return 0 || return 1
+    fi
+    if [ "$1" = "restart" ] && [ "$2" = "xray-api" ]; then
+        if grep -q "new_v2" /opt/xray-api/api.py 2>/dev/null; then
+            echo "Failed to start xray-api with new_v2" >&2
+            XRAY_API_ACTIVE=0
+            return 1
+        fi
+        XRAY_API_ACTIVE=1
+        return 0
+    fi
+    return 0
+}
+
+update_node "all"
+"""
+        res = self._run_shell_snippet(cmd)
+        self.assertNotEqual(res.returncode, 0, "update_node must fail when xray-api restart fails")
+        self.assertIn("Сбой обновления xray-api", res.stdout + res.stderr)
+
     # -------------------------------------------------------------------------
     # F21: Certificate Expiration & SAN Check in Doctor
     # -------------------------------------------------------------------------

@@ -195,28 +195,37 @@ update_node() {
 
         # Обновление xray-api и синхронизация зависимостей venv
         if [[ -d "${tmp_dir}/scripts/xray_api" && -d /opt/xray-api ]]; then
+            local api_was_active=false
+            if systemctl is-active --quiet xray-api 2>/dev/null; then
+                api_was_active=true
+            fi
+
             local venv_backup=""
             local code_backup="/tmp/xray_api_code_bak_$$"
 
-            # Резервная копия исходных файлов Python (исключая venv)
+            # Резервная копия исходных файлов Python (включая dotfiles, исключая venv)
             mkdir -p "$code_backup"
-            cp -a /opt/xray-api/* "$code_backup/" 2>/dev/null || true
-            rm -rf "$code_backup/venv"
+            if ! cp -a /opt/xray-api/. "$code_backup/" 2>/dev/null; then
+                rm -rf "$code_backup" "$tmp_tar" "$tmp_dir"
+                error "Не удалось создать резервную копию исходных файлов /opt/xray-api. Обновление отменено."
+            fi
+            rm -rf "$code_backup"/venv*
 
             # Резервная копия venv при наличии
             if [[ -d /opt/xray-api/venv ]]; then
                 venv_backup="/opt/xray-api/venv_bak_$$"
                 if ! cp -a /opt/xray-api/venv "$venv_backup" 2>/dev/null; then
-                    rm -rf "$venv_backup"
-                    venv_backup=""
+                    rm -rf "$code_backup" "$venv_backup" "$tmp_tar" "$tmp_dir"
+                    error "Не удалось создать резервную копию venv для /opt/xray-api. Обновление отменено."
                 fi
             fi
 
             # Функция безопасного отката при сбое pip или запуска службы
             rollback_xray_api() {
                 warn "Сбой обновления xray-api! Восстановление исходных файлов и venv из бэкапа..."
+                find /opt/xray-api -mindepth 1 -maxdepth 1 ! -name 'venv*' -exec rm -rf {} + 2>/dev/null || true
                 if [[ -d "$code_backup" ]]; then
-                    cp -r "$code_backup"/* /opt/xray-api/ 2>/dev/null || true
+                    cp -a "$code_backup"/. /opt/xray-api/ 2>/dev/null || true
                 fi
                 if [[ -n "$venv_backup" && -d "$venv_backup" ]]; then
                     rm -rf /opt/xray-api/venv
@@ -226,8 +235,14 @@ update_node() {
                 ensure_xrayapi_user
                 chown -R root:xrayapi /opt/xray-api 2>/dev/null || true
                 chmod -R 750 /opt/xray-api 2>/dev/null || true
-                if systemctl is-active --quiet xray-api 2>/dev/null; then
-                    systemctl restart xray-api 2>/dev/null || true
+                if [[ "$api_was_active" == "true" ]]; then
+                    if ! systemctl restart xray-api 2>/dev/null && ! systemctl start xray-api 2>/dev/null; then
+                        warn "Служба xray-api не смогла перезапуститься после отката на резервную копию."
+                    elif ! systemctl is-active --quiet xray-api 2>/dev/null; then
+                        warn "Служба xray-api не активна после отката на резервную копию."
+                    else
+                        log "Служба xray-api успешно восстановлена и перезапущена на исходной версии."
+                    fi
                 fi
             }
 
@@ -242,7 +257,7 @@ update_node() {
             ensure_xrayapi_user
             chown -R root:xrayapi /opt/xray-api 2>/dev/null || true
             chmod -R 750 /opt/xray-api 2>/dev/null || true
-            if systemctl is-active --quiet xray-api 2>/dev/null; then
+            if [[ "$api_was_active" == "true" ]]; then
                 if ! systemctl restart xray-api 2>/dev/null || ! systemctl is-active --quiet xray-api 2>/dev/null; then
                     rollback_xray_api
                     rm -rf "$code_backup" "$venv_backup" "$tmp_tar" "$tmp_dir"
