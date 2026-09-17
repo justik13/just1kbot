@@ -119,7 +119,12 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     from config.enums import WhiteInternetStatus
     from utils.datetime_helpers import now_utc
 
-    wi_sub = await get_subscription_by_user_id(session, db_user.id)
+    wi_sub = None
+    if session is not None and getattr(db_user, "id", None) is not None:
+        try:
+            wi_sub = await get_subscription_by_user_id(session, db_user.id)
+        except Exception:
+            wi_sub = None
     now = now_utc()
     is_wi_active = bool(
         wi_sub

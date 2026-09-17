@@ -289,24 +289,30 @@ async def _build_users_list_text_and_kb(
         current_time = now_utc()
 
         # Batch fetch White Internet subscriptions for users on the current page
-        user_ids = [u.id for u in users if u.id is not None]
+        user_ids = [getattr(u, "id", None) for u in users if getattr(u, "id", None) is not None]
         wi_subs_map: dict[int, WhiteInternetSubscription] = {}
         if user_ids and session is not None:
-            from config.enums import WhiteInternetStatus
-            stmt = select(WhiteInternetSubscription).where(
-                WhiteInternetSubscription.user_id.in_(user_ids),
-                WhiteInternetSubscription.status.in_([
-                    WhiteInternetStatus.ACTIVE,
-                    WhiteInternetStatus.PENDING,
-                    WhiteInternetStatus.EXHAUSTED,
-                ]),
-            )
-            result = await session.execute(stmt)
-            for w in result.scalars().all():
-                wi_subs_map[w.user_id] = w
+            try:
+                from config.enums import WhiteInternetStatus
+                stmt = select(WhiteInternetSubscription).where(
+                    WhiteInternetSubscription.user_id.in_(user_ids),
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.EXHAUSTED,
+                    ]),
+                )
+                result = await session.execute(stmt)
+                for w in result.scalars().all():
+                    uid = getattr(w, "user_id", None)
+                    if uid is not None:
+                        wi_subs_map[uid] = w
+            except Exception:
+                pass
 
         for user in users:
-            wi_sub = wi_subs_map.get(user.id)
+            uid = getattr(user, "id", None)
+            wi_sub = wi_subs_map.get(uid) if uid is not None else None
             has_awg = bool(user.subscription_end and user.subscription_end > current_time)
             has_wi = bool(
                 wi_sub
