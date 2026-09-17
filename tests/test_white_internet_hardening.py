@@ -142,7 +142,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0028_wi_notifications"])
+        self.assertEqual(heads, ["0029_rebase_wi_traffic_downlink"])
+        rev = scripts.get_revision("0029_rebase_wi_traffic_downlink")
+        self.assertEqual(rev.down_revision, "0028_wi_notifications")
         rev = scripts.get_revision("0028_wi_notifications")
         self.assertEqual(rev.down_revision, "0027_backfill_entitlements")
         rev = scripts.get_revision("0027_backfill_entitlements")
@@ -379,11 +381,56 @@ class TestGroupHWhiteInternetRepoAtomicDeduplication(unittest.IsolatedAsyncioTes
                 snapshot_downlink_before=0,
             )
 
-            self.assertEqual(allocated, 500)
+            self.assertEqual(allocated, 300)
             self.assertFalse(became_exhausted)
-            self.assertEqual(sub.traffic_used_bytes, 500)
+            self.assertEqual(sub.traffic_used_bytes, 300)
+            self.assertEqual(sub.traffic_uplink_bytes, 200)
+            self.assertEqual(sub.traffic_downlink_bytes, 300)
             self.assertEqual(sub.last_uplink_snapshot, 200)
             self.assertEqual(sub.last_downlink_snapshot, 300)
+
+    async def test_record_and_deduct_pure_uplink_does_not_consume_quota(self):
+        session = AsyncMock(spec=AsyncSession)
+        sub = WhiteInternetSubscription(
+            id=1,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=1000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=0,
+            traffic_overage_bytes=0,
+            traffic_uplink_bytes=0,
+            traffic_downlink_bytes=0,
+            last_uplink_snapshot=0,
+            last_downlink_snapshot=0,
+            expires_at=now_utc() + timedelta(days=10),
+        )
+
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
+        ):
+            (
+                allocated,
+                became_exhausted,
+                available,
+                event,
+            ) = await white_internet_repo.record_and_deduct_traffic_atomic(
+                session,
+                subscription_id=1,
+                node_epoch="ep-1",
+                snapshot_uplink_after=500,
+                snapshot_downlink_after=0,
+                snapshot_uplink_before=0,
+                snapshot_downlink_before=0,
+            )
+
+            # Uplink does NOT consume quota, but updates telemetry and snapshot
+            self.assertEqual(allocated, 0)
+            self.assertFalse(became_exhausted)
+            self.assertEqual(sub.traffic_used_bytes, 0)
+            self.assertEqual(sub.traffic_uplink_bytes, 500)
+            self.assertEqual(sub.traffic_downlink_bytes, 0)
+            self.assertEqual(sub.last_uplink_snapshot, 500)
+            self.assertEqual(sub.last_downlink_snapshot, 0)
 
     async def test_record_and_deduct_duplicate_returns_noop(self):
         session = AsyncMock(spec=AsyncSession)
@@ -419,6 +466,49 @@ class TestGroupHWhiteInternetRepoAtomicDeduplication(unittest.IsolatedAsyncioTes
             self.assertEqual(allocated, 0)
             self.assertFalse(became_exhausted)
             self.assertIsNone(event)
+
+    async def test_record_and_deduct_decoupled_negative_delta_handling(self):
+        session = AsyncMock(spec=AsyncSession)
+        sub = WhiteInternetSubscription(
+            id=1,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=5000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=500,
+            traffic_uplink_bytes=200,
+            traffic_downlink_bytes=500,
+            last_uplink_snapshot=200,
+            last_downlink_snapshot=500,
+            expires_at=now_utc() + timedelta(days=10),
+        )
+
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
+        ):
+            # Uplink counter experienced negative delta (e.g. counter anomaly: 50 < 200),
+            # but downlink counter grew normally (550 > 500).
+            # Downlink delta must be exactly +50, NOT rebased to full snapshot 550!
+            (
+                consumed,
+                became_exhausted,
+                available,
+                event,
+            ) = await white_internet_repo.record_and_deduct_traffic_atomic(
+                session,
+                subscription_id=1,
+                node_epoch="ep-1",
+                snapshot_uplink_after=50,
+                snapshot_downlink_after=550,
+                snapshot_uplink_before=200,
+                snapshot_downlink_before=500,
+            )
+
+            self.assertEqual(consumed, 50)
+            self.assertEqual(sub.traffic_used_bytes, 550)
+            self.assertEqual(sub.traffic_downlink_bytes, 550)
+            self.assertEqual(sub.traffic_uplink_bytes, 250)
+            self.assertEqual(sub.last_uplink_snapshot, 50)
+            self.assertEqual(sub.last_downlink_snapshot, 550)
 
 
 class TestGroupIWhiteInternetRepoGrantConservation(unittest.IsolatedAsyncioTestCase):
@@ -631,13 +721,16 @@ class TestGroupRAtomicTraffic90pEmitsWithoutPrematureFlag(unittest.IsolatedAsync
                 mock_session,
                 subscription_id=1,
                 node_epoch="epoch-test",
-                snapshot_uplink_after=910,
-                snapshot_downlink_after=0,
+                snapshot_uplink_after=100,
+                snapshot_downlink_after=910,
             )
 
         self.assertEqual(consumed, 910)
         self.assertFalse(became_exhausted)
         self.assertEqual(available_after, 90)
+        self.assertEqual(sub.traffic_used_bytes, 910)
+        self.assertEqual(sub.traffic_uplink_bytes, 100)
+        self.assertEqual(sub.traffic_downlink_bytes, 910)
         self.assertEqual(event, "traffic_90p")
         # Invariant: sub.notified_90p must remain False in repo; flipped only post-send via CAS in worker
         self.assertFalse(sub.notified_90p)

@@ -486,24 +486,27 @@ async def record_and_deduct_traffic_atomic(
     delta_uplink = snapshot_uplink_after - effective_before_up
     delta_downlink = snapshot_downlink_after - effective_before_down
 
-    if delta_uplink < 0 or delta_downlink < 0:
+    if delta_uplink < 0:
         delta_uplink = max(0, snapshot_uplink_after)
+    if delta_downlink < 0:
         delta_downlink = max(0, snapshot_downlink_after)
 
-    total_delta = delta_uplink + delta_downlink
     total_quota = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)
     used_before = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
     available_before = max(0, total_quota - used_before)
 
-    if total_delta <= 0:
+    if delta_uplink <= 0 and delta_downlink <= 0:
         return 0, False, available_before, None
 
-    if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.EXPIRED):
-        overage = total_delta
-    else:
-        overage = max(0, total_delta - available_before)
+    # Quota is metered strictly by downlink (Egress from CDN to client)
+    consumed_delta = max(0, delta_downlink)
 
-    sub.traffic_used_bytes = (sub.traffic_used_bytes or 0) + total_delta
+    if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.EXPIRED):
+        overage = consumed_delta
+    else:
+        overage = max(0, consumed_delta - available_before)
+
+    sub.traffic_used_bytes = (sub.traffic_used_bytes or 0) + consumed_delta
     sub.traffic_overage_bytes = (sub.traffic_overage_bytes or 0) + overage
     sub.traffic_uplink_bytes = (sub.traffic_uplink_bytes or 0) + delta_uplink
     sub.traffic_downlink_bytes = (sub.traffic_downlink_bytes or 0) + delta_downlink
@@ -527,7 +530,7 @@ async def record_and_deduct_traffic_atomic(
             event = "traffic_90p"
 
     await session.flush()
-    return total_delta, became_exhausted, available_after, event
+    return consumed_delta, became_exhausted, available_after, event
 
 
 async def finalize_hard_delete_subscription(
