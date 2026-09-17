@@ -478,8 +478,9 @@ async def record_and_deduct_traffic_atomic(
     delta_uplink = snapshot_uplink_after - effective_before_up
     delta_downlink = snapshot_downlink_after - effective_before_down
 
-    if delta_uplink < 0 or delta_downlink < 0:
+    if delta_uplink < 0:
         delta_uplink = max(0, snapshot_uplink_after)
+    if delta_downlink < 0:
         delta_downlink = max(0, snapshot_downlink_after)
 
     total_quota = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)

@@ -467,6 +467,49 @@ class TestGroupHWhiteInternetRepoAtomicDeduplication(unittest.IsolatedAsyncioTes
             self.assertFalse(became_exhausted)
             self.assertIsNone(event)
 
+    async def test_record_and_deduct_decoupled_negative_delta_handling(self):
+        session = AsyncMock(spec=AsyncSession)
+        sub = WhiteInternetSubscription(
+            id=1,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=5000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=500,
+            traffic_uplink_bytes=200,
+            traffic_downlink_bytes=500,
+            last_uplink_snapshot=200,
+            last_downlink_snapshot=500,
+            expires_at=now_utc() + timedelta(days=10),
+        )
+
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
+        ):
+            # Uplink counter experienced negative delta (e.g. counter anomaly: 50 < 200),
+            # but downlink counter grew normally (550 > 500).
+            # Downlink delta must be exactly +50, NOT rebased to full snapshot 550!
+            (
+                consumed,
+                became_exhausted,
+                available,
+                event,
+            ) = await white_internet_repo.record_and_deduct_traffic_atomic(
+                session,
+                subscription_id=1,
+                node_epoch="ep-1",
+                snapshot_uplink_after=50,
+                snapshot_downlink_after=550,
+                snapshot_uplink_before=200,
+                snapshot_downlink_before=500,
+            )
+
+            self.assertEqual(consumed, 50)
+            self.assertEqual(sub.traffic_used_bytes, 550)
+            self.assertEqual(sub.traffic_downlink_bytes, 550)
+            self.assertEqual(sub.traffic_uplink_bytes, 250)
+            self.assertEqual(sub.last_uplink_snapshot, 50)
+            self.assertEqual(sub.last_downlink_snapshot, 550)
+
 
 class TestGroupIWhiteInternetRepoGrantConservation(unittest.IsolatedAsyncioTestCase):
     """Group I: White Internet Repo Quota Pool Conservation & Topup."""
