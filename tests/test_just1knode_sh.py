@@ -695,7 +695,7 @@ systemctl() {
         [ "$XRAY_API_ACTIVE" -eq 1 ] && return 0 || return 1
     fi
     if [ "$1" = "restart" ] && [ "$2" = "xray-api" ]; then
-        if grep -q "new_v2" /opt/xray-api/api.py 2>/dev/null; then
+        if grep -q "new_v2" "$XRAY_API_DIR/api.py" 2>/dev/null; then
             echo "Failed to start xray-api with new_v2" >&2
             XRAY_API_ACTIVE=0
             return 1

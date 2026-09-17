@@ -194,7 +194,8 @@ update_node() {
         fi
 
         # Обновление xray-api и синхронизация зависимостей venv
-        if [[ -d "${tmp_dir}/scripts/xray_api" && -d /opt/xray-api ]]; then
+        local api_dir="${XRAY_API_DIR:-/opt/xray-api}"
+        if [[ -d "${tmp_dir}/scripts/xray_api" && -d "$api_dir" ]]; then
             local api_was_active=false
             if systemctl is-active --quiet xray-api 2>/dev/null; then
                 api_was_active=true
@@ -205,36 +206,36 @@ update_node() {
 
             # Резервная копия исходных файлов Python (включая dotfiles, исключая venv)
             mkdir -p "$code_backup"
-            if ! cp -a /opt/xray-api/. "$code_backup/" 2>/dev/null; then
+            if ! cp -a "${api_dir}/." "$code_backup/" 2>/dev/null; then
                 rm -rf "$code_backup" "$tmp_tar" "$tmp_dir"
-                error "Не удалось создать резервную копию исходных файлов /opt/xray-api. Обновление отменено."
+                error "Не удалось создать резервную копию исходных файлов ${api_dir}. Обновление отменено."
             fi
             rm -rf "$code_backup"/venv*
 
             # Резервная копия venv при наличии
-            if [[ -d /opt/xray-api/venv ]]; then
-                venv_backup="/opt/xray-api/venv_bak_$$"
-                if ! cp -a /opt/xray-api/venv "$venv_backup" 2>/dev/null; then
+            if [[ -d "${api_dir}/venv" ]]; then
+                venv_backup="${api_dir}/venv_bak_$$"
+                if ! cp -a "${api_dir}/venv" "$venv_backup" 2>/dev/null; then
                     rm -rf "$code_backup" "$venv_backup" "$tmp_tar" "$tmp_dir"
-                    error "Не удалось создать резервную копию venv для /opt/xray-api. Обновление отменено."
+                    error "Не удалось создать резервную копию venv для ${api_dir}. Обновление отменено."
                 fi
             fi
 
             # Функция безопасного отката при сбое pip или запуска службы
             rollback_xray_api() {
                 warn "Сбой обновления xray-api! Восстановление исходных файлов и venv из бэкапа..."
-                find /opt/xray-api -mindepth 1 -maxdepth 1 ! -name 'venv*' -exec rm -rf {} + 2>/dev/null || true
+                find "$api_dir" -mindepth 1 -maxdepth 1 ! -name 'venv*' -exec rm -rf {} + 2>/dev/null || true
                 if [[ -d "$code_backup" ]]; then
-                    cp -a "$code_backup"/. /opt/xray-api/ 2>/dev/null || true
+                    cp -a "$code_backup"/. "${api_dir}/" 2>/dev/null || true
                 fi
                 if [[ -n "$venv_backup" && -d "$venv_backup" ]]; then
-                    rm -rf /opt/xray-api/venv
-                    mv "$venv_backup" /opt/xray-api/venv
+                    rm -rf "${api_dir}/venv"
+                    mv "$venv_backup" "${api_dir}/venv"
                     venv_backup=""
                 fi
                 ensure_xrayapi_user
-                chown -R root:xrayapi /opt/xray-api 2>/dev/null || true
-                chmod -R 750 /opt/xray-api 2>/dev/null || true
+                chown -R root:xrayapi "$api_dir" 2>/dev/null || true
+                chmod -R 750 "$api_dir" 2>/dev/null || true
                 if [[ "$api_was_active" == "true" ]]; then
                     if ! systemctl restart xray-api 2>/dev/null && ! systemctl start xray-api 2>/dev/null; then
                         warn "Служба xray-api не смогла перезапуститься после отката на резервную копию."
@@ -246,17 +247,17 @@ update_node() {
                 fi
             }
 
-            cp -r "${tmp_dir}/scripts/xray_api"/* /opt/xray-api/
-            if [[ -x /opt/xray-api/venv/bin/pip && -f /opt/xray-api/requirements.txt ]]; then
-                if ! /opt/xray-api/venv/bin/pip install -q -r /opt/xray-api/requirements.txt --no-cache-dir; then
+            cp -r "${tmp_dir}/scripts/xray_api"/* "${api_dir}/"
+            if [[ -x "${api_dir}/venv/bin/pip" && -f "${api_dir}/requirements.txt" ]]; then
+                if ! "${api_dir}/venv/bin/pip" install -q -r "${api_dir}/requirements.txt" --no-cache-dir; then
                     rollback_xray_api
                     rm -rf "$code_backup" "$venv_backup" "$tmp_tar" "$tmp_dir"
                     error "Ошибка обновления зависимостей Python для xray-api. Обновление прервано."
                 fi
             fi
             ensure_xrayapi_user
-            chown -R root:xrayapi /opt/xray-api 2>/dev/null || true
-            chmod -R 750 /opt/xray-api 2>/dev/null || true
+            chown -R root:xrayapi "$api_dir" 2>/dev/null || true
+            chmod -R 750 "$api_dir" 2>/dev/null || true
             if [[ "$api_was_active" == "true" ]]; then
                 if ! systemctl restart xray-api 2>/dev/null || ! systemctl is-active --quiet xray-api 2>/dev/null; then
                     rollback_xray_api
@@ -266,7 +267,7 @@ update_node() {
             fi
             rm -rf "$code_backup"
             [[ -n "$venv_backup" && -d "$venv_backup" ]] && rm -rf "$venv_backup"
-            log "Компоненты /opt/xray-api успешно обновлены с синхронизацией Python-зависимостей и перезапуском службы."
+            log "Компоненты ${api_dir} успешно обновлены с синхронизацией Python-зависимостей и перезапуском службы."
         fi
 
         rm -rf "$tmp_tar" "$tmp_dir"
