@@ -31,6 +31,8 @@ from bot.handlers.admin.users.subscription_menu_routes import (
     admin_wi_confirm_extend,
     admin_wi_devices_view,
     admin_wi_devlimit_set,
+    admin_wi_extend_custom_process,
+    admin_wi_extend_custom_start,
     admin_wi_extend_menu,
     admin_wi_hwid_reset_apply,
     admin_wi_quota_set,
@@ -346,6 +348,17 @@ class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
         buttons_none = [btn.callback_data for row in kb_none.inline_keyboard for btn in row]
         self.assertNotIn(f"admin_wl_reset_confirm:{self.user.telegram_id}", buttons_none)
         self.assertIn(f"admin_wl_grant_trial:{self.user.telegram_id}", buttons_none)
+
+        # 4. Has WL trial sub -> extend button must be omitted
+        kb_trial = get_admin_wi_subscription_keyboard(
+            telegram_id=self.user.telegram_id,
+            has_wi_sub=True,
+            wi_is_active=True,
+            is_trial=True,
+        )
+        buttons_trial = [btn.callback_data for row in kb_trial.inline_keyboard for btn in row]
+        self.assertNotIn(f"admin_wi_extend_menu:{self.user.telegram_id}", buttons_trial)
+        self.assertIn(f"admin_wl_reset_confirm:{self.user.telegram_id}", buttons_trial)
 
     async def test_admin_wl_reset_confirm_callback(self):
         """admin_wl_reset_confirm displays confirmation prompt."""
@@ -1122,6 +1135,132 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
             mock_ext.assert_not_awaited()
             callback.answer.assert_awaited_once_with(texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED, show_alert=True)
 
+    async def test_admin_wi_extend_menu_rejects_trial(self):
+        """admin_wi_extend_menu shows alert that extending trial period is prohibited."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_extend_menu:{self.user.telegram_id}"
+        callback.answer = AsyncMock()
+
+        trial_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            is_trial=True,
+            status=WhiteInternetStatus.ACTIVE,
+        )
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=trial_sub)):
+
+            await admin_wi_extend_menu(callback, self.session)
+            callback.answer.assert_awaited_once_with(
+                texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN,
+                show_alert=True,
+            )
+
+    async def test_admin_wi_confirm_extend_rejects_trial(self):
+        """admin_wi_confirm_extend rejects trial subscription with alert."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_confirm_extend:{self.user.telegram_id}:30"
+        callback.answer = AsyncMock()
+
+        trial_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            is_trial=True,
+            status=WhiteInternetStatus.ACTIVE,
+        )
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=trial_sub)):
+
+            await admin_wi_confirm_extend(callback, self.session)
+            callback.answer.assert_awaited_once_with(
+                texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN,
+                show_alert=True,
+            )
+
+    async def test_admin_wi_apply_extend_rejects_trial(self):
+        """admin_wi_apply_extend rejects trial subscription with alert and does not extend."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_apply_extend:{self.user.telegram_id}:30"
+        callback.answer = AsyncMock()
+
+        trial_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            is_trial=True,
+            status=WhiteInternetStatus.ACTIVE,
+        )
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=trial_sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.WhiteInternetService.extend_subscription", new=AsyncMock()) as mock_ext:
+
+            await admin_wi_apply_extend(callback, self.session)
+            mock_ext.assert_not_awaited()
+            callback.answer.assert_awaited_once_with(
+                texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN,
+                show_alert=True,
+            )
+
+    async def test_admin_wi_extend_custom_start_rejects_trial(self):
+        """admin_wi_extend_custom_start rejects trial subscription with alert."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_extend_custom:{self.user.telegram_id}"
+        callback.answer = AsyncMock()
+
+        trial_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            is_trial=True,
+            status=WhiteInternetStatus.ACTIVE,
+        )
+        state = AsyncMock(spec=FSMContext)
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=trial_sub)):
+
+            await admin_wi_extend_custom_start(callback, state, self.session)
+            callback.answer.assert_awaited_once_with(
+                texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN,
+                show_alert=True,
+            )
+            state.set_state.assert_not_called()
+
+    async def test_admin_wi_extend_custom_process_rejects_trial(self):
+        """admin_wi_extend_custom_process rejects trial subscription via hub message."""
+        message = MagicMock(spec=Message)
+        message.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        message.chat = MagicMock(id=123456789)
+        message.bot = MagicMock()
+        message.text = "30"
+
+        trial_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            is_trial=True,
+            status=WhiteInternetStatus.ACTIVE,
+        )
+        state = AsyncMock(spec=FSMContext)
+        state.get_data.return_value = {"admin_telegram_id": self.user.telegram_id}
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=trial_sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.render_hub", new=AsyncMock()) as mock_hub:
+
+            await admin_wi_extend_custom_process(message, state, self.session)
+            mock_hub.assert_awaited_once()
+            self.assertEqual(mock_hub.call_args[0][2], texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN)
+
     async def test_admin_wi_devices_view(self):
         """admin_wi_devices_view renders HWID list and active devices cleanly."""
         callback = MagicMock(spec=CallbackQuery)
@@ -1252,6 +1391,27 @@ class TestWhiteInternetUserFilters(unittest.IsolatedAsyncioTestCase):
         self.assertIn("'EXHAUSTED'", expiring_sql)
         # Verify expired condition negates active_cond which includes EXHAUSTED
         self.assertIn("'EXHAUSTED'", expired_sql)
+
+    async def test_batch_fetch_white_internet_subscriptions_logs_warning_on_exception(self):
+        """_build_users_list_text_and_kb logs warning when batch fetching WI subscriptions fails."""
+        from bot.handlers.admin.users.common import _build_users_list_text_and_kb
+
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = RuntimeError("DB connection dropped")
+
+        user = User(id=1, telegram_id=12345, username="testuser")
+
+        with patch("bot.handlers.admin.users.common.logger.warning") as mock_warn:
+            rendered, kb = await _build_users_list_text_and_kb(
+                [user],
+                page=1,
+                total_pages=1,
+                total=1,
+                session=mock_session,
+            )
+            mock_warn.assert_called()
+            warning_messages = [call.args[0] for call in mock_warn.call_args_list]
+            self.assertTrue(any("Failed to batch fetch White Internet subscriptions" in msg for msg in warning_messages))
 
 
 if __name__ == "__main__":

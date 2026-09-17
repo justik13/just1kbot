@@ -99,7 +99,7 @@ update_xray_core() {
         fi
 
         log "Применение обновления..."
-        cp /tmp/xray_new/xray "$XRAY_BIN"
+        install -m 755 /tmp/xray_new/xray "$XRAY_BIN"
         set +e
         systemctl restart xray
         local restart_rc=$?
@@ -113,7 +113,7 @@ update_xray_core() {
         else
             warn "Xray не запустился после обновления! Выполняем откат на предыдущую версию..."
             if [[ -f "$backup_bin" ]]; then
-                cp "$backup_bin" "$XRAY_BIN"
+                install -m 755 "$backup_bin" "$XRAY_BIN"
                 systemctl restart xray || true
             fi
             log "Откат на предыдущую версию успешно выполнен и подтвержден."
@@ -193,9 +193,20 @@ update_node() {
 
         # Обновление xray-api и синхронизация зависимостей venv
         if [[ -d "${tmp_dir}/scripts/xray_api" && -d /opt/xray-api ]]; then
+            local venv_backup=""
+            if [[ -d /opt/xray-api/venv ]]; then
+                venv_backup="/opt/xray-api/venv_bak_$$"
+                cp -a /opt/xray-api/venv "$venv_backup" 2>/dev/null || true
+            fi
+
             cp -r "${tmp_dir}/scripts/xray_api"/* /opt/xray-api/
             if [[ -x /opt/xray-api/venv/bin/pip && -f /opt/xray-api/requirements.txt ]]; then
                 if ! /opt/xray-api/venv/bin/pip install -q -r /opt/xray-api/requirements.txt --no-cache-dir; then
+                    if [[ -n "$venv_backup" && -d "$venv_backup" ]]; then
+                        warn "Ошибка pip install. Восстановление виртуального окружения venv из бэкапа..."
+                        rm -rf /opt/xray-api/venv
+                        mv "$venv_backup" /opt/xray-api/venv
+                    fi
                     rm -rf "$tmp_tar" "$tmp_dir"
                     error "Ошибка обновления зависимостей Python для xray-api. Обновление прервано."
                 fi
@@ -205,10 +216,17 @@ update_node() {
             chmod -R 750 /opt/xray-api 2>/dev/null || true
             if systemctl is-active --quiet xray-api 2>/dev/null; then
                 if ! systemctl restart xray-api 2>/dev/null || ! systemctl is-active --quiet xray-api 2>/dev/null; then
+                    if [[ -n "$venv_backup" && -d "$venv_backup" ]]; then
+                        warn "Служба xray-api не смогла запуститься после обновления! Выполняем откат venv..."
+                        rm -rf /opt/xray-api/venv
+                        mv "$venv_backup" /opt/xray-api/venv
+                        systemctl restart xray-api 2>/dev/null || true
+                    fi
                     rm -rf "$tmp_tar" "$tmp_dir"
                     error "Служба xray-api не смогла перезапуститься после обновления."
                 fi
             fi
+            [[ -n "$venv_backup" && -d "$venv_backup" ]] && rm -rf "$venv_backup"
             log "Компоненты /opt/xray-api успешно обновлены с синхронизацией Python-зависимостей и перезапуском службы."
         fi
 

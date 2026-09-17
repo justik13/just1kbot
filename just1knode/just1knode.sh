@@ -8,7 +8,14 @@ set -euo pipefail
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
 if [[ -n "$SCRIPT_SOURCE" && "$SCRIPT_SOURCE" != "bash" && "$SCRIPT_SOURCE" != "-bash" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" 2>/dev/null && pwd)"
+    if command -v realpath >/dev/null 2>&1; then
+        resolved_source="$(realpath "$SCRIPT_SOURCE" 2>/dev/null || echo "$SCRIPT_SOURCE")"
+    elif command -v readlink >/dev/null 2>&1; then
+        resolved_source="$(readlink -f "$SCRIPT_SOURCE" 2>/dev/null || echo "$SCRIPT_SOURCE")"
+    else
+        resolved_source="$SCRIPT_SOURCE"
+    fi
+    SCRIPT_DIR="$(cd "$(dirname "$resolved_source")" 2>/dev/null && pwd)"
 fi
 
 # Если скрипт запущен через pipe (curl | bash) или модули не найдены локально:

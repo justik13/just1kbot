@@ -170,14 +170,16 @@ def get_admin_wi_subscription_keyboard(
     telegram_id: int,
     has_wi_sub: bool = False,
     wi_is_active: bool = False,
+    is_trial: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     if has_wi_sub:
-        builder.button(
-            text=texts.ADMIN_BTN_EXTEND_SUBSCRIPTION,
-            callback_data=f"admin_wi_extend_menu:{telegram_id}",
-        )
+        if not is_trial:
+            builder.button(
+                text=texts.ADMIN_BTN_EXTEND_SUBSCRIPTION,
+                callback_data=f"admin_wi_extend_menu:{telegram_id}",
+            )
         builder.button(
             text=texts.ADMIN_BTN_USER_DEVICES,
             callback_data=f"admin_wi_devices:{telegram_id}",

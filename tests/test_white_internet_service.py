@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from bot import texts
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.models import WhiteInternetSubscription
 from database.repositories import white_internet_repo
@@ -486,6 +487,112 @@ class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
             mock_repo_extend.assert_awaited_once_with(mock_session, 1, 30)
             mock_session.commit.assert_awaited_once()
             mock_sync.assert_awaited_once()
+
+    async def test_extend_subscription_atomic_exhausted_resets_extra_traffic(self):
+        """Extending EXHAUSTED subscription resets extra_traffic_bytes to 0 for the new cycle."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.EXHAUSTED,
+            expires_at=now + timedelta(days=5),
+            desired_version=1,
+            actual_version=1,
+            base_traffic_bytes=50 * 1024**3,
+            extra_traffic_bytes=25 * 1024**3,
+            traffic_used_bytes=75 * 1024**3,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+
+        self.assertEqual(extended.extra_traffic_bytes, 0)
+        self.assertEqual(extended.traffic_used_bytes, 0)
+        self.assertEqual(extended.status, WhiteInternetStatus.ACTIVE)
+
+    async def test_extend_subscription_atomic_active_preserves_extra_traffic(self):
+        """Extending ACTIVE subscription mid-cycle preserves accumulated extra_traffic_bytes."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        current_expires = now + timedelta(days=10)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=current_expires,
+            desired_version=1,
+            actual_version=1,
+            base_traffic_bytes=50 * 1024**3,
+            extra_traffic_bytes=15 * 1024**3,
+            traffic_used_bytes=20 * 1024**3,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+
+        self.assertEqual(extended.extra_traffic_bytes, 15 * 1024**3)
+        self.assertEqual(extended.traffic_used_bytes, 20 * 1024**3)
+        self.assertEqual(extended.expires_at, current_expires + timedelta(days=30))
+
+    async def test_extend_subscription_atomic_trial_rejected(self):
+        """Extending trial subscription via repo raises WhiteInternetTrialSubscriptionError."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=now + timedelta(days=2),
+            desired_version=1,
+            actual_version=1,
+            is_trial=True,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        with self.assertRaises(white_internet_repo.WhiteInternetTrialSubscriptionError):
+            await white_internet_repo.extend_subscription_atomic(
+                mock_session,
+                subscription_id=1,
+                days=30,
+                now=now,
+            )
+
+    async def test_extend_subscription_service_trial_rejected(self):
+        """WhiteInternetService.extend_subscription rejects trial with ADMIN_WI_TRIAL_EXTEND_FORBIDDEN."""
+        mock_session = AsyncMock()
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=now_utc() + timedelta(days=2),
+            is_trial=True,
+        )
+
+        with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)):
+            ok, msg, res_sub = await WhiteInternetService.extend_subscription(mock_session, user_id=10, days=30)
+            self.assertFalse(ok)
+            self.assertEqual(msg, texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN)
+            self.assertIsNone(res_sub)
 
 
 class TestCalculateExtensionEnd(unittest.TestCase):

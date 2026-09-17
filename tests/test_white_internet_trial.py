@@ -35,6 +35,7 @@ from config.enums import (
 from database.models import Server, User, WhiteInternetSubscription
 from services.xray_node_client import SyncResponse, SyncResult
 from services.white_internet_service import WhiteInternetService
+from utils.datetime_helpers import now_utc
 
 
 class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
@@ -439,6 +440,23 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
         callbacks_expired = [btn.callback_data for row in kb_expired.inline_keyboard for btn in row]
         self.assertIn("back_to_main_menu", callbacks_expired)
         self.assertIn("wl_renew_preview", callbacks_expired)
+
+        # 4. EXHAUSTED trial subscription (unexpired calendar date) -> Convert trial button MUST be present
+        sub_exhausted = WhiteInternetSubscription(
+            id=3,
+            user_id=10,
+            is_trial=True,
+            status=WhiteInternetStatus.EXHAUSTED,
+            expires_at=now_utc() + timedelta(days=2),
+        )
+        kb_exhausted = get_white_internet_overview_keyboard(sub_exhausted, bot_domain=domain)
+        callbacks_exhausted = [btn.callback_data for row in kb_exhausted.inline_keyboard for btn in row]
+        buttons_exhausted_text = [btn.text for row in kb_exhausted.inline_keyboard for btn in row]
+        self.assertIn("back_to_main_menu", callbacks_exhausted)
+        self.assertIn("wl_renew_preview", callbacks_exhausted)
+        self.assertTrue(any(texts.BTN_WL_CONVERT_TRIAL.format(price=100) in t or "Перейти на полный тариф" in t for t in buttons_exhausted_text))
+        self.assertNotIn("wl_topup_menu", callbacks_exhausted)
+        self.assertNotIn("wl_show_link", callbacks_exhausted)
 
     async def test_topup_menu_blocks_trial_subscription(self):
         """Topup menu must reject users on trial subscription with an alert."""

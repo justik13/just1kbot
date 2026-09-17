@@ -67,6 +67,10 @@ class WhiteInternetInactiveSubscriptionError(WhiteInternetError):
     """Raised when an operation requires a live subscription."""
 
 
+class WhiteInternetTrialSubscriptionError(WhiteInternetError):
+    """Raised when an operation cannot be performed on a trial subscription."""
+
+
 async def get_subscription_by_token(
     session: AsyncSession, token: str
 ) -> WhiteInternetSubscription | None:
@@ -917,6 +921,9 @@ async def extend_subscription_atomic(
     if sub.status == WhiteInternetStatus.DISABLED:
         raise WhiteInternetInactiveSubscriptionError("Subscription is disabled")
 
+    if getattr(sub, "is_trial", False):
+        raise WhiteInternetTrialSubscriptionError("Cannot extend trial subscription")
+
     current_time = now or now_utc()
     if current_time.tzinfo is None:
         current_time = current_time.replace(tzinfo=timezone.utc)
@@ -941,6 +948,7 @@ async def extend_subscription_atomic(
         sub.traffic_overage_bytes = 0
         sub.traffic_uplink_bytes = 0
         sub.traffic_downlink_bytes = 0
+        sub.extra_traffic_bytes = 0
         sub.notified_90p = False
         sub.status = WhiteInternetStatus.ACTIVE
         sub.status_reason = None

@@ -307,8 +307,8 @@ async def _build_users_list_text_and_kb(
                     uid = getattr(w, "user_id", None)
                     if uid is not None:
                         wi_subs_map[uid] = w
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to batch fetch White Internet subscriptions: %s", exc, exc_info=True)
 
         for user in users:
             uid = getattr(user, "id", None)
