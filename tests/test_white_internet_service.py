@@ -594,6 +594,42 @@ class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(msg, texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN)
             self.assertIsNone(res_sub)
 
+    async def test_repo_operations_trial_rejected(self):
+        """All modifying repo operations reject trial subscription with WhiteInternetTrialSubscriptionError."""
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=now_utc() + timedelta(days=2),
+            is_trial=True,
+            base_traffic_bytes=5 * 1024**3,
+            device_limit=1,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+        mock_session.get.return_value = sub
+
+        with self.assertRaises(white_internet_repo.WhiteInternetTrialSubscriptionError):
+            await white_internet_repo.add_extra_traffic_atomic(mock_session, subscription_id=1, extra_bytes=1024**3)
+
+        with self.assertRaises(white_internet_repo.WhiteInternetTrialSubscriptionError):
+            await white_internet_repo.reset_traffic_used_atomic(mock_session, subscription_id=1)
+
+        with self.assertRaises(white_internet_repo.WhiteInternetTrialSubscriptionError):
+            await white_internet_repo.set_base_traffic_quota_atomic(mock_session, subscription_id=1, base_bytes=50 * 1024**3)
+
+        with self.assertRaises(white_internet_repo.WhiteInternetTrialSubscriptionError):
+            await white_internet_repo.set_device_limit_atomic(mock_session, subscription_id=1, limit=2)
+
+        with self.assertRaises(white_internet_repo.WhiteInternetTrialSubscriptionError):
+            await white_internet_repo.add_device_slot_atomic(mock_session, subscription_id=1, extra_bytes=1024**3)
+
+        with self.assertRaises(white_internet_repo.WhiteInternetTrialSubscriptionError):
+            await white_internet_repo.topup_quota_atomic(mock_session, subscription_id=1, quote_id=1, pack_gb=10, price_rub=Decimal(50))
+
 
 class TestCalculateExtensionEnd(unittest.TestCase):
     """Test unified extension end calculation helper."""

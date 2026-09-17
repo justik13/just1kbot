@@ -230,6 +230,20 @@ async def admin_wi_traffic_add_menu(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if not wi_sub:
+        await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+        return
+
+    if getattr(wi_sub, "is_trial", False):
+        await callback.answer(texts.ADMIN_WI_TRIAL_ACTION_FORBIDDEN, show_alert=True)
+        return
+
     await callback.answer(show_alert=False)
 
     text = texts.ADMIN_WI_TRAFFIC_ADD_MENU_TITLE.format(telegram_id=telegram_id)
@@ -269,6 +283,10 @@ async def admin_wi_traffic_add(
     wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     if not wi_sub:
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+        return
+
+    if getattr(wi_sub, "is_trial", False):
+        await callback.answer(texts.ADMIN_WI_TRIAL_ACTION_FORBIDDEN, show_alert=True)
         return
 
     message = getattr(callback, "message", None)
@@ -333,6 +351,20 @@ async def admin_wi_traffic_reset_confirm(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if not wi_sub:
+        await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+        return
+
+    if getattr(wi_sub, "is_trial", False):
+        await callback.answer(texts.ADMIN_WI_TRIAL_ACTION_FORBIDDEN, show_alert=True)
+        return
+
     await callback.answer(show_alert=False)
 
     text = texts.ADMIN_WI_TRAFFIC_RESET_CONFIRM_TITLE.format(telegram_id=telegram_id)
@@ -374,6 +406,10 @@ async def admin_wi_traffic_reset_apply(
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
         return
 
+    if getattr(wi_sub, "is_trial", False):
+        await callback.answer(texts.ADMIN_WI_TRIAL_ACTION_FORBIDDEN, show_alert=True)
+        return
+
     try:
         await white_internet_repo.reset_traffic_used_atomic(session, wi_sub.id)
     except white_internet_repo.WhiteInternetError as e:
@@ -411,6 +447,20 @@ async def admin_wi_quota_menu(
     telegram_id = parse_callback_id(callback.data, 1)
     if telegram_id is None:
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if not wi_sub:
+        await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+        return
+
+    if getattr(wi_sub, "is_trial", False):
+        await callback.answer(texts.ADMIN_WI_TRIAL_ACTION_FORBIDDEN, show_alert=True)
         return
 
     await callback.answer(show_alert=False)
@@ -454,6 +504,10 @@ async def admin_wi_quota_set(
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
         return
 
+    if getattr(wi_sub, "is_trial", False):
+        await callback.answer(texts.ADMIN_WI_TRIAL_ACTION_FORBIDDEN, show_alert=True)
+        return
+
     quota_bytes = gb * 1024 * 1024 * 1024
     try:
         await white_internet_repo.set_base_traffic_quota_atomic(session, wi_sub.id, quota_bytes)
@@ -495,6 +549,20 @@ async def admin_wi_devlimit_menu(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if not wi_sub:
+        await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+        return
+
+    if getattr(wi_sub, "is_trial", False):
+        await callback.answer(texts.ADMIN_WI_TRIAL_ACTION_FORBIDDEN, show_alert=True)
+        return
+
     await callback.answer(show_alert=False)
 
     text = texts.ADMIN_WI_DEVLIMIT_MENU_TITLE.format(telegram_id=telegram_id)
@@ -534,6 +602,10 @@ async def admin_wi_devlimit_set(
     wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     if not wi_sub:
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+        return
+
+    if getattr(wi_sub, "is_trial", False):
+        await callback.answer(texts.ADMIN_WI_TRIAL_ACTION_FORBIDDEN, show_alert=True)
         return
 
     try:
