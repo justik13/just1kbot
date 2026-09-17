@@ -30,7 +30,7 @@ class Migration0028Tests(unittest.TestCase):
         rev = scripts.get_revision("0028_wi_notifications")
         self.assertIsNotNone(rev)
         self.assertEqual(rev.down_revision, "0027_backfill_entitlements")
-        self.assertEqual(scripts.get_heads(), ["0028_wi_notifications"])
+        self.assertEqual(scripts.get_heads(), ["0029_rebase_wi_traffic_downlink"])
         self.assertEqual(self.migration.revision, "0028_wi_notifications")
         self.assertEqual(self.migration.down_revision, "0027_backfill_entitlements")
 
