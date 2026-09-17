@@ -348,6 +348,7 @@ def get_effective_active_condition(now=None):
         WhiteInternetSubscription.status.in_([
             WhiteInternetStatus.ACTIVE,
             WhiteInternetStatus.PENDING,
+            WhiteInternetStatus.EXHAUSTED,
         ]),
         WhiteInternetSubscription.expires_at > now,
         WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
@@ -371,6 +372,7 @@ def get_effective_expiring_3d_condition(now=None):
             WhiteInternetSubscription.status.in_([
                 WhiteInternetStatus.ACTIVE,
                 WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.EXHAUSTED,
             ]),
             WhiteInternetSubscription.expires_at > now,
             WhiteInternetSubscription.expires_at <= limit_3d,
@@ -383,6 +385,7 @@ def get_effective_expiring_3d_condition(now=None):
             WhiteInternetSubscription.status.in_([
                 WhiteInternetStatus.ACTIVE,
                 WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.EXHAUSTED,
             ]),
             WhiteInternetSubscription.expires_at > limit_3d,
             WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,

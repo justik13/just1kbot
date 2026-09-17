@@ -1220,5 +1220,39 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
         self.assertEqual(back_button.callback_data, f"admin_sub_wi_menu:{self.user.telegram_id}")
 
 
+class TestWhiteInternetUserFilters(unittest.IsolatedAsyncioTestCase):
+    """Verifies that get_effective_active_condition and related filters correctly include EXHAUSTED."""
+
+    def test_effective_active_condition_includes_exhausted(self):
+        from database.models import User
+        from database.repositories.users_repo import (
+            get_effective_active_condition,
+            get_effective_expiring_3d_condition,
+            get_effective_expired_condition,
+        )
+        from datetime import datetime, timezone
+        from sqlalchemy import select
+        from sqlalchemy.dialects import postgresql
+
+        now = datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc)
+        active_cond = get_effective_active_condition(now)
+        expiring_cond = get_effective_expiring_3d_condition(now)
+        expired_cond = get_effective_expired_condition(now)
+
+        stmt_active = select(User).where(active_cond)
+        stmt_expiring = select(User).where(expiring_cond)
+        stmt_expired = select(User).where(expired_cond)
+
+        active_sql = str(stmt_active.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+        expiring_sql = str(stmt_expiring.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+        expired_sql = str(stmt_expired.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+
+        # Verify EXHAUSTED is included in active and expiring conditions
+        self.assertIn("'EXHAUSTED'", active_sql)
+        self.assertIn("'EXHAUSTED'", expiring_sql)
+        # Verify expired condition negates active_cond which includes EXHAUSTED
+        self.assertIn("'EXHAUSTED'", expired_sql)
+
+
 if __name__ == "__main__":
     unittest.main()
