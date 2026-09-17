@@ -40,7 +40,7 @@ from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
 from utils.telegram import render_hub
 
-logger = logging.getLogger("AccountBalanceNotifications")
+logger = logging.getLogger(__name__)
 BALANCE_NOTIFICATION_INTERVAL = 10.0
 BALANCE_NOTIFICATION_BATCH = 50
 

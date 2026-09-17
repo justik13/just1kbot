@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User as TgUser
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,9 +27,14 @@ from bot.handlers.admin.users.common import (
 )
 from bot.handlers.admin.users.subscription_menu_routes import (
     admin_subscription_menu,
+    admin_wi_apply_extend,
+    admin_wi_confirm_extend,
+    admin_wi_devices_view,
     admin_wi_devlimit_set,
+    admin_wi_extend_menu,
     admin_wi_hwid_reset_apply,
     admin_wi_quota_set,
+    admin_wi_subscription_menu,
     admin_wi_traffic_add,
     admin_wi_traffic_reset_apply,
     admin_wl_grant_trial,
@@ -49,6 +55,7 @@ from database.repositories import white_internet_repo
 from services.ban_service import BanService, BanStatus
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
+from utils.formatters import format_datetime
 
 
 class TestBanServiceWhiteInternet(unittest.IsolatedAsyncioTestCase):
@@ -219,6 +226,81 @@ class TestAdminUserCardWhiteInternet(unittest.IsolatedAsyncioTestCase):
                 white_internet_info=None,
             )
             self.assertNotIn("Белый Интернет", full_card)
+
+    async def test_user_card_renders_white_internet_last_seen(self):
+        """User card must include last seen activity if active_hwids has timestamps."""
+        now = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=self.user.id,
+            origin_node_id=5,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=10 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=2 * 1024 * 1024 * 1024,
+            expires_at=now,
+            active_hwids={"device_hwid_1": now.isoformat()},
+        )
+
+        with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)):
+            self.session.get.return_value = self.server
+
+            card_info = await _get_white_internet_card_info(self.session, self.user.id)
+            self.assertIsNotNone(card_info)
+            self.assertIn(f"• <b>Активность:</b> {format_datetime(now)}", card_info)
+
+    async def test_user_card_renders_white_internet_last_seen_fallback(self):
+        """User card must render dash when active_hwids is empty."""
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=self.user.id,
+            origin_node_id=5,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=10 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=0,
+            expires_at=datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc),
+            active_hwids={},
+        )
+
+        with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)):
+            self.session.get.return_value = self.server
+
+            card_info = await _get_white_internet_card_info(self.session, self.user.id)
+            self.assertIsNotNone(card_info)
+            self.assertIn("• <b>Активность:</b> —", card_info)
+            self.assertIn("• <b>Устройства:</b> 0 / 1", card_info)
+
+    async def test_user_card_renders_wi_only_as_active(self):
+        """User without AWG but with active WI must render as active in header."""
+        now = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+        wi_expiry = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=self.user.id,
+            origin_node_id=5,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=10 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=0,
+            expires_at=wi_expiry,
+            device_limit=2,
+            active_hwids={"hwid1": now.isoformat()},
+        )
+        self.user.subscription_end = None
+
+        card_text = format_user_card_text(
+            self.user,
+            profiles=[],
+            referrals=[],
+            now=now,
+            white_internet_info="WI_BLOCK",
+            wi_sub=sub,
+        )
+        self.assertIn(texts.STATUS_ACTIVE_BADGE, card_text)
+        self.assertIn(format_datetime(wi_expiry), card_text)
+        self.assertIn("Устройств:</b> 1/2", card_text)
+
 
 
 class TestAdminSubscriptionMenuWhiteInternet(unittest.IsolatedAsyncioTestCase):
@@ -691,6 +773,10 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
 
     async def asyncSetUp(self):
         self.session = AsyncMock(spec=AsyncSession)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = 1
+        mock_result.scalars.return_value.all.return_value = []
+        self.session.execute.return_value = mock_result
         self.user = User(
             id=42,
             telegram_id=123456789,
@@ -908,6 +994,214 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
             mock_audit.assert_not_called()
             mock_menu.assert_not_called()
 
+    async def test_admin_wi_extend_menu(self):
+        """admin_wi_extend_menu renders extend menu with options keyboard."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_extend_menu:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock()
+
+        state = AsyncMock(spec=FSMContext)
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)):
+
+            await admin_wi_extend_menu(callback, self.session, state=state)
+            state.clear.assert_awaited_once()
+            callback.answer.assert_awaited_once_with(show_alert=False)
+            callback.message.edit_text.assert_awaited_once()
+
+    async def test_admin_wi_extend_menu_user_not_found(self):
+        """admin_wi_extend_menu returns error alert when user does not exist."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_extend_menu:{self.user.telegram_id}"
+        callback.answer = AsyncMock()
+
+        state = AsyncMock(spec=FSMContext)
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=None)):
+
+            await admin_wi_extend_menu(callback, self.session, state=state)
+            callback.answer.assert_awaited_once_with(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+
+    async def test_admin_wi_confirm_extend(self):
+        """admin_wi_confirm_extend prompts admin for confirmation with days count."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_confirm_extend:{self.user.telegram_id}:30"
+        callback.message = MagicMock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)):
+
+            await admin_wi_confirm_extend(callback, self.session)
+            callback.answer.assert_awaited_once_with(show_alert=False)
+            callback.message.edit_text.assert_awaited_once()
+
+    async def test_admin_wi_confirm_extend_user_not_found(self):
+        """admin_wi_confirm_extend returns error alert when user does not exist."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_confirm_extend:{self.user.telegram_id}:30"
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=None)):
+
+            await admin_wi_confirm_extend(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+
+    def test_format_user_card_text_pending_status_shows_active_badge(self):
+        """format_user_card_text renders STATUS_ACTIVE_BADGE for PENDING subscription with future expires_at."""
+        from bot.handlers.admin.users.common import format_user_card_text
+        from config.enums import WhiteInternetStatus
+
+        now = now_utc()
+        pending_sub = WhiteInternetSubscription(
+            id=1,
+            user_id=self.user.id,
+            status=WhiteInternetStatus.PENDING,
+            expires_at=now + timedelta(days=10),
+        )
+
+        card = format_user_card_text(
+            self.user,
+            profiles=[],
+            referrals=[],
+            now=now,
+            wi_sub=pending_sub,
+        )
+        self.assertIn(texts.STATUS_ACTIVE_BADGE, card)
+
+    async def test_admin_wi_apply_extend(self):
+        """admin_wi_apply_extend calls WhiteInternetService.extend_subscription and logs audit."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_apply_extend:{self.user.telegram_id}:30"
+        callback.answer = AsyncMock()
+
+        extended_sub = WhiteInternetSubscription(
+            id=10,
+            user_id=self.user.id,
+            expires_at=now_utc() + timedelta(days=33),
+        )
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.WhiteInternetService.extend_subscription", new=AsyncMock(return_value=(True, "ok", extended_sub))) as mock_ext, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_apply_extend(callback, self.session)
+            mock_ext.assert_awaited_once_with(self.session, self.user.id, 30)
+            mock_audit.assert_awaited_once()
+            self.assertEqual(callback.answer.await_count, 1)
+            callback.answer.assert_awaited_once()
+            self.assertTrue(callback.answer.call_args.kwargs.get("show_alert", False))
+            mock_menu.assert_awaited_once()
+
+    async def test_admin_wi_apply_extend_idempotent_duplicate(self):
+        """admin_wi_apply_extend rejects already processed idempotent duplicate requests."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_apply_extend:{self.user.telegram_id}:30"
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.check_and_record_admin_op", new=AsyncMock(return_value=False)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.WhiteInternetService.extend_subscription", new=AsyncMock()) as mock_ext:
+
+            await admin_wi_apply_extend(callback, self.session)
+            mock_ext.assert_not_awaited()
+            callback.answer.assert_awaited_once_with(texts.ADMIN_BALANCE_OP_ALREADY_PROCESSED, show_alert=True)
+
+    async def test_admin_wi_devices_view(self):
+        """admin_wi_devices_view renders HWID list and active devices cleanly."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_devices:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock()
+
+        self.sub.active_hwids = {"device1": now_utc().isoformat()}
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)):
+
+            await admin_wi_devices_view(callback, self.session)
+            callback.answer.assert_awaited_once_with(show_alert=False)
+            callback.message.edit_text.assert_awaited_once()
+
+    async def test_admin_wi_devices_view_user_not_found(self):
+        """admin_wi_devices_view answers with error alert once if user is not found."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_devices:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=None)):
+
+            await admin_wi_devices_view(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+
+    async def test_admin_wi_devices_view_sub_not_found(self):
+        """admin_wi_devices_view answers with error alert once if WI subscription is not found."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_wi_devices:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=None)):
+
+            await admin_wi_devices_view(callback, self.session)
+            callback.answer.assert_awaited_once_with(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+
+    async def test_white_internet_card_info_provisioning_status_display(self):
+        """_get_white_internet_card_info omits node status when ACTIVE and includes it when pending."""
+        from bot.handlers.admin.users.common import _get_white_internet_card_info
+        from config.enums import WhiteInternetProvisioningStatus
+
+        self.sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+        block_active = await _get_white_internet_card_info(self.session, self.user.id, sub=self.sub)
+        self.assertNotIn("Узел:", block_active)
+
+        self.sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        block_pending = await _get_white_internet_card_info(self.session, self.user.id, sub=self.sub)
+        self.assertIn(texts.ADMIN_USER_CARD_WL_NODE_STATUS.format(status="PENDING_UPDATE"), block_pending)
+
+    async def test_admin_wi_subscription_menu_clears_state(self):
+        """admin_wi_subscription_menu clears FSM state when state is passed."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.from_user = TgUser(id=123456789, is_bot=False, first_name="Admin")
+        callback.data = f"admin_sub_wi_menu:{self.user.telegram_id}"
+        callback.message = MagicMock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock()
+
+        state = AsyncMock(spec=FSMContext)
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=self.sub)), \
+             patch("bot.handlers.admin.users.subscription_menu_routes._get_white_internet_card_info", new=AsyncMock(return_value="INFO")):
+
+            await admin_wi_subscription_menu(callback, self.session, state=state)
+            state.clear.assert_awaited_once()
+            callback.message.edit_text.assert_awaited_once()
+
     def test_get_admin_wi_device_limit_keyboard_bounds(self):
         """Keyboard must only offer valid limits up to WHITE_INTERNET_MAX_DEVICE_LIMIT (1..3), never exceeding DB CheckConstraint."""
         kb = get_admin_wi_device_limit_keyboard(telegram_id=self.user.telegram_id)
@@ -924,6 +1218,40 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
         self.assertEqual(callback_datas, expected_callbacks)
         self.assertNotIn(f"admin_wi_devlimit_set:{self.user.telegram_id}:5", callback_datas)
         self.assertEqual(back_button.callback_data, f"admin_sub_wi_menu:{self.user.telegram_id}")
+
+
+class TestWhiteInternetUserFilters(unittest.IsolatedAsyncioTestCase):
+    """Verifies that get_effective_active_condition and related filters correctly include EXHAUSTED."""
+
+    def test_effective_active_condition_includes_exhausted(self):
+        from database.models import User
+        from database.repositories.users_repo import (
+            get_effective_active_condition,
+            get_effective_expiring_3d_condition,
+            get_effective_expired_condition,
+        )
+        from datetime import datetime, timezone
+        from sqlalchemy import select
+        from sqlalchemy.dialects import postgresql
+
+        now = datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc)
+        active_cond = get_effective_active_condition(now)
+        expiring_cond = get_effective_expiring_3d_condition(now)
+        expired_cond = get_effective_expired_condition(now)
+
+        stmt_active = select(User).where(active_cond)
+        stmt_expiring = select(User).where(expiring_cond)
+        stmt_expired = select(User).where(expired_cond)
+
+        active_sql = str(stmt_active.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+        expiring_sql = str(stmt_expiring.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+        expired_sql = str(stmt_expired.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+
+        # Verify EXHAUSTED is included in active and expiring conditions
+        self.assertIn("'EXHAUSTED'", active_sql)
+        self.assertIn("'EXHAUSTED'", expiring_sql)
+        # Verify expired condition negates active_cond which includes EXHAUSTED
+        self.assertIn("'EXHAUSTED'", expired_sql)
 
 
 if __name__ == "__main__":

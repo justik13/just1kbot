@@ -71,10 +71,10 @@ Telegram-бот и комплекс автоматизированного уп�
 | Компонент | Технологии |
 |---|---|
 | Ядро бота | Python 3.12, aiogram 3.30+, asyncio, aiohttp 3.14+ |
-| База данных | PostgreSQL 16 (16.14-alpine, asyncpg 0.31+, SQLAlchemy 2.0.51 async) |
+| База данных | PostgreSQL 16 (16.14-alpine, asyncpg 0.31+, SQLAlchemy 2.0.54 async) |
 | Кэш и очереди | Redis 7.4 + транзакционные очереди в PostgreSQL |
 | Веб-сервер и TLS | Caddy 2.11 (Auto-HTTPS, Rate Limiting) или внешний Nginx |
-| Миграции БД | Alembic 1.19.2 (с тестами upgrade и downgrade) |
+| Миграции БД | Alembic 1.20.0 (с тестами upgrade и downgrade) |
 | Платежная система | ЮKassa API (идемпотентный webhook inbox с валидацией IP-диапазонов) |
 | Узлы Amnezia | Amnezia API (`amneziawg2`) на базе Docker |
 | Узлы Белого Интернета | Xray-core (VLESS over XHTTP + REALITY) + Nginx + Certbot |

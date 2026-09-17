@@ -312,6 +312,13 @@ class WhiteInternetService:
         await cls._try_inline_sync(
             session, sub, origin_node, idempotency_key=f"purchase:{sub.id}:1:True"
         )
+        logger.info(
+            "White Internet subscription purchased: user_id=%s, sub_id=%s, days=%s, node_id=%s",
+            user.id,
+            sub.id,
+            tariff.duration_days,
+            origin_node.id,
+        )
         return True, texts.WL_BUY_SUCCESS, sub
 
     @classmethod
@@ -467,6 +474,13 @@ class WhiteInternetService:
                 context=f"trial_convert migration sub {sub_locked.id}",
             )
 
+        logger.info(
+            "White Internet trial converted to paid: user_id=%s, sub_id=%s, days=%s, node_id=%s",
+            user.id,
+            sub_locked.id,
+            tariff.duration_days,
+            sub_locked.origin_node_id,
+        )
         return True, texts.WL_BUY_SUCCESS, sub_locked
 
     @classmethod
@@ -608,6 +622,13 @@ class WhiteInternetService:
                 context=f"renew sub {sub.id}",
             )
 
+        logger.info(
+            "White Internet subscription renewed: user_id=%s, sub_id=%s, days=%s, node_id=%s",
+            user.id,
+            renewed.id,
+            tariff.duration_days,
+            renewed.origin_node_id,
+        )
         return True, texts.WL_RENEW_SUCCESS, renewed
 
     @classmethod
@@ -756,6 +777,12 @@ class WhiteInternetService:
                 context=f"add_device_slot sub {sub.id}",
             )
 
+        logger.info(
+            "White Internet device slot purchased: user_id=%s, sub_id=%s, new_limit=%s",
+            user.id,
+            updated_sub.id,
+            updated_sub.device_limit,
+        )
         return True, texts.WL_ADD_DEVICE_SUCCESS.format(limit=updated_sub.device_limit), updated_sub
 
     @classmethod
@@ -902,6 +929,12 @@ class WhiteInternetService:
                 context=f"topup sub {sub.id}",
             )
 
+        logger.info(
+            "White Internet traffic topped up: user_id=%s, sub_id=%s, pack_gb=%s",
+            user.id,
+            sub.id,
+            pack_gb,
+        )
         return True, texts.WL_TOPUP_SUCCESS.format(gb=pack_gb), grant
 
     @classmethod
@@ -986,6 +1019,12 @@ class WhiteInternetService:
             session, sub, origin_node, idempotency_key=f"trial:{sub.id}:1:True"
         )
 
+        logger.info(
+            "White Internet trial activated: user_id=%s, sub_id=%s, node_id=%s",
+            user.id,
+            sub.id,
+            origin_node.id,
+        )
         return True, texts.WL_TRIAL_ACTIVATED_SUCCESS, sub
 
     @classmethod
@@ -1010,6 +1049,7 @@ class WhiteInternetService:
                 expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
         if not expected_inbound_tags:
             expected_inbound_tags.add("just1k-wl-default")
+        target_version = sub.desired_version or 1
         try:
             async with XrayNodeClient(timeout=4.0) as xray_client:
                 resp = await xray_client.sync_client(
@@ -1017,7 +1057,7 @@ class WhiteInternetService:
                     origin_node.api_key,
                     client_uuid=sub.uuid,
                     is_active=True,
-                    version=sub.desired_version or 1,
+                    version=target_version,
                     expected_node_epoch=origin_node.xray_instance_epoch,
                     idempotency_key=idempotency_key,
                 )
@@ -1047,9 +1087,10 @@ class WhiteInternetService:
                         )
                     confirmed = inv_ok and observed == "active" and inbounds_ok
                 if confirmed:
-                    sub.status = WhiteInternetStatus.ACTIVE
-                    sub.actual_version = sub.desired_version or 1
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+                    sub.actual_version = target_version
+                    if (sub.desired_version or 1) == target_version:
+                        sub.status = WhiteInternetStatus.ACTIVE
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
                     sub.last_reconciled_node_epoch = verified_epoch
                     sub.last_synced_at = now_utc()
                     await session.flush()
@@ -1120,6 +1161,12 @@ class WhiteInternetService:
                     context=f"deactivate sub {sub.id}",
                 )
 
+        logger.info(
+            "White Internet subscriptions deactivated: user_id=%s, count=%s, reason=%s",
+            user_id,
+            len(deactivated),
+            reason,
+        )
         return deactivated
 
     @classmethod
@@ -1182,7 +1229,50 @@ class WhiteInternetService:
                     context=f"reset sub {sub.id}",
                 )
 
+        logger.info(
+            "White Internet trial reset: user_id=%s, deactivated_count=%s",
+            user_id,
+            len(trial_subs),
+        )
         return True, texts.ADMIN_WL_RESET_SUCCESS
+
+    @classmethod
+    async def extend_subscription(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        days: int,
+    ) -> tuple[bool, str, WhiteInternetSubscription | None]:
+        """Extend the expiration date of a user's White Internet subscription."""
+        sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+        if sub is None:
+            return False, texts.ADMIN_WI_SUB_NOT_FOUND, None
+
+        try:
+            sub = await white_internet_repo.extend_subscription_atomic(
+                session, sub.id, days
+            )
+        except white_internet_repo.WhiteInternetError as exc:
+            await session.rollback()
+            return False, str(exc), None
+
+        # Commit DB state before executing external network sync.
+        # This durably persists the extended expiration in PostgreSQL
+        # and releases the SELECT FOR UPDATE row lock so concurrent operations
+        # are not blocked during external network I/O.
+        await session.commit()
+
+        if sub.origin_node_id:
+            origin_node = await session.get(Server, sub.origin_node_id)
+            if origin_node and origin_node.is_active:
+                await cls._try_inline_sync(
+                    session,
+                    sub,
+                    origin_node,
+                    idempotency_key=f"admin_extend:{sub.id}:{sub.desired_version}:{days}",
+                )
+
+        return True, "ok", sub
 
     @staticmethod
     def generate_vless_links(

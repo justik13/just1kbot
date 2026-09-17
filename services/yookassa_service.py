@@ -5,6 +5,8 @@ never invents idempotency keys or logs credentials/payloads.
 """
 
 import asyncio
+import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Generic, TypeVar
@@ -12,6 +14,8 @@ from typing import Generic, TypeVar
 import aiohttp
 
 from config.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 _client_session: aiohttp.ClientSession | None = None
@@ -94,6 +98,7 @@ class YooKassaService:
                     False, error_kind=YooKassaErrorKind.VALIDATION_FAILED
                 )
             headers["Idempotence-Key"] = idempotency_key
+        start = time.monotonic()
         try:
             client = await _get_client_session()
             async with client.request(
@@ -105,6 +110,13 @@ class YooKassaService:
                 except asyncio.CancelledError:
                     raise
                 except asyncio.TimeoutError:
+                    logger.warning(
+                        "YooKassa HTTP %s %s JSON decode timeout (status=%s, %.0f ms)",
+                        method,
+                        path,
+                        code,
+                        (time.monotonic() - start) * 1000,
+                    )
                     return YooKassaResult(
                         False,
                         error_kind=YooKassaErrorKind.TIMEOUT,
@@ -112,7 +124,15 @@ class YooKassaService:
                         retryable=True,
                         ambiguous=ambiguous_on_failure,
                     )
-                except aiohttp.ClientError:
+                except aiohttp.ClientError as exc:
+                    logger.warning(
+                        "YooKassa HTTP %s %s client error on read (status=%s, error=%s, %.0f ms)",
+                        method,
+                        path,
+                        code,
+                        exc,
+                        (time.monotonic() - start) * 1000,
+                    )
                     return YooKassaResult(
                         False,
                         error_kind=YooKassaErrorKind.NETWORK_ERROR,
@@ -121,6 +141,13 @@ class YooKassaService:
                         ambiguous=ambiguous_on_failure,
                     )
                 except (ValueError, TypeError):
+                    logger.warning(
+                        "YooKassa HTTP %s %s invalid JSON body (status=%s, %.0f ms)",
+                        method,
+                        path,
+                        code,
+                        (time.monotonic() - start) * 1000,
+                    )
                     return YooKassaResult(
                         False,
                         error_kind=YooKassaErrorKind.INVALID_RESPONSE,
@@ -128,7 +155,15 @@ class YooKassaService:
                         retryable=200 <= code < 300 or code >= 500,
                         ambiguous=ambiguous_on_failure,
                     )
-                except Exception:
+                except Exception as exc:
+                    logger.warning(
+                        "YooKassa HTTP %s %s unexpected error on read (status=%s, error=%s, %.0f ms)",
+                        method,
+                        path,
+                        code,
+                        exc,
+                        (time.monotonic() - start) * 1000,
+                    )
                     return YooKassaResult(
                         False,
                         error_kind=YooKassaErrorKind.UNKNOWN,
@@ -136,9 +171,25 @@ class YooKassaService:
                         retryable=False,
                         ambiguous=ambiguous_on_failure,
                     )
+                elapsed_ms = (time.monotonic() - start) * 1000
                 if 200 <= code < 300:
                     if isinstance(data, dict):
+                        logger.info(
+                            "YooKassa HTTP %s %s -> %s (%.0f ms, idempotency=%s)",
+                            method,
+                            path,
+                            code,
+                            elapsed_ms,
+                            idempotency_key[:8] if idempotency_key else "-",
+                        )
                         return YooKassaResult(True, value=data, status_code=code)
+                    logger.warning(
+                        "YooKassa HTTP %s %s returned non-dict JSON (status=%s, %.0f ms)",
+                        method,
+                        path,
+                        code,
+                        elapsed_ms,
+                    )
                     return YooKassaResult(
                         False,
                         error_kind=YooKassaErrorKind.INVALID_RESPONSE,
@@ -157,6 +208,14 @@ class YooKassaService:
                     kind = YooKassaErrorKind.SERVER_ERROR
                 elif code < 500:
                     kind = YooKassaErrorKind.VALIDATION_FAILED
+                logger.warning(
+                    "YooKassa HTTP %s %s failed: status=%s, kind=%s (%.0f ms)",
+                    method,
+                    path,
+                    code,
+                    kind.value,
+                    elapsed_ms,
+                )
                 return YooKassaResult(
                     False,
                     error_kind=kind,
@@ -167,20 +226,40 @@ class YooKassaService:
         except asyncio.CancelledError:
             raise
         except asyncio.TimeoutError:
+            logger.warning(
+                "YooKassa HTTP %s %s request timeout (%.0f ms)",
+                method,
+                path,
+                (time.monotonic() - start) * 1000,
+            )
             return YooKassaResult(
                 False,
                 error_kind=YooKassaErrorKind.TIMEOUT,
                 retryable=True,
                 ambiguous=ambiguous_on_failure,
             )
-        except aiohttp.ClientError:
+        except aiohttp.ClientError as exc:
+            logger.warning(
+                "YooKassa HTTP %s %s network connection error: %s (%.0f ms)",
+                method,
+                path,
+                exc,
+                (time.monotonic() - start) * 1000,
+            )
             return YooKassaResult(
                 False,
                 error_kind=YooKassaErrorKind.NETWORK_ERROR,
                 retryable=True,
                 ambiguous=ambiguous_on_failure,
             )
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "YooKassa HTTP %s %s unexpected client failure: %s (%.0f ms)",
+                method,
+                path,
+                exc,
+                (time.monotonic() - start) * 1000,
+            )
             return YooKassaResult(
                 False,
                 error_kind=YooKassaErrorKind.UNKNOWN,

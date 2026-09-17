@@ -2,7 +2,7 @@ name: Docker Compose CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, dev-main]
   pull_request:
 
 permissions:

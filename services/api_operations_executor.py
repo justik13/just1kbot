@@ -80,6 +80,14 @@ def _error_code(result) -> str:
 
 
 async def _fail(op, *, retryable: bool, code: str, message: str = ""):
+    logger.warning(
+        "APIOperation failed: op_id=%s, type=%s, server_id=%s, retryable=%s, error_code=%s",
+        getattr(op, "id", None),
+        getattr(op, "operation_type", getattr(op, "op_type", None)),
+        getattr(op, "server_id", None),
+        retryable,
+        code,
+    )
     await finalize_operation_failure(op.id, worker_id=op.locked_by,
         expected_attempt_number=op.attempt_number, retryable=retryable,
         error_code=code, error_message=message or code)
@@ -237,6 +245,13 @@ async def _execute_create(op, client):
             server_name_snapshot=getattr(op, "server_name_snapshot", None),
             api_url_snapshot=getattr(op, "api_url_snapshot", None),
             api_key_snapshot=getattr(op, "api_key_snapshot", None))
+        logger.info(
+            "APIOperation create_peer succeeded: op_id=%s, server_id=%s, profile_id=%s, peer_id=%s",
+            getattr(op, "id", None),
+            getattr(op, "server_id", None),
+            getattr(op, "profile_id", None),
+            getattr(created, "id", None),
+        )
     except (RuntimeError, CreateCompensationRequired) as error:
         compensation = isinstance(error, CreateCompensationRequired)
         if not compensation and str(error) != "create_cancel_requested":
@@ -286,6 +301,13 @@ async def _execute_update(op, client):
         expected_attempt_number=op.attempt_number, sent_version=sent_version,
         sent_is_active=sent_status != "disabled", sent_expires_at=sent_expires_dt,
         sent_clear_expires_at=sent_clear)
+    logger.info(
+        "APIOperation update_peer succeeded: op_id=%s, server_id=%s, profile_id=%s, peer_id=%s",
+        getattr(op, "id", None),
+        getattr(op, "server_id", None),
+        getattr(op, "profile_id", None),
+        getattr(op, "peer_id", None),
+    )
 
 
 async def _execute_delete(op, client):
@@ -296,6 +318,12 @@ async def _execute_delete(op, client):
         return await _fail(op, retryable=result.retryable, code=_error_code(result))
     await finalize_delete_success(op.id, worker_id=op.locked_by,
                                   expected_attempt_number=op.attempt_number)
+    logger.info(
+        "APIOperation delete_peer succeeded: op_id=%s, server_id=%s, peer_id=%s",
+        getattr(op, "id", None),
+        getattr(op, "server_id", None),
+        getattr(op, "peer_id", None),
+    )
 
 
 async def execute_claimed_api_operation(

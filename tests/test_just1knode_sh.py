@@ -771,12 +771,12 @@ run_doctor
             pkg_name = pkg.split("[")[0].strip()
             pinned_packages[pkg_name] = ver.strip()
 
-        self.assertEqual(pinned_packages.get("fastapi"), "0.115.6")
-        self.assertEqual(pinned_packages.get("uvicorn"), "0.34.0")
-        self.assertEqual(pinned_packages.get("grpcio"), "1.68.1")
-        self.assertEqual(pinned_packages.get("protobuf"), "7.35.1")
-        self.assertEqual(pinned_packages.get("pydantic"), "2.10.4")
-        self.assertEqual(pinned_packages.get("psutil"), "6.1.1")
+        self.assertEqual(pinned_packages.get("fastapi"), "0.141.1")
+        self.assertEqual(pinned_packages.get("uvicorn"), "0.53.0")
+        self.assertEqual(pinned_packages.get("grpcio"), "1.84.0")
+        self.assertEqual(pinned_packages.get("protobuf"), "7.36.1")
+        self.assertEqual(pinned_packages.get("pydantic"), "2.13.5")
+        self.assertEqual(pinned_packages.get("psutil"), "7.2.2")
 
         # 2. Check just1knode for absence of floating git tarballs / unpinned upgrades / dead commits
         sh_content = ""

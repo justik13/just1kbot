@@ -7,11 +7,11 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from config.enums import WhiteInternetStatus
+from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.models import WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from services.white_internet_service import WhiteInternetService
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import calculate_extension_end, now_utc
 
 
 class TestWhiteInternetVlessGeneration(unittest.TestCase):
@@ -233,3 +233,283 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                     outbound_tags,
                     f"Routing rule references undefined outboundTag: {tag}",
                 )
+
+
+class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
+    """Test White Internet subscription duration extension."""
+
+    async def test_extend_subscription_atomic_active(self):
+        """Extending active subscription adds days to current expires_at and bumps desired_version."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        current_expires = now + timedelta(days=5)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=current_expires,
+            desired_version=1,
+            actual_version=1,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+
+        self.assertEqual(extended.expires_at, current_expires + timedelta(days=30))
+        self.assertEqual(extended.desired_version, 2)
+        self.assertFalse(extended.notified_3d)
+        mock_session.flush.assert_awaited_once()
+
+    async def test_extend_subscription_atomic_consecutive_active(self):
+        """Consecutive extensions on active subscription monotonically increment desired_version."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        current_expires = now + timedelta(days=5)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=current_expires,
+            desired_version=1,
+            actual_version=1,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        # First extension: +30 days -> version 2
+        ext1 = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+        self.assertEqual(ext1.desired_version, 2)
+        self.assertEqual(ext1.expires_at, current_expires + timedelta(days=30))
+
+        # Second extension: +30 days -> version 3, expires_at +60 days
+        ext2 = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+        self.assertEqual(ext2.desired_version, 3)
+        self.assertEqual(ext2.expires_at, current_expires + timedelta(days=60))
+
+    async def test_extend_subscription_atomic_expired(self):
+        """Extending expired subscription resets to ACTIVE, zeroes traffic and counts days from now."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        old_expires = now - timedelta(days=2)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.EXPIRED,
+            expires_at=old_expires,
+            desired_version=1,
+            actual_version=1,
+            traffic_used_bytes=50 * 1024 * 1024 * 1024,
+            traffic_overage_bytes=1024,
+            traffic_uplink_bytes=20 * 1024 * 1024 * 1024,
+            traffic_downlink_bytes=30 * 1024 * 1024 * 1024,
+            notified_90p=True,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=7,
+            now=now,
+        )
+
+        self.assertEqual(extended.expires_at, now + timedelta(days=7))
+        self.assertEqual(extended.status, WhiteInternetStatus.ACTIVE)
+        self.assertEqual(extended.traffic_used_bytes, 0)
+        self.assertEqual(extended.traffic_overage_bytes, 0)
+        self.assertEqual(extended.traffic_uplink_bytes, 0)
+        self.assertEqual(extended.traffic_downlink_bytes, 0)
+        self.assertFalse(extended.notified_90p)
+        self.assertEqual(extended.desired_version, 2)
+        mock_session.flush.assert_awaited_once()
+
+    async def test_extend_subscription_atomic_exhausted(self):
+        """Extending EXHAUSTED subscription resets traffic counters, transitions to ACTIVE and increments desired_version."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.EXHAUSTED,
+            expires_at=now + timedelta(days=5),
+            desired_version=1,
+            actual_version=1,
+            traffic_used_bytes=50 * 1024 * 1024 * 1024,
+            traffic_overage_bytes=1024,
+            traffic_uplink_bytes=20 * 1024 * 1024 * 1024,
+            traffic_downlink_bytes=30 * 1024 * 1024 * 1024,
+            notified_90p=True,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+
+        self.assertEqual(extended.status, WhiteInternetStatus.ACTIVE)
+        self.assertIsNone(extended.status_reason)
+        self.assertEqual(extended.provisioning_status, WhiteInternetProvisioningStatus.PENDING_UPDATE)
+        self.assertEqual(extended.traffic_used_bytes, 0)
+        self.assertEqual(extended.traffic_overage_bytes, 0)
+        self.assertEqual(extended.traffic_uplink_bytes, 0)
+        self.assertEqual(extended.traffic_downlink_bytes, 0)
+        self.assertFalse(extended.notified_90p)
+        self.assertEqual(extended.desired_version, 2)
+        self.assertEqual(extended.expires_at, now + timedelta(days=35))
+        mock_session.flush.assert_awaited_once()
+
+    async def test_extend_subscription_atomic_active_past_expiry_resets_traffic(self):
+        """Extending an ACTIVE subscription that already lapsed calendar-wise resets traffic counters."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        lapsed_expires = now - timedelta(minutes=5)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=lapsed_expires,
+            desired_version=1,
+            actual_version=1,
+            traffic_used_bytes=45 * 1024 * 1024 * 1024,
+            traffic_overage_bytes=1024,
+            traffic_uplink_bytes=20 * 1024 * 1024 * 1024,
+            traffic_downlink_bytes=25 * 1024 * 1024 * 1024,
+            notified_90p=True,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+
+        self.assertEqual(extended.status, WhiteInternetStatus.ACTIVE)
+        self.assertEqual(extended.traffic_used_bytes, 0)
+        self.assertEqual(extended.traffic_overage_bytes, 0)
+        self.assertEqual(extended.traffic_uplink_bytes, 0)
+        self.assertEqual(extended.traffic_downlink_bytes, 0)
+        self.assertFalse(extended.notified_90p)
+        self.assertEqual(extended.desired_version, 2)
+        self.assertEqual(extended.expires_at, now + timedelta(days=30))
+        mock_session.flush.assert_awaited_once()
+
+    async def test_extend_subscription_atomic_active_preserves_notified_90p(self):
+        """Extending an ACTIVE subscription before expiry preserves mid-cycle notified_90p state."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        current_expires = now + timedelta(days=10)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=current_expires,
+            desired_version=1,
+            actual_version=1,
+            traffic_used_bytes=95 * 1024 * 1024 * 1024,
+            traffic_limit_bytes=100 * 1024 * 1024 * 1024,
+            notified_90p=True,
+            notified_3d=True,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+
+        self.assertEqual(extended.status, WhiteInternetStatus.ACTIVE)
+        self.assertEqual(extended.expires_at, current_expires + timedelta(days=30))
+        self.assertEqual(extended.traffic_used_bytes, 95 * 1024 * 1024 * 1024)
+        self.assertTrue(extended.notified_90p, "Mid-cycle active extension must NOT reset notified_90p")
+        self.assertFalse(extended.notified_3d, "Calendar notifications must be reset for the new end date")
+        mock_session.flush.assert_awaited_once()
+
+    async def test_extend_subscription_service_sync(self):
+        """WhiteInternetService.extend_subscription calls repo and inline node sync."""
+        mock_session = AsyncMock()
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=now_utc() + timedelta(days=10),
+            origin_node_id=3,
+        )
+        origin_node = MagicMock(is_active=True)
+        mock_session.get.return_value = origin_node
+
+        with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
+             patch("database.repositories.white_internet_repo.extend_subscription_atomic", new=AsyncMock(return_value=sub)) as mock_repo_extend, \
+             patch.object(WhiteInternetService, "_try_inline_sync", new=AsyncMock(return_value=True)) as mock_sync:
+
+            ok, msg, res_sub = await WhiteInternetService.extend_subscription(mock_session, user_id=10, days=30)
+            self.assertTrue(ok)
+            self.assertEqual(res_sub.id, 1)
+            mock_repo_extend.assert_awaited_once_with(mock_session, 1, 30)
+            mock_session.commit.assert_awaited_once()
+            mock_sync.assert_awaited_once()
+
+
+class TestCalculateExtensionEnd(unittest.TestCase):
+    """Test unified extension end calculation helper."""
+
+    def test_active_expiry_extended(self):
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        current = now + timedelta(days=5)
+        res = calculate_extension_end(current, 30, now=now)
+        self.assertEqual(res, current + timedelta(days=30))
+
+    def test_expired_expiry_extended_from_now(self):
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        current = now - timedelta(days=5)
+        res = calculate_extension_end(current, 10, now=now)
+        self.assertEqual(res, now + timedelta(days=10))
+
+    def test_none_expiry_extended_from_now(self):
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        res = calculate_extension_end(None, 7, now=now)
+        self.assertEqual(res, now + timedelta(days=7))
+
+    def test_permanent_duration_returns_permanent_end_date(self):
+        from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        res = calculate_extension_end(now, PERMANENT_SUBSCRIPTION_DAYS, now=now)
+        self.assertEqual(res, PERMANENT_END_DATE)

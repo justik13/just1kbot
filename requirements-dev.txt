@@ -8,5 +8,5 @@ aiosqlite>=0.21.0,<1.0.0
 # Static analysis and local test runner.
 # ruff pin matches .github/workflows/tests.yml; CI itself runs the suite
 # via unittest discover, pytest is for local use only.
-ruff==0.16.1
+ruff==0.16.8
 pytest==9.1.1
