@@ -427,6 +427,42 @@ class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extended.expires_at, now + timedelta(days=30))
         mock_session.flush.assert_awaited_once()
 
+    async def test_extend_subscription_atomic_active_preserves_notified_90p(self):
+        """Extending an ACTIVE subscription before expiry preserves mid-cycle notified_90p state."""
+        now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+        current_expires = now + timedelta(days=10)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            expires_at=current_expires,
+            desired_version=1,
+            actual_version=1,
+            traffic_used_bytes=95 * 1024 * 1024 * 1024,
+            traffic_limit_bytes=100 * 1024 * 1024 * 1024,
+            notified_90p=True,
+            notified_3d=True,
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        extended = await white_internet_repo.extend_subscription_atomic(
+            mock_session,
+            subscription_id=1,
+            days=30,
+            now=now,
+        )
+
+        self.assertEqual(extended.status, WhiteInternetStatus.ACTIVE)
+        self.assertEqual(extended.expires_at, current_expires + timedelta(days=30))
+        self.assertEqual(extended.traffic_used_bytes, 95 * 1024 * 1024 * 1024)
+        self.assertTrue(extended.notified_90p, "Mid-cycle active extension must NOT reset notified_90p")
+        self.assertFalse(extended.notified_3d, "Calendar notifications must be reset for the new end date")
+        mock_session.flush.assert_awaited_once()
+
     async def test_extend_subscription_service_sync(self):
         """WhiteInternetService.extend_subscription calls repo and inline node sync."""
         mock_session = AsyncMock()

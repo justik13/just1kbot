@@ -950,7 +950,6 @@ async def extend_subscription_atomic(
     sub.notified_1d = False
     sub.notified_2h = False
     sub.notified_expired = False
-    sub.notified_90p = False
 
     await session.flush()
     await session.refresh(sub)
