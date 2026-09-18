@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT, AdminAuditAction
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import APIOperation, Server, User, VPNProfile
 from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
 from services.amnezia_capacity import (
@@ -109,7 +110,21 @@ class DeviceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if not server or server.protocol != AMNEZIA_PROTOCOL or not server.is_active:
+        if (
+            not server
+            or server.protocol != AMNEZIA_PROTOCOL
+            or not server.is_active
+            or getattr(server, "health_state", None) in (
+                ServerHealthState.AUTO_DISABLED,
+                ServerHealthState.MANUAL_DISABLED,
+                ServerHealthState.PROBLEM,
+            )
+            or getattr(server, "lifecycle_status", None) in (
+                ServerLifecycleStatus.DECOMMISSIONING,
+                ServerLifecycleStatus.DECOMMISSIONED,
+                ServerLifecycleStatus.ARCHIVED,
+            )
+        ):
             raise ServerUnavailable("Invalid or disabled server")
         if (
             user.is_banned
@@ -367,7 +382,21 @@ class DeviceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if not target_server or target_server.protocol != AMNEZIA_PROTOCOL or not target_server.is_active:
+        if (
+            not target_server
+            or target_server.protocol != AMNEZIA_PROTOCOL
+            or not target_server.is_active
+            or getattr(target_server, "health_state", None) in (
+                ServerHealthState.AUTO_DISABLED,
+                ServerHealthState.MANUAL_DISABLED,
+                ServerHealthState.PROBLEM,
+            )
+            or getattr(target_server, "lifecycle_status", None) in (
+                ServerLifecycleStatus.DECOMMISSIONING,
+                ServerLifecycleStatus.DECOMMISSIONED,
+                ServerLifecycleStatus.ARCHIVED,
+            )
+        ):
             raise ServerUnavailable("Invalid or disabled server")
 
         if (

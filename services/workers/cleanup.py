@@ -274,7 +274,7 @@ async def _cleanup_stuck_profiles():
                     select(VPNProfile)
                     .where(
                         VPNProfile.provisioning_status.in_(
-                            ["pending_create", "create_cleanup_pending", "deleting"]
+                            ["pending_create", "create_cleanup_pending", "deleting", "delete_failed"]
                         ),
                         VPNProfile.created_at < cutoff_time,
                     )
@@ -350,7 +350,7 @@ async def _cleanup_stuck_profiles():
                         exc,
                     )
                     profile.provisioning_status = "create_cleanup_pending"
-            elif profile.provisioning_status in {"create_cleanup_pending", "deleting"}:
+            elif profile.provisioning_status in {"create_cleanup_pending", "deleting", "delete_failed"}:
                 # Peer ID unknown: requeue create_peer for reconciliation by client_name on Amnezia
                 if create_op and create_op.status in {"dead", "cancelled"}:
                     from database.models import Server

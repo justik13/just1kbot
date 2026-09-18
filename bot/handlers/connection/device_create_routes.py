@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import DeviceCreationStates
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.connection import get_session
 from database.models import User, VPNProfile
 from database.repositories.profiles_repo import get_user_profiles
@@ -55,7 +56,7 @@ _creating_devices: TTLCache[int, bool] = TTLCache(
 
 async def _await_profile_ready(
     profile_id: int,
-    timeout_seconds: float = 6.0,
+    timeout_seconds: float = 15.0,
     poll_interval: float = 0.1,
 ) -> VPNProfile | None:
     """Poll for profile to become active or fail within a monotonic UI wait window.
@@ -281,7 +282,19 @@ async def _process_server_selection(
         await state.clear()
         return
 
-    if not server.is_active:
+    if (
+        not server.is_active
+        or getattr(server, "health_state", None) in (
+            ServerHealthState.AUTO_DISABLED,
+            ServerHealthState.MANUAL_DISABLED,
+            ServerHealthState.PROBLEM,
+        )
+        or getattr(server, "lifecycle_status", None) in (
+            ServerLifecycleStatus.DECOMMISSIONING,
+            ServerLifecycleStatus.DECOMMISSIONED,
+            ServerLifecycleStatus.ARCHIVED,
+        )
+    ):
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -455,7 +468,7 @@ async def _process_server_selection(
         await state.clear()
         if new_profile:
             try:
-                ready_profile = await _await_profile_ready(new_profile.id, timeout_seconds=4.0)
+                ready_profile = await _await_profile_ready(new_profile.id, timeout_seconds=15.0)
             except Exception:
                 logger.exception("Error during _await_profile_ready for profile_id=%s", new_profile.id)
                 ready_profile = None

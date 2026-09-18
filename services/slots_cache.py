@@ -41,7 +41,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
             from services.amnezia_client import _get_circuit_breaker
 
             cb = _get_circuit_breaker(server.api_url)
-            if cb.is_open:
+            if not await cb.is_available():
                 raise ServerUnavailable("server circuit breaker open")
             endpoint = (server.api_url, server.api_key)
         else:
@@ -54,6 +54,13 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
     try:
         clients = await asyncio.wait_for(AmneziaClient(*endpoint).get_all_clients(), timeout=5.0)
     except (asyncio.TimeoutError, Exception) as exc:
+        try:
+            from services.amnezia_client import _get_circuit_breaker
+
+            cb = _get_circuit_breaker(endpoint[0])
+            await cb.record_failure()
+        except Exception:
+            pass
         raise ServerUnavailable(f"server peer snapshot unavailable: {exc}") from exc
     if clients is None:
         raise ServerUnavailable("server peer snapshot unavailable")

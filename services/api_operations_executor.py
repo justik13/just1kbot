@@ -1,7 +1,6 @@
 """The sole production boundary allowed to mutate Amnezia peers."""
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -124,7 +123,7 @@ async def _client(op):
     return AmneziaClient(url, key)
 
 
-async def _execute_create(op, client, bot=None):
+async def _execute_create(op, client):
     if not op.client_name:
         return await _fail(op, retryable=False, code="configuration")
     async with session_scope() as session:
@@ -253,12 +252,6 @@ async def _execute_create(op, client, bot=None):
             getattr(op, "profile_id", None),
             getattr(created, "id", None),
         )
-        if bot and op.profile_id:
-            created_at = getattr(op, "created_at", None)
-            from utils.datetime_helpers import now_utc
-            elapsed = (now_utc() - created_at).total_seconds() if created_at else 0.0
-            if elapsed > 6.0 or getattr(op, "attempts", 1) > 1:
-                asyncio.create_task(_notify_user_device_ready(bot, op.profile_id))
     except (RuntimeError, CreateCompensationRequired) as error:
         compensation = isinstance(error, CreateCompensationRequired)
         if not compensation and str(error) != "create_cancel_requested":
@@ -333,59 +326,8 @@ async def _execute_delete(op, client):
     )
 
 
-async def _notify_user_device_ready(bot, profile_id: int) -> None:
-    if not bot or not profile_id:
-        return
-    try:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from sqlalchemy import select
-        from sqlalchemy.orm import selectinload
-
-        from bot import texts
-        from database.models import VPNProfile
-        from utils.telegram import safe
-
-        async with session_scope() as session:
-            profile = (
-                await session.execute(
-                    select(VPNProfile)
-                    .where(VPNProfile.id == profile_id)
-                    .options(selectinload(VPNProfile.server), selectinload(VPNProfile.user))
-                )
-            ).scalar_one_or_none()
-            if not profile or not profile.user or not profile.user.telegram_id:
-                return
-            if profile.provisioning_status != "active":
-                return
-            server = profile.server
-            flag = (server.country_flag or "🌐") if server else "🌐"
-            server_name = server.name if server else texts.DEVICE_DEFAULT_SERVER_NAME
-            device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=profile.id)
-            telegram_id = profile.user.telegram_id
-
-        builder = InlineKeyboardBuilder()
-        builder.button(
-            text=texts.BTN_OPEN_DEVICE,
-            callback_data=f"manage_device:{profile_id}",
-        )
-        msg_text = texts.DEVICE_READY_PUSH_NOTIFICATION.format(
-            device_name=safe(device_name),
-            server_flag=flag,
-            server_name=safe(server_name),
-        )
-        await bot.send_message(
-            telegram_id,
-            msg_text,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML",
-        )
-    except Exception as exc:
-        logger.debug("Failed to notify user about device ready: %s", exc)
-
-
 async def execute_claimed_api_operation(
     operation: ClaimedAPIOperation,
-    bot=None,
 ) -> None:
     try:
         client = await _client(operation)
@@ -415,7 +357,7 @@ async def execute_claimed_api_operation(
         )
 
     if operation.operation_type == "create_peer":
-        return await _execute_create(operation, client, bot=bot)
+        return await _execute_create(operation, client)
     if operation.operation_type == "update_peer":
         return await _execute_update(operation, client)
     if operation.operation_type == "delete_peer":
