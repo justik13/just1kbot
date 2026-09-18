@@ -744,6 +744,7 @@ class Payment(Base):
 
     user = relationship("User", back_populates="payments")
     events = relationship("PaymentEvent", back_populates="payment", cascade="all, delete-orphan")
+    refunds = relationship("PaymentRefund", back_populates="payment", cascade="all, delete-orphan")
 
 
 class AccountLedgerEntry(Base):
@@ -1101,6 +1102,7 @@ class PaymentRefund(Base):
     event_key: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payment = relationship("Payment", back_populates="refunds")
 
 
 class PaymentEvent(Base):

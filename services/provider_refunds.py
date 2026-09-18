@@ -119,10 +119,17 @@ async def request_balance_topup_refund(
             raise BalanceRefundError("active_refund_reservation_missing")
         return BalanceRefundRequest(active, reservation, False)
 
+    already_refunded = Decimal(
+        await session.scalar(
+            select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+                PaymentRefund.payment_id == payment.id,
+                PaymentRefund.provider_status == "succeeded",
+            )
+        )
+        or 0
+    )
     refundable = whole_rubles(
-        await get_payment_refundable_amount(
-            session, payment_id=payment.id, for_update=True
-        ),
+        max(Decimal(0), Decimal(payment.amount) - already_refunded),
         allow_zero=True,
     )
     if refundable <= 0:
@@ -494,7 +501,7 @@ async def _update_topup_after_refund(session, payment: Payment) -> Decimal:
         payment.fulfillment_status = "succeeded"
     if payment.reconciliation_status not in {"mismatch", "manual_review"}:
         payment.reconciliation_status = "ok"
-    if payment.manual_review_reason == "partial_refund":
+    if payment.manual_review_reason in ("partial_refund", "chargeback_debt"):
         payment.manual_review_reason = None
     return total
 
@@ -593,14 +600,158 @@ async def apply_balance_topup_refund_success(
                         details=f"reservation_id={reservation_id}",
                     )
                 )
+            # 1. Reverse purchase debits funded by this payment's credit lot
+            credit_entry = await session.scalar(
+                select(AccountLedgerEntry).where(
+                    AccountLedgerEntry.payment_id == payment.id,
+                    AccountLedgerEntry.entry_type == "payment_credit",
+                )
+            )
+            service_duration = timedelta(0)
+            if credit_entry is not None:
+                from database.models import AccountLedgerAllocation
+                from database.repositories.account_ledger_repo import create_purchase_reversal
+
+                allocations = (
+                    await session.scalars(
+                        select(AccountLedgerAllocation).where(
+                            AccountLedgerAllocation.credit_entry_id == credit_entry.id
+                        )
+                    )
+                ).all()
+                for alloc in allocations:
+                    p_debit = await session.get(AccountLedgerEntry, alloc.debit_entry_id)
+                    if p_debit is not None and p_debit.entry_type == "purchase_debit":
+                        already_rev = await session.scalar(
+                            select(AccountLedgerEntry.id).where(
+                                AccountLedgerEntry.entry_type == "purchase_reversal",
+                                AccountLedgerEntry.reversal_of_id == p_debit.id,
+                            )
+                        )
+                        if not already_rev:
+                            await create_purchase_reversal(
+                                session,
+                                debit_id=p_debit.id,
+                                metadata={
+                                    "reason": "payment_refunded",
+                                    "provider_refund_id": provider_refund_id,
+                                    "payment_id": payment.id,
+                                },
+                            )
+                        if p_debit.quote_id:
+                            from database.models import TariffQuote, TariffVersion
+
+                            quote = await session.get(TariffQuote, p_debit.quote_id)
+                            if quote and quote.target_tariff_version_id:
+                                t_version = await session.get(
+                                    TariffVersion, quote.target_tariff_version_id
+                                )
+                                if t_version and t_version.duration_hours:
+                                    service_duration += timedelta(
+                                        hours=t_version.duration_hours
+                                    )
+
+            if (
+                service_duration == timedelta(0)
+                and payment.topup_context
+                and isinstance(payment.topup_context, dict)
+            ):
+                quote_raw = payment.topup_context.get("quote_public_id")
+                if quote_raw:
+                    try:
+                        from database.models import TariffQuote, TariffVersion
+
+                        q_uuid = uuid.UUID(str(quote_raw))
+                        quote = await session.scalar(
+                            select(TariffQuote).where(TariffQuote.public_id == q_uuid)
+                        )
+                        if quote and quote.target_tariff_version_id:
+                            t_version = await session.get(
+                                TariffVersion, quote.target_tariff_version_id
+                            )
+                            if t_version and t_version.duration_hours:
+                                service_duration += timedelta(
+                                    hours=t_version.duration_hours
+                                )
+                    except Exception:
+                        pass
+
+            is_full_refund = bool(already + amount >= Decimal(payment.amount))
+
+            from config.constants import VPN_ACCESS_GRACE_HOURS
+            from services.subscription import SubscriptionService
+            from services.user_cache import invalidate_user_cache
+
+            user = await session.scalar(
+                select(User).where(User.id == payment.user_id).with_for_update()
+            )
+            if user is not None:
+                now = now_utc()
+                expired_threshold = now - timedelta(
+                    hours=VPN_ACCESS_GRACE_HOURS, seconds=1
+                )
+                if user.subscription_end is not None:
+                    if is_full_refund:
+                        user.subscription_end = expired_threshold
+                    elif service_duration > timedelta(0):
+                        new_end = user.subscription_end - service_duration
+                        user.subscription_end = (
+                            expired_threshold if new_end <= now else new_end
+                        )
+                    else:
+                        if user.subscription_end <= now:
+                            user.subscription_end = expired_threshold
+
+                    user.notified_3d = False
+                    user.notified_1d = False
+                    user.notified_2h = False
+                    user.notified_expired = False
+                    user.notified_grace_12h = False
+                    user.notification_retry_count = 0
+                    user.last_notification_attempt = None
+
+                await session.flush()
+                await SubscriptionService._sync_access_state(session, user)
+                invalidate_user_cache(user.telegram_id)
+
+            from services.white_internet_service import WhiteInternetService
+
+            if user is not None:
+                await WhiteInternetService.deactivate_user_subscriptions(
+                    session, user.id, reason="payment_refunded"
+                )
+
             await _update_topup_after_refund(session, payment)
             from services.referral_bonus import reverse_referral_bonus_for_topup
+
             await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
 
-            from database.repositories.account_ledger_repo import get_account_balance
+            from database.repositories.account_ledger_repo import (
+                create_admin_adjustment,
+                get_account_balance,
+            )
+
             balance = await get_account_balance(session, user_id=payment.user_id)
             if balance.debt > 0:
-                await place_financial_hold(session, payment=payment, reason="chargeback_debt")
+                await create_admin_adjustment(
+                    session,
+                    user_id=payment.user_id,
+                    signed_amount=balance.debt,
+                    idempotency_key=f"refund-debt-correction:{payment.id}:{provider_refund_id}",
+                    metadata={
+                        "reason": "refund_balance_correction",
+                        "payment_id": payment.id,
+                        "provider_refund_id": provider_refund_id,
+                    },
+                )
+            if (
+                user is not None
+                and user.financial_hold
+                and user.financial_block_reason == "chargeback_debt"
+            ):
+                user.financial_hold = False
+                user.topup_blocked = False
+                user.financial_block_reason = None
     if operation is not None:
         operation.provider_refund_id = provider_refund_id
         operation.provider_status = "succeeded"

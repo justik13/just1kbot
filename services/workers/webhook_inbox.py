@@ -231,8 +231,9 @@ async def finalize(session, claim, result, bot=None):
                 (claim.payload or {}).get("object")
             )
             provider_refund = _parse_refund_snapshot(result.value)
-        except RefundSnapshotError as exc:
-            await _manual_refund_review(session, payment, reason=str(exc))
+        except (RefundSnapshotError, BalanceRefundError, ValueError) as exc:
+            reason = exc.code if isinstance(exc, BalanceRefundError) else str(exc)
+            await _manual_refund_review(session, payment, reason=reason)
         else:
             if provider_refund.status == "pending":
                 dead = _schedule_retry(

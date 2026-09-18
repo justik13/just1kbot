@@ -12,7 +12,6 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from database.models import Payment
-from database.repositories.account_ledger_repo import get_payment_refundable_amount
 from database.repositories.payments_repo import get_payment_by_id
 from services.payment_status import payment_display_status
 from services.provider_refunds import (
@@ -31,7 +30,9 @@ logger = logging.getLogger(__name__)
 PAYMENTS_PER_PAGE = 20
 
 
-def _refund_available(payment: Payment) -> bool:
+def _refund_available(payment: Payment, refundable: Decimal | None = None) -> bool:
+    if refundable is not None and refundable <= 0:
+        return False
     return bool(
         payment.provider_status == "succeeded"
         and payment.external_id
@@ -39,13 +40,34 @@ def _refund_available(payment: Payment) -> bool:
     )
 
 
+async def get_payment_refundable_remainder(session: AsyncSession, payment: Payment) -> Decimal:
+    """Calculate refundable remainder as total payment amount minus already succeeded refunds."""
+    if hasattr(payment, "refunds") and payment.refunds is not None and len(payment.refunds) > 0:
+        successful_refunds_sum = sum(
+            Decimal(str(r.amount)) for r in payment.refunds if r.provider_status == "succeeded"
+        )
+    else:
+        from database.models import PaymentRefund
+        successful_refunds_sum = Decimal(
+            await session.scalar(
+                select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+                    PaymentRefund.payment_id == payment.id,
+                    PaymentRefund.provider_status == "succeeded",
+                )
+            )
+            or 0
+        )
+    return max(Decimal(0), Decimal(str(payment.amount)) - successful_refunds_sum)
+
+
 def _get_payment_card_keyboard(
     payment: Payment,
     user_telegram_id: int | None,
+    refundable: Decimal | None = None,
 ) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
 
-    if _refund_available(payment):
+    if _refund_available(payment, refundable):
         builder.button(
             text=texts.ADMIN_REFUND_START_BUTTON,
             callback_data=f"admin_payment_refund:{payment.id}",
@@ -378,12 +400,9 @@ async def show_payment_card(
             texts.ADMIN_PAYMENT_MANUAL_REVIEW_LINE.format(reason=safe(payment.manual_review_reason))
         )
 
+    refundable = await get_payment_refundable_remainder(session, payment)
     refundable_line = ""
-    if _refund_available(payment):
-        refundable = await get_payment_refundable_amount(
-            session,
-            payment_id=payment.id,
-        )
+    if _refund_available(payment, refundable):
         refundable_line = texts.ADMIN_PAYMENT_REFUNDABLE_LINE.format(amount_rub=int(refundable))
 
     rendered = (
@@ -407,6 +426,7 @@ async def show_payment_card(
     kb = _get_payment_card_keyboard(
         payment,
         user_telegram_id,
+        refundable=refundable,
     )
 
     try:
@@ -435,14 +455,11 @@ async def confirm_payment_refund(
         if payment_id is not None
         else None
     )
-    if payment is None or not _refund_available(payment):
+    if payment is None:
         await callback.answer(texts.ADMIN_REFUND_NOT_AVAILABLE_ALERT, show_alert=True)
         return
-    refundable = await get_payment_refundable_amount(
-        session,
-        payment_id=payment.id,
-    )
-    if refundable <= 0:
+    refundable = await get_payment_refundable_remainder(session, payment)
+    if not _refund_available(payment, refundable) or refundable <= 0:
         await callback.answer(texts.ADMIN_REFUND_NO_REMAINDER_ALERT, show_alert=True)
         return
     await state.clear()

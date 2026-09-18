@@ -14,7 +14,7 @@ from database.models import Payment, User
 class AdminPaymentCardTests(unittest.IsolatedAsyncioTestCase):
     @patch("bot.handlers.admin.payments.is_admin", return_value=True)
     @patch("bot.handlers.admin.payments.get_payment_by_id", new_callable=AsyncMock)
-    @patch("bot.handlers.admin.payments.get_payment_refundable_amount", new_callable=AsyncMock)
+    @patch("bot.handlers.admin.payments.get_payment_refundable_remainder", new_callable=AsyncMock)
     async def test_show_payment_card_success(
         self,
         mock_get_refundable,
