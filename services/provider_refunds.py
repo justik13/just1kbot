@@ -726,32 +726,11 @@ async def apply_balance_topup_refund_success(
 
             await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
 
-            from database.repositories.account_ledger_repo import (
-                create_admin_adjustment,
-                get_account_balance,
-            )
+            from database.repositories.account_ledger_repo import get_account_balance
 
             balance = await get_account_balance(session, user_id=payment.user_id)
             if balance.debt > 0:
-                await create_admin_adjustment(
-                    session,
-                    user_id=payment.user_id,
-                    signed_amount=balance.debt,
-                    idempotency_key=f"refund-debt-correction:{payment.id}:{provider_refund_id}",
-                    metadata={
-                        "reason": "refund_balance_correction",
-                        "payment_id": payment.id,
-                        "provider_refund_id": provider_refund_id,
-                    },
-                )
-            if (
-                user is not None
-                and user.financial_hold
-                and user.financial_block_reason == "chargeback_debt"
-            ):
-                user.financial_hold = False
-                user.topup_blocked = False
-                user.financial_block_reason = None
+                await place_financial_hold(session, payment=payment, reason="chargeback_debt")
     if operation is not None:
         operation.provider_refund_id = provider_refund_id
         operation.provider_status = "succeeded"
