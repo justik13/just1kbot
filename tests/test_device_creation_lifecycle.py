@@ -1065,9 +1065,9 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             PROFILE_QUOTA_EXCLUDED_STATUSES,
         )
 
-        self.assertEqual(PROFILE_LIST_HIDDEN_STATUSES, ("deleting",))
+        self.assertEqual(PROFILE_LIST_HIDDEN_STATUSES, ("deleting", "delete_failed"))
         self.assertNotIn("create_cleanup_pending", PROFILE_QUOTA_EXCLUDED_STATUSES)
-        self.assertNotIn("delete_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertIn("delete_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
         self.assertIn("create_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
         self.assertNotIn("pending_create", PROFILE_QUOTA_EXCLUDED_STATUSES)
         self.assertNotIn("active", PROFILE_QUOTA_EXCLUDED_STATUSES)

@@ -446,18 +446,24 @@ async def white_internet_traffic_loop(
     worker = WhiteInternetTrafficWorker(bot=bot)
     logger.info("White Internet traffic worker started.")
 
-    while not event.is_set():
-        try:
-            processed = await worker.run_traffic_cycle()
-            if processed > 0:
-                logger.debug("Processed traffic for %d White Internet subscriptions.", processed)
-        except Exception as exc:
-            logger.error("Unhandled error in White Internet traffic cycle: %s", exc, exc_info=True)
+    try:
+        while not event.is_set():
+            try:
+                processed = await worker.run_traffic_cycle()
+                if processed > 0:
+                    logger.debug("Processed traffic for %d White Internet subscriptions.", processed)
+            except Exception as exc:
+                logger.error("Unhandled error in White Internet traffic cycle: %s", exc, exc_info=True)
 
-        try:
-            await asyncio.wait_for(event.wait(), timeout=TRAFFIC_SYNC_INTERVAL_SECONDS)
-            break
-        except asyncio.TimeoutError:
-            pass
-
-    logger.info("White Internet traffic worker stopped.")
+            try:
+                await asyncio.wait_for(event.wait(), timeout=TRAFFIC_SYNC_INTERVAL_SECONDS)
+                break
+            except asyncio.TimeoutError:
+                pass
+    finally:
+        if worker.client is not None:
+            try:
+                await worker.client.close()
+            except Exception as exc:
+                logger.debug("Error closing XrayNodeClient in traffic worker: %s", exc)
+        logger.info("White Internet traffic worker stopped.")

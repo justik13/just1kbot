@@ -140,10 +140,13 @@ async def get_available_servers(session: AsyncSession) -> list[Server]:
     if not servers:
         return []
 
-    # Filter servers for AWG allocation: strictly require AMNEZIA_PROTOCOL and exclude Xray Origin nodes
+    # Filter servers for AWG allocation: strictly require AMNEZIA_PROTOCOL, exclude Xray Origin nodes,
+    # and exclude servers in unhealthy / problem / disabled states
     awg_servers = [
         s for s in servers
-        if s.protocol == AMNEZIA_PROTOCOL and "xray_origin" not in (s.capabilities or [])
+        if s.protocol == AMNEZIA_PROTOCOL
+        and "xray_origin" not in (s.capabilities or [])
+        and s.health_state in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION, None)
     ]
     if not awg_servers:
         return []

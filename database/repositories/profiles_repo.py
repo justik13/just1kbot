@@ -15,17 +15,18 @@ ALLOWED_PROFILE_UPDATE_FIELDS = {
 }
 
 # Lifecycle states hidden from the user's UI connection list.
-# Only in-flight deletions are hidden; recoverable and failure states remain visible.
+# In-flight and failed deletions are hidden from regular user listings.
 PROFILE_LIST_HIDDEN_STATUSES = (
     "deleting",
+    "delete_failed",
 )
 
 # Lifecycle states excluded from active quota / capacity count calculations.
-# delete_failed and create_cleanup_pending still have active server peers,
-# so they MUST consume quota to prevent downgrade exploits.
+# Failed/in-flight deletions do not consume user quota so node outages do not block users.
 PROFILE_QUOTA_EXCLUDED_STATUSES = (
     "deleting",
     "create_failed",
+    "delete_failed",
 )
 
 # Provisioning states in which a profile can be deleted by a user or service (Fail-Closed).

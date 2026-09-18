@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from aiogram import F, Router
@@ -259,14 +260,21 @@ async def ping_server(
     start_t = time.monotonic()
     try:
         if server.protocol == "amneziawg2":
-            from services.amnezia_client import AmneziaClient
+            from services.amnezia_client import AmneziaClient, _get_circuit_breaker
 
-            client = AmneziaClient(server.api_url, server.api_key)
-            is_healthy = await client.healthcheck()
+            cb = _get_circuit_breaker(server.api_url)
+            if cb.is_open:
+                is_healthy = False
+            else:
+                client = AmneziaClient(server.api_url, server.api_key)
+                try:
+                    is_healthy = await asyncio.wait_for(client.healthcheck(), timeout=4.0)
+                except asyncio.TimeoutError:
+                    is_healthy = False
         elif server.protocol == "xray":
             from services.xray_node_client import XrayNodeClient
 
-            async with XrayNodeClient(timeout=10.0) as xclient:
+            async with XrayNodeClient(timeout=4.0) as xclient:
                 is_healthy, _epoch, _detail = await xclient.check_health(server.api_url, server.api_key)
         else:
             is_healthy = False

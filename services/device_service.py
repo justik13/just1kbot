@@ -34,7 +34,6 @@ RESERVING_STATUSES = (
     "pending_update",
     "update_failed",
     "create_cleanup_pending",
-    "delete_failed",
 )
 
 

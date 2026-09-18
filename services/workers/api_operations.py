@@ -29,12 +29,12 @@ def notify_api_operation_enqueued() -> None:
     event.set()
 
 
-async def api_operations_loop(shutdown_event: asyncio.Event) -> None:
+async def api_operations_loop(shutdown_event: asyncio.Event, bot=None) -> None:
     worker_id = f"api-operations-{PROCESS_ID}"
     in_flight: set[asyncio.Task] = set()
     async def run(operation):
         try:
-            await execute_claimed_api_operation(operation)
+            await execute_claimed_api_operation(operation, bot=bot)
         except asyncio.CancelledError:
             raise
         except Exception as error:

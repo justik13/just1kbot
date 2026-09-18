@@ -51,6 +51,9 @@ ADMIN_MASS_BONUS_AUDIENCE_LABELS = {
     "expired": "Истекшие подписки"
 }
 
+ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE = "🎯 Пользователям сервера..."
+ADMIN_USERS_MASS_BONUS_SELECT_SERVER = "Выберите сервер для начисления бонуса его пользователям:"
+
 ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS = "Granted +{amount} RUB bonus to {count} users (batch {batch_id}). Reason: {reason}"
 
 ADMIN_MASS_BONUS_DEFAULT_REASON = "Массовый бонус"
