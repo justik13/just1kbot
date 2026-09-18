@@ -1,5 +1,6 @@
 import logging
 import math
+from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -42,7 +43,7 @@ def _refund_available(payment: Payment, refundable: Decimal | None = None) -> bo
 
 async def get_payment_refundable_remainder(session: AsyncSession, payment: Payment) -> Decimal:
     """Calculate refundable remainder as total payment amount minus already succeeded refunds."""
-    if hasattr(payment, "refunds") and payment.refunds is not None and len(payment.refunds) > 0:
+    if hasattr(payment, "refunds") and payment.refunds is not None:
         successful_refunds_sum = sum(
             Decimal(str(r.amount)) for r in payment.refunds if r.provider_status == "succeeded"
         )

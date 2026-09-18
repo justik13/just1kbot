@@ -15,6 +15,7 @@ from config.enums import AdminAuditAction
 from database.dispute_models import PaymentDispute
 from database.models import (
     AccountBalanceReservation,
+    AccountLedgerEntry,
     Payment,
     PaymentEvent,
     PaymentRefund,
@@ -23,7 +24,6 @@ from database.models import (
 from database.refund_models import ProviderRefundOperation
 from database.repositories.account_ledger_repo import (
     create_payment_debit,
-    get_payment_refundable_amount,
     lock_account_user,
     reserve_payment_funds,
     resolve_reservation,

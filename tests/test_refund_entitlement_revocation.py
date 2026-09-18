@@ -1,10 +1,9 @@
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from bot.handlers.admin.payments import get_payment_refundable_remainder
-from database.models import Payment, PaymentRefund, User
+from database.models import Payment, PaymentRefund
 from services.payment_provider_state import (
     PaymentFulfillmentStatus,
     PaymentProviderStatus,
@@ -48,20 +47,28 @@ class RefundEntitlementRevocationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refundable, Decimal("200.00"))
 
     async def test_reconciliation_status_refunded_succeeded_ok(self):
-        session = AsyncMock()
+        session = MagicMock()
         payment = Payment(
             id=101,
             amount=Decimal("250.00"),
             currency="RUB",
+            public_order_id="topup_101",
             provider_status=PaymentProviderStatus.REFUNDED.value,
             fulfillment_status=PaymentFulfillmentStatus.REVERSED.value,
             reconciliation_status=PaymentReconciliationStatus.OK.value,
         )
         # YooKassa returns observed="succeeded" with refunded_amount=250.00
         data = {
+            "id": "2d3e4f5a-000f-5000-8000-123456789abc",
             "status": "succeeded",
             "refundable": False,
+            "amount": {"value": "250.00", "currency": "RUB"},
             "refunded_amount": {"value": "250.00", "currency": "RUB"},
+            "captured_at": "2026-09-18T10:00:00.000Z",
+            "metadata": {
+                "order_id": "topup_101",
+                "local_payment_id": "101",
+            },
         }
 
         transition = await apply_provider_transition(
@@ -71,7 +78,7 @@ class RefundEntitlementRevocationTests(unittest.IsolatedAsyncioTestCase):
             source="reconciliation",
         )
 
-        self.assertEqual(transition.action, "applied")
+        self.assertEqual(transition.outcome, "applied")
         self.assertEqual(payment.reconciliation_status, PaymentReconciliationStatus.OK.value)
 
 
