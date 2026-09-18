@@ -111,7 +111,7 @@ async def select_mass_bonus_server(
     from database.repositories.servers_repo import get_all_servers
 
     servers = await get_all_servers(session)
-    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, "Выбор сервера")
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.BROADCAST_BREADCRUMB_SERVER_SELECTION)
     text = f"{header}\n\n{texts.ADMIN_USERS_MASS_BONUS_SELECT_SERVER}"
 
     builder = InlineKeyboardBuilder()
@@ -237,7 +237,7 @@ async def process_mass_bonus_reason(
         server = await get_server_by_id(session, server_id)
         server_name = server.name if server else f"ID {server_id}"
         server_flag = (server.country_flag or "🌐") if server else "🌐"
-        aud_label = f"Пользователям сервера {server_flag} {server_name}"
+        aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=server_name)
         stmt = (
             select(func.count(func.distinct(User.id)))
             .join(VPNProfile, VPNProfile.user_id == User.id)

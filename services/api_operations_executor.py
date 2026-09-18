@@ -341,6 +341,7 @@ async def _notify_user_device_ready(bot, profile_id: int) -> None:
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
 
+        from bot import texts
         from database.models import VPNProfile
         from utils.telegram import safe
 
@@ -357,19 +358,20 @@ async def _notify_user_device_ready(bot, profile_id: int) -> None:
             if profile.provisioning_status != "active":
                 return
             server = profile.server
-            flag = server.country_flag or "🌐" if server else "🌐"
-            server_name = server.name if server else "сервере"
-            device_name = profile.device_name or f"Устройство #{profile.id}"
+            flag = (server.country_flag or "🌐") if server else "🌐"
+            server_name = server.name if server else texts.DEVICE_DEFAULT_SERVER_NAME
+            device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=profile.id)
             telegram_id = profile.user.telegram_id
 
         builder = InlineKeyboardBuilder()
         builder.button(
-            text="📱 Открыть устройство",
+            text=texts.BTN_OPEN_DEVICE,
             callback_data=f"manage_device:{profile_id}",
         )
-        msg_text = (
-            f"✅ Ваше подключение «<b>{safe(device_name)}</b>» "
-            f"({flag} {safe(server_name)}) успешно настроено и готово к использованию!"
+        msg_text = texts.DEVICE_READY_PUSH_NOTIFICATION.format(
+            device_name=safe(device_name),
+            server_flag=flag,
+            server_name=safe(server_name),
         )
         await bot.send_message(
             telegram_id,

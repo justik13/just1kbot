@@ -9,6 +9,12 @@ BTN_CHANGE_TARIFF = "⚙️ Сменить тариф"
 
 BTN_DELETE_DEVICE = "🗑 Удалить устройство"
 
+BTN_OPEN_DEVICE = "📱 Открыть устройство"
+
+DEVICE_DEFAULT_SERVER_NAME = "сервере"
+
+DEVICE_READY_PUSH_NOTIFICATION = "✅ Ваше подключение «<b>{device_name}</b>» ({server_flag} {server_name}) успешно настроено и готово к использованию!"
+
 CONNECTION_DEVICES_DEVICE_ALT_CONNECTION = "🔄 Другой способ подключения"
 
 CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE = "← К устройству"

@@ -106,8 +106,8 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
                 batch_id="test_batch",
             )
 
-            call_stmt = mock_session.execute.call_args[0][0]
-            sql_str = str(call_stmt.compile(compile_kwargs={"literal_binds": True}))
+            first_call_stmt = mock_session.execute.call_args_list[0][0][0]
+            sql_str = str(first_call_stmt.compile(compile_kwargs={"literal_binds": True}))
             self.assertIn("vpn_profiles", sql_str)
             self.assertIn("server_id = 2", sql_str)
 
