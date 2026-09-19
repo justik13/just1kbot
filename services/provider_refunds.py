@@ -128,8 +128,17 @@ async def request_balance_topup_refund(
         )
         or 0
     )
+    active_reservations = Decimal(
+        await session.scalar(
+            select(func.coalesce(func.sum(AccountBalanceReservation.amount), 0)).where(
+                AccountBalanceReservation.payment_id == payment.id,
+                AccountBalanceReservation.status == "active",
+            )
+        )
+        or 0
+    )
     refundable = whole_rubles(
-        max(Decimal(0), Decimal(payment.amount) - already_refunded),
+        max(Decimal(0), Decimal(payment.amount) - already_refunded - active_reservations),
         allow_zero=True,
     )
     if refundable <= 0:
@@ -523,6 +532,25 @@ async def _update_topup_after_refund(session, payment: Payment) -> Decimal:
     return total
 
 
+async def _user_has_other_wi_payments(session, *, user_id: int, payment_id: int) -> bool:
+    other_payments = (
+        await session.scalars(
+            select(Payment).where(
+                Payment.user_id == user_id,
+                Payment.id != payment_id,
+                Payment.provider_status == "succeeded",
+                Payment.fulfillment_status != "reversed",
+            )
+        )
+    ).all()
+    for p in other_payments:
+        ctx = p.topup_context if isinstance(p.topup_context, dict) else {}
+        action = ctx.get("auto_fulfill_action")
+        if action and action.startswith("white_internet"):
+            return True
+    return False
+
+
 async def apply_balance_topup_refund_success(
     session,
     *,
@@ -682,13 +710,24 @@ async def apply_balance_topup_refund_success(
                     )
                 )
                 await _update_topup_after_refund(session, payment)
-            elif topup_action in ("tariff_change", "white_internet_renew", "white_internet_add_device"):
-                # Sub-case B3: Refund of a complex subscription modification payment.
+            elif (
+                topup_action in ("tariff_change", "white_internet_renew", "white_internet_add_device", "white_internet_pack")
+                or (
+                    topup_action == "white_internet_buy"
+                    and await _user_has_other_wi_payments(session, user_id=payment.user_id, payment_id=payment.id)
+                )
+            ):
+                # Sub-case B3: Refund of a complex subscription modification payment, or white_internet_buy
+                # on an account that has other active/renewed White Internet services.
                 # Cannot be trivially rolled back by deleting the subscription or subtracting duration.
                 # Route to manual review without corrupting subscription dates or nuking active services.
                 payment.reconciliation_status = "manual_review"
                 payment.fulfillment_status = "manual_review"
-                reason_code = f"{topup_action}_refund_requires_admin_review"
+                reason_code = (
+                    "white_internet_has_renewals_requires_admin_review"
+                    if topup_action == "white_internet_buy"
+                    else f"{topup_action}_refund_requires_admin_review"
+                )
                 payment.manual_review_reason = reason_code
                 session.add(
                     PaymentEvent(
@@ -816,7 +855,6 @@ async def apply_balance_topup_refund_success(
                         # 2. Determine services to revoke (READ-ONLY quotes, NO status mutation to preserve triggers)
                         awg_duration_to_revoke = timedelta(0)
                         has_white_internet_subscription = False
-                        white_internet_pack_gb = 0
 
                         for q_id in reversed_quote_ids:
                             q = await session.get(TariffQuote, q_id)
@@ -846,8 +884,6 @@ async def apply_balance_topup_refund_success(
 
                         if topup_action == "white_internet_buy":
                             has_white_internet_subscription = True
-                        elif topup_action == "white_internet_pack":
-                            white_internet_pack_gb = int(topup_ctx.get("pack_gb") or 0)
 
                         # Revoke AWG access if applicable
                         if awg_duration_to_revoke > timedelta(0):
@@ -900,21 +936,6 @@ async def apply_balance_topup_refund_success(
                                 wi_sub.desired_version += 1
                                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
                             await session.flush()
-
-                        if white_internet_pack_gb > 0:
-                            from database.models import WhiteInternetSubscription
-
-                            wi_sub = await session.scalar(
-                                select(WhiteInternetSubscription).where(
-                                    WhiteInternetSubscription.user_id == payment.user_id,
-                                ).order_by(WhiteInternetSubscription.id.desc()).with_for_update()
-                            )
-                            if wi_sub is not None:
-                                pack_bytes = white_internet_pack_gb * (1024 ** 3)
-                                wi_sub.traffic_limit_bytes = max(
-                                    0, (wi_sub.traffic_limit_bytes or 0) - pack_bytes
-                                )
-                                await session.flush()
 
                         from services.referral_bonus import reverse_referral_bonus_for_topup
                         await reverse_referral_bonus_for_topup(session, payment_id=payment.id)

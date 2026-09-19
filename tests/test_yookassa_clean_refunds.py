@@ -18,7 +18,11 @@ from services.payment_provider_state import (
     PaymentReconciliationStatus,
     apply_provider_transition,
 )
-from services.provider_refunds import apply_balance_topup_refund_success, place_financial_hold
+from services.provider_refunds import (
+    apply_balance_topup_refund_success,
+    place_financial_hold,
+    request_balance_topup_refund,
+)
 
 
 class YooKassaCleanRefundsTests(unittest.IsolatedAsyncioTestCase):
@@ -1043,6 +1047,188 @@ class YooKassaCleanRefundsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payment.fulfillment_status, "manual_review")
         mock_sync.assert_awaited_once_with(session, user)
         mock_invalidate_cache.assert_called_once_with(12345)
+
+    @patch("services.provider_refunds._update_topup_after_refund", new_callable=AsyncMock)
+    @patch("services.provider_refunds.create_payment_debit", new_callable=AsyncMock)
+    @patch("services.provider_refunds._get_or_create_payment_refund", new_callable=AsyncMock)
+    async def test_white_internet_buy_with_renewals_routes_to_manual_review(
+        self,
+        mock_get_refund,
+        mock_debit,
+        mock_update_topup,
+    ):
+        """Refunding white_internet_buy when user has subsequent WI payments routes to manual_review."""
+        now = datetime.now(timezone.utc)
+        payment1 = Payment(
+            id=71,
+            user_id=1,
+            amount=Decimal("350.00"),
+            currency="RUB",
+            topup_context={"auto_fulfill_action": "white_internet_buy"},
+            provider_status="succeeded",
+            credited_at=now,
+        )
+        payment2 = Payment(
+            id=72,
+            user_id=1,
+            amount=Decimal("350.00"),
+            currency="RUB",
+            topup_context={"auto_fulfill_action": "white_internet_renew"},
+            provider_status="succeeded",
+            fulfillment_status="fulfilled",
+            credited_at=now,
+        )
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        def scalar_side_effect(stmt):
+            stmt_str = str(stmt).lower()
+            if "provider_refund_operations" in stmt_str:
+                return None
+            if "payment_refunds" in stmt_str:
+                return Decimal(0)
+            if "account_balance_reservations" in stmt_str:
+                return None
+            if "account_ledger_entries" in stmt_str:
+                return None
+            return None
+
+        session.scalar = AsyncMock(side_effect=scalar_side_effect)
+        def scalars_side_effect(stmt):
+            stmt_str = str(stmt).lower()
+            res = MagicMock()
+            if "payments" in stmt_str:
+                res.all.return_value = [payment2]
+            else:
+                res.all.return_value = []
+            return res
+
+        session.scalars = AsyncMock(side_effect=scalars_side_effect)
+
+        nested_mock = AsyncMock()
+        nested_mock.__aenter__ = AsyncMock()
+        nested_mock.__aexit__ = AsyncMock()
+        session.begin_nested = MagicMock(return_value=nested_mock)
+
+        await apply_balance_topup_refund_success(
+            session,
+            payment=payment1,
+            provider_refund_id="rf_wi_buy_with_renew",
+            amount=Decimal("350.00"),
+            currency="RUB",
+            event_key="evt_wi_buy_with_renew",
+        )
+
+        self.assertEqual(payment1.reconciliation_status, "manual_review")
+        self.assertEqual(payment1.fulfillment_status, "manual_review")
+        self.assertEqual(payment1.manual_review_reason, "white_internet_has_renewals_requires_admin_review")
+        mock_debit.assert_not_called()
+
+    @patch("services.provider_refunds._update_topup_after_refund", new_callable=AsyncMock)
+    @patch("services.provider_refunds.create_payment_debit", new_callable=AsyncMock)
+    @patch("services.provider_refunds._get_or_create_payment_refund", new_callable=AsyncMock)
+    async def test_white_internet_pack_refund_routes_to_manual_review(
+        self,
+        mock_get_refund,
+        mock_debit,
+        mock_update_topup,
+    ):
+        """Refunding white_internet_pack routes to manual review to prevent quota corruption."""
+        now = datetime.now(timezone.utc)
+        payment = Payment(
+            id=73,
+            user_id=1,
+            amount=Decimal("100.00"),
+            currency="RUB",
+            topup_context={"auto_fulfill_action": "white_internet_pack", "pack_gb": 10},
+            provider_status="succeeded",
+            credited_at=now,
+        )
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        def scalar_side_effect(stmt):
+            stmt_str = str(stmt).lower()
+            if "provider_refund_operations" in stmt_str:
+                return None
+            if "payment_refunds" in stmt_str:
+                return Decimal(0)
+            if "account_balance_reservations" in stmt_str:
+                return None
+            if "account_ledger_entries" in stmt_str:
+                return None
+            return None
+
+        session.scalar = AsyncMock(side_effect=scalar_side_effect)
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = []
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        nested_mock = AsyncMock()
+        nested_mock.__aenter__ = AsyncMock()
+        nested_mock.__aexit__ = AsyncMock()
+        session.begin_nested = MagicMock(return_value=nested_mock)
+
+        await apply_balance_topup_refund_success(
+            session,
+            payment=payment,
+            provider_refund_id="rf_wi_pack",
+            amount=Decimal("100.00"),
+            currency="RUB",
+            event_key="evt_wi_pack",
+        )
+
+        self.assertEqual(payment.reconciliation_status, "manual_review")
+        self.assertEqual(payment.fulfillment_status, "manual_review")
+        self.assertEqual(payment.manual_review_reason, "white_internet_pack_refund_requires_admin_review")
+        mock_debit.assert_not_called()
+
+    @patch("services.provider_refunds.reserve_payment_funds", new_callable=AsyncMock)
+    @patch("services.provider_refunds.lock_account_user", new_callable=AsyncMock)
+    async def test_request_balance_topup_refund_subtracts_active_reservations(
+        self,
+        mock_lock_user,
+        mock_reserve,
+    ):
+        """request_balance_topup_refund deducts active reservations from refundable amount."""
+        payment = Payment(
+            id=74,
+            user_id=1,
+            amount=Decimal("300.00"),
+            currency="RUB",
+            provider_status="succeeded",
+            external_id="ext_74",
+        )
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        def scalar_side_effect(stmt):
+            stmt_str = str(stmt).lower()
+            if "payments" in stmt_str:
+                return payment
+            if "payment_disputes" in stmt_str:
+                return None
+            if "provider_refund_operations" in stmt_str:
+                return None
+            if "payment_refunds" in stmt_str:
+                return Decimal("50.00")  # 50 already refunded
+            if "account_balance_reservations" in stmt_str:
+                return Decimal("100.00")  # 100 active reservation
+            return None
+
+        session.scalar = AsyncMock(side_effect=scalar_side_effect)
+        mock_reserve.return_value = (MagicMock(), True)
+
+        await request_balance_topup_refund(
+            session,
+            payment_id=74,
+            requested_by_admin_id=999,
+        )
+
+        # Refundable should be 300 - 50 (already) - 100 (active reservations) = 150
+        mock_reserve.assert_awaited_once()
+        _, kwargs = mock_reserve.call_args
+        self.assertEqual(kwargs["amount"], Decimal("150.00"))
 
 
 if __name__ == "__main__":
