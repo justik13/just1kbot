@@ -659,232 +659,271 @@ async def apply_balance_topup_refund_success(
                 balance = await get_account_balance(session, user_id=payment.user_id)
                 if balance.debt > 0:
                     await place_financial_hold(session, payment=payment, reason="chargeback_debt")
-            elif not is_full_refund:
-                # Sub-case B2: Partial refund of an indivisible service.
-                # Must NOT create refund_debit (which would create false debt and block user).
+            elif not is_full_refund or already > 0 or payment.reconciliation_status == "manual_review" or payment.fulfillment_status == "manual_review":
+                # Sub-case B2: Partial refund of an indivisible service, or subsequent refund on a payment with active manual review / prior partial refund.
+                # Must NOT create refund_debit or auto-reverse (which would corrupt days or leak balance).
                 # Route to manual review for administrator inspection.
                 payment.reconciliation_status = "manual_review"
-                payment.manual_review_reason = "partial_refund_requires_admin_review"
+                payment.fulfillment_status = "manual_review"
+                reason_code = (
+                    "partial_refund_requires_admin_review"
+                    if not is_full_refund
+                    else "chained_refund_requires_admin_review"
+                )
+                payment.manual_review_reason = reason_code
                 session.add(
                     PaymentEvent(
                         payment_id=payment.id,
-                        event_type="partial_refund_manual_review",
+                        event_type="refund_manual_review",
                         provider_status=payment.provider_status,
-                        reason="partial_refund_requires_admin_review",
+                        reason=reason_code,
                         source="provider_refund",
-                        details=f"amount={int(amount)} RUB of {int(payment.amount)} RUB",
+                        details=f"amount={int(amount)} RUB of {int(payment.amount)} RUB; already={int(already)} RUB",
                     )
                 )
                 await _update_topup_after_refund(session, payment)
-            elif topup_action == "tariff_change":
-                # Sub-case B3: Refund of a tariff_change payment (upgrade difference).
-                # Cannot be trivially rolled back by subtracting target duration.
-                # Route to manual review without corrupting subscription dates or blocking user.
+            elif topup_action in ("tariff_change", "white_internet_renew", "white_internet_add_device"):
+                # Sub-case B3: Refund of a complex subscription modification payment.
+                # Cannot be trivially rolled back by deleting the subscription or subtracting duration.
+                # Route to manual review without corrupting subscription dates or nuking active services.
                 payment.reconciliation_status = "manual_review"
-                payment.manual_review_reason = "tariff_change_refund_requires_admin_review"
+                payment.fulfillment_status = "manual_review"
+                reason_code = f"{topup_action}_refund_requires_admin_review"
+                payment.manual_review_reason = reason_code
                 session.add(
                     PaymentEvent(
                         payment_id=payment.id,
-                        event_type="tariff_change_refund_manual_review",
+                        event_type=f"{topup_action}_refund_manual_review",
                         provider_status=payment.provider_status,
-                        reason="tariff_change_refund_requires_admin_review",
+                        reason=reason_code,
                         source="provider_refund",
                         details=f"payment_id={payment.id}; amount={int(amount)} RUB",
                     )
                 )
                 await _update_topup_after_refund(session, payment)
             else:
-                # Sub-case B4: Full refund of spent service (AWG or White Internet).
+                # Sub-case B4: Full refund of spent single-funded service (AWG or White Internet Buy).
                 from database.models import Tariff, TariffQuote, TariffVersion
                 from database.repositories.account_ledger_repo import create_purchase_reversal
 
-                # 1. Reverse purchase debits to balance the account ledger
-                reversed_quote_ids = set()
+                # Check for split-funded purchase (e.g. balance + topup)
+                is_split_funded = False
                 for alloc in allocations:
                     p_debit = await session.get(AccountLedgerEntry, alloc.debit_entry_id)
                     if p_debit is not None and p_debit.entry_type == "purchase_debit":
-                        already_rev = await session.scalar(
-                            select(AccountLedgerEntry.id).where(
-                                AccountLedgerEntry.entry_type == "purchase_reversal",
-                                AccountLedgerEntry.reversal_of_id == p_debit.id,
-                            )
-                        )
-                        if not already_rev:
-                            await create_purchase_reversal(
-                                session,
-                                debit_id=p_debit.id,
-                                metadata={
-                                    "reason": "payment_refunded",
-                                    "provider_refund_id": provider_refund_id,
-                                    "payment_id": payment.id,
-                                },
-                            )
-                        if p_debit.quote_id:
-                            reversed_quote_ids.add(p_debit.quote_id)
+                        if abs(Decimal(p_debit.amount)) != Decimal(payment.amount) or Decimal(alloc.amount) != abs(Decimal(p_debit.amount)):
+                            is_split_funded = True
+                            break
 
-                if not reversed_quote_ids and quote_raw:
-                    try:
-                        q_uuid = uuid.UUID(str(quote_raw))
-                        ctx_quote = await session.scalar(
-                            select(TariffQuote).where(TariffQuote.public_id == q_uuid)
+                if is_split_funded:
+                    # Split-funded purchase cannot be safely auto-reversed without leaking funds.
+                    payment.reconciliation_status = "manual_review"
+                    payment.fulfillment_status = "manual_review"
+                    payment.manual_review_reason = "split_funded_purchase_requires_admin_review"
+                    session.add(
+                        PaymentEvent(
+                            payment_id=payment.id,
+                            event_type="split_funded_refund_manual_review",
+                            provider_status=payment.provider_status,
+                            reason="split_funded_purchase_requires_admin_review",
+                            source="provider_refund",
+                            details=f"payment_id={payment.id}; amount={int(amount)} RUB",
                         )
-                        if ctx_quote:
-                            reversed_quote_ids.add(ctx_quote.id)
-                            ctx_debit = await session.scalar(
-                                select(AccountLedgerEntry).where(
-                                    AccountLedgerEntry.entry_type == "purchase_debit",
-                                    AccountLedgerEntry.quote_id == ctx_quote.id,
-                                )
-                            )
-                            if ctx_debit:
+                    )
+                    await _update_topup_after_refund(session, payment)
+                else:
+                    # Post the refund debit (reversal + refund_debit = net 0 change to balance)
+                    debit, created_debit = await create_payment_debit(
+                        session,
+                        payment_id=payment.id,
+                        entry_type="refund_debit",
+                        amount=amount,
+                        idempotency_key=f"provider-refund-debit:{provider_refund_id}",
+                        metadata={
+                            "provider_refund_id": provider_refund_id,
+                            "event_key": event_key,
+                            "source": "provider_refund",
+                        },
+                    )
+
+                    # Strictly gate side-effects on created_debit to prevent double date-cutting on retry
+                    if created_debit:
+                        # 1. Reverse purchase debits to balance the account ledger
+                        reversed_quote_ids = set()
+                        for alloc in allocations:
+                            p_debit = await session.get(AccountLedgerEntry, alloc.debit_entry_id)
+                            if p_debit is not None and p_debit.entry_type == "purchase_debit":
                                 already_rev = await session.scalar(
                                     select(AccountLedgerEntry.id).where(
                                         AccountLedgerEntry.entry_type == "purchase_reversal",
-                                        AccountLedgerEntry.reversal_of_id == ctx_debit.id,
+                                        AccountLedgerEntry.reversal_of_id == p_debit.id,
                                     )
                                 )
                                 if not already_rev:
                                     await create_purchase_reversal(
                                         session,
-                                        debit_id=ctx_debit.id,
+                                        debit_id=p_debit.id,
                                         metadata={
                                             "reason": "payment_refunded",
                                             "provider_refund_id": provider_refund_id,
                                             "payment_id": payment.id,
                                         },
                                     )
-                    except (ValueError, TypeError) as exc:
-                        _logger.warning("Failed to parse quote_raw %s: %s", quote_raw, exc)
+                                if p_debit.quote_id:
+                                    reversed_quote_ids.add(p_debit.quote_id)
 
-                # 2. Post the refund debit (reversal + refund_debit = net 0 change to balance)
-                debit, created_debit = await create_payment_debit(
-                    session,
-                    payment_id=payment.id,
-                    entry_type="refund_debit",
-                    amount=amount,
-                    idempotency_key=f"provider-refund-debit:{provider_refund_id}",
-                    metadata={
-                        "provider_refund_id": provider_refund_id,
-                        "event_key": event_key,
-                        "source": "provider_refund",
-                    },
-                )
-                await _consume_reservation_if_present(session, reservation_id=reservation_id)
+                        if not reversed_quote_ids and quote_raw:
+                            try:
+                                q_uuid = uuid.UUID(str(quote_raw))
+                                ctx_quote = await session.scalar(
+                                    select(TariffQuote).where(TariffQuote.public_id == q_uuid)
+                                )
+                                if ctx_quote:
+                                    reversed_quote_ids.add(ctx_quote.id)
+                                    ctx_debit = await session.scalar(
+                                        select(AccountLedgerEntry).where(
+                                            AccountLedgerEntry.entry_type == "purchase_debit",
+                                            AccountLedgerEntry.quote_id == ctx_quote.id,
+                                        )
+                                    )
+                                    if ctx_debit:
+                                        already_rev = await session.scalar(
+                                            select(AccountLedgerEntry.id).where(
+                                                AccountLedgerEntry.entry_type == "purchase_reversal",
+                                                AccountLedgerEntry.reversal_of_id == ctx_debit.id,
+                                            )
+                                        )
+                                        if not already_rev:
+                                            await create_purchase_reversal(
+                                                session,
+                                                debit_id=ctx_debit.id,
+                                                metadata={
+                                                    "reason": "payment_refunded",
+                                                    "provider_refund_id": provider_refund_id,
+                                                    "payment_id": payment.id,
+                                                },
+                                            )
+                            except (ValueError, TypeError) as exc:
+                                _logger.warning("Failed to parse quote_raw %s: %s", quote_raw, exc)
 
-                # 3. Determine services to revoke
-                awg_duration_to_revoke = timedelta(0)
-                has_white_internet_subscription = False
-                white_internet_pack_gb = 0
+                        await _consume_matching_reservation(
+                            session,
+                            payment_id=payment.id,
+                            amount=amount,
+                            reservation_id=reservation_id,
+                        )
 
-                for q_id in reversed_quote_ids:
-                    q = await session.get(TariffQuote, q_id)
-                    if q:
-                        q.status = "cancelled"
-                        if q.target_tariff_version_id:
-                            t_ver = await session.get(TariffVersion, q.target_tariff_version_id)
-                            if t_ver:
-                                tar = await session.get(Tariff, t_ver.tariff_id)
-                                if tar and tar.service_type == "awg":
-                                    if t_ver.duration_hours:
-                                        awg_duration_to_revoke += timedelta(hours=t_ver.duration_hours)
-                                elif tar and tar.service_type == "white_internet":
-                                    has_white_internet_subscription = True
+                        # 2. Determine services to revoke (READ-ONLY quotes, NO status mutation to preserve triggers)
+                        awg_duration_to_revoke = timedelta(0)
+                        has_white_internet_subscription = False
+                        white_internet_pack_gb = 0
 
-                if topup_action in ("purchase", "renew") and awg_duration_to_revoke == timedelta(0):
-                    if quote_raw:
-                        try:
-                            q_uuid = uuid.UUID(str(quote_raw))
-                            q = await session.scalar(
-                                select(TariffQuote).where(TariffQuote.public_id == q_uuid)
+                        for q_id in reversed_quote_ids:
+                            q = await session.get(TariffQuote, q_id)
+                            if q and q.target_tariff_version_id:
+                                t_ver = await session.get(TariffVersion, q.target_tariff_version_id)
+                                if t_ver:
+                                    tar = await session.get(Tariff, t_ver.tariff_id)
+                                    if tar and tar.service_type == "awg":
+                                        if t_ver.duration_hours:
+                                            awg_duration_to_revoke += timedelta(hours=t_ver.duration_hours)
+                                    elif tar and tar.service_type == "white_internet":
+                                        has_white_internet_subscription = True
+
+                        if topup_action in ("purchase", "renew") and awg_duration_to_revoke == timedelta(0):
+                            if quote_raw:
+                                try:
+                                    q_uuid = uuid.UUID(str(quote_raw))
+                                    q = await session.scalar(
+                                        select(TariffQuote).where(TariffQuote.public_id == q_uuid)
+                                    )
+                                    if q and q.target_tariff_version_id:
+                                        t_ver = await session.get(TariffVersion, q.target_tariff_version_id)
+                                        if t_ver and t_ver.duration_hours:
+                                            awg_duration_to_revoke += timedelta(hours=t_ver.duration_hours)
+                                except (ValueError, TypeError) as exc:
+                                    _logger.warning("Failed to parse quote_raw fallback %s: %s", quote_raw, exc)
+
+                        if topup_action == "white_internet_buy":
+                            has_white_internet_subscription = True
+                        elif topup_action == "white_internet_pack":
+                            white_internet_pack_gb = int(topup_ctx.get("pack_gb") or 0)
+
+                        # Revoke AWG access if applicable
+                        if awg_duration_to_revoke > timedelta(0):
+                            from config.constants import VPN_ACCESS_GRACE_HOURS
+                            from services.subscription import SubscriptionService
+                            from services.user_cache import invalidate_user_cache
+
+                            user = await session.scalar(
+                                select(User).where(User.id == payment.user_id).with_for_update()
                             )
-                            if q:
-                                q.status = "cancelled"
-                                if q.target_tariff_version_id:
-                                    t_ver = await session.get(TariffVersion, q.target_tariff_version_id)
-                                    if t_ver and t_ver.duration_hours:
-                                        awg_duration_to_revoke += timedelta(hours=t_ver.duration_hours)
-                        except (ValueError, TypeError) as exc:
-                            _logger.warning("Failed to parse quote_raw fallback %s: %s", quote_raw, exc)
+                            if user is not None and user.subscription_end is not None:
+                                now = now_utc()
+                                expired_threshold = now - timedelta(
+                                    hours=VPN_ACCESS_GRACE_HOURS, seconds=1
+                                )
+                                new_end = user.subscription_end - awg_duration_to_revoke
+                                user.subscription_end = (
+                                    expired_threshold if new_end <= now else new_end
+                                )
 
-                if topup_action in ("white_internet_buy", "white_internet_renew"):
-                    has_white_internet_subscription = True
-                elif topup_action == "white_internet_pack":
-                    white_internet_pack_gb = int(topup_ctx.get("pack_gb") or 0)
+                                if user.subscription_end <= now:
+                                    user.notified_3d = False
+                                    user.notified_1d = False
+                                    user.notified_2h = False
+                                    user.notified_expired = False
+                                    user.notified_grace_12h = False
+                                    user.notification_retry_count = 0
+                                    user.last_notification_attempt = None
 
-                # Revoke AWG access if applicable
-                if awg_duration_to_revoke > timedelta(0):
-                    from config.constants import VPN_ACCESS_GRACE_HOURS
-                    from services.subscription import SubscriptionService
-                    from services.user_cache import invalidate_user_cache
+                                await session.flush()
+                                await SubscriptionService._sync_access_state(session, user)
+                                invalidate_user_cache(user.telegram_id)
 
-                    user = await session.scalar(
-                        select(User).where(User.id == payment.user_id).with_for_update()
-                    )
-                    if user is not None and user.subscription_end is not None:
-                        now = now_utc()
-                        expired_threshold = now - timedelta(
-                            hours=VPN_ACCESS_GRACE_HOURS, seconds=1
-                        )
-                        new_end = user.subscription_end - awg_duration_to_revoke
-                        user.subscription_end = (
-                            expired_threshold if new_end <= now else new_end
-                        )
+                        # Revoke White Internet access if applicable
+                        if has_white_internet_subscription:
+                            from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+                            from database.models import WhiteInternetSubscription
 
-                        if user.subscription_end <= now:
-                            user.notified_3d = False
-                            user.notified_1d = False
-                            user.notified_2h = False
-                            user.notified_expired = False
-                            user.notified_grace_12h = False
-                            user.notification_retry_count = 0
-                            user.last_notification_attempt = None
+                            wi_subs = (
+                                await session.scalars(
+                                    select(WhiteInternetSubscription).where(
+                                        WhiteInternetSubscription.user_id == payment.user_id,
+                                        WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
+                                    ).with_for_update()
+                                )
+                            ).all()
+                            for wi_sub in wi_subs:
+                                wi_sub.status = WhiteInternetStatus.DISABLED
+                                wi_sub.status_reason = "payment_refunded"
+                                wi_sub.desired_version += 1
+                                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+                            await session.flush()
 
-                        await session.flush()
-                        await SubscriptionService._sync_access_state(session, user)
-                        invalidate_user_cache(user.telegram_id)
+                        if white_internet_pack_gb > 0:
+                            from database.models import WhiteInternetSubscription
 
-                # Revoke White Internet access if applicable
-                if has_white_internet_subscription:
-                    from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-                    from database.models import WhiteInternetSubscription
+                            wi_sub = await session.scalar(
+                                select(WhiteInternetSubscription).where(
+                                    WhiteInternetSubscription.user_id == payment.user_id,
+                                ).order_by(WhiteInternetSubscription.id.desc()).with_for_update()
+                            )
+                            if wi_sub is not None:
+                                pack_bytes = white_internet_pack_gb * (1024 ** 3)
+                                wi_sub.traffic_limit_bytes = max(
+                                    0, (wi_sub.traffic_limit_bytes or 0) - pack_bytes
+                                )
+                                await session.flush()
 
-                    wi_subs = (
-                        await session.scalars(
-                            select(WhiteInternetSubscription).where(
-                                WhiteInternetSubscription.user_id == payment.user_id,
-                                WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
-                            ).with_for_update()
-                        )
-                    ).all()
-                    for wi_sub in wi_subs:
-                        wi_sub.status = WhiteInternetStatus.DISABLED
-                        wi_sub.status_reason = "payment_refunded"
-                        wi_sub.desired_version += 1
-                        wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
-                    await session.flush()
+                        from services.referral_bonus import reverse_referral_bonus_for_topup
+                        await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
+                        from database.repositories.account_ledger_repo import get_account_balance
+                        balance = await get_account_balance(session, user_id=payment.user_id)
+                        if balance.debt > 0:
+                            await place_financial_hold(session, payment=payment, reason="chargeback_debt")
 
-                if white_internet_pack_gb > 0:
-                    from database.models import WhiteInternetSubscription
-
-                    wi_sub = await session.scalar(
-                        select(WhiteInternetSubscription).where(
-                            WhiteInternetSubscription.user_id == payment.user_id,
-                        ).order_by(WhiteInternetSubscription.id.desc()).with_for_update()
-                    )
-                    if wi_sub is not None:
-                        pack_bytes = white_internet_pack_gb * (1024 ** 3)
-                        wi_sub.traffic_limit_bytes = max(
-                            0, (wi_sub.traffic_limit_bytes or 0) - pack_bytes
-                        )
-                        await session.flush()
-
-                await _update_topup_after_refund(session, payment)
-                from services.referral_bonus import reverse_referral_bonus_for_topup
-                await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
-                from database.repositories.account_ledger_repo import get_account_balance
-                balance = await get_account_balance(session, user_id=payment.user_id)
-                if balance.debt > 0:
-                    await place_financial_hold(session, payment=payment, reason="chargeback_debt")
+                    await _update_topup_after_refund(session, payment)
     if operation is not None:
         operation.provider_refund_id = provider_refund_id
         operation.provider_status = "succeeded"
@@ -921,6 +960,12 @@ async def place_financial_hold(
         user.financial_hold = True
         user.topup_blocked = True
         user.financial_block_reason = str(reason)[:255]
+        await session.flush()
+        from services.subscription import SubscriptionService
+        from services.user_cache import invalidate_user_cache
+
+        await SubscriptionService._sync_access_state(session, user)
+        invalidate_user_cache(user.telegram_id)
     payment.reconciliation_status = "manual_review"
     payment.fulfillment_status = "manual_review"
     payment.manual_review_reason = str(reason)[:255]
