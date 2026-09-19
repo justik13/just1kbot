@@ -251,7 +251,7 @@ async def process_mass_bonus_reason(
                 (VPNProfile.server_id == server_id)
                 & (VPNProfile.is_active.is_(True))
                 & (VPNProfile.desired_is_active.is_(True))
-                & (VPNProfile.provisioning_status.notin_(["deleted", "deleting"]))
+                & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
             )
         )
         xray_cond = (
@@ -429,7 +429,7 @@ async def _run_mass_bonus_background(
                     (VPNProfile.server_id == server_id)
                     & (VPNProfile.is_active.is_(True))
                     & (VPNProfile.desired_is_active.is_(True))
-                    & (VPNProfile.provisioning_status.notin_(["deleted", "deleting"]))
+                    & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
                 )
             )
             xray_cond = (

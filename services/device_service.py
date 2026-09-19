@@ -11,7 +11,10 @@ from bot import texts
 from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT, AdminAuditAction
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import APIOperation, Server, User, VPNProfile
-from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
+from database.repositories.profiles_repo import (
+    ALLOWED_DELETE_STATES,
+    PROFILE_QUOTA_EXCLUDED_STATUSES,
+)
 from services.amnezia_capacity import (
     ServerAtCapacity,
     ServerCapacityUnavailable,
@@ -135,7 +138,10 @@ class DeviceService:
         if not device_name:
             user_profiles = (
                 await session.execute(
-                    select(VPNProfile).where(VPNProfile.user_id == user.id)
+                    select(VPNProfile).where(
+                        VPNProfile.user_id == user.id,
+                        VPNProfile.provisioning_status.notin_(PROFILE_QUOTA_EXCLUDED_STATUSES),
+                    )
                 )
             ).scalars().all()
             used = set()

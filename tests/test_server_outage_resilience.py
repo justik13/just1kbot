@@ -84,6 +84,102 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
             self.assertIn("white_internet_subscriptions", sql_str)
             self.assertIn("server_id = 2", sql_str)
 
+    async def test_cleanup_stuck_profiles_handles_delete_failed_and_revives_dead_operation(self):
+        """Cleanup worker picks up delete_failed profiles and queues/revives delete_peer operation."""
+        from database.models import Server, VPNProfile
+        from services.workers.cleanup import _cleanup_stuck_profiles
+
+        stuck_profile = VPNProfile(
+            id=50,
+            user_id=1,
+            server_id=10,
+            device_name="Test Phone",
+            client_name="tg_100_p50",
+            provisioning_status="delete_failed",
+            peer_id="peer_xyz",
+        )
+
+        mock_server = Server(id=10, name="DE Server", api_url="https://de.vpn", api_key="secret", is_active=True)
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            # 1. select stuck profiles
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            # 2. check active operations -> None
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            # 3. resolve endpoint snapshot
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        ])
+        mock_session.get = AsyncMock(return_value=mock_server)
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with (
+            patch("services.workers.cleanup.session_scope", return_value=mock_scope),
+            patch("services.api_operations_queue.ensure_delete_operation", new=AsyncMock()) as mock_ensure_delete,
+        ):
+            await _cleanup_stuck_profiles()
+
+            self.assertEqual(stuck_profile.provisioning_status, "deleting")
+            mock_ensure_delete.assert_called_once()
+            call_kwargs = mock_ensure_delete.call_args.kwargs
+            self.assertEqual(call_kwargs["profile_id"], 50)
+            self.assertEqual(call_kwargs["peer_id"], "peer_xyz")
+
+    async def test_device_service_slot_allocation_filters_delete_failed_profiles(self):
+        """DeviceService slot allocation assigns slot #2 when slot #2 was delete_failed on dead server."""
+        from datetime import datetime, timezone
+        from database.models import Server, User, VPNProfile
+        from services.device_service import DeviceService
+        from services.slots_cache import ServerPeerSnapshot
+
+        user = User(id=1, telegram_id=100, device_limit=2, subscription_end=datetime(2099, 1, 1, tzinfo=timezone.utc), is_banned=False)
+        server_healthy = Server(id=20, name="NL", api_url="https://nl.vpn", api_key="k", protocol="amneziawg2", is_active=True, max_clients=100)
+        p1 = VPNProfile(id=1, user_id=1, server_id=10, device_name="Устройство #1", provisioning_status="active")
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            # 1. select User FOR UPDATE
+            MagicMock(scalar_one=MagicMock(return_value=user)),
+            # 2. select Server FOR UPDATE
+            MagicMock(scalar_one_or_none=MagicMock(return_value=server_healthy)),
+            # 3. select user profiles excluding PROFILE_QUOTA_EXCLUDED_STATUSES -> [p1]
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[p1])))),
+            # 4. select duplicate -> None
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            # 5. user_count -> 1
+            MagicMock(scalar_one=MagicMock(return_value=1)),
+            # 6. server_count -> 0
+            MagicMock(scalar_one=MagicMock(return_value=0)),
+            # 7. bot_peer_ids -> []
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            # 8. duplicate client_name -> None
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        ])
+
+        mock_nested = MagicMock()
+        mock_nested.__aenter__ = AsyncMock()
+        mock_nested.__aexit__ = AsyncMock()
+        mock_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        snapshot = ServerPeerSnapshot(server_id=20, peer_ids=frozenset(), captured_at=datetime.now(timezone.utc))
+
+        with (
+            patch("services.device_service.enqueue_api_operation", new=AsyncMock()),
+            patch("services.device_service.is_admin", return_value=True),
+        ):
+            profile = await DeviceService.create_device(
+                mock_session,
+                user_id=1,
+                server_id=20,
+                device_name=None,
+                snapshot=snapshot,
+            )
+            # Slot #2 was freed because delete_failed was excluded from query
+            self.assertEqual(profile.device_name, "Устройство #2")
+
 
 if __name__ == "__main__":
     unittest.main()

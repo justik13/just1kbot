@@ -116,7 +116,7 @@ async def get_user_profiles_count(
 ) -> int:
     """Return count of active/reserving profiles for quota checks.
 
-    Excludes PROFILE_QUOTA_EXCLUDED_STATUSES ('deleting', 'create_failed') by default.
+    Excludes PROFILE_QUOTA_EXCLUDED_STATUSES ('deleting', 'create_failed', 'delete_failed') by default.
     """
     stmt = select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id)
     if not include_deleting:

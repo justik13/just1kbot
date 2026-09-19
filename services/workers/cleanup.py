@@ -260,7 +260,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
 
 
 async def _cleanup_stuck_profiles():
-    # Cleanup dangling pending_create, create_cleanup_pending, and deleting profiles.
+    # Cleanup dangling pending_create, create_cleanup_pending, deleting, and delete_failed profiles.
     # Only clean up profiles that do NOT have an active APIOperation in flight.
     from sqlalchemy import func
     from sqlalchemy import update as sa_update
