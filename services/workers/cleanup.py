@@ -260,7 +260,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
 
 
 async def _cleanup_stuck_profiles():
-    # Cleanup dangling pending_create, create_cleanup_pending, and deleting profiles.
+    # Cleanup dangling pending_create, create_cleanup_pending, deleting, and delete_failed profiles.
     # Only clean up profiles that do NOT have an active APIOperation in flight.
     from sqlalchemy import func
     from sqlalchemy import update as sa_update
@@ -274,7 +274,7 @@ async def _cleanup_stuck_profiles():
                     select(VPNProfile)
                     .where(
                         VPNProfile.provisioning_status.in_(
-                            ["pending_create", "create_cleanup_pending", "deleting"]
+                            ["pending_create", "create_cleanup_pending", "deleting", "delete_failed"]
                         ),
                         VPNProfile.created_at < cutoff_time,
                     )
@@ -350,7 +350,7 @@ async def _cleanup_stuck_profiles():
                         exc,
                     )
                     profile.provisioning_status = "create_cleanup_pending"
-            elif profile.provisioning_status in {"create_cleanup_pending", "deleting"}:
+            elif profile.provisioning_status in {"create_cleanup_pending", "deleting", "delete_failed"}:
                 # Peer ID unknown: requeue create_peer for reconciliation by client_name on Amnezia
                 if create_op and create_op.status in {"dead", "cancelled"}:
                     from database.models import Server

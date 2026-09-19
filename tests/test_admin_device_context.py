@@ -167,13 +167,11 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
         stmt = session.execute.await_args.args[0]
         sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("provisioning_status", sql)
-        self.assertIn("deleting", sql)
-        # create_failed (no peer on server) is excluded from quota
+        # create_failed (no peer on server) and delete_failed (failed delete on node) are excluded from quota
         self.assertIn("create_failed", sql)
-        # create_cleanup_pending and delete_failed have active server peers —
-        # they must NOT be excluded from quota to prevent downgrade exploits.
+        self.assertIn("delete_failed", sql)
         self.assertNotIn("create_cleanup_pending", PROFILE_QUOTA_EXCLUDED_STATUSES)
-        self.assertNotIn("delete_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertIn("delete_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
 
 
 if __name__ == "__main__":

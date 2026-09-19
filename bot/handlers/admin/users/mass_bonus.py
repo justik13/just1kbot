@@ -77,6 +77,10 @@ async def start_mass_bonus(
         callback_data="mass_bonus_aud:expired",
     )
     builder.button(
+        text=texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE,
+        callback_data="mass_bonus_servers",
+    )
+    builder.button(
         text=texts.BTN_ADMIN_MENU,
         callback_data="admin_menu",
     )
@@ -91,6 +95,43 @@ async def start_mass_bonus(
     except Exception:
         pass
 
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data == "mass_bonus_servers")
+async def select_mass_bonus_server(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    from database.repositories.servers_repo import get_all_servers
+
+    servers = await get_all_servers(session)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.BROADCAST_BREADCRUMB_SERVER_SELECTION)
+    text = f"{header}\n\n{texts.ADMIN_USERS_MASS_BONUS_SELECT_SERVER}"
+
+    builder = InlineKeyboardBuilder()
+    for s in servers:
+        flag = s.country_flag or "🌐"
+        builder.button(
+            text=f"{flag} {s.name}",
+            callback_data=f"mass_bonus_aud:server_{s.id}",
+        )
+    builder.button(text=texts.BTN_BACK, callback_data="admin_mass_bonus")
+    builder.adjust(1)
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
     await callback.answer(show_alert=False)
 
 
@@ -188,11 +229,60 @@ async def process_mass_bonus_reason(
 
     # Подсчет аудитории
     now = now_utc()
-    stmt = select(func.count(User.id)).where(User.is_deleted.is_(False), User.is_banned.is_(False))
-    if target_aud == "active":
-        stmt = stmt.where(User.subscription_end > now)
-    elif target_aud == "expired":
-        stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
+    if target_aud.startswith("server_"):
+        try:
+            server_id = int(target_aud.split("_")[1])
+        except (IndexError, ValueError):
+            server_id = -1
+        from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+        from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+        from database.models import Server, VPNProfile, WhiteInternetSubscription
+        from database.repositories.servers_repo import get_server_by_id
+
+        server = await get_server_by_id(session, server_id)
+        server_name = server.name if server else f"ID {server_id}"
+        server_flag = (server.country_flag or "🌐") if server else "🌐"
+        aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=server_name)
+
+        server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
+        awg_cond = (
+            (server_proto_subq == AMNEZIA_PROTOCOL)
+            & User.profiles.any(
+                (VPNProfile.server_id == server_id)
+                & (VPNProfile.is_active.is_(True))
+                & (VPNProfile.desired_is_active.is_(True))
+                & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
+            )
+        )
+        xray_cond = (
+            (server_proto_subq == XRAY_PROTOCOL)
+            & User.id.in_(
+                select(WhiteInternetSubscription.user_id).where(
+                    WhiteInternetSubscription.origin_node_id == server_id,
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.EXHAUSTED,
+                    ]),
+                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+                )
+            )
+        )
+        stmt = (
+            select(func.count(User.id))
+            .where(
+                User.is_deleted.is_(False),
+                User.is_banned.is_(False),
+                or_(awg_cond, xray_cond),
+            )
+        )
+    else:
+        aud_label = texts.ADMIN_MASS_BONUS_AUDIENCE_LABELS.get(target_aud, target_aud)
+        stmt = select(func.count(User.id)).where(User.is_deleted.is_(False), User.is_banned.is_(False))
+        if target_aud == "active":
+            stmt = stmt.where(User.subscription_end > now)
+        elif target_aud == "expired":
+            stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
 
     user_count = int((await session.scalar(stmt)) or 0)
     total_budget = user_count * amount
@@ -201,7 +291,6 @@ async def process_mass_bonus_reason(
     await state.set_state(AdminStates.confirming_mass_bonus)
 
     header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_CONFIRM)
-    aud_label = texts.ADMIN_MASS_BONUS_AUDIENCE_LABELS.get(target_aud, target_aud)
 
     text = (
         f"{header}"+
@@ -324,11 +413,54 @@ async def _run_mass_bonus_background(
         blocked_count = 0
 
         now = now_utc()
-        stmt = select(User.id, User.telegram_id).where(User.is_deleted.is_(False), User.is_banned.is_(False))
-        if target_aud == "active":
-            stmt = stmt.where(User.subscription_end > now)
-        elif target_aud == "expired":
-            stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
+        if target_aud.startswith("server_"):
+            try:
+                server_id = int(target_aud.split("_")[1])
+            except (IndexError, ValueError):
+                server_id = -1
+            from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+            from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+            from database.models import Server, VPNProfile, WhiteInternetSubscription
+
+            server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
+            awg_cond = (
+                (server_proto_subq == AMNEZIA_PROTOCOL)
+                & User.profiles.any(
+                    (VPNProfile.server_id == server_id)
+                    & (VPNProfile.is_active.is_(True))
+                    & (VPNProfile.desired_is_active.is_(True))
+                    & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
+                )
+            )
+            xray_cond = (
+                (server_proto_subq == XRAY_PROTOCOL)
+                & User.id.in_(
+                    select(WhiteInternetSubscription.user_id).where(
+                        WhiteInternetSubscription.origin_node_id == server_id,
+                        WhiteInternetSubscription.status.in_([
+                            WhiteInternetStatus.ACTIVE,
+                            WhiteInternetStatus.PENDING,
+                            WhiteInternetStatus.EXHAUSTED,
+                        ]),
+                        WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+                    )
+                )
+            )
+            stmt = (
+                select(User.id, User.telegram_id)
+                .where(
+                    User.is_deleted.is_(False),
+                    User.is_banned.is_(False),
+                    or_(awg_cond, xray_cond),
+                )
+                .distinct()
+            )
+        else:
+            stmt = select(User.id, User.telegram_id).where(User.is_deleted.is_(False), User.is_banned.is_(False))
+            if target_aud == "active":
+                stmt = stmt.where(User.subscription_end > now)
+            elif target_aud == "expired":
+                stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
 
         async with session_scope() as session:
             result = await session.execute(stmt)

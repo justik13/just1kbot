@@ -728,18 +728,24 @@ async def white_internet_reconciliation_loop(
 
     logger.info("White Internet reconciliation worker started.")
 
-    while not event.is_set():
-        try:
-            synced = await worker.run_reconciliation_cycle()
-            if synced > 0:
-                logger.info("Reconciled %d White Internet subscriptions.", synced)
-        except Exception as exc:
-            logger.error("Unhandled error in White Internet reconciliation cycle: %s", exc, exc_info=True)
+    try:
+        while not event.is_set():
+            try:
+                synced = await worker.run_reconciliation_cycle()
+                if synced > 0:
+                    logger.info("Reconciled %d White Internet subscriptions.", synced)
+            except Exception as exc:
+                logger.error("Unhandled error in White Internet reconciliation cycle: %s", exc, exc_info=True)
 
-        try:
-            await asyncio.wait_for(event.wait(), timeout=RECONCILIATION_INTERVAL_SECONDS)
-            break
-        except asyncio.TimeoutError:
-            pass
-
-    logger.info("White Internet reconciliation worker stopped.")
+            try:
+                await asyncio.wait_for(event.wait(), timeout=RECONCILIATION_INTERVAL_SECONDS)
+                break
+            except asyncio.TimeoutError:
+                pass
+    finally:
+        if worker.client is not None:
+            try:
+                await worker.client.close()
+            except Exception as exc:
+                logger.debug("Error closing XrayNodeClient in reconciliation worker: %s", exc)
+        logger.info("White Internet reconciliation worker stopped.")
