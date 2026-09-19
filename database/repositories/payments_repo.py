@@ -49,7 +49,6 @@ async def get_payment_by_id(
         select(Payment)
         .options(
             selectinload(Payment.user),
-            selectinload(Payment.refunds),
         )
         .where(Payment.id == payment_id)
     )

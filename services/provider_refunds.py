@@ -343,141 +343,24 @@ async def _find_matching_active_operation(
     return operation
 
 
-async def _consume_matching_reservation(
+async def _consume_reservation_if_present(
     session,
     *,
-    payment_id: int,
-    amount: Decimal,
     reservation_id: int | None,
-) -> AccountBalanceReservation | None:
-    reservation = None
+) -> None:
     if reservation_id is not None:
         reservation = await session.scalar(
             select(AccountBalanceReservation)
             .where(
                 AccountBalanceReservation.id == reservation_id,
-                AccountBalanceReservation.payment_id == payment_id,
-                AccountBalanceReservation.reservation_type == "refund",
                 AccountBalanceReservation.status == "active",
             )
             .with_for_update()
         )
-    if reservation is None:
-        # 1. Try to find a single reservation that covers the requested amount (>= amount),
-        # prioritizing exact match, then the smallest sufficient reservation.
-        reservation = await session.scalar(
-            select(AccountBalanceReservation)
-            .where(
-                AccountBalanceReservation.payment_id == payment_id,
-                AccountBalanceReservation.reservation_type == "refund",
-                AccountBalanceReservation.status == "active",
-                AccountBalanceReservation.amount >= amount,
-            )
-            .order_by(
-                (AccountBalanceReservation.amount == amount).desc(),
-                AccountBalanceReservation.amount.asc(),
-                AccountBalanceReservation.id.asc(),
-            )
-            .with_for_update()
-        )
-    if reservation is not None and reservation.status == "active":
-        if reservation.amount > amount:
-            remaining = reservation.amount - amount
+        if reservation is not None:
             await resolve_reservation(
                 session, reservation_id=reservation.id, outcome="consumed"
             )
-            new_res_key = f"refund-split-res:{payment_id}:{reservation.id}:{amount}"
-            new_reservation = AccountBalanceReservation(
-                user_id=reservation.user_id,
-                payment_id=payment_id,
-                reservation_type="refund",
-                amount=remaining,
-                currency="RUB",
-                status="active",
-                idempotency_key=new_res_key,
-                metadata_={
-                    "split_from_reservation_id": reservation.id,
-                    "original_amount": str(reservation.amount),
-                    "consumed_amount": str(amount),
-                    "remaining_amount": str(remaining),
-                },
-            )
-            session.add(new_reservation)
-            await session.flush()
-        else:
-            await resolve_reservation(
-                session, reservation_id=reservation.id, outcome="consumed"
-            )
-        return reservation
-
-    # 2. Multi-reservation handling: check if multiple active reservations together cover the amount
-    active_reservations = (
-        await session.scalars(
-            select(AccountBalanceReservation)
-            .where(
-                AccountBalanceReservation.payment_id == payment_id,
-                AccountBalanceReservation.reservation_type == "refund",
-                AccountBalanceReservation.status == "active",
-            )
-            .order_by(
-                AccountBalanceReservation.amount.desc(),
-                AccountBalanceReservation.id.asc(),
-            )
-            .with_for_update()
-        )
-    ).all()
-
-    total_available = sum(Decimal(r.amount) for r in active_reservations)
-    if total_available < amount:
-        _logger.warning(
-            "_consume_matching_reservation: insufficient active reservations for payment_id=%s (needed=%s, available=%s)",
-            payment_id,
-            amount,
-            total_available,
-        )
-        return None
-
-    # Consume multiple reservations sequentially until amount is covered
-    remaining_to_consume = amount
-    first_consumed = None
-    for res in active_reservations:
-        if remaining_to_consume <= 0:
-            break
-        if first_consumed is None:
-            first_consumed = res
-        res_amount = Decimal(res.amount)
-        if res_amount <= remaining_to_consume:
-            await resolve_reservation(
-                session, reservation_id=res.id, outcome="consumed"
-            )
-            remaining_to_consume -= res_amount
-        else:
-            # Split the final partially-consumed reservation
-            split_remaining = res_amount - remaining_to_consume
-            await resolve_reservation(
-                session, reservation_id=res.id, outcome="consumed"
-            )
-            new_res_key = f"refund-split-res:{payment_id}:{res.id}:{remaining_to_consume}"
-            new_reservation = AccountBalanceReservation(
-                user_id=res.user_id,
-                payment_id=payment_id,
-                reservation_type="refund",
-                amount=split_remaining,
-                currency="RUB",
-                status="active",
-                idempotency_key=new_res_key,
-                metadata_={
-                    "split_from_reservation_id": res.id,
-                    "original_amount": str(res.amount),
-                    "consumed_amount": str(remaining_to_consume),
-                    "remaining_amount": str(split_remaining),
-                },
-            )
-            session.add(new_reservation)
-            await session.flush()
-            remaining_to_consume = Decimal(0)
-
-    return first_consumed
 
 
 async def _update_topup_after_refund(session, payment: Payment) -> Decimal:
@@ -494,14 +377,16 @@ async def _update_topup_after_refund(session, payment: Payment) -> Decimal:
         raise BalanceRefundError("provider_refund_total_exceeds_payment")
     if total == Decimal(payment.amount):
         payment.provider_status = "refunded"
-        payment.fulfillment_status = "reversed"
+        if payment.fulfillment_status != "manual_review":
+            payment.fulfillment_status = "reversed"
         payment.reversed_at = payment.reversed_at or now_utc()
     else:
         payment.provider_status = "succeeded"
-        payment.fulfillment_status = "succeeded"
+        if payment.fulfillment_status != "manual_review":
+            payment.fulfillment_status = "succeeded"
     if payment.reconciliation_status not in {"mismatch", "manual_review"}:
         payment.reconciliation_status = "ok"
-    if payment.manual_review_reason in ("partial_refund", "chargeback_debt"):
+    if payment.manual_review_reason in ("partial_refund", "chargeback_debt") and payment.fulfillment_status != "manual_review":
         payment.manual_review_reason = None
     return total
 
@@ -560,85 +445,92 @@ async def apply_balance_topup_refund_success(
         provider_status="succeeded",
         event_key=event_key,
     )
-    created = False
-    async with session.begin_nested():
-        debit, created = await create_payment_debit(
-            session,
-            payment_id=payment.id,
-            entry_type="refund_debit",
-            amount=amount,
-            idempotency_key=f"provider-refund-debit:{provider_refund_id}",
-            metadata={
-                "provider_refund_id": provider_refund_id,
-                "event_key": event_key,
-                "source": "provider_refund",
-            },
-        )
-        if created:
-            consumed = await _consume_matching_reservation(
-                session,
-                payment_id=payment.id,
-                amount=amount,
-                reservation_id=reservation_id,
-            )
-            if consumed is None and reservation_id is not None:
-                # A refund reservation was expected to fund this refund but no
-                # active reservation could be matched or split. Without a flag
-                # the stale reservation would silently keep shrinking the
-                # user's available balance until manual repair.
-                await place_financial_hold(
-                    session,
-                    payment=payment,
-                    reason="orphan_refund_reservation",
-                )
-                session.add(
-                    PaymentEvent(
-                        payment_id=payment.id,
-                        event_type="refund_orphan_reservation",
-                        provider_status=payment.provider_status,
-                        reason="expected reservation not found or insufficient",
-                        source="provider_refund",
-                        details=f"reservation_id={reservation_id}",
-                    )
-                )
-            is_full_refund = bool(already + amount >= Decimal(payment.amount))
+    is_full_refund = bool(already + amount >= Decimal(payment.amount))
 
-            # 1. Inspect what this payment funded
-            credit_entry = await session.scalar(
-                select(AccountLedgerEntry).where(
-                    AccountLedgerEntry.payment_id == payment.id,
-                    AccountLedgerEntry.entry_type == "payment_credit",
+    # Check if payment was ever credited to user's internal ledger
+    credit_entry = await session.scalar(
+        select(AccountLedgerEntry).where(
+            AccountLedgerEntry.payment_id == payment.id,
+            AccountLedgerEntry.entry_type == "payment_credit",
+        )
+    )
+
+    created_debit = False
+    async with session.begin_nested():
+        if credit_entry is None and payment.credited_at is None:
+            # Case A: Payment was NEVER credited to user's ledger (e.g. race condition
+            # where refund.succeeded arrives before payment.succeeded, or canceled before settlement).
+            # Do NOT create refund_debit, do NOT deduct from balance, do NOT cut subscriptions.
+            await _consume_reservation_if_present(session, reservation_id=reservation_id)
+            await _update_topup_after_refund(session, payment)
+            session.add(
+                PaymentEvent(
+                    payment_id=payment.id,
+                    event_type="uncredited_refund_applied",
+                    provider_status=payment.provider_status,
+                    reason="payment_not_credited_no_debit_needed",
+                    source="provider_refund",
+                    details=f"refund={provider_refund_id}; amount={int(amount)} RUB",
                 )
             )
-            allocations = []
-            if credit_entry is not None:
-                from database.models import AccountLedgerAllocation
-                allocations = (
-                    await session.scalars(
-                        select(AccountLedgerAllocation).where(
-                            AccountLedgerAllocation.credit_entry_id == credit_entry.id
-                        )
+        else:
+            # Case B: Payment was credited. Inspect if funds were spent on a service or remain unspent.
+            from database.models import AccountLedgerAllocation
+            allocations = (
+                await session.scalars(
+                    select(AccountLedgerAllocation).where(
+                        AccountLedgerAllocation.credit_entry_id == (credit_entry.id if credit_entry else -1)
                     )
-                ).all()
+                )
+            ).all()
 
             topup_ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
             topup_action = topup_ctx.get("auto_fulfill_action")
+            auto_fulfill_status = topup_ctx.get("auto_fulfill_status")
             quote_raw = topup_ctx.get("quote_public_id")
 
+            # True spent purchase: allocations exist OR auto-fulfillment requested/succeeded (and not failed)
+            auto_fulfill_failed = auto_fulfill_status == "failed"
             has_spent_purchase = bool(
                 allocations
-                or topup_action in (
+                or (not auto_fulfill_failed and topup_action in (
                     "purchase",
                     "renew",
                     "tariff_change",
                     "white_internet_buy",
                     "white_internet_renew",
+                    "white_internet_add_device",
                     "white_internet_pack",
-                )
+                ))
             )
 
-            if not is_full_refund and has_spent_purchase:
-                # Partial refund of an indivisible subscription requires manual review
+            if not has_spent_purchase:
+                # Sub-case B1: Unspent balance top-up.
+                # Deduct funds from user's internal balance. Subscriptions are untouched.
+                debit, created_debit = await create_payment_debit(
+                    session,
+                    payment_id=payment.id,
+                    entry_type="refund_debit",
+                    amount=amount,
+                    idempotency_key=f"provider-refund-debit:{provider_refund_id}",
+                    metadata={
+                        "provider_refund_id": provider_refund_id,
+                        "event_key": event_key,
+                        "source": "provider_refund",
+                    },
+                )
+                await _consume_reservation_if_present(session, reservation_id=reservation_id)
+                await _update_topup_after_refund(session, payment)
+                from services.referral_bonus import reverse_referral_bonus_for_topup
+                await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
+                from database.repositories.account_ledger_repo import get_account_balance
+                balance = await get_account_balance(session, user_id=payment.user_id)
+                if balance.debt > 0:
+                    await place_financial_hold(session, payment=payment, reason="chargeback_debt")
+            elif not is_full_refund:
+                # Sub-case B2: Partial refund of an indivisible service.
+                # Must NOT create refund_debit (which would create false debt and block user).
+                # Route to manual review for administrator inspection.
                 payment.reconciliation_status = "manual_review"
                 payment.manual_review_reason = "partial_refund_requires_admin_review"
                 session.add(
@@ -651,11 +543,30 @@ async def apply_balance_topup_refund_success(
                         details=f"amount={int(amount)} RUB of {int(payment.amount)} RUB",
                     )
                 )
-            elif is_full_refund and has_spent_purchase:
-                # Full refund of spent service: reverse purchases and revoke product access
+                await _update_topup_after_refund(session, payment)
+            elif topup_action == "tariff_change":
+                # Sub-case B3: Refund of a tariff_change payment (upgrade difference).
+                # Cannot be trivially rolled back by subtracting target duration.
+                # Route to manual review without corrupting subscription dates or blocking user.
+                payment.reconciliation_status = "manual_review"
+                payment.manual_review_reason = "tariff_change_refund_requires_admin_review"
+                session.add(
+                    PaymentEvent(
+                        payment_id=payment.id,
+                        event_type="tariff_change_refund_manual_review",
+                        provider_status=payment.provider_status,
+                        reason="tariff_change_refund_requires_admin_review",
+                        source="provider_refund",
+                        details=f"payment_id={payment.id}; amount={int(amount)} RUB",
+                    )
+                )
+                await _update_topup_after_refund(session, payment)
+            else:
+                # Sub-case B4: Full refund of spent service (AWG or White Internet).
                 from database.models import Tariff, TariffQuote, TariffVersion
                 from database.repositories.account_ledger_repo import create_purchase_reversal
 
+                # 1. Reverse purchase debits to balance the account ledger
                 reversed_quote_ids = set()
                 for alloc in allocations:
                     p_debit = await session.get(AccountLedgerEntry, alloc.debit_entry_id)
@@ -710,45 +621,65 @@ async def apply_balance_topup_refund_success(
                                             "payment_id": payment.id,
                                         },
                                     )
-                    except Exception:
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        _logger.warning("Failed to parse quote_raw %s: %s", quote_raw, exc)
 
+                # 2. Post the refund debit (reversal + refund_debit = net 0 change to balance)
+                debit, created_debit = await create_payment_debit(
+                    session,
+                    payment_id=payment.id,
+                    entry_type="refund_debit",
+                    amount=amount,
+                    idempotency_key=f"provider-refund-debit:{provider_refund_id}",
+                    metadata={
+                        "provider_refund_id": provider_refund_id,
+                        "event_key": event_key,
+                        "source": "provider_refund",
+                    },
+                )
+                await _consume_reservation_if_present(session, reservation_id=reservation_id)
+
+                # 3. Determine services to revoke
                 awg_duration_to_revoke = timedelta(0)
                 has_white_internet_subscription = False
                 white_internet_pack_gb = 0
 
                 for q_id in reversed_quote_ids:
                     q = await session.get(TariffQuote, q_id)
-                    if q and q.target_tariff_version_id:
-                        t_ver = await session.get(TariffVersion, q.target_tariff_version_id)
-                        if t_ver:
-                            tar = await session.get(Tariff, t_ver.tariff_id)
-                            if tar and tar.service_type == "awg":
-                                if t_ver.duration_hours:
-                                    awg_duration_to_revoke += timedelta(hours=t_ver.duration_hours)
-                            elif tar and tar.service_type == "white_internet":
-                                has_white_internet_subscription = True
+                    if q:
+                        q.status = "cancelled"
+                        if q.target_tariff_version_id:
+                            t_ver = await session.get(TariffVersion, q.target_tariff_version_id)
+                            if t_ver:
+                                tar = await session.get(Tariff, t_ver.tariff_id)
+                                if tar and tar.service_type == "awg":
+                                    if t_ver.duration_hours:
+                                        awg_duration_to_revoke += timedelta(hours=t_ver.duration_hours)
+                                elif tar and tar.service_type == "white_internet":
+                                    has_white_internet_subscription = True
 
-                if topup_action in ("purchase", "renew", "tariff_change") and awg_duration_to_revoke == timedelta(0):
+                if topup_action in ("purchase", "renew") and awg_duration_to_revoke == timedelta(0):
                     if quote_raw:
                         try:
                             q_uuid = uuid.UUID(str(quote_raw))
                             q = await session.scalar(
                                 select(TariffQuote).where(TariffQuote.public_id == q_uuid)
                             )
-                            if q and q.target_tariff_version_id:
-                                t_ver = await session.get(TariffVersion, q.target_tariff_version_id)
-                                if t_ver and t_ver.duration_hours:
-                                    awg_duration_to_revoke += timedelta(hours=t_ver.duration_hours)
-                        except Exception:
-                            pass
+                            if q:
+                                q.status = "cancelled"
+                                if q.target_tariff_version_id:
+                                    t_ver = await session.get(TariffVersion, q.target_tariff_version_id)
+                                    if t_ver and t_ver.duration_hours:
+                                        awg_duration_to_revoke += timedelta(hours=t_ver.duration_hours)
+                        except (ValueError, TypeError) as exc:
+                            _logger.warning("Failed to parse quote_raw fallback %s: %s", quote_raw, exc)
 
                 if topup_action in ("white_internet_buy", "white_internet_renew"):
                     has_white_internet_subscription = True
                 elif topup_action == "white_internet_pack":
                     white_internet_pack_gb = int(topup_ctx.get("pack_gb") or 0)
 
-                # 1. Isolated AWG revocation
+                # Revoke AWG access if applicable
                 if awg_duration_to_revoke > timedelta(0):
                     from config.constants import VPN_ACCESS_GRACE_HOURS
                     from services.subscription import SubscriptionService
@@ -780,7 +711,7 @@ async def apply_balance_topup_refund_success(
                         await SubscriptionService._sync_access_state(session, user)
                         invalidate_user_cache(user.telegram_id)
 
-                # 2. Isolated White Internet revocation
+                # Revoke White Internet access if applicable
                 if has_white_internet_subscription:
                     from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
                     from database.models import WhiteInternetSubscription
@@ -815,16 +746,13 @@ async def apply_balance_topup_refund_success(
                         )
                         await session.flush()
 
-            await _update_topup_after_refund(session, payment)
-            from services.referral_bonus import reverse_referral_bonus_for_topup
-
-            await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
-
-            from database.repositories.account_ledger_repo import get_account_balance
-
-            balance = await get_account_balance(session, user_id=payment.user_id)
-            if balance.debt > 0:
-                await place_financial_hold(session, payment=payment, reason="chargeback_debt")
+                await _update_topup_after_refund(session, payment)
+                from services.referral_bonus import reverse_referral_bonus_for_topup
+                await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
+                from database.repositories.account_ledger_repo import get_account_balance
+                balance = await get_account_balance(session, user_id=payment.user_id)
+                if balance.debt > 0:
+                    await place_financial_hold(session, payment=payment, reason="chargeback_debt")
     if operation is not None:
         operation.provider_refund_id = provider_refund_id
         operation.provider_status = "succeeded"
@@ -834,7 +762,7 @@ async def apply_balance_topup_refund_success(
         operation.last_error = None
         operation.locked_at = None
         operation.locked_by = None
-    if created:
+    if created_debit:
         session.add(
             PaymentEvent(
                 payment_id=payment.id,
