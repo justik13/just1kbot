@@ -100,6 +100,24 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
             current == PaymentProviderStatus.REFUNDED
             or payment.fulfillment_status == PaymentFulfillmentStatus.REVERSED
         ):
+            from decimal import Decimal
+            refunded_amount_obj = data.get("refunded_amount") or {}
+            refunded_val_str = refunded_amount_obj.get("value")
+            provider_refunded = None
+            if refunded_val_str is not None:
+                try:
+                    provider_refunded = Decimal(str(refunded_val_str))
+                except Exception:
+                    pass
+            # In YooKassa, a fully refunded payment retains status 'succeeded' with refunded_amount >= payment.amount
+            if provider_refunded is not None and provider_refunded >= Decimal(payment.amount):
+                if payment.reconciliation_status not in (
+                    PaymentReconciliationStatus.MANUAL_REVIEW,
+                    PaymentReconciliationStatus.MISMATCH,
+                ):
+                    payment.reconciliation_status = PaymentReconciliationStatus.OK
+                return ProviderTransition("applied", observed)
+
             payment.reconciliation_status = PaymentReconciliationStatus.MISMATCH
             session.add(
                 PaymentEvent(

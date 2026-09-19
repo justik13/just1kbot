@@ -630,6 +630,7 @@ async def reserve_payment_funds(
     amount: object,
     idempotency_key: str,
     metadata: dict | None = None,
+    allow_spent_service: bool | None = None,
 ) -> tuple[AccountBalanceReservation, bool]:
     if reservation_type not in {"refund", "dispute"}:
         raise ValueError("invalid reservation type")
@@ -652,14 +653,41 @@ async def reserve_payment_funds(
         ):
             raise AccountLedgerConflictError("reservation_idempotency_conflict")
         return existing, False
-    refundable = await get_payment_refundable_amount(
-        session, payment_id=payment.id, for_update=False
+    if allow_spent_service is None:
+        allow_spent_service = (reservation_type == "refund")
+
+    from database.models import PaymentRefund
+    already_refunded = Decimal(
+        await session.scalar(
+            select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+                PaymentRefund.payment_id == payment.id,
+                PaymentRefund.provider_status == "succeeded",
+            )
+        )
+        or 0
     )
-    snapshot = await get_account_balance(
-        session, user_id=user.id, for_update=False, locked_user=user
+    active_reservations = Decimal(
+        await session.scalar(
+            select(func.coalesce(func.sum(AccountBalanceReservation.amount), 0)).where(
+                AccountBalanceReservation.payment_id == payment.id,
+                AccountBalanceReservation.status == "active",
+            )
+        )
+        or 0
     )
-    if amount > refundable or amount > snapshot.available:
+    payment_refundable = max(Decimal(0), Decimal(payment.amount) - already_refunded - active_reservations)
+    if amount > payment_refundable:
         raise InsufficientAccountBalanceError("insufficient_refundable_balance")
+
+    if not allow_spent_service:
+        refundable = await get_payment_refundable_amount(
+            session, payment_id=payment.id, for_update=False
+        )
+        snapshot = await get_account_balance(
+            session, user_id=user.id, for_update=False, locked_user=user
+        )
+        if amount > refundable or amount > snapshot.available:
+            raise InsufficientAccountBalanceError("insufficient_refundable_balance")
     reservation = AccountBalanceReservation(
         user_id=user.id,
         payment_id=payment.id,
