@@ -303,7 +303,6 @@ async def confirm_migrate_device(
         target_name = target_server.name or texts.CONNECTION_DEVICE_CREATE_DEFAULT_SERVER_NAME
         target_display = f"{target_server.country_flag or texts.EMOJI_GLOBE} {target_name}".strip()
 
-        await callback.answer(show_alert=False)
         await render_hub(
             callback.bot,
             callback.message.chat.id,
