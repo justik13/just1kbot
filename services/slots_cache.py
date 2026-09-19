@@ -53,7 +53,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
             raise ServerUnavailable(f"Unsupported protocol {server_proto!r} for server {server_id}")
     try:
         clients = await asyncio.wait_for(AmneziaClient(*endpoint).get_all_clients(), timeout=5.0)
-    except (asyncio.TimeoutError, Exception) as exc:
+    except Exception as exc:
         try:
             from services.amnezia_client import _get_circuit_breaker
 

@@ -180,6 +180,56 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
             # Slot #2 was freed because delete_failed was excluded from query
             self.assertEqual(profile.device_name, "Устройство #2")
 
+    async def test_ping_server_records_circuit_breaker_success_and_failure(self):
+        """Admin ping_server records success on healthy response and failure on error/timeout."""
+        from bot.handlers.admin.servers.card_routes import ping_server
+        from database.models import Server
+
+        mock_cb = AsyncMock()
+        mock_cb.is_available.return_value = True
+
+        mock_callback = AsyncMock()
+        mock_callback.from_user.id = 1
+        mock_callback.data = "admin_server_ping:1"
+        mock_callback.message.edit_text = AsyncMock()
+
+        mock_server = Server(
+            id=1,
+            name="Test Node",
+            protocol="amneziawg2",
+            api_url="https://awg.example.com",
+            api_key="key",
+            is_active=True,
+            max_clients=100,
+        )
+
+        mock_session = AsyncMock()
+
+        with (
+            patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True),
+            patch("bot.handlers.admin.servers.card_routes.get_server_by_id", return_value=mock_server),
+            patch("services.amnezia_client._get_circuit_breaker", return_value=mock_cb),
+            patch("services.amnezia_client.AmneziaClient.healthcheck", new=AsyncMock(return_value=True)),
+            patch("bot.handlers.admin.servers.card_routes._show_server_card", new=AsyncMock()) as mock_card,
+        ):
+            await ping_server(mock_callback, mock_session)
+            mock_cb.record_success.assert_called_once()
+            mock_cb.record_failure.assert_not_called()
+            mock_card.assert_called_once()
+
+        mock_cb.reset_mock()
+        with (
+            patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True),
+            patch("bot.handlers.admin.servers.card_routes.get_server_by_id", return_value=mock_server),
+            patch("services.amnezia_client._get_circuit_breaker", return_value=mock_cb),
+            patch("services.amnezia_client.AmneziaClient.healthcheck", new=AsyncMock(side_effect=TimeoutError())),
+            patch("bot.handlers.admin.servers.card_routes._show_server_card", new=AsyncMock()),
+        ):
+            await ping_server(mock_callback, mock_session)
+            mock_cb.record_failure.assert_called_once()
+            mock_cb.record_success.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
+

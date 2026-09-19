@@ -14,7 +14,7 @@ from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_migration_targets_keyboard
 from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
 from bot.states import AdminStates
-from config.constants import XRAY_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, WhiteInternetSubscription
 from database.repositories.servers_repo import (
@@ -259,7 +259,7 @@ async def ping_server(
 
     start_t = time.monotonic()
     try:
-        if server.protocol == "amneziawg2":
+        if server.protocol == AMNEZIA_PROTOCOL:
             from services.amnezia_client import AmneziaClient, _get_circuit_breaker
 
             cb = _get_circuit_breaker(server.api_url)
@@ -269,10 +269,14 @@ async def ping_server(
                 client = AmneziaClient(server.api_url, server.api_key)
                 try:
                     is_healthy = await asyncio.wait_for(client.healthcheck(), timeout=4.0)
-                except asyncio.TimeoutError:
+                    if is_healthy:
+                        await cb.record_success()
+                    else:
+                        await cb.record_failure()
+                except Exception:
                     await cb.record_failure()
                     is_healthy = False
-        elif server.protocol == "xray":
+        elif server.protocol == XRAY_PROTOCOL:
             from services.xray_node_client import XrayNodeClient
 
             async with XrayNodeClient(timeout=4.0, max_retries=0) as xclient:
