@@ -8,7 +8,7 @@ import uuid
 
 import redis.asyncio as aioredis
 from aiohttp import web
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from bot.middlewares.correlation import set_request_id
@@ -113,6 +113,21 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         return web.Response(status=400, text="Invalid webhook")
     try:
         async with session_scope() as session:
+            existing_event = await session.scalar(
+                select(WebhookInbox).where(
+                    WebhookInbox.provider == "yookassa",
+                    WebhookInbox.event_key == event_key,
+                )
+            )
+            if existing_event:
+                logger.info(
+                    "[%s] YooKassa webhook event %s already processed (inbox_id=%s), skipping",
+                    request_id,
+                    event_key,
+                    existing_event.id,
+                )
+                return web.Response(status=200, text="OK")
+
             from config.enums import WebhookInboxStatus
             from services.order_service import OrderService
 
@@ -123,7 +138,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 else WebhookInboxStatus.PENDING.value
             )
 
-            if order and order.status == "paid":
+            if order and order.status == "paid" and getattr(order, "_newly_paid", True):
                 bot = request.app.get("bot")
                 if bot:
                     try:
@@ -142,7 +157,20 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                                 from bot.handlers.payment.balance_routes import (
                                     _render_balance,
                                 )
+                                from bot.keyboards.payment import (
+                                    get_topup_credit_keyboard,
+                                )
 
+                                order_context = (
+                                    (order.metadata_ or {}).get("context")
+                                    if order.metadata_
+                                    else None
+                                )
+                                kb = (
+                                    get_topup_credit_keyboard(order_context)
+                                    if order_context
+                                    else None
+                                )
                                 await _render_balance(
                                     bot,
                                     user.telegram_id,
@@ -151,6 +179,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                                     notice=texts.TOPUP_CREDITED_NOTICE,
                                     message_effect_id=EFFECT_CONFETTI,
                                     force_new=True,
+                                    custom_keyboard=kb,
                                 )
                             else:
                                 balance = await get_account_balance(
@@ -159,11 +188,20 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                                 tariff_name = get_tariff_display_name(
                                     order.device_limit or 2
                                 )
+                                is_change = bool(
+                                    order.metadata_
+                                    and order.metadata_.get("is_tariff_change")
+                                )
+                                operation = (
+                                    texts.PAYMENT_OP_TITLE_CHANGE
+                                    if is_change
+                                    else texts.PURCHASE_COMPLETED
+                                )
                                 await render_hub(
                                     bot,
                                     user.telegram_id,
                                     texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                                        operation_title=texts.PURCHASE_COMPLETED,
+                                        operation_title=operation,
                                         tariff_name=tariff_name,
                                         duration_days=order.duration_days,
                                         charged=int(order.amount_rub),

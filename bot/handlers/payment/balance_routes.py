@@ -6,7 +6,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,6 +120,7 @@ async def _render_balance(
     trigger_message_id: int | None = None,
     message_effect_id: str | None = None,
     force_new: bool = False,
+    custom_keyboard: InlineKeyboardMarkup | None = None,
 ) -> None:
     snapshot = await get_account_balance(session, user_id=user.id)
     history = await get_account_history(session, user_id=user.id, limit=5)
@@ -156,7 +157,7 @@ async def _render_balance(
         bot,
         chat_id,
         text,
-        get_balance_keyboard(has_visible_topup=pending_topup is not None),
+        custom_keyboard or get_balance_keyboard(has_visible_topup=pending_topup is not None),
         trigger_message_id=trigger_message_id,
         message_effect_id=message_effect_id,
         force_new=force_new,
@@ -190,6 +191,8 @@ async def _create_and_render_topup(
         return
 
     try:
+        bot_username = getattr(getattr(bot, "_me", None), "username", None)
+        order_meta = {"context": context} if context else None
         order = await OrderService.create_order(
             session,
             user_id=user.id,
@@ -197,6 +200,8 @@ async def _create_and_render_topup(
             amount_rub=Decimal(amount),
             payment_method="yookassa",
             description=texts.CHECKOUT_DESCRIPTION_DEFAULT,
+            metadata=order_meta,
+            bot_username=bot_username,
         )
     except Exception as exc:
         logger.exception("Failed to create topup order for user %s: %s", user.id, exc)

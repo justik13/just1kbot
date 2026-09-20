@@ -42,6 +42,7 @@ class BasePaymentGateway(ABC):
         amount_rub: Decimal,
         description: str,
         return_url: str | None = None,
+        bot_username: str | None = None,
     ) -> PaymentInvoice:
         """Create a payment invoice with the provider and return redirect URL and external ID."""
         ...

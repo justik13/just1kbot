@@ -1,6 +1,7 @@
 """Order payment, confirmation, and status check routes."""
 from __future__ import annotations
 
+from decimal import Decimal
 import logging
 import uuid
 
@@ -20,6 +21,7 @@ from database.repositories.tariffs_repo import get_tariff_by_id
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.maintenance_service import MaintenanceService
 from services.order_service import InsufficientBalanceError, OrderService
+from utils.datetime_helpers import now_utc
 from utils.telegram import EFFECT_CONFETTI, render_hub
 
 from .common import _render_maintenance
@@ -85,7 +87,8 @@ async def handle_order_pay_wallet(
 
     balance = await get_account_balance(session, user_id=db_user.id)
     tariff_name = get_tariff_display_name(order.device_limit or 2)
-    operation = texts.PURCHASE_COMPLETED
+    is_change = bool(order.metadata_ and order.metadata_.get("is_tariff_change"))
+    operation = texts.PAYMENT_OP_TITLE_CHANGE if is_change else texts.PURCHASE_COMPLETED
 
     await render_hub(
         callback.bot,
@@ -130,15 +133,57 @@ async def handle_order_pay_card(
         await callback.answer(texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE, show_alert=True)
         return
 
+    # Check if this is a zero-cost change: if so, route to wallet payment
+    current_tid = getattr(db_user, "current_tariff_id", None)
+    sub_end = getattr(db_user, "subscription_end", None)
+    now = now_utc()
+    if (
+        current_tid
+        and current_tid != tariff.id
+        and sub_end
+        and sub_end > now
+    ):
+        current_tariff = await get_tariff_by_id(session, current_tid)
+        due_rub, _ = OrderService.calculate_tariff_change(
+            current_tariff, tariff, sub_end, now=now
+        )
+        if due_rub <= Decimal("0.00"):
+            order = await OrderService.pay_from_wallet(
+                session,
+                user_id=db_user.id,
+                service_type="awg",
+                tariff_id=tariff.id,
+            )
+            balance = await get_account_balance(session, user_id=db_user.id)
+            tariff_name = get_tariff_display_name(order.device_limit or 2)
+            await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+                    operation_title=texts.PAYMENT_OP_TITLE_CHANGE,
+                    tariff_name=tariff_name,
+                    duration_days=order.duration_days,
+                    charged=int(order.amount_rub),
+                    real_balance=int(balance.real_available),
+                    bonus_balance=int(balance.bonus_available),
+                ),
+                get_payment_success_keyboard(),
+                message_effect_id=EFFECT_CONFETTI,
+                force_new=True,
+            )
+            return
+
     await callback.answer(texts.PAYMENT_CREATING_LINK_NOTICE, show_alert=False)
 
     try:
+        bot_username = getattr(getattr(callback.bot, "_me", None), "username", None)
         order = await OrderService.create_order(
             session,
             user_id=db_user.id,
             service_type="awg",
             tariff_id=tariff.id,
             payment_method="yookassa",
+            bot_username=bot_username,
         )
     except Exception as exc:
         logger.exception(
@@ -191,7 +236,18 @@ async def handle_order_check(
     if order.status == "paid":
         if order.service_type == "topup":
             from .balance_routes import _render_balance
+            from bot.keyboards.payment import get_topup_credit_keyboard
 
+            order_context = (
+                (order.metadata_ or {}).get("context")
+                if order.metadata_
+                else None
+            )
+            kb = (
+                get_topup_credit_keyboard(order_context)
+                if order_context
+                else None
+            )
             await _render_balance(
                 callback.bot,
                 callback.message.chat.id,
@@ -200,16 +256,19 @@ async def handle_order_check(
                 notice=texts.TOPUP_CREDITED_NOTICE,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
+                custom_keyboard=kb,
             )
             return
 
         balance = await get_account_balance(session, user_id=db_user.id)
         tariff_name = get_tariff_display_name(order.device_limit or 2)
+        is_change = bool(order.metadata_ and order.metadata_.get("is_tariff_change"))
+        operation = texts.PAYMENT_OP_TITLE_CHANGE if is_change else texts.PURCHASE_COMPLETED
         await render_hub(
             callback.bot,
             callback.message.chat.id,
             texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                operation_title=texts.PURCHASE_COMPLETED,
+                operation_title=operation,
                 tariff_name=tariff_name,
                 duration_days=order.duration_days,
                 charged=int(order.amount_rub),
@@ -229,39 +288,58 @@ async def handle_order_check(
             paid_order = await OrderService.mark_order_paid(
                 session, order.id, external_id=order.external_id
             )
-            if paid_order:
-                if paid_order.service_type == "topup":
-                    from .balance_routes import _render_balance
+            if not paid_order:
+                await callback.answer(texts.ERROR_PAYMENT_SERVICE, show_alert=True)
+                return
 
-                    await _render_balance(
-                        callback.bot,
-                        callback.message.chat.id,
-                        session,
-                        db_user,
-                        notice=texts.TOPUP_CREDITED_NOTICE,
-                        message_effect_id=EFFECT_CONFETTI,
-                        force_new=True,
-                    )
-                    return
+            if paid_order.service_type == "topup":
+                from .balance_routes import _render_balance
+                from bot.keyboards.payment import get_topup_credit_keyboard
 
-                balance = await get_account_balance(session, user_id=db_user.id)
-                tariff_name = get_tariff_display_name(paid_order.device_limit or 2)
-                await render_hub(
+                order_context = (
+                    (paid_order.metadata_ or {}).get("context")
+                    if paid_order.metadata_
+                    else None
+                )
+                kb = (
+                    get_topup_credit_keyboard(order_context)
+                    if order_context
+                    else None
+                )
+                await _render_balance(
                     callback.bot,
                     callback.message.chat.id,
-                    texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                        operation_title=texts.PURCHASE_COMPLETED,
-                        tariff_name=tariff_name,
-                        duration_days=paid_order.duration_days,
-                        charged=int(paid_order.amount_rub),
-                        real_balance=int(balance.real_available),
-                        bonus_balance=int(balance.bonus_available),
-                    ),
-                    get_payment_success_keyboard(),
+                    session,
+                    db_user,
+                    notice=texts.TOPUP_CREDITED_NOTICE,
                     message_effect_id=EFFECT_CONFETTI,
                     force_new=True,
+                    custom_keyboard=kb,
                 )
                 return
+
+            balance = await get_account_balance(session, user_id=db_user.id)
+            tariff_name = get_tariff_display_name(paid_order.device_limit or 2)
+            is_change = bool(
+                paid_order.metadata_ and paid_order.metadata_.get("is_tariff_change")
+            )
+            operation = texts.PAYMENT_OP_TITLE_CHANGE if is_change else texts.PURCHASE_COMPLETED
+            await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+                    operation_title=operation,
+                    tariff_name=tariff_name,
+                    duration_days=paid_order.duration_days,
+                    charged=int(paid_order.amount_rub),
+                    real_balance=int(balance.real_available),
+                    bonus_balance=int(balance.bonus_available),
+                ),
+                get_payment_success_keyboard(),
+                message_effect_id=EFFECT_CONFETTI,
+                force_new=True,
+            )
+            return
         elif status_res.is_canceled:
             order.status = "canceled"
             await session.flush()
@@ -283,6 +361,7 @@ async def handle_order_cancel(
     db_user: User | None = None,
 ) -> None:
     order_id = _uuid_from_callback(callback.data)
+    order = None
     if order_id and db_user:
         order = await session.get(Order, order_id)
         if order and order.user_id == db_user.id and order.status == "pending":
@@ -290,6 +369,27 @@ async def handle_order_cancel(
             await session.flush()
 
     await callback.answer(show_alert=False)
+
+    order_context = (
+        (order.metadata_ or {}).get("context") if order and order.metadata_ else None
+    )
+    if (order_context or {}).get("source") == "white_internet":
+        from bot.handlers.white_internet import show_white_internet_menu
+
+        await show_white_internet_menu(callback, session)
+        return
+
+    if order and order.service_type == "topup":
+        from .balance_routes import _render_balance
+
+        await _render_balance(
+            callback.bot,
+            callback.message.chat.id,
+            session,
+            db_user,
+        )
+        return
+
     from .common import render_tariff_showcase
 
     await render_tariff_showcase(callback.bot, callback.message.chat.id, session)

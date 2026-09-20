@@ -83,6 +83,8 @@ class OrderService:
         payment_method: str = "yookassa",
         description: str | None = None,
         return_url: str | None = None,
+        metadata: dict | None = None,
+        bot_username: str | None = None,
     ) -> Order:
         """Create a new commercial order and obtain payment link if external gateway."""
         # 1. Deduplication guard for pending external orders (prevent double-clicks)
@@ -105,7 +107,7 @@ class OrderService:
                 return existing
 
         user = await session.get(User, user_id)
-        order_meta: dict = {}
+        order_meta: dict = dict(metadata) if metadata else {}
         if tariff_id is not None:
             tariff = await session.get(Tariff, tariff_id)
             if tariff:
@@ -168,6 +170,7 @@ class OrderService:
                     amount_rub=order.amount_rub,
                     description=final_desc,
                     return_url=return_url,
+                    bot_username=bot_username,
                 )
                 order.external_id = invoice.external_id
                 order.payment_url = invoice.payment_url
@@ -193,13 +196,14 @@ class OrderService:
         traffic_bytes: int = 0,
         device_limit: int | None = None,
         description: str | None = None,
+        metadata: dict | None = None,
     ) -> Order:
         """Pay for an order immediately using internal wallet balance."""
         user = await session.get(User, user_id)
         if user and getattr(user, "financial_hold", False):
             raise FinancialHoldBlockedError("Financial hold active on user")
 
-        order_meta: dict = {}
+        order_meta: dict = dict(metadata) if metadata else {}
         if tariff_id is not None:
             tariff = await session.get(Tariff, tariff_id)
             if tariff:
@@ -263,13 +267,14 @@ class OrderService:
         await session.flush()
 
         # Debit wallet ledger
-        await create_order_debit(
-            session,
-            user_id=user_id,
-            amount_rub=cost,
-            order_id=order.id,
-            metadata={"description": order.description},
-        )
+        if cost > 0:
+            await create_order_debit(
+                session,
+                user_id=user_id,
+                amount_rub=cost,
+                order_id=order.id,
+                metadata={"description": order.description},
+            )
 
         # Fulfill
         await FulfillmentService.fulfill_order(session, order)
@@ -295,11 +300,19 @@ class OrderService:
 
         if order.status == "paid":
             logger.info("Order %s already marked paid, ignoring duplicate execution", order.id)
+            order._newly_paid = False
             return order
 
-        if order.status in ("canceled", "refunded"):
-            logger.warning("Cannot mark %s order %s as paid", order.status, order.id)
+        if order.status == "refunded":
+            logger.warning("Cannot mark refunded order %s as paid", order.id)
+            order._newly_paid = False
             return order
+
+        was_canceled = order.status == "canceled"
+        if was_canceled:
+            logger.info(
+                "Reviving canceled order %s on valid payment received", order.id
+            )
 
         if paid_amount_rub is not None and paid_amount_rub < order.amount_rub:
             logger.error(
@@ -312,17 +325,25 @@ class OrderService:
 
         order.status = "paid"
         order.paid_at = now_utc()
+        order._newly_paid = True
+        if was_canceled:
+            order_meta = dict(order.metadata_ or {})
+            order_meta["revived_from_canceled"] = True
+            order.metadata_ = order_meta
         if external_id:
             order.external_id = external_id
 
         # Ledger records: ONLY topup credits user's bot wallet
         if order.service_type == "topup":
+            credit_meta = {"source": f"{order.payment_method}_topup"}
+            if was_canceled:
+                credit_meta["revived"] = True
             await create_order_credit(
                 session,
                 user_id=order.user_id,
                 amount_rub=order.amount_rub,
                 order_id=order.id,
-                metadata={"source": f"{order.payment_method}_topup"},
+                metadata=credit_meta,
             )
             try:
                 from services.referral_bonus import grant_referral_bonus_for_topup
@@ -390,27 +411,60 @@ class OrderService:
             )
 
         if result.is_refunded:
-            if order.status == "refunded":
+            refund_amount = (
+                result.amount_rub
+                if result.amount_rub is not None
+                else order.amount_rub
+            )
+            order_meta = dict(order.metadata_ or {})
+            refunded_so_far = Decimal(str(order_meta.get("refunded_amount_rub", "0")))
+            processed_refund_ids = list(order_meta.get("processed_refund_ids", []))
+
+            # Deduplication for the exact same refund event
+            if result.external_id and result.external_id in processed_refund_ids:
                 logger.info(
-                    "Order %s already marked refunded, ignoring duplicate webhook",
+                    "Refund %s for order %s already processed, ignoring duplicate webhook",
+                    result.external_id,
                     order.id,
                 )
                 return order
-            order.status = "refunded"
+
+            if order.status == "refunded" and refunded_so_far >= order.amount_rub:
+                logger.info(
+                    "Order %s already marked fully refunded, ignoring duplicate webhook",
+                    order.id,
+                )
+                return order
+
+            new_total_refunded = refunded_so_far + refund_amount
+            order_meta["refunded_amount_rub"] = str(new_total_refunded)
+            if result.external_id:
+                processed_refund_ids.append(result.external_id)
+            order_meta["processed_refund_ids"] = processed_refund_ids
+            order.metadata_ = order_meta
+
+            if new_total_refunded >= order.amount_rub:
+                order.status = "refunded"
             order.refunded_at = now_utc()
 
             if order.service_type == "topup":
                 await create_order_refund_debit(
                     session,
                     user_id=order.user_id,
-                    amount_rub=order.amount_rub,
+                    amount_rub=refund_amount,
                     order_id=order.id,
                     metadata={"source": "yookassa_refund"},
                 )
 
             await FulfillmentService.revoke_order(session, order)
             await session.flush()
-            logger.info("Order %s refunded and revoked", order.id)
+            logger.info(
+                "Order %s refunded %s RUB (total %s / %s) and revoked",
+                order.id,
+                refund_amount,
+                new_total_refunded,
+                order.amount_rub,
+            )
             return order
 
         return None

@@ -199,6 +199,25 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    conn = op.get_bind()
+    order_entries_count = conn.execute(
+        sa.text("SELECT count(*) FROM account_ledger_entries WHERE order_id IS NOT NULL")
+    ).scalar()
+    if order_entries_count:
+        raise RuntimeError(
+            f"Cannot downgrade migration 0030: {order_entries_count} ledger entries are linked to orders. "
+            "Downgrading would cause loss of financial records."
+        )
+
+    paid_orders_count = conn.execute(
+        sa.text("SELECT count(*) FROM orders WHERE status = 'paid'")
+    ).scalar()
+    if paid_orders_count:
+        raise RuntimeError(
+            f"Cannot downgrade migration 0030: {paid_orders_count} paid orders exist in orders table. "
+            "Downgrading would cause loss of order history."
+        )
+
     op.drop_index(
         "uq_account_ledger_order_credit",
         table_name="account_ledger_entries",
@@ -234,7 +253,6 @@ def downgrade() -> None:
         postgresql_where=sa.text("entry_type='purchase_debit'"),
     )
 
-    op.execute("DELETE FROM account_ledger_entries WHERE order_id IS NOT NULL")
     op.execute(
         "ALTER TABLE account_ledger_entries DROP CONSTRAINT IF EXISTS ck_account_ledger_entry_shape"
     )

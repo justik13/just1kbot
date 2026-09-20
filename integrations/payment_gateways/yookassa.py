@@ -1,6 +1,7 @@
 """YooKassa implementation of BasePaymentGateway."""
 
 import logging
+import os
 from decimal import Decimal
 
 from config.settings import get_settings
@@ -25,19 +26,42 @@ class YooKassaGateway(BasePaymentGateway):
         amount_rub: Decimal,
         description: str,
         return_url: str | None = None,
+        bot_username: str | None = None,
     ) -> PaymentInvoice:
         resolved_return_url = return_url
         if not resolved_return_url:
+            raw_template = "https://t.me/{bot_username}"
             try:
                 settings = get_settings()
-                raw_template = getattr(settings, "YOOKASSA_RETURN_URL", "https://t.me")
-                bot_user = (getattr(settings, "SUPPORT_USERNAME", "") or "").lstrip("@")
-                if "{bot_username}" in raw_template:
-                    resolved_return_url = raw_template.format(bot_username=bot_user)
-                else:
-                    resolved_return_url = raw_template
+                raw_template = getattr(settings, "YOOKASSA_RETURN_URL", raw_template) or raw_template
             except Exception:
-                resolved_return_url = "https://t.me"
+                pass
+            resolved_bot_user = bot_username or os.getenv("BOT_USERNAME")
+            if not resolved_bot_user:
+                try:
+                    from aiogram import Bot
+                    current_bot = Bot.get_current()
+                    if current_bot:
+                        me = getattr(current_bot, "_me", None)
+                        if not me:
+                            me = await current_bot.get_me()
+                        if me and me.username:
+                            resolved_bot_user = me.username
+                except Exception:
+                    pass
+            if not resolved_bot_user:
+                try:
+                    settings = get_settings()
+                    resolved_bot_user = getattr(settings, "BOT_USERNAME", None)
+                except Exception:
+                    pass
+            if not resolved_bot_user:
+                resolved_bot_user = "bot"
+            resolved_bot_user = str(resolved_bot_user).lstrip("@")
+            if "{bot_username}" in raw_template:
+                resolved_return_url = raw_template.format(bot_username=resolved_bot_user)
+            else:
+                resolved_return_url = raw_template
         if not resolved_return_url:
             resolved_return_url = "https://t.me"
 

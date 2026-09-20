@@ -12,11 +12,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from utils.datetime_helpers import now_utc
 from database.models import Order, Tariff, User
 from database.repositories.account_ledger_repo import AccountBalanceSnapshot
 from integrations.payment_gateways.base import (
@@ -429,6 +430,7 @@ class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
 
     @patch("services.fulfillment_service.WhiteInternetService.purchase_subscription")
     async def test_fulfill_white_internet_passes_debit_balance_false(self, mock_buy):
+        mock_buy.return_value = (True, "OK", AsyncMock())
         session = AsyncMock(spec=AsyncSession)
         session.scalar.return_value = None  # No existing sub
         user = User(id=10, telegram_id=12345678)
@@ -581,4 +583,783 @@ class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry.operation_type, "topup")
         self.assertEqual(entry.operation_title, "Пополнение")
         self.assertEqual(entry.tariff_name, "Баланс")
+
+
+class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
+    """Unit tests for defect fixes identified during audit of PR #277."""
+
+    @patch("services.order_service.FulfillmentService.fulfill_order")
+    @patch("services.order_service.create_order_debit")
+    @patch("services.order_service.get_account_balance")
+    async def test_pay_from_wallet_zero_cost(self, mock_bal, mock_debit, mock_fulfill):
+        mock_bal.return_value = AccountBalanceSnapshot(
+            accounting_position=Decimal("0.00"),
+            available=Decimal("0.00"),
+            reserved=Decimal("0.00"),
+            debt=Decimal("0.00"),
+            real_available=Decimal("0.00"),
+            bonus_available=Decimal("0.00"),
+        )
+        session = AsyncMock(spec=AsyncSession)
+        session.scalar.return_value = None
+        tariff = Tariff(id=1, name="Free", price_rub=Decimal("0.00"), duration_days=30, device_limit=1)
+        session.get.return_value = tariff
+
+        order = await OrderService.pay_from_wallet(
+            session,
+            user_id=42,
+            service_type="awg",
+            tariff_id=1,
+        )
+
+        self.assertEqual(order.status, "paid")
+        self.assertEqual(order.payment_method, "wallet")
+        self.assertEqual(order.amount_rub, Decimal("0.00"))
+        mock_debit.assert_not_called()
+        mock_fulfill.assert_called_once_with(session, order)
+
+    def test_get_order_checkout_keyboard_zero_cost(self):
+        from bot import texts
+
+        kb = get_order_checkout_keyboard(
+            tariff_id=5,
+            price=0,
+            can_pay_wallet=True,
+            back_callback="back_to_tariffs",
+        )
+        buttons = [btn for row in kb.inline_keyboard for btn in row]
+        callbacks = [b.callback_data for b in buttons]
+        # Card payment button must not exist
+        self.assertNotIn("order_pay_card:5", callbacks)
+        # Free change button must exist
+        self.assertIn("order_pay_wallet:5", callbacks)
+        free_btn = next(b for b in buttons if b.callback_data == "order_pay_wallet:5")
+        self.assertEqual(free_btn.text, texts.BTN_PAYMENT_CONFIRM_FREE_CHANGE)
+
+    @patch("services.white_internet_service.white_internet_repo")
+    @patch("services.white_internet_service.get_or_create_current_version")
+    @patch("services.white_internet_service.lock_checkout_user")
+    async def test_convert_trial_to_paid_debit_balance_false(
+        self, mock_lock_user, mock_get_ver, mock_wi_repo
+    ):
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+        from database.models import Server, WhiteInternetSubscription
+        from services.white_internet_service import WhiteInternetService
+
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, telegram_id=12345678)
+        mock_lock_user.return_value = user
+
+        sub = WhiteInternetSubscription(
+            id=100,
+            user_id=10,
+            is_trial=True,
+            status="ACTIVE",
+            origin_node_id=1,
+            device_limit=1,
+            uuid="test-uuid",
+            desired_version=1,
+        )
+        mock_wi_repo.get_subscription_by_user_id = AsyncMock(return_value=sub)
+        mock_wi_repo.get_subscription_with_lock = AsyncMock(return_value=sub)
+
+        origin_node = Server(
+            id=1,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            extra_data={"relays": ["relay1"]},
+            protocol="xray",
+        )
+        session.scalar.return_value = origin_node
+
+        mock_version = AsyncMock()
+        mock_version.id = 1
+        mock_version.base_quota_bytes = 10 * 1024**3
+        mock_version.price_rub = 300
+        mock_version.duration_hours = 720
+        mock_get_ver.return_value = mock_version
+
+        with patch.object(
+            WhiteInternetService,
+            "get_or_create_white_internet_tariff",
+            new_callable=AsyncMock,
+            return_value=Tariff(id=1, name="WI", duration_days=30, price_rub=Decimal("300.00"), is_active=True),
+        ), patch.object(
+            WhiteInternetService, "_new_quote"
+        ) as mock_new_quote, patch(
+            "services.white_internet_service.create_purchase_debit", new_callable=AsyncMock
+        ) as mock_debit, patch.object(
+            WhiteInternetService, "_try_inline_sync", new_callable=AsyncMock
+        ):
+            ok, msg, result_sub = await WhiteInternetService.convert_trial_to_paid(
+                session, user_id=10, debit_balance=False
+            )
+
+        self.assertTrue(ok)
+        self.assertFalse(result_sub.is_trial)
+        mock_new_quote.assert_not_called()
+        mock_debit.assert_not_called()
+
+    @patch("services.fulfillment_service.WhiteInternetService.purchase_subscription")
+    async def test_fulfill_order_raises_on_purchase_failure(self, mock_purchase):
+        mock_purchase.return_value = (False, "Node unreachable", None)
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, telegram_id=12345678)
+        session.get.return_value = user
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="white_internet",
+            duration_days=30,
+            amount_rub=Decimal("300.00"),
+            status="paid",
+        )
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_by_user_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            with self.assertRaises(RuntimeError) as cm:
+                await FulfillmentService.fulfill_order(session, order)
+            self.assertIn("Node unreachable", str(cm.exception))
+
+    @patch("services.fulfillment_service.WhiteInternetService.topup_quota")
+    async def test_fulfill_order_raises_on_quota_topup_failure(self, mock_topup):
+        mock_topup.return_value = (False, "Quota limit reached", None)
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, telegram_id=12345678)
+        session.get.return_value = user
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="white_internet",
+            traffic_bytes=5 * 1024**3,
+            duration_days=0,
+            amount_rub=Decimal("100.00"),
+            status="paid",
+        )
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_by_user_id",
+            new_callable=AsyncMock,
+            return_value=AsyncMock(),
+        ):
+            with self.assertRaises(RuntimeError) as cm:
+                await FulfillmentService.fulfill_order(session, order)
+            self.assertIn("Quota limit reached", str(cm.exception))
+
+    @patch("services.fulfillment_service.WhiteInternetService.purchase_device_slot")
+    async def test_fulfill_order_raises_on_device_slot_failure(self, mock_slot):
+        mock_slot.return_value = (False, "Device limit reached", None)
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, telegram_id=12345678)
+        session.get.return_value = user
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="white_internet",
+            device_limit=3,
+            duration_days=0,
+            amount_rub=Decimal("150.00"),
+            status="paid",
+        )
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_by_user_id",
+            new_callable=AsyncMock,
+            return_value=AsyncMock(),
+        ):
+            with self.assertRaises(RuntimeError) as cm:
+                await FulfillmentService.fulfill_order(session, order)
+            self.assertIn("Device limit reached", str(cm.exception))
+
+    @patch("services.fulfillment_service.WhiteInternetService.renew_subscription")
+    async def test_fulfill_order_raises_on_renew_failure(self, mock_renew):
+        mock_renew.return_value = (False, "Renewal error", None)
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, telegram_id=12345678)
+        session.get.return_value = user
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="white_internet",
+            duration_days=30,
+            amount_rub=Decimal("300.00"),
+            status="paid",
+        )
+        mock_sub = AsyncMock()
+        mock_sub.status = "ACTIVE"
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_by_user_id",
+            new_callable=AsyncMock,
+            return_value=mock_sub,
+        ):
+            with self.assertRaises(RuntimeError) as cm:
+                await FulfillmentService.fulfill_order(session, order)
+            self.assertIn("Renewal error", str(cm.exception))
+
+    @patch("services.order_service.FulfillmentService.fulfill_order")
+    async def test_mark_order_paid_revives_canceled_order(self, mock_fulfill):
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=25,
+            service_type="awg",
+            duration_days=30,
+            amount_rub=Decimal("250.00"),
+            status="canceled",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        paid_order = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertEqual(paid_order.status, "paid")
+        self.assertTrue(paid_order.metadata_.get("revived_from_canceled"))
+        self.assertIsNotNone(paid_order.paid_at)
+        mock_fulfill.assert_called_once_with(session, paid_order)
+
+    @patch("bot.handlers.webhook.session_scope")
+    @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")
+    @patch("bot.handlers.webhook._is_yookassa_ip", return_value=True)
+    async def test_yookassa_webhook_deduplication(self, mock_ip, mock_real, mock_scope):
+        from bot.handlers.webhook import yookassa_webhook_handler
+        from database.models import WebhookInbox
+
+        session = AsyncMock(spec=AsyncSession)
+        session.scalar.return_value = WebhookInbox(id=99, provider="yookassa")
+        mock_scope.return_value.__aenter__.return_value = session
+
+        request = AsyncMock()
+        request.content_length = 200
+        request.json.return_value = {
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-123",
+                "status": "succeeded",
+                "metadata": {"order_id": "ord-123"},
+            },
+        }
+
+        with patch("services.order_service.OrderService.process_webhook_event") as mock_process:
+            response = await yookassa_webhook_handler(request)
+            self.assertEqual(response.status, 200)
+            mock_process.assert_not_called()
+
+    @patch("integrations.payment_gateways.yookassa.YooKassaService.create_payment_result")
+    async def test_yookassa_gateway_bot_username_resolution(self, mock_create):
+        mock_create.return_value = YooKassaResult(
+            True,
+            value={"id": "ext-1", "confirmation": {"confirmation_url": "https://pay.link"}},
+        )
+        gw = YooKassaGateway()
+
+        # 1. bot_username argument passed explicitly
+        await gw.create_payment_url(
+            order_id="ord-1",
+            amount_rub=Decimal("100.00"),
+            description="test",
+            bot_username="my_explicit_bot",
+        )
+        payload = mock_create.call_args[0][0]
+        self.assertEqual(payload["confirmation"]["return_url"], "https://t.me/my_explicit_bot")
+
+        # 2. bot_username via os.getenv("BOT_USERNAME")
+        mock_create.reset_mock()
+        with patch.dict("os.environ", {"BOT_USERNAME": "env_configured_bot"}):
+            await gw.create_payment_url(
+                order_id="ord-2",
+                amount_rub=Decimal("100.00"),
+                description="test",
+                bot_username=None,
+            )
+            payload = mock_create.call_args[0][0]
+            self.assertEqual(payload["confirmation"]["return_url"], "https://t.me/env_configured_bot")
+
+    @patch("services.order_service.FulfillmentService.revoke_order")
+    @patch("services.order_service.create_order_refund_debit")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_partial_refund(
+        self, mock_gw_factory, mock_refund_debit, mock_revoke
+    ):
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            amount_rub=Decimal("80.00"),
+            external_id="ext-pay-888",
+        )
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("200.00"),
+            status="paid",
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        success = await OrderService.process_webhook_event(session, {"some": "payload"})
+
+        self.assertTrue(success)
+        mock_refund_debit.assert_called_once_with(
+            session,
+            user_id=10,
+            amount_rub=Decimal("80.00"),
+            order_id=order_uuid,
+            metadata={"source": "yookassa_refund"},
+        )
+
+    @patch("services.fulfillment_service.invalidate_user_cache")
+    @patch("services.fulfillment_service.SubscriptionService.sync_access_state")
+    async def test_revoke_order_with_grace_period(self, mock_sync, mock_cache):
+        from config.constants import VPN_ACCESS_GRACE_HOURS
+
+        session = AsyncMock(spec=AsyncSession)
+        now = datetime.now(timezone.utc)
+        # User has 3 days remaining; revoking 10 days puts it into past
+        user = User(
+            id=10,
+            telegram_id=12345678,
+            subscription_end=now + timedelta(days=3),
+        )
+        session.get.return_value = user
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="awg",
+            duration_days=10,
+            amount_rub=Decimal("100.00"),
+            status="refunded",
+        )
+
+        await FulfillmentService.revoke_order(session, order)
+
+        expected_boundary = now - timedelta(hours=VPN_ACCESS_GRACE_HOURS)
+        self.assertLessEqual(user.subscription_end, expected_boundary)
+        mock_sync.assert_called_once_with(session, user)
+
+    def test_migration_0030_downgrade_safety_check(self):
+        import importlib.util
+        from pathlib import Path
+
+        mig_path = (
+            Path(__file__).parent.parent
+            / "alembic"
+            / "versions"
+            / "0030_simple_billing.py"
+        )
+        spec = importlib.util.spec_from_file_location("mig_0030", mig_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        mig_0030 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig_0030)
+
+        with patch.object(mig_0030, "op") as mock_op:
+            mock_bind = mock_op.get_bind.return_value
+
+            # Case 1: Entries exist -> raises RuntimeError
+            mock_bind.execute.return_value.scalar.return_value = 3
+            with self.assertRaises(RuntimeError) as cm:
+                mig_0030.downgrade()
+            self.assertIn("ledger entries are linked to orders", str(cm.exception))
+
+            # Case 2: Zero entries exist -> completes without error
+            mock_bind.execute.return_value.scalar.return_value = 0
+            mig_0030.downgrade()
+
+    async def test_admin_show_order_card(self):
+        from bot.handlers.admin.payments import show_order_card
+
+        session = AsyncMock(spec=AsyncSession)
+        test_uuid = uuid.uuid4()
+        user = User(id=10, telegram_id=987654321, username="testadminuser")
+        tariff = Tariff(id=1, name="Standard AWG")
+        order = Order(
+            id=test_uuid,
+            user_id=10,
+            service_type="awg",
+            amount_rub=Decimal("250.00"),
+            duration_days=30,
+            status="paid",
+            payment_method="card",
+            created_at=datetime.now(timezone.utc),
+            user=user,
+            tariff=tariff,
+        )
+
+        session.scalar.return_value = order
+
+        callback = AsyncMock()
+        callback.data = f"admin_order_card:{test_uuid}"
+        callback.from_user.id = 987654321
+        callback.message = AsyncMock()
+        state = AsyncMock()
+
+        with patch("bot.handlers.admin.payments.is_admin", return_value=True):
+            await show_order_card(callback, state, session)
+
+        callback.message.edit_text.assert_called_once()
+        call_text = callback.message.edit_text.call_args[0][0]
+        self.assertIn("Заказ #", call_text)
+        self.assertIn("250 ₽", call_text)
+        self.assertIn("Standard AWG", call_text)
+        callback.answer.assert_called_once_with(show_alert=False)
+
+    def test_get_topup_credit_keyboard_with_white_internet_context(self):
+        from bot import texts
+        from bot.keyboards.payment import get_topup_credit_keyboard
+
+        kb = get_topup_credit_keyboard({"source": "white_internet"})
+        buttons = [btn for row in kb.inline_keyboard for btn in row]
+        callbacks = [b.callback_data for b in buttons]
+
+        self.assertIn("white_internet", callbacks)
+        wi_btn = next(b for b in buttons if b.callback_data == "white_internet")
+        self.assertEqual(wi_btn.text, texts.BTN_WL_RETURN_TO_SERVICE)
+
+    async def test_admin_payments_list_build_with_orders_and_legacy(self):
+        from bot.handlers.admin.payments import _build_payments_list_text_and_kb
+        from database.models import Order, Payment, User
+
+        user = User(id=1, telegram_id=111, username="testuser")
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=1,
+            amount_rub=Decimal("300.00"),
+            service_type="awg",
+            status="paid",
+            created_at=datetime.now(timezone.utc),
+            user=user,
+        )
+        payment = Payment(
+            id=77,
+            user_id=1,
+            amount=200,
+            provider_status="succeeded",
+            fulfillment_status="succeeded",
+            reconciliation_status="matched",
+            created_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            user=user,
+        )
+
+        rendered, builder = await _build_payments_list_text_and_kb(
+            payments=[order, payment],
+            page=1,
+            total_pages=1,
+            total=2,
+        )
+        buttons = [btn for row in builder.as_markup().inline_keyboard for btn in row]
+        callbacks = [btn.callback_data for btn in buttons]
+        button_texts = [btn.text for btn in buttons]
+
+        self.assertIn(f"admin_order_card:{order_uuid}", callbacks)
+        self.assertIn("admin_payment_card:77", callbacks)
+        self.assertTrue(any("300 ₽" in t for t in button_texts))
+        self.assertTrue(any("200" in t for t in button_texts))
+        self.assertIn("Всего: 2", rendered)
+
+    @patch("services.order_service.FulfillmentService.revoke_order")
+    @patch("services.order_service.create_order_refund_debit")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_sequential_partial_refunds(
+        self, mock_gw_factory, mock_refund_debit, mock_revoke
+    ):
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("200.00"),
+            status="paid",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        # 1. First partial refund: 80 RUB
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            amount_rub=Decimal("80.00"),
+            external_id="refund-part-1",
+        )
+        res1 = await OrderService.process_webhook_event(session, {"ref": 1})
+        self.assertIsNotNone(res1)
+        self.assertEqual(order.status, "paid")
+        self.assertEqual(order.metadata_["refunded_amount_rub"], "80.00")
+        mock_refund_debit.assert_called_once_with(
+            session,
+            user_id=10,
+            amount_rub=Decimal("80.00"),
+            order_id=order_uuid,
+            metadata={"source": "yookassa_refund"},
+        )
+
+        # 2. Duplicate of first partial refund should be ignored
+        mock_refund_debit.reset_mock()
+        res_dup = await OrderService.process_webhook_event(session, {"ref": 1})
+        self.assertEqual(res_dup, order)
+        mock_refund_debit.assert_not_called()
+
+        # 3. Second partial refund: 120 RUB (completes the 200 RUB order)
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            amount_rub=Decimal("120.00"),
+            external_id="refund-part-2",
+        )
+        res2 = await OrderService.process_webhook_event(session, {"ref": 2})
+        self.assertIsNotNone(res2)
+        self.assertEqual(order.status, "refunded")
+        self.assertEqual(order.metadata_["refunded_amount_rub"], "200.00")
+        mock_refund_debit.assert_called_once_with(
+            session,
+            user_id=10,
+            amount_rub=Decimal("120.00"),
+            order_id=order_uuid,
+            metadata={"source": "yookassa_refund"},
+        )
+
+    @patch("bot.handlers.webhook.session_scope")
+    @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")
+    @patch("bot.handlers.webhook._is_yookassa_ip", return_value=True)
+    async def test_yookassa_webhook_suppresses_notification_if_already_paid(
+        self, mock_ip, mock_real, mock_scope
+    ):
+        from bot.handlers.webhook import yookassa_webhook_handler
+
+        mock_session = AsyncMock(spec=AsyncSession)
+        mock_scope.return_value.__aenter__.return_value = mock_session
+
+        mock_session.scalar.return_value = None
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="paid",
+        )
+        order._newly_paid = False
+
+        with patch("services.order_service.OrderService.process_webhook_event", return_value=order):
+            with patch("bot.handlers.payment.balance_routes._render_balance") as mock_render:
+                request = AsyncMock()
+                request.content_length = 200
+                request.app = {"bot": AsyncMock()}
+                request.json.return_value = {
+                    "event": "payment.succeeded",
+                    "type": "notification",
+                    "object": {
+                        "id": "pay-already-paid",
+                        "status": "succeeded",
+                        "paid": True,
+                        "amount": {"value": "100.00", "currency": "RUB"},
+                        "metadata": {"order_id": str(order_uuid)},
+                    },
+                }
+                resp = await yookassa_webhook_handler(request)
+
+                self.assertEqual(resp.status, 200)
+                mock_render.assert_not_called()
+
+    async def test_handle_order_check_renders_context_keyboard_when_already_paid(self):
+        from bot.handlers.payment.purchase_routes import handle_order_check
+
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        user = User(id=10, telegram_id=123456)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="paid",
+            metadata_={"context": {"source": "white_internet"}},
+        )
+        session.get.return_value = order
+
+        callback = AsyncMock()
+        callback.data = f"order_check:{order_uuid}"
+        callback.from_user.id = 123456
+        callback.message = AsyncMock()
+        callback.bot = AsyncMock()
+
+        with patch("bot.handlers.payment.balance_routes._render_balance") as mock_render:
+            await handle_order_check(callback, session, db_user=user)
+
+            mock_render.assert_called_once()
+            custom_kb = mock_render.call_args[1].get("custom_keyboard")
+            self.assertIsNotNone(custom_kb)
+            buttons = [b for row in custom_kb.inline_keyboard for b in row]
+            self.assertTrue(any(b.callback_data == "white_internet" for b in buttons))
+
+    async def test_handle_order_cancel_routing(self):
+        from bot.handlers.payment.purchase_routes import handle_order_cancel
+
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, telegram_id=123456)
+
+        # Case 1: Cancel white_internet topup order -> show_white_internet_menu
+        wi_order_uuid = uuid.uuid4()
+        wi_order = Order(
+            id=wi_order_uuid,
+            user_id=10,
+            service_type="topup",
+            status="pending",
+            metadata_={"context": {"source": "white_internet"}},
+        )
+        session.get.return_value = wi_order
+
+        cb_wi = AsyncMock()
+        cb_wi.data = f"order_cancel:{wi_order_uuid}"
+        cb_wi.bot = AsyncMock()
+        cb_wi.message = AsyncMock()
+
+        with patch("bot.handlers.white_internet.show_white_internet_menu") as mock_wi_menu:
+            await handle_order_cancel(cb_wi, session, db_user=user)
+            self.assertEqual(wi_order.status, "canceled")
+            mock_wi_menu.assert_called_once_with(cb_wi, session)
+
+        # Case 2: Cancel standard topup order -> _render_balance
+        topup_uuid = uuid.uuid4()
+        topup_order = Order(
+            id=topup_uuid,
+            user_id=10,
+            service_type="topup",
+            status="pending",
+            metadata_={},
+        )
+        session.get.return_value = topup_order
+
+        cb_topup = AsyncMock()
+        cb_topup.data = f"order_cancel:{topup_uuid}"
+        cb_topup.bot = AsyncMock()
+        cb_topup.message = AsyncMock()
+
+        with patch("bot.handlers.payment.balance_routes._render_balance") as mock_bal:
+            await handle_order_cancel(cb_topup, session, db_user=user)
+            self.assertEqual(topup_order.status, "canceled")
+            mock_bal.assert_called_once()
+
+    async def test_handle_order_pay_card_zero_cost_routes_to_wallet(self):
+        from bot.handlers.payment.purchase_routes import handle_order_pay_card
+
+        session = AsyncMock(spec=AsyncSession)
+        user = User(
+            id=10,
+            telegram_id=123456,
+            current_tariff_id=1,
+            subscription_end=now_utc() + timedelta(days=20),
+        )
+        tariff1 = Tariff(id=1, name="Old", price_rub=200, duration_days=30, device_limit=2)
+        tariff2 = Tariff(id=2, name="Target", price_rub=200, duration_days=30, device_limit=2, is_active=True)
+
+        async def mock_get_tariff(sess, tid):
+            return tariff1 if tid == 1 else tariff2
+
+        cb = AsyncMock()
+        cb.data = "order_pay_card:2"
+        cb.from_user.id = 123456
+        cb.bot = AsyncMock()
+        cb.message = AsyncMock()
+
+        with patch("bot.handlers.payment.purchase_routes.MaintenanceService.can_user_perform_action", return_value=True):
+            with patch("bot.handlers.payment.purchase_routes.get_tariff_by_id", side_effect=mock_get_tariff):
+                with patch("services.order_service.OrderService.calculate_tariff_change", return_value=(Decimal("0.00"), 20)):
+                    with patch("services.order_service.OrderService.pay_from_wallet") as mock_pay_wallet:
+                        mock_pay_wallet.return_value = Order(
+                            id=uuid.uuid4(),
+                            user_id=10,
+                            amount_rub=Decimal("0.00"),
+                            duration_days=20,
+                            device_limit=2,
+                            status="paid",
+                            metadata_={"is_tariff_change": True},
+                        )
+                        with patch("bot.handlers.payment.purchase_routes.get_account_balance") as mock_bal:
+                            mock_bal.return_value = MagicMock(real_available=Decimal("100"), bonus_available=Decimal("0"))
+                            with patch("bot.handlers.payment.purchase_routes.render_hub") as mock_render:
+                                await handle_order_pay_card(cb, session, db_user=user)
+                                mock_pay_wallet.assert_called_once()
+                                mock_render.assert_called_once()
+
+    async def test_pay_from_wallet_preserves_custom_metadata(self):
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, financial_hold=False)
+        session.get.return_value = user
+
+        with patch("services.order_service.get_account_balance") as mock_bal:
+            mock_bal.return_value = MagicMock(debt=Decimal("0"), available=Decimal("500"))
+            with patch("services.order_service.create_order_debit"):
+                with patch("services.order_service.FulfillmentService.fulfill_order"):
+                    order = await OrderService.pay_from_wallet(
+                        session,
+                        user_id=10,
+                        amount_rub=Decimal("100.00"),
+                        metadata={"custom_flag": True, "source": "promo"},
+                    )
+                    self.assertTrue(order.metadata_["custom_flag"])
+                    self.assertEqual(order.metadata_["source"], "promo")
+
+    def test_admin_payments_sorting_handles_mixed_tz(self):
+        from bot.handlers.admin.payments import _normalize_dt
+
+        naive_dt = datetime(2026, 9, 21, 12, 0, 0)
+        aware_dt = datetime(2026, 9, 21, 12, 0, 0, tzinfo=timezone.utc)
+        none_dt = None
+
+        norm_naive = _normalize_dt(naive_dt)
+        norm_aware = _normalize_dt(aware_dt)
+        norm_none = _normalize_dt(none_dt)
+
+        self.assertIsNotNone(norm_naive.tzinfo)
+        self.assertIsNotNone(norm_aware.tzinfo)
+        self.assertIsNotNone(norm_none.tzinfo)
+
+        items = [norm_naive, norm_aware, norm_none]
+        sorted_items = sorted(items, reverse=True)
+        self.assertEqual(len(sorted_items), 3)
+
+    def test_migration_0030_downgrade_safety_check_with_paid_orders(self):
+        import importlib.util
+        from pathlib import Path
+
+        mig_path = (
+            Path(__file__).parent.parent
+            / "alembic"
+            / "versions"
+            / "0030_simple_billing.py"
+        )
+        spec = importlib.util.spec_from_file_location("mig_0030", mig_path)
+        mig_0030 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig_0030)
+
+        with patch.object(mig_0030, "op") as mock_op:
+            mock_bind = mock_op.get_bind.return_value
+
+            mock_bind.execute.return_value.scalar.side_effect = [0, 2]
+            with self.assertRaises(RuntimeError) as cm:
+                mig_0030.downgrade()
+            self.assertIn("paid orders exist in orders table", str(cm.exception))
 

@@ -16,6 +16,7 @@ BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE = "💱 Сменить тариф с ба
 BTN_PAYMENT_CONFIRM_PURCHASE = "✅ Подтвердить покупку"
 
 BTN_PAYMENT_CONFIRM_TARIFF_CHANGE = "✅ Подтвердить смену тарифа"
+BTN_PAYMENT_CONFIRM_FREE_CHANGE = "✅ Сменить бесплатно"
 
 BTN_PAYMENT_CONNECT_DEVICE = "🔌 Подключить устройство"
 

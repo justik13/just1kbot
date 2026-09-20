@@ -1,5 +1,7 @@
+from datetime import datetime, timezone
 import logging
 import math
+import uuid
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -11,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from bot import texts
-from database.models import Payment
+from database.models import Order, Payment
 from config.enums import (
     PaymentFulfillmentStatus,
     PaymentProviderStatus,
@@ -29,6 +31,14 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 PAYMENTS_PER_PAGE = 20
+
+
+def _normalize_dt(dt: datetime | None) -> datetime:
+    if dt is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def payment_display_status(payment) -> str:
@@ -59,6 +69,18 @@ def payment_display_status(payment) -> str:
         PaymentProviderStatus.WAITING_FOR_CAPTURE,
         PaymentProviderStatus.UNKNOWN,
     }:
+        return "pending"
+    return "failed"
+
+
+def order_display_status(order: Order) -> str:
+    if order.status == "paid":
+        return "completed"
+    if order.status == "canceled":
+        return "cancelled"
+    if order.status == "refunded":
+        return "refunded"
+    if order.status == "pending":
         return "pending"
     return "failed"
 
@@ -98,24 +120,44 @@ async def _build_payments_list_text_and_kb(
         rendered += texts.ADMIN_PAYMENTS_LIST_EMPTY
     else:
         for payment in payments:
-            display_status = payment_display_status(payment)
-            status_icon = texts.PAYMENT_STATUS_ICONS.get(
-                display_status,
-                texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
-            )
-            if payment.user and payment.user.username:
-                user_label = f"@{payment.user.username}"
-            elif payment.user:
-                user_label = texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=payment.user.telegram_id)
+            if isinstance(payment, Order):
+                display_status = order_display_status(payment)
+                status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                    display_status,
+                    texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
+                )
+                if payment.user and payment.user.username:
+                    user_label = f"@{payment.user.username}"
+                elif payment.user:
+                    user_label = texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=payment.user.telegram_id)
+                else:
+                    user_label = texts.PLACEHOLDER_DASH
+                button_text = truncate_button_text(
+                    f"{status_icon} #{str(payment.id)[:8]} • {user_label} • {int(payment.amount_rub)} ₽"
+                )
+                builder.button(
+                    text=button_text,
+                    callback_data=f"admin_order_card:{payment.id}",
+                )
             else:
-                user_label = texts.PLACEHOLDER_DASH
-            button_text = truncate_button_text(
-                texts.ADMIN_PAYMENTS_ROW_ENTRY.format(status_icon=status_icon, payment_id=payment.id, user_label=user_label, amount_rub=payment.amount)
-            )
-            builder.button(
-                text=button_text,
-                callback_data=f"admin_payment_card:{payment.id}",
-            )
+                display_status = payment_display_status(payment)
+                status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                    display_status,
+                    texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
+                )
+                if payment.user and payment.user.username:
+                    user_label = f"@{payment.user.username}"
+                elif payment.user:
+                    user_label = texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=payment.user.telegram_id)
+                else:
+                    user_label = texts.PLACEHOLDER_DASH
+                button_text = truncate_button_text(
+                    texts.ADMIN_PAYMENTS_ROW_ENTRY.format(status_icon=status_icon, payment_id=payment.id, user_label=user_label, amount_rub=payment.amount)
+                )
+                builder.button(
+                    text=button_text,
+                    callback_data=f"admin_payment_card:{payment.id}",
+                )
     if page > 1:
         builder.button(
             text=texts.ADMIN_BTN_PAGINATION_PREV,
@@ -137,28 +179,51 @@ async def _show_payments_list(
     session: AsyncSession,
     page: int = 1,
 ):
-    total_payments = await session.scalar(
-        select(func.count(Payment.id)),
-    ) or 0
+    total_orders = (
+        await session.scalar(
+            select(func.count(Order.id))
+        )
+        or 0
+    )
+    total_legacy = (
+        await session.scalar(
+            select(func.count(Payment.id))
+        )
+        or 0
+    )
+    total_payments = total_orders + total_legacy
     total_pages = max(
         1,
         math.ceil(total_payments / PAYMENTS_PER_PAGE),
     )
-    page = min(page, total_pages)
+    page = min(max(1, page), total_pages)
     offset = (page - 1) * PAYMENTS_PER_PAGE
-    stmt = (
-        select(Payment)
-        .options(
-            selectinload(Payment.user),
-        )
-        .order_by(Payment.created_at.desc())
-        .offset(offset)
-        .limit(PAYMENTS_PER_PAGE)
+    needed = offset + PAYMENTS_PER_PAGE
+
+    order_stmt = (
+        select(Order)
+        .options(selectinload(Order.user))
+        .order_by(Order.created_at.desc())
+        .limit(needed)
     )
-    result = await session.execute(stmt)
-    payments = result.scalars().all()
+    legacy_stmt = (
+        select(Payment)
+        .options(selectinload(Payment.user))
+        .order_by(Payment.created_at.desc())
+        .limit(needed)
+    )
+    orders = (await session.execute(order_stmt)).scalars().all()
+    legacy_payments = (await session.execute(legacy_stmt)).scalars().all()
+
+    combined = sorted(
+        [*orders, *legacy_payments],
+        key=lambda item: _normalize_dt(item.created_at),
+        reverse=True,
+    )
+    page_items = combined[offset : offset + PAYMENTS_PER_PAGE]
+
     rendered, kb = await _build_payments_list_text_and_kb(
-        payments,
+        page_items,
         page,
         total_pages,
         total_payments,
@@ -255,27 +320,47 @@ async def show_user_payments_list(
         return
 
     await state.clear()
-    total_payments = (
+    user_orders_count = (
+        await session.scalar(
+            select(func.count(Order.id)).where(Order.user_id == user.id)
+        )
+        or 0
+    )
+    user_legacy_count = (
         await session.scalar(
             select(func.count(Payment.id)).where(Payment.user_id == user.id)
         )
         or 0
     )
+    total_payments = user_orders_count + user_legacy_count
 
     total_pages = max(1, math.ceil(total_payments / PAYMENTS_PER_PAGE))
     page = min(max(1, page), total_pages)
     offset = (page - 1) * PAYMENTS_PER_PAGE
+    needed = offset + PAYMENTS_PER_PAGE
 
-    stmt = (
+    order_stmt = (
+        select(Order)
+        .where(Order.user_id == user.id)
+        .options(selectinload(Order.user))
+        .order_by(Order.created_at.desc())
+        .limit(needed)
+    )
+    payment_stmt = (
         select(Payment)
         .where(Payment.user_id == user.id)
         .options(selectinload(Payment.user))
         .order_by(Payment.created_at.desc())
-        .offset(offset)
-        .limit(PAYMENTS_PER_PAGE)
+        .limit(needed)
     )
-    result = await session.execute(stmt)
-    payments = result.scalars().all()
+    orders = (await session.execute(order_stmt)).scalars().all()
+    legacy = (await session.execute(payment_stmt)).scalars().all()
+    combined = sorted(
+        [*orders, *legacy],
+        key=lambda item: _normalize_dt(item.created_at),
+        reverse=True,
+    )
+    page_items = combined[offset : offset + PAYMENTS_PER_PAGE]
 
     user_label = user.username or str(user.telegram_id)
     header = texts.ADMIN_PAYMENTS_USER_TITLE.format(
@@ -286,23 +371,37 @@ async def show_user_payments_list(
     ) + "\n\n"
 
     builder = InlineKeyboardBuilder()
-    if not payments:
+    if not page_items:
         rendered = header + texts.ADMIN_PAYMENTS_USER_EMPTY
     else:
         rendered = header
-        for payment in payments:
-            display_status = payment_display_status(payment)
-            status_icon = texts.PAYMENT_STATUS_ICONS.get(
-                display_status,
-                texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
-            )
-            button_text = truncate_button_text(
-                f"{status_icon} #{payment.id} • {payment.amount} ₽ ({format_datetime(payment.created_at)})"
-            )
-            builder.button(
-                text=button_text,
-                callback_data=f"admin_payment_card:{payment.id}",
-            )
+        for item in page_items:
+            if isinstance(item, Order):
+                display_status = order_display_status(item)
+                status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                    display_status,
+                    texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
+                )
+                button_text = truncate_button_text(
+                    f"{status_icon} #{str(item.id)[:8]} • {int(item.amount_rub)} ₽ ({format_datetime(item.created_at)})"
+                )
+                builder.button(
+                    text=button_text,
+                    callback_data=f"admin_order_card:{item.id}",
+                )
+            else:
+                display_status = payment_display_status(item)
+                status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                    display_status,
+                    texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
+                )
+                button_text = truncate_button_text(
+                    f"{status_icon} #{item.id} • {item.amount} ₽ ({format_datetime(item.created_at)})"
+                )
+                builder.button(
+                    text=button_text,
+                    callback_data=f"admin_payment_card:{item.id}",
+                )
 
     if page > 1:
         builder.button(
@@ -433,4 +532,91 @@ async def show_payment_card(
         )
     except TelegramBadRequest as e:
         logger.debug("show_payment_card edit_text failed: %s", e)
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data.startswith("admin_order_card:"))
+async def show_order_card(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    try:
+        order_id_str = callback.data.split(":")[1]
+        order_uuid = uuid.UUID(order_id_str)
+    except (IndexError, ValueError, TypeError):
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+    await state.clear()
+    order = await session.scalar(
+        select(Order)
+        .where(Order.id == order_uuid)
+        .options(selectinload(Order.user), selectinload(Order.tariff))
+    )
+    if not order:
+        await callback.answer(texts.ADMIN_PAYMENT_NOT_FOUND_ALERT, show_alert=True)
+        return
+    user = order.user
+    if user and user.username:
+        user_label = texts.ADMIN_PAYMENT_USER_WITH_ID.format(
+            username=safe(user.username),
+            user_id=user.telegram_id,
+        )
+        user_telegram_id = user.telegram_id
+    elif user:
+        user_label = texts.ADMIN_PAYMENT_USER_ID.format(user_id=user.telegram_id)
+        user_telegram_id = user.telegram_id
+    else:
+        user_label = texts.PLACEHOLDER_DASH
+        user_telegram_id = None
+
+    display_status = order_display_status(order)
+    status_name = texts.PAYMENT_STATUS_NAMES.get(display_status, display_status)
+    status_icon = texts.PAYMENT_STATUS_ICONS.get(
+        display_status, texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON
+    )
+
+    tariff_label = order.tariff.name if order.tariff else order.service_type
+    lines = [
+        f"🧾 <b>Заказ #{str(order.id)[:8]}</b>",
+        "",
+        f"👤 <b>Пользователь:</b> {user_label}",
+        f"💰 <b>Сумма:</b> <b>{int(order.amount_rub)} ₽</b>",
+        f"📦 <b>Услуга:</b> {safe(tariff_label)} ({safe(order.service_type)})",
+        f"📊 <b>Статус:</b> {status_icon} {status_name} (<code>{order.status}</code>)",
+        f"💳 <b>Метод:</b> <code>{safe(order.payment_method)}</code>",
+        f"🕒 <b>Создан:</b> {format_datetime(order.created_at)}",
+    ]
+    if order.paid_at:
+        lines.append(f"✅ <b>Оплачен:</b> {format_datetime(order.paid_at)}")
+    if order.refunded_at:
+        lines.append(f"↩️ <b>Возврат:</b> {format_datetime(order.refunded_at)}")
+    if order.external_id:
+        lines.append(f"🔗 <b>Внешний ID:</b> <code>{safe(order.external_id)}</code>")
+    if order.description:
+        lines.append(f"📝 <b>Описание:</b> {safe(order.description)}")
+
+    rendered = "\n".join(lines)
+    builder = InlineKeyboardBuilder()
+    if user_telegram_id:
+        builder.button(
+            text=texts.ADMIN_CLIENT_CARD_BUTTON,
+            callback_data=f"admin_user_card:{user_telegram_id}",
+        )
+    builder.button(
+        text=texts.ADMIN_BTN_BACK_TO_PAYMENTS,
+        callback_data="admin_payments",
+    )
+    builder.adjust(1)
+    try:
+        await callback.message.edit_text(
+            rendered,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug("show_order_card edit_text failed: %s", e)
     await callback.answer(show_alert=False)

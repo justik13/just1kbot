@@ -455,7 +455,13 @@ def get_order_checkout_keyboard(
     back_callback: str,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    if can_pay_wallet:
+    if price == 0:
+        builder.button(
+            text=texts.BTN_PAYMENT_CONFIRM_FREE_CHANGE,
+            callback_data=f"order_pay_wallet:{tariff_id}",
+            style="success",
+        )
+    elif can_pay_wallet:
         builder.button(
             text=texts.BTN_PAYMENT_BUY_FROM_BALANCE,
             callback_data=f"order_pay_wallet:{tariff_id}",

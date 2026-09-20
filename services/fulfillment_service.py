@@ -7,6 +7,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.constants import VPN_ACCESS_GRACE_HOURS
 from database.models import Order, User
 from services.subscription import SubscriptionService
 from services.user_cache import invalidate_user_cache
@@ -61,29 +62,35 @@ class FulfillmentService:
             sub = await get_subscription_by_user_id(session, user.id)
             if (order.traffic_bytes or 0) > 0 and (order.duration_days or 0) == 0:
                 pack_gb = max(1, order.traffic_bytes // (1024**3))
-                await WhiteInternetService.topup_quota(
+                ok, msg, _ = await WhiteInternetService.topup_quota(
                     session,
                     user.id,
                     pack_gb,
                     actor_telegram_id=user.telegram_id,
                     debit_balance=False,
                 )
+                if not ok:
+                    raise RuntimeError(f"White Internet quota topup failed: {msg}")
             elif order.device_limit and (order.duration_days or 0) == 0:
-                await WhiteInternetService.purchase_device_slot(
+                ok, msg, _ = await WhiteInternetService.purchase_device_slot(
                     session,
                     user.id,
                     actor_telegram_id=user.telegram_id,
                     debit_balance=False,
                 )
+                if not ok:
+                    raise RuntimeError(f"White Internet device slot purchase failed: {msg}")
             else:
                 if sub and sub.status in ("ACTIVE", "EXPIRED", "EXHAUSTED"):
-                    await WhiteInternetService.renew_subscription(
+                    ok, msg, _ = await WhiteInternetService.renew_subscription(
                         session, user.id, debit_balance=False
                     )
                 else:
-                    await WhiteInternetService.purchase_subscription(
+                    ok, msg, _ = await WhiteInternetService.purchase_subscription(
                         session, user.id, debit_balance=False
                     )
+                if not ok:
+                    raise RuntimeError(f"White Internet subscription fulfillment failed: {msg}")
             logger.info("Fulfilled White Internet order %s for user %s", order.id, user.id)
 
         elif order.service_type == "topup":
@@ -105,16 +112,20 @@ class FulfillmentService:
         if order.service_type == "awg":
             if order.duration_days > 0 and user.subscription_end:
                 now = now_utc()
-                user.subscription_end = max(
-                    now, user.subscription_end - timedelta(days=order.duration_days)
-                )
+                new_end = user.subscription_end - timedelta(days=order.duration_days)
+                cutoff = now - timedelta(hours=VPN_ACCESS_GRACE_HOURS + 1)
+                if new_end <= now:
+                    user.subscription_end = cutoff
+                else:
+                    user.subscription_end = new_end
                 await SubscriptionService.sync_access_state(session, user)
                 invalidate_user_cache(user.telegram_id)
                 logger.info(
-                    "Revoked AWG order %s for user %s: -%s days",
+                    "Revoked AWG order %s for user %s: -%s days (subscription_end=%s)",
                     order.id,
                     user.id,
                     order.duration_days,
+                    user.subscription_end,
                 )
 
         elif order.service_type == "white_internet":

@@ -224,7 +224,9 @@ class WhiteInternetService:
         now = now_utc()
         if existing is not None:
             if getattr(existing, "is_trial", False):
-                return await cls.convert_trial_to_paid(session, user_id)
+                return await cls.convert_trial_to_paid(
+                    session, user_id, debit_balance=debit_balance
+                )
             if existing.status == WhiteInternetStatus.DISABLED:
                 return False, texts.WL_SUB_DISABLED, existing
             if (
@@ -330,7 +332,9 @@ class WhiteInternetService:
         return True, texts.WL_BUY_SUCCESS, sub
 
     @classmethod
-    async def convert_trial_to_paid(cls, session: AsyncSession, user_id: int):
+    async def convert_trial_to_paid(
+        cls, session: AsyncSession, user_id: int, debit_balance: bool = True
+    ):
         """Convert an existing trial subscription to a full paid subscription."""
         user = await lock_checkout_user(session, user_id)
         if user is None:
@@ -385,41 +389,42 @@ class WhiteInternetService:
         tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff_version.price_rub))
         tier_base_bytes = sub_device_limit * tariff_version.base_quota_bytes
 
-        quote = cls._new_quote(
-            user_id=user.id,
-            operation_type=TariffQuoteOperation.PURCHASE,
-            target_version_id=tariff_version.id,
-            source_version_id=tariff_version.id,
-            amount_due=tier_price,
-            expires_at=now + timedelta(minutes=15),
-            resulting_paid_hours=tariff_version.duration_hours,
-            resulting_paid_value=tier_price,
-        )
-        session.add(quote)
-        await session.flush()
-        try:
-            await create_purchase_debit(
-                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+        if debit_balance:
+            quote = cls._new_quote(
+                user_id=user.id,
+                operation_type=TariffQuoteOperation.PURCHASE,
+                target_version_id=tariff_version.id,
+                source_version_id=tariff_version.id,
+                amount_due=tier_price,
+                expires_at=now + timedelta(minutes=15),
+                resulting_paid_hours=tariff_version.duration_hours,
+                resulting_paid_value=tier_price,
             )
-        except InsufficientAccountBalanceError:
-            quote.status = TariffQuoteStatus.CANCELLED
+            session.add(quote)
             await session.flush()
-            balance_snap = await get_account_balance(session, user_id=user.id)
-            return (
-                False,
-                texts.WL_INSUFFICIENT_BALANCE_BUY.format(
-                    price=int(tier_price),
-                    balance=balance_snap.available,
-                    shortage=max(tier_price - balance_snap.available, Decimal(0)),
-                ),
-                None,
-            )
-        except AccountLedgerError as exc:
-            quote.status = TariffQuoteStatus.CANCELLED
-            await session.flush()
-            return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
-        quote.status = TariffQuoteStatus.CONSUMED
-        quote.consumed_at = now_utc()
+            try:
+                await create_purchase_debit(
+                    session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+                )
+            except InsufficientAccountBalanceError:
+                quote.status = TariffQuoteStatus.CANCELLED
+                await session.flush()
+                balance_snap = await get_account_balance(session, user_id=user.id)
+                return (
+                    False,
+                    texts.WL_INSUFFICIENT_BALANCE_BUY.format(
+                        price=int(tier_price),
+                        balance=balance_snap.available,
+                        shortage=max(tier_price - balance_snap.available, Decimal(0)),
+                    ),
+                    None,
+                )
+            except AccountLedgerError as exc:
+                quote.status = TariffQuoteStatus.CANCELLED
+                await session.flush()
+                return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+            quote.status = TariffQuoteStatus.CONSUMED
+            quote.consumed_at = now_utc()
 
         old_origin_for_cleanup: Server | None = None
         if needs_migration and new_origin_server is not None:
@@ -502,7 +507,9 @@ class WhiteInternetService:
         if sub is None:
             return False, texts.WL_SUB_NOT_FOUND, None
         if getattr(sub, "is_trial", False):
-            return await cls.convert_trial_to_paid(session, user_id)
+            return await cls.convert_trial_to_paid(
+                session, user_id, debit_balance=debit_balance
+            )
         if sub.status == WhiteInternetStatus.DISABLED:
             return False, texts.WL_SUB_DISABLED, None
         if sub.status == WhiteInternetStatus.PENDING:
