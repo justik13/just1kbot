@@ -221,7 +221,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.external_id, "ext-999")
         self.assertEqual(order.payment_url, "https://pay.link/999")
         self.assertEqual(order.status, "pending")
-        session.commit.assert_called_once()
+        session.flush.assert_called()
 
     @patch("services.order_service.FulfillmentService.fulfill_order")
     @patch("services.order_service.create_order_debit")
@@ -251,7 +251,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.payment_method, "wallet")
         mock_debit.assert_called_once()
         mock_fulfill.assert_called_once_with(session, order)
-        session.commit.assert_called_once()
+        session.flush.assert_called()
 
     @patch("services.order_service.get_account_balance")
     async def test_pay_from_wallet_insufficient_balance(self, mock_bal):
@@ -312,7 +312,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         mock_credit.assert_not_called()
         mock_debit.assert_not_called()
         mock_fulfill.assert_called_once_with(session, order)
-        session.commit.assert_called_once()
+        session.flush.assert_called()
 
     @patch("services.order_service.FulfillmentService.revoke_order")
     @patch("services.order_service.create_order_refund_debit")
@@ -347,7 +347,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.status, "refunded")
         mock_refund_debit.assert_not_called()
         mock_revoke.assert_called_once_with(session, order)
-        session.commit.assert_called_once()
+        session.flush.assert_called()
 
 
 class TestOrderKeyboards(unittest.TestCase):

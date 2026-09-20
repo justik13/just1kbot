@@ -44,17 +44,6 @@ class AccountDebtBlockedError(Exception):
 
 class OrderService:
     @staticmethod
-    async def _safe_commit(session: AsyncSession) -> None:
-        """Safely commit or flush if transaction is managed by an outer begin() block."""
-        try:
-            await session.commit()
-        except Exception as exc:
-            if "managed by begin" in str(exc).lower():
-                await session.flush()
-            else:
-                raise
-
-    @staticmethod
     def calculate_tariff_change(
         current_tariff: Tariff | None,
         target_tariff: Tariff,
@@ -165,7 +154,7 @@ class OrderService:
                 await session.rollback()
                 raise
 
-        await OrderService._safe_commit(session)
+        await session.flush()
         return order
 
     @staticmethod
@@ -237,7 +226,7 @@ class OrderService:
 
         # Fulfill
         await FulfillmentService.fulfill_order(session, order)
-        await OrderService._safe_commit(session)
+        await session.flush()
         return order
 
     @staticmethod
@@ -291,7 +280,7 @@ class OrderService:
 
         # Fulfill benefits linearly
         await FulfillmentService.fulfill_order(session, order)
-        await OrderService._safe_commit(session)
+        await session.flush()
         logger.info("Order %s marked paid and fulfilled successfully", order.id)
         return order
 
@@ -360,7 +349,7 @@ class OrderService:
                 )
 
             await FulfillmentService.revoke_order(session, order)
-            await OrderService._safe_commit(session)
+            await session.flush()
             logger.info("Order %s refunded and revoked", order.id)
             return order
 
