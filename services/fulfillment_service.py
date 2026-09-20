@@ -49,21 +49,24 @@ class FulfillmentService:
             )
 
         elif order.service_type == "white_internet":
-            from database.repositories.white_internet_repo import get_user_subscription
+            from database.repositories.white_internet_repo import (
+                get_subscription_by_user_id,
+            )
 
-            sub = await get_user_subscription(session, user.id)
+            sub = await get_subscription_by_user_id(session, user.id)
             if order.traffic_bytes > 0 and order.duration_days == 0:
+                pack_gb = max(1, order.traffic_bytes // (1024**3))
                 await WhiteInternetService.topup_quota(
                     session,
-                    user_id=user.id,
-                    topup_bytes=order.traffic_bytes,
-                    cost_rub=order.amount_rub,
+                    user.id,
+                    pack_gb,
+                    actor_telegram_id=user.telegram_id,
                 )
             elif order.device_limit and order.duration_days == 0:
                 await WhiteInternetService.purchase_device_slot(
                     session,
-                    user_id=user.id,
-                    cost_rub=order.amount_rub,
+                    user.id,
+                    actor_telegram_id=user.telegram_id,
                 )
             else:
                 if sub and sub.status in ("ACTIVE", "EXPIRED", "EXHAUSTED"):

@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.constants import AdminAuditAction
-from bot.handlers.admin.disputes import router as disputes_router
 from bot.keyboards import (
     get_admin_cat_finance_keyboard,
     get_admin_cat_infra_keyboard,
@@ -46,7 +45,6 @@ from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_details
 
 router = Router()
-router.include_router(disputes_router)
 logger = logging.getLogger(__name__)
 
 
@@ -90,20 +88,11 @@ async def _get_financial_stats(session: AsyncSession) -> dict:
 
 
 async def _get_disputes_count(session: AsyncSession) -> int:
-    from database.dispute_models import PaymentDispute
-    stmt = select(func.count(PaymentDispute.id)).where(
-        PaymentDispute.status.in_(["open", "manual_review"])
-    )
-    return int((await session.scalar(stmt)) or 0)
+    return 0
 
 
 async def _get_dead_queues_count(session: AsyncSession) -> int:
-    from services.payment_queue_health import get_payment_queue_health_snapshot
-    try:
-        snapshot = await get_payment_queue_health_snapshot(session)
-        return sum(q.dead for q in snapshot.queues)
-    except Exception:
-        return 0
+    return 0
 
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:

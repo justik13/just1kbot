@@ -116,7 +116,7 @@ class TestSetupBotLifecycleIdempotency(unittest.IsolatedAsyncioTestCase):
     """Verifies setup_bot() can be called repeatedly without router/parent conflicts."""
 
     async def test_repeated_setup_bot_lifecycle_clean(self):
-        from bot.handlers.admin import dashboard_router, disputes_router
+        from bot.handlers.admin import dashboard_router, payments_router
         from bot.main import setup_bot
 
         fake_settings = MagicMock()
@@ -139,7 +139,7 @@ class TestSetupBotLifecycleIdempotency(unittest.IsolatedAsyncioTestCase):
                 try:
                     self.assertIn(admin_router, dp.sub_routers)
                     self.assertIn(dashboard_router, admin_router.sub_routers)
-                    self.assertIn(disputes_router, dashboard_router.sub_routers)
+                    self.assertIn(payments_router, admin_router.sub_routers)
                 finally:
                     await storage.close()
                     for r in dp.sub_routers[:]:
@@ -430,10 +430,8 @@ class TestAdminRouterDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
             ("admin_users", "bot.handlers.admin.users.list_routes._build_users_list_text_and_kb"),
             ("admin_servers", "bot.handlers.admin.servers.list_routes._show_servers_list"),
             ("admin_tariffs", "bot.handlers.admin.tariffs._build_tariffs_list_text_and_kb"),
-            ("admin_disputes", "bot.handlers.admin.disputes._list_keyboard"),
             ("admin_payments", "bot.handlers.admin.payments._show_payments_list"),
             ("admin_purchases", "bot.handlers.admin.purchases._show_purchases_list"),
-            ("aq:home", "bot.handlers.admin.payment_queues._show_home"),
         ]
 
         with (

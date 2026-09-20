@@ -92,7 +92,7 @@ async def is_first_topup_eligible(
 
     from sqlalchemy import func
 
-    from database.models import Payment
+    from database.models import Order, Payment
 
     count = await session.scalar(
         select(func.count(Payment.id)).where(
@@ -101,7 +101,14 @@ async def is_first_topup_eligible(
             Payment.fulfillment_status == "succeeded",
         )
     )
-    return (count or 0) == 0
+    order_count = await session.scalar(
+        select(func.count(Order.id)).where(
+            Order.user_id == user_id,
+            Order.service_type == "topup",
+            Order.status == "paid",
+        )
+    )
+    return (count or 0) == 0 and (order_count or 0) == 0
 
 
 async def grant_referral_bonus_for_topup(

@@ -12,13 +12,13 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from database.models import Payment
+from config.enums import (
+    PaymentFulfillmentStatus,
+    PaymentProviderStatus,
+    PaymentReconciliationStatus,
+)
 from database.repositories.account_ledger_repo import get_payment_refundable_amount
 from database.repositories.payments_repo import get_payment_by_id
-from services.payment_status import payment_display_status
-from services.provider_refunds import (
-    BalanceRefundError,
-    request_balance_topup_refund,
-)
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
@@ -31,12 +31,37 @@ logger = logging.getLogger(__name__)
 PAYMENTS_PER_PAGE = 20
 
 
-def _refund_available(payment: Payment) -> bool:
-    return bool(
-        payment.provider_status == "succeeded"
-        and payment.external_id
-        and payment.currency == "RUB"
-    )
+def payment_display_status(payment) -> str:
+    if (
+        payment.reconciliation_status in {PaymentReconciliationStatus.MISMATCH, PaymentReconciliationStatus.MANUAL_REVIEW}
+        or payment.provider_status == PaymentProviderStatus.MANUAL_REVIEW
+        or payment.fulfillment_status == PaymentFulfillmentStatus.MANUAL_REVIEW
+    ):
+        return "requires_manual_review"
+    if (
+        payment.provider_status == PaymentProviderStatus.REFUNDED
+        or payment.fulfillment_status == PaymentFulfillmentStatus.REVERSED
+    ):
+        return "refunded"
+    if payment.provider_status == PaymentProviderStatus.CANCELED:
+        return "cancelled"
+    if (
+        payment.provider_status == PaymentProviderStatus.SUCCEEDED
+        and payment.fulfillment_status == PaymentFulfillmentStatus.SUCCEEDED
+    ):
+        return "completed"
+    if payment.provider_status == PaymentProviderStatus.SUCCEEDED:
+        return "paid_processing"
+    if payment.provider_status in {
+        PaymentProviderStatus.NOT_CREATED,
+        PaymentProviderStatus.CREATING,
+        PaymentProviderStatus.PENDING,
+        PaymentProviderStatus.WAITING_FOR_CAPTURE,
+        PaymentProviderStatus.UNKNOWN,
+    }:
+        return "pending"
+    return "failed"
+
 
 
 def _get_payment_card_keyboard(
@@ -44,12 +69,6 @@ def _get_payment_card_keyboard(
     user_telegram_id: int | None,
 ) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
-
-    if _refund_available(payment):
-        builder.button(
-            text=texts.ADMIN_REFUND_START_BUTTON,
-            callback_data=f"admin_payment_refund:{payment.id}",
-        )
 
     if user_telegram_id:
         builder.button(
@@ -156,14 +175,10 @@ async def _show_payments_list(
 
 @router.callback_query(F.data == "stale_alerts:dismiss")
 async def dismiss_stale_alert(callback: CallbackQuery):
-    """Dismiss semantics: hide the card now, keep it silent while the
-    underlying state is unchanged, re-deliver a fresh card on change."""
+    """Dismiss semantics: hide the card now."""
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
-    from services.workers.payments import dismiss_stale_alert_card
-
-    dismiss_stale_alert_card(callback.from_user.id)
     try:
         await callback.message.delete()
     except Exception:
@@ -379,12 +394,13 @@ async def show_payment_card(
         )
 
     refundable_line = ""
-    if _refund_available(payment):
+    if payment.provider_status == "succeeded" and payment.currency == "RUB":
         refundable = await get_payment_refundable_amount(
             session,
             payment_id=payment.id,
         )
-        refundable_line = texts.ADMIN_PAYMENT_REFUNDABLE_LINE.format(amount_rub=int(refundable))
+        if refundable > 0:
+            refundable_line = texts.ADMIN_PAYMENT_REFUNDABLE_LINE.format(amount_rub=int(refundable))
 
     rendered = (
         texts.ADMIN_PAYMENT_CARD_TEMPLATE.format(
@@ -418,111 +434,3 @@ async def show_payment_card(
     except TelegramBadRequest as e:
         logger.debug("show_payment_card edit_text failed: %s", e)
     await callback.answer(show_alert=False)
-
-
-@router.callback_query(F.data.startswith("admin_payment_refund:"))
-async def confirm_payment_refund(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-    payment_id = parse_callback_id(callback.data, 1)
-    payment = (
-        await get_payment_by_id(session, payment_id)
-        if payment_id is not None
-        else None
-    )
-    if payment is None or not _refund_available(payment):
-        await callback.answer(texts.ADMIN_REFUND_NOT_AVAILABLE_ALERT, show_alert=True)
-        return
-    refundable = await get_payment_refundable_amount(
-        session,
-        payment_id=payment.id,
-    )
-    if refundable <= 0:
-        await callback.answer(texts.ADMIN_REFUND_NO_REMAINDER_ALERT, show_alert=True)
-        return
-    await state.clear()
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.ADMIN_REFUND_CONFIRM_BUTTON.format(amount_rub=int(refundable)),
-        callback_data=f"admin_payment_refund_confirm:{payment.id}",
-    )
-    builder.button(
-        text=texts.ADMIN_BTN_BACK_TO_PAYMENT,
-        callback_data=f"admin_payment_card:{payment.id}",
-    )
-    builder.adjust(1)
-    await callback.message.edit_text(
-        texts.ADMIN_REFUND_CONFIRMATION_BODY.format(
-            payment_id=payment.id,
-            provider_payment_id=safe(payment.external_id),
-            amount_rub=int(refundable),
-        ),
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("admin_payment_refund_confirm:"))
-async def enqueue_payment_refund(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-    payment_id = parse_callback_id(callback.data, 1)
-    if payment_id is None:
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
-        return
-    try:
-        request = await request_balance_topup_refund(
-            session,
-            payment_id=payment_id,
-            requested_by_admin_id=callback.from_user.id,
-        )
-    except BalanceRefundError as exc:
-        messages = {
-            "payment_not_found": texts.ADMIN_PAYMENT_NOT_FOUND_ALERT,
-            "refund_requires_balance_topup": texts.ADMIN_REFUND_ERR_ONLY_TOPUP,
-            "payment_not_refundable": texts.ADMIN_REFUND_ERR_NOT_REFUNDABLE,
-            "provider_payment_id_missing": texts.ADMIN_REFUND_ERR_NO_PROVIDER_ID,
-            "no_refundable_balance": texts.ADMIN_REFUND_NO_REMAINDER_ALERT,
-            "active_refund_reservation_missing": texts.ADMIN_REFUND_ERR_MANUAL_REVIEW,
-        }
-        await callback.answer(
-            messages.get(exc.code, texts.ADMIN_REFUND_ENQUEUE_FAILED_ALERT),
-            show_alert=True,
-        )
-        return
-
-    await state.clear()
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.ADMIN_BTN_BACK_TO_PAYMENT,
-        callback_data=f"admin_payment_card:{payment_id}",
-    )
-    builder.button(text=texts.ADMIN_PAYMENTS_BACK_TO_LIST_BUTTON, callback_data="admin_payments")
-    builder.adjust(1)
-    status_text = (
-        texts.ADMIN_REFUND_ENQUEUED_STATUS
-        if request.created
-        else texts.ADMIN_REFUND_ALREADY_QUEUED_STATUS
-    )
-    await callback.message.edit_text(
-        texts.ADMIN_REFUND_ACCEPTED_TEMPLATE.format(
-            status_text=status_text,
-            amount_rub=int(request.operation.amount),
-            operation_id=safe(request.operation.operation_id),
-            operation_status=safe(request.operation.status),
-        ),
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-    )
-    await callback.answer()

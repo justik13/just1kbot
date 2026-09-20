@@ -203,6 +203,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         mock_gw_factory.return_value = mock_gw
 
         session = AsyncMock(spec=AsyncSession)
+        session.scalar.return_value = None
         tariff = Tariff(id=1, name="Basic", price_rub=Decimal("150.00"), duration_days=30, device_limit=2)
         session.get.return_value = tariff
 
@@ -235,6 +236,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
             bonus_available=Decimal("0.00"),
         )
         session = AsyncMock(spec=AsyncSession)
+        session.scalar.return_value = None
         tariff = Tariff(id=1, name="Basic", price_rub=Decimal("200.00"), duration_days=30, device_limit=2)
         session.get.return_value = tariff
 
@@ -262,6 +264,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
             bonus_available=Decimal("0.00"),
         )
         session = AsyncMock(spec=AsyncSession)
+        session.scalar.return_value = None
         tariff = Tariff(id=1, name="Basic", price_rub=Decimal("200.00"), duration_days=30, device_limit=2)
         session.get.return_value = tariff
 
@@ -298,6 +301,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
             amount_rub=Decimal("200.00"),
             status="pending",
         )
+        session.scalar.return_value = order
         session.get.return_value = order
 
         success = await OrderService.process_webhook_event(session, {"some": "payload"})
@@ -305,8 +309,8 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(success)
         self.assertEqual(order.status, "paid")
         self.assertEqual(order.external_id, "ext-pay-888")
-        mock_credit.assert_called_once()
-        mock_debit.assert_called_once()
+        mock_credit.assert_not_called()
+        mock_debit.assert_not_called()
         mock_fulfill.assert_called_once_with(session, order)
         session.commit.assert_called_once()
 
@@ -334,13 +338,14 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
             amount_rub=Decimal("200.00"),
             status="paid",
         )
+        session.scalar.return_value = order
         session.get.return_value = order
 
         success = await OrderService.process_webhook_event(session, {"some": "payload"})
 
         self.assertTrue(success)
         self.assertEqual(order.status, "refunded")
-        mock_refund_debit.assert_called_once()
+        mock_refund_debit.assert_not_called()
         mock_revoke.assert_called_once_with(session, order)
         session.commit.assert_called_once()
 

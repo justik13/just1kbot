@@ -20,9 +20,6 @@ from .cleanup import cleanup_dangling_peers_loop
 from .heartbeat import heartbeat_loop
 from .node_monitor import node_monitor_loop
 from .notifications import subscription_notifications_loop
-from .payment_pipeline import payment_pipeline_loop
-from .payments import stale_payments_checker_loop
-from .queue_health import queue_health_loop
 from .traffic import traffic_sync_loop
 from .white_internet_reconciliation import white_internet_reconciliation_loop
 from .white_internet_traffic import white_internet_traffic_loop
@@ -97,13 +94,10 @@ _ALERT_SHUTDOWN_GRACE = 1.0
 
 def _traffic(bot): return traffic_sync_loop(bot, shutdown_event)
 def _cleanup(bot): return cleanup_dangling_peers_loop(bot, shutdown_event)
-def _stale_payments(bot): return stale_payments_checker_loop(bot, shutdown_event)
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
 def _api_operations(bot): return api_operations_loop(shutdown_event)
 def _account_balance(bot): return account_balance_notifications_loop(bot, shutdown_event)
-def _payment_pipeline(bot): return payment_pipeline_loop(bot, shutdown_event)
-def _queue_health(bot): return queue_health_loop(bot, shutdown_event)
 def _node_monitor(bot): return node_monitor_loop(bot, shutdown_event)
 def _white_internet_reconciliation(bot): return white_internet_reconciliation_loop(bot, shutdown_event)
 def _white_internet_traffic(bot): return white_internet_traffic_loop(bot, shutdown_event)
@@ -112,16 +106,13 @@ def _white_internet_traffic(bot): return white_internet_traffic_loop(bot, shutdo
 WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("traffic", _traffic, False),
     WorkerDefinition("cleanup", _cleanup, False),
-    WorkerDefinition("stale_payments", _stale_payments, False),
     WorkerDefinition("notifications", _notifications, False),
     WorkerDefinition("account_balance", _account_balance, False),
     WorkerDefinition("heartbeat", _heartbeat, False),
-    WorkerDefinition("queue_health", _queue_health, False),
     WorkerDefinition("node_monitor", _node_monitor, False),
     WorkerDefinition("white_internet_reconciliation", _white_internet_reconciliation, True),
     WorkerDefinition("white_internet_traffic", _white_internet_traffic, True),
     WorkerDefinition("api_operations", _api_operations, True),
-    WorkerDefinition("payment_pipeline", _payment_pipeline, True),
 )
 
 

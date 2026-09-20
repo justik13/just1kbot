@@ -148,6 +148,32 @@ def upgrade() -> None:
     )
 
     # 4. Partial indices on account_ledger_entries
+    op.drop_index(
+        "uq_account_ledger_payment_credit",
+        table_name="account_ledger_entries",
+    )
+    op.create_index(
+        "uq_account_ledger_payment_credit",
+        "account_ledger_entries",
+        ["payment_id"],
+        unique=True,
+        postgresql_where=sa.text(
+            "entry_type='payment_credit' AND payment_id IS NOT NULL"
+        ),
+    )
+    op.drop_index(
+        "uq_account_ledger_purchase_debit",
+        table_name="account_ledger_entries",
+    )
+    op.create_index(
+        "uq_account_ledger_purchase_debit",
+        "account_ledger_entries",
+        ["quote_id"],
+        unique=True,
+        postgresql_where=sa.text(
+            "entry_type='purchase_debit' AND quote_id IS NOT NULL"
+        ),
+    )
     op.create_index(
         "ix_account_ledger_order_id",
         "account_ledger_entries",
@@ -187,6 +213,31 @@ def downgrade() -> None:
         "ix_account_ledger_order_id",
         table_name="account_ledger_entries",
     )
+    op.drop_index(
+        "uq_account_ledger_payment_credit",
+        table_name="account_ledger_entries",
+    )
+    op.create_index(
+        "uq_account_ledger_payment_credit",
+        "account_ledger_entries",
+        ["payment_id"],
+        unique=True,
+        postgresql_where=sa.text("entry_type='payment_credit'"),
+    )
+    op.drop_index(
+        "uq_account_ledger_purchase_debit",
+        table_name="account_ledger_entries",
+    )
+    op.create_index(
+        "uq_account_ledger_purchase_debit",
+        "account_ledger_entries",
+        ["quote_id"],
+        unique=True,
+        postgresql_where=sa.text("entry_type='purchase_debit'"),
+    )
+
+    op.execute("DELETE FROM account_ledger_entries WHERE order_id IS NOT NULL")
+    op.drop_column("account_ledger_entries", "order_id")
 
     op.drop_constraint(
         "ck_account_ledger_entry_shape",
@@ -211,8 +262,6 @@ def downgrade() -> None:
         "(entry_type = 'admin_adjustment' AND payment_id IS NULL "
         "AND quote_id IS NULL AND reversal_of_id IS NULL)",
     )
-
-    op.drop_column("account_ledger_entries", "order_id")
 
     op.drop_index("ix_orders_status", table_name="orders")
     op.drop_index("ix_orders_external_id", table_name="orders")

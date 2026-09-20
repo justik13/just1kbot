@@ -113,10 +113,15 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         return web.Response(status=400, text="Invalid webhook")
     try:
         async with session_scope() as session:
+            from config.enums import WebhookInboxStatus
             from services.order_service import OrderService
 
             order = await OrderService.process_webhook_event(session, payload)
-            inbox_status = "processed" if order else "pending"
+            inbox_status = (
+                WebhookInboxStatus.SUCCEEDED.value
+                if order
+                else WebhookInboxStatus.PENDING.value
+            )
 
             if order and order.status == "paid":
                 bot = request.app.get("bot")

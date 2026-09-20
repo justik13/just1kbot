@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
 import uuid
@@ -10,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from database.models import Order, Tariff
+from database.models import Order, Tariff, User
 from database.repositories.account_ledger_repo import (
     create_order_credit,
     create_order_debit,
@@ -33,7 +34,41 @@ class InsufficientBalanceError(Exception):
         self.available = available
 
 
+class FinancialHoldBlockedError(Exception):
+    pass
+
+
+class AccountDebtBlockedError(Exception):
+    pass
+
+
 class OrderService:
+    @staticmethod
+    def calculate_tariff_change(
+        current_tariff: Tariff | None,
+        target_tariff: Tariff,
+        subscription_end: datetime | None,
+        now: datetime | None = None,
+    ) -> tuple[Decimal, int]:
+        """Calculate required payment in RUB and resulting days for tariff change."""
+        now = now or now_utc()
+        if not subscription_end or subscription_end <= now or not current_tariff:
+            return Decimal(target_tariff.price_rub), target_tariff.duration_days
+
+        days_left = max(0, (subscription_end - now).days)
+        if current_tariff.duration_days > 0 and current_tariff.price_rub > 0:
+            remaining_rub = Decimal(
+                round(
+                    (days_left / current_tariff.duration_days)
+                    * float(current_tariff.price_rub)
+                )
+            )
+        else:
+            remaining_rub = Decimal(0)
+
+        due_rub = max(Decimal(0), Decimal(target_tariff.price_rub) - remaining_rub)
+        return due_rub, target_tariff.duration_days
+
     @staticmethod
     async def create_order(
         session: AsyncSession,
@@ -50,6 +85,25 @@ class OrderService:
         return_url: str | None = None,
     ) -> Order:
         """Create a new commercial order and obtain payment link if external gateway."""
+        # 1. Deduplication guard for pending external orders (prevent double-clicks)
+        if payment_method != "wallet":
+            cutoff = now_utc() - timedelta(minutes=15)
+            existing = await session.scalar(
+                select(Order)
+                .where(
+                    Order.user_id == user_id,
+                    Order.service_type == service_type,
+                    Order.tariff_id == tariff_id,
+                    Order.status == "pending",
+                    Order.created_at >= cutoff,
+                    Order.payment_url.is_not(None),
+                )
+                .order_by(Order.created_at.desc())
+                .limit(1)
+            )
+            if existing and existing.payment_url:
+                return existing
+
         if tariff_id is not None:
             tariff = await session.get(Tariff, tariff_id)
             if tariff:
@@ -84,14 +138,21 @@ class OrderService:
 
         if payment_method != "wallet":
             gateway = get_payment_gateway(payment_method)
-            invoice = await gateway.create_payment_url(
-                order_id=str(order.id),
-                amount_rub=order.amount_rub,
-                description=final_desc,
-                return_url=return_url,
-            )
-            order.external_id = invoice.external_id
-            order.payment_url = invoice.payment_url
+            try:
+                invoice = await gateway.create_payment_url(
+                    order_id=str(order.id),
+                    amount_rub=order.amount_rub,
+                    description=final_desc,
+                    return_url=return_url,
+                )
+                order.external_id = invoice.external_id
+                order.payment_url = invoice.payment_url
+            except Exception as exc:
+                logger.exception(
+                    "Gateway failed to create payment for order %s: %s", order.id, exc
+                )
+                await session.rollback()
+                raise
 
         await session.commit()
         return order
@@ -110,6 +171,10 @@ class OrderService:
         description: str | None = None,
     ) -> Order:
         """Pay for an order immediately using internal wallet balance."""
+        user = await session.get(User, user_id)
+        if user and getattr(user, "financial_hold", False):
+            raise FinancialHoldBlockedError("Financial hold active on user")
+
         if tariff_id is not None:
             tariff = await session.get(Tariff, tariff_id)
             if tariff:
@@ -126,6 +191,8 @@ class OrderService:
         balance_snapshot = await get_account_balance(
             session, user_id=user_id, for_update=True
         )
+        if balance_snapshot.debt > 0:
+            raise AccountDebtBlockedError("Account debt prevents wallet purchases")
         if balance_snapshot.available < cost:
             raise InsufficientBalanceError(
                 required=cost, available=balance_snapshot.available
@@ -163,6 +230,61 @@ class OrderService:
         return order
 
     @staticmethod
+    async def mark_order_paid(
+        session: AsyncSession,
+        order_id: uuid.UUID | str,
+        *,
+        external_id: str | None = None,
+        paid_amount_rub: Decimal | None = None,
+    ) -> Order | None:
+        """Idempotent, atomic order settlement with row-level locking."""
+        order_uuid = uuid.UUID(str(order_id)) if not isinstance(order_id, uuid.UUID) else order_id
+        order = await session.scalar(
+            select(Order).where(Order.id == order_uuid).with_for_update()
+        )
+        if not order:
+            logger.warning("mark_order_paid: Order %s not found", order_id)
+            return None
+
+        if order.status == "paid":
+            logger.info("Order %s already marked paid, ignoring duplicate execution", order.id)
+            return order
+
+        if order.status in ("canceled", "refunded"):
+            logger.warning("Cannot mark %s order %s as paid", order.status, order.id)
+            return order
+
+        if paid_amount_rub is not None and paid_amount_rub < order.amount_rub:
+            logger.error(
+                "Order %s underpaid: expected %s, got %s",
+                order.id,
+                order.amount_rub,
+                paid_amount_rub,
+            )
+            return None
+
+        order.status = "paid"
+        order.paid_at = now_utc()
+        if external_id:
+            order.external_id = external_id
+
+        # Ledger records: ONLY topup credits user's bot wallet
+        if order.service_type == "topup":
+            await create_order_credit(
+                session,
+                user_id=order.user_id,
+                amount_rub=order.amount_rub,
+                order_id=order.id,
+                metadata={"source": f"{order.payment_method}_topup"},
+            )
+
+        # Fulfill benefits linearly
+        await FulfillmentService.fulfill_order(session, order)
+        await session.commit()
+        logger.info("Order %s marked paid and fulfilled successfully", order.id)
+        return order
+
+    @staticmethod
     async def process_webhook_event(
         session: AsyncSession,
         payload: dict,
@@ -180,13 +302,15 @@ class OrderService:
         if result.order_id:
             try:
                 order_uuid = uuid.UUID(result.order_id)
-                order = await session.get(Order, order_uuid)
+                order = await session.scalar(
+                    select(Order).where(Order.id == order_uuid).with_for_update()
+                )
             except (ValueError, TypeError):
                 pass
 
         if not order and result.external_id:
             order = await session.scalar(
-                select(Order).where(Order.external_id == result.external_id)
+                select(Order).where(Order.external_id == result.external_id).with_for_update()
             )
 
         if not order:
@@ -198,46 +322,12 @@ class OrderService:
             return None
 
         if result.is_paid:
-            if order.status == "paid":
-                logger.info(
-                    "Order %s already marked paid, ignoring duplicate webhook",
-                    order.id,
-                )
-                return order
-            order.status = "paid"
-            order.paid_at = now_utc()
-            if result.external_id:
-                order.external_id = result.external_id
-
-            # Create ledger records
-            if order.service_type == "topup":
-                await create_order_credit(
-                    session,
-                    user_id=order.user_id,
-                    amount_rub=order.amount_rub,
-                    order_id=order.id,
-                    metadata={"source": "yookassa_topup"},
-                )
-            else:
-                await create_order_credit(
-                    session,
-                    user_id=order.user_id,
-                    amount_rub=order.amount_rub,
-                    order_id=order.id,
-                    metadata={"source": "yookassa_payment"},
-                )
-                await create_order_debit(
-                    session,
-                    user_id=order.user_id,
-                    amount_rub=order.amount_rub,
-                    order_id=order.id,
-                    metadata={"description": order.description},
-                )
-
-            await FulfillmentService.fulfill_order(session, order)
-            await session.commit()
-            logger.info("Order %s successfully paid and fulfilled", order.id)
-            return order
+            return await OrderService.mark_order_paid(
+                session,
+                order.id,
+                external_id=result.external_id,
+                paid_amount_rub=result.amount_rub,
+            )
 
         if result.is_refunded:
             if order.status == "refunded":
@@ -249,13 +339,14 @@ class OrderService:
             order.status = "refunded"
             order.refunded_at = now_utc()
 
-            await create_order_refund_debit(
-                session,
-                user_id=order.user_id,
-                amount_rub=order.amount_rub,
-                order_id=order.id,
-                metadata={"source": "yookassa_refund"},
-            )
+            if order.service_type == "topup":
+                await create_order_refund_debit(
+                    session,
+                    user_id=order.user_id,
+                    amount_rub=order.amount_rub,
+                    order_id=order.id,
+                    metadata={"source": "yookassa_refund"},
+                )
 
             await FulfillmentService.revoke_order(session, order)
             await session.commit()

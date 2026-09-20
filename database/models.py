@@ -785,7 +785,7 @@ class Order(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     service_type: Mapped[str] = mapped_column(
         String(30), nullable=False, default="awg", server_default=text("'awg'")
@@ -926,7 +926,6 @@ class AccountLedgerEntry(Base):
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="RESTRICT"),
         nullable=True,
-        index=True,
     )
     reversal_of_id: Mapped[int | None] = mapped_column(
         ForeignKey("account_ledger_entries.id", ondelete="RESTRICT"), nullable=True

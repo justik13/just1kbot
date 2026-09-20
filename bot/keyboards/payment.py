@@ -504,4 +504,3 @@ def get_order_invoice_keyboard(
     )
     builder.adjust(1)
     return builder.as_markup()
-

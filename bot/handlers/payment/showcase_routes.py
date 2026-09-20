@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import (
     get_back_button,
-    get_balance_change_start_keyboard,
     get_change_tariff_keyboard,
     get_order_checkout_keyboard,
     get_renew_keyboard,
@@ -22,11 +21,9 @@ from database.repositories.tariffs_repo import (
     get_active_tariffs,
     get_tariff_by_id,
 )
-from services.account_tariff_change import get_account_tariff_change_intent
 from services.maintenance_service import MaintenanceService
-from services.tariff_change_quote import create_tariff_change_quote
+from services.order_service import OrderService
 from utils.callbacks import parse_callback_id, parse_callback_parts
-from utils.datetime_helpers import now_utc
 from bot.formatters import (
     format_plural,
     format_subscription_date,
@@ -158,15 +155,30 @@ async def select_tariff(
         await _render_maintenance(callback, session, back_to=back_to)
         return
 
-    tariff = await get_tariff_by_id(session, tariff_id)
-
-    if not tariff:
-        await callback.answer(
-            texts.ERROR_TARIFF_UNAVAILABLE, show_alert=True
+    if getattr(db_user, "has_financial_hold", False) or getattr(db_user, "financial_hold", False):
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+            get_back_button(back_to),
         )
+        await callback.answer(show_alert=False)
         return
 
-    if not tariff.is_active:
+    balance_snapshot = await get_account_balance(session, user_id=db_user.id)
+    if balance_snapshot.debt > 0 or balance_snapshot.real_available < 0:
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.PAYMENT_DEBT_BLOCKED_NOTICE,
+            get_back_button(back_to),
+        )
+        await callback.answer(show_alert=False)
+        return
+
+    tariff = await get_tariff_by_id(session, tariff_id)
+
+    if not tariff or not tariff.is_active:
         await callback.answer(
             texts.ERROR_TARIFF_UNAVAILABLE, show_alert=True
         )
@@ -189,109 +201,57 @@ async def select_tariff(
     device_limit = getattr(tariff, "device_limit", 2)
 
     if source == "change":
-        quote_result = await create_tariff_change_quote(
-            session,
-            user_id=db_user.id,
-            target_tariff_id=tariff.id,
-            as_of=now_utc(),
-        )
-        if quote_result.failure_code:
-            logger.warning(
-                "Tariff change quote creation failed: user_id=%s, target_tariff_id=%s, failure_code=%s, snapshot_failure_code=%s",
-                db_user.id,
-                tariff.id,
-                quote_result.failure_code,
-                getattr(quote_result, "snapshot_failure_code", None),
-            )
-            errors = {
-                "target_device_limit_too_small": (
-                    texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                        profiles_count=await get_user_profiles_count(
-                            session, db_user.id
-                        ),
-                        new_limit=device_limit,
-                    )
-                ),
-                "same_tariff_requires_renew": (
-                    texts.PAYMENT_SHOWCASE
-                ),
-                "financial_hold": (
-                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE
-                ),
-                "account_debt": (
-                    texts.PAYMENT_DEBT_BLOCKED_NOTICE
-                ),
-                "subscription_balance_untracked": (
-                    texts.PAYMENT_SHOWCASE_CALC_FAILED
-                ),
-                "mixed_source_tariffs": (
-                    texts.PAYMENT_SHOWCASE_CALC_FAILED
-                ),
-                "target_tariff_not_found": (
-                    texts.ERROR_TARIFF_UNAVAILABLE
-                ),
-                "target_tariff_inactive": (
-                    texts.ERROR_TARIFF_UNAVAILABLE
-                ),
-                "user_ineligible": (
-                    texts.PAYMENT_SHOWCASE_CALC_FAILED
-                ),
-                "subscription_inactive": texts.PAYMENT_SUBSCRIPTION_INACTIVE,
-                "current_tariff_unknown": texts.PAYMENT_CURRENT_TARIFF_UNKNOWN,
-                "active_checkout_exists": texts.PAYMENT_ACTIVE_CHECKOUT_EXISTS,
-                # NOTE: active_change_quote_exists is auto-resolved (old quote
-                # is cancelled), kept as defensive fallback for race conditions.
-                "active_change_quote_exists": texts.PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS,
-            }
-            back_button_target = (
-                "payment_showcase"
-                if quote_result.failure_code in {"subscription_inactive", "current_tariff_unknown"}
-                else "payment_change_tariff"
-            )
+        profiles_count = await get_user_profiles_count(session, db_user.id)
+        if profiles_count > device_limit:
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                errors.get(
-                    quote_result.failure_code,
-                    texts.PAYMENT_SHOWCASE_PREPARE_CHANGE_FAILED,
+                texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
+                    profiles_count=format_plural(profiles_count, texts.NOUN_DEVICES),
+                    new_limit=format_plural(device_limit, texts.NOUN_DEVICES),
                 ),
-                get_same_tariff_keyboard()
-                if quote_result.failure_code == "same_tariff_requires_renew"
-                else get_back_button(back_button_target),
+                get_back_button(back_to),
             )
             await callback.answer(show_alert=False)
             return
-        intent = await get_account_tariff_change_intent(
-            session,
-            user_id=db_user.id,
-            quote_public_id=quote_result.quote.public_id,
+
+        current_tariff = (
+            await get_tariff_by_id(session, db_user.current_tariff_id)
+            if db_user.current_tariff_id
+            else None
         )
-        due = int(intent.quote.amount_due_rub)
-        before = int(intent.balance.available)
-        after = max(0, before - due)
-        shortage = (
-            texts.PAYMENT_SHORTAGE_WARNING.format(amount_rub=int(intent.shortage))
-            if intent.shortage > 0
+        due_rub, resulting_days = OrderService.calculate_tariff_change(
+            current_tariff=current_tariff,
+            target_tariff=tariff,
+            subscription_end=db_user.subscription_end,
+        )
+        price = int(due_rub)
+        balance_before = int(balance_snapshot.available)
+        balance_after = max(0, balance_before - price)
+        shortage = max(0, price - balance_before)
+        shortage_line = (
+            texts.PAYMENT_SHORTAGE_WARNING.format(amount_rub=shortage)
+            if shortage > 0
             else ""
         )
-        resulting_hours = (
-            intent.quote.resulting_paid_hours
-            + intent.quote.resulting_bonus_hours
+        text = texts.PAYMENT_TARIFF_CHANGE_HEADER_CARD.format(
+            tariff_name=get_tariff_display_name(device_limit),
+            device_limit=device_limit,
+            duration_days=texts.TIME_DAYS_FORMAT.format(days=resulting_days),
+            due=price,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            shortage_line=shortage_line,
         )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_TARIFF_CHANGE_HEADER_CARD.format(
-                tariff_name=get_tariff_display_name(device_limit),
-                device_limit=device_limit,
-                duration_days=_hours_text(resulting_hours),
-                due=due,
-                balance_before=before,
-                balance_after=after,
-                shortage_line=shortage,
-            ),
-            get_balance_change_start_keyboard(
-                str(intent.quote.public_id), "payment_change_tariff", is_shortage=intent.shortage > 0
+            text,
+            get_order_checkout_keyboard(
+                tariff_id=tariff.id,
+                price=price,
+                can_pay_wallet=(balance_before >= price),
+                back_callback=back_to,
             ),
         )
         await callback.answer(show_alert=False)
@@ -313,7 +273,6 @@ async def select_tariff(
 
     tariff_name = get_tariff_display_name(device_limit)
     price = int(tariff.price_rub)
-    balance_snapshot = await get_account_balance(session, user_id=db_user.id)
     balance_before = int(balance_snapshot.available)
     balance_after = max(0, balance_before - price)
     shortage = max(0, price - balance_before)

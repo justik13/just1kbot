@@ -30,11 +30,14 @@ class YooKassaGateway(BasePaymentGateway):
         if not resolved_return_url:
             try:
                 settings = get_settings()
-                bot_user = getattr(settings, "BOT_USERNAME", None)
-                if bot_user:
-                    resolved_return_url = f"https://t.me/{bot_user}"
+                raw_template = getattr(settings, "YOOKASSA_RETURN_URL", "https://t.me")
+                bot_user = (getattr(settings, "SUPPORT_USERNAME", "") or "").lstrip("@")
+                if "{bot_username}" in raw_template:
+                    resolved_return_url = raw_template.format(bot_username=bot_user)
+                else:
+                    resolved_return_url = raw_template
             except Exception:
-                pass
+                resolved_return_url = "https://t.me"
         if not resolved_return_url:
             resolved_return_url = "https://t.me"
 
