@@ -429,7 +429,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 session, user_id=self.user_id, tariff_id=self.tariff_id
             )
             with patch(
-                "services.account_purchase.SubscriptionService.extend_subscription",
+                "services.account_purchase.subscription_coverage_service.append_awg_grant",
                 new=AsyncMock(side_effect=AccountPurchaseError("forced_failure")),
             ), self.assertRaisesRegex(AccountPurchaseError, "forced_failure"):
                 await settle_account_purchase(
