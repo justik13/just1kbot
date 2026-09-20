@@ -330,6 +330,45 @@ async def _cleanup_stuck_profiles():
                     )
                     continue
 
+                from config.enums import ServerHealthState
+
+                if server and getattr(server, "health_state", None) in (
+                    ServerHealthState.AUTO_DISABLED,
+                    ServerHealthState.MANUAL_DISABLED,
+                    ServerHealthState.PROBLEM,
+                ):
+                    logger.info(
+                        "Skipping delete_peer queue for profile %s: server %s is in %s",
+                        profile.id,
+                        profile.server_id,
+                        server.health_state,
+                    )
+                    continue
+
+                # For delete_failed profiles, avoid infinite retry loops when operation reached dead status.
+                # Require at least 6 hours cooldown after the dead operation before cleanup revives it.
+                if profile.provisioning_status == "delete_failed":
+                    dead_op_res = await session.execute(
+                        select(APIOperation)
+                        .where(
+                            APIOperation.profile_id == profile.id,
+                            APIOperation.operation_type == "delete_peer",
+                            APIOperation.status.in_(["dead", "cancelled"]),
+                        )
+                        .order_by(APIOperation.id.desc())
+                        .limit(1)
+                    )
+                    dead_op = dead_op_res.scalar_one_or_none()
+                    if dead_op:
+                        op_time = dead_op.completed_at or dead_op.updated_at
+                        if op_time and op_time > now_utc() - timedelta(hours=6):
+                            logger.debug(
+                                "Skipping delete_failed profile %s retry: dead operation %s in cooldown",
+                                profile.id,
+                                dead_op.id,
+                            )
+                            continue
+
                 try:
                     from services.api_operations_queue import (
                         ensure_delete_operation,

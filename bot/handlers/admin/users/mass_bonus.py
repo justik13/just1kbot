@@ -242,7 +242,7 @@ async def process_mass_bonus_reason(
         server = await get_server_by_id(session, server_id)
         server_name = server.name if server else f"ID {server_id}"
         server_flag = (server.country_flag or "🌐") if server else "🌐"
-        aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=server_name)
+        aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=safe(server_name))
 
         server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
         awg_cond = (
