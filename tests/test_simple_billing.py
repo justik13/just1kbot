@@ -12,21 +12,18 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 import uuid
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import OrderServiceType, OrderStatus
 from database.models import Order, Tariff, User
 from database.repositories.account_ledger_repo import AccountBalanceSnapshot
 from integrations.payment_gateways.base import (
     PaymentInvoice,
-    PaymentStatusResult,
     WebhookResult,
 )
-from integrations.payment_gateways.factory import get_payment_gateway
 from services.yookassa_service import YooKassaResult
 from integrations.payment_gateways.yookassa import YooKassaGateway
 from services.fulfillment_service import FulfillmentService
