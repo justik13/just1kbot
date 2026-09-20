@@ -16,6 +16,7 @@ from bot.handlers.white_internet_web import setup_white_internet_web_routes
 from config.constants import XRAY_PROTOCOL
 from config.enums import ServerHealthState, WhiteInternetStatus
 from database.models import Server, User, WhiteInternetSubscription
+from utils.datetime_helpers import now_utc
 
 
 class TestWhiteInternetWebFeed(AioHTTPTestCase):
@@ -81,7 +82,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         sub.traffic_uplink_bytes = 1000
         sub.traffic_downlink_bytes = 2000
         sub.traffic_limit_bytes = 53687091200
-        sub.expires_at = datetime(2026, 9, 30, 0, 0, tzinfo=timezone.utc)
+        sub.expires_at = now_utc() + timedelta(days=30)
 
         mock_session = AsyncMock()
         @asynccontextmanager
@@ -96,7 +97,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertIn("download=2000", resp.headers.get("Subscription-Userinfo", ""))
 
     async def test_expired_status_returns_403(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
         sub.origin_node_id = 1
@@ -119,7 +120,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(text, texts.WL_WEB_EXPIRED)
 
     async def test_runtime_out_of_sync_returns_503(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
         sub.origin_node_id = 1
@@ -153,7 +154,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
     async def test_epoch_mismatch_returns_503(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
         sub.origin_node_id = 1
@@ -188,7 +189,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
     async def test_active_and_synced_returns_base64_vless_feed(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
@@ -258,7 +259,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertIn("OPTIONS", unquote(wl_url))
 
     async def test_feed_without_hwid_returns_403_hwid_required(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
@@ -304,7 +305,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
 
 
     async def test_missing_cdn_domain_returns_503_fail_closed(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
@@ -352,7 +353,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.headers.get("Retry-After"), "60")
 
     async def test_cdn_domain_from_server_extra_data_succeeds_without_env(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
@@ -412,7 +413,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertIn("/w_custom/default", unquote(wl_url))
 
     async def test_offline_server_returns_503_fail_closed(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
@@ -454,7 +455,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
     async def test_banned_user_returns_403_forbidden(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
@@ -485,7 +486,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(await resp.text(), "Forbidden")
 
     async def test_deleted_user_returns_403_forbidden(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,

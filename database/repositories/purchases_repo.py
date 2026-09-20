@@ -350,6 +350,8 @@ async def create_purchase(
     details: dict | None = None,
     status: PurchaseStatus = PurchaseStatus.PENDING,
     fulfillment_status: PurchaseFulfillmentStatus = PurchaseFulfillmentStatus.PENDING,
+    completed_at: datetime | None = None,
+    fulfilled_at: datetime | None = None,
 ) -> Purchase:
     purchase = Purchase(
         user_id=user_id,
@@ -370,6 +372,8 @@ async def create_purchase(
         device_limit=device_limit,
         details=details,
         created_at=now_utc(),
+        completed_at=completed_at,
+        fulfilled_at=fulfilled_at,
     )
     session.add(purchase)
     await session.flush()
