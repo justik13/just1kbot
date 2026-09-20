@@ -103,10 +103,11 @@ async def get_purchase_logs_paginated(
         tg_id = user.telegram_id if user else 0
         username = user.username if user else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
+        tariff_obj = getattr(ord_item, "tariff", None)
         tariff_name = (
-            ord_item.tariff.name
-            if ord_item.tariff
-            else ("White Internet" if ord_item.service_type == "white_internet" else "Тариф")
+            tariff_obj.name
+            if tariff_obj
+            else ("White Internet" if getattr(ord_item, "service_type", None) == "white_internet" else "Тариф")
         )
         entries.append(
             PurchaseLogEntry(
@@ -227,29 +228,36 @@ async def get_purchase_logs_paginated(
 
     entries.sort(key=lambda x: x.created_at, reverse=True)
 
-    order_count = (
-        await session.scalar(
-            select(func.count(Order.id)).where(
-                Order.status == "paid",
-                Order.service_type.in_(("awg", "white_internet")),
+    if (
+        len(order_results) < needed
+        and len(quote_results) < needed
+        and len(audit_results) < needed
+    ):
+        total = len(entries)
+    else:
+        order_count = (
+            await session.scalar(
+                select(func.count(Order.id)).where(
+                    Order.status == "paid",
+                    Order.service_type.in_(("awg", "white_internet")),
+                )
             )
-        )
-    ) or 0
-    quote_count = (
-        await session.scalar(
-            select(func.count(TariffQuote.id)).where(
-                TariffQuote.status == "consumed"
+        ) or 0
+        quote_count = (
+            await session.scalar(
+                select(func.count(TariffQuote.id)).where(
+                    TariffQuote.status == "consumed"
+                )
             )
-        )
-    ) or 0
-    audit_count = (
-        await session.scalar(
-            select(func.count(AuditLog.id)).where(
-                AuditLog.action.in_(AUDIT_PURCHASE_ACTIONS)
+        ) or 0
+        audit_count = (
+            await session.scalar(
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.action.in_(AUDIT_PURCHASE_ACTIONS)
+                )
             )
-        )
-    ) or 0
-    total = order_count + quote_count + audit_count
+        ) or 0
+        total = order_count + quote_count + audit_count
 
     paged_entries = entries[offset : offset + per_page]
     return paged_entries, total
