@@ -113,6 +113,14 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         return web.Response(status=400, text="Invalid webhook")
     try:
         async with session_scope() as session:
+            from services.order_service import OrderService
+
+            bot = request.app.get("bot")
+            order_processed = await OrderService.process_webhook_event(
+                session, payload, bot=bot
+            )
+            inbox_status = "processed" if order_processed else "pending"
+
             await session.execute(
                 insert(WebhookInbox)
                 .values(
@@ -123,6 +131,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     payment_external_id=str(payment_external_id),
                     public_order_id=public_order_id,
                     payload=payload,
+                    status=inbox_status,
                 )
                 .on_conflict_do_nothing(
                     constraint="uq_webhook_inbox_provider_event_key"

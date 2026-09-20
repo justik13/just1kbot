@@ -261,6 +261,19 @@ class WhiteInternetGrantType(StrEnum):
     TOPUP = "TOPUP"
 
 
+class OrderStatus(StrEnum):
+    PENDING = "pending"
+    PAID = "paid"
+    REFUNDED = "refunded"
+    CANCELED = "canceled"
+
+
+class OrderServiceType(StrEnum):
+    AWG = "awg"
+    WHITE_INTERNET = "white_internet"
+    TOPUP = "topup"
+
+
 __all__ = [
     "AccountLedgerEntryType",
     "AccountReservationStatus",
@@ -269,6 +282,8 @@ __all__ = [
     "ApiOperationStatus",
     "ApiOperationType",
     "EntitlementEntryType",
+    "OrderStatus",
+    "OrderServiceType",
     "PaidValueEntryType",
     "PaymentCheckoutStatus",
     "PaymentDisputeStatus",

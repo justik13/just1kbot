@@ -13,12 +13,20 @@ from bot.keyboards import (
     get_back_button,
     get_balance_purchase_confirm_keyboard,
     get_balance_shortage_keyboard,
+    get_order_invoice_keyboard,
     get_payment_success_keyboard,
     get_same_tariff_keyboard,
 )
 from bot.states import BalanceStates
 from config.settings import get_settings
-from database.models import TariffQuote, User
+from database.models import Order, TariffQuote, User
+from database.repositories.account_ledger_repo import (
+    create_order_credit,
+    create_order_debit,
+    get_account_balance,
+)
+from database.repositories.tariffs_repo import get_tariff_by_id
+from integrations.payment_gateways.factory import get_payment_gateway
 from services.account_purchase import (
     AccountPurchaseError,
     cancel_account_purchase_quote,
@@ -26,7 +34,9 @@ from services.account_purchase import (
     prepare_account_purchase,
     settle_account_purchase,
 )
+from services.fulfillment_service import FulfillmentService
 from services.maintenance_service import MaintenanceService
+from services.order_service import InsufficientBalanceError, OrderService
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
 from bot.formatters import get_tariff_display_name
@@ -37,6 +47,255 @@ from .common import _render_maintenance
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+@router.callback_query(F.data.startswith("order_pay_wallet:"))
+async def handle_order_pay_wallet(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    if not db_user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="payment_showcase")
+        return
+
+    try:
+        tariff_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    tariff = await get_tariff_by_id(session, tariff_id)
+    if not tariff or not tariff.is_active:
+        await callback.answer(texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE, show_alert=True)
+        return
+
+    await callback.answer(texts.PAYMENT_PURCHASE_PROCESSING_NOTICE, show_alert=False)
+
+    try:
+        order = await OrderService.pay_from_wallet(
+            session,
+            user_id=db_user.id,
+            service_type="awg",
+            tariff_id=tariff.id,
+        )
+    except InsufficientBalanceError:
+        await callback.answer(texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
+        return
+    except Exception as exc:
+        logger.exception(
+            "Wallet payment failed for user %s, tariff %s: %s",
+            db_user.id,
+            tariff_id,
+            exc,
+        )
+        await callback.answer(texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True)
+        return
+
+    balance = await get_account_balance(session, user_id=db_user.id)
+    tariff_name = get_tariff_display_name(order.device_limit or 2)
+    operation = texts.PURCHASE_COMPLETED
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+            operation_title=operation,
+            tariff_name=tariff_name,
+            duration_days=order.duration_days,
+            charged=int(order.amount_rub),
+            real_balance=int(balance.real_available),
+            bonus_balance=int(balance.bonus_available),
+        ),
+        get_payment_success_keyboard(),
+        message_effect_id=EFFECT_CONFETTI,
+        force_new=True,
+    )
+
+
+@router.callback_query(F.data.startswith("order_pay_card:"))
+async def handle_order_pay_card(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    if not db_user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="payment_showcase")
+        return
+
+    try:
+        tariff_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    tariff = await get_tariff_by_id(session, tariff_id)
+    if not tariff or not tariff.is_active:
+        await callback.answer(texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE, show_alert=True)
+        return
+
+    await callback.answer(texts.PAYMENT_CREATING_LINK_NOTICE, show_alert=False)
+
+    try:
+        order = await OrderService.create_order(
+            session,
+            user_id=db_user.id,
+            service_type="awg",
+            tariff_id=tariff.id,
+            payment_method="yookassa",
+        )
+    except Exception as exc:
+        logger.exception(
+            "Failed to create YooKassa order for user %s: %s", db_user.id, exc
+        )
+        await callback.answer(texts.ERROR_PAYMENT_SERVICE, show_alert=True)
+        return
+
+    tariff_name = get_tariff_display_name(order.device_limit or 2)
+    price = int(order.amount_rub)
+    text = (
+        f"💳 <b>Оплата заказа</b>\n\n"
+        f"📦 Тариф: <b>{tariff_name}</b>\n"
+        f"⏱ Срок: <b>{order.duration_days} дней</b>\n"
+        f"💰 К оплате: <b>{price} ₽</b>\n\n"
+        f"Нажмите кнопку ниже для перехода к безопасной оплате YooKassa. "
+        f"Подписка активируется автоматически сразу после завершения платежа."
+    )
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        text,
+        get_order_invoice_keyboard(
+            payment_url=order.payment_url or "",
+            order_id=str(order.id),
+            price=price,
+            back_callback="payment_showcase",
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("order_check:"))
+async def handle_order_check(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    if not db_user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    order_id = _uuid_from_callback(callback.data)
+    if not order_id:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    order = await session.get(Order, order_id)
+    if not order or order.user_id != db_user.id:
+        await callback.answer(texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
+        return
+
+    if order.status == "paid":
+        balance = await get_account_balance(session, user_id=db_user.id)
+        tariff_name = get_tariff_display_name(order.device_limit or 2)
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+                operation_title=texts.PURCHASE_COMPLETED,
+                tariff_name=tariff_name,
+                duration_days=order.duration_days,
+                charged=int(order.amount_rub),
+                real_balance=int(balance.real_available),
+                bonus_balance=int(balance.bonus_available),
+            ),
+            get_payment_success_keyboard(),
+            message_effect_id=EFFECT_CONFETTI,
+            force_new=True,
+        )
+        return
+
+    if order.external_id:
+        gateway = get_payment_gateway(order.payment_method)
+        status_res = await gateway.check_payment_status(order.external_id)
+        if status_res.is_paid:
+            order.status = "paid"
+            order.paid_at = now_utc()
+            await create_order_credit(
+                session,
+                user_id=order.user_id,
+                amount_rub=order.amount_rub,
+                order_id=order.id,
+                metadata={"source": "yookassa_payment_check"},
+            )
+            await create_order_debit(
+                session,
+                user_id=order.user_id,
+                amount_rub=order.amount_rub,
+                order_id=order.id,
+                metadata={"description": order.description},
+            )
+            await FulfillmentService.fulfill_order(session, order)
+            await session.commit()
+
+            balance = await get_account_balance(session, user_id=db_user.id)
+            tariff_name = get_tariff_display_name(order.device_limit or 2)
+            await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+                    operation_title=texts.PURCHASE_COMPLETED,
+                    tariff_name=tariff_name,
+                    duration_days=order.duration_days,
+                    charged=int(order.amount_rub),
+                    real_balance=int(balance.real_available),
+                    bonus_balance=int(balance.bonus_available),
+                ),
+                get_payment_success_keyboard(),
+                message_effect_id=EFFECT_CONFETTI,
+                force_new=True,
+            )
+            return
+        elif status_res.is_canceled:
+            order.status = "canceled"
+            await session.commit()
+            await callback.answer("Платеж был отменен.", show_alert=True)
+            return
+
+    await callback.answer(
+        "Оплата еще не поступила. Если вы уже оплатили, подождите несколько секунд и проверьте снова.",
+        show_alert=True,
+    )
+
+
+@router.callback_query(F.data.startswith("order_cancel:"))
+async def handle_order_cancel(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    order_id = _uuid_from_callback(callback.data)
+    if order_id and db_user:
+        order = await session.get(Order, order_id)
+        if order and order.user_id == db_user.id and order.status == "pending":
+            order.status = "canceled"
+            await session.commit()
+
+    await callback.answer(show_alert=False)
+    from .common import render_tariff_showcase
+
+    await render_tariff_showcase(callback.bot, callback.message.chat.id, session)
+
 
 
 PURCHASE_ERRORS = {

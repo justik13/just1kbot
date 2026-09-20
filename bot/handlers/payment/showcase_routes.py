@@ -10,18 +10,18 @@ from bot import texts
 from bot.keyboards import (
     get_back_button,
     get_balance_change_start_keyboard,
-    get_balance_purchase_start_keyboard,
     get_change_tariff_keyboard,
+    get_order_checkout_keyboard,
     get_renew_keyboard,
     get_same_tariff_keyboard,
     get_tariff_duration_keyboard,
 )
+from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import (
     get_active_tariffs,
     get_tariff_by_id,
 )
-from services.account_purchase import AccountPurchaseError, prepare_account_purchase
 from services.account_tariff_change import get_account_tariff_change_intent
 from services.maintenance_service import MaintenanceService
 from services.tariff_change_quote import create_tariff_change_quote
@@ -312,45 +312,37 @@ async def select_tariff(
         return
 
     tariff_name = get_tariff_display_name(device_limit)
-
-    try:
-        intent = await prepare_account_purchase(
-            session, user_id=db_user.id, tariff_id=tariff.id
-        )
-    except AccountPurchaseError as exc:
-        errors = {
-            "financial_hold": texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-            "account_debt": texts.PAYMENT_DEBT_BLOCKED_NOTICE,
-            "tariff_change_required": texts.PAYMENT_SHOWCASE_USE_CHANGE_SECTION,
-            "active_tariff_change_quote_exists": texts.PAYMENT_CHANGE_TARIFF_IN_PROGRESS_NOTICE,
-        }
-        await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            errors.get(exc.code, texts.PAYMENT_SHOWCASE_PREPARE_FAILED),
-            get_back_button(back_to),
-        )
-        await callback.answer(show_alert=False)
-        return
-
-    price = int(intent.quote.amount_due_rub)
-    balance_before = int(intent.balance.available)
+    price = int(tariff.price_rub)
+    balance_snapshot = await get_account_balance(session, user_id=db_user.id)
+    balance_before = int(balance_snapshot.available)
     balance_after = max(0, balance_before - price)
+    shortage = max(0, price - balance_before)
     shortage_line = (
-        texts.PAYMENT_SHORTAGE_WARNING.format(amount_rub=int(intent.shortage))
-        if intent.shortage > 0
+        texts.PAYMENT_SHORTAGE_WARNING.format(amount_rub=shortage)
+        if shortage > 0
         else ""
     )
     text = (
-        texts.PAYMENT_SHOWCASE_ORDER_CARD.format(tariff_label=tariff_name, days=tariff.duration_days, device_limit=device_limit, price=price, balance_before=balance_before, balance_after=balance_after, shortage_line=shortage_line)
+        texts.PAYMENT_SHOWCASE_ORDER_CARD.format(
+            tariff_label=tariff_name,
+            days=tariff.duration_days,
+            device_limit=device_limit,
+            price=price,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            shortage_line=shortage_line,
+        )
     )
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         text,
-        get_balance_purchase_start_keyboard(
-            str(intent.quote.public_id), back_to, is_shortage=intent.shortage > 0
+        get_order_checkout_keyboard(
+            tariff_id=tariff.id,
+            price=price,
+            can_pay_wallet=(balance_before >= price),
+            back_callback=back_to,
         ),
     )
 
