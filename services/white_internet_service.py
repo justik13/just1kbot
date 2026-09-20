@@ -232,10 +232,12 @@ class WhiteInternetService:
         tariff: Tariff | None = None,
         tariff_version: TariffVersion | None = None,
         device_limit: int = 1,
+        duration_days: int | None = None,
+        operation_type: str | None = None,
     ) -> Purchase:
-        duration_days = getattr(tariff_version, "duration_days", 0) if tariff_version else 0
-        now = now_utc()
-        op_str = (
+        if duration_days is None:
+            duration_days = getattr(tariff_version, "duration_days", 0) if tariff_version else 0
+        op_str = operation_type or (
             quote.operation_type.value
             if hasattr(quote.operation_type, "value")
             else str(quote.operation_type)
@@ -252,11 +254,12 @@ class WhiteInternetService:
             tariff_version_id=tariff_version.id if tariff_version else None,
             duration_days=duration_days,
             device_limit=device_limit,
-            status=PurchaseStatus.COMPLETED,
-            fulfillment_status=PurchaseFulfillmentStatus.FULFILLED,
-            completed_at=now,
-            fulfilled_at=now,
+            status=PurchaseStatus.PENDING,
+            fulfillment_status=PurchaseFulfillmentStatus.PENDING,
+            completed_at=None,
+            fulfilled_at=None,
         )
+
 
     @classmethod
     async def purchase_subscription(cls, session: AsyncSession, user_id: int):
@@ -349,6 +352,9 @@ class WhiteInternetService:
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
 
         quote.status = TariffQuoteStatus.CONSUMED
+        await purchases_repo.mark_purchase_completed(session, purchase)
+        await purchases_repo.mark_purchase_fulfilled(session, purchase)
+
 
         sub = await white_internet_repo.create_white_internet_subscription(
             session,
@@ -485,6 +491,9 @@ class WhiteInternetService:
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
+        await purchases_repo.mark_purchase_completed(session, purchase)
+        await purchases_repo.mark_purchase_fulfilled(session, purchase)
+
 
         old_origin_for_cleanup: Server | None = None
         if needs_migration and new_origin_server is not None:
@@ -664,6 +673,9 @@ class WhiteInternetService:
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
+        await purchases_repo.mark_purchase_completed(session, purchase)
+        await purchases_repo.mark_purchase_fulfilled(session, purchase)
+
 
         # Apply node migration ONLY after successful financial debit
         old_origin_for_cleanup: Server | None = None
@@ -810,6 +822,8 @@ class WhiteInternetService:
             tariff=tariff,
             tariff_version=tariff_version,
             device_limit=sub.device_limit + 1,
+            duration_days=0,
+            operation_type="addon_device",
         )
         try:
             await create_purchase_debit(
@@ -859,6 +873,9 @@ class WhiteInternetService:
         )
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
+        await purchases_repo.mark_purchase_completed(session, purchase)
+        await purchases_repo.mark_purchase_fulfilled(session, purchase)
+
 
         if old_origin_for_cleanup:
             await white_internet_repo.enqueue_orphan_cleanup(
@@ -973,6 +990,8 @@ class WhiteInternetService:
             tariff=tariff,
             tariff_version=tariff_version,
             device_limit=sub.device_limit,
+            duration_days=0,
+            operation_type="addon_traffic",
         )
         try:
             await create_purchase_debit(
@@ -1025,6 +1044,9 @@ class WhiteInternetService:
         )
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
+        await purchases_repo.mark_purchase_completed(session, purchase)
+        await purchases_repo.mark_purchase_fulfilled(session, purchase)
+
 
         if old_origin_for_cleanup:
             await white_internet_repo.enqueue_orphan_cleanup(

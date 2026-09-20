@@ -75,7 +75,7 @@ def upgrade() -> None:
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("fulfilled_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(
-            "status IN ('pending','completed','cancelled','refunded')",
+            "status IN ('pending','completed','cancelled','failed','refunded')",
             name="ck_purchases_status",
         ),
         sa.CheckConstraint(
@@ -288,6 +288,7 @@ def downgrade() -> None:
         "account_ledger_entries",
         type_="check",
     )
+    op.drop_column("account_ledger_entries", "purchase_id")
     op.create_check_constraint(
         "ck_account_ledger_entry_shape",
         "account_ledger_entries",
@@ -306,7 +307,7 @@ def downgrade() -> None:
         "(entry_type = 'admin_adjustment' AND payment_id IS NULL "
         "AND quote_id IS NULL AND reversal_of_id IS NULL)",
     )
-    op.drop_column("account_ledger_entries", "purchase_id")
+
 
     op.drop_table("entitlement_grants")
     op.drop_table("purchases")

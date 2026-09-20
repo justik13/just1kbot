@@ -187,3 +187,128 @@ class TestBackfillBillingV2(unittest.IsolatedAsyncioTestCase):
 
             # 4. Assert session.commit was called
             mock_session.commit.assert_awaited_once()
+
+    async def test_backfill_billing_v2_white_internet_addon_and_grant_idempotency(self):
+        base_time = datetime(2026, 9, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+        tariff = Tariff(
+            id=2,
+            name="White Internet Base",
+            service_type="white_internet",
+            duration_days=30,
+            device_limit=1,
+            price_rub=Decimal("150.00"),
+        )
+        t_ver = TariffVersion(
+            id=20,
+            tariff_id=2,
+            version_number=1,
+            name_snapshot="White Internet Base",
+            duration_hours=720,
+            device_limit=1,
+            price_rub=Decimal("150.00"),
+        )
+        t_ver.tariff = tariff
+
+        # WI add-on quote: price 50.00 < 150.00 base price
+        q_addon = TariffQuote(
+            id=202,
+            user_id=99,
+            service_type="white_internet",
+            target_tariff_version_id=20,
+            operation_type=TariffQuoteOperation.PURCHASE.value,
+            status=TariffQuoteStatus.CONSUMED.value,
+            amount_due_rub=Decimal("50.00"),
+            current_paid_hours=0,
+            current_paid_value_rub=Decimal("0.00"),
+            bonus_hours=0,
+            resulting_paid_hours=0,
+            resulting_paid_value_rub=Decimal("50.00"),
+            resulting_bonus_hours=0,
+            rounding_loss_hours=Decimal("0.0"),
+            rounding_loss_value_rub=Decimal("0.0"),
+            created_at=base_time,
+            consumed_at=base_time,
+            target_tariff_version=t_ver,
+        )
+
+        user = User(
+            id=99,
+            telegram_id=999999,
+            subscription_end=base_time + timedelta(days=10),
+            device_limit=1,
+        )
+
+        mock_paid_lot = MagicMock()
+        mock_paid_lot.entitlement_entry_id = 2
+        mock_paid_lot.paid_value_ledger_entry_id = 2
+        mock_paid_lot.quote_id = 202
+        mock_paid_lot.segment_start = base_time
+        mock_paid_lot.segment_end = base_time + timedelta(days=10)
+        mock_paid_lot.original_paid_hours = 240
+        mock_paid_lot.original_paid_value_rub = Decimal("50.000000")
+        mock_paid_lot.tariff_version_id = 20
+
+        mock_snapshot = MagicMock()
+        mock_snapshot.tracked = True
+        mock_snapshot.paid_lots = (mock_paid_lot,)
+        mock_snapshot.bonus_lots = ()
+
+        mock_session = AsyncMock()
+        def on_add(obj):
+            if isinstance(obj, Purchase) and obj.id is None:
+                obj.id = 999
+
+        mock_session.add = MagicMock(side_effect=on_add)
+        mock_session.flush = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_session.rollback = AsyncMock()
+
+        quotes_res = MagicMock()
+        quotes_res.all.return_value = [q_addon]
+
+        ledger_res = MagicMock()
+        ledger_res.all.return_value = []
+
+        users_res = MagicMock()
+        users_res.all.return_value = [user]
+
+        mock_session.scalars.side_effect = [quotes_res, ledger_res, users_res]
+
+        # Simulate existing grant in DB (e.g. revoked or previously migrated)
+        existing_grant = MagicMock()
+        existing_grant.id = 777
+        def scalar_mock(stmt):
+            if "purchases" in str(stmt):
+                return None
+            return existing_grant
+        mock_session.scalar.side_effect = scalar_mock
+
+        with patch("scripts.backfill_billing_v2.session_scope") as mock_scope, patch(
+            "scripts.backfill_billing_v2.get_subscription_balance_snapshot",
+            new_callable=AsyncMock,
+            return_value=mock_snapshot,
+        ), patch(
+            "database.repositories.entitlement_grants_repo.get_active_grants_for_user",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "database.repositories.entitlement_grants_repo.create_grant",
+            new_callable=AsyncMock,
+        ) as mock_create_grant:
+            mock_scope.return_value.__aenter__.return_value = mock_session
+
+            await backfill_billing_v2(commit=True)
+
+            # Assert WI add-on Purchase has duration_days=0 and op_type="addon"
+            added_purchases = [call.args[0] for call in mock_session.add.call_args_list if isinstance(call.args[0], Purchase)]
+            self.assertEqual(len(added_purchases), 1)
+            p = added_purchases[0]
+            self.assertEqual(p.service_type, "white_internet")
+            self.assertEqual(p.operation_type, "addon")
+            self.assertEqual(p.duration_days, 0)
+            self.assertEqual(p.amount_rub, Decimal("50.00"))
+
+            # Because existing_grant was found, create_grant MUST NOT be called (idempotency)
+            mock_create_grant.assert_not_called()
+

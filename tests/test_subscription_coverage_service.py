@@ -103,6 +103,39 @@ class SubscriptionCoverageServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(grant.coverage_end, existing_end + timedelta(hours=720))
             self.assertEqual(self.sample_user.subscription_end, existing_end + timedelta(hours=720))
 
+    async def test_append_awg_grant_preserves_legacy_user_subscription_end_when_grants_empty(self):
+        base_time = datetime(2026, 9, 20, 12, 0, 0, tzinfo=timezone.utc)
+        legacy_end = base_time + timedelta(days=20)
+        self.sample_user.subscription_end = legacy_end
+
+        with patch(
+            "database.repositories.entitlement_grants_repo.get_active_grants_for_user",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "database.repositories.entitlement_grants_repo.create_grant",
+            new_callable=AsyncMock,
+        ) as mock_create_grant:
+            mock_create_grant.side_effect = lambda session, **kwargs: EntitlementGrant(**kwargs)
+
+            grant = await subscription_coverage_service.append_awg_grant(
+                self.mock_session,
+                user_id=42,
+                duration_hours=720,
+                source_type="purchase",
+                source_id="102_legacy",
+                paid_value_rub=Decimal("300.000000"),
+                device_limit=1,
+                as_of=base_time,
+                locked_user=self.sample_user,
+            )
+
+            # Sequence start MUST be after existing legacy_end, NOT from base_time!
+            self.assertEqual(grant.coverage_start, legacy_end)
+            self.assertEqual(grant.coverage_end, legacy_end + timedelta(hours=720))
+            self.assertEqual(self.sample_user.subscription_end, legacy_end + timedelta(hours=720))
+
+
     async def test_append_awg_grant_permanent_protection(self):
         base_time = datetime(2026, 9, 20, 12, 0, 0, tzinfo=timezone.utc)
         perm_grant = EntitlementGrant(

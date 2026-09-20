@@ -11,7 +11,7 @@ import uuid
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from database.models import EntitlementEntry, Tariff, User
+from database.models import EntitlementEntry, EntitlementGrant, Tariff, User
 from services.subscription import SubscriptionService
 from services.subscription_balance_service import get_subscription_balance_snapshot
 from services.tariff_change_quote import create_tariff_change_quote
@@ -60,17 +60,26 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(updated_user, user)
         # Verify entitlement added to session
         self.assertTrue(session.add.called)
-        added_obj = session.add.call_args[0][0]
-        self.assertIsInstance(added_obj, EntitlementEntry)
-        self.assertEqual(added_obj.beneficiary_user_id, 42)
-        self.assertEqual(added_obj.source_type, "admin")
-        self.assertEqual(added_obj.entry_type, "manual_grant")
-        self.assertEqual(added_obj.days_delta, 30)
-        self.assertEqual(added_obj.hours_delta, 720)
-        self.assertEqual(added_obj.device_limit_snapshot, 3)
-        self.assertEqual(added_obj.tariff_id_snapshot, 11)
-        self.assertEqual(added_obj.metadata_["admin_id"], 999)
-        self.assertEqual(added_obj.metadata_["reason"], "admin_sub_grant")
+        added_entitlement = next(
+            obj for call in session.add.call_args_list for obj in call[0] if isinstance(obj, EntitlementEntry)
+        )
+        self.assertEqual(added_entitlement.beneficiary_user_id, 42)
+        self.assertEqual(added_entitlement.source_type, "admin")
+        self.assertEqual(added_entitlement.entry_type, "manual_grant")
+        self.assertEqual(added_entitlement.days_delta, 30)
+        self.assertEqual(added_entitlement.hours_delta, 720)
+        self.assertEqual(added_entitlement.device_limit_snapshot, 3)
+        self.assertEqual(added_entitlement.tariff_id_snapshot, 11)
+        self.assertEqual(added_entitlement.metadata_["admin_id"], 999)
+        self.assertEqual(added_entitlement.metadata_["reason"], "admin_sub_grant")
+
+        added_grant = next(
+            obj for call in session.add.call_args_list for obj in call[0] if isinstance(obj, EntitlementGrant)
+        )
+        self.assertEqual(added_grant.user_id, 42)
+        self.assertEqual(added_grant.grant_type, "admin_gift")
+        self.assertEqual(added_grant.source_type, "admin")
+        self.assertEqual(added_grant.original_duration_hours, 30 * 24)
 
     async def test_extend_subscription_without_entitlement_flag_skips_creation(self) -> None:
         session = AsyncMock()
@@ -197,11 +206,21 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
-        added_obj = session.add.call_args[0][0]
+        added_entitlement = next(
+            obj for call in session.add.call_args_list for obj in call[0] if isinstance(obj, EntitlementEntry)
+        )
         expected_days = (PERMANENT_END_DATE - now).days
-        self.assertEqual(added_obj.hours_delta, expected_days * 24)
-        self.assertEqual(added_obj.days_delta, expected_days)
-        self.assertEqual(added_obj.metadata_, {"admin_id": 999, "reason": "permanent_grant"})
+        self.assertEqual(added_entitlement.hours_delta, expected_days * 24)
+        self.assertEqual(added_entitlement.days_delta, expected_days)
+        self.assertEqual(added_entitlement.metadata_, {"admin_id": 999, "reason": "permanent_grant"})
+
+        added_grant = next(
+            obj for call in session.add.call_args_list for obj in call[0] if isinstance(obj, EntitlementGrant)
+        )
+        self.assertEqual(added_grant.user_id, 42)
+        self.assertEqual(added_grant.grant_type, "admin_gift")
+        self.assertEqual(added_grant.source_type, "admin")
+        self.assertEqual(added_grant.original_duration_hours, expected_days * 24)
 
     async def test_extend_subscription_permanent_already_permanent_no_grant(self) -> None:
         from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
@@ -267,11 +286,21 @@ class SubscriptionAdminEntitlementUnitTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(updated_user.subscription_end, PERMANENT_END_DATE)
-        added_obj = session.add.call_args[0][0]
+        added_entitlement = next(
+            obj for call in session.add.call_args_list for obj in call[0] if isinstance(obj, EntitlementEntry)
+        )
         expected_days = (PERMANENT_END_DATE - active_end).days
-        self.assertEqual(added_obj.hours_delta, expected_days * 24)
-        self.assertEqual(added_obj.days_delta, expected_days)
-        self.assertGreater(added_obj.days_delta, 0)
+        self.assertEqual(added_entitlement.hours_delta, expected_days * 24)
+        self.assertEqual(added_entitlement.days_delta, expected_days)
+        self.assertGreater(added_entitlement.days_delta, 0)
+
+        added_grant = next(
+            obj for call in session.add.call_args_list for obj in call[0] if isinstance(obj, EntitlementGrant)
+        )
+        self.assertEqual(added_grant.user_id, 42)
+        self.assertEqual(added_grant.grant_type, "admin_gift")
+        self.assertEqual(added_grant.source_type, "admin")
+        self.assertEqual(added_grant.original_duration_hours, expected_days * 24)
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")

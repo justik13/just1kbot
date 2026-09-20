@@ -41,13 +41,18 @@ async def append_awg_grant(
     )
 
     # Permanent check: cannot append to a permanent subscription
+    if user.subscription_end and user.subscription_end >= PERMANENT_END_DATE:
+        raise ValueError("Cannot append coverage to a permanent subscription")
     for g in active_grants:
         if g.coverage_end >= PERMANENT_END_DATE:
             raise ValueError("Cannot append coverage to a permanent subscription")
 
     # Determine sequence start: after latest active grant or from now
     future_ends = [g.coverage_end for g in active_grants if g.coverage_end > now]
+    if user.subscription_end and user.subscription_end > now:
+        future_ends.append(user.subscription_end)
     coverage_start = max(future_ends) if future_ends else now
+
 
     is_permanent = duration_hours >= PERMANENT_SUBSCRIPTION_DAYS * 24
     if is_permanent:

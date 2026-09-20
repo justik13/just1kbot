@@ -51,7 +51,9 @@ from database.repositories.tariff_quotes_repo import (
 from services import subscription_coverage_service
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
+from services.user_cache import invalidate_user_cache
 from utils.datetime_helpers import now_utc
+
 
 logger = logging.getLogger(__name__)
 
@@ -439,19 +441,21 @@ async def _settle_account_purchase(
     )
     if not entitlement_created:
         raise AccountPurchaseError("active_quote_has_existing_entitlement")
-    days, remainder = divmod(version.duration_hours, 24)
-    if remainder or days <= 0:
-        raise AccountPurchaseError("tariff_duration_not_whole_days")
-    updated = await SubscriptionService.extend_subscription(
-        session,
-        user.telegram_id,
-        days,
-        version.device_limit,
-        version.tariff_id,
-        create_entitlement=False,
-    )
-    if updated is None:
-        raise AccountPurchaseError("purchase_user_missing")
+    # 4. Update user projection and access state (duration already added canonically via append_awg_grant)
+    user.current_tariff_id = version.tariff_id
+    if version.device_limit > (user.device_limit or 0):
+        user.device_limit = version.device_limit
+    user.notified_3d = False
+    user.notified_1d = False
+    user.notified_2h = False
+    user.notified_expired = False
+    user.notified_grace_12h = False
+    user.notification_retry_count = 0
+    user.last_notification_attempt = None
+    await session.flush()
+    invalidate_user_cache(user.telegram_id)
+    await SubscriptionService._sync_access_state(session, user)
+
 
     # 4. Mark Purchase fulfilled
     await purchases_repo.mark_purchase_fulfilled(session, purchase)
@@ -520,6 +524,11 @@ async def refund_purchase(
         return purchase
     if purchase.status != PurchaseStatus.COMPLETED:
         raise ValueError(f"Cannot refund purchase in status: {purchase.status}")
+    if purchase.service_type != "awg":
+        raise NotImplementedError(
+            f"refund_purchase does not currently support service_type '{purchase.service_type}'. "
+            "White Internet refunds require dedicated quota/device rollback via white_internet_service."
+        )
 
     user = await lock_checkout_user(session, purchase.user_id)
     if user is None:
@@ -550,10 +559,13 @@ async def refund_purchase(
             session, [g.id for g in grants]
         )
 
-    # 3. Resync user projection
+    # 3. Resync user projection and access state
     await subscription_coverage_service.sync_user_subscription_projection(
         session, user.id, locked_user=user
     )
+    invalidate_user_cache(user.telegram_id)
+    await SubscriptionService._sync_access_state(session, user)
+
 
     # 4. Mark purchase refunded
     await purchases_repo.mark_purchase_refunded(session, purchase)

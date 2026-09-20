@@ -1,6 +1,7 @@
 import logging
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -12,7 +13,9 @@ from config.constants import (
     PERMANENT_SUBSCRIPTION_DAYS,
     VPN_ACCESS_GRACE_HOURS,
 )
+from config.enums import EntitlementGrantStatus, EntitlementGrantType
 from database.models import EntitlementEntry, User
+from database.repositories import entitlement_grants_repo
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
@@ -377,10 +380,11 @@ class SubscriptionService:
                 if new_tariff_id is not None
                 else user.current_tariff_id
             )
+            source_id = f"admin_{admin_id or 'system'}_{uuid.uuid4().hex[:12]}"
             entitlement = EntitlementEntry(
                 beneficiary_user_id=user.id,
                 source_type="admin",
-                source_id=f"admin_{admin_id or 'system'}_{uuid.uuid4().hex[:12]}",
+                source_id=source_id,
                 entry_type="manual_grant",
                 days_delta=effective_days,
                 hours_delta=effective_hours,
@@ -389,6 +393,22 @@ class SubscriptionService:
                 metadata_={"admin_id": admin_id, "reason": reason} if (admin_id or reason) else {},
             )
             session.add(entitlement)
+            await entitlement_grants_repo.create_grant(
+                session,
+                user_id=user.id,
+                service_type="awg",
+                source_type="admin",
+                source_id=source_id,
+                grant_type=EntitlementGrantType.ADMIN_GIFT,
+                coverage_start=base_end,
+                coverage_end=new_end,
+                original_duration_hours=effective_hours,
+                paid_value_rub=Decimal("0.000000"),
+                tariff_version_id=None,
+                device_limit=device_limit_val,
+                status=EntitlementGrantStatus.ACTIVE,
+            )
+
 
         user.notified_3d = False
         user.notified_1d = False

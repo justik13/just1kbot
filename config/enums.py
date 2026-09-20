@@ -266,7 +266,9 @@ class PurchaseStatus(StrEnum):
     PENDING = "pending"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    FAILED = "failed"
     REFUNDED = "refunded"
+
 
 
 class PurchaseFulfillmentStatus(StrEnum):

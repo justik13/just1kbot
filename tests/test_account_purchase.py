@@ -98,12 +98,12 @@ class AccountPurchaseContractTests(unittest.TestCase):
         self.assertNotIn("YooKassa", source)
         self.assertIn("session.begin_nested()", source)
         debit = source.index("create_purchase_debit(")
+        activation = source.index("append_awg_grant(", debit)
         entitlement = source.index("_get_or_create_entitlement(", debit)
-        activation = source.index("SubscriptionService.extend_subscription(", debit)
         consumed = source.index('quote.status = "consumed"', debit)
-        self.assertLess(debit, entitlement)
-        self.assertLess(entitlement, activation)
-        self.assertLess(activation, consumed)
+        self.assertLess(debit, activation)
+        self.assertLess(activation, entitlement)
+        self.assertLess(entitlement, consumed)
 
     def test_cancel_service_is_explicit_and_financially_safe(self):
         source = inspect.getsource(account_purchase.cancel_account_purchase_quote)

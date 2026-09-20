@@ -455,6 +455,7 @@ async def mark_purchase_failed(
     p = await get_purchase_by_id(session, purchase, for_update=True) if isinstance(purchase, int) else purchase
     if p is None:
         raise LookupError(f"Purchase not found: {purchase}")
+    p.status = PurchaseStatus.FAILED.value
     p.fulfillment_status = PurchaseFulfillmentStatus.FAILED.value
     if reason:
         current_details = dict(p.details or {})

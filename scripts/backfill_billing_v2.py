@@ -33,6 +33,7 @@ from config.enums import (
 from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
+    EntitlementGrant,
     Purchase,
     TariffQuote,
     TariffVersion,
@@ -120,6 +121,21 @@ async def backfill_billing_v2(*, commit: bool = False) -> None:
             elif tariff is not None and getattr(tariff, "duration_days", None):
                 duration_days = tariff.duration_days
 
+            op_type_str = (
+                quote.operation_type.value
+                if hasattr(quote.operation_type, "value")
+                else str(quote.operation_type)
+            )
+            if service_type == "white_internet":
+                base_price = (
+                    getattr(tariff_ver, "price_rub", None)
+                    or getattr(tariff, "price_rub", None)
+                    or Decimal("150.00")
+                )
+                if (quote.amount_due_rub or Decimal("0.00")) < Decimal(str(base_price)):
+                    duration_days = 0
+                    op_type_str = "addon"
+
             device_limit = 1
             if tariff_ver is not None and getattr(tariff_ver, "device_limit", None):
                 device_limit = tariff_ver.device_limit
@@ -134,10 +150,11 @@ async def backfill_billing_v2(*, commit: bool = False) -> None:
                 quote_id=quote.id,
                 idempotency_key=f"migrated_quote:{quote.id}",
                 service_type=service_type,
-                operation_type=quote.operation_type.value if hasattr(quote.operation_type, "value") else str(quote.operation_type),
+                operation_type=op_type_str,
                 amount_rub=quote.amount_due_rub or Decimal("0.00"),
                 status=PurchaseStatus.COMPLETED,
                 fulfillment_status=PurchaseFulfillmentStatus.FULFILLED,
+
                 tariff_id=tariff_id,
                 tariff_version_id=quote.target_tariff_version_id,
                 duration_days=duration_days,
@@ -215,6 +232,17 @@ async def backfill_billing_v2(*, commit: bool = False) -> None:
                     if paid_lot.segment_end <= now:
                         continue
 
+                    paid_src_id = f"paid_lot:{paid_lot.entitlement_entry_id}:{paid_lot.paid_value_ledger_entry_id}"
+                    existing_grant = await session.scalar(
+                        select(EntitlementGrant).where(
+                            EntitlementGrant.user_id == user.id,
+                            EntitlementGrant.source_type == "legacy_lot",
+                            EntitlementGrant.source_id == paid_src_id,
+                        )
+                    )
+                    if existing_grant is not None:
+                        continue
+
                     # Lookup purchase_id
                     p_id = quote_to_purchase_map.get(paid_lot.quote_id) if paid_lot.quote_id else None
                     if p_id is None and paid_lot.quote_id:
@@ -229,7 +257,7 @@ async def backfill_billing_v2(*, commit: bool = False) -> None:
                         purchase_id=p_id,
                         service_type="awg",
                         source_type="legacy_lot",
-                        source_id=f"paid_lot:{paid_lot.entitlement_entry_id}:{paid_lot.paid_value_ledger_entry_id}",
+                        source_id=paid_src_id,
                         grant_type=EntitlementGrantType.LEGACY_BACKFILL,
                         coverage_start=paid_lot.segment_start,
                         coverage_end=paid_lot.segment_end,
@@ -246,13 +274,25 @@ async def backfill_billing_v2(*, commit: bool = False) -> None:
                     if bonus_lot.segment_end <= now:
                         continue
 
+                    bonus_src_type = bonus_lot.source_type or "legacy_bonus"
+                    bonus_src_id = f"bonus_lot:{bonus_lot.entitlement_entry_id}:{bonus_lot.source_id}"
+                    existing_grant = await session.scalar(
+                        select(EntitlementGrant).where(
+                            EntitlementGrant.user_id == user.id,
+                            EntitlementGrant.source_type == bonus_src_type,
+                            EntitlementGrant.source_id == bonus_src_id,
+                        )
+                    )
+                    if existing_grant is not None:
+                        continue
+
                     await entitlement_grants_repo.create_grant(
                         session,
                         user_id=user.id,
                         purchase_id=None,
                         service_type="awg",
-                        source_type=bonus_lot.source_type or "legacy_bonus",
-                        source_id=f"bonus_lot:{bonus_lot.entitlement_entry_id}:{bonus_lot.source_id}",
+                        source_type=bonus_src_type,
+                        source_id=bonus_src_id,
                         grant_type=EntitlementGrantType.LEGACY_BACKFILL,
                         coverage_start=bonus_lot.segment_start,
                         coverage_end=bonus_lot.segment_end,
@@ -267,25 +307,35 @@ async def backfill_billing_v2(*, commit: bool = False) -> None:
 
             # If legacy projector did not produce active grants (e.g. untracked direct admin grant)
             if not created_any_grant and user.subscription_end is not None and user.subscription_end > now:
-                # Create a single fallback grant to preserve active subscription
-                hours_remaining = max(1, int((user.subscription_end - now).total_seconds() // 3600))
-                start_ts = min(now, user.subscription_end - timedelta(hours=1))
-                await entitlement_grants_repo.create_grant(
-                    session,
-                    user_id=user.id,
-                    purchase_id=None,
-                    service_type="awg",
-                    source_type="legacy_user",
-                    source_id=f"legacy_sub:{user.id}",
-                    grant_type=EntitlementGrantType.LEGACY_BACKFILL,
-                    coverage_start=start_ts,
-                    coverage_end=user.subscription_end,
-                    original_duration_hours=hours_remaining,
-                    paid_value_rub=Decimal("0.000000"),
-                    device_limit=user.device_limit,
-                    status=EntitlementGrantStatus.ACTIVE,
+                fallback_src_id = f"legacy_sub:{user.id}"
+                existing_grant = await session.scalar(
+                    select(EntitlementGrant).where(
+                        EntitlementGrant.user_id == user.id,
+                        EntitlementGrant.source_type == "legacy_user",
+                        EntitlementGrant.source_id == fallback_src_id,
+                    )
                 )
-                stats["fallback_grants_created"] += 1
+                if existing_grant is None:
+                    # Create a single fallback grant to preserve active subscription
+                    hours_remaining = max(1, int((user.subscription_end - now).total_seconds() // 3600))
+                    start_ts = min(now, user.subscription_end - timedelta(hours=1))
+                    await entitlement_grants_repo.create_grant(
+                        session,
+                        user_id=user.id,
+                        purchase_id=None,
+                        service_type="awg",
+                        source_type="legacy_user",
+                        source_id=fallback_src_id,
+                        grant_type=EntitlementGrantType.LEGACY_BACKFILL,
+                        coverage_start=start_ts,
+                        coverage_end=user.subscription_end,
+                        original_duration_hours=hours_remaining,
+                        paid_value_rub=Decimal("0.000000"),
+                        device_limit=user.device_limit,
+                        status=EntitlementGrantStatus.ACTIVE,
+                    )
+                    stats["fallback_grants_created"] += 1
+
 
             # Verification of user's coverage continuity
             user_active_grants = await entitlement_grants_repo.get_active_grants_for_user(
