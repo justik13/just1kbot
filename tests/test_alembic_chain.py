@@ -38,9 +38,9 @@ class AlembicMigrationChainTests(unittest.TestCase):
             if rev is not None:
                 revisions[rev] = down_rev
 
-        self.assertIn("0030_purchases_and_entitlement_grants", revisions)
+        self.assertIn("0030_purchases_and_grants", revisions)
         self.assertEqual(
-            revisions["0030_purchases_and_entitlement_grants"],
+            revisions["0030_purchases_and_grants"],
             "0029_rebase_wi_traffic_downlink",
         )
 
@@ -52,4 +52,4 @@ class AlembicMigrationChainTests(unittest.TestCase):
         all_down = set(revisions.values())
         heads = [rev for rev in revisions if rev not in all_down]
         self.assertEqual(len(heads), 1, f"Expected 1 migration head, got {heads}")
-        self.assertEqual(heads[0], "0030_purchases_and_entitlement_grants")
+        self.assertEqual(heads[0], "0030_purchases_and_grants")

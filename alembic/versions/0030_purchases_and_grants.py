@@ -1,6 +1,6 @@
 """Add purchases and entitlement_grants tables, update account_ledger_entries with purchase_id.
 
-Revision ID: 0030_purchases_and_entitlement_grants
+Revision ID: 0030_purchases_and_grants
 Revises: 0029_rebase_wi_traffic_downlink
 Create Date: 2026-09-20 00:00:00.000000
 """
@@ -12,7 +12,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "0030_purchases_and_entitlement_grants"
+revision: str = "0030_purchases_and_grants"
 down_revision: str | None = "0029_rebase_wi_traffic_downlink"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

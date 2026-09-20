@@ -13,11 +13,11 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_head_is_0030_purchases_and_entitlement_grants(self):
+    def test_alembic_head_is_0030_purchases_and_grants(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0030_purchases_and_entitlement_grants"])
+        self.assertEqual(scripts.get_heads(), ["0030_purchases_and_grants"])
         self.assertEqual(
-            scripts.get_revision("0030_purchases_and_entitlement_grants").down_revision,
+            scripts.get_revision("0030_purchases_and_grants").down_revision,
             "0029_rebase_wi_traffic_downlink",
         )
         self.assertEqual(
