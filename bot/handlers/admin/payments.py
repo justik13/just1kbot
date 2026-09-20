@@ -580,26 +580,44 @@ async def show_order_card(
     )
 
     tariff_label = order.tariff.name if order.tariff else order.service_type
-    lines = [
-        f"🧾 <b>Заказ #{str(order.id)[:8]}</b>",
-        "",
-        f"👤 <b>Пользователь:</b> {user_label}",
-        f"💰 <b>Сумма:</b> <b>{int(order.amount_rub)} ₽</b>",
-        f"📦 <b>Услуга:</b> {safe(tariff_label)} ({safe(order.service_type)})",
-        f"📊 <b>Статус:</b> {status_icon} {status_name} (<code>{order.status}</code>)",
-        f"💳 <b>Метод:</b> <code>{safe(order.payment_method)}</code>",
-        f"🕒 <b>Создан:</b> {format_datetime(order.created_at)}",
-    ]
-    if order.paid_at:
-        lines.append(f"✅ <b>Оплачен:</b> {format_datetime(order.paid_at)}")
-    if order.refunded_at:
-        lines.append(f"↩️ <b>Возврат:</b> {format_datetime(order.refunded_at)}")
-    if order.external_id:
-        lines.append(f"🔗 <b>Внешний ID:</b> <code>{safe(order.external_id)}</code>")
-    if order.description:
-        lines.append(f"📝 <b>Описание:</b> {safe(order.description)}")
-
-    rendered = "\n".join(lines)
+    paid_at_line = (
+        texts.ADMIN_ORDER_PAID_AT_LINE.format(paid_at=format_datetime(order.paid_at))
+        if order.paid_at
+        else ""
+    )
+    refunded_at_line = (
+        texts.ADMIN_ORDER_REFUNDED_AT_LINE.format(
+            refunded_at=format_datetime(order.refunded_at)
+        )
+        if order.refunded_at
+        else ""
+    )
+    external_id_line = (
+        texts.ADMIN_ORDER_EXTERNAL_ID_LINE.format(external_id=safe(order.external_id))
+        if order.external_id
+        else ""
+    )
+    description_line = (
+        texts.ADMIN_ORDER_DESCRIPTION_LINE.format(description=safe(order.description))
+        if order.description
+        else ""
+    )
+    rendered = texts.ADMIN_ORDER_CARD_TEMPLATE.format(
+        short_id=str(order.id)[:8],
+        user_label=user_label,
+        amount_rub=int(order.amount_rub),
+        tariff_label=safe(tariff_label),
+        service_type=safe(order.service_type),
+        status_icon=status_icon,
+        status_name=status_name,
+        status=order.status,
+        payment_method=safe(order.payment_method),
+        created_at=format_datetime(order.created_at),
+        paid_at_line=paid_at_line,
+        refunded_at_line=refunded_at_line,
+        external_id_line=external_id_line,
+        description_line=description_line,
+    )
     builder = InlineKeyboardBuilder()
     if user_telegram_id:
         builder.button(
