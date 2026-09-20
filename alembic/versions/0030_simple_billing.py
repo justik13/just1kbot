@@ -123,10 +123,8 @@ def upgrade() -> None:
     )
 
     # 3. Update check constraint on account_ledger_entries
-    op.drop_constraint(
-        "ck_account_ledger_entry_shape",
-        "account_ledger_entries",
-        type_="check",
+    op.execute(
+        "ALTER TABLE account_ledger_entries DROP CONSTRAINT IF EXISTS ck_account_ledger_entry_shape"
     )
     op.create_check_constraint(
         "ck_account_ledger_entry_shape",
@@ -237,13 +235,10 @@ def downgrade() -> None:
     )
 
     op.execute("DELETE FROM account_ledger_entries WHERE order_id IS NOT NULL")
-    op.drop_column("account_ledger_entries", "order_id")
-
-    op.drop_constraint(
-        "ck_account_ledger_entry_shape",
-        "account_ledger_entries",
-        type_="check",
+    op.execute(
+        "ALTER TABLE account_ledger_entries DROP CONSTRAINT IF EXISTS ck_account_ledger_entry_shape"
     )
+    op.drop_column("account_ledger_entries", "order_id")
     op.create_check_constraint(
         "ck_account_ledger_entry_shape",
         "account_ledger_entries",
