@@ -264,7 +264,7 @@ async def handle_order_check(
                 return
         elif status_res.is_canceled:
             order.status = "canceled"
-            await session.commit()
+            await session.flush()
             await callback.answer(
                 texts.PAYMENT_ORDER_PAYMENT_CANCELLED, show_alert=True
             )
@@ -287,7 +287,7 @@ async def handle_order_cancel(
         order = await session.get(Order, order_id)
         if order and order.user_id == db_user.id and order.status == "pending":
             order.status = "canceled"
-            await session.commit()
+            await session.flush()
 
     await callback.answer(show_alert=False)
     from .common import render_tariff_showcase

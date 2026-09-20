@@ -571,7 +571,7 @@ async def cancel_topup_ui(
         )
         .values(status="canceled")
     )
-    await session.commit()
+    await session.flush()
 
     await _render_balance(
         callback.bot,
@@ -604,7 +604,7 @@ async def cancel_all_topups_ui(
         .values(status="canceled")
     )
     count = result.rowcount
-    await session.commit()
+    await session.flush()
 
     if count == 0:
         await callback.answer(

@@ -23,7 +23,7 @@ from bot.keyboards import (
     get_maintenance_confirm_keyboard,
 )
 from bot.states import AdminStates
-from database.models import Payment
+from database.models import Order, Payment
 from database.repositories.audit_repo import (
     get_all_audit_logs_paginated,
     get_total_audit_logs_count,
@@ -71,11 +71,36 @@ async def _get_financial_stats(session: AsyncSession) -> dict:
     res_7d = (await session.execute(stmt_7d)).scalar_one()
     res_30d = (await session.execute(stmt_30d)).one()
 
-    rev_24h = int(res_24h[0])
-    count_24h = int(res_24h[1])
-    rev_7d = int(res_7d)
-    rev_30d = int(res_30d[0])
-    count_30d = int(res_30d[1])
+    # Include external revenue from Order (excluding internal wallet payments)
+    order_stmt_24h = select(
+        func.coalesce(func.sum(Order.amount_rub), 0), func.count(Order.id)
+    ).where(
+        Order.status == "paid",
+        Order.payment_method != "wallet",
+        func.coalesce(Order.paid_at, Order.created_at) >= since_24h,
+    )
+    order_stmt_7d = select(func.coalesce(func.sum(Order.amount_rub), 0)).where(
+        Order.status == "paid",
+        Order.payment_method != "wallet",
+        func.coalesce(Order.paid_at, Order.created_at) >= since_7d,
+    )
+    order_stmt_30d = select(
+        func.coalesce(func.sum(Order.amount_rub), 0), func.count(Order.id)
+    ).where(
+        Order.status == "paid",
+        Order.payment_method != "wallet",
+        func.coalesce(Order.paid_at, Order.created_at) >= since_30d,
+    )
+
+    order_res_24h = (await session.execute(order_stmt_24h)).one()
+    order_res_7d = (await session.execute(order_stmt_7d)).scalar_one()
+    order_res_30d = (await session.execute(order_stmt_30d)).one()
+
+    rev_24h = int(res_24h[0] + order_res_24h[0])
+    count_24h = int(res_24h[1] + order_res_24h[1])
+    rev_7d = int(res_7d + order_res_7d)
+    rev_30d = int(res_30d[0] + order_res_30d[0])
+    count_30d = int(res_30d[1] + order_res_30d[1])
     avg_check = int(rev_30d / count_30d) if count_30d > 0 else 0
 
     return {

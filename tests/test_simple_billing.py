@@ -387,3 +387,198 @@ class TestOrderKeyboards(unittest.TestCase):
         self.assertEqual(rows[0][0].url, "https://pay.link/123")
         self.assertEqual(rows[1][0].callback_data, "order_check:ord-abc")
         self.assertEqual(rows[2][0].callback_data, "order_cancel:ord-abc")
+
+
+class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
+    @patch("services.fulfillment_service.invalidate_user_cache")
+    @patch("services.fulfillment_service.SubscriptionService.sync_access_state")
+    async def test_fulfill_awg_order_tariff_change(self, mock_sync, mock_cache):
+        session = AsyncMock(spec=AsyncSession)
+        now = datetime.now(timezone.utc)
+        # User currently has 10 days remaining
+        user = User(
+            id=10,
+            telegram_id=12345678,
+            subscription_end=now + timedelta(days=10),
+            device_limit=2,
+            current_tariff_id=1,
+        )
+        session.get.return_value = user
+
+        # User changes to a 30-day tariff (prorated price paid)
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="awg",
+            duration_days=30,
+            device_limit=4,
+            tariff_id=2,
+            amount_rub=Decimal("350.00"),
+            status="paid",
+            metadata_={"is_tariff_change": True},
+        )
+
+        await FulfillmentService.fulfill_order(session, order)
+
+        # Resulting subscription end must be ~30 days from now, NOT 10 + 30 = 40 days
+        self.assertLess(user.subscription_end, now + timedelta(days=31))
+        self.assertGreater(user.subscription_end, now + timedelta(days=29))
+        self.assertEqual(user.device_limit, 4)
+        self.assertEqual(user.current_tariff_id, 2)
+        mock_sync.assert_called_once_with(session, user)
+
+    @patch("services.fulfillment_service.WhiteInternetService.purchase_subscription")
+    async def test_fulfill_white_internet_passes_debit_balance_false(self, mock_buy):
+        session = AsyncMock(spec=AsyncSession)
+        session.scalar.return_value = None  # No existing sub
+        user = User(id=10, telegram_id=12345678)
+        session.get.return_value = user
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="white_internet",
+            duration_days=30,
+            amount_rub=Decimal("300.00"),
+            status="paid",
+        )
+
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_by_user_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            await FulfillmentService.fulfill_order(session, order)
+
+        mock_buy.assert_called_once_with(session, 10, debit_balance=False)
+
+    def test_calculate_tariff_change_math(self):
+        now = datetime.now(timezone.utc)
+        current_tariff = Tariff(
+            id=1,
+            name="100 RUB / 10 days",
+            price_rub=Decimal("100.00"),
+            duration_days=10,
+        )
+        target_tariff = Tariff(
+            id=2,
+            name="300 RUB / 30 days",
+            price_rub=Decimal("300.00"),
+            duration_days=30,
+        )
+        # 5 days remaining on current tariff -> 50 RUB remaining value
+        subscription_end = now + timedelta(days=5)
+
+        due_rub, resulting_days = OrderService.calculate_tariff_change(
+            current_tariff, target_tariff, subscription_end, now=now
+        )
+        # 300 - 50 = 250 RUB
+        self.assertEqual(due_rub, Decimal("250.00"))
+        self.assertEqual(resulting_days, 30)
+
+    @patch("services.referral_bonus.grant_referral_bonus_for_topup")
+    @patch("services.order_service.create_order_credit")
+    @patch("services.order_service.FulfillmentService.fulfill_order")
+    async def test_mark_topup_order_paid_triggers_referral_bonus(
+        self, mock_fulfill, mock_credit, mock_bonus
+    ):
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=55,
+            service_type="topup",
+            amount_rub=Decimal("500.00"),
+            payment_method="yookassa",
+            status="pending",
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        paid_order = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertIsNotNone(paid_order)
+        self.assertEqual(paid_order.status, "paid")
+        mock_credit.assert_called_once_with(
+            session,
+            user_id=55,
+            amount_rub=Decimal("500.00"),
+            order_id=order_uuid,
+            metadata={"source": "yookassa_topup"},
+        )
+        mock_bonus.assert_called_once_with(
+            session,
+            purchaser_user_id=55,
+            order_id=str(order_uuid),
+            topup_amount=Decimal("500.00"),
+        )
+        mock_fulfill.assert_called_once_with(session, order)
+
+    async def test_has_successful_topup_checks_orders(self):
+        from database.repositories.payments_repo import has_successful_topup
+
+        session = AsyncMock(spec=AsyncSession)
+        # 1st call for Payment returns 0, 2nd call for Order returns 1
+        session.scalar.side_effect = [0, 1]
+
+        result = await has_successful_topup(session, user_id=99)
+        self.assertTrue(result)
+        self.assertEqual(session.scalar.call_count, 2)
+
+    async def test_admin_financial_stats_combines_order_and_payment(self):
+        from bot.handlers.admin.dashboard import _get_financial_stats
+
+        session = AsyncMock(spec=AsyncSession)
+        # Payment results:
+        # res_24h = (100, 1)
+        # res_7d = 200
+        # res_30d = (500, 2)
+        # Order results:
+        # order_res_24h = (300, 2)
+        # order_res_7d = 400
+        # order_res_30d = (700, 3)
+
+        mock_execute_results = [
+            unittest.mock.MagicMock(one=lambda: (100, 1)),
+            unittest.mock.MagicMock(scalar_one=lambda: 200),
+            unittest.mock.MagicMock(one=lambda: (500, 2)),
+            unittest.mock.MagicMock(one=lambda: (300, 2)),
+            unittest.mock.MagicMock(scalar_one=lambda: 400),
+            unittest.mock.MagicMock(one=lambda: (700, 3)),
+        ]
+        session.execute.side_effect = mock_execute_results
+
+        stats = await _get_financial_stats(session)
+
+        self.assertEqual(stats["rev_24h"], 100 + 300)
+        self.assertEqual(stats["count_24h"], 1 + 2)
+        self.assertEqual(stats["rev_7d"], 200 + 400)
+        self.assertEqual(stats["rev_30d"], 500 + 700)
+        self.assertEqual(stats["avg_check"], (500 + 700) // (2 + 3))
+
+    async def test_purchases_repo_topup_and_change_entries(self):
+        from database.repositories.purchases_repo import (
+            get_purchase_log_by_id,
+        )
+
+        session = AsyncMock(spec=AsyncSession)
+        test_uuid = uuid.uuid4()
+        topup_order = Order(
+            id=test_uuid,
+            user_id=1,
+            service_type="topup",
+            amount_rub=Decimal("500.00"),
+            duration_days=0,
+            status="paid",
+            created_at=datetime.now(timezone.utc),
+        )
+        mock_result = unittest.mock.MagicMock()
+        mock_result.scalar_one_or_none.return_value = topup_order
+        session.execute.return_value = mock_result
+
+        entry = await get_purchase_log_by_id(session, f"order_{test_uuid}")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.operation_type, "topup")
+        self.assertEqual(entry.operation_title, "Пополнение")
+        self.assertEqual(entry.tariff_name, "Баланс")
+

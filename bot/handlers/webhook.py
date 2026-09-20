@@ -138,27 +138,42 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
 
                         user = await session.get(User, order.user_id)
                         if user and user.telegram_id:
-                            balance = await get_account_balance(
-                                session, user_id=user.id
-                            )
-                            tariff_name = get_tariff_display_name(
-                                order.device_limit or 2
-                            )
-                            await render_hub(
-                                bot,
-                                user.telegram_id,
-                                texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                                    operation_title=texts.PURCHASE_COMPLETED,
-                                    tariff_name=tariff_name,
-                                    duration_days=order.duration_days,
-                                    charged=int(order.amount_rub),
-                                    real_balance=int(balance.real_available),
-                                    bonus_balance=int(balance.bonus_available),
-                                ),
-                                get_payment_success_keyboard(),
-                                message_effect_id=EFFECT_CONFETTI,
-                                force_new=True,
-                            )
+                            if order.service_type == "topup":
+                                from bot.handlers.payment.balance_routes import (
+                                    _render_balance,
+                                )
+
+                                await _render_balance(
+                                    bot,
+                                    user.telegram_id,
+                                    session,
+                                    user,
+                                    notice=texts.TOPUP_CREDITED_NOTICE,
+                                    message_effect_id=EFFECT_CONFETTI,
+                                    force_new=True,
+                                )
+                            else:
+                                balance = await get_account_balance(
+                                    session, user_id=user.id
+                                )
+                                tariff_name = get_tariff_display_name(
+                                    order.device_limit or 2
+                                )
+                                await render_hub(
+                                    bot,
+                                    user.telegram_id,
+                                    texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+                                        operation_title=texts.PURCHASE_COMPLETED,
+                                        tariff_name=tariff_name,
+                                        duration_days=order.duration_days,
+                                        charged=int(order.amount_rub),
+                                        real_balance=int(balance.real_available),
+                                        bonus_balance=int(balance.bonus_available),
+                                    ),
+                                    get_payment_success_keyboard(),
+                                    message_effect_id=EFFECT_CONFETTI,
+                                    force_new=True,
+                                )
                     except Exception as exc:
                         logger.warning(
                             "Could not notify user of order fulfillment: %s", exc

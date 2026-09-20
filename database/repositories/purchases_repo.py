@@ -91,7 +91,7 @@ async def get_purchase_logs_paginated(
         select(Order)
         .where(
             Order.status == "paid",
-            Order.service_type.in_(("awg", "white_internet")),
+            Order.service_type.in_(("awg", "white_internet", "topup")),
         )
         .options(selectinload(Order.user), selectinload(Order.tariff))
         .order_by(Order.paid_at.desc().nullslast(), Order.created_at.desc())
@@ -104,11 +104,29 @@ async def get_purchase_logs_paginated(
         username = user.username if user else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
         tariff_obj = getattr(ord_item, "tariff", None)
-        tariff_name = (
-            tariff_obj.name
-            if tariff_obj
-            else ("White Internet" if getattr(ord_item, "service_type", None) == "white_internet" else "Тариф")
+        is_change = bool(
+            ord_item.metadata_ and ord_item.metadata_.get("is_tariff_change")
         )
+        if ord_item.service_type == "topup":
+            op_type = "topup"
+            op_title = "Пополнение"
+            tariff_name = "Баланс"
+        elif is_change:
+            op_type = "change"
+            op_title = "Смена тарифа"
+            tariff_name = tariff_obj.name if tariff_obj else "Тариф"
+        else:
+            op_type = "purchase"
+            op_title = "Покупка"
+            tariff_name = (
+                tariff_obj.name
+                if tariff_obj
+                else (
+                    "White Internet"
+                    if getattr(ord_item, "service_type", None) == "white_internet"
+                    else "Тариф"
+                )
+            )
         entries.append(
             PurchaseLogEntry(
                 id=f"order_{ord_item.id}",
@@ -117,8 +135,8 @@ async def get_purchase_logs_paginated(
                 telegram_id=tg_id,
                 username=username,
                 user_label=user_label,
-                operation_type="purchase",
-                operation_title="Покупка",
+                operation_type=op_type,
+                operation_title=op_title,
                 tariff_name=tariff_name,
                 device_limit=ord_item.device_limit or 2,
                 duration_days=ord_item.duration_days,
@@ -239,7 +257,7 @@ async def get_purchase_logs_paginated(
             await session.scalar(
                 select(func.count(Order.id)).where(
                     Order.status == "paid",
-                    Order.service_type.in_(("awg", "white_internet")),
+                    Order.service_type.in_(("awg", "white_internet", "topup")),
                 )
             )
         ) or 0
@@ -285,11 +303,30 @@ async def get_purchase_log_by_id(
         tg_id = user.telegram_id if user else 0
         username = user.username if user else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
-        tariff_name = (
-            ord_item.tariff.name
-            if ord_item.tariff
-            else ("White Internet" if ord_item.service_type == "white_internet" else "Тариф")
+        tariff_obj = ord_item.tariff
+        is_change = bool(
+            ord_item.metadata_ and ord_item.metadata_.get("is_tariff_change")
         )
+        if ord_item.service_type == "topup":
+            op_type = "topup"
+            op_title = "Пополнение"
+            tariff_name = "Баланс"
+        elif is_change:
+            op_type = "change"
+            op_title = "Смена тарифа"
+            tariff_name = tariff_obj.name if tariff_obj else "Тариф"
+        else:
+            op_type = "purchase"
+            op_title = "Покупка"
+            tariff_name = (
+                tariff_obj.name
+                if tariff_obj
+                else (
+                    "White Internet"
+                    if ord_item.service_type == "white_internet"
+                    else "Тариф"
+                )
+            )
         return PurchaseLogEntry(
             id=f"order_{ord_item.id}",
             numeric_id=0,
@@ -297,8 +334,8 @@ async def get_purchase_log_by_id(
             telegram_id=tg_id,
             username=username,
             user_label=user_label,
-            operation_type="purchase",
-            operation_title="Покупка",
+            operation_type=op_type,
+            operation_title=op_title,
             tariff_name=tariff_name,
             device_limit=ord_item.device_limit or 2,
             duration_days=ord_item.duration_days,

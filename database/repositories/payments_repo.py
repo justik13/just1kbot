@@ -11,7 +11,9 @@ async def has_successful_topup(
     *,
     user_id: int,
 ) -> bool:
-    """Return True if user has ever had at least one credited top-up payment."""
+    """Return True if user has ever had at least one credited top-up payment or paid topup order."""
+    from database.models import Order
+
     stmt = (
         select(func.count(Payment.id))
         .where(
@@ -20,7 +22,19 @@ async def has_successful_topup(
         )
     )
     count = await session.scalar(stmt)
-    return (count or 0) > 0
+    if (count or 0) > 0:
+        return True
+
+    order_stmt = (
+        select(func.count(Order.id))
+        .where(
+            Order.user_id == user_id,
+            Order.service_type == "topup",
+            Order.status == "paid",
+        )
+    )
+    order_count = await session.scalar(order_stmt)
+    return (order_count or 0) > 0
 
 
 

@@ -104,13 +104,36 @@ class OrderService:
             if existing and existing.payment_url:
                 return existing
 
+        user = await session.get(User, user_id)
+        order_meta: dict = {}
         if tariff_id is not None:
             tariff = await session.get(Tariff, tariff_id)
             if tariff:
-                if amount_rub is None:
-                    amount_rub = Decimal(tariff.price_rub)
-                if duration_days is None:
-                    duration_days = tariff.duration_days
+                now = now_utc()
+                current_tid = getattr(user, "current_tariff_id", None)
+                sub_end = getattr(user, "subscription_end", None)
+                is_tariff_change = bool(
+                    user
+                    and current_tid
+                    and current_tid != tariff.id
+                    and sub_end
+                    and sub_end > now
+                )
+                if is_tariff_change:
+                    order_meta["is_tariff_change"] = True
+                    current_tariff = await session.get(Tariff, current_tid)
+                    due_rub, resulting_days = OrderService.calculate_tariff_change(
+                        current_tariff, tariff, sub_end, now=now
+                    )
+                    if amount_rub is None:
+                        amount_rub = due_rub
+                    if duration_days is None:
+                        duration_days = resulting_days
+                else:
+                    if amount_rub is None:
+                        amount_rub = Decimal(tariff.price_rub)
+                    if duration_days is None:
+                        duration_days = tariff.duration_days
                 if device_limit is None:
                     device_limit = tariff.device_limit
                 if description is None:
@@ -132,6 +155,7 @@ class OrderService:
             payment_method=payment_method,
             status="pending",
             description=final_desc,
+            metadata_=order_meta,
         )
         session.add(order)
         await session.flush()
@@ -175,13 +199,35 @@ class OrderService:
         if user and getattr(user, "financial_hold", False):
             raise FinancialHoldBlockedError("Financial hold active on user")
 
+        order_meta: dict = {}
         if tariff_id is not None:
             tariff = await session.get(Tariff, tariff_id)
             if tariff:
-                if amount_rub is None:
-                    amount_rub = Decimal(tariff.price_rub)
-                if duration_days is None:
-                    duration_days = tariff.duration_days
+                now = now_utc()
+                current_tid = getattr(user, "current_tariff_id", None)
+                sub_end = getattr(user, "subscription_end", None)
+                is_tariff_change = bool(
+                    user
+                    and current_tid
+                    and current_tid != tariff.id
+                    and sub_end
+                    and sub_end > now
+                )
+                if is_tariff_change:
+                    order_meta["is_tariff_change"] = True
+                    current_tariff = await session.get(Tariff, current_tid)
+                    due_rub, resulting_days = OrderService.calculate_tariff_change(
+                        current_tariff, tariff, sub_end, now=now
+                    )
+                    if amount_rub is None:
+                        amount_rub = due_rub
+                    if duration_days is None:
+                        duration_days = resulting_days
+                else:
+                    if amount_rub is None:
+                        amount_rub = Decimal(tariff.price_rub)
+                    if duration_days is None:
+                        duration_days = tariff.duration_days
                 if device_limit is None:
                     device_limit = tariff.device_limit
                 if description is None:
@@ -211,6 +257,7 @@ class OrderService:
             status="paid",
             description=description or texts.CHECKOUT_DESCRIPTION_DEFAULT,
             paid_at=now_utc(),
+            metadata_=order_meta,
         )
         session.add(order)
         await session.flush()
@@ -277,6 +324,19 @@ class OrderService:
                 order_id=order.id,
                 metadata={"source": f"{order.payment_method}_topup"},
             )
+            try:
+                from services.referral_bonus import grant_referral_bonus_for_topup
+
+                await grant_referral_bonus_for_topup(
+                    session,
+                    purchaser_user_id=order.user_id,
+                    order_id=str(order.id),
+                    topup_amount=order.amount_rub,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to process referral bonus for order %s: %s", order.id, exc
+                )
 
         # Fulfill benefits linearly
         await FulfillmentService.fulfill_order(session, order)

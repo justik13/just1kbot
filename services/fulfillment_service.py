@@ -31,9 +31,13 @@ class FulfillmentService:
 
         if order.service_type == "awg":
             now = now_utc()
-            base = max(user.subscription_end, now) if user.subscription_end else now
-            if order.duration_days > 0:
-                user.subscription_end = base + timedelta(days=order.duration_days)
+            is_tariff_change = bool(order.metadata_ and order.metadata_.get("is_tariff_change"))
+            if is_tariff_change and order.duration_days > 0:
+                user.subscription_end = now + timedelta(days=order.duration_days)
+            else:
+                base = max(user.subscription_end, now) if user.subscription_end else now
+                if order.duration_days > 0:
+                    user.subscription_end = base + timedelta(days=order.duration_days)
             if order.device_limit:
                 user.device_limit = order.device_limit
             if order.tariff_id:
@@ -41,11 +45,12 @@ class FulfillmentService:
             await SubscriptionService.sync_access_state(session, user)
             invalidate_user_cache(user.telegram_id)
             logger.info(
-                "Fulfilled AWG order %s for user %s: +%s days (until %s)",
+                "Fulfilled AWG order %s for user %s: +%s days (until %s, tariff_change=%s)",
                 order.id,
                 user.id,
                 order.duration_days,
                 user.subscription_end,
+                is_tariff_change,
             )
 
         elif order.service_type == "white_internet":
@@ -54,25 +59,31 @@ class FulfillmentService:
             )
 
             sub = await get_subscription_by_user_id(session, user.id)
-            if order.traffic_bytes > 0 and order.duration_days == 0:
+            if (order.traffic_bytes or 0) > 0 and (order.duration_days or 0) == 0:
                 pack_gb = max(1, order.traffic_bytes // (1024**3))
                 await WhiteInternetService.topup_quota(
                     session,
                     user.id,
                     pack_gb,
                     actor_telegram_id=user.telegram_id,
+                    debit_balance=False,
                 )
-            elif order.device_limit and order.duration_days == 0:
+            elif order.device_limit and (order.duration_days or 0) == 0:
                 await WhiteInternetService.purchase_device_slot(
                     session,
                     user.id,
                     actor_telegram_id=user.telegram_id,
+                    debit_balance=False,
                 )
             else:
                 if sub and sub.status in ("ACTIVE", "EXPIRED", "EXHAUSTED"):
-                    await WhiteInternetService.renew_subscription(session, user.id)
+                    await WhiteInternetService.renew_subscription(
+                        session, user.id, debit_balance=False
+                    )
                 else:
-                    await WhiteInternetService.purchase_subscription(session, user.id)
+                    await WhiteInternetService.purchase_subscription(
+                        session, user.id, debit_balance=False
+                    )
             logger.info("Fulfilled White Internet order %s for user %s", order.id, user.id)
 
         elif order.service_type == "topup":

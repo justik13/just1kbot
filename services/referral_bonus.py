@@ -115,7 +115,8 @@ async def grant_referral_bonus_for_topup(
     session: AsyncSession,
     *,
     purchaser_user_id: int,
-    payment_id: int,
+    payment_id: int | None = None,
+    order_id: str | None = None,
     topup_amount: object,
 ) -> ReferralBonusGrantResult:
     """Credit the referrer with 10% of a top-up, and credit the purchaser with 10% if it is their first top-up."""
@@ -166,7 +167,8 @@ async def grant_referral_bonus_for_topup(
 
     # 1. Grant 10% bonus to referrer for every top-up
     referrer_bonus_granted = Decimal(0)
-    idempotency_key = f"referral-bonus:topup:{payment_id}:{referrer.id}"
+    op_id = order_id or str(payment_id or "unknown")
+    idempotency_key = f"referral-bonus:topup:{op_id}:{referrer.id}"
     existing = await session.scalar(
         select(AccountLedgerEntry).where(
             AccountLedgerEntry.idempotency_key == idempotency_key
@@ -179,7 +181,7 @@ async def grant_referral_bonus_for_topup(
                 entry_type="admin_adjustment",
                 amount=bonus,
                 currency="RUB",
-                payment_id=None,
+                payment_id=payment_id,
                 quote_id=None,
                 reversal_of_id=None,
                 idempotency_key=idempotency_key,
@@ -189,6 +191,7 @@ async def grant_referral_bonus_for_topup(
                     "referred_user_id": purchaser.id,
                     "referred_telegram_id": purchaser.telegram_id,
                     "topup_payment_id": payment_id,
+                    "topup_order_id": order_id,
                     "bonus_rate": str(REFERRAL_BONUS_RATE),
                 },
             )
@@ -205,6 +208,7 @@ async def grant_referral_bonus_for_topup(
                 "amount": int(bonus),
                 "from_user_id": purchaser.id,
                 "payment_id": payment_id,
+                "order_id": order_id,
             },
         )
     else:
@@ -213,17 +217,32 @@ async def grant_referral_bonus_for_topup(
     # 2. Check if this is the purchaser's first successful top-up. If so, grant purchaser +10% bonus as well.
     purchaser_welcome_granted = Decimal(0)
     from sqlalchemy import func
+    import uuid as _uuid
 
-    from database.models import Payment
+    from database.models import Order, Payment
 
-    prev_credited = await session.scalar(
-        select(func.count(Payment.id)).where(
-            Payment.user_id == purchaser.id,
-            Payment.credited_at.is_not(None),
-            Payment.fulfillment_status == "succeeded",
-            Payment.id < payment_id,
-        )
+    prev_payment_stmt = select(func.count(Payment.id)).where(
+        Payment.user_id == purchaser.id,
+        Payment.credited_at.is_not(None),
+        Payment.fulfillment_status == "succeeded",
     )
+    if payment_id is not None:
+        prev_payment_stmt = prev_payment_stmt.where(Payment.id < payment_id)
+    prev_payments = (await session.scalar(prev_payment_stmt)) or 0
+
+    prev_order_stmt = select(func.count(Order.id)).where(
+        Order.user_id == purchaser.id,
+        Order.service_type == "topup",
+        Order.status == "paid",
+    )
+    if order_id:
+        try:
+            prev_order_stmt = prev_order_stmt.where(Order.id != _uuid.UUID(str(order_id)))
+        except (ValueError, TypeError):
+            pass
+    prev_orders = (await session.scalar(prev_order_stmt)) or 0
+
+    prev_credited = prev_payments + prev_orders
     if (prev_credited or 0) == 0:
         purchaser_key = f"referral-bonus:first-topup-welcome:{purchaser.id}"
         existing_purchaser = await session.scalar(
@@ -238,7 +257,7 @@ async def grant_referral_bonus_for_topup(
                     entry_type="admin_adjustment",
                     amount=bonus,
                     currency="RUB",
-                    payment_id=None,
+                    payment_id=payment_id,
                     quote_id=None,
                     reversal_of_id=None,
                     idempotency_key=purchaser_key,
@@ -248,6 +267,7 @@ async def grant_referral_bonus_for_topup(
                         "purchaser_user_id": purchaser.id,
                         "referrer_telegram_id": purchaser.referred_by,
                         "topup_payment_id": payment_id,
+                        "topup_order_id": order_id,
                         "bonus_rate": str(REFERRAL_BONUS_RATE),
                     },
                 )
