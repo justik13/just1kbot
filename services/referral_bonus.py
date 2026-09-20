@@ -181,7 +181,7 @@ async def grant_referral_bonus_for_topup(
                 entry_type="admin_adjustment",
                 amount=bonus,
                 currency="RUB",
-                payment_id=payment_id,
+                payment_id=None,
                 quote_id=None,
                 reversal_of_id=None,
                 idempotency_key=idempotency_key,
@@ -221,28 +221,40 @@ async def grant_referral_bonus_for_topup(
 
     from database.models import Order, Payment
 
-    prev_payment_stmt = select(func.count(Payment.id)).where(
-        Payment.user_id == purchaser.id,
-        Payment.credited_at.is_not(None),
-        Payment.fulfillment_status == "succeeded",
-    )
-    if payment_id is not None:
-        prev_payment_stmt = prev_payment_stmt.where(Payment.id < payment_id)
-    prev_payments = (await session.scalar(prev_payment_stmt)) or 0
-
-    prev_order_stmt = select(func.count(Order.id)).where(
-        Order.user_id == purchaser.id,
-        Order.service_type == "topup",
-        Order.status == "paid",
-    )
+    order_uuid = None
     if order_id:
         try:
-            prev_order_stmt = prev_order_stmt.where(Order.id != _uuid.UUID(str(order_id)))
+            order_uuid = _uuid.UUID(str(order_id))
         except (ValueError, TypeError):
             pass
-    prev_orders = (await session.scalar(prev_order_stmt)) or 0
 
-    prev_credited = prev_payments + prev_orders
+    payment_subq = (
+        select(func.count(Payment.id))
+        .where(
+            Payment.user_id == purchaser.id,
+            Payment.credited_at.is_not(None),
+            Payment.fulfillment_status == "succeeded",
+            *((Payment.id < payment_id,) if payment_id is not None else ()),
+        )
+        .scalar_subquery()
+    )
+
+    order_subq = (
+        select(func.count(Order.id))
+        .where(
+            Order.user_id == purchaser.id,
+            Order.service_type == "topup",
+            Order.status == "paid",
+            *((Order.id != order_uuid,) if order_uuid else ()),
+        )
+        .scalar_subquery()
+    )
+
+    prev_credited = (
+        await session.scalar(
+            select(func.coalesce(payment_subq, 0) + func.coalesce(order_subq, 0))
+        )
+    ) or 0
     if (prev_credited or 0) == 0:
         purchaser_key = f"referral-bonus:first-topup-welcome:{purchaser.id}"
         existing_purchaser = await session.scalar(
@@ -257,7 +269,7 @@ async def grant_referral_bonus_for_topup(
                     entry_type="admin_adjustment",
                     amount=bonus,
                     currency="RUB",
-                    payment_id=payment_id,
+                    payment_id=None,
                     quote_id=None,
                     reversal_of_id=None,
                     idempotency_key=purchaser_key,
