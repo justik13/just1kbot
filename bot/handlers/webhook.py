@@ -115,11 +115,49 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         async with session_scope() as session:
             from services.order_service import OrderService
 
-            bot = request.app.get("bot")
-            order_processed = await OrderService.process_webhook_event(
-                session, payload, bot=bot
-            )
-            inbox_status = "processed" if order_processed else "pending"
+            order = await OrderService.process_webhook_event(session, payload)
+            inbox_status = "processed" if order else "pending"
+
+            if order and order.status == "paid":
+                bot = request.app.get("bot")
+                if bot:
+                    try:
+                        from database.models import User
+                        from database.repositories.account_ledger_repo import (
+                            get_account_balance,
+                        )
+                        from bot import texts
+                        from bot.formatters import get_tariff_display_name
+                        from bot.keyboards import get_payment_success_keyboard
+                        from utils.telegram import EFFECT_CONFETTI, render_hub
+
+                        user = await session.get(User, order.user_id)
+                        if user and user.telegram_id:
+                            balance = await get_account_balance(
+                                session, user_id=user.id
+                            )
+                            tariff_name = get_tariff_display_name(
+                                order.device_limit or 2
+                            )
+                            await render_hub(
+                                bot,
+                                user.telegram_id,
+                                texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+                                    operation_title=texts.PURCHASE_COMPLETED,
+                                    tariff_name=tariff_name,
+                                    duration_days=order.duration_days,
+                                    charged=int(order.amount_rub),
+                                    real_balance=int(balance.real_available),
+                                    bonus_balance=int(balance.bonus_available),
+                                ),
+                                get_payment_success_keyboard(),
+                                message_effect_id=EFFECT_CONFETTI,
+                                force_new=True,
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not notify user of order fulfillment: %s", exc
+                        )
 
             await session.execute(
                 insert(WebhookInbox)

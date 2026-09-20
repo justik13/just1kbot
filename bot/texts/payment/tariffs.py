@@ -21,6 +21,10 @@ BTN_PAYMENT_CONNECT_DEVICE = "🔌 Подключить устройство"
 
 BTN_PAYMENT_GO_TO_RENEW = "🔄 Перейти к продлению"
 
+BTN_PAYMENT_PAY_CARD = "💳 Оплатить картой ({price} ₽)"
+
+BTN_PAYMENT_PAY_ORDER = "💳 Оплатить {price} ₽"
+
 BTN_PAYMENT_RENEW_SUBSCRIPTION = "🔄 Продлить подписку"
 
 BTN_PAYMENT_RETURN_TO_PURCHASE = "Вернуться к покупке"
@@ -67,6 +71,19 @@ PAYMENT_HUB_HEADER = """⏳ <b>Ваша подписка</b>
 PAYMENT_NO_TARIFFS = """💳 В данный момент нет доступных тарифов.
 
 Обратитесь в поддержку для оформления подписки вручную."""
+
+PAYMENT_ORDER_INVOICE_CARD = """💳 <b>Оплата заказа</b>
+
+📦 Тариф: <b>{tariff_name}</b>
+⏱ Срок: <b>{duration_days} дней</b>
+💰 К оплате: <b>{price} ₽</b>
+
+Нажмите кнопку ниже для перехода к безопасной оплате.
+Подписка активируется автоматически сразу после завершения платежа."""
+
+PAYMENT_ORDER_PAYMENT_CANCELLED = "Платеж был отменен."
+
+PAYMENT_ORDER_WAITING_PAYMENT = "Оплата еще не поступила. Если вы уже оплатили, подождите минуту."
 
 PAYMENT_PRICE_RUB_FORMAT = "{amount_rub} ₽"
 

@@ -462,12 +462,12 @@ def get_order_checkout_keyboard(
             style="success",
         )
         builder.button(
-            text=f"💳 Оплатить картой ({price} ₽)",
+            text=texts.BTN_PAYMENT_PAY_CARD.format(price=price),
             callback_data=f"order_pay_card:{tariff_id}",
         )
     else:
         builder.button(
-            text=f"💳 Оплатить картой ({price} ₽)",
+            text=texts.BTN_PAYMENT_PAY_CARD.format(price=price),
             callback_data=f"order_pay_card:{tariff_id}",
             style="success",
         )
@@ -488,17 +488,17 @@ def get_order_invoice_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=f"💳 Оплатить {price} ₽",
+        text=texts.BTN_PAYMENT_PAY_ORDER.format(price=price),
         url=payment_url,
         style="success",
     )
     builder.button(
-        text="🔄 Проверить оплату",
+        text=texts.BTN_PAYMENT_CHECK,
         callback_data=f"order_check:{order_id}",
         style="primary",
     )
     builder.button(
-        text="❌ Отмена",
+        text=texts.BTN_CANCEL_ACTION,
         callback_data=f"order_cancel:{order_id}",
         style="danger",
     )

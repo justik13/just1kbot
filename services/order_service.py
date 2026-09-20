@@ -9,6 +9,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot import texts
 from database.models import Order, Tariff
 from database.repositories.account_ledger_repo import (
     create_order_credit,
@@ -59,11 +60,11 @@ class OrderService:
                 if device_limit is None:
                     device_limit = tariff.device_limit
                 if description is None:
-                    description = f"Тариф: {tariff.name}"
+                    description = f"{texts.CHECKOUT_DESCRIPTION_DEFAULT} ({tariff.name})"
 
         final_amount = amount_rub if amount_rub is not None else Decimal("0.00")
         final_duration = duration_days if duration_days is not None else 0
-        final_desc = description or f"Заказ {service_type}"
+        final_desc = description or texts.CHECKOUT_DESCRIPTION_DEFAULT
 
         order = Order(
             id=uuid.uuid4(),
@@ -119,7 +120,7 @@ class OrderService:
                 if device_limit is None:
                     device_limit = tariff.device_limit
                 if description is None:
-                    description = f"Тариф: {tariff.name}"
+                    description = f"{texts.CHECKOUT_DESCRIPTION_DEFAULT} ({tariff.name})"
 
         cost = amount_rub if amount_rub is not None else Decimal("0.00")
         balance_snapshot = await get_account_balance(
@@ -141,7 +142,7 @@ class OrderService:
             device_limit=device_limit,
             payment_method="wallet",
             status="paid",
-            description=description or f"Оплата с баланса {service_type}",
+            description=description or texts.CHECKOUT_DESCRIPTION_DEFAULT,
             paid_at=now_utc(),
         )
         session.add(order)
@@ -165,8 +166,7 @@ class OrderService:
     async def process_webhook_event(
         session: AsyncSession,
         payload: dict,
-        bot: object | None = None,
-    ) -> bool:
+    ) -> Order | None:
         """Handle incoming webhook event (payment succeeded or refund succeeded)."""
         gateway = get_payment_gateway("yookassa")
         result = await gateway.parse_webhook(payload)
@@ -174,7 +174,7 @@ class OrderService:
             logger.warning(
                 "Received webhook without order_id or external_id: %s", payload
             )
-            return False
+            return None
 
         order = None
         if result.order_id:
@@ -195,7 +195,7 @@ class OrderService:
                 result.order_id,
                 result.external_id,
             )
-            return False
+            return None
 
         if result.is_paid:
             if order.status == "paid":
@@ -203,7 +203,7 @@ class OrderService:
                     "Order %s already marked paid, ignoring duplicate webhook",
                     order.id,
                 )
-                return True
+                return order
             order.status = "paid"
             order.paid_at = now_utc()
             if result.external_id:
@@ -237,41 +237,7 @@ class OrderService:
             await FulfillmentService.fulfill_order(session, order)
             await session.commit()
             logger.info("Order %s successfully paid and fulfilled", order.id)
-
-            if bot:
-                try:
-                    from database.models import User
-
-                    user = await session.get(User, order.user_id)
-                    if user and user.telegram_id:
-                        from bot import texts
-                        from bot.formatters import get_tariff_display_name
-                        from bot.keyboards import get_payment_success_keyboard
-                        from utils.telegram import EFFECT_CONFETTI, render_hub
-
-                        balance = await get_account_balance(session, user_id=user.id)
-                        tariff_name = get_tariff_display_name(order.device_limit or 2)
-                        await render_hub(
-                            bot,
-                            user.telegram_id,
-                            texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                                operation_title=texts.PURCHASE_COMPLETED,
-                                tariff_name=tariff_name,
-                                duration_days=order.duration_days,
-                                charged=int(order.amount_rub),
-                                real_balance=int(balance.real_available),
-                                bonus_balance=int(balance.bonus_available),
-                            ),
-                            get_payment_success_keyboard(),
-                            message_effect_id=EFFECT_CONFETTI,
-                            force_new=True,
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "Could not notify user of order fulfillment: %s", exc
-                    )
-
-            return True
+            return order
 
         if result.is_refunded:
             if order.status == "refunded":
@@ -279,7 +245,7 @@ class OrderService:
                     "Order %s already marked refunded, ignoring duplicate webhook",
                     order.id,
                 )
-                return True
+                return order
             order.status = "refunded"
             order.refunded_at = now_utc()
 
@@ -294,6 +260,6 @@ class OrderService:
             await FulfillmentService.revoke_order(session, order)
             await session.commit()
             logger.info("Order %s refunded and revoked", order.id)
-            return True
+            return order
 
-        return False
+        return None

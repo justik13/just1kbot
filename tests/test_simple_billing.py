@@ -15,7 +15,6 @@ import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import Order, Tariff, User
@@ -34,7 +33,6 @@ from bot.keyboards.payment import (
 )
 
 
-@pytest.mark.asyncio
 class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.gateway = YooKassaGateway()
@@ -106,7 +104,6 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(status_result.is_canceled)
 
 
-@pytest.mark.asyncio
 class TestFulfillmentService(unittest.IsolatedAsyncioTestCase):
     @patch("services.fulfillment_service.invalidate_user_cache")
     @patch("services.fulfillment_service.SubscriptionService.sync_access_state")
@@ -195,7 +192,6 @@ class TestFulfillmentService(unittest.IsolatedAsyncioTestCase):
         mock_sync.assert_called_once_with(session, user)
 
 
-@pytest.mark.asyncio
 class TestOrderService(unittest.IsolatedAsyncioTestCase):
     @patch("services.order_service.get_payment_gateway")
     async def test_create_order_external_gateway(self, mock_gw_factory):

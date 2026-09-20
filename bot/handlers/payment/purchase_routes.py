@@ -163,13 +163,10 @@ async def handle_order_pay_card(
 
     tariff_name = get_tariff_display_name(order.device_limit or 2)
     price = int(order.amount_rub)
-    text = (
-        f"💳 <b>Оплата заказа</b>\n\n"
-        f"📦 Тариф: <b>{tariff_name}</b>\n"
-        f"⏱ Срок: <b>{order.duration_days} дней</b>\n"
-        f"💰 К оплате: <b>{price} ₽</b>\n\n"
-        f"Нажмите кнопку ниже для перехода к безопасной оплате YooKassa. "
-        f"Подписка активируется автоматически сразу после завершения платежа."
+    text = texts.PAYMENT_ORDER_INVOICE_CARD.format(
+        tariff_name=tariff_name,
+        duration_days=order.duration_days,
+        price=price,
     )
 
     await render_hub(
@@ -269,11 +266,13 @@ async def handle_order_check(
         elif status_res.is_canceled:
             order.status = "canceled"
             await session.commit()
-            await callback.answer("Платеж был отменен.", show_alert=True)
+            await callback.answer(
+                texts.PAYMENT_ORDER_PAYMENT_CANCELLED, show_alert=True
+            )
             return
 
     await callback.answer(
-        "Оплата еще не поступила. Если вы уже оплатили, подождите несколько секунд и проверьте снова.",
+        texts.PAYMENT_ORDER_WAITING_PAYMENT,
         show_alert=True,
     )
 
