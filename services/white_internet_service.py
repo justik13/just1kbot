@@ -539,14 +539,6 @@ class WhiteInternetService:
                 f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes"
             )
 
-        origin_node = await session.get(Server, sub.origin_node_id)
-        needs_migration = (
-            origin_node is None
-            or not origin_node.is_active
-            or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or origin_node.health_state != ServerHealthState.HEALTHY
-        )
-        new_origin_server: Server | None = None
         if needs_migration:
             try:
                 new_origin_server = await cls.select_origin_node(session)
@@ -678,16 +670,20 @@ class WhiteInternetService:
 
         sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
         if sub is None:
-            return False, texts.WL_SUB_NOT_FOUND, None
-        if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.PENDING):
-            return False, texts.WL_SUB_NOT_READY, None
+            return False, texts.WL_NO_SUB, None
+        if sub.user_id != user.id:
+            return False, texts.ERROR_ACCESS_DENIED, None
+        if getattr(sub, "is_trial", False):
+            return False, texts.WL_TRIAL_CANNOT_ADD_DEVICE, None
         now = now_utc()
+        if sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.DISABLED):
+            return False, texts.WL_SUB_NOT_READY, None
         if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
             return False, texts.WL_SUB_EXPIRED, None
 
         current_limit = max(1, getattr(sub, "device_limit", 1) or 1)
         if current_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
-            return False, texts.WL_MAX_DEVICES_REACHED, None
+            return False, texts.WL_DEVICE_LIMIT_MAX_REACHED, None
 
         total_accumulated = (
             (sub.base_traffic_bytes or 0)
