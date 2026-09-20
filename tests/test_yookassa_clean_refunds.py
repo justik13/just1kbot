@@ -19,6 +19,7 @@ from services.payment_provider_state import (
     apply_provider_transition,
 )
 from services.provider_refunds import (
+    BalanceRefundError,
     apply_balance_topup_refund_success,
     place_financial_hold,
     request_balance_topup_refund,
@@ -1229,6 +1230,298 @@ class YooKassaCleanRefundsTests(unittest.IsolatedAsyncioTestCase):
         mock_reserve.assert_awaited_once()
         _, kwargs = mock_reserve.call_args
         self.assertEqual(kwargs["amount"], Decimal("150.00"))
+
+
+    @patch("services.provider_refunds._update_topup_after_refund", new_callable=AsyncMock)
+    @patch("services.referral_bonus.reverse_referral_bonus_for_topup", new_callable=AsyncMock)
+    @patch("services.provider_refunds.create_payment_debit", new_callable=AsyncMock)
+    @patch("services.provider_refunds._get_or_create_payment_refund", new_callable=AsyncMock)
+    @patch("services.subscription.SubscriptionService._sync_access_state", new_callable=AsyncMock)
+    @patch("database.repositories.account_ledger_repo.create_purchase_reversal", new_callable=AsyncMock)
+    async def test_permanent_subscription_not_truncated_on_refund(
+        self,
+        mock_reversal,
+        mock_sync,
+        mock_get_refund,
+        mock_debit,
+        mock_rev_bonus,
+        mock_update_topup,
+    ):
+        """Permanent subscription sentinel (year >= 2100) must NEVER be truncated on refund."""
+        mock_debit.return_value = (MagicMock(), True)
+
+        permanent_end = datetime(2100, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=1001,
+            subscription_end=permanent_end,
+            current_tariff_id=5,
+        )
+
+        payment = Payment(
+            id=10,
+            user_id=1,
+            amount=Decimal("250.00"),
+            currency="RUB",
+            topup_context={
+                "auto_fulfill_action": "purchase",
+                "quote_public_id": "00000000-0000-0000-0000-000000000001",
+            },
+            provider_status="succeeded",
+        )
+
+        tariff = Tariff(id=5, service_type="awg", name="Standard AWG")
+        t_version = TariffVersion(id=2, tariff_id=5, duration_hours=720, price_rub=Decimal("250.00"))
+        quote = TariffQuote(
+            id=100,
+            public_id="00000000-0000-0000-0000-000000000001",
+            user_id=1,
+            target_tariff_version_id=2,
+        )
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        nested_mock = AsyncMock()
+        nested_mock.__aenter__ = AsyncMock()
+        nested_mock.__aexit__ = AsyncMock()
+        session.begin_nested = MagicMock(return_value=nested_mock)
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = []
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        def scalar_side_effect(stmt):
+            stmt_str = str(stmt).lower()
+            if "provider_refund_operation" in stmt_str:
+                return None
+            if "account_balance_reservation" in stmt_str:
+                return None
+            if "users" in stmt_str:
+                return user
+            if "tariff_quotes" in stmt_str:
+                return quote
+            if "account_ledger_entries" in stmt_str:
+                return None
+            return None
+
+        async def get_side_effect(model, ident):
+            if model == TariffQuote:
+                return quote if ident == 100 else None
+            if model == TariffVersion:
+                return t_version if ident == 2 else None
+            if model == Tariff:
+                return tariff if ident == 5 else None
+            return None
+
+        session.scalar = AsyncMock(side_effect=scalar_side_effect)
+        session.get = AsyncMock(side_effect=get_side_effect)
+        mock_get_refund.return_value = MagicMock()
+
+        await apply_balance_topup_refund_success(
+            session,
+            payment=payment,
+            provider_refund_id="rf_perm",
+            amount=Decimal("250.00"),
+            currency="RUB",
+            event_key="evt_perm",
+        )
+
+        # Permanent subscription date must be completely preserved!
+        self.assertEqual(user.subscription_end, permanent_end)
+        self.assertEqual(user.current_tariff_id, 5)
+
+    @patch("services.provider_refunds._update_topup_after_refund", new_callable=AsyncMock)
+    @patch("services.referral_bonus.reverse_referral_bonus_for_topup", new_callable=AsyncMock)
+    @patch("services.provider_refunds.create_payment_debit", new_callable=AsyncMock)
+    @patch("services.provider_refunds._get_or_create_payment_refund", new_callable=AsyncMock)
+    @patch("services.provider_refunds.place_financial_hold", new_callable=AsyncMock)
+    @patch("services.provider_refunds._consume_matching_reservation", new_callable=AsyncMock)
+    async def test_orphan_reservation_places_financial_hold_in_b4(
+        self,
+        mock_consume,
+        mock_hold,
+        mock_get_refund,
+        mock_debit,
+        mock_rev_bonus,
+        mock_update_topup,
+    ):
+        """If expected reservation is missing in B4, fail-closed financial hold must be placed."""
+        mock_debit.return_value = (MagicMock(), True)
+        mock_consume.return_value = None  # Orphan reservation!
+
+        now = datetime.now(timezone.utc)
+        user = User(id=1, telegram_id=1001, subscription_end=now + timedelta(days=10))
+        payment = Payment(
+            id=11,
+            user_id=1,
+            amount=Decimal("250.00"),
+            currency="RUB",
+            topup_context={"auto_fulfill_action": "purchase"},
+            provider_status="succeeded",
+            credited_at=now,
+        )
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        nested_mock = AsyncMock()
+        nested_mock.__aenter__ = AsyncMock()
+        nested_mock.__aexit__ = AsyncMock()
+        session.begin_nested = MagicMock(return_value=nested_mock)
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = []
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        def scalar_side_effect(stmt):
+            stmt_str = str(stmt).lower()
+            if "provider_refund_operations" in stmt_str:
+                return None
+            if "users" in stmt_str:
+                return user
+            return None
+
+        session.scalar = AsyncMock(side_effect=scalar_side_effect)
+        session.get = AsyncMock(return_value=None)
+        mock_get_refund.return_value = MagicMock()
+
+        await apply_balance_topup_refund_success(
+            session,
+            payment=payment,
+            provider_refund_id="rf_orphan",
+            amount=Decimal("250.00"),
+            currency="RUB",
+            event_key="evt_orphan",
+            reservation_id=999,  # Reservation was expected!
+        )
+
+        mock_hold.assert_awaited_once_with(
+            session,
+            payment=payment,
+            reason="orphan_refund_reservation",
+        )
+
+    @patch("services.provider_refunds._update_topup_after_refund", new_callable=AsyncMock)
+    @patch("services.provider_refunds._get_or_create_payment_refund", new_callable=AsyncMock)
+    @patch("services.provider_refunds._consume_matching_reservation", new_callable=AsyncMock)
+    async def test_b2_and_b3_consume_matching_reservation(
+        self,
+        mock_consume,
+        mock_get_refund,
+        mock_update_topup,
+    ):
+        """B2 and B3 route to manual review but MUST consume the reservation so funds are not locked forever."""
+        now = datetime.now(timezone.utc)
+        payment = Payment(
+            id=12,
+            user_id=1,
+            amount=Decimal("250.00"),
+            currency="RUB",
+            topup_context={"auto_fulfill_action": "tariff_change"},
+            provider_status="succeeded",
+            credited_at=now,
+        )
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        nested_mock = AsyncMock()
+        nested_mock.__aenter__ = AsyncMock()
+        nested_mock.__aexit__ = AsyncMock()
+        session.begin_nested = MagicMock(return_value=nested_mock)
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = []
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        session.scalar = AsyncMock(return_value=None)
+        mock_get_refund.return_value = MagicMock()
+
+        await apply_balance_topup_refund_success(
+            session,
+            payment=payment,
+            provider_refund_id="rf_b3",
+            amount=Decimal("250.00"),
+            currency="RUB",
+            event_key="evt_b3",
+            reservation_id=888,
+        )
+
+        self.assertEqual(payment.fulfillment_status, "manual_review")
+        mock_consume.assert_awaited_once_with(
+            session,
+            payment_id=payment.id,
+            amount=Decimal("250.00"),
+            reservation_id=888,
+        )
+
+    async def test_provider_transition_fully_refunded_when_locally_not_refunded_locks_manual_review(self):
+        """If YooKassa reports fully refunded, but local state was not refunded yet, route to manual_review."""
+        payment = Payment(
+            id=13,
+            amount=Decimal("250.00"),
+            provider_status=PaymentProviderStatus.SUCCEEDED,
+            fulfillment_status=PaymentFulfillmentStatus.SUCCEEDED,
+            reconciliation_status=PaymentReconciliationStatus.OK,
+            currency="RUB",
+        )
+        session = AsyncMock()
+        session.add = MagicMock()
+
+        data = {
+            "status": "succeeded",
+            "paid": True,
+            "amount": {"value": "250.00", "currency": "RUB"},
+            "refunded_amount": {"value": "250.00", "currency": "RUB"},
+            "captured_at": "2026-09-20T10:00:00.000Z",
+            "metadata": {
+                "order_id": payment.public_order_id,
+                "local_payment_id": str(payment.id),
+            },
+        }
+
+        transition = await apply_provider_transition(
+            session,
+            payment,
+            data,
+            source="test",
+            event_type="payment.succeeded",
+        )
+
+        self.assertEqual(transition.outcome, "conflict")
+        self.assertEqual(payment.provider_status, PaymentProviderStatus.REFUNDED)
+        self.assertEqual(payment.reconciliation_status, PaymentReconciliationStatus.MANUAL_REVIEW)
+        self.assertEqual(payment.fulfillment_status, PaymentFulfillmentStatus.MANUAL_REVIEW)
+        self.assertEqual(payment.manual_review_reason, "provider_already_refunded")
+
+    @patch("services.provider_refunds.lock_account_user", new_callable=AsyncMock)
+    async def test_request_balance_topup_refund_blocked_when_payment_in_manual_review(
+        self,
+        mock_lock_user,
+    ):
+        """request_balance_topup_refund raises BalanceRefundError if payment is in manual_review or mismatch."""
+        payment = Payment(
+            id=14,
+            user_id=1,
+            amount=Decimal("250.00"),
+            currency="RUB",
+            provider_status="succeeded",
+            external_id="ext_14",
+            reconciliation_status="manual_review",
+        )
+
+        session = AsyncMock()
+        def scalar_side_effect(stmt):
+            stmt_str = str(stmt).lower()
+            if "payments" in stmt_str:
+                return payment
+            if "payment_disputes" in stmt_str:
+                return None
+            return None
+        session.scalar = AsyncMock(side_effect=scalar_side_effect)
+
+        with self.assertRaises(BalanceRefundError) as cm:
+            await request_balance_topup_refund(
+                session,
+                payment_id=14,
+                requested_by_admin_id=999,
+            )
+        self.assertEqual(cm.exception.code, "payment_in_manual_review")
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, or_, select
@@ -101,6 +101,11 @@ async def request_balance_topup_refund(
     )
     if active_dispute is not None:
         raise BalanceRefundError("payment_has_active_dispute")
+    if (
+        payment.reconciliation_status in {"manual_review", "mismatch"}
+        or payment.fulfillment_status == "manual_review"
+    ):
+        raise BalanceRefundError("payment_in_manual_review")
 
     active = await session.scalar(
         select(ProviderRefundOperation)
@@ -532,17 +537,22 @@ async def _update_topup_after_refund(session, payment: Payment) -> Decimal:
     return total
 
 
-async def _user_has_other_wi_payments(session, *, user_id: int, payment_id: int) -> bool:
-    other_payments = (
-        await session.scalars(
-            select(Payment).where(
-                Payment.user_id == user_id,
-                Payment.id != payment_id,
-                Payment.provider_status == "succeeded",
-                Payment.fulfillment_status != "reversed",
-            )
-        )
-    ).all()
+async def _user_has_other_wi_payments(
+    session,
+    *,
+    user_id: int,
+    payment_id: int,
+    payment_created_at: datetime | None = None,
+) -> bool:
+    stmt = select(Payment).where(
+        Payment.user_id == user_id,
+        Payment.id != payment_id,
+        Payment.fulfillment_status != "reversed",
+    )
+    if payment_created_at is not None:
+        stmt = stmt.where(Payment.created_at > payment_created_at)
+
+    other_payments = (await session.scalars(stmt)).all()
     for p in other_payments:
         ctx = p.topup_context if isinstance(p.topup_context, dict) else {}
         action = ctx.get("auto_fulfill_action")
@@ -687,7 +697,7 @@ async def apply_balance_topup_refund_success(
                 balance = await get_account_balance(session, user_id=payment.user_id)
                 if balance.debt > 0:
                     await place_financial_hold(session, payment=payment, reason="chargeback_debt")
-            elif not is_full_refund or already > 0 or payment.reconciliation_status == "manual_review" or payment.fulfillment_status == "manual_review":
+            elif not is_full_refund or already > 0 or payment.reconciliation_status in ("manual_review", "mismatch") or payment.fulfillment_status == "manual_review":
                 # Sub-case B2: Partial refund of an indivisible service, or subsequent refund on a payment with active manual review / prior partial refund.
                 # Must NOT create refund_debit or auto-reverse (which would corrupt days or leak balance).
                 # Route to manual review for administrator inspection.
@@ -709,12 +719,23 @@ async def apply_balance_topup_refund_success(
                         details=f"amount={int(amount)} RUB of {int(payment.amount)} RUB; already={int(already)} RUB",
                     )
                 )
+                await _consume_matching_reservation(
+                    session,
+                    payment_id=payment.id,
+                    amount=amount,
+                    reservation_id=reservation_id,
+                )
                 await _update_topup_after_refund(session, payment)
             elif (
                 topup_action in ("tariff_change", "white_internet_renew", "white_internet_add_device", "white_internet_pack")
                 or (
                     topup_action == "white_internet_buy"
-                    and await _user_has_other_wi_payments(session, user_id=payment.user_id, payment_id=payment.id)
+                    and await _user_has_other_wi_payments(
+                        session,
+                        user_id=payment.user_id,
+                        payment_id=payment.id,
+                        payment_created_at=payment.created_at,
+                    )
                 )
             ):
                 # Sub-case B3: Refund of a complex subscription modification payment, or white_internet_buy
@@ -738,6 +759,12 @@ async def apply_balance_topup_refund_success(
                         source="provider_refund",
                         details=f"payment_id={payment.id}; amount={int(amount)} RUB",
                     )
+                )
+                await _consume_matching_reservation(
+                    session,
+                    payment_id=payment.id,
+                    amount=amount,
+                    reservation_id=reservation_id,
                 )
                 await _update_topup_after_refund(session, payment)
             else:
@@ -845,12 +872,28 @@ async def apply_balance_topup_refund_success(
                             except (ValueError, TypeError) as exc:
                                 _logger.warning("Failed to parse quote_raw %s: %s", quote_raw, exc)
 
-                        await _consume_matching_reservation(
+                        consumed = await _consume_matching_reservation(
                             session,
                             payment_id=payment.id,
                             amount=amount,
                             reservation_id=reservation_id,
                         )
+                        if consumed is None and reservation_id is not None:
+                            await place_financial_hold(
+                                session,
+                                payment=payment,
+                                reason="orphan_refund_reservation",
+                            )
+                            session.add(
+                                PaymentEvent(
+                                    payment_id=payment.id,
+                                    event_type="refund_orphan_reservation",
+                                    provider_status=payment.provider_status,
+                                    reason="expected reservation not found or insufficient",
+                                    source="provider_refund",
+                                    details=f"reservation_id={reservation_id}",
+                                )
+                            )
 
                         # 2. Determine services to revoke (READ-ONLY quotes, NO status mutation to preserve triggers)
                         awg_duration_to_revoke = timedelta(0)
@@ -890,32 +933,37 @@ async def apply_balance_topup_refund_success(
                             from config.constants import VPN_ACCESS_GRACE_HOURS
                             from services.subscription import SubscriptionService
                             from services.user_cache import invalidate_user_cache
+                            from utils.datetime_helpers import is_permanent_subscription
 
                             user = await session.scalar(
                                 select(User).where(User.id == payment.user_id).with_for_update()
                             )
                             if user is not None and user.subscription_end is not None:
-                                now = now_utc()
-                                expired_threshold = now - timedelta(
-                                    hours=VPN_ACCESS_GRACE_HOURS, seconds=1
-                                )
-                                new_end = user.subscription_end - awg_duration_to_revoke
-                                user.subscription_end = (
-                                    expired_threshold if new_end <= now else new_end
-                                )
+                                # Point 3: Permanent subscriptions must never be truncated
+                                if not is_permanent_subscription(user.subscription_end):
+                                    now = now_utc()
+                                    expired_threshold = now - timedelta(
+                                        hours=VPN_ACCESS_GRACE_HOURS, seconds=1
+                                    )
+                                    new_end = user.subscription_end - awg_duration_to_revoke
+                                    user.subscription_end = (
+                                        expired_threshold if new_end <= now else new_end
+                                    )
 
-                                if user.subscription_end <= now:
-                                    user.notified_3d = False
-                                    user.notified_1d = False
-                                    user.notified_2h = False
-                                    user.notified_expired = False
-                                    user.notified_grace_12h = False
-                                    user.notification_retry_count = 0
-                                    user.last_notification_attempt = None
+                                    # Point 2: If the subscription is now expired, reset current_tariff_id
+                                    if user.subscription_end <= now:
+                                        user.current_tariff_id = None
+                                        user.notified_3d = False
+                                        user.notified_1d = False
+                                        user.notified_2h = False
+                                        user.notified_expired = False
+                                        user.notified_grace_12h = False
+                                        user.notification_retry_count = 0
+                                        user.last_notification_attempt = None
 
-                                await session.flush()
-                                await SubscriptionService._sync_access_state(session, user)
-                                invalidate_user_cache(user.telegram_id)
+                                    await session.flush()
+                                    await SubscriptionService._sync_access_state(session, user)
+                                    invalidate_user_cache(user.telegram_id)
 
                         # Revoke White Internet access if applicable
                         if has_white_internet_subscription:

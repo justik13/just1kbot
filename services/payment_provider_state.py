@@ -96,28 +96,53 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
                 )
             )
             return ProviderTransition("conflict", observed, mismatch)
-        if (
-            current == PaymentProviderStatus.REFUNDED
-            or payment.fulfillment_status == PaymentFulfillmentStatus.REVERSED
-        ):
-            from decimal import Decimal
-            refunded_amount_obj = data.get("refunded_amount") or {}
-            refunded_val_str = refunded_amount_obj.get("value")
-            provider_refunded = None
-            if refunded_val_str is not None:
-                try:
-                    provider_refunded = Decimal(str(refunded_val_str))
-                except Exception:
-                    pass
-            # In YooKassa, a fully refunded payment retains status 'succeeded' with refunded_amount >= payment.amount
-            if provider_refunded is not None and provider_refunded >= Decimal(payment.amount):
+        from decimal import Decimal
+        refunded_amount_obj = data.get("refunded_amount") or {}
+        refunded_val_str = refunded_amount_obj.get("value")
+        provider_refunded = None
+        if refunded_val_str is not None:
+            try:
+                provider_refunded = Decimal(str(refunded_val_str))
+            except Exception:
+                pass
+
+        is_fully_refunded_at_provider = (
+            provider_refunded is not None and provider_refunded >= Decimal(payment.amount)
+        )
+
+        if is_fully_refunded_at_provider:
+            if (
+                current == PaymentProviderStatus.REFUNDED
+                or payment.fulfillment_status == PaymentFulfillmentStatus.REVERSED
+            ):
                 if payment.reconciliation_status not in (
                     PaymentReconciliationStatus.MANUAL_REVIEW,
                     PaymentReconciliationStatus.MISMATCH,
                 ):
                     payment.reconciliation_status = PaymentReconciliationStatus.OK
                 return ProviderTransition("applied", observed)
+            else:
+                # Provider reports fully refunded, but local state was not marked refunded yet.
+                # Lock into manual_review so funds are not settled as normal succeeded.
+                payment.provider_status = PaymentProviderStatus.REFUNDED
+                payment.reconciliation_status = PaymentReconciliationStatus.MANUAL_REVIEW
+                payment.fulfillment_status = PaymentFulfillmentStatus.MANUAL_REVIEW
+                payment.manual_review_reason = "provider_already_refunded"
+                session.add(
+                    PaymentEvent(
+                        payment_id=payment.id,
+                        event_type="provider_transition_conflict",
+                        provider_status=PaymentProviderStatus.REFUNDED,
+                        reason="provider_already_refunded",
+                        source=source,
+                    )
+                )
+                return ProviderTransition("conflict", observed, "provider_already_refunded")
 
+        if (
+            current == PaymentProviderStatus.REFUNDED
+            or payment.fulfillment_status == PaymentFulfillmentStatus.REVERSED
+        ):
             payment.reconciliation_status = PaymentReconciliationStatus.MISMATCH
             session.add(
                 PaymentEvent(
