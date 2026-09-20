@@ -38,10 +38,9 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
                 datetime.now(timezone.utc),
             )
         elif server_proto == AMNEZIA_PROTOCOL:
-            from services.amnezia_client import _get_circuit_breaker
+            from services.amnezia_client import is_server_circuit_available
 
-            cb = _get_circuit_breaker(server.api_url)
-            if not await cb.is_available():
+            if not await is_server_circuit_available(server.api_url):
                 raise ServerUnavailable("server circuit breaker open")
             endpoint = (server.api_url, server.api_key)
         else:
@@ -52,7 +51,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
             )
             raise ServerUnavailable(f"Unsupported protocol {server_proto!r} for server {server_id}")
     try:
-        clients = await asyncio.wait_for(AmneziaClient(*endpoint).get_all_clients(), timeout=5.0)
+        clients = await asyncio.wait_for(AmneziaClient(*endpoint).get_all_clients(), timeout=10.0)
     except Exception as exc:
         raise ServerUnavailable(f"server peer snapshot unavailable: {exc}") from exc
     if clients is None:

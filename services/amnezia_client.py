@@ -171,6 +171,12 @@ def cleanup_server_circuit_breakers(api_url: str) -> None:
         )
 
 
+async def is_server_circuit_available(api_url: str) -> bool:
+    """Check if the circuit breaker for a given API URL allows requests."""
+    cb = _get_circuit_breaker(api_url)
+    return await cb.is_available()
+
+
 class TokenBucketRateLimiter:
     def __init__(self, rate: float = 3.0, burst: int = 5):
         self.rate = rate
@@ -304,6 +310,10 @@ class AmneziaClient:
             "Content-Type": "application/json",
         }
         self._key_error_logged = False
+
+    async def is_circuit_available(self) -> bool:
+        """Check if circuit breaker allows requests to this server endpoint."""
+        return await is_server_circuit_available(self.api_url)
 
     @staticmethod
     def _success(

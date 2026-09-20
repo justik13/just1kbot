@@ -212,6 +212,39 @@ async def process_mass_bonus_amount(
     )
 
 
+def _build_server_audience_condition(server_id: int):
+    """Build unified SQL filter for users with active profiles or subscriptions on server_id."""
+    from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+    from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+    from database.models import Server, VPNProfile, WhiteInternetSubscription
+
+    server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
+    awg_cond = (
+        (server_proto_subq == AMNEZIA_PROTOCOL)
+        & User.profiles.any(
+            (VPNProfile.server_id == server_id)
+            & (VPNProfile.is_active.is_(True))
+            & (VPNProfile.desired_is_active.is_(True))
+            & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
+        )
+    )
+    xray_cond = (
+        (server_proto_subq == XRAY_PROTOCOL)
+        & User.id.in_(
+            select(WhiteInternetSubscription.user_id).where(
+                WhiteInternetSubscription.origin_node_id == server_id,
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.PENDING,
+                    WhiteInternetStatus.EXHAUSTED,
+                ]),
+                WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+            )
+        )
+    )
+    return or_(awg_cond, xray_cond)
+
+
 @router.message(AdminStates.entering_mass_bonus_reason)
 async def process_mass_bonus_reason(
     message: Message,
@@ -234,9 +267,6 @@ async def process_mass_bonus_reason(
             server_id = int(target_aud.split("_")[1])
         except (IndexError, ValueError):
             server_id = -1
-        from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
-        from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-        from database.models import Server, VPNProfile, WhiteInternetSubscription
         from database.repositories.servers_repo import get_server_by_id
 
         server = await get_server_by_id(session, server_id)
@@ -244,36 +274,13 @@ async def process_mass_bonus_reason(
         server_flag = (server.country_flag or "🌐") if server else "🌐"
         aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=safe(server_name))
 
-        server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
-        awg_cond = (
-            (server_proto_subq == AMNEZIA_PROTOCOL)
-            & User.profiles.any(
-                (VPNProfile.server_id == server_id)
-                & (VPNProfile.is_active.is_(True))
-                & (VPNProfile.desired_is_active.is_(True))
-                & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
-            )
-        )
-        xray_cond = (
-            (server_proto_subq == XRAY_PROTOCOL)
-            & User.id.in_(
-                select(WhiteInternetSubscription.user_id).where(
-                    WhiteInternetSubscription.origin_node_id == server_id,
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.PENDING,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ]),
-                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                )
-            )
-        )
+        server_cond = _build_server_audience_condition(server_id)
         stmt = (
             select(func.count(User.id))
             .where(
                 User.is_deleted.is_(False),
                 User.is_banned.is_(False),
-                or_(awg_cond, xray_cond),
+                server_cond,
             )
         )
     else:
@@ -418,40 +425,13 @@ async def _run_mass_bonus_background(
                 server_id = int(target_aud.split("_")[1])
             except (IndexError, ValueError):
                 server_id = -1
-            from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
-            from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-            from database.models import Server, VPNProfile, WhiteInternetSubscription
-
-            server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
-            awg_cond = (
-                (server_proto_subq == AMNEZIA_PROTOCOL)
-                & User.profiles.any(
-                    (VPNProfile.server_id == server_id)
-                    & (VPNProfile.is_active.is_(True))
-                    & (VPNProfile.desired_is_active.is_(True))
-                    & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
-                )
-            )
-            xray_cond = (
-                (server_proto_subq == XRAY_PROTOCOL)
-                & User.id.in_(
-                    select(WhiteInternetSubscription.user_id).where(
-                        WhiteInternetSubscription.origin_node_id == server_id,
-                        WhiteInternetSubscription.status.in_([
-                            WhiteInternetStatus.ACTIVE,
-                            WhiteInternetStatus.PENDING,
-                            WhiteInternetStatus.EXHAUSTED,
-                        ]),
-                        WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                    )
-                )
-            )
+            server_cond = _build_server_audience_condition(server_id)
             stmt = (
                 select(User.id, User.telegram_id)
                 .where(
                     User.is_deleted.is_(False),
                     User.is_banned.is_(False),
-                    or_(awg_cond, xray_cond),
+                    server_cond,
                 )
                 .distinct()
             )
@@ -480,7 +460,12 @@ async def _run_mass_bonus_background(
                                 user_id=uid,
                                 signed_amount=amount,
                                 idempotency_key=idempotency_key,
-                                metadata={"admin_id": admin_id, "reason": reason, "batch_id": batch_id},
+                                metadata={
+                                    "admin_id": admin_id,
+                                    "reason": reason,
+                                    "batch_id": batch_id,
+                                    "target_aud": target_aud,
+                                },
                             )
                             if created:
                                 success_count += 1
@@ -514,6 +499,7 @@ async def _run_mass_bonus_background(
                             db_user.is_bot_blocked = True
 
         async with session_scope() as session:
+            audit_reason = f"[{target_aud}] {reason}" if target_aud else reason
             await AuditService.log_action(
                 session,
                 admin_id,
@@ -521,7 +507,7 @@ async def _run_mass_bonus_background(
                 "User",
                 0,
                 texts.ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS.format(
-                    amount=amount, count=success_count, batch_id=batch_id, reason=reason
+                    amount=amount, count=success_count, batch_id=batch_id, reason=audit_reason
                 ),
             )
 

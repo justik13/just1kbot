@@ -122,14 +122,21 @@ class DeviceService:
         ):
             raise NoActiveSubscription("No active subscription")
         if not device_name:
-            user_profiles = (
+            all_user_profiles = (
                 await session.execute(
-                    select(VPNProfile).where(
-                        VPNProfile.user_id == user.id,
-                        VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES),
-                    )
+                    select(VPNProfile).where(VPNProfile.user_id == user.id)
                 )
             ).scalars().all()
+            existing_names_on_server = {
+                p.device_name.lower()
+                for p in all_user_profiles
+                if p.server_id == server.id and p.device_name
+            }
+            user_profiles = [
+                p
+                for p in all_user_profiles
+                if p.provisioning_status not in PROFILE_LIST_HIDDEN_STATUSES
+            ]
             used = set()
             for p in user_profiles:
                 m = re.search(r"#(\d+)$", p.device_name)
@@ -138,11 +145,18 @@ class DeviceService:
             limit = user.device_limit or 5
             slot_index = 1
             for i in range(1, limit + 1):
-                if i not in used:
+                candidate_name = texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=i)
+                if i not in used and candidate_name.lower() not in existing_names_on_server:
                     slot_index = i
                     break
             else:
-                slot_index = max(used) + 1 if used else 1
+                candidate_index = max(used) + 1 if used else 1
+                while (
+                    texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=candidate_index).lower()
+                    in existing_names_on_server
+                ):
+                    candidate_index += 1
+                slot_index = candidate_index
             device_name = texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=slot_index)
         duplicate = (
             await session.execute(

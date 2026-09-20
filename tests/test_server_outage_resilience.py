@@ -260,6 +260,41 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
             # Slot #3 allocated, avoiding DuplicateDeviceName collision with visible create_failed #2!
             self.assertEqual(profile.device_name, "Устройство #3")
 
+        # Scenario C: User had #1 (active on s10) and #2 (delete_failed on server_healthy id=20).
+        # When creating on the SAME server 20, #2 is physically present on server 20,
+        # so slot #3 must be allocated to prevent DuplicateDeviceName on server 20!
+        p2_delete_failed_on_s20 = VPNProfile(
+            id=4,
+            user_id=1,
+            server_id=20,
+            device_name="Устройство #2",
+            provisioning_status="delete_failed",
+        )
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one=MagicMock(return_value=user)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=server_healthy)),
+            # select all user profiles: [p1 on s10, p2_delete_failed on s20]
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[p1, p2_delete_failed_on_s20])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one=MagicMock(return_value=1)),
+            MagicMock(scalar_one=MagicMock(return_value=0)),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        ])
+        with (
+            patch("services.device_service.enqueue_api_operation", new=AsyncMock()),
+            patch("services.device_service.is_admin", return_value=True),
+        ):
+            profile = await DeviceService.create_device(
+                mock_session,
+                user_id=1,
+                server_id=20,
+                device_name=None,
+                snapshot=snapshot,
+            )
+            # Slot #3 allocated on server 20, avoiding DuplicateDeviceName collision with delete_failed #2 on same server!
+            self.assertEqual(profile.device_name, "Устройство #3")
+
     async def test_is_server_allocatable_predicate(self):
         """Test is_server_allocatable predicate across all states and capabilities."""
         from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
@@ -316,9 +351,6 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
         from bot.handlers.admin.servers.card_routes import ping_server
         from database.models import Server
 
-        mock_cb = AsyncMock()
-        mock_cb.is_available.return_value = False
-
         mock_callback = AsyncMock()
         mock_callback.from_user.id = 1
         mock_callback.data = "admin_server_ping:1"
@@ -340,7 +372,7 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
         with (
             patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True),
             patch("bot.handlers.admin.servers.card_routes.get_server_by_id", return_value=mock_server),
-            patch("services.amnezia_client._get_circuit_breaker", return_value=mock_cb),
+            patch("services.amnezia_client.is_server_circuit_available", new=AsyncMock(return_value=False)),
             patch("services.amnezia_client.AmneziaClient.healthcheck", new=AsyncMock()) as mock_health,
             patch("bot.handlers.admin.servers.card_routes._show_server_card", new=AsyncMock()) as mock_card,
         ):
@@ -350,11 +382,10 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mock_card.call_args.kwargs["ping_result"], texts.ADMIN_SERVER_PING_NO_HEALTHZ)
 
         # 2. When CB is available -> call healthcheck and update server card with latency
-        mock_cb.is_available.return_value = True
         with (
             patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True),
             patch("bot.handlers.admin.servers.card_routes.get_server_by_id", return_value=mock_server),
-            patch("services.amnezia_client._get_circuit_breaker", return_value=mock_cb),
+            patch("services.amnezia_client.is_server_circuit_available", new=AsyncMock(return_value=True)),
             patch("services.amnezia_client.AmneziaClient.healthcheck", new=AsyncMock(return_value=True)) as mock_health,
             patch("bot.handlers.admin.servers.card_routes._show_server_card", new=AsyncMock()) as mock_card,
         ):
@@ -362,6 +393,22 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
             mock_health.assert_called_once()
             mock_card.assert_called_once()
             self.assertIn("ms", mock_card.call_args.kwargs["ping_result"])
+
+    async def test_circuit_breaker_helper_and_client_method(self):
+        """is_server_circuit_available and AmneziaClient.is_circuit_available delegate cleanly."""
+        from services.amnezia_client import AmneziaClient, is_server_circuit_available
+
+        mock_cb = AsyncMock()
+        mock_cb.is_available.return_value = True
+
+        with patch("services.amnezia_client._get_circuit_breaker", return_value=mock_cb):
+            res1 = await is_server_circuit_available("https://awg.test")
+            self.assertTrue(res1)
+            mock_cb.is_available.assert_called_once()
+
+            client = AmneziaClient("https://awg.test", "key")
+            res2 = await client.is_circuit_available()
+            self.assertTrue(res2)
 
     async def test_cleanup_stuck_profiles_skips_inactive_server_and_preserves_delete_failed(self):
         """Cleanup worker skips inactive servers and keeps delete_failed status on enqueue failure."""

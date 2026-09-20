@@ -260,10 +260,9 @@ async def ping_server(
     start_t = time.monotonic()
     try:
         if server.protocol == AMNEZIA_PROTOCOL:
-            from services.amnezia_client import AmneziaClient, _get_circuit_breaker
+            from services.amnezia_client import AmneziaClient, is_server_circuit_available
 
-            cb = _get_circuit_breaker(server.api_url)
-            if not await cb.is_available():
+            if not await is_server_circuit_available(server.api_url):
                 is_healthy = False
             else:
                 client = AmneziaClient(server.api_url, server.api_key)
