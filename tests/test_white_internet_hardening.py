@@ -142,7 +142,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0029_rebase_wi_traffic_downlink"])
+        self.assertEqual(heads, ["0030_purchases_and_entitlement_grants"])
+        rev = scripts.get_revision("0030_purchases_and_entitlement_grants")
+        self.assertEqual(rev.down_revision, "0029_rebase_wi_traffic_downlink")
         rev = scripts.get_revision("0029_rebase_wi_traffic_downlink")
         self.assertEqual(rev.down_revision, "0028_wi_notifications")
         rev = scripts.get_revision("0028_wi_notifications")

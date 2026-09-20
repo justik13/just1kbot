@@ -484,6 +484,7 @@ async def create_purchase_debit(
     user_id: int,
     quote_id: int,
     amount: object,
+    purchase_id: int | None = None,
 ) -> tuple[AccountLedgerEntry | None, bool]:
     amount = whole_rubles(amount, allow_zero=True)
     user = await lock_account_user(session, user_id)
@@ -507,6 +508,9 @@ async def create_purchase_debit(
     if existing is not None:
         if existing.user_id != user.id or existing.amount != -amount:
             raise AccountLedgerConflictError("purchase_debit_conflict")
+        if purchase_id is not None and existing.purchase_id is None:
+            existing.purchase_id = purchase_id
+            await session.flush()
         return existing, False
     if quote.status != "active":
         raise LookupError(f"purchase_quote_inactive:{quote.status}")
@@ -524,6 +528,7 @@ async def create_purchase_debit(
         "currency": "RUB",
         "payment_id": None,
         "quote_id": quote.id,
+        "purchase_id": purchase_id,
         "reversal_of_id": None,
         "idempotency_key": f"purchase-debit:{quote.id}",
         "metadata_": {"operation_type": quote.operation_type},
@@ -572,6 +577,7 @@ async def create_purchase_reversal(
         "currency": "RUB",
         "payment_id": None,
         "quote_id": debit.quote_id,
+        "purchase_id": debit.purchase_id,
         "reversal_of_id": debit.id,
         "idempotency_key": f"purchase-reversal:{debit.id}",
         "metadata_": dict(metadata or {}),

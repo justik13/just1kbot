@@ -11,7 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import AdminAuditAction, ServiceType
+from config.enums import (
+    AdminAuditAction,
+    PurchaseFulfillmentStatus,
+    PurchaseStatus,
+    ServiceType,
+)
 from database.models import (
     AccountLedgerEntry,
     EntitlementEntry,
@@ -20,6 +25,7 @@ from database.models import (
     TariffQuote,
     TariffVersion,
 )
+from database.repositories import purchases_repo
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
     InsufficientAccountBalanceError,
@@ -36,6 +42,7 @@ from database.repositories.tariff_quotes_repo import (
     get_or_create_current_version,
     lock_checkout_user,
 )
+from services import subscription_coverage_service
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from services.subscription_balance_service import get_subscription_balance_snapshot
@@ -343,6 +350,26 @@ async def _settle_account_tariff_change(
         raise AccountTariffChangeError("account_debt")
     if before.available < amount:
         raise AccountTariffChangeError("insufficient_balance")
+    # 1. Create or retrieve canonical Purchase record
+    purchase = await purchases_repo.get_purchase_by_quote_id(session, quote.id)
+    if purchase is None:
+        purchase = await purchases_repo.create_purchase(
+            session,
+            user_id=user.id,
+            quote_id=quote.id,
+            idempotency_key=f"quote:{quote.id}",
+            service_type="awg",
+            operation_type="change",
+            amount_rub=amount,
+            tariff_id=target.tariff_id,
+            tariff_version_id=target.id,
+            duration_days=target.duration_days,
+            device_limit=target.device_limit,
+            status=PurchaseStatus.COMPLETED,
+            fulfillment_status=PurchaseFulfillmentStatus.PENDING,
+            completed_at=now,
+        )
+
     debit = None
     if amount:
         try:
@@ -351,11 +378,27 @@ async def _settle_account_tariff_change(
                 user_id=user.id,
                 quote_id=quote.id,
                 amount=amount,
+                purchase_id=purchase.id,
             )
         except InsufficientAccountBalanceError as exc:
             raise AccountTariffChangeError("insufficient_balance") from exc
         if not debit_created:
             raise AccountTariffChangeError("active_quote_has_existing_debit")
+
+    # 2. Replace coverage slots canonically (SSOT)
+    await subscription_coverage_service.replace_awg_coverage(
+        session,
+        user_id=user.id,
+        source_purchase_id=purchase.id,
+        new_paid_hours=quote.resulting_paid_hours,
+        new_paid_value_rub=quote.resulting_paid_value_rub,
+        retained_bonus_hours=quote.resulting_bonus_hours,
+        target_tariff_id=target.tariff_id,
+        target_tariff_version_id=target.id,
+        target_device_limit=target.device_limit,
+        as_of=quote.balance_as_of,
+        locked_user=user,
+    )
 
     metadata = {
         "operation_type": "change",
@@ -426,6 +469,9 @@ async def _settle_account_tariff_change(
         )
     except ValueError as exc:
         raise AccountTariffChangeError("subscription_state_changed") from exc
+
+    # 3. Mark Purchase fulfilled
+    await purchases_repo.mark_purchase_fulfilled(session, purchase)
     quote.status = "consumed"
     quote.consumed_at = now
     user.last_payment_at = now

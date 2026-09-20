@@ -33,6 +33,8 @@ from config.constants import (
     XRAY_PROTOCOL,
 )
 from config.enums import (
+    PurchaseFulfillmentStatus,
+    PurchaseStatus,
     ServerHealthState,
     ServerLifecycleStatus,
     TariffQuoteOperation,
@@ -40,8 +42,15 @@ from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
-from database.models import Server, Tariff, TariffQuote, WhiteInternetSubscription
-from database.repositories import servers_repo, white_internet_repo
+from database.models import (
+    Purchase,
+    Server,
+    Tariff,
+    TariffQuote,
+    TariffVersion,
+    WhiteInternetSubscription,
+)
+from database.repositories import purchases_repo, servers_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     AccountLedgerError,
     InsufficientAccountBalanceError,
@@ -214,6 +223,42 @@ class WhiteInternetService:
         )
 
     @classmethod
+    async def _create_white_internet_purchase(
+        cls,
+        session: AsyncSession,
+        *,
+        user_id: int,
+        quote: TariffQuote,
+        tariff: Tariff | None = None,
+        tariff_version: TariffVersion | None = None,
+        device_limit: int = 1,
+    ) -> Purchase:
+        duration_days = getattr(tariff_version, "duration_days", 0) if tariff_version else 0
+        now = now_utc()
+        op_str = (
+            quote.operation_type.value
+            if hasattr(quote.operation_type, "value")
+            else str(quote.operation_type)
+        )
+        return await purchases_repo.create_purchase(
+            session,
+            user_id=user_id,
+            quote_id=quote.id,
+            idempotency_key=f"quote:{quote.id}",
+            service_type=WHITE_INTERNET_SERVICE_TYPE,
+            operation_type=op_str,
+            amount_rub=quote.amount_due_rub,
+            tariff_id=tariff.id if tariff else (tariff_version.tariff_id if tariff_version else None),
+            tariff_version_id=tariff_version.id if tariff_version else None,
+            duration_days=duration_days,
+            device_limit=device_limit,
+            status=PurchaseStatus.COMPLETED,
+            fulfillment_status=PurchaseFulfillmentStatus.FULFILLED,
+            completed_at=now,
+            fulfilled_at=now,
+        )
+
+    @classmethod
     async def purchase_subscription(cls, session: AsyncSession, user_id: int):
         user = await lock_checkout_user(session, user_id)
         if user is None:
@@ -265,11 +310,24 @@ class WhiteInternetService:
         )
         session.add(quote)
         await session.flush()
+        purchase = await cls._create_white_internet_purchase(
+            session,
+            user_id=user.id,
+            quote=quote,
+            tariff=tariff,
+            tariff_version=tariff_version,
+            device_limit=1,
+        )
         try:
             await create_purchase_debit(
-                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+                session,
+                user_id=user.id,
+                quote_id=quote.id,
+                amount=quote.amount_due_rub,
+                purchase_id=purchase.id,
             )
         except InsufficientAccountBalanceError:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
@@ -285,6 +343,7 @@ class WhiteInternetService:
                 None,
             )
         except AccountLedgerError as exc:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
@@ -389,11 +448,24 @@ class WhiteInternetService:
         )
         session.add(quote)
         await session.flush()
+        purchase = await cls._create_white_internet_purchase(
+            session,
+            user_id=user.id,
+            quote=quote,
+            tariff=tariff,
+            tariff_version=tariff_version,
+            device_limit=sub_device_limit,
+        )
         try:
             await create_purchase_debit(
-                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+                session,
+                user_id=user.id,
+                quote_id=quote.id,
+                amount=quote.amount_due_rub,
+                purchase_id=purchase.id,
             )
         except InsufficientAccountBalanceError:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
@@ -407,6 +479,7 @@ class WhiteInternetService:
                 None,
             )
         except AccountLedgerError as exc:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
@@ -552,11 +625,24 @@ class WhiteInternetService:
         )
         session.add(quote)
         await session.flush()
+        purchase = await cls._create_white_internet_purchase(
+            session,
+            user_id=user.id,
+            quote=quote,
+            tariff=tariff,
+            tariff_version=tariff_version,
+            device_limit=sub_device_limit,
+        )
         try:
             await create_purchase_debit(
-                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+                session,
+                user_id=user.id,
+                quote_id=quote.id,
+                amount=quote.amount_due_rub,
+                purchase_id=purchase.id,
             )
         except InsufficientAccountBalanceError:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
@@ -572,6 +658,7 @@ class WhiteInternetService:
                 None,
             )
         except AccountLedgerError as exc:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
@@ -716,11 +803,24 @@ class WhiteInternetService:
         )
         session.add(quote)
         await session.flush()
+        purchase = await cls._create_white_internet_purchase(
+            session,
+            user_id=user.id,
+            quote=quote,
+            tariff=tariff,
+            tariff_version=tariff_version,
+            device_limit=sub.device_limit + 1,
+        )
         try:
             await create_purchase_debit(
-                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+                session,
+                user_id=user.id,
+                quote_id=quote.id,
+                amount=quote.amount_due_rub,
+                purchase_id=purchase.id,
             )
         except InsufficientAccountBalanceError:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
@@ -734,6 +834,7 @@ class WhiteInternetService:
                 None,
             )
         except AccountLedgerError as exc:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
@@ -865,11 +966,24 @@ class WhiteInternetService:
         )
         session.add(quote)
         await session.flush()
+        purchase = await cls._create_white_internet_purchase(
+            session,
+            user_id=user.id,
+            quote=quote,
+            tariff=tariff,
+            tariff_version=tariff_version,
+            device_limit=sub.device_limit,
+        )
         try:
             await create_purchase_debit(
-                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+                session,
+                user_id=user.id,
+                quote_id=quote.id,
+                amount=quote.amount_due_rub,
+                purchase_id=purchase.id,
             )
         except InsufficientAccountBalanceError:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
@@ -884,6 +998,7 @@ class WhiteInternetService:
                 None,
             )
         except AccountLedgerError as exc:
+            await purchases_repo.mark_purchase_failed(session, purchase)
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None

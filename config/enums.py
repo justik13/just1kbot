@@ -167,6 +167,7 @@ class VPNProvisioningStatus(StrEnum):
 
 
 class AdminAuditAction(StrEnum):
+    ACCOUNT_PURCHASE_REFUNDED = "ACCOUNT_PURCHASE_REFUNDED"
     ACCOUNT_PURCHASE_SETTLED = "ACCOUNT_PURCHASE_SETTLED"
     ACCOUNT_TARIFF_CHANGE_SETTLED = "ACCOUNT_TARIFF_CHANGE_SETTLED"
     ADD_SERVER = "ADD_SERVER"
@@ -261,6 +262,35 @@ class WhiteInternetGrantType(StrEnum):
     TOPUP = "TOPUP"
 
 
+class PurchaseStatus(StrEnum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    REFUNDED = "refunded"
+
+
+class PurchaseFulfillmentStatus(StrEnum):
+    PENDING = "pending"
+    FULFILLED = "fulfilled"
+    FAILED = "failed"
+    MANUAL_REVIEW = "manual_review"
+
+
+class EntitlementGrantStatus(StrEnum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+
+
+class EntitlementGrantType(StrEnum):
+    PAID_PURCHASE = "paid_purchase"
+    PAID_CHANGE = "paid_change"
+    BONUS_CHANGE = "bonus_change"
+    REFERRAL_BONUS = "referral_bonus"
+    ADMIN_GIFT = "admin_gift"
+    COMPENSATION = "compensation"
+    LEGACY_BACKFILL = "legacy_backfill"
+
+
 __all__ = [
     "AccountLedgerEntryType",
     "AccountReservationStatus",
@@ -269,6 +299,8 @@ __all__ = [
     "ApiOperationStatus",
     "ApiOperationType",
     "EntitlementEntryType",
+    "EntitlementGrantStatus",
+    "EntitlementGrantType",
     "PaidValueEntryType",
     "PaymentCheckoutStatus",
     "PaymentDisputeStatus",
@@ -278,6 +310,8 @@ __all__ = [
     "PaymentQueueStatus",
     "PaymentReconciliationStatus",
     "ProviderRefundOperationStatus",
+    "PurchaseFulfillmentStatus",
+    "PurchaseStatus",
     "ServerHealthState",
     "ServerLifecycleStatus",
     "ServiceType",

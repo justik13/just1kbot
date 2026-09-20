@@ -9,8 +9,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from config.enums import AdminAuditAction, TariffQuoteOperation
-from database.models import AuditLog, TariffQuote, TariffVersion, User
+from config.enums import AdminAuditAction, PurchaseFulfillmentStatus, PurchaseStatus, TariffQuoteOperation
+from database.models import AuditLog, Purchase, TariffQuote, TariffVersion, User
+from utils.datetime_helpers import now_utc
 
 
 @dataclass
@@ -331,3 +332,141 @@ async def get_purchase_log_by_id(
             created_at=log.created_at,
         )
     return None
+
+
+async def create_purchase(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    service_type: str,
+    operation_type: str,
+    amount_rub: Decimal,
+    idempotency_key: str,
+    quote_id: int | None = None,
+    tariff_id: int | None = None,
+    tariff_version_id: int | None = None,
+    duration_days: int | None = None,
+    device_limit: int | None = None,
+    details: dict | None = None,
+    status: PurchaseStatus = PurchaseStatus.PENDING,
+    fulfillment_status: PurchaseFulfillmentStatus = PurchaseFulfillmentStatus.PENDING,
+) -> Purchase:
+    purchase = Purchase(
+        user_id=user_id,
+        quote_id=quote_id,
+        idempotency_key=idempotency_key,
+        service_type=service_type,
+        operation_type=operation_type,
+        amount_rub=amount_rub,
+        status=status.value if isinstance(status, PurchaseStatus) else str(status),
+        fulfillment_status=(
+            fulfillment_status.value
+            if isinstance(fulfillment_status, PurchaseFulfillmentStatus)
+            else str(fulfillment_status)
+        ),
+        tariff_id=tariff_id,
+        tariff_version_id=tariff_version_id,
+        duration_days=duration_days,
+        device_limit=device_limit,
+        details=details,
+        created_at=now_utc(),
+    )
+    session.add(purchase)
+    await session.flush()
+    return purchase
+
+
+async def get_purchase_by_id(
+    session: AsyncSession,
+    purchase_id: int,
+    *,
+    for_update: bool = False,
+) -> Purchase | None:
+    stmt = select(Purchase).where(Purchase.id == purchase_id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    return await session.scalar(stmt)
+
+
+async def get_purchase_by_idempotency_key(
+    session: AsyncSession,
+    idempotency_key: str,
+    *,
+    for_update: bool = False,
+) -> Purchase | None:
+    stmt = select(Purchase).where(Purchase.idempotency_key == idempotency_key)
+    if for_update:
+        stmt = stmt.with_for_update()
+    return await session.scalar(stmt)
+
+
+async def get_purchase_by_quote_id(
+    session: AsyncSession,
+    quote_id: int,
+    *,
+    for_update: bool = False,
+) -> Purchase | None:
+    stmt = select(Purchase).where(Purchase.quote_id == quote_id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    return await session.scalar(stmt)
+
+
+async def mark_purchase_completed(
+    session: AsyncSession,
+    purchase: Purchase | int,
+    *,
+    completed_at: datetime | None = None,
+) -> Purchase:
+    p = await get_purchase_by_id(session, purchase, for_update=True) if isinstance(purchase, int) else purchase
+    if p is None:
+        raise LookupError(f"Purchase not found: {purchase}")
+    p.status = PurchaseStatus.COMPLETED.value
+    p.completed_at = completed_at or now_utc()
+    await session.flush()
+    return p
+
+
+async def mark_purchase_fulfilled(
+    session: AsyncSession,
+    purchase: Purchase | int,
+    *,
+    fulfilled_at: datetime | None = None,
+) -> Purchase:
+    p = await get_purchase_by_id(session, purchase, for_update=True) if isinstance(purchase, int) else purchase
+    if p is None:
+        raise LookupError(f"Purchase not found: {purchase}")
+    p.fulfillment_status = PurchaseFulfillmentStatus.FULFILLED.value
+    p.fulfilled_at = fulfilled_at or now_utc()
+    await session.flush()
+    return p
+
+
+async def mark_purchase_failed(
+    session: AsyncSession,
+    purchase: Purchase | int,
+    *,
+    reason: str | None = None,
+) -> Purchase:
+    p = await get_purchase_by_id(session, purchase, for_update=True) if isinstance(purchase, int) else purchase
+    if p is None:
+        raise LookupError(f"Purchase not found: {purchase}")
+    p.fulfillment_status = PurchaseFulfillmentStatus.FAILED.value
+    if reason:
+        current_details = dict(p.details or {})
+        current_details["failure_reason"] = reason
+        p.details = current_details
+    await session.flush()
+    return p
+
+
+async def mark_purchase_refunded(
+    session: AsyncSession,
+    purchase: Purchase | int,
+) -> Purchase:
+    p = await get_purchase_by_id(session, purchase, for_update=True) if isinstance(purchase, int) else purchase
+    if p is None:
+        raise LookupError(f"Purchase not found: {purchase}")
+    p.status = PurchaseStatus.REFUNDED.value
+    await session.flush()
+    return p

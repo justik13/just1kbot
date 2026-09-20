@@ -35,6 +35,8 @@ from config.enums import (
     ApiOperationStatus,
     ApiOperationType,
     EntitlementEntryType,
+    EntitlementGrantStatus,
+    EntitlementGrantType,
     PaidValueEntryType,
     PaymentCheckoutStatus,
     PaymentDisputeStatus,
@@ -43,6 +45,8 @@ from config.enums import (
     PaymentProviderStatus,
     PaymentQueueStatus,
     PaymentReconciliationStatus,
+    PurchaseFulfillmentStatus,
+    PurchaseStatus,
     ServerHealthState,
     ServerLifecycleStatus,
     ServiceType,
@@ -74,6 +78,10 @@ VPN_PROVISIONING_STATUSES = tuple(s.value for s in VPNProvisioningStatus)
 WEBHOOK_INBOX_STATUSES = tuple(s.value for s in WebhookInboxStatus)
 PAYMENT_DISPUTE_STATUSES = tuple(s.value for s in PaymentDisputeStatus)
 PAYMENT_CHECKOUT_STATUSES = tuple(s.value for s in PaymentCheckoutStatus)
+PURCHASE_STATUSES = tuple(s.value for s in PurchaseStatus)
+PURCHASE_FULFILLMENT_STATUSES = tuple(s.value for s in PurchaseFulfillmentStatus)
+ENTITLEMENT_GRANT_STATUSES = tuple(s.value for s in EntitlementGrantStatus)
+ENTITLEMENT_GRANT_TYPES = tuple(s.value for s in EntitlementGrantType)
 
 
 class Base(DeclarativeBase):
@@ -523,6 +531,130 @@ class TariffQuote(Base):
     source_tariff_version = relationship("TariffVersion", foreign_keys=[source_tariff_version_id])
 
 
+class Purchase(Base):
+    """Canonical commercial order/purchase record."""
+
+    __tablename__ = "purchases"
+    __table_args__ = (
+        CheckConstraint(
+            sql_enum_in("status", PurchaseStatus),
+            name="ck_purchases_status",
+        ),
+        CheckConstraint(
+            sql_enum_in("fulfillment_status", PurchaseFulfillmentStatus),
+            name="ck_purchases_fulfillment_status",
+        ),
+        CheckConstraint("amount_rub >= 0", name="ck_purchases_amount_rub_nonnegative"),
+        Index("ix_purchases_user_id", "user_id"),
+        Index("uq_purchases_quote_id", "quote_id", unique=True, postgresql_where=text("quote_id IS NOT NULL")),
+        Index("uq_purchases_idempotency_key", "idempotency_key", unique=True),
+        Index("ix_purchases_user_status", "user_id", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    quote_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tariff_quotes.id", ondelete="SET NULL"), nullable=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    service_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    operation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    amount_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    fulfillment_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    tariff_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tariffs.id", ondelete="SET NULL"), nullable=True
+    )
+    tariff_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tariff_versions.id", ondelete="SET NULL"), nullable=True
+    )
+    duration_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    device_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    quote = relationship("TariffQuote", foreign_keys=[quote_id])
+    tariff = relationship("Tariff", foreign_keys=[tariff_id])
+    tariff_version = relationship("TariffVersion", foreign_keys=[tariff_version_id])
+    ledger_entries = relationship("AccountLedgerEntry", back_populates="purchase")
+    entitlement_grants = relationship("EntitlementGrant", back_populates="purchase")
+
+
+class EntitlementGrant(Base):
+    """Canonical subscription time and economic value slot."""
+
+    __tablename__ = "entitlement_grants"
+    __table_args__ = (
+        CheckConstraint(
+            sql_enum_in("status", EntitlementGrantStatus),
+            name="ck_entitlement_grants_status",
+        ),
+        CheckConstraint(
+            sql_enum_in("grant_type", EntitlementGrantType),
+            name="ck_entitlement_grants_grant_type",
+        ),
+        CheckConstraint("paid_value_rub >= 0", name="ck_entitlement_grants_paid_value_rub_nonnegative"),
+        CheckConstraint("coverage_start < coverage_end", name="ck_entitlement_grants_coverage_interval"),
+        CheckConstraint("original_duration_hours > 0", name="ck_entitlement_grants_original_duration_positive"),
+        Index("ix_entitlement_grants_user_active", "user_id", "status", "coverage_end"),
+        Index("ix_entitlement_grants_purchase_id", "purchase_id"),
+        Index(
+            "uq_entitlement_grants_source",
+            "user_id",
+            "source_type",
+            "source_id",
+            "grant_type",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    purchase_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("purchases.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    service_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="awg", server_default=text("'awg'")
+    )
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    grant_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    coverage_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    coverage_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    original_duration_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    paid_value_rub: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False, default=Decimal("0.000000"), server_default=text("0.000000")
+    )
+    tariff_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tariff_versions.id", ondelete="SET NULL"), nullable=True
+    )
+    device_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default=text("'active'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+
+    user = relationship("User", foreign_keys=[user_id])
+    purchase = relationship("Purchase", back_populates="entitlement_grants", foreign_keys=[purchase_id])
+    tariff_version = relationship("TariffVersion", foreign_keys=[tariff_version_id])
+
+
 class PaidValueLedgerEntry(Base):
     """Append-only paid subscription value created only from account purchases."""
 
@@ -766,19 +898,19 @@ class AccountLedgerEntry(Base):
         ),
         CheckConstraint(
             "(entry_type = 'payment_credit' AND amount > 0 "
-            "AND payment_id IS NOT NULL AND quote_id IS NULL "
+            "AND payment_id IS NOT NULL AND quote_id IS NULL AND purchase_id IS NULL "
             "AND reversal_of_id IS NULL) OR "
             "(entry_type = 'purchase_debit' AND amount < 0 "
-            "AND payment_id IS NULL AND quote_id IS NOT NULL "
+            "AND payment_id IS NULL AND (quote_id IS NOT NULL OR purchase_id IS NOT NULL) "
             "AND reversal_of_id IS NULL) OR "
             "(entry_type = 'purchase_reversal' AND amount > 0 "
-            "AND payment_id IS NULL AND quote_id IS NOT NULL "
+            "AND payment_id IS NULL AND (quote_id IS NOT NULL OR purchase_id IS NOT NULL) "
             "AND reversal_of_id IS NOT NULL) OR "
             "(entry_type IN ('refund_debit','chargeback_debit') "
             "AND amount < 0 AND payment_id IS NOT NULL "
-            "AND quote_id IS NULL AND reversal_of_id IS NULL) OR "
+            "AND quote_id IS NULL AND purchase_id IS NULL AND reversal_of_id IS NULL) OR "
             "(entry_type = 'admin_adjustment' AND payment_id IS NULL "
-            "AND quote_id IS NULL AND reversal_of_id IS NULL)",
+            "AND quote_id IS NULL AND purchase_id IS NULL AND reversal_of_id IS NULL)",
             name="ck_account_ledger_entry_shape",
         ),
         Index(
@@ -797,7 +929,13 @@ class AccountLedgerEntry(Base):
             "uq_account_ledger_purchase_debit",
             "quote_id",
             unique=True,
-            postgresql_where=text("entry_type='purchase_debit'"),
+            postgresql_where=text("entry_type='purchase_debit' AND quote_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_account_ledger_purchase_debit_v2",
+            "purchase_id",
+            unique=True,
+            postgresql_where=text("entry_type='purchase_debit' AND purchase_id IS NOT NULL"),
         ),
         Index(
             "uq_account_ledger_reversal",
@@ -809,6 +947,11 @@ class AccountLedgerEntry(Base):
             "ix_account_ledger_payment_debits",
             "payment_id",
             postgresql_where=text("entry_type IN ('refund_debit','chargeback_debit')"),
+        ),
+        Index(
+            "ix_account_ledger_purchase_id",
+            "purchase_id",
+            postgresql_where=text("purchase_id IS NOT NULL"),
         ),
     )
 
@@ -827,6 +970,9 @@ class AccountLedgerEntry(Base):
     quote_id: Mapped[int | None] = mapped_column(
         ForeignKey("tariff_quotes.id", ondelete="RESTRICT"), nullable=True
     )
+    purchase_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("purchases.id", ondelete="RESTRICT"), nullable=True
+    )
     reversal_of_id: Mapped[int | None] = mapped_column(
         ForeignKey("account_ledger_entries.id", ondelete="RESTRICT"), nullable=True
     )
@@ -837,6 +983,8 @@ class AccountLedgerEntry(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
     )
+
+    purchase = relationship("Purchase", back_populates="ledger_entries", foreign_keys=[purchase_id])
 
 
 class AccountLedgerAllocation(Base):

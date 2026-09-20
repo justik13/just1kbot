@@ -10,20 +10,29 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import AdminAuditAction, ServiceType
+from config.enums import (
+    AdminAuditAction,
+    EntitlementGrantType,
+    PurchaseFulfillmentStatus,
+    PurchaseStatus,
+    ServiceType,
+)
 from database.models import (
     AccountLedgerEntry,
     EntitlementEntry,
     PaidValueLedgerEntry,
+    Purchase,
     Tariff,
     TariffQuote,
     TariffVersion,
     User,
 )
+from database.repositories import entitlement_grants_repo, purchases_repo
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
     InsufficientAccountBalanceError,
     create_purchase_debit,
+    create_purchase_reversal,
     get_account_balance,
     whole_rubles,
 )
@@ -39,6 +48,7 @@ from database.repositories.tariff_quotes_repo import (
     get_or_create_current_version,
     lock_checkout_user,
 )
+from services import subscription_coverage_service
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
@@ -362,17 +372,57 @@ async def _settle_account_purchase(
     before = await get_account_balance(session, user_id=user.id)
     if before.debt > 0:
         raise AccountPurchaseError("account_debt")
+
+    # 1. Create or retrieve canonical Purchase record
+    purchase = await purchases_repo.get_purchase_by_quote_id(session, quote.id)
+    if purchase is None:
+        purchase = await purchases_repo.create_purchase(
+            session,
+            user_id=user.id,
+            quote_id=quote.id,
+            idempotency_key=f"quote:{quote.id}",
+            service_type=tariff.service_type or "awg",
+            operation_type=quote.operation_type,
+            amount_rub=amount,
+            tariff_id=tariff.id,
+            tariff_version_id=version.id,
+            duration_days=version.duration_days,
+            device_limit=version.device_limit,
+            status=PurchaseStatus.COMPLETED,
+            fulfillment_status=PurchaseFulfillmentStatus.PENDING,
+            completed_at=now,
+        )
+
     try:
         debit, debit_created = await create_purchase_debit(
             session,
             user_id=user.id,
             quote_id=quote.id,
             amount=amount,
+            purchase_id=purchase.id,
         )
     except InsufficientAccountBalanceError as exc:
         raise AccountPurchaseError("insufficient_balance") from exc
     if not debit_created:
         raise AccountPurchaseError("active_quote_has_existing_debit")
+
+    # 2. Append canonical EntitlementGrant (SSOT)
+    await subscription_coverage_service.append_awg_grant(
+        session,
+        user_id=user.id,
+        duration_hours=version.duration_hours,
+        source_type="purchase",
+        source_id=str(purchase.id),
+        paid_value_rub=Decimal(amount),
+        grant_type=EntitlementGrantType.PAID_PURCHASE,
+        purchase_id=purchase.id,
+        tariff_version_id=version.id,
+        device_limit=version.device_limit,
+        as_of=now,
+        locked_user=user,
+    )
+
+    # 3. Dual-write legacy PaidValue and Entitlement entries
     try:
         await get_or_create_account_purchase_entry(
             session,
@@ -402,6 +452,9 @@ async def _settle_account_purchase(
     )
     if updated is None:
         raise AccountPurchaseError("purchase_user_missing")
+
+    # 4. Mark Purchase fulfilled
+    await purchases_repo.mark_purchase_fulfilled(session, purchase)
     quote.status = "consumed"
     quote.consumed_at = now
     user.last_payment_at = now
@@ -451,3 +504,68 @@ async def settle_account_purchase(
             exc.code,
         )
         raise
+
+
+async def refund_purchase(
+    session: AsyncSession,
+    *,
+    purchase_id: int,
+    reason: str = "requested_by_user_or_admin",
+) -> Purchase:
+    """Refund a completed purchase: reverse ledger debit back to wallet balance and revoke entitlements."""
+    purchase = await purchases_repo.get_purchase_by_id(session, purchase_id, for_update=True)
+    if purchase is None:
+        raise LookupError(f"Purchase not found: {purchase_id}")
+    if purchase.status == PurchaseStatus.REFUNDED:
+        return purchase
+    if purchase.status != PurchaseStatus.COMPLETED:
+        raise ValueError(f"Cannot refund purchase in status: {purchase.status}")
+
+    user = await lock_checkout_user(session, purchase.user_id)
+    if user is None:
+        raise LookupError(f"User not found: {purchase.user_id}")
+
+    # Find the purchase_debit ledger entry
+    debit = await session.scalar(
+        select(AccountLedgerEntry).where(
+            AccountLedgerEntry.entry_type == "purchase_debit",
+            (AccountLedgerEntry.purchase_id == purchase.id)
+            | (AccountLedgerEntry.quote_id == purchase.quote_id),
+        )
+    )
+    if debit is None:
+        raise LookupError(f"Debit ledger entry not found for purchase: {purchase.id}")
+
+    # 1. Reverse ledger debit back to internal wallet balance
+    reversal, _ = await create_purchase_reversal(
+        session,
+        debit_id=debit.id,
+        metadata={"reason": reason, "purchase_id": purchase.id},
+    )
+
+    # 2. Revoke associated EntitlementGrants
+    grants = await entitlement_grants_repo.get_grants_by_purchase_id(session, purchase.id)
+    if grants:
+        await entitlement_grants_repo.revoke_grants_by_ids(
+            session, [g.id for g in grants]
+        )
+
+    # 3. Resync user projection
+    await subscription_coverage_service.sync_user_subscription_projection(
+        session, user.id, locked_user=user
+    )
+
+    # 4. Mark purchase refunded
+    await purchases_repo.mark_purchase_refunded(session, purchase)
+
+    await AuditService.log_action(
+        session,
+        admin_id=0,
+        action=AdminAuditAction.ACCOUNT_PURCHASE_REFUNDED,
+        target_type="Purchase",
+        target_id=purchase.id,
+        details=f"refund_purchase_id={purchase.id}, reversal_id={reversal.id}, amount={purchase.amount_rub}",
+    )
+    await session.flush()
+    return purchase
+

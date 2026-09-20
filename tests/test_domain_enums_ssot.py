@@ -48,7 +48,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
 
     def test_all_enums_declared_are_strenums_with_values(self):
         """Every exported enum in config.enums must be a valid StrEnum with non-empty members."""
-        self.assertEqual(len(config.enums.__all__), 26)
+        self.assertEqual(len(config.enums.__all__), 30)
         for enum_name in config.enums.__all__:
             enum_cls = getattr(config.enums, enum_name)
             self.assertTrue(
@@ -137,6 +137,22 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertEqual(
             models.PAYMENT_CHECKOUT_STATUSES,
             tuple(s.value for s in config.enums.PaymentCheckoutStatus),
+        )
+        self.assertEqual(
+            models.PURCHASE_STATUSES,
+            tuple(s.value for s in config.enums.PurchaseStatus),
+        )
+        self.assertEqual(
+            models.PURCHASE_FULFILLMENT_STATUSES,
+            tuple(s.value for s in config.enums.PurchaseFulfillmentStatus),
+        )
+        self.assertEqual(
+            models.ENTITLEMENT_GRANT_STATUSES,
+            tuple(s.value for s in config.enums.EntitlementGrantStatus),
+        )
+        self.assertEqual(
+            models.ENTITLEMENT_GRANT_TYPES,
+            tuple(s.value for s in config.enums.EntitlementGrantType),
         )
 
     def test_database_model_constraints_match_enums(self):
@@ -237,6 +253,26 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertEqual(
             _extract_check_constraint_in(PaymentDispute.__table__, "ck_payment_disputes_status"),
             set(config.enums.PaymentDisputeStatus),
+        )
+
+        # 13. Purchase status & fulfillment_status
+        self.assertEqual(
+            _extract_check_constraint_in(models.Purchase.__table__, "ck_purchases_status"),
+            set(config.enums.PurchaseStatus),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.Purchase.__table__, "ck_purchases_fulfillment_status"),
+            set(config.enums.PurchaseFulfillmentStatus),
+        )
+
+        # 14. EntitlementGrant status & grant_type
+        self.assertEqual(
+            _extract_check_constraint_in(models.EntitlementGrant.__table__, "ck_entitlement_grants_status"),
+            set(config.enums.EntitlementGrantStatus),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.EntitlementGrant.__table__, "ck_entitlement_grants_grant_type"),
+            set(config.enums.EntitlementGrantType),
         )
 
     def test_exact_spelling_and_serialization_integrity(self):

@@ -16,6 +16,7 @@ from bot.keyboards.admin.users import (
 from bot.middlewares.user_context import invalidate_user_cache
 from bot.states import AdminStates
 from database.repositories.users_repo import get_user_by_telegram_id
+from services import subscription_coverage_service
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from utils.admin import is_admin
@@ -225,7 +226,12 @@ async def admin_sub_apply_reduce(
 
         new_end = user.subscription_end - timedelta(days=days)
 
-        user.subscription_end = new_end
+        await subscription_coverage_service.reduce_awg_coverage(
+            session,
+            user_id=user.id,
+            new_end=new_end,
+            locked_user=user,
+        )
 
         user.notified_3d = False
         user.notified_1d = False
