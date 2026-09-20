@@ -10,12 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.keyboards.device import get_device_migrate_confirm_keyboard
-from config.enums import ServerHealthState, ServerLifecycleStatus
+from config.constants import AMNEZIA_PROTOCOL
 from database.models import User
 from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
+    is_server_allocatable,
 )
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.device_service import (
@@ -181,20 +182,7 @@ async def select_migrate_target_server(
         return
 
     target_server = await get_server_by_id(session, target_server_id)
-    if (
-        not target_server
-        or not target_server.is_active
-        or getattr(target_server, "health_state", None) in (
-            ServerHealthState.AUTO_DISABLED,
-            ServerHealthState.MANUAL_DISABLED,
-            ServerHealthState.PROBLEM,
-        )
-        or getattr(target_server, "lifecycle_status", None) in (
-            ServerLifecycleStatus.DECOMMISSIONING,
-            ServerLifecycleStatus.DECOMMISSIONED,
-            ServerLifecycleStatus.ARCHIVED,
-        )
-    ):
+    if not is_server_allocatable(target_server, AMNEZIA_PROTOCOL):
         await callback.answer(texts.ERROR_SERVER_UNAVAILABLE, show_alert=True)
         return
 
@@ -283,20 +271,7 @@ async def confirm_migrate_device(
             return
 
         target_server = await get_server_by_id(session, target_server_id)
-        if (
-            not target_server
-            or not target_server.is_active
-            or getattr(target_server, "health_state", None) in (
-                ServerHealthState.AUTO_DISABLED,
-                ServerHealthState.MANUAL_DISABLED,
-                ServerHealthState.PROBLEM,
-            )
-            or getattr(target_server, "lifecycle_status", None) in (
-                ServerLifecycleStatus.DECOMMISSIONING,
-                ServerLifecycleStatus.DECOMMISSIONED,
-                ServerLifecycleStatus.ARCHIVED,
-            )
-        ):
+        if not is_server_allocatable(target_server, AMNEZIA_PROTOCOL):
             await callback.answer(texts.ERROR_SERVER_UNAVAILABLE, show_alert=True)
             return
 

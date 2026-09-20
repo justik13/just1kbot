@@ -180,18 +180,69 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
             # Slot #2 was freed because delete_failed was excluded from query
             self.assertEqual(profile.device_name, "Устройство #2")
 
-    async def test_ping_server_records_circuit_breaker_success_and_failure(self):
-        """Admin ping_server records success on healthy response and failure on error/timeout."""
+    async def test_is_server_allocatable_predicate(self):
+        """Test is_server_allocatable predicate across all states and capabilities."""
+        from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+        from database.repositories.servers_repo import is_server_allocatable
+
+        # Valid AWG server
+        s_valid = Server(
+            id=1, name="NL", protocol=AMNEZIA_PROTOCOL, is_active=True,
+            health_state=ServerHealthState.ONLINE, lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=[]
+        )
+        self.assertTrue(is_server_allocatable(s_valid, AMNEZIA_PROTOCOL))
+
+        # None server
+        self.assertFalse(is_server_allocatable(None, AMNEZIA_PROTOCOL))
+
+        # Inactive server
+        s_inactive = Server(
+            id=2, name="NL", protocol=AMNEZIA_PROTOCOL, is_active=False,
+            health_state=ServerHealthState.ONLINE, capabilities=[]
+        )
+        self.assertFalse(is_server_allocatable(s_inactive, AMNEZIA_PROTOCOL))
+
+        # Wrong protocol
+        self.assertFalse(is_server_allocatable(s_valid, XRAY_PROTOCOL))
+
+        # Unhealthy states
+        for bad_health in (ServerHealthState.AUTO_DISABLED, ServerHealthState.MANUAL_DISABLED, ServerHealthState.PROBLEM):
+            s_bad_health = Server(
+                id=3, name="NL", protocol=AMNEZIA_PROTOCOL, is_active=True,
+                health_state=bad_health, capabilities=[]
+            )
+            self.assertFalse(is_server_allocatable(s_bad_health, AMNEZIA_PROTOCOL))
+
+        # Decommissioning lifecycle states
+        for bad_lc in (ServerLifecycleStatus.DECOMMISSIONING, ServerLifecycleStatus.DECOMMISSIONED, ServerLifecycleStatus.ARCHIVED):
+            s_bad_lc = Server(
+                id=4, name="NL", protocol=AMNEZIA_PROTOCOL, is_active=True,
+                health_state=ServerHealthState.ONLINE, lifecycle_status=bad_lc, capabilities=[]
+            )
+            self.assertFalse(is_server_allocatable(s_bad_lc, AMNEZIA_PROTOCOL))
+
+        # Xray origin capability excluded from AWG allocation
+        s_xray_origin = Server(
+            id=5, name="NL", protocol=AMNEZIA_PROTOCOL, is_active=True,
+            health_state=ServerHealthState.ONLINE, capabilities=["xray_origin"]
+        )
+        self.assertFalse(is_server_allocatable(s_xray_origin, AMNEZIA_PROTOCOL))
+
+    async def test_ping_server_checks_circuit_breaker_availability(self):
+        """Admin ping_server respects circuit breaker availability."""
+        from bot import texts
         from bot.handlers.admin.servers.card_routes import ping_server
         from database.models import Server
 
         mock_cb = AsyncMock()
-        mock_cb.is_available.return_value = True
+        mock_cb.is_available.return_value = False
 
         mock_callback = AsyncMock()
         mock_callback.from_user.id = 1
         mock_callback.data = "admin_server_ping:1"
-        mock_callback.message.edit_text = AsyncMock()
+        mock_callback.answer = AsyncMock()
 
         mock_server = Server(
             id=1,
@@ -205,29 +256,85 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
 
         mock_session = AsyncMock()
 
+        # 1. When CB is open -> do not call healthcheck, render NO_HEALTHZ on server card
         with (
             patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True),
             patch("bot.handlers.admin.servers.card_routes.get_server_by_id", return_value=mock_server),
             patch("services.amnezia_client._get_circuit_breaker", return_value=mock_cb),
-            patch("services.amnezia_client.AmneziaClient.healthcheck", new=AsyncMock(return_value=True)),
+            patch("services.amnezia_client.AmneziaClient.healthcheck", new=AsyncMock()) as mock_health,
             patch("bot.handlers.admin.servers.card_routes._show_server_card", new=AsyncMock()) as mock_card,
         ):
             await ping_server(mock_callback, mock_session)
-            mock_cb.record_success.assert_called_once()
-            mock_cb.record_failure.assert_not_called()
+            mock_health.assert_not_called()
             mock_card.assert_called_once()
+            self.assertEqual(mock_card.call_args.kwargs["ping_result"], texts.ADMIN_SERVER_PING_NO_HEALTHZ)
 
-        mock_cb.reset_mock()
+        # 2. When CB is available -> call healthcheck and update server card with latency
+        mock_cb.is_available.return_value = True
         with (
             patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True),
             patch("bot.handlers.admin.servers.card_routes.get_server_by_id", return_value=mock_server),
             patch("services.amnezia_client._get_circuit_breaker", return_value=mock_cb),
-            patch("services.amnezia_client.AmneziaClient.healthcheck", new=AsyncMock(side_effect=TimeoutError())),
-            patch("bot.handlers.admin.servers.card_routes._show_server_card", new=AsyncMock()),
+            patch("services.amnezia_client.AmneziaClient.healthcheck", new=AsyncMock(return_value=True)) as mock_health,
+            patch("bot.handlers.admin.servers.card_routes._show_server_card", new=AsyncMock()) as mock_card,
         ):
             await ping_server(mock_callback, mock_session)
-            mock_cb.record_failure.assert_called_once()
-            mock_cb.record_success.assert_not_called()
+            mock_health.assert_called_once()
+            mock_card.assert_called_once()
+            self.assertIn("ms", mock_card.call_args.kwargs["ping_result"])
+
+    async def test_cleanup_stuck_profiles_skips_inactive_server_and_preserves_delete_failed(self):
+        """Cleanup worker skips inactive servers and keeps delete_failed status on enqueue failure."""
+        from database.models import Server, VPNProfile
+        from services.workers.cleanup import _cleanup_stuck_profiles
+
+        stuck_profile = VPNProfile(
+            id=51,
+            user_id=1,
+            server_id=11,
+            device_name="Test Device",
+            client_name="tg_100_p51",
+            provisioning_status="delete_failed",
+            peer_id="peer_abc",
+        )
+
+        # Inactive server -> should skip enqueueing delete_peer
+        mock_server_inactive = Server(id=11, name="Dead Server", api_url="https://dead.vpn", api_key="k", is_active=False)
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # active ops -> None
+        ])
+        mock_session.get = AsyncMock(return_value=mock_server_inactive)
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with (
+            patch("services.workers.cleanup.session_scope", return_value=mock_scope),
+            patch("services.api_operations_queue.ensure_delete_operation", new=AsyncMock()) as mock_ensure_delete,
+        ):
+            await _cleanup_stuck_profiles()
+            mock_ensure_delete.assert_not_called()
+            self.assertEqual(stuck_profile.provisioning_status, "delete_failed")
+
+        # Active server, but ensure_delete_operation raises exception -> must preserve delete_failed
+        mock_server_active = Server(id=11, name="Active Server", api_url="https://act.vpn", api_key="k", is_active=True)
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # active ops -> None
+        ])
+        mock_session.get = AsyncMock(return_value=mock_server_active)
+
+        with (
+            patch("services.workers.cleanup.session_scope", return_value=mock_scope),
+            patch("services.api_operations_queue.resolve_profile_endpoint_snapshot", return_value=(11, "Active", "https://act.vpn", "k")),
+            patch("services.api_operations_queue.ensure_delete_operation", side_effect=Exception("DB lock error")),
+        ):
+            await _cleanup_stuck_profiles()
+            # Stays delete_failed, not downgraded to create_cleanup_pending!
+            self.assertEqual(stuck_profile.provisioning_status, "delete_failed")
 
 
 if __name__ == "__main__":

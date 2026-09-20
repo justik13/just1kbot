@@ -9,12 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT, AdminAuditAction
-from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import APIOperation, Server, User, VPNProfile
 from database.repositories.profiles_repo import (
     ALLOWED_DELETE_STATES,
-    PROFILE_QUOTA_EXCLUDED_STATUSES,
+    PROFILE_LIST_HIDDEN_STATUSES,
 )
+from database.repositories.servers_repo import is_server_allocatable
 from services.amnezia_capacity import (
     ServerAtCapacity,
     ServerCapacityUnavailable,
@@ -113,21 +113,7 @@ class DeviceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if (
-            not server
-            or server.protocol != AMNEZIA_PROTOCOL
-            or not server.is_active
-            or getattr(server, "health_state", None) in (
-                ServerHealthState.AUTO_DISABLED,
-                ServerHealthState.MANUAL_DISABLED,
-                ServerHealthState.PROBLEM,
-            )
-            or getattr(server, "lifecycle_status", None) in (
-                ServerLifecycleStatus.DECOMMISSIONING,
-                ServerLifecycleStatus.DECOMMISSIONED,
-                ServerLifecycleStatus.ARCHIVED,
-            )
-        ):
+        if not is_server_allocatable(server, AMNEZIA_PROTOCOL):
             raise ServerUnavailable("Invalid or disabled server")
         if (
             user.is_banned
@@ -140,7 +126,7 @@ class DeviceService:
                 await session.execute(
                     select(VPNProfile).where(
                         VPNProfile.user_id == user.id,
-                        VPNProfile.provisioning_status.notin_(PROFILE_QUOTA_EXCLUDED_STATUSES),
+                        VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES),
                     )
                 )
             ).scalars().all()
@@ -388,21 +374,7 @@ class DeviceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if (
-            not target_server
-            or target_server.protocol != AMNEZIA_PROTOCOL
-            or not target_server.is_active
-            or getattr(target_server, "health_state", None) in (
-                ServerHealthState.AUTO_DISABLED,
-                ServerHealthState.MANUAL_DISABLED,
-                ServerHealthState.PROBLEM,
-            )
-            or getattr(target_server, "lifecycle_status", None) in (
-                ServerLifecycleStatus.DECOMMISSIONING,
-                ServerLifecycleStatus.DECOMMISSIONED,
-                ServerLifecycleStatus.ARCHIVED,
-            )
-        ):
+        if not is_server_allocatable(target_server, AMNEZIA_PROTOCOL):
             raise ServerUnavailable("Invalid or disabled server")
 
         if (

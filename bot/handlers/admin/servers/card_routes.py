@@ -269,12 +269,7 @@ async def ping_server(
                 client = AmneziaClient(server.api_url, server.api_key)
                 try:
                     is_healthy = await asyncio.wait_for(client.healthcheck(), timeout=4.0)
-                    if is_healthy:
-                        await cb.record_success()
-                    else:
-                        await cb.record_failure()
                 except Exception:
-                    await cb.record_failure()
                     is_healthy = False
         elif server.protocol == XRAY_PROTOCOL:
             from services.xray_node_client import XrayNodeClient

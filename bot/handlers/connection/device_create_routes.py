@@ -13,13 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import DeviceCreationStates
-from config.enums import ServerHealthState, ServerLifecycleStatus
+from config.constants import AMNEZIA_PROTOCOL
 from database.connection import get_session
 from database.models import User, VPNProfile
 from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
+    is_server_allocatable,
 )
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.device_service import (
@@ -282,19 +283,7 @@ async def _process_server_selection(
         await state.clear()
         return
 
-    if (
-        not server.is_active
-        or getattr(server, "health_state", None) in (
-            ServerHealthState.AUTO_DISABLED,
-            ServerHealthState.MANUAL_DISABLED,
-            ServerHealthState.PROBLEM,
-        )
-        or getattr(server, "lifecycle_status", None) in (
-            ServerLifecycleStatus.DECOMMISSIONING,
-            ServerLifecycleStatus.DECOMMISSIONED,
-            ServerLifecycleStatus.ARCHIVED,
-        )
-    ):
+    if not is_server_allocatable(server, AMNEZIA_PROTOCOL):
         await render_hub(
             callback.bot,
             callback.message.chat.id,
