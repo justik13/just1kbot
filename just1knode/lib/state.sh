@@ -41,7 +41,16 @@ except ImportError:
     fcntl = None
 
 os.umask(0o007)
-f, k, v = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def safe_arg(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return val.encode(sys.getfilesystemencoding(), 'surrogateescape').decode('utf-8', 'replace')
+    except Exception:
+        return val
+
+f, k, v = sys.argv[1], safe_arg(sys.argv[2]), safe_arg(sys.argv[3])
 lock_file = f + '.lock'
 lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o660)
 try:
@@ -56,14 +65,14 @@ try:
     data = {}
     if os.path.exists(f):
         try:
-            with open(f, 'r', encoding='utf-8') as fp:
+            with open(f, 'r', encoding='utf-8', errors='replace') as fp:
                 data = json.load(fp)
         except Exception:
             data = {}
     data[k] = v
     tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(f), suffix='.tmp')
-    with os.fdopen(tmp_fd, 'w', encoding='utf-8') as fp:
-        json.dump(data, fp, indent=2)
+    with os.fdopen(tmp_fd, 'w', encoding='utf-8', errors='replace') as fp:
+        json.dump(data, fp, indent=2, ensure_ascii=False)
         fp.flush()
     os.replace(tmp_path, f)
     try:
@@ -88,9 +97,18 @@ get_state_val() {
     fi
     python3 -c "
 import sys, json
-f, k, d = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def safe_arg(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return val.encode(sys.getfilesystemencoding(), 'surrogateescape').decode('utf-8', 'replace')
+    except Exception:
+        return val
+
+f, k, d = sys.argv[1], safe_arg(sys.argv[2]), safe_arg(sys.argv[3])
 try:
-    with open(f, 'r', encoding='utf-8') as fp:
+    with open(f, 'r', encoding='utf-8', errors='replace') as fp:
         data = json.load(fp)
     print(data.get(k, d))
 except Exception:

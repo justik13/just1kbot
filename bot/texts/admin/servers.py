@@ -41,6 +41,25 @@ ADMIN_SERVER_ADDED_NO_RELAYS_WARNING = (
 
 ADMIN_SERVER_BTN_DELETE = "🗑 Удалить сервер"
 ADMIN_SERVER_BTN_MIGRATE = "📦 Мигрировать подписчиков"
+ADMIN_SERVER_BTN_RELAYS = "🌐 Статус Relay-узлов"
+ADMIN_SERVER_RELAYS_CHECKING = "⚡ Опрос Relay-узлов..."
+ADMIN_SERVER_RELAYS_HEADER = """{header}🌐 <b>Статус Relay-узлов для {flag} {server_name}</b>
+
+• 🇷🇺 <b>Origin (Прямой выход):</b> 🟢 Онлайн{origin_rtt_str}
+"""
+ADMIN_SERVER_RELAYS_EMPTY = """\n<i>На этом сервере нет подключенных Relay-узлов. Весь трафик выходит напрямую через Origin.</i>\n"""
+ADMIN_SERVER_RELAYS_ROW = "• {flag} <b>{name}</b> (<code>{ip}:{port}</code>)\n  Статус: {status_badge}\n"
+ADMIN_SERVER_RELAYS_API_ERROR = "\n🔴 <b>Ошибка проверки узлов:</b> <code>{error}</code>\n"
+ADMIN_SERVER_RELAYS_ORIGIN_RTT = " (RTT: {origin_rtt} ms)"
+ADMIN_SERVER_RELAYS_ORIGIN_UNAVAILABLE = " (API недоступен)"
+ADMIN_SERVER_RELAYS_ERR_FETCH = "Не удалось получить статус релеев"
+ADMIN_SERVER_RELAYS_FALLBACK_NAME = "Релей"
+ADMIN_SERVER_RELAYS_STATUS_ONLINE_RTT = "🟢 Онлайн (RTT: {rtt_ms} ms)"
+ADMIN_SERVER_RELAYS_STATUS_ONLINE = "🟢 Онлайн"
+ADMIN_SERVER_RELAYS_STATUS_OFFLINE_ERR = "🔴 Офлайн ({error})"
+ADMIN_SERVER_RELAYS_STATUS_OFFLINE = "🔴 Офлайн"
+ADMIN_SERVER_BTN_REFRESH_RELAYS = "🔄 Обновить статус узлов"
+ADMIN_SERVER_BTN_BACK_TO_SERVER = "« Назад к серверу"
 
 ADMIN_SERVER_BTN_CHANGE_LIMIT = "👥 Изменить лимит"
 

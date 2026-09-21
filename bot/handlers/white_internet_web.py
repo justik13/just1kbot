@@ -239,6 +239,9 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
 
         profile_title_b64 = base64.b64encode(texts.WL_PROFILE_NAME.encode("utf-8")).decode("ascii")
+        profile_desc_b64 = base64.b64encode(texts.WL_PROFILE_DESCRIPTION.encode("utf-8")).decode("ascii")
+        bot_user = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+        bot_url = f"https://t.me/{bot_user}"
         response_headers = dict(common_headers)
         response_headers.update(
             {
@@ -250,7 +253,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                     expire=expire_ts,
                 ),
                 "Profile-Title": f"base64:{profile_title_b64}",
+                "Profile-Description": f"base64:{profile_desc_b64}",
                 "Profile-Update-Interval": "6",
+                "Support-Url": bot_url,
+                "Profile-Web-Page-Url": bot_url,
                 "hide-url": "1",
                 "no-limit-enabled": "1",
             }

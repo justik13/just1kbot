@@ -593,6 +593,93 @@ def list_relays(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     }
 
 
+async def _probe_single_relay(relay: Dict[str, Any], timeout: float = 2.5) -> Dict[str, Any]:
+    ip = relay.get("ip")
+    port = relay.get("port")
+    code = relay.get("code", "")
+    name = relay.get("name", "")
+
+    if not ip or not port:
+        return {
+            "name": name,
+            "code": code,
+            "ip": ip,
+            "port": port,
+            "healthy": False,
+            "rtt_ms": None,
+            "error": "Missing IP or port",
+        }
+
+    t0 = time.perf_counter()
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(str(ip), int(port)),
+            timeout=timeout,
+        )
+        rtt_ms = round((time.perf_counter() - t0) * 1000, 1)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return {
+            "name": name,
+            "code": code,
+            "ip": ip,
+            "port": port,
+            "healthy": True,
+            "rtt_ms": rtt_ms,
+            "error": None,
+        }
+    except asyncio.TimeoutError:
+        return {
+            "name": name,
+            "code": code,
+            "ip": ip,
+            "port": port,
+            "healthy": False,
+            "rtt_ms": None,
+            "error": f"Timeout ({timeout}s)",
+        }
+    except Exception as exc:
+        return {
+            "name": name,
+            "code": code,
+            "ip": ip,
+            "port": port,
+            "healthy": False,
+            "rtt_ms": None,
+            "error": str(exc),
+        }
+
+
+@app.get("/v1/relays/health")
+async def check_relays_health(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+    """Probes all configured relay nodes from this Origin node via TCP connection.
+
+    Measures RTT and connectivity. Returns status 'ok' if all relays are healthy,
+    'degraded' if some are unreachable, or 'empty' if no relays configured.
+    """
+    relays = get_active_relays()
+    if not relays:
+        return {
+            "status": "empty",
+            "count": 0,
+            "all_healthy": True,
+            "relays": [],
+        }
+
+    tasks = [_probe_single_relay(r) for r in relays]
+    results = await asyncio.gather(*tasks)
+    all_healthy = all(r["healthy"] for r in results)
+    return {
+        "status": "ok" if all_healthy else "degraded",
+        "count": len(results),
+        "all_healthy": all_healthy,
+        "relays": list(results),
+    }
+
+
 @app.get("/v1/clients/list")
 def list_clients(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """Returns list of currently active clients persisted on the node."""

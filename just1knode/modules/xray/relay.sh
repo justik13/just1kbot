@@ -100,10 +100,30 @@ install_xray_relay_node() {
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["tls", "http"]
+        "destOverride": ["tls", "http", "quic"],
+        "metadataOnly": false
       }
     }
   ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "protocol": [
+          "bittorrent"
+        ],
+        "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "geosite:bittorrent"
+        ],
+        "outboundTag": "block"
+      }
+    ]
+  },
   "outbounds": [
     {
       "tag": "direct",

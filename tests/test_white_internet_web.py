@@ -119,9 +119,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(text, texts.WL_WEB_EXPIRED)
 
     async def test_runtime_out_of_sync_returns_503(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
+        sub.user_id = 10
         sub.origin_node_id = 1
         sub.status = WhiteInternetStatus.ACTIVE
         sub.expires_at = now + timedelta(days=20)
@@ -139,6 +140,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             health_state=ServerHealthState.ONLINE,
         )
 
+        mock_user = MagicMock(is_banned=False, is_deleted=False)
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
 
@@ -147,15 +149,17 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             yield mock_session
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
-            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                resp = await self.client.get("/sub/wl/unsynced-token-1234567890abcdef")
-                self.assertEqual(resp.status, 503)
-                self.assertEqual(resp.headers.get("Retry-After"), "5")
+            with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get("/sub/wl/unsynced-token-1234567890abcdef")
+                    self.assertEqual(resp.status, 503)
+                    self.assertEqual(resp.headers.get("Retry-After"), "5")
 
     async def test_epoch_mismatch_returns_503(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
+        sub.user_id = 10
         sub.origin_node_id = 1
         sub.status = WhiteInternetStatus.ACTIVE
         sub.expires_at = now + timedelta(days=20)
@@ -174,6 +178,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             health_state=ServerHealthState.ONLINE,
         )
 
+        mock_user = MagicMock(is_banned=False, is_deleted=False)
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
 
@@ -182,10 +187,11 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             yield mock_session
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
-            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                resp = await self.client.get("/sub/wl/epoch-mismatch-token-1234567890")
-                self.assertEqual(resp.status, 503)
-                self.assertEqual(resp.headers.get("Retry-After"), "5")
+            with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get("/sub/wl/epoch-mismatch-token-1234567890")
+                    self.assertEqual(resp.status, 503)
+                    self.assertEqual(resp.headers.get("Retry-After"), "5")
 
     async def test_active_and_synced_returns_base64_vless_feed(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
@@ -242,6 +248,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.status, 200)
                     self.assertEqual(resp.headers.get("Content-Type"), "text/plain; charset=utf-8")
                     self.assertEqual(resp.headers.get("Profile-Title"), "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==")
+                    self.assertIsNotNone(resp.headers.get("Profile-Description"))
+                    self.assertIn("t.me", resp.headers.get("Support-Url", ""))
+                    self.assertIn("t.me", resp.headers.get("Profile-Web-Page-Url", ""))
                     self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
                     self.assertEqual(resp.headers.get("hide-url"), "1")
                     self.assertEqual(resp.headers.get("no-limit-enabled"), "1")

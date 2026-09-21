@@ -308,6 +308,20 @@ for r in rules:
         if 'domain' in r and 'domain:2ip.ru' not in r['domain']:
             r['domain'].append('domain:2ip.ru')
 
+# Запрет BitTorrent (P2P и трекеры)
+if not any(r.get('protocol') == ['bittorrent'] for r in rules):
+    rules.insert(0, {
+        'type': 'field',
+        'protocol': ['bittorrent'],
+        'outboundTag': 'just1k-wl-block'
+    })
+if not any(r.get('domain') == ['geosite:bittorrent'] for r in rules):
+    rules.insert(1, {
+        'type': 'field',
+        'domain': ['geosite:bittorrent'],
+        'outboundTag': 'just1k-wl-block'
+    })
+
 # Вставляем правило выхода на Relay СТРОГО ПОСЛЕ правил прямого выхода в Рунет
 direct_indices = [i for i, r in enumerate(rules) if r.get('outboundTag') == 'just1k-wl-direct']
 insert_idx = (max(direct_indices) + 1) if direct_indices else 0
@@ -318,22 +332,16 @@ rules.insert(insert_idx, {
     'outboundTag': out_tag
 })
 
-# Enforce relay egress for default client traffic (anti-Russian exit)
-primary_relay_code = code
-primary_relay_tag = f'just1k-wl-outbound-{primary_relay_code}'
-default_rule_found = False
-for r in rules:
-    if (r.get('inboundTag') == ['just1k-wl-default'] or 'just1k-wl-default' in r.get('inboundTag', [])) and 'domain' not in r and 'ip' not in r:
-        r['inboundTag'] = ['just1k-wl-default']
-        r['outboundTag'] = primary_relay_tag
-        default_rule_found = True
-        break
-if not default_rule_found:
+# Default узел Origin (Москва) всегда выходит напрямую через РФ (just1k-wl-direct)
+default_rule = next((r for r in rules if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r), None)
+if not default_rule:
     rules.append({
         'type': 'field',
         'inboundTag': ['just1k-wl-default'],
-        'outboundTag': primary_relay_tag
+        'outboundTag': 'just1k-wl-direct'
     })
+else:
+    default_rule['outboundTag'] = 'just1k-wl-direct'
 
 cfg['routing']['rules'] = rules
 
@@ -406,9 +414,18 @@ EOF
     # Обновление relays.json (Durable-by-Default: атомарная запись через tempfile)
     python3 -c "
 import json, os, sys, tempfile
+
+def safe_arg(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return val.encode(sys.getfilesystemencoding(), 'surrogateescape').decode('utf-8', 'replace')
+    except Exception:
+        return val
+
 rf = sys.argv[1]
-code = sys.argv[2]
-name = sys.argv[3]
+code = safe_arg(sys.argv[2]).strip()
+name = safe_arg(sys.argv[3]).strip()
 ip = sys.argv[4]
 port = int(sys.argv[5])
 in_path = sys.argv[6]
@@ -420,7 +437,7 @@ sni = sys.argv[10]
 relays = []
 if os.path.exists(rf):
     try:
-        with open(rf, 'r', encoding='utf-8') as f:
+        with open(rf, 'r', encoding='utf-8', errors='replace') as f:
             data = json.load(f)
             if isinstance(data, list):
                 relays = data
@@ -443,7 +460,7 @@ relays.append({
 d = os.path.dirname(os.path.abspath(rf))
 os.makedirs(d, exist_ok=True)
 t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
-with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
     json.dump(relays, fp, ensure_ascii=False, indent=2)
     fp.flush()
     os.fsync(fp.fileno())
@@ -557,12 +574,21 @@ with open(cfg_file, 'w') as f: json.dump(cfg, f, indent=2)
     # Удаление из relays.json (Durable-by-Default: атомарная запись через tempfile)
     python3 -c "
 import json, os, sys, tempfile
+
+def safe_arg(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return val.encode(sys.getfilesystemencoding(), 'surrogateescape').decode('utf-8', 'replace')
+    except Exception:
+        return val
+
 rf = sys.argv[1]
-code = sys.argv[2]
+code = safe_arg(sys.argv[2]).strip()
 relays = []
 if os.path.exists(rf):
     try:
-        with open(rf, 'r', encoding='utf-8') as f:
+        with open(rf, 'r', encoding='utf-8', errors='replace') as f:
             data = json.load(f)
             if isinstance(data, list):
                 relays = data
@@ -572,7 +598,7 @@ relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
 d = os.path.dirname(os.path.abspath(rf))
 os.makedirs(d, exist_ok=True)
 t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
-with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
     json.dump(relays, fp, ensure_ascii=False, indent=2)
     fp.flush()
     os.fsync(fp.fileno())
@@ -629,16 +655,25 @@ rename_relay_node() {
     local updated
     updated=$(python3 -c "
 import json, os, sys, tempfile
+
+def safe_arg(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return val.encode(sys.getfilesystemencoding(), 'surrogateescape').decode('utf-8', 'replace')
+    except Exception:
+        return val
+
 rf = sys.argv[1]
-target = sys.argv[2].strip().lower()
-new_name = sys.argv[3].strip()
+target = safe_arg(sys.argv[2]).strip().lower()
+new_name = safe_arg(sys.argv[3]).strip()
 
 if not os.path.exists(rf):
     print('no_file')
     sys.exit(0)
 
 try:
-    with open(rf, 'r', encoding='utf-8') as f:
+    with open(rf, 'r', encoding='utf-8', errors='replace') as f:
         relays = json.load(f)
 except Exception as e:
     print(f'read_error: {e}')
@@ -663,7 +698,7 @@ try:
     d = os.path.dirname(os.path.abspath(rf))
     os.makedirs(d, exist_ok=True)
     t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
-    with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+    with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
         json.dump(relays, fp, ensure_ascii=False, indent=2)
         fp.flush()
         os.fsync(fp.fileno())
@@ -697,7 +732,7 @@ import json, os
 rf = '$RELAYS_FILE'
 if os.path.exists(rf):
     try:
-        with open(rf, 'r', encoding='utf-8') as f:
+        with open(rf, 'r', encoding='utf-8', errors='replace') as f:
             data = json.load(f)
         for i, r in enumerate(data, 1):
             print(f\"{i}\t{r.get('code','')}\t{r.get('name','')}\t{r.get('ip','')}\")

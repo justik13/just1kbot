@@ -10,6 +10,7 @@ from .dashboard import (
 from .servers import (
     get_admin_server_card_keyboard,
     get_admin_server_peers_keyboard,
+    get_admin_server_relays_keyboard,
     get_server_delete_confirm_keyboard,
 )
 from .tariffs import get_admin_tariff_card_keyboard
@@ -45,6 +46,7 @@ __all__ = [
     # servers
     "get_admin_server_card_keyboard",
     "get_admin_server_peers_keyboard",
+    "get_admin_server_relays_keyboard",
     "get_server_delete_confirm_keyboard",
     # tariffs
     "get_admin_tariff_card_keyboard",

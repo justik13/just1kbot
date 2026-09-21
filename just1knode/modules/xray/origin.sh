@@ -348,6 +348,18 @@ rules.append({
     'outboundTag': 'just1k-wl-api'
 })
 
+# Запрет BitTorrent (P2P и трекеры) на уровне ядра Xray
+rules.append({
+    'type': 'field',
+    'protocol': ['bittorrent'],
+    'outboundTag': 'just1k-wl-block'
+})
+rules.append({
+    'type': 'field',
+    'domain': ['geosite:bittorrent'],
+    'outboundTag': 'just1k-wl-block'
+})
+
 # Split-Routing: прямой выход в Рунет с московского IP Origin-сервера
 rules.append({
     'type': 'field',
@@ -369,11 +381,11 @@ rules.append({
     'outboundTag': 'just1k-wl-direct'
 })
 
-# Standalone Origin: блокировать весь зарубежный трафик клиентов до подключения зарубежного Relay
+# Origin (Москва): прямой выход в сеть с московского IP (как подключение в РФ)
 rules.append({
     'type': 'field',
     'inboundTag': ['just1k-wl-default'],
-    'outboundTag': 'just1k-wl-block'
+    'outboundTag': 'just1k-wl-direct'
 })
 
 final_config = dict(existing)
@@ -789,6 +801,20 @@ if not any(r.get('outboundTag') == 'just1k-wl-api' for r in rules):
         'outboundTag': 'just1k-wl-api'
     })
 
+# 4.1b. Блокировка BitTorrent (P2P и трекеры)
+if not any(r.get('protocol') == ['bittorrent'] and r.get('outboundTag') == 'just1k-wl-block' for r in rules):
+    rules.insert(1, {
+        'type': 'field',
+        'protocol': ['bittorrent'],
+        'outboundTag': 'just1k-wl-block'
+    })
+if not any(r.get('domain') == ['geosite:bittorrent'] and r.get('outboundTag') == 'just1k-wl-block' for r in rules):
+    rules.insert(2, {
+        'type': 'field',
+        'domain': ['geosite:bittorrent'],
+        'outboundTag': 'just1k-wl-block'
+    })
+
 # 4.2. Правило Direct для доменов РФ
 ru_domains = [
     'geosite:category-ru',
@@ -806,7 +832,7 @@ if not dom_rule:
         'domain': ru_domains,
         'outboundTag': 'just1k-wl-direct'
     }
-    rules.insert(1, dom_rule)
+    rules.insert(3, dom_rule)
 else:
     dom_rule['domain'] = list(dict.fromkeys(dom_rule.get('domain', []) + ru_domains))
     curr_ib = dom_rule.get('inboundTag', [])
@@ -829,19 +855,16 @@ else:
     curr_ib = ip_rule.get('inboundTag', [])
     ip_rule['inboundTag'] = list(dict.fromkeys((curr_ib if isinstance(curr_ib, list) else [curr_ib]) + known_client_inbounds))
 
-# 4.4. Дефолтное правило для just1k-wl-default
+# 4.4. Дефолтное правило для just1k-wl-default (прямой выход через Москву)
 def_rule = next((r for r in rules if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r), None)
-first_relay_tag = ('just1k-wl-outbound-' + str(relays[0]['code'])) if relays and relays[0].get('code') else 'just1k-wl-block'
 if not def_rule:
     rules.append({
         'type': 'field',
         'inboundTag': ['just1k-wl-default'],
-        'outboundTag': first_relay_tag
+        'outboundTag': 'just1k-wl-direct'
     })
 else:
-    curr_out = def_rule.get('outboundTag')
-    if not any(ob.get('tag') == curr_out for ob in outbounds):
-        def_rule['outboundTag'] = first_relay_tag
+    def_rule['outboundTag'] = 'just1k-wl-direct'
 
 # 4.5. Правила маршрутизации для каждого индивидуального релея
 for r in relays:

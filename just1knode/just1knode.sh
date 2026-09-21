@@ -4,6 +4,13 @@
 # =============================================================================
 set -euo pipefail
 
+# Принудительная UTF-8 локаль и режим UTF-8 в Python (PEP 540)
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export LANG="${LANG:-C.UTF-8}"
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
+
 # Определение каталога скрипта с защитой от запуска через pipe (curl | bash)
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
@@ -96,6 +103,8 @@ source "${SCRIPT_DIR}/lib/backup.sh"
 source "${SCRIPT_DIR}/lib/state.sh"
 # shellcheck source=lib/ssl.sh
 source "${SCRIPT_DIR}/lib/ssl.sh"
+# shellcheck source=lib/traffic_watchdog.sh
+source "${SCRIPT_DIR}/lib/traffic_watchdog.sh"
 
 # Подключение модулей
 # shellcheck source=modules/xray/core.sh
@@ -160,6 +169,17 @@ show_status() {
 
         echo -e "\n  Службы:"
         systemctl is-active --quiet xray && echo -e "    Xray Relay:  ${GREEN}● Активен${NC}" || echo -e "    Xray Relay:  ${RED}○ Не работает${NC}"
+    fi
+
+    local t_status
+    t_status="$(get_state_val "traffic_limit_status" "disabled")"
+    if [[ "$t_status" == "enabled" ]]; then
+        echo -e "\n  Контроль трафика:"
+        local lim_gb
+        lim_gb="$(get_state_val "traffic_limit_gb" "-")"
+        local r_day
+        r_day="$(get_state_val "traffic_reset_day" "1")"
+        echo -e "    Лимит хостинга: ${CYAN}${lim_gb} ГБ${NC} (сброс: ${r_day}-е число)"
     fi
 }
 
@@ -767,6 +787,42 @@ uninstall_node() {
     exit 0
 }
 
+manage_traffic_limit_menu() {
+    title "УПРАВЛЕНИЕ ЛИМИТОМ ТРАФИКА"
+    check_root
+    show_traffic_limit_status
+    echo ""
+    echo -e "  ${BOLD}[1]${NC} ⚙️  Включить / настроить лимит"
+    echo -e "  ${BOLD}[2]${NC} ⚪ Отключить лимит (Безлимитный режим)"
+    echo -e "  ${BOLD}[3]${NC} 🔄 Проверить текущий трафик"
+    echo -e "  ${BOLD}[0]${NC} ⬅️  Назад"
+    echo ""
+    read -rp "Выберите действие [0-3]: " t_act
+    case "$t_act" in
+        1)
+            read -rp "Введите лимит трафика в ГБ (например: 8000 для 8 ТБ): " lim_in
+            read -rp "День месяца сброса биллинга у провайдера [по умолчанию: 1]: " day_in
+            day_in="${day_in:-1}"
+            read -rp "Telegram Bot Token для уведомлений (опционально, Enter для пропуска): " tok_in
+            local chat_in=""
+            if [[ -n "$tok_in" ]]; then
+                read -rp "Telegram Chat ID администратора: " chat_in
+            fi
+            set_traffic_limit "$lim_in" "$day_in" "$tok_in" "$chat_in"
+            ;;
+        2)
+            disable_traffic_limit
+            ;;
+        3)
+            check_traffic_limit
+            show_traffic_limit_status
+            ;;
+        *)
+            return
+            ;;
+    esac
+}
+
 # =============================================================================
 # ДИНАМИЧЕСКОЕ КОНТЕКСТНОЕ МЕНЮ
 # =============================================================================
@@ -818,23 +874,25 @@ main_menu() {
             echo -e "  ${BOLD}[2]${NC} 📊 Статус узла и подключенные клиенты"
             echo -e "  ${BOLD}[3]${NC} 🩺 Комплексная самодиагностика (Doctor)"
             echo -e "  ${BOLD}[4]${NC} 🔑 Показать данные для Telegram-бота (/admin)"
-            echo -e "  ${BOLD}[5]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[6]${NC} ⚡ Обновить ядро Xray-core"
-            echo -e "  ${BOLD}[7]${NC} ⚠️ Сбросить / переустановить узел"
-            echo -e "  ${BOLD}[8]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[5]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[7]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[8]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[9]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-8]: " choice
+            read -rp "Выберите действие [0-9]: " choice
 
             case "$choice" in
                 1) manage_relays_menu; read -rp "Нажмите Enter для продолжения...";;
                 2) show_status; read -rp "Нажмите Enter для продолжения...";;
                 3) run_doctor; read -rp "Нажмите Enter для продолжения...";;
                 4) show_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
-                5) update_node; read -rp "Нажмите Enter для продолжения...";;
-                6) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
-                7) reset_node; read -rp "Нажмите Enter для продолжения...";;
-                8) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                6) update_node; read -rp "Нажмите Enter для продолжения...";;
+                7) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                8) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -849,23 +907,25 @@ main_menu() {
 
             echo -e "  ${BOLD}[1]${NC} 📋 Показать данные подключения (команда для Origin)"
             echo -e "  ${BOLD}[2]${NC} 📊 Статус туннеля и сетевой трафик"
-            echo -e "  ${BOLD}[3]${NC} 🩺 Комплексная самодиагностика (Doctor)"
-            echo -e "  ${BOLD}[4]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[5]${NC} ⚡ Обновить ядро Xray-core"
-            echo -e "  ${BOLD}[6]${NC} ⚠️ Сбросить / переустановить узел"
-            echo -e "  ${BOLD}[7]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[3]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[4]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[5]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[6]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[7]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[8]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-7]: " choice
+            read -rp "Выберите действие [0-8]: " choice
 
             case "$choice" in
                 1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
                 2) show_status; read -rp "Нажмите Enter для продолжения...";;
-                3) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                4) update_node; read -rp "Нажмите Enter для продолжения...";;
-                5) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
-                6) reset_node; read -rp "Нажмите Enter для продолжения...";;
-                7) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                3) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                4) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                5) update_node; read -rp "Нажмите Enter для продолжения...";;
+                6) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                7) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                8) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -894,6 +954,15 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                     rename) rename_relay_node "${3:-}" "${4:-}" ;;
                     list) list_relays ;;
                     *) manage_relays_menu ;;
+                esac
+                ;;
+            limit|traffic)
+                case "${2:-}" in
+                    set) set_traffic_limit "${3:-}" "${4:-1}" "${5:-}" "${6:-}" ;;
+                    disable|off) disable_traffic_limit ;;
+                    check) check_traffic_limit ;;
+                    status|show|"") show_traffic_limit_status ;;
+                    *) error "Использование: just1knode limit [status|set <GB> [reset_day] [tg_token] [tg_chat]|disable|check]" ;;
                 esac
                 ;;
             status) show_status ;;

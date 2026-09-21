@@ -136,19 +136,25 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
             path="/w_abcdef12",
             relays=relays,
         )
-        self.assertEqual(len(links), 3)
+        self.assertEqual(len(links), 4)
 
-        de_parsed = urllib.parse.urlparse(links[0])
+        # First link is Origin node (direct egress)
+        origin_parsed = urllib.parse.urlparse(links[0])
+        origin_params = urllib.parse.parse_qs(origin_parsed.query)
+        self.assertEqual(origin_params["path"][0], "/w_abcdef12/default")
+        self.assertIn("Россия", urllib.parse.unquote(origin_parsed.fragment))
+
+        de_parsed = urllib.parse.urlparse(links[1])
         de_params = urllib.parse.parse_qs(de_parsed.query)
         self.assertEqual(de_params["path"][0], "/w_abcdef12/de")
         self.assertEqual(urllib.parse.unquote(de_parsed.fragment), "Германия")
 
-        nl_parsed = urllib.parse.urlparse(links[1])
+        nl_parsed = urllib.parse.urlparse(links[2])
         nl_params = urllib.parse.parse_qs(nl_parsed.query)
         self.assertEqual(nl_params["path"][0], "/w_abcdef12/nl")
         self.assertEqual(urllib.parse.unquote(nl_parsed.fragment), "Нидерланды")
 
-        se_parsed = urllib.parse.urlparse(links[2])
+        se_parsed = urllib.parse.urlparse(links[3])
         se_params = urllib.parse.parse_qs(se_parsed.query)
         self.assertEqual(se_params["path"][0], "/w_abcdef12/se")
         self.assertEqual(urllib.parse.unquote(se_parsed.fragment), "Швеция")
@@ -194,18 +200,17 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertIn("'xPaddingPlacement': 'queryInHeader'", sh_content)
 
     def test_origin_routing_default_fallback_and_ru_split(self) -> None:
-        """On Origin node, default inbound routes to relay/block, while RU domains route to just1k-wl-direct."""
+        """On Origin node, default inbound routes to direct (RU traffic), while relays route to their respective outbounds."""
         sh_content = _read_just1knode_content()
 
-        # In standalone mode (install_xray_origin_node), default inbound routes to blackhole block
+        # In standalone mode and relay mode, Origin default inbound routes directly to the Russian network
         self.assertIn(
-            "'inboundTag': ['just1k-wl-default'],\n    'outboundTag': 'just1k-wl-block'",
+            "'inboundTag': ['just1k-wl-default'],\n    'outboundTag': 'just1k-wl-direct'",
             sh_content,
         )
 
-        # In add_relay_node, default inbound routes to the primary relay outbound
-        self.assertIn("primary_relay_tag = f'just1k-wl-outbound-{primary_relay_code}'", sh_content)
-        self.assertIn("r['outboundTag'] = primary_relay_tag", sh_content)
+        # In add_relay_node, Origin default inbound continues to exit directly to Russian network
+        self.assertIn("default_rule['outboundTag'] = 'just1k-wl-direct'", sh_content)
 
         # Server-side split routing uses geosite:category-ru and geosite:tld-ru
         self.assertIn("'geosite:category-ru'", sh_content)

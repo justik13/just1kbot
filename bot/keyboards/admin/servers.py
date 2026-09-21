@@ -25,6 +25,10 @@ def get_admin_server_card_keyboard(
         )
     else:
         builder.button(
+            text=texts.ADMIN_SERVER_BTN_RELAYS,
+            callback_data=f"admin_server_relays:{server_id}",
+        )
+        builder.button(
             text=texts.ADMIN_SERVER_BTN_MIGRATE,
             callback_data=f"admin_server_migrate:{server_id}",
         )
@@ -165,6 +169,20 @@ def get_server_migration_targets_keyboard(
     builder.button(
         text=texts.BTN_BACK,
         callback_data=f"admin_server_card:{source_id}",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_REFRESH_RELAYS,
+        callback_data=f"admin_server_relays:{server_id}",
+    )
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
+        callback_data=f"admin_server_card:{server_id}",
     )
     builder.adjust(1)
     return builder.as_markup()

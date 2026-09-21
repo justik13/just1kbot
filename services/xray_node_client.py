@@ -288,3 +288,15 @@ class XrayNodeClient:
             return node_epoch, node_boot_id, node_starttime, users
         logger.error("Traffic snapshot fetch failed for %s: %s", _sanitize_url(url), err)
         return None, None, None, None
+
+    async def get_relays_health(
+        self, api_url: str, api_key: str
+    ) -> tuple[bool, dict[str, Any] | None, str | None]:
+        """Fetch real-time health status of all relay nodes connected through Origin."""
+        url = f"{api_url.rstrip('/')}/v1/relays/health"
+        headers = self._get_headers(api_key)
+        status_code, data, err = await self._make_request("GET", url, headers)
+        if status_code == 200 and isinstance(data, dict):
+            return True, data, None
+        return False, None, err or f"Relays health check failed with HTTP {status_code}"
+

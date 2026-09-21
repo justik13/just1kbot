@@ -1283,6 +1283,7 @@ class WhiteInternetService:
         port: int = 443,
         path: str = DEFAULT_WHITE_INTERNET_PATH,
         relays: list[dict] | None = None,
+        include_origin: bool = True,
     ) -> list[str]:
         extra_dict = {
             "mode": CANONICAL_XHTTP_PROFILE["mode"],
@@ -1297,19 +1298,24 @@ class WhiteInternetService:
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
         fp = CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT)
         base = _normalize_base_path(path)
-        if not relays:
-            tag = urllib.parse.quote(texts.WL_VLESS_TAG)
-            standalone_path = f"{base}/default"
-            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
-            return [link]
 
         links: list[str] = []
-        for r in relays:
-            relay_code = r.get("code") or r.get("name") or "default"
-            r_path = r.get("path") or f"{base}/{relay_code}"
-            r_tag = urllib.parse.quote(r.get("name") or texts.WL_VLESS_TAG)
-            link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
-            links.append(link)
+
+        if include_origin or not relays:
+            origin_tag_str = texts.WL_ORIGIN_VLESS_TAG if relays else texts.WL_VLESS_TAG
+            origin_tag = urllib.parse.quote(origin_tag_str)
+            standalone_path = f"{base}/default"
+            origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{origin_tag}"
+            links.append(origin_link)
+
+        if relays:
+            for r in relays:
+                relay_code = r.get("code") or r.get("name") or "default"
+                r_path = r.get("path") or f"{base}/{relay_code}"
+                r_tag = urllib.parse.quote(r.get("name") or texts.WL_VLESS_TAG)
+                link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
+                links.append(link)
+
         return links
 
     @staticmethod
