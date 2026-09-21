@@ -218,19 +218,23 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
                 pct = (float(accumulated) / float(limit_bytes) * 100) if limit_bytes > 0 else 0.0
 
                 action = "none"
-                if accumulated < limit_bytes and cutoff_active:
-                    action = "resume"
-                    cutoff_sent = False
+                if accumulated < limit_bytes:
+                    if cutoff_active or cutoff_sent:
+                        action = "resume"
+                        cutoff_sent = False
+                        if pct < 90.0:
+                            warn_sent = False
+                    elif pct >= 90.0 and not warn_sent:
+                        action = "warn"
+                        warn_sent = True
+                    elif pct < 90.0:
+                        warn_sent = False
                 elif accumulated >= limit_bytes:
                     if not cutoff_sent:
                         action = "cutoff"
                         cutoff_sent = True
                     else:
                         action = "ensure_stopped"
-                else:
-                    if pct >= 90.0 and not warn_sent:
-                        action = "warn"
-                        warn_sent = True
 
                 data = {
                     "cycle": cycle,
@@ -273,7 +277,17 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
             act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 1, "2026-09-01", True)
             self.assertEqual(act, "ensure_stopped")
 
-            # 7. Next billing cycle arrives -> auto-resume
+            # 7. Admin increases limit mid-cycle: 8000 GB -> 10000 GB (accumulated 8050 GB is now 80.5% < 90%)
+            # Should trigger 'resume', clear cutoff_sent, and reset warn_sent
+            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 10000, 1, "2026-09-01", True)
+            self.assertEqual(act, "resume")
+            self.assertEqual(acc, 8050 * gb)
+
+            # 8. Traffic moves further to 9200 GB (92% of new 10000 GB limit) -> triggers 'warn' again
+            act, acc, pct = check_traffic(1000 * mb + 9200 * gb, 10000, 1, "2026-09-01", False)
+            self.assertEqual(act, "warn")
+
+            # 9. Next billing cycle arrives -> auto-resume
             act, acc, pct = check_traffic(500 * mb, 8000, 1, "2026-10-01", True)
             self.assertEqual(act, "resume")
             self.assertEqual(acc, 0)

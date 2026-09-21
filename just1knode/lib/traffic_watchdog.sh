@@ -126,10 +126,18 @@ lim_gb_fmt = f'{float(limit_bytes) / (1024 ** 3):.2f}'
 pct = (float(accumulated) / float(limit_bytes) * 100) if limit_bytes > 0 else 0.0
 
 action = 'none'
-if accumulated < limit_bytes and cutoff_active:
-    # Лимит восстановлен (новый период или увеличение лимита) -> перезапуск Xray
-    action = 'resume'
-    cutoff_sent = False
+if accumulated < limit_bytes:
+    if cutoff_active or cutoff_sent:
+        # Лимит восстановлен (новый расчетный период или увеличение лимита владельцем) -> перезапуск Xray
+        action = 'resume'
+        cutoff_sent = False
+        if pct < 90.0:
+            warn_sent = False
+    elif pct >= 90.0 and not warn_sent:
+        action = 'warn'
+        warn_sent = True
+    elif pct < 90.0:
+        warn_sent = False
 elif accumulated >= limit_bytes:
     # 100% лимита исчерпано -> отключение Xray (дедуплицировано)
     if not cutoff_sent:
@@ -137,11 +145,6 @@ elif accumulated >= limit_bytes:
         cutoff_sent = True
     else:
         action = 'ensure_stopped'
-else:
-    # Предупреждение 90%
-    if pct >= 90.0 and not warn_sent:
-        action = 'warn'
-        warn_sent = True
 
 # Атомарная запись через tempfile + os.replace (POSIX atomic rename)
 data = {
@@ -295,7 +298,6 @@ set_traffic_limit() {
     set_state_val "traffic_limit_gb" "$limit_gb"
     set_state_val "traffic_reset_day" "$reset_day"
     set_state_val "traffic_warn_pct" "90"
-    set_state_val "traffic_cutoff_triggered" "false"
 
     if [[ -n "$tg_token" ]]; then
         set_state_val "traffic_telegram_token" "$tg_token"
@@ -316,9 +318,15 @@ set_traffic_limit() {
 
 disable_traffic_limit() {
     init_state_dir
+    local cutoff_active
+    cutoff_active="$(get_state_val "traffic_cutoff_triggered" "false")"
     set_state_val "traffic_limit_status" "disabled"
     set_state_val "traffic_cutoff_triggered" "false"
     remove_traffic_watchdog_timer
+    if [[ "$cutoff_active" == "true" ]]; then
+        systemctl start xray 2>/dev/null || true
+        log "Служба Xray автоматически запущена после снятия лимита."
+    fi
     log "Контроль лимита трафика успешно отключен. Сервер переведен в безлимитный режим."
 }
 
