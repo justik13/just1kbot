@@ -182,34 +182,18 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         d2 = datetime.datetime(2026, 9, 5, 12, 0, tzinfo=datetime.timezone.utc)
         self.assertEqual(get_cycle(d2, 10), "2026-08-10")
 
-    def test_traffic_watchdog_backup_restoration_and_accounting(self):
+    def test_traffic_watchdog_accounting_and_decision_logic(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = os.path.join(tmpdir, "traffic.json")
-            bak_file = state_file + ".bak"
 
-            def update_tx(raw_tx: int, cycle: str, initial_offset_gb: float = 0) -> int:
-                data = None
-                for path in (state_file, bak_file):
-                    if os.path.exists(path):
-                        try:
-                            with open(path, "r", encoding="utf-8") as f:
-                                c = json.load(f)
-                                if isinstance(c, dict) and "accumulated_tx" in c:
-                                    data = c
-                                    break
-                        except Exception:
-                            continue
-
-                is_fresh = False
-                if data is None:
-                    is_fresh = True
-                    data = {
-                        "cycle": cycle,
-                        "raw_tx_last": raw_tx,
-                        "accumulated_tx": max(0, int(initial_offset_gb * (1024 ** 3))),
-                        "warn_sent": False,
-                        "cutoff_sent": False,
-                    }
+            def check_traffic(tx_raw: int, limit_gb: int, reset_day: int, cycle: str, cutoff_active: bool):
+                data = {}
+                if os.path.exists(state_file):
+                    try:
+                        with open(state_file, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                    except Exception:
+                        pass
 
                 saved_cycle = data.get("cycle", "")
                 accumulated = int(data.get("accumulated_tx", 0))
@@ -217,53 +201,80 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
                 warn_sent = bool(data.get("warn_sent", False))
                 cutoff_sent = bool(data.get("cutoff_sent", False))
 
-                if not is_fresh:
-                    if saved_cycle != cycle:
-                        accumulated = 0
-                        raw_tx_last = raw_tx
-                        warn_sent = False
-                        cutoff_sent = False
+                if saved_cycle != cycle:
+                    accumulated = 0
+                    raw_tx_last = tx_raw
+                    warn_sent = False
+                    cutoff_sent = False
+                else:
+                    if tx_raw >= raw_tx_last:
+                        delta = tx_raw - raw_tx_last
                     else:
-                        if raw_tx >= raw_tx_last:
-                            delta = raw_tx - raw_tx_last
-                        else:
-                            delta = raw_tx
-                        accumulated += delta
-                        raw_tx_last = raw_tx
+                        delta = tx_raw
+                    accumulated += delta
+                    raw_tx_last = tx_raw
 
-                data["cycle"] = cycle
-                data["accumulated_tx"] = accumulated
-                data["raw_tx_last"] = raw_tx_last
-                data["warn_sent"] = warn_sent
-                data["cutoff_sent"] = cutoff_sent
+                limit_bytes = limit_gb * (1024 ** 3)
+                pct = (float(accumulated) / float(limit_bytes) * 100) if limit_bytes > 0 else 0.0
 
-                if os.path.exists(state_file):
-                    with open(bak_file, "w", encoding="utf-8") as fbak:
-                        json.dump(data, fbak)
+                action = "none"
+                if accumulated < limit_bytes and cutoff_active:
+                    action = "resume"
+                    cutoff_sent = False
+                elif accumulated >= limit_bytes:
+                    if not cutoff_sent:
+                        action = "cutoff"
+                        cutoff_sent = True
+                else:
+                    if pct >= 90.0 and not warn_sent:
+                        action = "warn"
+                        warn_sent = True
 
+                data = {
+                    "cycle": cycle,
+                    "raw_tx_last": raw_tx_last,
+                    "accumulated_tx": accumulated,
+                    "warn_sent": warn_sent,
+                    "cutoff_sent": cutoff_sent,
+                }
                 with open(state_file, "w", encoding="utf-8") as fp:
                     json.dump(data, fp)
 
-                return accumulated
+                return action, accumulated, pct
 
-            # 1. Initial boot with 10 GB offset mid-cycle
-            acc1 = update_tx(1000, "2026-09-01", initial_offset_gb=10)
-            self.assertEqual(acc1, 10 * 1024**3)
+            # 1. Initial run: raw counter 1000 MB
+            mb = 1024 * 1024
+            gb = 1024 * 1024 * 1024
+            act, acc, pct = check_traffic(1000 * mb, 8000, 1, "2026-09-01", False)
+            self.assertEqual(act, "none")
+            self.assertEqual(acc, 0)
 
-            # 2. Traffic moves: raw rises from 1000 to 5000 (+4000)
-            acc2 = update_tx(5000, "2026-09-01")
-            self.assertEqual(acc2, 10 * 1024**3 + 4000)
+            # 2. Traffic moves: +5000 GB -> under 90% threshold
+            act, acc, pct = check_traffic(1000 * mb + 5000 * gb, 8000, 1, "2026-09-01", False)
+            self.assertEqual(act, "none")
+            self.assertEqual(acc, 5000 * gb)
 
-            # 3. Corrupt primary state file: verify fallback to .bak
-            with open(state_file, "w", encoding="utf-8") as f:
-                f.write("{corrupt-json-truncated...")
+            # 3. Traffic reaches 7300 GB (91.25%) -> triggers 'warn' once
+            act, acc, pct = check_traffic(1000 * mb + 7300 * gb, 8000, 1, "2026-09-01", False)
+            self.assertEqual(act, "warn")
+            self.assertGreaterEqual(pct, 90.0)
 
-            acc3 = update_tx(6000, "2026-09-01")
-            self.assertEqual(acc3, 10 * 1024**3 + 5000)
+            # 4. Next run still 7300 GB -> no duplicate warn
+            act, acc, pct = check_traffic(1000 * mb + 7300 * gb, 8000, 1, "2026-09-01", False)
+            self.assertEqual(act, "none")
 
-            # 4. Next billing cycle arrives: accumulated resets to 0
-            acc4 = update_tx(1000, "2026-10-01")
-            self.assertEqual(acc4, 0)
+            # 5. Traffic reaches 8050 GB (100.6%) -> triggers 'cutoff'
+            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 1, "2026-09-01", False)
+            self.assertEqual(act, "cutoff")
+
+            # 6. Next run still 8050 GB -> no duplicate cutoff
+            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 1, "2026-09-01", True)
+            self.assertEqual(act, "none")
+
+            # 7. Next billing cycle arrives -> auto-resume
+            act, acc, pct = check_traffic(500 * mb, 8000, 1, "2026-10-01", True)
+            self.assertEqual(act, "resume")
+            self.assertEqual(acc, 0)
 
 
 if __name__ == "__main__":
