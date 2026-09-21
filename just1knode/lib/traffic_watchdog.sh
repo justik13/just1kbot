@@ -20,7 +20,7 @@ if os.path.exists(proc_net):
                 name, stats = line.split(':', 1)
                 name = name.strip()
                 # Исключаем локальную петлю и виртуальные интерфейсы
-                if name == 'lo' or name.startswith(('docker', 'veth', 'br-')):
+                if name == 'lo' or name.startswith(('docker', 'veth', 'br-', 'wg', 'tun', 'tap')):
                     continue
                 cols = stats.split()
                 if len(cols) >= 9:
@@ -59,6 +59,7 @@ update_accumulated_tx() {
     local reset_day="${1:-1}"
     local raw_tx
     raw_tx="$(get_current_raw_tx_bytes)"
+    raw_tx="${raw_tx:-0}"
     local current_cycle
     current_cycle="$(get_current_billing_cycle "$reset_day")"
 
@@ -135,8 +136,8 @@ send_traffic_telegram_alert() {
     if [[ -n "$bot_token" && -n "$chat_id" ]]; then
         curl -s -X POST "https://api.telegram.org/bot${bot_token}/sendMessage" \
             -d "chat_id=${chat_id}" \
-            -d "text=${message}" \
-            -d "parse_mode=HTML" >/dev/null 2>&1 || true
+            -d "parse_mode=HTML" \
+            --data-urlencode "text=${message}" >/dev/null 2>&1 || true
     fi
 }
 
@@ -159,6 +160,7 @@ check_traffic_limit() {
 
     local accumulated_bytes
     accumulated_bytes="$(update_accumulated_tx "$reset_day")"
+    accumulated_bytes="${accumulated_bytes:-0}"
 
     local limit_bytes=$(( limit_gb * 1024 * 1024 * 1024 ))
     local warn_threshold_pct
@@ -177,7 +179,13 @@ check_traffic_limit() {
         systemctl stop xray 2>/dev/null || true
         set_state_val "traffic_cutoff_triggered" "true"
 
-        send_traffic_telegram_alert "🚨 <b>ВНИМАНИЕ! Лимит трафика исчерпан!</b>%0A%0AСервер: <code>$(hostname)</code>%0AИспользовано: <b>${acc_gb} ГБ</b> из <b>${lim_gb} ГБ</b>.%0A%0AСлужба Xray остановлена для защиты от платного перерасхода."
+        local alert_msg="🚨 <b>ВНИМАНИЕ! Лимит трафика исчерпан!</b>
+
+Сервер: <code>$(hostname)</code>
+Использовано: <b>${acc_gb} ГБ</b> из <b>${lim_gb} ГБ</b>.
+
+Служба Xray остановлена для защиты от платного перерасхода."
+        send_traffic_telegram_alert "$alert_msg"
         return 1
     fi
 
@@ -198,7 +206,11 @@ else:
 ")"
         if [[ "$warn_sent" != "true" ]]; then
             warn "Потребление трафика превысило ${warn_threshold_pct}%: ${acc_gb} ГБ из ${lim_gb} ГБ."
-            send_traffic_telegram_alert "⚠️ <b>Предупреждение по лимиту трафика (${warn_threshold_pct}%):</b>%0A%0AСервер: <code>$(hostname)</code>%0AИспользовано: <b>${acc_gb} ГБ</b> из <b>${lim_gb} ГБ</b>."
+            local warn_msg="⚠️ <b>Предупреждение по лимиту трафика (${warn_threshold_pct}%):</b>
+
+Сервер: <code>$(hostname)</code>
+Использовано: <b>${acc_gb} ГБ</b> из <b>${lim_gb} ГБ</b>."
+            send_traffic_telegram_alert "$warn_msg"
             python3 -c "
 import json, os
 if os.path.exists('$TRAFFIC_STATE_FILE'):
@@ -220,6 +232,11 @@ deploy_traffic_watchdog_timer() {
     local systemd_dir="${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
     mkdir -p "$systemd_dir"
 
+    local bin_path="/usr/local/bin/just1knode"
+    if [[ ! -x "$bin_path" ]]; then
+        bin_path="${SCRIPT_DIR:-/opt/just1knode}/just1knode.sh"
+    fi
+
     cat > "${systemd_dir}/just1knode-traffic.service" <<EOF
 [Unit]
 Description=Just1kNode Traffic Limit Watchdog Service
@@ -227,7 +244,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/just1knode limit check
+ExecStart=${bin_path} limit check
 StandardOutput=journal
 StandardError=journal
 EOF
