@@ -381,11 +381,11 @@ rules.append({
     'outboundTag': 'just1k-wl-direct'
 })
 
-# Origin (Москва): прямой выход в сеть с московского IP (как подключение в РФ)
+# Standalone Origin: блокировать весь зарубежный трафик клиентов до подключения зарубежного Relay
 rules.append({
     'type': 'field',
     'inboundTag': ['just1k-wl-default'],
-    'outboundTag': 'just1k-wl-direct'
+    'outboundTag': 'just1k-wl-block'
 })
 
 final_config = dict(existing)
