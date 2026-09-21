@@ -670,13 +670,10 @@ async def check_relays_health(_: bool = Depends(verify_api_key)) -> Dict[str, An
     """
     relays, err = get_active_relays()
     if err:
-        return {
-            "status": "error",
-            "count": 0,
-            "all_healthy": False,
-            "relays": [],
-            "error": err,
-        }
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load relays config: {err}",
+        )
     if not relays:
         return {
             "status": "empty",

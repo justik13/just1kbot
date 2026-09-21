@@ -83,7 +83,10 @@ def get_admin_server_card_keyboard(
         callback_data="admin_servers",
     )
 
-    builder.adjust(1)
+    if is_xray:
+        builder.adjust(2, 2, 2, 2, 2, 2, 1)
+    else:
+        builder.adjust(2, 2, 2, 2, 1, 2, 1)
     return builder.as_markup()
 
 

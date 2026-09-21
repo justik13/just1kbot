@@ -135,6 +135,8 @@ elif accumulated >= limit_bytes:
     if not cutoff_sent:
         action = 'cutoff'
         cutoff_sent = True
+    else:
+        action = 'ensure_stopped'
 else:
     # Предупреждение 90%
     if pct >= 90.0 and not warn_sent:
@@ -195,6 +197,13 @@ print(f'{action}|{acc_gb_fmt}|{lim_gb_fmt}|{pct:.1f}')
 
 Служба Xray остановлена для защиты от платного перерасхода."
             send_traffic_telegram_alert "$alert_msg" || true
+            ;;
+        ensure_stopped)
+            set_state_val "traffic_cutoff_triggered" "true"
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet xray 2>/dev/null; then
+                warn "Лимит исчерпан, но Xray активен. Принудительная повторная остановка службы..."
+                systemctl stop xray 2>/dev/null || true
+            fi
             ;;
         warn)
             warn "Потребление трафика превысило 90%: ${acc_gb} ГБ из ${lim_gb} ГБ."

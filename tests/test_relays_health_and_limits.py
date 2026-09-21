@@ -225,6 +225,8 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
                     if not cutoff_sent:
                         action = "cutoff"
                         cutoff_sent = True
+                    else:
+                        action = "ensure_stopped"
                 else:
                     if pct >= 90.0 and not warn_sent:
                         action = "warn"
@@ -267,14 +269,125 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
             act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 1, "2026-09-01", False)
             self.assertEqual(act, "cutoff")
 
-            # 6. Next run still 8050 GB -> no duplicate cutoff
+            # 6. Next run still 8050 GB -> returns ensure_stopped to idempotently keep xray down
             act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 1, "2026-09-01", True)
-            self.assertEqual(act, "none")
+            self.assertEqual(act, "ensure_stopped")
 
             # 7. Next billing cycle arrives -> auto-resume
             act, acc, pct = check_traffic(500 * mb, 8000, 1, "2026-10-01", True)
             self.assertEqual(act, "resume")
             self.assertEqual(acc, 0)
+
+    async def test_admin_server_card_keyboard_2_column_layout(self):
+        from bot.keyboards.admin.servers import get_admin_server_card_keyboard
+
+        # Xray server card layout
+        kb_xray = get_admin_server_card_keyboard(server_id=1, is_active=True, is_xray=True)
+        rows_xray = kb_xray.inline_keyboard
+        self.assertEqual(len(rows_xray), 7, f"Expected 7 rows for Xray server card, got {len(rows_xray)}")
+        # Row 1: Relays + Migrate (2 buttons)
+        self.assertEqual(len(rows_xray[0]), 2)
+        self.assertIn("admin_server_relays:1", rows_xray[0][0].callback_data)
+        self.assertIn("admin_server_migrate:1", rows_xray[0][1].callback_data)
+        # Row 2: Users + Broadcast (2 buttons)
+        self.assertEqual(len(rows_xray[1]), 2)
+        # Row 6: Toggle + Delete (2 buttons)
+        self.assertEqual(len(rows_xray[5]), 2)
+        # Row 7: Back to servers (1 button, full width)
+        self.assertEqual(len(rows_xray[6]), 1)
+        self.assertEqual(rows_xray[6][0].callback_data, "admin_servers")
+
+        # AWG server card layout
+        kb_awg = get_admin_server_card_keyboard(server_id=2, is_active=True, used_clients=10, max_clients=200, is_xray=False)
+        rows_awg = kb_awg.inline_keyboard
+        self.assertEqual(len(rows_awg), 7, f"Expected 7 rows for AWG server card, got {len(rows_awg)}")
+        # Row 1: Peers + Users (2 buttons)
+        self.assertEqual(len(rows_awg[0]), 2)
+        self.assertIn("admin_server_peers:2:1", rows_awg[0][0].callback_data)
+        # Row 5: Change Limit (1 button)
+        self.assertEqual(len(rows_awg[4]), 1)
+        # Row 6: Toggle + Delete (2 buttons)
+        self.assertEqual(len(rows_awg[5]), 2)
+        # Row 7: Back to servers (1 button)
+        self.assertEqual(len(rows_awg[6]), 1)
+
+    async def test_white_internet_overview_keyboard_2_column_layout(self):
+        from bot.handlers.white_internet import get_white_internet_overview_keyboard
+        from config.enums import WhiteInternetStatus
+        from database.models import WhiteInternetSubscription
+
+        sub = WhiteInternetSubscription(
+            id=10,
+            user_id=100,
+            token="test-tok-123",
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            is_trial=False,
+            expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=5),
+        )
+
+        kb = get_white_internet_overview_keyboard(sub, bot_domain="bot.example.com")
+        rows = kb.inline_keyboard
+        self.assertEqual(len(rows), 5, f"Expected 5 rows for active sub with topup & reset, got {len(rows)}")
+        # Row 1: Copy link (1)
+        self.assertEqual(len(rows[0]), 1)
+        self.assertIsNotNone(rows[0][0].copy_text)
+        # Row 2: Instructions (1)
+        self.assertEqual(len(rows[1]), 1)
+        self.assertEqual(rows[1][0].callback_data, "wl_show_link")
+        # Row 3: Renew (1)
+        self.assertEqual(len(rows[2]), 1)
+        self.assertEqual(rows[2][0].callback_data, "wl_renew_preview")
+        # Row 4: Topup + Add Device (2 buttons in row)
+        self.assertEqual(len(rows[3]), 2)
+        self.assertEqual(rows[3][0].callback_data, "wl_topup_menu")
+        self.assertEqual(rows[3][1].callback_data, "wl_add_device_menu")
+        # Row 5: Reset Devices + Back (2 buttons in row)
+        self.assertEqual(len(rows[4]), 2)
+        self.assertEqual(rows[4][0].callback_data, "wl_reset_devices")
+        self.assertEqual(rows[4][1].callback_data, "back_to_main_menu")
+
+    async def test_show_server_relays_config_error_status_renders_api_error(self):
+        server = Server(
+            id=42,
+            name="Origin-Corrupt",
+            country_flag="🇷🇺",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://origin.corrupt:8444",
+            api_key="key-corrupt",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+
+        mock_session = AsyncMock()
+        mock_callback = AsyncMock(spec=CallbackQuery)
+        mock_callback.answer = AsyncMock()
+        mock_callback.from_user = TgUser(id=1001, is_bot=False, first_name="Admin")
+        mock_callback.data = "admin_server_relays:42"
+        mock_callback.message = AsyncMock()
+
+        error_data = {
+            "status": "error",
+            "count": 0,
+            "all_healthy": False,
+            "relays": [],
+            "error": "Failed to parse relays.json: invalid JSON",
+        }
+
+        with patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.card_routes.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch.object(XrayNodeClient, "check_health", new_callable=AsyncMock, return_value=(True, "epoch-1", {})), \
+             patch.object(XrayNodeClient, "get_relays_health", new_callable=AsyncMock, return_value=(True, error_data, None)):
+
+            await show_server_relays(mock_callback, mock_session)
+
+            mock_callback.message.edit_text.assert_called_once()
+            call_args = mock_callback.message.edit_text.call_args
+            rendered_text = call_args.args[0] if call_args.args else call_args.kwargs.get("text", "")
+            self.assertIn("Ошибка проверки узлов:", rendered_text)
+            self.assertIn("Failed to parse relays.json: invalid JSON", rendered_text)
+            self.assertNotIn("На этом сервере нет подключенных Relay-узлов", rendered_text)
 
 
 if __name__ == "__main__":

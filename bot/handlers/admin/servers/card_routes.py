@@ -324,7 +324,10 @@ async def show_server_relays(
                 origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_ONLINE_RTT.format(rtt_ms=origin_rtt)
                 success, data, err = await xclient.get_relays_health(server.api_url, server.api_key)
                 if success and isinstance(data, dict):
-                    relays_list = data.get("relays", [])
+                    if data.get("status") == "error":
+                        error_msg = data.get("error") or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
+                    else:
+                        relays_list = data.get("relays", [])
                 else:
                     error_msg = err or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
             else:
