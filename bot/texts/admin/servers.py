@@ -45,9 +45,9 @@ ADMIN_SERVER_BTN_RELAYS = "🌐 Статус Relay-узлов"
 ADMIN_SERVER_RELAYS_CHECKING = "⚡ Опрос Relay-узлов..."
 ADMIN_SERVER_RELAYS_HEADER = """{header}🌐 <b>Статус Relay-узлов для {flag} {server_name}</b>
 
-• 🇷🇺 <b>Origin (Прямой выход):</b> 🟢 Онлайн{origin_rtt_str}
+• 🇷🇺 <b>Origin (Прямой выход):</b> {origin_status_badge}
 """
-ADMIN_SERVER_RELAYS_EMPTY = """\n<i>На этом сервере нет подключенных Relay-узлов. Весь трафик выходит напрямую через Origin.</i>\n"""
+ADMIN_SERVER_RELAYS_EMPTY = """\n<i>На этом сервере нет подключенных Relay-узлов. Доступен прямой выход в зону RU (зарубежный трафик блокируется).</i>\n"""
 ADMIN_SERVER_RELAYS_ROW = "• {flag} <b>{name}</b> (<code>{ip}:{port}</code>)\n  Статус: {status_badge}\n"
 ADMIN_SERVER_RELAYS_API_ERROR = "\n🔴 <b>Ошибка проверки узлов:</b> <code>{error}</code>\n"
 ADMIN_SERVER_RELAYS_ORIGIN_RTT = " (RTT: {origin_rtt} ms)"

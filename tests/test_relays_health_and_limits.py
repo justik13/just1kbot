@@ -96,9 +96,76 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Warsaw", rendered_text)
             self.assertIn("32.4 ms", rendered_text)
             self.assertIn("Timeout", rendered_text)
+            self.assertIn("🟢 Онлайн (RTT:", rendered_text)
+
+    async def test_show_server_relays_origin_offline_renders_offline_badge(self):
+        server = Server(
+            id=42,
+            name="Origin-Down",
+            country_flag="🇷🇺",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://origin.down:8444",
+            api_key="key-down",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.PROBLEM,
+        )
+
+        mock_session = AsyncMock()
+        mock_callback = AsyncMock(spec=CallbackQuery)
+        mock_callback.answer = AsyncMock()
+        mock_callback.from_user = TgUser(id=1001, is_bot=False, first_name="Admin")
+        mock_callback.data = "admin_server_relays:42"
+        mock_callback.message = AsyncMock()
+
+        with patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.card_routes.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch.object(XrayNodeClient, "check_health", new_callable=AsyncMock, return_value=(False, None, "Connection refused")), \
+             patch.object(XrayNodeClient, "get_relays_health", new_callable=AsyncMock) as mock_relays:
+
+            await show_server_relays(mock_callback, mock_session)
+
+            # get_relays_health should not be called if Origin check_health failed
+            mock_relays.assert_not_called()
+            mock_callback.message.edit_text.assert_called_once()
+            call_args = mock_callback.message.edit_text.call_args
+            rendered_text = call_args.args[0] if call_args.args else call_args.kwargs.get("text", "")
+            self.assertIn("Origin (Прямой выход):</b> 🔴 Офлайн", rendered_text)
+            self.assertNotIn("🟢 Онлайн", rendered_text)
+
+    async def test_show_server_relays_empty_renders_ru_access_note(self):
+        server = Server(
+            id=42,
+            name="Origin-Solo",
+            country_flag="🇷🇺",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://origin.solo:8444",
+            api_key="key-solo",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+
+        mock_session = AsyncMock()
+        mock_callback = AsyncMock(spec=CallbackQuery)
+        mock_callback.answer = AsyncMock()
+        mock_callback.from_user = TgUser(id=1001, is_bot=False, first_name="Admin")
+        mock_callback.data = "admin_server_relays:42"
+        mock_callback.message = AsyncMock()
+
+        with patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.card_routes.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch.object(XrayNodeClient, "check_health", new_callable=AsyncMock, return_value=(True, "epoch-1", {})), \
+             patch.object(XrayNodeClient, "get_relays_health", new_callable=AsyncMock, return_value=(True, {"status": "empty", "relays": []}, None)):
+
+            await show_server_relays(mock_callback, mock_session)
+
+            mock_callback.message.edit_text.assert_called_once()
+            call_args = mock_callback.message.edit_text.call_args
+            rendered_text = call_args.args[0] if call_args.args else call_args.kwargs.get("text", "")
+            self.assertIn("Доступен прямой выход в зону RU", rendered_text)
 
     def test_traffic_watchdog_billing_cycle_python_logic(self):
-        # Simulate the exact python code embedded in traffic_watchdog.sh
         def get_cycle(now: datetime.datetime, reset_day: int) -> str:
             r_day = max(1, min(28, reset_day))
             if now.day >= r_day:
@@ -109,69 +176,92 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
                 cycle_start = datetime.date(last_prev_month.year, last_prev_month.month, min(r_day, last_prev_month.day))
             return cycle_start.strftime('%Y-%m-%d')
 
-        # Test on 15th with reset on 1st -> cycle starts on 1st of current month
         d1 = datetime.datetime(2026, 9, 15, 12, 0, tzinfo=datetime.timezone.utc)
         self.assertEqual(get_cycle(d1, 1), "2026-09-01")
 
-        # Test on 5th with reset on 10th -> cycle starts on 10th of previous month (August)
         d2 = datetime.datetime(2026, 9, 5, 12, 0, tzinfo=datetime.timezone.utc)
         self.assertEqual(get_cycle(d2, 10), "2026-08-10")
 
-    def test_traffic_watchdog_accumulated_tx_accounting(self):
+    def test_traffic_watchdog_backup_restoration_and_accounting(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = os.path.join(tmpdir, "traffic.json")
+            bak_file = state_file + ".bak"
 
-            def update_tx(raw_tx: int, cycle: str) -> int:
-                data = {
-                    'cycle': cycle,
-                    'raw_tx_last': raw_tx,
-                    'accumulated_tx': 0,
-                    'warn_sent': False
-                }
-                if os.path.exists(state_file):
-                    try:
-                        with open(state_file, 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                    except Exception:
-                        pass
-                saved_cycle = data.get('cycle', '')
-                accumulated = int(data.get('accumulated_tx', 0))
-                raw_tx_last = int(data.get('raw_tx_last', 0))
-                warn_sent = bool(data.get('warn_sent', False))
+            def update_tx(raw_tx: int, cycle: str, initial_offset_gb: float = 0) -> int:
+                data = None
+                for path in (state_file, bak_file):
+                    if os.path.exists(path):
+                        try:
+                            with open(path, "r", encoding="utf-8") as f:
+                                c = json.load(f)
+                                if isinstance(c, dict) and "accumulated_tx" in c:
+                                    data = c
+                                    break
+                        except Exception:
+                            continue
 
-                if saved_cycle != cycle:
-                    accumulated = 0
-                    raw_tx_last = raw_tx
-                    warn_sent = False
-                else:
-                    if raw_tx >= raw_tx_last:
-                        delta = raw_tx - raw_tx_last
+                is_fresh = False
+                if data is None:
+                    is_fresh = True
+                    data = {
+                        "cycle": cycle,
+                        "raw_tx_last": raw_tx,
+                        "accumulated_tx": max(0, int(initial_offset_gb * (1024 ** 3))),
+                        "warn_sent": False,
+                        "cutoff_sent": False,
+                    }
+
+                saved_cycle = data.get("cycle", "")
+                accumulated = int(data.get("accumulated_tx", 0))
+                raw_tx_last = int(data.get("raw_tx_last", 0))
+                warn_sent = bool(data.get("warn_sent", False))
+                cutoff_sent = bool(data.get("cutoff_sent", False))
+
+                if not is_fresh:
+                    if saved_cycle != cycle:
+                        accumulated = 0
+                        raw_tx_last = raw_tx
+                        warn_sent = False
+                        cutoff_sent = False
                     else:
-                        delta = raw_tx
-                    accumulated += delta
-                    raw_tx_last = raw_tx
+                        if raw_tx >= raw_tx_last:
+                            delta = raw_tx - raw_tx_last
+                        else:
+                            delta = raw_tx
+                        accumulated += delta
+                        raw_tx_last = raw_tx
 
-                data['cycle'] = cycle
-                data['accumulated_tx'] = accumulated
-                data['raw_tx_last'] = raw_tx_last
-                data['warn_sent'] = warn_sent
-                with open(state_file, 'w', encoding='utf-8') as fp:
+                data["cycle"] = cycle
+                data["accumulated_tx"] = accumulated
+                data["raw_tx_last"] = raw_tx_last
+                data["warn_sent"] = warn_sent
+                data["cutoff_sent"] = cutoff_sent
+
+                if os.path.exists(state_file):
+                    with open(bak_file, "w", encoding="utf-8") as fbak:
+                        json.dump(data, fbak)
+
+                with open(state_file, "w", encoding="utf-8") as fp:
                     json.dump(data, fp)
+
                 return accumulated
 
-            # Initial boot: kernel counter is 1000
-            acc1 = update_tx(1000, "2026-09-01")
-            self.assertEqual(acc1, 0)
+            # 1. Initial boot with 10 GB offset mid-cycle
+            acc1 = update_tx(1000, "2026-09-01", initial_offset_gb=10)
+            self.assertEqual(acc1, 10 * 1024**3)
 
-            # Traffic moves: kernel counter rises to 5000 (delta = 4000)
+            # 2. Traffic moves: raw rises from 1000 to 5000 (+4000)
             acc2 = update_tx(5000, "2026-09-01")
-            self.assertEqual(acc2, 4000)
+            self.assertEqual(acc2, 10 * 1024**3 + 4000)
 
-            # Server reboots: kernel counter drops to 500 (delta = 500)
-            acc3 = update_tx(500, "2026-09-01")
-            self.assertEqual(acc3, 4500)
+            # 3. Corrupt primary state file: verify fallback to .bak
+            with open(state_file, "w", encoding="utf-8") as f:
+                f.write("{corrupt-json-truncated...")
 
-            # Next month arrives: counter is 1000 (accumulated resets to 0)
+            acc3 = update_tx(6000, "2026-09-01")
+            self.assertEqual(acc3, 10 * 1024**3 + 5000)
+
+            # 4. Next billing cycle arrives: accumulated resets to 0
             acc4 = update_tx(1000, "2026-10-01")
             self.assertEqual(acc4, 0)
 

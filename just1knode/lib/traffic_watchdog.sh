@@ -57,6 +57,7 @@ print(cycle_start.strftime('%Y-%m-%d'))
 
 update_accumulated_tx() {
     local reset_day="${1:-1}"
+    local initial_offset_gb="${2:-0}"
     local raw_tx
     raw_tx="$(get_current_raw_tx_bytes)"
     raw_tx="${raw_tx:-0}"
@@ -66,79 +67,146 @@ update_accumulated_tx() {
     python3 -c "
 import json, os, sys, tempfile
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 state_file = sys.argv[1]
 raw_tx = int(sys.argv[2])
 current_cycle = sys.argv[3]
-
-data = {
-    'cycle': current_cycle,
-    'raw_tx_last': raw_tx,
-    'accumulated_tx': 0,
-    'warn_sent': False
-}
-
-if os.path.exists(state_file):
-    try:
-        with open(state_file, 'r', encoding='utf-8', errors='replace') as f:
-            data = json.load(f)
-    except Exception:
-        pass
-
-saved_cycle = data.get('cycle', '')
-accumulated = int(data.get('accumulated_tx', 0))
-raw_tx_last = int(data.get('raw_tx_last', 0))
-warn_sent = bool(data.get('warn_sent', False))
-
-if saved_cycle != current_cycle:
-    # Наступил новый биллинговый месяц у хостера
-    accumulated = 0
-    raw_tx_last = raw_tx
-    warn_sent = False
-else:
-    if raw_tx >= raw_tx_last:
-        delta = raw_tx - raw_tx_last
-    else:
-        # Сервер перезагрузился, счетчик ядра сбросился
-        delta = raw_tx
-    accumulated += delta
-    raw_tx_last = raw_tx
-
-data['cycle'] = current_cycle
-data['accumulated_tx'] = accumulated
-data['raw_tx_last'] = raw_tx_last
-data['warn_sent'] = warn_sent
+try:
+    initial_offset_bytes = int(float(sys.argv[4]) * (1024 ** 3))
+except Exception:
+    initial_offset_bytes = 0
 
 d = os.path.dirname(os.path.abspath(state_file))
 os.makedirs(d, exist_ok=True)
-t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
-with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
-    json.dump(data, fp, indent=2)
-    fp.flush()
-os.replace(t_path, state_file)
-try:
-    import shutil
-    shutil.chown(state_file, user='root', group='xrayapi')
-    os.chmod(state_file, 0o660)
-except Exception:
-    pass
+bak_file = state_file + '.bak'
+lock_file = state_file + '.lock'
 
-print(accumulated)
-" "$TRAFFIC_STATE_FILE" "$raw_tx" "$current_cycle"
+lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o660)
+try:
+    if fcntl:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+    data = None
+    for path in (state_file, bak_file):
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = json.load(f)
+                    if isinstance(content, dict) and 'accumulated_tx' in content:
+                        data = content
+                        break
+            except Exception:
+                continue
+
+    is_fresh = False
+    if data is None:
+        is_fresh = True
+        data = {
+            'cycle': current_cycle,
+            'raw_tx_last': raw_tx,
+            'accumulated_tx': max(0, initial_offset_bytes),
+            'warn_sent': False,
+            'cutoff_sent': False
+        }
+
+    saved_cycle = data.get('cycle', '')
+    accumulated = int(data.get('accumulated_tx', 0))
+    raw_tx_last = int(data.get('raw_tx_last', 0))
+    warn_sent = bool(data.get('warn_sent', False))
+    cutoff_sent = bool(data.get('cutoff_sent', False))
+
+    if not is_fresh:
+        if saved_cycle != current_cycle:
+            # Наступил новый биллинговый месяц у хостера
+            accumulated = 0
+            raw_tx_last = raw_tx
+            warn_sent = False
+            cutoff_sent = False
+        else:
+            if raw_tx >= raw_tx_last:
+                delta = raw_tx - raw_tx_last
+            else:
+                # Сервер перезагрузился, счетчик ядра сбросился
+                delta = raw_tx
+            accumulated += delta
+            raw_tx_last = raw_tx
+
+    data['cycle'] = current_cycle
+    data['accumulated_tx'] = accumulated
+    data['raw_tx_last'] = raw_tx_last
+    data['warn_sent'] = warn_sent
+    data['cutoff_sent'] = cutoff_sent
+
+    # Резервная копия перед сохранением
+    if os.path.exists(state_file):
+        try:
+            import shutil
+            shutil.copy2(state_file, bak_file)
+        except Exception:
+            pass
+
+    t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+    with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
+        json.dump(data, fp, indent=2)
+        fp.flush()
+    os.replace(t_path, state_file)
+    try:
+        import shutil
+        shutil.chown(state_file, user='root', group='xrayapi')
+        os.chmod(state_file, 0o660)
+        shutil.chown(lock_file, user='root', group='xrayapi')
+        os.chmod(lock_file, 0o660)
+    except Exception:
+        pass
+
+    print(accumulated)
+finally:
+    try:
+        if fcntl:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+    except Exception:
+        pass
+" "$TRAFFIC_STATE_FILE" "$raw_tx" "$current_cycle" "$initial_offset_gb"
 }
 
 send_traffic_telegram_alert() {
     local message="$1"
-    local bot_token
-    bot_token="$(get_state_val "traffic_telegram_token" "")"
-    local chat_id
-    chat_id="$(get_state_val "traffic_telegram_chat_id" "")"
+    local bot_token=""
+    local chat_id=""
+
+    local alerts_file="${STATE_DIR:-/etc/just1knode}/traffic_alerts.json"
+    if [[ -f "$alerts_file" ]]; then
+        bot_token="$(python3 -c "import json; print(json.load(open('$alerts_file')).get('token', ''))" 2>/dev/null || true)"
+        chat_id="$(python3 -c "import json; print(json.load(open('$alerts_file')).get('chat_id', ''))" 2>/dev/null || true)"
+    fi
+
+    if [[ -z "$bot_token" ]]; then
+        bot_token="$(get_state_val "traffic_telegram_token" "")"
+    fi
+    if [[ -z "$chat_id" ]]; then
+        chat_id="$(get_state_val "traffic_telegram_chat_id" "")"
+    fi
 
     if [[ -n "$bot_token" && -n "$chat_id" ]]; then
-        curl -s -X POST "https://api.telegram.org/bot${bot_token}/sendMessage" \
+        local http_code
+        http_code="$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://api.telegram.org/bot${bot_token}/sendMessage" \
+            --max-time 10 \
             -d "chat_id=${chat_id}" \
             -d "parse_mode=HTML" \
-            --data-urlencode "text=${message}" >/dev/null 2>&1 || true
+            --data-urlencode "text=${message}" 2>/dev/null || echo "000")"
+        if [[ "$http_code" == "200" ]]; then
+            return 0
+        else
+            warn "Не удалось отправить Telegram-уведомление (HTTP ${http_code})"
+            return 1
+        fi
     fi
+    return 0
 }
 
 check_traffic_limit() {
@@ -172,21 +240,41 @@ check_traffic_limit() {
     local lim_gb
     lim_gb="$(python3 -c "print(f'{float($limit_bytes)/(1024**3):.2f}')")"
 
+    local cutoff_active
+    cutoff_active="$(get_state_val "traffic_cutoff_triggered" "false")"
+
+    # Восстановление работы при начале нового цикла или увеличении лимита
+    if (( accumulated_bytes < limit_bytes )) && [[ "$cutoff_active" == "true" ]]; then
+        set_state_val "traffic_cutoff_triggered" "false"
+        warn "Лимит трафика восстановлен / начат новый биллинговый период. Запуск службы Xray..."
+        systemctl start xray 2>/dev/null || true
+        local resume_msg="✅ <b>Лимит трафика сброшен / обновлен</b>
+
+Сервер: <code>$(hostname)</code>
+Использовано: <b>${acc_gb} ГБ</b> из <b>${lim_gb} ГБ</b>.
+
+Служба Xray автоматически запущена и принимает соединения."
+        send_traffic_telegram_alert "$resume_msg" || true
+        return 0
+    fi
+
     # 1. Проверка на превышение лимита 100%
     if (( accumulated_bytes >= limit_bytes )); then
-        echo -e "\n${BOLD}${RED}🚨 КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ: Лимит трафика исчерпан! (${acc_gb} ГБ / ${lim_gb} ГБ)${NC}" >&2
-        warn "Остановка службы Xray во избежание платного овердрафта у хостинг-провайдера..."
-        systemctl stop xray 2>/dev/null || true
-        set_state_val "traffic_cutoff_triggered" "true"
+        if [[ "$cutoff_active" != "true" ]]; then
+            echo -e "\n${BOLD}${RED}🚨 КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ: Лимит трафика исчерпан! (${acc_gb} ГБ / ${lim_gb} ГБ)${NC}" >&2
+            warn "Остановка службы Xray во избежание платного овердрафта у хостинг-провайдера..."
+            systemctl stop xray 2>/dev/null || true
+            set_state_val "traffic_cutoff_triggered" "true"
 
-        local alert_msg="🚨 <b>ВНИМАНИЕ! Лимит трафика исчерпан!</b>
+            local alert_msg="🚨 <b>ВНИМАНИЕ! Лимит трафика исчерпан!</b>
 
 Сервер: <code>$(hostname)</code>
 Использовано: <b>${acc_gb} ГБ</b> из <b>${lim_gb} ГБ</b>.
 
 Служба Xray остановлена для защиты от платного перерасхода."
-        send_traffic_telegram_alert "$alert_msg"
-        return 1
+            send_traffic_telegram_alert "$alert_msg" || true
+        fi
+        return 0
     fi
 
     # 2. Проверка порога предупреждения (90%)
@@ -210,8 +298,8 @@ else:
 
 Сервер: <code>$(hostname)</code>
 Использовано: <b>${acc_gb} ГБ</b> из <b>${lim_gb} ГБ</b>."
-            send_traffic_telegram_alert "$warn_msg"
-            python3 -c "
+            if send_traffic_telegram_alert "$warn_msg"; then
+                python3 -c "
 import json, os
 if os.path.exists('$TRAFFIC_STATE_FILE'):
     try:
@@ -222,6 +310,7 @@ if os.path.exists('$TRAFFIC_STATE_FILE'):
             json.dump(d, f, indent=2)
     except: pass
 " 2>/dev/null || true
+            fi
         fi
     fi
 
@@ -265,6 +354,9 @@ EOF
     if command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload 2>/dev/null || true
         systemctl enable --now just1knode-traffic.timer 2>/dev/null || true
+        if ! systemctl is-active --quiet just1knode-traffic.timer 2>/dev/null; then
+            warn "Не удалось подтвердить активность just1knode-traffic.timer через systemctl."
+        fi
     fi
 }
 
@@ -285,6 +377,7 @@ set_traffic_limit() {
     local reset_day="${2:-1}"
     local tg_token="${3:-}"
     local tg_chat="${4:-}"
+    local initial_offset_gb="${5:-0}"
 
     if [[ -z "$limit_gb" || ! "$limit_gb" =~ ^[1-9][0-9]*$ ]]; then
         error "Укажите корректный лимит трафика в ГБ (целое положительное число, например: 8000)."
@@ -302,15 +395,22 @@ set_traffic_limit() {
     set_state_val "traffic_warn_pct" "90"
     set_state_val "traffic_cutoff_triggered" "false"
 
-    if [[ -n "$tg_token" ]]; then
-        set_state_val "traffic_telegram_token" "$tg_token"
-    fi
-    if [[ -n "$tg_chat" ]]; then
+    if [[ -n "$tg_token" && -n "$tg_chat" ]]; then
+        local alerts_file="${STATE_DIR:-/etc/just1knode}/traffic_alerts.json"
+        python3 -c "
+import json, os, sys
+cfg = {'token': sys.argv[1], 'chat_id': sys.argv[2]}
+path = sys.argv[3]
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2)
+os.chmod(path, 0o600)
+" "$tg_token" "$tg_chat" "$alerts_file" 2>/dev/null || true
+        set_state_val "traffic_telegram_token" ""
         set_state_val "traffic_telegram_chat_id" "$tg_chat"
     fi
 
-    # Инициализация первого замера
-    update_accumulated_tx "$reset_day" >/dev/null
+    # Инициализация первого замера (с опциональным сдвигом)
+    update_accumulated_tx "$reset_day" "$initial_offset_gb" >/dev/null
     deploy_traffic_watchdog_timer
 
     local tb_fmt

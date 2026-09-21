@@ -372,17 +372,19 @@ def get_target_inbounds() -> List[str]:
     return discovered_tags
 
 
-def get_active_relays() -> List[Dict[str, Any]]:
-    """Return active relay configurations from relays.json."""
+def get_active_relays() -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Return active relay configurations from relays.json and optional error message."""
     if RELAYS_FILE_PATH.exists():
         try:
             with open(RELAYS_FILE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
-                    return data
+                    return data, None
+                return [], f"Expected list in {RELAYS_FILE_PATH}, got {type(data).__name__}"
         except Exception as e:
             logger.warning("Failed to load relays from %s: %s", RELAYS_FILE_PATH, e)
-    return []
+            return [], f"Corrupted {RELAYS_FILE_PATH.name}: {e}"
+    return [], None
 
 
 grpc_client = XrayGrpcClient(host=GRPC_HOST, port=GRPC_PORT)
@@ -543,7 +545,7 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         store_corrupted = True
 
     target_inbounds = get_target_inbounds()
-    relays = get_active_relays()
+    relays, _ = get_active_relays()
     secret_path = get_secret_base_path()
 
     pid, starttime, boot_id, running_epoch = (
@@ -585,7 +587,12 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
 @app.get("/v1/relays")
 def list_relays(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """Returns list of active relays configured on the node."""
-    relays = get_active_relays()
+    relays, err = get_active_relays()
+    if err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Relays configuration error: {err}",
+        )
     return {
         "status": "ok",
         "count": len(relays),
@@ -658,9 +665,18 @@ async def check_relays_health(_: bool = Depends(verify_api_key)) -> Dict[str, An
     """Probes all configured relay nodes from this Origin node via TCP connection.
 
     Measures RTT and connectivity. Returns status 'ok' if all relays are healthy,
-    'degraded' if some are unreachable, or 'empty' if no relays configured.
+    'degraded' if some are unreachable, 'error' if relays config is invalid,
+    or 'empty' if no relays configured.
     """
-    relays = get_active_relays()
+    relays, err = get_active_relays()
+    if err:
+        return {
+            "status": "error",
+            "count": 0,
+            "all_healthy": False,
+            "relays": [],
+            "error": err,
+        }
     if not relays:
         return {
             "status": "empty",

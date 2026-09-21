@@ -499,6 +499,7 @@ reset_node() {
 
     systemctl stop xray xray-api 2>/dev/null || true
     systemctl disable xray xray-api 2>/dev/null || true
+    remove_traffic_watchdog_timer
     rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf 2>/dev/null || true
     rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api 2>/dev/null || true
     systemctl reload nginx 2>/dev/null || true
@@ -631,11 +632,12 @@ uninstall_node() {
     done
 
     info "1/11. Остановка и отключение системных служб systemd..."
+    remove_traffic_watchdog_timer
     systemctl stop xray xray-api 2>/dev/null || true
     systemctl disable xray xray-api 2>/dev/null || true
     rm -f "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray.service" "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray-api.service" 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
-    systemctl reset-failed xray xray-api 2>/dev/null || true
+    systemctl reset-failed xray xray-api just1knode-traffic 2>/dev/null || true
 
     info "2/11. Завершение активных процессов ядра и API..."
     local xray_proc_name
@@ -803,12 +805,14 @@ manage_traffic_limit_menu() {
             read -rp "Введите лимит трафика в ГБ (например: 8000 для 8 ТБ): " lim_in
             read -rp "День месяца сброса биллинга у провайдера [по умолчанию: 1]: " day_in
             day_in="${day_in:-1}"
+            read -rp "Уже израсходовано трафика в этом месяце в ГБ [по умолчанию: 0]: " offset_in
+            offset_in="${offset_in:-0}"
             read -rp "Telegram Bot Token для уведомлений (опционально, Enter для пропуска): " tok_in
             local chat_in=""
             if [[ -n "$tok_in" ]]; then
                 read -rp "Telegram Chat ID администратора: " chat_in
             fi
-            set_traffic_limit "$lim_in" "$day_in" "$tok_in" "$chat_in"
+            set_traffic_limit "$lim_in" "$day_in" "$tok_in" "$chat_in" "$offset_in"
             ;;
         2)
             disable_traffic_limit
@@ -958,11 +962,11 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 ;;
             limit|traffic)
                 case "${2:-}" in
-                    set) set_traffic_limit "${3:-}" "${4:-1}" "${5:-}" "${6:-}" ;;
+                    set) set_traffic_limit "${3:-}" "${4:-1}" "${5:-}" "${6:-}" "${7:-0}" ;;
                     disable|off) disable_traffic_limit ;;
                     check) check_traffic_limit ;;
                     status|show|"") show_traffic_limit_status ;;
-                    *) error "Использование: just1knode limit [status|set <GB> [reset_day] [tg_token] [tg_chat]|disable|check]" ;;
+                    *) error "Использование: just1knode limit [status|set <GB> [reset_day] [tg_token] [tg_chat] [offset_gb]|disable|check]" ;;
                 esac
                 ;;
             status) show_status ;;

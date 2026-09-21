@@ -311,33 +311,34 @@ async def show_server_relays(
     flag = server.country_flag or texts.EMOJI_GLOBE
     header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}", "Relays")
 
-    origin_rtt_str = ""
+    origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_OFFLINE
     error_msg = None
     relays_list: list[dict] = []
 
     try:
-        async with XrayNodeClient(timeout=10.0) as xclient:
+        async with XrayNodeClient(timeout=3.5, max_retries=0) as xclient:
             t0 = time.monotonic()
-            is_ok, _epoch, _detail = await xclient.check_health(server.api_url, server.api_key)
+            is_ok, _epoch, detail = await xclient.check_health(server.api_url, server.api_key)
             origin_rtt = int((time.monotonic() - t0) * 1000)
             if is_ok:
-                origin_rtt_str = texts.ADMIN_SERVER_RELAYS_ORIGIN_RTT.format(origin_rtt=origin_rtt)
+                origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_ONLINE_RTT.format(rtt_ms=origin_rtt)
+                success, data, err = await xclient.get_relays_health(server.api_url, server.api_key)
+                if success and isinstance(data, dict):
+                    relays_list = data.get("relays", [])
+                else:
+                    error_msg = err or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
             else:
-                origin_rtt_str = texts.ADMIN_SERVER_RELAYS_ORIGIN_UNAVAILABLE
-
-            success, data, err = await xclient.get_relays_health(server.api_url, server.api_key)
-            if success and isinstance(data, dict):
-                relays_list = data.get("relays", [])
-            else:
-                error_msg = err or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
+                origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_OFFLINE
+                error_msg = detail or texts.ADMIN_SERVER_RELAYS_ORIGIN_UNAVAILABLE
     except Exception as exc:
+        origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_OFFLINE
         error_msg = str(exc)
 
     rendered = texts.ADMIN_SERVER_RELAYS_HEADER.format(
         header=header,
         flag=flag,
         server_name=safe(server.name),
-        origin_rtt_str=origin_rtt_str,
+        origin_status_badge=origin_status_badge,
     )
 
     if error_msg:
