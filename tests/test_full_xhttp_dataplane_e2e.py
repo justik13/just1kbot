@@ -200,17 +200,18 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertIn("'xPaddingPlacement': 'queryInHeader'", sh_content)
 
     def test_origin_routing_default_fallback_and_ru_split(self) -> None:
-        """On Origin node, default inbound routes to direct (RU traffic), while relays route to their respective outbounds."""
+        """On Origin node, default inbound routes to relay/block, while RU domains route to just1k-wl-direct."""
         sh_content = _read_just1knode_content()
 
-        # In standalone mode and relay mode, Origin default inbound routes directly to the Russian network
+        # In standalone mode (install_xray_origin_node), default inbound routes to blackhole block
         self.assertIn(
-            "'inboundTag': ['just1k-wl-default'],\n    'outboundTag': 'just1k-wl-direct'",
+            "first_relay_tag = ('just1k-wl-outbound-' + str(relays[0]['code'])) if relays and relays[0].get('code') else 'just1k-wl-block'",
             sh_content,
         )
 
-        # In add_relay_node, Origin default inbound continues to exit directly to Russian network
-        self.assertIn("default_rule['outboundTag'] = 'just1k-wl-direct'", sh_content)
+        # In add_relay_node, default inbound routes to the primary relay outbound
+        self.assertIn("primary_relay_tag = f'just1k-wl-outbound-{primary_relay_code}'", sh_content)
+        self.assertIn("r['outboundTag'] = primary_relay_tag", sh_content)
 
         # Server-side split routing uses geosite:category-ru and geosite:tld-ru
         self.assertIn("'geosite:category-ru'", sh_content)

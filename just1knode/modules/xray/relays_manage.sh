@@ -332,16 +332,22 @@ rules.insert(insert_idx, {
     'outboundTag': out_tag
 })
 
-# Default узел Origin (Москва) всегда выходит напрямую через РФ (just1k-wl-direct)
-default_rule = next((r for r in rules if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r), None)
-if not default_rule:
+# Enforce relay egress for default client traffic (anti-Russian exit)
+primary_relay_code = code
+primary_relay_tag = f'just1k-wl-outbound-{primary_relay_code}'
+default_rule_found = False
+for r in rules:
+    if (r.get('inboundTag') == ['just1k-wl-default'] or 'just1k-wl-default' in r.get('inboundTag', [])) and 'domain' not in r and 'ip' not in r:
+        r['inboundTag'] = ['just1k-wl-default']
+        r['outboundTag'] = primary_relay_tag
+        default_rule_found = True
+        break
+if not default_rule_found:
     rules.append({
         'type': 'field',
         'inboundTag': ['just1k-wl-default'],
-        'outboundTag': 'just1k-wl-direct'
+        'outboundTag': primary_relay_tag
     })
-else:
-    default_rule['outboundTag'] = 'just1k-wl-direct'
 
 cfg['routing']['rules'] = rules
 

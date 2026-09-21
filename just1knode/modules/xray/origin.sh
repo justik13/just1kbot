@@ -855,16 +855,19 @@ else:
     curr_ib = ip_rule.get('inboundTag', [])
     ip_rule['inboundTag'] = list(dict.fromkeys((curr_ib if isinstance(curr_ib, list) else [curr_ib]) + known_client_inbounds))
 
-# 4.4. Дефолтное правило для just1k-wl-default (прямой выход через Москву)
+# 4.4. Дефолтное правило для just1k-wl-default
 def_rule = next((r for r in rules if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r), None)
+first_relay_tag = ('just1k-wl-outbound-' + str(relays[0]['code'])) if relays and relays[0].get('code') else 'just1k-wl-block'
 if not def_rule:
     rules.append({
         'type': 'field',
         'inboundTag': ['just1k-wl-default'],
-        'outboundTag': 'just1k-wl-direct'
+        'outboundTag': first_relay_tag
     })
 else:
-    def_rule['outboundTag'] = 'just1k-wl-direct'
+    curr_out = def_rule.get('outboundTag')
+    if not any(ob.get('tag') == curr_out for ob in outbounds):
+        def_rule['outboundTag'] = first_relay_tag
 
 # 4.5. Правила маршрутизации для каждого индивидуального релея
 for r in relays:
