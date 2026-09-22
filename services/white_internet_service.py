@@ -1319,7 +1319,9 @@ class WhiteInternetService:
         if include_origin or not relays:
             origin_tag_str = texts.WL_ORIGIN_VLESS_TAG if relays else texts.WL_VLESS_TAG
             effective_origin_badge = (
-                origin_badge if origin_badge is not None else WHITE_INTERNET_ORIGIN_BADGE
+                origin_badge
+                if origin_badge is not None
+                else (WHITE_INTERNET_ORIGIN_BADGE or texts.WL_DEFAULT_ORIGIN_BADGE)
             )
             origin_tag = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
             standalone_path = f"{base}/default"
@@ -1341,7 +1343,7 @@ class WhiteInternetService:
                 elif default_relay_badge is not None:
                     r_badge = default_relay_badge
                 else:
-                    r_badge = WHITE_INTERNET_RELAY_BADGE
+                    r_badge = WHITE_INTERNET_RELAY_BADGE or texts.WL_DEFAULT_RELAY_BADGE
 
                 r_tag = WhiteInternetService._format_vless_tag(r_name, r_badge)
                 link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"

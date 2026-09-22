@@ -444,7 +444,7 @@ in_tag = sys.argv[7]
 out_tag = sys.argv[8]
 sec = sys.argv[9]
 sni = sys.argv[10]
-badge = safe_arg(sys.argv[11]).strip() if len(sys.argv) > 11 else ""
+badge = safe_arg(sys.argv[11]).strip() if len(sys.argv) > 11 else ''
 
 relays = []
 if os.path.exists(rf):

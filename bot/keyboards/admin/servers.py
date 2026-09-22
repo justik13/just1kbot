@@ -32,10 +32,6 @@ def get_admin_server_card_keyboard(
             text=texts.ADMIN_SERVER_BTN_MIGRATE,
             callback_data=f"admin_server_migrate:{server_id}",
         )
-        builder.button(
-            text=texts.ADMIN_SERVER_BTN_INCY,
-            callback_data=f"admin_server_incy:{server_id}",
-        )
     builder.button(
         text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
         callback_data=f"admin_users_filter:server:{server_id}:1",
@@ -88,7 +84,7 @@ def get_admin_server_card_keyboard(
     )
 
     if is_xray:
-        builder.adjust(2, 1, 2, 2, 2, 2, 2, 1)
+        builder.adjust(2, 2, 2, 2, 2, 2, 1)
     else:
         builder.adjust(2, 2, 2, 2, 1, 2, 1)
     return builder.as_markup()
@@ -188,6 +184,10 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
         callback_data=f"admin_server_relays:{server_id}",
     )
     builder.button(
+        text=texts.ADMIN_SERVER_BTN_INCY,
+        callback_data=f"admin_server_incy:{server_id}",
+    )
+    builder.button(
         text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
         callback_data=f"admin_server_card:{server_id}",
     )
@@ -198,35 +198,35 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
 def get_admin_server_incy_keyboard(server_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="✏️ Имя профиля",
+        text=texts.ADMIN_SERVER_INCY_BTN_TITLE,
         callback_data=f"admin_server_incy_edit:{server_id}:title",
     )
     builder.button(
-        text="✏️ Подзаголовок",
+        text=texts.ADMIN_SERVER_INCY_BTN_DESC,
         callback_data=f"admin_server_incy_edit:{server_id}:desc",
     )
     builder.button(
-        text="🏷️ Бейдж шлюза РФ",
+        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE,
         callback_data=f"admin_server_incy_edit:{server_id}:origin_badge",
     )
     builder.button(
-        text="🏷️ Бейдж Relay (по умолч.)",
+        text=texts.ADMIN_SERVER_INCY_BTN_RELAY_BADGE,
         callback_data=f"admin_server_incy_edit:{server_id}:relay_badge",
     )
     builder.button(
-        text="🌐 Бейджи конкретных Relay",
+        text=texts.ADMIN_SERVER_INCY_BTN_RELAYS,
         callback_data=f"admin_server_incy_relays:{server_id}",
     )
     builder.button(
-        text="🔗 Кнопка «Канал / Бот»",
+        text=texts.ADMIN_SERVER_INCY_BTN_CHANNEL,
         callback_data=f"admin_server_incy_edit:{server_id}:channel",
     )
     builder.button(
-        text="🔗 Кнопка «Поддержка»",
+        text=texts.ADMIN_SERVER_INCY_BTN_SUPPORT,
         callback_data=f"admin_server_incy_edit:{server_id}:support",
     )
     builder.button(
-        text="🔄 Сбросить к дефолтам",
+        text=texts.ADMIN_SERVER_INCY_BTN_RESET,
         callback_data=f"admin_server_incy_reset:{server_id}",
     )
     builder.button(
@@ -247,13 +247,13 @@ def get_admin_server_incy_relays_keyboard(
     for r in relays:
         code = r.get("code") or r.get("name") or "default"
         name = r.get("name") or "Relay"
-        badge = custom_badges.get(code) or r.get("badge") or "по умолч."
+        badge = custom_badges.get(code) or r.get("badge") or texts.ADMIN_SERVER_INCY_VALUE_DEFAULT
         builder.button(
-            text=f"🌐 {name} [{badge}]",
+            text=texts.ADMIN_SERVER_INCY_RELAY_BTN.format(name=name, badge=badge),
             callback_data=f"admin_server_incy_relay_edit:{server_id}:{code}",
         )
     builder.button(
-        text="« Назад к оформлению",
+        text=texts.ADMIN_SERVER_INCY_BTN_BACK,
         callback_data=f"admin_server_incy:{server_id}",
     )
     builder.adjust(1)

@@ -59,10 +59,10 @@ def _get_server_incy_details(server: Any) -> dict[str, str]:
     support_url = extra.get("support_url") or WHITE_INTERNET_SUPPORT_URL or default_bot_url
 
     return {
-        "title": title or "✦ Just1k",
-        "description": description or "— (отключено)",
-        "origin_badge": origin_badge or "— (отключено)",
-        "relay_badge": relay_badge or "— (отключено)",
+        "title": title or texts.WL_PROFILE_NAME,
+        "description": description or texts.ADMIN_SERVER_INCY_VALUE_DISABLED,
+        "origin_badge": origin_badge or texts.ADMIN_SERVER_INCY_VALUE_DISABLED,
+        "relay_badge": relay_badge or texts.ADMIN_SERVER_INCY_VALUE_DISABLED,
         "channel_url": channel_url,
         "support_url": support_url,
     }
@@ -297,7 +297,7 @@ async def show_server_incy_relays(
     custom_badges = extra.get("relay_badges", {})
 
     if not relays:
-        await callback.answer("На сервере нет подключенных Relay-узлов.", show_alert=True)
+        await callback.answer(texts.ADMIN_SERVER_INCY_NO_RELAYS, show_alert=True)
         return
 
     try:
@@ -346,7 +346,11 @@ async def start_edit_relay_specific_badge(
 
     relay = next((r for r in relays if (r.get("code") or r.get("name")) == relay_code), None)
     relay_name = relay.get("name") if relay else relay_code
-    current_badge = custom_badges.get(relay_code) or (relay.get("badge") if relay else None) or "по умолч."
+    current_badge = (
+        custom_badges.get(relay_code)
+        or (relay.get("badge") if relay else None)
+        or texts.ADMIN_SERVER_INCY_VALUE_DEFAULT
+    )
 
     await state.update_data(server_id=server_id, relay_code=relay_code)
     await state.set_state(AdminStates.editing_server_incy_relay_badge)
