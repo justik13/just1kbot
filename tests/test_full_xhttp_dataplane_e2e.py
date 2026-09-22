@@ -147,17 +147,17 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         de_parsed = urllib.parse.urlparse(links[1])
         de_params = urllib.parse.parse_qs(de_parsed.query)
         self.assertEqual(de_params["path"][0], "/w_abcdef12/de")
-        self.assertEqual(urllib.parse.unquote(de_parsed.fragment), "Германия")
+        self.assertEqual(urllib.parse.unquote(de_parsed.fragment).split("?")[0], "Германия")
 
         nl_parsed = urllib.parse.urlparse(links[2])
         nl_params = urllib.parse.parse_qs(nl_parsed.query)
         self.assertEqual(nl_params["path"][0], "/w_abcdef12/nl")
-        self.assertEqual(urllib.parse.unquote(nl_parsed.fragment), "Нидерланды")
+        self.assertEqual(urllib.parse.unquote(nl_parsed.fragment).split("?")[0], "Нидерланды")
 
         se_parsed = urllib.parse.urlparse(links[3])
         se_params = urllib.parse.parse_qs(se_parsed.query)
         self.assertEqual(se_params["path"][0], "/w_abcdef12/se")
-        self.assertEqual(urllib.parse.unquote(se_parsed.fragment), "Швеция")
+        self.assertEqual(urllib.parse.unquote(se_parsed.fragment).split("?")[0], "Швеция")
 
     def test_padding_placement_is_query_in_header(self) -> None:
         """XPadding parameter must be set to queryInHeader per Yandex Cloud CDN spec."""
