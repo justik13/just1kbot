@@ -458,6 +458,9 @@ app = FastAPI(
     title="Just1kBot Xray API Agent",
     description="Autonomous server agent for Xray management and traffic stats",
     version="2.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
     lifespan=lifespan,
 )
 

@@ -86,7 +86,7 @@ deploy_subscription_proxy_conf() {
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
     location ^~ ${sub_prefix} {
-        resolver 1.1.1.1 8.8.8.8 77.88.8.8 valid=30s ipv6=off;
+        resolver 1.1.1.1 1.0.0.1 8.8.8.8 9.9.9.9 valid=30s ipv6=off;
         set \$bot_upstream "https://${target_host}";
         proxy_pass \$bot_upstream;
         proxy_ssl_server_name on;
@@ -483,8 +483,12 @@ EOF
         client_max_body_size 0;
         proxy_buffering off;
         proxy_request_buffering off;
+        proxy_max_temp_file_size 0;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+        add_header CDN-Cache-Control "no-store" always;
+        add_header X-Accel-Buffering no always;
+        add_header Accept-Ranges none always;
     }
 EOF
 
@@ -518,11 +522,46 @@ EOF
         rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
 
+    local ssl_reject_directive=""
+    local nginx_ver
+    nginx_ver="$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "0.0.0")"
+    if [[ -n "$nginx_ver" ]] && python3 -c "
+import sys
+try:
+    v = tuple(map(int, '$nginx_ver'.split('.')))
+    sys.exit(0 if v >= (1, 19, 4) else 1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+        ssl_reject_directive="ssl_reject_handshake on;"
+    fi
+
     cat > "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" <<EOF
+# 0. Catch-All Default Server: сброс прямых сканирований по IP и неизвестным SNI
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    server_tokens off;
+    return 444;
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    ${ssl_reject_directive}
+    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+    return 444;
+}
+
 server {
     listen 80;
     listen [::]:80;
     server_name ${server_name_str};
+    server_tokens off;
 
     location ^~ /.well-known/acme-challenge/ {
         root ${CERTBOT_DIR};
@@ -538,6 +577,7 @@ server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
     server_name ${server_name_str};
+    server_tokens off;
 
     ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
@@ -567,6 +607,7 @@ server {
     listen 8444 ssl http2;
     listen [::]:8444 ssl http2;
     server_name ${domain};
+    server_tokens off;
 
     ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
@@ -940,8 +981,12 @@ try:
     client_max_body_size 0;
     proxy_buffering off;
     proxy_request_buffering off;
+    proxy_max_temp_file_size 0;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    add_header CDN-Cache-Control \"no-store\" always;
+    add_header X-Accel-Buffering no always;
+    add_header Accept-Ranges none always;
 }}
 ''')
             print(f'[+] Восстановлен Nginx конфиг для релея {code}')

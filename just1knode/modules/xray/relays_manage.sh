@@ -401,8 +401,12 @@ location ^~ ${relay_inbound_path} {
     client_max_body_size 0;
     proxy_buffering off;
     proxy_request_buffering off;
+    proxy_max_temp_file_size 0;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    add_header CDN-Cache-Control "no-store" always;
+    add_header X-Accel-Buffering no always;
+    add_header Accept-Ranges none always;
 }
 EOF
 
