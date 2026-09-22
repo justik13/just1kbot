@@ -244,7 +244,7 @@ async def process_server_incy_param_input(
                 val = val[:50]
             extra[key] = val
 
-        await update_server(session, server_id, extra_data=extra)
+        await update_server(session, server, extra_data=extra)
 
     await state.clear()
     await session.refresh(server)
@@ -406,7 +406,7 @@ async def process_server_incy_relay_badge_input(
             relay_badges[relay_code] = raw_text[:30]
 
         extra["relay_badges"] = relay_badges
-        await update_server(session, server_id, extra_data=extra)
+        await update_server(session, server, extra_data=extra)
         await session.refresh(server)
 
     await state.clear()
@@ -453,7 +453,7 @@ async def reset_server_incy_to_defaults(
     ):
         extra.pop(k, None)
 
-    await update_server(session, server_id, extra_data=extra)
+    await update_server(session, server, extra_data=extra)
     await session.refresh(server)
 
     await callback.answer(texts.ADMIN_SERVER_INCY_RESET_SUCCESS, show_alert=True)

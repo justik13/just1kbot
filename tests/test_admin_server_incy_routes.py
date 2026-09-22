@@ -115,7 +115,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     await process_server_incy_param_input(msg, self.state, self.mock_session)
                     mock_update.assert_awaited_once_with(
                         self.mock_session,
-                        1,
+                        server,
                         extra_data={"profile_title": "★ Just1k Prime"},
                     )
                     state_after = await self.state.get_state()
@@ -145,7 +145,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     await process_server_incy_param_input(msg, self.state, self.mock_session)
                     mock_update.assert_awaited_once_with(
                         self.mock_session,
-                        1,
+                        server,
                         extra_data={"profile_description": ""},
                     )
 
@@ -195,6 +195,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                 with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
                     await process_server_incy_relay_badge_input(msg, self.state, self.mock_session)
                     mock_update.assert_awaited_once()
+                    self.assertIs(mock_update.call_args[0][1], server)
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["relay_badges"]["de"], "⚡ YouTube БЕЗ рекламы")
 
@@ -223,6 +224,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                 with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
                     await reset_server_incy_to_defaults(cb, self.state, self.mock_session)
                     mock_update.assert_awaited_once()
+                    self.assertIs(mock_update.call_args[0][1], server)
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertNotIn("profile_title", saved_extra)
                     self.assertNotIn("origin_badge", saved_extra)
