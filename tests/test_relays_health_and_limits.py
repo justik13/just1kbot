@@ -196,16 +196,26 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
                         pass
 
                 saved_cycle = data.get("cycle", "")
+                saved_reset_day = int(data.get("reset_day", 0))
                 accumulated = int(data.get("accumulated_tx", 0))
                 raw_tx_last = int(data.get("raw_tx_last", 0))
                 warn_sent = bool(data.get("warn_sent", False))
                 cutoff_sent = bool(data.get("cutoff_sent", False))
 
                 if saved_cycle != cycle:
-                    accumulated = 0
-                    raw_tx_last = tx_raw
-                    warn_sent = False
-                    cutoff_sent = False
+                    if saved_reset_day != 0 and saved_reset_day != reset_day and saved_cycle:
+                        # Reconfigured reset_day mid-month: preserve accumulated traffic
+                        if tx_raw >= raw_tx_last:
+                            delta = tx_raw - raw_tx_last
+                        else:
+                            delta = tx_raw
+                        accumulated += delta
+                        raw_tx_last = tx_raw
+                    else:
+                        accumulated = 0
+                        raw_tx_last = tx_raw
+                        warn_sent = False
+                        cutoff_sent = False
                 else:
                     if tx_raw >= raw_tx_last:
                         delta = tx_raw - raw_tx_last
@@ -232,12 +242,12 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
                 elif accumulated >= limit_bytes:
                     if not cutoff_sent:
                         action = "cutoff"
-                        cutoff_sent = True
                     else:
                         action = "ensure_stopped"
 
                 data = {
                     "cycle": cycle,
+                    "reset_day": reset_day,
                     "raw_tx_last": raw_tx_last,
                     "accumulated_tx": accumulated,
                     "warn_sent": warn_sent,
@@ -260,35 +270,52 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(act, "none")
             self.assertEqual(acc, 5000 * gb)
 
-            # 3. Traffic reaches 7300 GB (91.25%) -> triggers 'warn' once
-            act, acc, pct = check_traffic(1000 * mb + 7300 * gb, 8000, 1, "2026-09-01", False)
+            # 3. Admin reconfigures reset_day mid-cycle (1 -> 15): cycle changes from 2026-09-01 to 2026-09-15
+            # Accumulated 5000 GB must be preserved, NOT reset to 0!
+            act, acc, pct = check_traffic(1000 * mb + 5000 * gb, 8000, 15, "2026-09-15", False)
+            self.assertEqual(act, "none")
+            self.assertEqual(acc, 5000 * gb)
+
+            # 4. Traffic reaches 7300 GB (91.25%) -> triggers 'warn' once
+            act, acc, pct = check_traffic(1000 * mb + 7300 * gb, 8000, 15, "2026-09-15", False)
             self.assertEqual(act, "warn")
             self.assertGreaterEqual(pct, 90.0)
 
-            # 4. Next run still 7300 GB -> no duplicate warn
-            act, acc, pct = check_traffic(1000 * mb + 7300 * gb, 8000, 1, "2026-09-01", False)
+            # 5. Next run still 7300 GB -> no duplicate warn
+            act, acc, pct = check_traffic(1000 * mb + 7300 * gb, 8000, 15, "2026-09-15", False)
             self.assertEqual(act, "none")
 
-            # 5. Traffic reaches 8050 GB (100.6%) -> triggers 'cutoff'
-            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 1, "2026-09-01", False)
+            # 6. Traffic reaches 8050 GB (100.6%) -> triggers 'cutoff'
+            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 15, "2026-09-15", False)
             self.assertEqual(act, "cutoff")
 
-            # 6. Next run still 8050 GB -> returns ensure_stopped to idempotently keep xray down
-            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 1, "2026-09-01", True)
+            # Simulate alert delivery failure: cutoff_sent remains False, next run keeps retrying cutoff alert
+            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 15, "2026-09-15", True)
+            self.assertEqual(act, "cutoff")
+
+            # Simulate alert delivered: mark cutoff_sent = True
+            with open(state_file, "r", encoding="utf-8") as fp:
+                d = json.load(fp)
+            d["cutoff_sent"] = True
+            with open(state_file, "w", encoding="utf-8") as fp:
+                json.dump(d, fp)
+
+            # Subsequent run with cutoff_sent=True returns ensure_stopped
+            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 8000, 15, "2026-09-15", True)
             self.assertEqual(act, "ensure_stopped")
 
             # 7. Admin increases limit mid-cycle: 8000 GB -> 10000 GB (accumulated 8050 GB is now 80.5% < 90%)
             # Should trigger 'resume', clear cutoff_sent, and reset warn_sent
-            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 10000, 1, "2026-09-01", True)
+            act, acc, pct = check_traffic(1000 * mb + 8050 * gb, 10000, 15, "2026-09-15", True)
             self.assertEqual(act, "resume")
             self.assertEqual(acc, 8050 * gb)
 
             # 8. Traffic moves further to 9200 GB (92% of new 10000 GB limit) -> triggers 'warn' again
-            act, acc, pct = check_traffic(1000 * mb + 9200 * gb, 10000, 1, "2026-09-01", False)
+            act, acc, pct = check_traffic(1000 * mb + 9200 * gb, 10000, 15, "2026-09-15", False)
             self.assertEqual(act, "warn")
 
-            # 9. Next billing cycle arrives -> auto-resume
-            act, acc, pct = check_traffic(500 * mb, 8000, 1, "2026-10-01", True)
+            # 9. Next billing cycle arrives (October) -> auto-resume and reset accumulated
+            act, acc, pct = check_traffic(500 * mb, 8000, 15, "2026-10-15", True)
             self.assertEqual(act, "resume")
             self.assertEqual(acc, 0)
 

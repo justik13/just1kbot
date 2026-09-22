@@ -244,6 +244,37 @@ for ob in cfg.get('outbounds', []):
     if ob.get('tag') == 'direct' or ob.get('protocol') == 'freedom':
         ob.setdefault('settings', {})['domainStrategy'] = 'UseIPv4'
 
+has_block = any(ob.get('tag') == 'block' for ob in cfg.get('outbounds', []))
+if not has_block:
+    cfg.setdefault('outbounds', []).append({
+        'tag': 'block',
+        'protocol': 'blackhole'
+    })
+
+routing = cfg.setdefault('routing', {})
+routing.setdefault('domainStrategy', 'IPIfNonMatch')
+rules = routing.setdefault('rules', [])
+has_bt_proto = any(r.get('type') == 'field' and 'bittorrent' in r.get('protocol', []) for r in rules)
+if not has_bt_proto:
+    rules.insert(0, {
+        'type': 'field',
+        'protocol': ['bittorrent'],
+        'outboundTag': 'block'
+    })
+has_bt_domain = any(r.get('type') == 'field' and 'geosite:bittorrent' in r.get('domain', []) for r in rules)
+if not has_bt_domain:
+    rules.insert(1, {
+        'type': 'field',
+        'domain': ['geosite:bittorrent'],
+        'outboundTag': 'block'
+    })
+
+for ib in cfg.get('inbounds', []):
+    sniff = ib.setdefault('sniffing', {})
+    sniff['enabled'] = True
+    sniff.setdefault('destOverride', ['tls', 'http', 'quic'])
+    sniff.setdefault('metadataOnly', False)
+
 cfg['dns'] = {
     'servers': ['1.1.1.1', '1.0.0.1', '8.8.8.8', 'localhost'],
     'queryStrategy': 'UseIPv4'

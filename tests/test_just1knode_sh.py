@@ -1533,6 +1533,12 @@ ensure_xrayapi_user
         st = xray_config.stat().st_mode & 0o777
         self.assertEqual(st, 0o640, f"Expected 0640, got {oct(st)}")
 
+        # Verify BitTorrent filtering and blackhole block outbound injected
+        rules = updated_cfg.get("routing", {}).get("rules", [])
+        self.assertTrue(any("bittorrent" in r.get("protocol", []) for r in rules), "BitTorrent protocol rule must be present")
+        self.assertTrue(any("geosite:bittorrent" in r.get("domain", []) for r in rules), "BitTorrent geosite rule must be present")
+        self.assertTrue(any(ob.get("tag") == "block" and ob.get("protocol") == "blackhole" for ob in updated_cfg.get("outbounds", [])), "Blackhole outbound must be present")
+
     # -------------------------------------------------------------------------
     # Safe Complete Uninstallation Lifecycle Tests
     # -------------------------------------------------------------------------
@@ -1785,6 +1791,42 @@ exit 0
         # Failure cases: hostile sub prefix
         res_hostile_prefix = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.just1k.best' '/sub/../evil'")
         self.assertNotEqual(res_hostile_prefix.returncode, 0)
+
+    def test_deploy_and_remove_traffic_watchdog_timer_and_cutoff_invariants(self):
+        """deploy_traffic_watchdog_timer installs systemd timer and xray cutoff drop-in, remove cleans up."""
+        self._prepare_base_env()
+        systemd_dir = self.systemd_dir
+        systemd_dir.mkdir(parents=True, exist_ok=True)
+
+        snippet = f"""
+export SYSTEMD_SYSTEM_DIR="{systemd_dir}"
+deploy_traffic_watchdog_timer
+"""
+        res = self._run_shell_snippet(snippet)
+        self.assertEqual(res.returncode, 0, f"deploy_traffic_watchdog_timer failed: {res.stderr}\n{res.stdout}")
+
+        svc_file = systemd_dir / "just1knode-traffic.service"
+        timer_file = systemd_dir / "just1knode-traffic.timer"
+        dropin_file = systemd_dir / "xray.service.d" / "traffic-cutoff.conf"
+
+        self.assertTrue(svc_file.exists(), "Traffic service unit must be created")
+        self.assertTrue(timer_file.exists(), "Traffic timer unit must be created")
+        self.assertTrue(dropin_file.exists(), "xray.service.d/traffic-cutoff.conf must be created")
+
+        dropin_content = dropin_file.read_text(encoding="utf-8")
+        self.assertIn("ConditionPathExists=!", dropin_content)
+        self.assertIn("traffic_cutoff.active", dropin_content)
+
+        # Removal
+        remove_snippet = f"""
+export SYSTEMD_SYSTEM_DIR="{systemd_dir}"
+remove_traffic_watchdog_timer
+"""
+        res_rm = self._run_shell_snippet(remove_snippet)
+        self.assertEqual(res_rm.returncode, 0)
+        self.assertFalse(svc_file.exists(), "Traffic service unit must be removed")
+        self.assertFalse(timer_file.exists(), "Traffic timer unit must be removed")
+        self.assertFalse(dropin_file.exists(), "xray.service.d/traffic-cutoff.conf must be removed")
 
 
 if __name__ == "__main__":

@@ -252,8 +252,10 @@ manifest_rollback() {
         systemctl reload nginx 2>/dev/null || true
     fi
     if [[ -n "${XRAY_CONFIG:-}" && -f "${XRAY_CONFIG:-}" && -n "${XRAY_BIN:-}" && -x "${XRAY_BIN:-}" ]]; then
-        if "$XRAY_BIN" run -test -config "$XRAY_CONFIG" >/dev/null 2>&1; then
-            systemctl restart xray 2>/dev/null || true
+        if [[ ! -f "${STATE_DIR:-/etc/just1knode}/traffic_cutoff.active" ]]; then
+            if "$XRAY_BIN" run -test -config "$XRAY_CONFIG" >/dev/null 2>&1; then
+                systemctl restart xray 2>/dev/null || true
+            fi
         fi
     fi
 

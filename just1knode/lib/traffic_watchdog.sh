@@ -4,6 +4,7 @@
 # =============================================================================
 
 TRAFFIC_STATE_FILE="${STATE_DIR:-/etc/just1knode}/traffic_monthly.json"
+TRAFFIC_CUTOFF_FLAG="${STATE_DIR:-/etc/just1knode}/traffic_cutoff.active"
 
 send_traffic_telegram_alert() {
     local message="$1"
@@ -29,6 +30,49 @@ send_traffic_telegram_alert() {
     return 0
 }
 
+mark_traffic_alert_flag() {
+    local flag_key="$1"
+    python3 -c "
+import json, os, sys, tempfile
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+sf = sys.argv[1]
+k = sys.argv[2]
+if not os.path.exists(sf):
+    sys.exit(0)
+
+lock_file = sf + '.lock'
+d = os.path.dirname(os.path.abspath(sf))
+os.makedirs(d, exist_ok=True)
+lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o660)
+if fcntl:
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+try:
+    with open(sf, 'r', encoding='utf-8', errors='replace') as fp:
+        data = json.load(fp)
+    if isinstance(data, dict):
+        data[k] = True
+        t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+        with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
+            json.dump(data, fp, indent=2)
+            fp.flush()
+        os.replace(t_path, sf)
+        try:
+            import shutil
+            shutil.chown(sf, user='root', group='xrayapi')
+            os.chmod(sf, 0o640)
+        except Exception:
+            pass
+finally:
+    if fcntl:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    os.close(lock_fd)
+" "$TRAFFIC_STATE_FILE" "$flag_key"
+}
+
 check_traffic_limit() {
     init_state_dir
     local status
@@ -46,136 +90,168 @@ check_traffic_limit() {
     local reset_day
     reset_day="$(get_state_val "traffic_reset_day" "1")"
 
+    local warn_pct
+    warn_pct="$(get_state_val "traffic_warn_pct" "90")"
+
     local cutoff_active
     cutoff_active="$(get_state_val "traffic_cutoff_triggered" "false")"
 
-    # Выполняем подсчет трафика, проверку цикла и определение действия за один атомарный запуск Python
+    # Выполняем подсчет трафика, проверку цикла и определение действия за один атомарный запуск Python с блокировкой
     local result
     result="$(python3 -c "
 import datetime, json, os, sys, tempfile
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 state_file = sys.argv[1]
 limit_gb = int(sys.argv[2])
 reset_day = max(1, min(28, int(sys.argv[3])))
 cutoff_active = (sys.argv[4].lower() == 'true')
+try:
+    warn_pct_cfg = float(sys.argv[5])
+except Exception:
+    warn_pct_cfg = 90.0
 
-# 1. Чтение сырых TX-байт ядра (исключая loopback и виртуальные интерфейсы)
-tx_raw = 0
-proc_net = '/proc/net/dev'
-if os.path.exists(proc_net):
-    try:
-        with open(proc_net, 'r', encoding='utf-8', errors='replace') as f:
-            for line in f:
-                if ':' not in line:
-                    continue
-                name, stats = line.split(':', 1)
-                name = name.strip()
-                if name == 'lo' or name.startswith(('docker', 'veth', 'br-', 'wg', 'tun', 'tap')):
-                    continue
-                cols = stats.split()
-                if len(cols) >= 9:
-                    tx_raw += int(cols[8])
-    except Exception:
-        pass
-
-# 2. Определение текущего биллингового периода
-now = datetime.datetime.now(datetime.timezone.utc)
-if now.day >= reset_day:
-    cycle_start = datetime.date(now.year, now.month, reset_day)
-else:
-    first_this_month = datetime.date(now.year, now.month, 1)
-    last_prev_month = first_this_month - datetime.timedelta(days=1)
-    cycle_start = datetime.date(last_prev_month.year, last_prev_month.month, min(reset_day, last_prev_month.day))
-current_cycle = cycle_start.strftime('%Y-%m-%d')
-
-# 3. Чтение сохраненного состояния
-data = {}
-if os.path.exists(state_file):
-    try:
-        with open(state_file, 'r', encoding='utf-8', errors='replace') as f:
-            c = json.load(f)
-            if isinstance(c, dict):
-                data = c
-    except Exception:
-        pass
-
-saved_cycle = data.get('cycle', '')
-accumulated = int(data.get('accumulated_tx', 0))
-raw_tx_last = int(data.get('raw_tx_last', 0))
-warn_sent = bool(data.get('warn_sent', False))
-cutoff_sent = bool(data.get('cutoff_sent', False))
-
-if saved_cycle != current_cycle:
-    # Новый расчетный месяц у хостера: сброс накопленного счетчика
-    accumulated = 0
-    raw_tx_last = tx_raw
-    warn_sent = False
-    cutoff_sent = False
-else:
-    if tx_raw >= raw_tx_last:
-        delta = tx_raw - raw_tx_last
-    else:
-        # Сервер перезагружался: счетчик ядра сбросился
-        delta = tx_raw
-    accumulated += delta
-    raw_tx_last = tx_raw
-
-limit_bytes = limit_gb * (1024 ** 3)
-acc_gb_fmt = f'{float(accumulated) / (1024 ** 3):.2f}'
-lim_gb_fmt = f'{float(limit_bytes) / (1024 ** 3):.2f}'
-pct = (float(accumulated) / float(limit_bytes) * 100) if limit_bytes > 0 else 0.0
-
-action = 'none'
-if accumulated < limit_bytes:
-    if cutoff_active or cutoff_sent:
-        # Лимит восстановлен (новый расчетный период или увеличение лимита владельцем) -> перезапуск Xray
-        action = 'resume'
-        cutoff_sent = False
-        if pct < 90.0:
-            warn_sent = False
-    elif pct >= 90.0 and not warn_sent:
-        action = 'warn'
-        warn_sent = True
-    elif pct < 90.0:
-        warn_sent = False
-elif accumulated >= limit_bytes:
-    # 100% лимита исчерпано -> отключение Xray (дедуплицировано)
-    if not cutoff_sent:
-        action = 'cutoff'
-        cutoff_sent = True
-    else:
-        action = 'ensure_stopped'
-
-# Атомарная запись через tempfile + os.replace (POSIX atomic rename)
-data = {
-    'cycle': current_cycle,
-    'raw_tx_last': raw_tx_last,
-    'accumulated_tx': accumulated,
-    'warn_sent': warn_sent,
-    'cutoff_sent': cutoff_sent,
-}
+lock_file = state_file + '.lock'
 d = os.path.dirname(os.path.abspath(state_file))
 os.makedirs(d, exist_ok=True)
-t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
-with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
-    json.dump(data, fp, indent=2)
-    fp.flush()
-os.replace(t_path, state_file)
+lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o660)
+if fcntl:
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
 try:
-    import shutil
-    shutil.chown(state_file, user='root', group='xrayapi')
-    os.chmod(state_file, 0o660)
-except Exception:
-    pass
+    # 1. Чтение сырых TX-байт ядра (исключая loopback и виртуальные интерфейсы)
+    tx_raw = 0
+    proc_net = '/proc/net/dev'
+    if os.path.exists(proc_net):
+        try:
+            with open(proc_net, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    if ':' not in line:
+                        continue
+                    name, stats = line.split(':', 1)
+                    name = name.strip()
+                    if name == 'lo' or name.startswith(('docker', 'veth', 'br-', 'wg', 'tun', 'tap')):
+                        continue
+                    cols = stats.split()
+                    if len(cols) >= 9:
+                        tx_raw += int(cols[8])
+        except Exception:
+            pass
 
-print(f'{action}|{acc_gb_fmt}|{lim_gb_fmt}|{pct:.1f}')
-" "$TRAFFIC_STATE_FILE" "$limit_gb" "$reset_day" "$cutoff_active")"
+    # 2. Определение текущего биллингового периода
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if now.day >= reset_day:
+        cycle_start = datetime.date(now.year, now.month, reset_day)
+    else:
+        first_this_month = datetime.date(now.year, now.month, 1)
+        last_prev_month = first_this_month - datetime.timedelta(days=1)
+        cycle_start = datetime.date(last_prev_month.year, last_prev_month.month, min(reset_day, last_prev_month.day))
+    current_cycle = cycle_start.strftime('%Y-%m-%d')
+
+    # 3. Чтение сохраненного состояния
+    data = {}
+    if os.path.exists(state_file):
+        try:
+            with open(state_file, 'r', encoding='utf-8', errors='replace') as f:
+                c = json.load(f)
+                if isinstance(c, dict):
+                    data = c
+        except Exception:
+            pass
+
+    saved_cycle = data.get('cycle', '')
+    saved_reset_day = int(data.get('reset_day', 0))
+    accumulated = int(data.get('accumulated_tx', 0))
+    raw_tx_last = int(data.get('raw_tx_last', 0))
+    warn_sent = bool(data.get('warn_sent', False))
+    cutoff_sent = bool(data.get('cutoff_sent', False))
+
+    if saved_cycle != current_cycle:
+        # Проверяем: это смена настроек reset_day администратором или новый календарный период хостера?
+        if saved_reset_day != 0 and saved_reset_day != reset_day and saved_cycle:
+            # Администратор перенастроил день сброса: сохраняем накопленный трафик периода
+            if tx_raw >= raw_tx_last:
+                delta = tx_raw - raw_tx_last
+            else:
+                delta = tx_raw
+            accumulated += delta
+            raw_tx_last = tx_raw
+        else:
+            # Новый расчетный месяц у хостера: сброс накопленного счетчика
+            accumulated = 0
+            raw_tx_last = tx_raw
+            warn_sent = False
+            cutoff_sent = False
+    else:
+        if tx_raw >= raw_tx_last:
+            delta = tx_raw - raw_tx_last
+        else:
+            # Сервер перезагружался: счетчик ядра сбросился
+            delta = tx_raw
+        accumulated += delta
+        raw_tx_last = tx_raw
+
+    limit_bytes = limit_gb * (1024 ** 3)
+    acc_gb_fmt = f'{float(accumulated) / (1024 ** 3):.2f}'
+    lim_gb_fmt = f'{float(limit_bytes) / (1024 ** 3):.2f}'
+    pct = (float(accumulated) / float(limit_bytes) * 100) if limit_bytes > 0 else 0.0
+
+    action = 'none'
+    if accumulated < limit_bytes:
+        if cutoff_active or cutoff_sent:
+            # Лимит восстановлен (новый расчетный период или увеличение лимита владельцем) -> перезапуск Xray
+            action = 'resume'
+            cutoff_sent = False
+            if pct < warn_pct_cfg:
+                warn_sent = False
+        elif pct >= warn_pct_cfg and not warn_sent:
+            action = 'warn'
+        elif pct < warn_pct_cfg:
+            warn_sent = False
+    elif accumulated >= limit_bytes:
+        # 100% лимита исчерпано -> отключение Xray (дедуплицировано)
+        if not cutoff_sent:
+            action = 'cutoff'
+        else:
+            action = 'ensure_stopped'
+
+    # Атомарная запись через tempfile + os.replace (POSIX atomic rename)
+    data = {
+        'cycle': current_cycle,
+        'reset_day': reset_day,
+        'raw_tx_last': raw_tx_last,
+        'accumulated_tx': accumulated,
+        'warn_sent': warn_sent,
+        'cutoff_sent': cutoff_sent,
+    }
+    t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+    with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
+        json.dump(data, fp, indent=2)
+        fp.flush()
+    os.replace(t_path, state_file)
+
+    try:
+        import shutil
+        shutil.chown(state_file, user='root', group='xrayapi')
+        os.chmod(state_file, 0o640)
+    except Exception:
+        pass
+
+    print(f'{action}|{acc_gb_fmt}|{lim_gb_fmt}|{pct:.1f}')
+finally:
+    if fcntl:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    os.close(lock_fd)
+" "$TRAFFIC_STATE_FILE" "$limit_gb" "$reset_day" "$cutoff_active" "$warn_pct")"
 
     IFS='|' read -r action acc_gb lim_gb pct <<< "$result"
 
     case "$action" in
         resume)
+            rm -f "$TRAFFIC_CUTOFF_FLAG" 2>/dev/null || true
             set_state_val "traffic_cutoff_triggered" "false"
             warn "Лимит трафика восстановлен / начат новый биллинговый период. Запуск службы Xray..."
             systemctl start xray 2>/dev/null || true
@@ -190,6 +266,7 @@ print(f'{action}|{acc_gb_fmt}|{lim_gb_fmt}|{pct:.1f}')
         cutoff)
             echo -e "\n${BOLD}${RED}🚨 КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ: Лимит трафика исчерпан! (${acc_gb} ГБ / ${lim_gb} ГБ)${NC}" >&2
             warn "Остановка службы Xray во избежание платного овердрафта у хостинг-провайдера..."
+            touch "$TRAFFIC_CUTOFF_FLAG" 2>/dev/null || true
             systemctl stop xray 2>/dev/null || true
             set_state_val "traffic_cutoff_triggered" "true"
 
@@ -199,9 +276,12 @@ print(f'{action}|{acc_gb_fmt}|{lim_gb_fmt}|{pct:.1f}')
 Использовано: <b>${acc_gb} ГБ</b> из <b>${lim_gb} ГБ</b>.
 
 Служба Xray остановлена для защиты от платного перерасхода."
-            send_traffic_telegram_alert "$alert_msg" || true
+            if send_traffic_telegram_alert "$alert_msg"; then
+                mark_traffic_alert_flag "cutoff_sent"
+            fi
             ;;
         ensure_stopped)
+            touch "$TRAFFIC_CUTOFF_FLAG" 2>/dev/null || true
             set_state_val "traffic_cutoff_triggered" "true"
             if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet xray 2>/dev/null; then
                 warn "Лимит исчерпан, но Xray активен. Принудительная повторная остановка службы..."
@@ -209,12 +289,14 @@ print(f'{action}|{acc_gb_fmt}|{lim_gb_fmt}|{pct:.1f}')
             fi
             ;;
         warn)
-            warn "Потребление трафика превысило 90%: ${acc_gb} ГБ из ${lim_gb} ГБ."
-            local warn_msg="⚠️ <b>Предупреждение по лимиту трафика (90%):</b>
+            warn "Потребление трафика превысило порог (${pct}%): ${acc_gb} ГБ из ${lim_gb} ГБ."
+            local warn_msg="⚠️ <b>Предупреждение по лимиту трафика (${pct}%):</b>
 
 Сервер: <code>$(hostname)</code>
 Использовано: <b>${acc_gb} ГБ</b> из <b>${lim_gb} ГБ</b>."
-            send_traffic_telegram_alert "$warn_msg" || true
+            if send_traffic_telegram_alert "$warn_msg"; then
+                mark_traffic_alert_flag "warn_sent"
+            fi
             ;;
         *)
             ;;
@@ -231,6 +313,14 @@ deploy_traffic_watchdog_timer() {
     if [[ ! -x "$bin_path" ]]; then
         bin_path="${SCRIPT_DIR:-/opt/just1knode}/just1knode.sh"
     fi
+
+    # Drop-in для xray.service, блокирующий запуск при активном cutoff (reboot / certbot / hooks)
+    local xray_dropin_dir="${systemd_dir}/xray.service.d"
+    mkdir -p "$xray_dropin_dir"
+    cat > "${xray_dropin_dir}/traffic-cutoff.conf" <<EOF
+[Unit]
+ConditionPathExists=!${TRAFFIC_CUTOFF_FLAG}
+EOF
 
     cat > "${systemd_dir}/just1knode-traffic.service" <<EOF
 [Unit]
@@ -273,6 +363,8 @@ remove_traffic_watchdog_timer() {
         systemctl disable just1knode-traffic.timer 2>/dev/null || true
     fi
     rm -f "${systemd_dir}/just1knode-traffic.service" "${systemd_dir}/just1knode-traffic.timer" 2>/dev/null || true
+    rm -f "${systemd_dir}/xray.service.d/traffic-cutoff.conf" 2>/dev/null || true
+    rm -f "$TRAFFIC_CUTOFF_FLAG" 2>/dev/null || true
     if command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload 2>/dev/null || true
     fi
@@ -294,6 +386,8 @@ set_traffic_limit() {
     fi
 
     init_state_dir
+    deploy_traffic_watchdog_timer
+
     set_state_val "traffic_limit_status" "enabled"
     set_state_val "traffic_limit_gb" "$limit_gb"
     set_state_val "traffic_reset_day" "$reset_day"
@@ -308,7 +402,6 @@ set_traffic_limit() {
 
     # Первичная фиксация точки отсчета
     check_traffic_limit >/dev/null 2>&1 || true
-    deploy_traffic_watchdog_timer
 
     local tb_fmt
     tb_fmt="$(python3 -c "print(f'{float($limit_gb)/1024:.2f}')")"
@@ -320,6 +413,7 @@ disable_traffic_limit() {
     init_state_dir
     local cutoff_active
     cutoff_active="$(get_state_val "traffic_cutoff_triggered" "false")"
+    rm -f "$TRAFFIC_CUTOFF_FLAG" 2>/dev/null || true
     set_state_val "traffic_limit_status" "disabled"
     set_state_val "traffic_cutoff_triggered" "false"
     remove_traffic_watchdog_timer
@@ -338,8 +432,13 @@ show_traffic_limit_status() {
     limit_gb="$(get_state_val "traffic_limit_gb" "0")"
     local reset_day
     reset_day="$(get_state_val "traffic_reset_day" "1")"
+    local warn_pct
+    warn_pct="$(get_state_val "traffic_warn_pct" "90")"
     local cutoff
     cutoff="$(get_state_val "traffic_cutoff_triggered" "false")"
+    if [[ -f "$TRAFFIC_CUTOFF_FLAG" ]]; then
+        cutoff="true"
+    fi
 
     title "СТАТУС ЛИМИТА ТРАФИКА"
 
@@ -387,9 +486,9 @@ print(f'{current_cycle}|{acc_gb}|{acc_tb}|{lim_tb}|{pct:.1f}')
     IFS='|' read -r current_cycle acc_gb acc_tb lim_tb pct <<< "$info"
 
     local status_color="$GREEN"
-    if (( $(python3 -c "print(1 if float('$pct') >= 90.0 else 0)") )); then
+    if (( $(python3 -c "print(1 if float('$pct') >= float('$warn_pct') else 0)") )); then
         status_color="$RED"
-    elif (( $(python3 -c "print(1 if float('$pct') >= 75.0 else 0)") )); then
+    elif (( $(python3 -c "print(1 if float('$pct') >= (float('$warn_pct') * 0.8) else 0)") )); then
         status_color="$YELLOW"
     fi
 
