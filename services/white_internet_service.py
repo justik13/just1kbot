@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import secrets
@@ -25,6 +26,8 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
+    WHITE_INTERNET_ORIGIN_BADGE,
+    WHITE_INTERNET_RELAY_BADGE,
     WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
@@ -1277,6 +1280,15 @@ class WhiteInternetService:
         return True, "ok", sub
 
     @staticmethod
+    def _format_vless_tag(tag_name: str, badge: str | None) -> str:
+        quoted_tag = urllib.parse.quote(tag_name)
+        if badge and isinstance(badge, str) and badge.strip() and badge.strip().lower() != "none":
+            clean_badge = badge.strip()[:30]
+            b64_badge = base64.b64encode(clean_badge.encode("utf-8")).decode("ascii")
+            return f"{quoted_tag}?serverDescription={b64_badge}"
+        return quoted_tag
+
+    @staticmethod
     def generate_vless_links(
         subscription: WhiteInternetSubscription,
         cdn_domain: str,
@@ -1284,6 +1296,9 @@ class WhiteInternetService:
         path: str = DEFAULT_WHITE_INTERNET_PATH,
         relays: list[dict] | None = None,
         include_origin: bool = True,
+        origin_badge: str | None = None,
+        default_relay_badge: str | None = None,
+        relay_badges: dict[str, str] | None = None,
     ) -> list[str]:
         extra_dict = {
             "mode": CANONICAL_XHTTP_PROFILE["mode"],
@@ -1303,7 +1318,10 @@ class WhiteInternetService:
 
         if include_origin or not relays:
             origin_tag_str = texts.WL_ORIGIN_VLESS_TAG if relays else texts.WL_VLESS_TAG
-            origin_tag = urllib.parse.quote(origin_tag_str)
+            effective_origin_badge = (
+                origin_badge if origin_badge is not None else WHITE_INTERNET_ORIGIN_BADGE
+            )
+            origin_tag = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
             standalone_path = f"{base}/default"
             origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{origin_tag}"
             links.append(origin_link)
@@ -1312,7 +1330,20 @@ class WhiteInternetService:
             for r in relays:
                 relay_code = r.get("code") or r.get("name") or "default"
                 r_path = r.get("path") or f"{base}/{relay_code}"
-                r_tag = urllib.parse.quote(r.get("name") or texts.WL_VLESS_TAG)
+                r_name = r.get("name") or texts.WL_VLESS_TAG
+
+                if relay_badges and relay_code in relay_badges:
+                    r_badge = relay_badges[relay_code]
+                elif r.get("badge"):
+                    r_badge = r.get("badge")
+                elif r.get("server_description"):
+                    r_badge = r.get("server_description")
+                elif default_relay_badge is not None:
+                    r_badge = default_relay_badge
+                else:
+                    r_badge = WHITE_INTERNET_RELAY_BADGE
+
+                r_tag = WhiteInternetService._format_vless_tag(r_name, r_badge)
                 link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
                 links.append(link)
 

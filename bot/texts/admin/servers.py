@@ -255,3 +255,64 @@ ADMIN_SERVER_MIGRATE_SELECT_TARGET_PROMPT = """📦 <b>Миграция подп
 Подписчиков для переноса: <b>{count}</b>
 
 Выберите целевой сервер Origin:"""
+
+ADMIN_SERVER_BTN_INCY = "🎨 Оформление INCY"
+ADMIN_SERVER_INCY_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> › 🎨 <b>Оформление INCY</b>
+
+Настройки внешнего вида подписки для приложения INCY:
+
+• <b>Имя профиля:</b> <code>{title}</code>
+• <b>Подзаголовок:</b> <code>{description}</code>
+• <b>Бейдж шлюза РФ:</b> <code>{origin_badge}</code>
+• <b>Бейдж Relay (по умолч.):</b> <code>{relay_badge}</code>
+• <b>Кнопка «Канал / Бот»:</b> <code>{channel_url}</code>
+• <b>Кнопка «Поддержка»:</b> <code>{support_url}</code>
+
+<i>Для изменения выберите нужный пункт ниже:</i>"""
+
+ADMIN_SERVER_INCY_PROMPT_TITLE = """🎨 <b>Изменение имени профиля в INCY</b>
+
+Текущее значение: <code>{current}</code>
+
+Отправьте новое название профиля (до 30 символов) или /clear для сброса к значению по умолчанию:"""
+
+ADMIN_SERVER_INCY_PROMPT_DESC = """🎨 <b>Изменение подзаголовка профиля в INCY</b>
+
+Текущее значение: <code>{current}</code>
+
+Отправьте подзаголовок (до 50 символов) или /clear для отключения подзаголовка:"""
+
+ADMIN_SERVER_INCY_PROMPT_ORIGIN_BADGE = """🎨 <b>Изменение бейджа шлюза РФ (Origin)</b>
+
+Текущий бейдж: <code>{current}</code>
+
+Отправьте текст бейджа (до 30 символов, например <code>⚡ Прямой шлюз</code>) или /clear для отключения бейджа:"""
+
+ADMIN_SERVER_INCY_PROMPT_RELAY_BADGE = """🎨 <b>Изменение бейджа Relay по умолчанию</b>
+
+Текущий бейдж: <code>{current}</code>
+
+Отправьте текст бейджа (до 30 символов, например <code>⚡ Зарубежный узел</code>) или /clear для отключения бейджа:"""
+
+ADMIN_SERVER_INCY_PROMPT_CHANNEL = """🎨 <b>Изменение ссылки на Канал / Бот</b>
+
+Текущая ссылка: <code>{current}</code>
+
+Отправьте URL для зелёной кнопки (например <code>https://t.me/your_channel</code>) или /clear для ссылки на бота:"""
+
+ADMIN_SERVER_INCY_PROMPT_SUPPORT = """🎨 <b>Изменение ссылки на Поддержку</b>
+
+Текущая ссылка: <code>{current}</code>
+
+Отправьте URL для фиолетовой кнопки (например <code>https://t.me/your_support</code>) или /clear для ссылки на бота:"""
+
+ADMIN_SERVER_INCY_PROMPT_RELAY_SPECIFIC = """🎨 <b>Настройка бейджа для узла {relay_name} ({relay_code})</b>
+
+Текущий бейдж: <code>{current}</code>
+
+Отправьте персональный бейдж (до 30 символов, например <code>⚡ YouTube БЕЗ рекламы</code>) или /clear для сброса к общему бейджу Relay:"""
+
+ADMIN_SERVER_INCY_SAVED = "✅ Настройка сохранена!"
+ADMIN_SERVER_INCY_RELAYS_TITLE = "🎨 <b>Персональные бейджи Relay-узлов:</b>\n\nВыберите узел для настройки синего бейджа в INCY:"
+ADMIN_SERVER_INCY_RESET_CONFIRM = "⚠️ Вы уверены, что хотите сбросить оформление INCY для этого сервера к системным настройкам по умолчанию?"
+ADMIN_SERVER_INCY_RESET_SUCCESS = "✅ Настройки оформления сброшены к системным значениям!"

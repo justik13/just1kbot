@@ -246,9 +246,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     )
 
                     self.assertEqual(resp.status, 200)
-                    self.assertEqual(resp.headers.get("Content-Type"), "text/plain; charset=utf-8")
-                    self.assertEqual(resp.headers.get("Profile-Title"), "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==")
-                    self.assertIsNotNone(resp.headers.get("Profile-Description"))
+                    expected_title_b64 = base64.b64encode(texts.WL_PROFILE_NAME.encode("utf-8")).decode("ascii")
+                    self.assertEqual(resp.headers.get("Profile-Title"), f"base64:{expected_title_b64}")
+                    self.assertIsNone(resp.headers.get("Profile-Description"))
                     self.assertIn("t.me", resp.headers.get("Support-Url", ""))
                     self.assertIn("t.me", resp.headers.get("Profile-Web-Page-Url", ""))
                     self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")

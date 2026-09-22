@@ -951,7 +951,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 ;;
             relay)
                 case "${2:-}" in
-                    add) add_relay_node "${3:-}" "${4:-}" "${5:-10443}" "${6:-}" "${7:-de}" "${8:-reality}" "${9:-}" "${10:-}" "${11:-www.google.com}" ;;
+                    add) add_relay_node "${3:-}" "${4:-}" "${5:-10443}" "${6:-}" "${7:-de}" "${8:-reality}" "${9:-}" "${10:-}" "${11:-www.google.com}" "${12:-}" ;;
                     remove|del) remove_relay_node "${3:-}" ;;
                     rename) rename_relay_node "${3:-}" "${4:-}" ;;
                     list) list_relays ;;

@@ -39,5 +39,7 @@ class AdminStates(StatesGroup):
     confirming_mass_bonus = State()
     editing_mtproto_proxy_url = State()
     sending_user_message = State()
+    editing_server_incy_param = State()
+    editing_server_incy_relay_badge = State()
 
 

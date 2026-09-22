@@ -158,6 +158,7 @@ add_relay_node() {
     local pubkey="${7:-}"
     local shortid="${8:-}"
     local sni="${9:-www.google.com}"
+    local badge="${10:-}"
 
     local role
     role="$(get_state_val "role")"
@@ -443,6 +444,7 @@ in_tag = sys.argv[7]
 out_tag = sys.argv[8]
 sec = sys.argv[9]
 sni = sys.argv[10]
+badge = safe_arg(sys.argv[11]).strip() if len(sys.argv) > 11 else ""
 
 relays = []
 if os.path.exists(rf):
@@ -455,7 +457,7 @@ if os.path.exists(rf):
         relays = []
 
 relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
-relays.append({
+new_entry = {
     'name': name,
     'code': code,
     'ip': ip,
@@ -465,7 +467,11 @@ relays.append({
     'outbound_tag': out_tag,
     'security': sec,
     'sni': sni
-})
+}
+if badge:
+    new_entry['badge'] = badge[:30]
+
+relays.append(new_entry)
 
 d = os.path.dirname(os.path.abspath(rf))
 os.makedirs(d, exist_ok=True)
@@ -481,7 +487,7 @@ try:
     os.chmod(rf, 0o660)
 except Exception:
     pass
-" "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni"
+" "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni" "$badge"
 
     nginx -t && systemctl reload nginx
     set +e
@@ -795,7 +801,8 @@ try:
         pk = tokens[6] if len(tokens) > 6 else ''
         sid = tokens[7] if len(tokens) > 7 else ''
         sni = tokens[8] if len(tokens) > 8 else 'www.google.com'
-        print(' '.join(shlex.quote(x) for x in [name, ip, port, uuid, code, sec, pk, sid, sni]))
+        badge = tokens[9] if len(tokens) > 9 else ''
+        print(' '.join(shlex.quote(x) for x in [name, ip, port, uuid, code, sec, pk, sid, sni, badge]))
     else:
         sys.exit(1)
 except Exception:
@@ -836,7 +843,8 @@ except Exception:
                     if [[ -z "$r_sni_in" ]]; then error "Домен SNI обязателен для TLS."; fi
                     r_sni="$r_sni_in"
                 fi
-                add_relay_node "$r_name" "$r_ip" "$r_port" "$r_uuid" "$r_code" "$r_sec" "$r_pubkey" "$r_shortid" "$r_sni"
+                read -rp "Бейдж узла в INCY (например: ⚡ Зарубежный узел, Enter по умолчанию): " r_badge
+                add_relay_node "$r_name" "$r_ip" "$r_port" "$r_uuid" "$r_code" "$r_sec" "$r_pubkey" "$r_shortid" "$r_sni" "$r_badge"
             fi
             ;;
         2)

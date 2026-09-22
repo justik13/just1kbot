@@ -9,6 +9,8 @@ from .dashboard import (
 )
 from .servers import (
     get_admin_server_card_keyboard,
+    get_admin_server_incy_keyboard,
+    get_admin_server_incy_relays_keyboard,
     get_admin_server_peers_keyboard,
     get_admin_server_relays_keyboard,
     get_server_delete_confirm_keyboard,
@@ -45,6 +47,8 @@ __all__ = [
     "get_admin_wi_extend_days_keyboard",
     # servers
     "get_admin_server_card_keyboard",
+    "get_admin_server_incy_keyboard",
+    "get_admin_server_incy_relays_keyboard",
     "get_admin_server_peers_keyboard",
     "get_admin_server_relays_keyboard",
     "get_server_delete_confirm_keyboard",

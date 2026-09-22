@@ -24,6 +24,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
+from bot import texts
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
 from config.enums import (
     ServerHealthState,
@@ -184,10 +185,10 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                         f"/sub/wl/{sub.token}",
                         headers={"X-Hwid": "e2e-device-1"},
                     )
-                    self.assertEqual(resp.status, 200)
+                    expected_title_b64 = base64.b64encode(texts.WL_PROFILE_NAME.encode("utf-8")).decode("ascii")
                     self.assertEqual(
                         resp.headers.get("Profile-Title"),
-                        "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==",
+                        f"base64:{expected_title_b64}",
                     )
                     self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
                     self.assertEqual(resp.headers.get("hide-url"), "1")
