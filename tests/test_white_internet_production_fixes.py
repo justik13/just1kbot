@@ -163,8 +163,11 @@ class TestWhiteInternetPingWebRoute(AioHTTPTestCase):
 class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         clear_monitor_states()
+        self._delay_patcher = patch("services.workers.node_monitor.INGRESS_RETRY_DELAY", 0.0)
+        self._delay_patcher.start()
 
     def tearDown(self):
+        self._delay_patcher.stop()
         clear_monitor_states()
 
     async def test_node_monitor_ingress_probe_decoupled_from_core_health(self):
@@ -255,7 +258,12 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(called_kwargs["health_state"], ServerHealthState.ONLINE)
             bot.send_message.assert_not_called()
 
-            # Tick 2: 2nd consecutive failure confirms issue, sends alert!
+            # Tick 2: 2nd consecutive failure is also debounced (threshold is 3)
+            mock_snap.reset_mock()
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Tick 3: 3rd consecutive failure confirms issue, sends alert!
             mock_snap.reset_mock()
             await check_node_resources_and_alerts(bot)
             mock_snap.assert_called_once()
@@ -366,7 +374,11 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mock_snap.call_args[1]["consecutive_fails"], 0)
             bot.send_message.assert_not_called()
 
-            # Tick 2: 2nd consecutive failure confirms issue, sends alert!
+            # Tick 2: 2nd failure is also debounced
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Tick 3: 3rd consecutive failure confirms issue, sends alert!
             await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
@@ -443,7 +455,11 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
             bot.send_message.assert_not_called()
 
-            # Tick 2: confirmed failure triggers alert
+            # Tick 2: 2nd failure is debounced
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Tick 3: confirmed failure triggers alert
             await check_node_resources_and_alerts(bot)
 
             # Core health stays ONLINE
@@ -531,7 +547,11 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
             bot.send_message.assert_not_called()
 
-            # Tick 2: confirmed failure triggers alert
+            # Tick 2: 2nd failure is debounced
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Tick 3: confirmed failure triggers alert
             await check_node_resources_and_alerts(bot)
 
             # Core health stays ONLINE
@@ -602,7 +622,11 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mock_snap.call_args[1]["health_state"], ServerHealthState.ONLINE)
             bot.send_message.assert_not_called()
 
-            # Tick 2: confirmed failure triggers alert
+            # Tick 2: 2nd failure is debounced
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Tick 3: confirmed failure triggers alert
             await check_node_resources_and_alerts(bot)
 
             # Core health stays ONLINE
@@ -704,14 +728,16 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
 
             # Tick 1: first failure is debounced
             await check_node_resources_and_alerts(bot)
-            # Tick 2: second failure attempts delivery, which fails with Exception
+            # Tick 2: second failure is debounced
+            await check_node_resources_and_alerts(bot)
+            # Tick 3: third failure attempts delivery, which fails with Exception
             await check_node_resources_and_alerts(bot)
 
             # Retrieve cached monitor state: ingress_problem must stay False since delivery failed
             from services.workers.node_monitor import get_server_monitor_state
             cached_st = get_server_monitor_state(server.id)
             self.assertFalse(cached_st.ingress_problem)
-            self.assertEqual(cached_st.consecutive_ingress_fails, 2)
+            self.assertEqual(cached_st.consecutive_ingress_fails, 3)
             bot.send_message.assert_called_once()
 
     async def test_node_monitor_ingress_probe_executes_when_xray_client_fails(self):
@@ -786,7 +812,11 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             st = get_server_monitor_state(server.id)
             st.next_check_at = time.monotonic() - 1.0
 
-            # Tick 2: second failure triggers alert
+            # Tick 2: second failure is debounced
+            await check_node_resources_and_alerts(bot)
+            st.next_check_at = time.monotonic() - 1.0
+
+            # Tick 3: third failure triggers alert
             await check_node_resources_and_alerts(bot)
 
             # Ingress probe MUST have been called despite FailingXrayClient
@@ -1019,7 +1049,11 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(bot)
             bot.send_message.assert_not_called()
 
-            # Tick 2: confirmed failure triggers alert
+            # Tick 2: 2nd failure is debounced
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Tick 3: confirmed failure triggers alert
             await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             alert_text = bot.send_message.call_args[1]["text"]
@@ -1115,7 +1149,11 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(bot)
             bot.send_message.assert_not_called()
 
-            # Tick 2: confirmed failure triggers alert
+            # Tick 2: 2nd failure is debounced
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Tick 3: confirmed failure triggers alert
             await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             alert_text = bot.send_message.call_args[1]["text"]
@@ -1261,7 +1299,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(cached_st.ingress_problem)
             bot.send_message.assert_not_called()
 
-            # Cycle 2: Next cycle succeeds with 200 OK
+            # Cycle 2: 2nd consecutive blip is also debounced (threshold=3)
+            await check_node_resources_and_alerts(bot)
+            self.assertEqual(cached_st.consecutive_ingress_fails, 2)
+            self.assertFalse(cached_st.ingress_problem)
+            bot.send_message.assert_not_called()
+
+            # Cycle 3: Next cycle succeeds with 200 OK
             mock_sess.get.side_effect = None
             mock_sess.get.return_value = MockProbeResponse(status=200)
             await check_node_resources_and_alerts(bot)

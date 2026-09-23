@@ -140,7 +140,7 @@ class XrayNodeClient:
                             "%s %s failed with status %d (attempt %d/%d), retrying...",
                             method, safe_url, status_code, attempt + 1, self.max_retries + 1
                         )
-                        await asyncio.sleep(0.5 * (2**attempt))
+                        await asyncio.sleep(1.5 * (2**attempt))
                         continue
                     return status_code, None, f"HTTP {status_code}: {sanitize_short(text, limit=200)}"
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
@@ -149,7 +149,7 @@ class XrayNodeClient:
                         "%s %s failed with %s (attempt %d/%d), retrying...",
                         method, safe_url, exc, attempt + 1, self.max_retries + 1
                     )
-                    await asyncio.sleep(0.5 * (2**attempt))
+                    await asyncio.sleep(1.5 * (2**attempt))
                     continue
                 return 0, None, f"Network failure: {exc}"
             except Exception as exc:
