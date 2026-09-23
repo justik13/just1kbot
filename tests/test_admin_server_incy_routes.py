@@ -20,6 +20,8 @@ from bot.handlers.admin.servers.incy_routes import (
     show_server_incy_relays,
     start_edit_relay_specific_name,
     start_edit_server_incy_param,
+    toggle_server_incy_origin_visibility,
+    toggle_server_incy_relay_visibility,
 )
 from bot.states import AdminStates
 from config.constants import XRAY_PROTOCOL
@@ -307,3 +309,76 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("relay_badges", saved_extra)
                     self.assertIn("relays", saved_extra)  # relays preserved
                     cb.answer.assert_awaited_once()
+
+    async def test_toggle_server_incy_origin_visibility(self):
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_server_incy_toggle_origin:1"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        server = Server(
+            id=1,
+            name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
+            is_active=True,
+            extra_data={"origin_hidden": False},
+        )
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
+                    await toggle_server_incy_origin_visibility(cb, self.mock_session)
+                    mock_update.assert_awaited_once()
+                    saved_extra = mock_update.call_args[1]["extra_data"]
+                    self.assertTrue(saved_extra["origin_hidden"])
+
+    async def test_toggle_server_incy_relay_visibility(self):
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_server_incy_relay_toggle:1:de"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        server = Server(
+            id=1,
+            name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
+            is_active=True,
+            extra_data={"relays": [{"code": "de", "name": "Германия"}], "relay_hidden": []},
+        )
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
+                    await toggle_server_incy_relay_visibility(cb, self.mock_session)
+                    mock_update.assert_awaited_once()
+                    saved_extra = mock_update.call_args[1]["extra_data"]
+                    self.assertIn("de", saved_extra["relay_hidden"])
+
+    async def test_process_server_incy_announce_input(self):
+        await self.state.set_state(AdminStates.editing_server_incy_param)
+        await self.state.update_data(server_id=1, incy_param="announce")
+
+        msg = MagicMock(spec=Message)
+        msg.from_user = self.admin_user
+        msg.text = "⚡ Новые скоростные узлы добавлены!"
+        msg.answer = AsyncMock()
+
+        server = Server(
+            id=1,
+            name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
+            is_active=True,
+            extra_data={},
+        )
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
+                    await process_server_incy_param_input(msg, self.state, self.mock_session)
+                    mock_update.assert_awaited_once()
+                    saved_extra = mock_update.call_args[1]["extra_data"]
+                    self.assertEqual(saved_extra["announce"], "⚡ Новые скоростные узлы добавлены!")

@@ -195,7 +195,7 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_admin_server_incy_keyboard(server_id: int) -> InlineKeyboardMarkup:
+def get_admin_server_incy_keyboard(server_id: int, origin_hidden: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.ADMIN_SERVER_INCY_BTN_TITLE,
@@ -206,6 +206,14 @@ def get_admin_server_incy_keyboard(server_id: int) -> InlineKeyboardMarkup:
         callback_data=f"admin_server_incy_edit:{server_id}:desc",
     )
     builder.button(
+        text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE,
+        callback_data=f"admin_server_incy_edit:{server_id}:announce",
+    )
+    builder.button(
+        text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL,
+        callback_data=f"admin_server_incy_edit:{server_id}:announce_url",
+    )
+    builder.button(
         text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME,
         callback_data=f"admin_server_incy_edit:{server_id}:origin_name",
     )
@@ -213,17 +221,14 @@ def get_admin_server_incy_keyboard(server_id: int) -> InlineKeyboardMarkup:
         text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE,
         callback_data=f"admin_server_incy_edit:{server_id}:origin_badge",
     )
+    origin_status = texts.ADMIN_SERVER_INCY_STATUS_HIDDEN if origin_hidden else texts.ADMIN_SERVER_INCY_STATUS_ACTIVE
+    builder.button(
+        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_TOGGLE.format(status=origin_status),
+        callback_data=f"admin_server_incy_toggle_origin:{server_id}",
+    )
     builder.button(
         text=texts.ADMIN_SERVER_INCY_BTN_RELAYS,
         callback_data=f"admin_server_incy_relays:{server_id}",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_CHANNEL,
-        callback_data=f"admin_server_incy_edit:{server_id}:channel",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_SUPPORT,
-        callback_data=f"admin_server_incy_edit:{server_id}:support",
     )
     builder.button(
         text=texts.ADMIN_SERVER_INCY_BTN_RESET,
@@ -233,7 +238,7 @@ def get_admin_server_incy_keyboard(server_id: int) -> InlineKeyboardMarkup:
         text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
         callback_data=f"admin_server_card:{server_id}",
     )
-    builder.adjust(2, 2, 1, 2, 1, 1)
+    builder.adjust(2, 2, 2, 1, 1, 1, 1)
     return builder.as_markup()
 
 
@@ -242,17 +247,24 @@ def get_admin_server_incy_relays_keyboard(
     relays: list[dict],
     custom_names: dict[str, str] | None = None,
     custom_badges: dict[str, str] | None = None,
+    hidden_relays: set[str] | list[str] | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     custom_names = custom_names or {}
     custom_badges = custom_badges or {}
+    hidden_set = set(hidden_relays or [])
     for r in relays:
         code = r.get("code") or r.get("name") or "default"
         name = custom_names.get(code) or r.get("name") or code
         badge = custom_badges.get(code) or r.get("badge")
         badge_part = f" [{badge}]" if badge else ""
+        status_part = f" [{texts.ADMIN_SERVER_INCY_STATUS_HIDDEN}]" if code in hidden_set else ""
         builder.button(
-            text=texts.ADMIN_SERVER_INCY_RELAY_BTN.format(name=name, badge_part=badge_part),
+            text=texts.ADMIN_SERVER_INCY_RELAY_BTN.format(
+                name=name,
+                badge_part=badge_part,
+                status_part=status_part,
+            ),
             callback_data=f"admin_server_incy_relay_view:{server_id}:{code}",
         )
     builder.button(
@@ -266,6 +278,7 @@ def get_admin_server_incy_relays_keyboard(
 def get_admin_server_incy_relay_actions_keyboard(
     server_id: int,
     relay_code: str,
+    is_hidden: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -276,9 +289,14 @@ def get_admin_server_incy_relay_actions_keyboard(
         text=texts.ADMIN_SERVER_INCY_BTN_RELAY_EDIT_BADGE,
         callback_data=f"admin_server_incy_relay_edit_badge:{server_id}:{relay_code}",
     )
+    action_text = texts.ADMIN_SERVER_INCY_ACTION_SHOW if is_hidden else texts.ADMIN_SERVER_INCY_ACTION_HIDE
+    builder.button(
+        text=texts.ADMIN_SERVER_INCY_BTN_RELAY_TOGGLE.format(action=action_text),
+        callback_data=f"admin_server_incy_relay_toggle:{server_id}:{relay_code}",
+    )
     builder.button(
         text=texts.ADMIN_SERVER_INCY_BTN_BACK_TO_RELAYS,
         callback_data=f"admin_server_incy_relays:{server_id}",
     )
-    builder.adjust(2, 1)
+    builder.adjust(2, 1, 1)
     return builder.as_markup()

@@ -207,6 +207,8 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
             extra_data={
                 "profile_title": "★ VIP Just1k",
                 "profile_description": "Премиальный доступ",
+                "announce": "Внимание: технические работы",
+                "announce_url": "https://t.me/just1k_channel/123",
                 "channel_url": "https://t.me/just1k_channel",
                 "support_url": "https://t.me/just1k_support",
                 "origin_badge": "⚡ Максимальная скорость",
@@ -241,6 +243,16 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     desc_b64 = resp.headers.get("Profile-Description", "").split("base64:")[1]
                     self.assertEqual(base64.b64decode(desc_b64).decode("utf-8"), "Премиальный доступ")
 
+                    # Announce banner
+                    announce_b64 = resp.headers.get("Announce", "").split("base64:")[1]
+                    self.assertEqual(base64.b64decode(announce_b64).decode("utf-8"), "Внимание: технические работы")
+                    self.assertEqual(resp.headers.get("Announce-Url"), "https://t.me/just1k_channel/123")
+
+                    # Zero-config system headers
+                    self.assertEqual(resp.headers.get("hide-check"), "1")
+                    self.assertEqual(resp.headers.get("sort-order"), "none")
+                    self.assertEqual(resp.headers.get("Profile-Update-Interval"), "3")
+
                     # Action buttons
                     self.assertEqual(resp.headers.get("Profile-Web-Page-Url"), "https://t.me/just1k_channel")
                     self.assertEqual(resp.headers.get("Support-Url"), "https://t.me/just1k_support")
@@ -250,3 +262,73 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     decoded_body = base64.b64decode(body_b64).decode("utf-8")
                     self.assertIn("serverDescription=", decoded_body)
                     self.assertIn(base64.b64encode("⚡ Максимальная скорость".encode()).decode(), decoded_body)
+
+    async def test_web_feed_hidden_origin_and_relays(self):
+        now = now_utc()
+        sub = WhiteInternetSubscription(
+            id=3,
+            user_id=11,
+            origin_node_id=3,
+            token="valid-token-hidden-test-1234567890",
+            uuid="b3c8d5e2-84d6-4923-a175-f4e8b96b2913",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=0,
+            traffic_uplink_bytes=0,
+            traffic_downlink_bytes=0,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+            device_limit=1,
+            active_hwids={},
+        )
+        server = Server(
+            id=3,
+            name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={
+                "origin_hidden": True,
+                "relays": [
+                    {"code": "de", "name": "Германия"},
+                    {"code": "nl", "name": "Нидерланды"},
+                ],
+                "relay_hidden": ["de"],
+            },
+        )
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch(
+                    "database.repositories.white_internet_repo.get_subscription_by_token",
+                    return_value=sub,
+                ):
+                    resp = await self.client.get(
+                        f"/sub/wl/{sub.token}",
+                        headers={"X-Hwid": "test-device"},
+                    )
+                    self.assertEqual(resp.status, 200)
+
+                    body_b64 = await resp.text()
+                    decoded_body = base64.b64decode(body_b64).decode("utf-8")
+                    links = [line for line in decoded_body.splitlines() if line.strip()]
+
+                    # Origin is hidden and 'de' is hidden -> only 'nl' relay should be returned
+                    self.assertEqual(len(links), 1)
+                    self.assertIn("nl", links[0])
+                    self.assertNotIn("default", links[0])
+                    self.assertNotIn("/de", links[0])
