@@ -7,7 +7,7 @@ import os
 import unittest
 import urllib.parse
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiohttp import web
@@ -20,6 +20,7 @@ from config.constants import (
 from config.enums import ServerHealthState, WhiteInternetStatus
 from database.models import Server, WhiteInternetSubscription
 from services.white_internet_service import WhiteInternetService
+from utils.datetime_helpers import now_utc
 
 
 class TestWhiteInternetIncyConfig(unittest.TestCase):
@@ -62,7 +63,7 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
         relays = [
-            {"code": "de", "name": "🇩🇪 Германия", "badge": "⚡ YouTube БЕЗ рекламы"},
+            {"code": "de", "name": "🇩🇪 Германия"},
             {"code": "nl", "name": "🇳🇱 Нидерланды"},
         ]
 
@@ -70,27 +71,43 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
             sub,
             cdn_domain="cdn.just1k.online",
             relays=relays,
+            origin_tag="🇷🇺 РФ Премиум",
             origin_badge="⚡ Шлюз РФ",
-            default_relay_badge="⚡ Зарубежный",
-            relay_badges={"nl": "⚡ Пинг 20ms"},
+            relay_names={"de": "🇩🇪 Франкфурт"},
+            relay_badges={"de": "⚡ YouTube БЕЗ рекламы"},
         )
 
         self.assertEqual(len(links), 3)
 
-        # 1. Origin link
+        # 1. Origin link: custom origin_tag and origin_badge
         origin_link = links[0]
+        self.assertIn(urllib.parse.quote("🇷🇺 РФ Премиум"), origin_link)
         self.assertIn("serverDescription=", origin_link)
         self.assertIn(base64.b64encode("⚡ Шлюз РФ".encode()).decode(), origin_link)
 
-        # 2. Relay 'de' uses r.badge
+        # 2. Relay 'de': custom relay name and custom badge
         de_link = links[1]
+        self.assertIn(urllib.parse.quote("🇩🇪 Франкфурт"), de_link)
         self.assertIn("serverDescription=", de_link)
         self.assertIn(base64.b64encode("⚡ YouTube БЕЗ рекламы".encode()).decode(), de_link)
 
-        # 3. Relay 'nl' uses relay_badges override
+        # 3. Relay 'nl': no custom badge -> completely clean without serverDescription=
         nl_link = links[2]
-        self.assertIn("serverDescription=", nl_link)
-        self.assertIn(base64.b64encode("⚡ Пинг 20ms".encode()).decode(), nl_link)
+        self.assertIn(urllib.parse.quote("🇳🇱 Нидерланды"), nl_link)
+        self.assertNotIn("serverDescription=", nl_link)
+
+    def test_generate_vless_links_clean_when_no_badges_configured(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+        relays = [{"code": "nl", "name": "🇳🇱 Нидерланды"}]
+        links = WhiteInternetService.generate_vless_links(
+            sub,
+            cdn_domain="cdn.just1k.online",
+            relays=relays,
+        )
+        self.assertEqual(len(links), 2)
+        self.assertNotIn("serverDescription=", links[0])
+        self.assertNotIn("serverDescription=", links[1])
 
 
 class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
@@ -102,7 +119,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
         return app
 
     async def test_feed_headers_clean_by_default_without_description(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
@@ -158,7 +175,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     self.assertIn("t.me", resp.headers.get("Profile-Web-Page-Url", ""))
 
     async def test_feed_headers_customized_via_extra_data(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = now_utc()
         sub = WhiteInternetSubscription(
             id=2,
             user_id=10,

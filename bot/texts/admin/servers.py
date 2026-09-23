@@ -263,8 +263,8 @@ ADMIN_SERVER_INCY_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> �
 
 • <b>Имя профиля:</b> <code>{title}</code>
 • <b>Подзаголовок:</b> <code>{description}</code>
+• <b>Шлюз РФ в клиенте:</b> <code>{origin_name}</code>
 • <b>Бейдж шлюза РФ:</b> <code>{origin_badge}</code>
-• <b>Бейдж Relay (по умолч.):</b> <code>{relay_badge}</code>
 • <b>Кнопка «Канал / Бот»:</b> <code>{channel_url}</code>
 • <b>Кнопка «Поддержка»:</b> <code>{support_url}</code>
 
@@ -274,7 +274,7 @@ ADMIN_SERVER_INCY_PROMPT_TITLE = """🎨 <b>Изменение имени про
 
 Текущее значение: <code>{current}</code>
 
-Отправьте новое название профиля (до 30 символов) или /clear для сброса к значению по умолчанию:"""
+Отправьте новое название профиля (до 30 символов) или /clear для сброса:"""
 
 ADMIN_SERVER_INCY_PROMPT_DESC = """🎨 <b>Изменение подзаголовка профиля в INCY</b>
 
@@ -282,17 +282,23 @@ ADMIN_SERVER_INCY_PROMPT_DESC = """🎨 <b>Изменение подзаголо
 
 Отправьте подзаголовок (до 50 символов) или /clear для отключения подзаголовка:"""
 
+ADMIN_SERVER_INCY_PROMPT_ORIGIN_NAME = """🎨 <b>Изменение имени шлюза РФ в клиенте</b>
+
+Текущее имя: <code>{current}</code>
+
+Отправьте отображаемое имя узла (до 30 символов, например <code>🇷🇺 Россия (Мск)</code>) или /clear для сброса к имени сервера:"""
+
 ADMIN_SERVER_INCY_PROMPT_ORIGIN_BADGE = """🎨 <b>Изменение бейджа шлюза РФ (Origin)</b>
 
 Текущий бейдж: <code>{current}</code>
 
-Отправьте текст бейджа (до 30 символов, например <code>⚡ Прямой шлюз</code>) или /clear для отключения бейджа:"""
+Отправьте текст бейджа (до 30 символов, например <code>Прямой шлюз</code>) или /clear для удаления бейджа:"""
 
 ADMIN_SERVER_INCY_PROMPT_RELAY_BADGE = """🎨 <b>Изменение бейджа Relay по умолчанию</b>
 
 Текущий бейдж: <code>{current}</code>
 
-Отправьте текст бейджа (до 30 символов, например <code>⚡ Зарубежный узел</code>) или /clear для отключения бейджа:"""
+Отправьте текст бейджа (до 30 символов) или /clear для отключения бейджа:"""
 
 ADMIN_SERVER_INCY_PROMPT_CHANNEL = """🎨 <b>Изменение ссылки на Канал / Бот</b>
 
@@ -306,28 +312,45 @@ ADMIN_SERVER_INCY_PROMPT_SUPPORT = """🎨 <b>Изменение ссылки н
 
 Отправьте URL для фиолетовой кнопки (например <code>https://t.me/your_support</code>) или /clear для ссылки на бота:"""
 
+ADMIN_SERVER_INCY_PROMPT_RELAY_NAME = """🎨 <b>Изменение имени узла {relay_code}</b>
+
+Текущее имя: <code>{current}</code>
+
+Отправьте отображаемое имя узла в клиенте (до 30 символов, например <code>🇩🇪 Германия (10 Гбит/с)</code>) или /clear для сброса:"""
+
 ADMIN_SERVER_INCY_PROMPT_RELAY_SPECIFIC = """🎨 <b>Настройка бейджа для узла {relay_name} ({relay_code})</b>
 
 Текущий бейдж: <code>{current}</code>
 
-Отправьте персональный бейдж (до 30 символов, например <code>⚡ YouTube БЕЗ рекламы</code>) или /clear для сброса к общему бейджу Relay:"""
+Отправьте персональный бейдж (до 30 символов, например <code>YouTube без рекламы</code>) или /clear для удаления бейджа:"""
 
 ADMIN_SERVER_INCY_SAVED = "✅ Настройка сохранена!"
-ADMIN_SERVER_INCY_RELAYS_TITLE = "🎨 <b>Персональные бейджи Relay-узлов:</b>\n\nВыберите узел для настройки синего бейджа в INCY:"
-ADMIN_SERVER_INCY_RESET_CONFIRM = "⚠️ Вы уверены, что хотите сбросить оформление INCY для этого сервера к системным настройкам по умолчанию?"
-ADMIN_SERVER_INCY_RESET_SUCCESS = "✅ Настройки оформления сброшены к системным значениям!"
+ADMIN_SERVER_INCY_RELAYS_TITLE = "🎨 <b>Управление узлами (Релеями) в INCY:</b>\n\nВыберите узел для настройки его названия и синего бейджа:"
+ADMIN_SERVER_INCY_RELAY_CARD = """🎨 <b>Настройка узла {relay_name} ({relay_code})</b>
+
+• <b>Имя в клиенте:</b> <code>{custom_name}</code>
+• <b>Бейдж в клиенте:</b> <code>{custom_badge}</code>
+
+<i>Выберите действие:</i>"""
+
+ADMIN_SERVER_INCY_RESET_CONFIRM = "⚠️ Вы уверены, что хотите сбросить оформление INCY для этого сервера к исходным настройкам?"
+ADMIN_SERVER_INCY_RESET_SUCCESS = "✅ Настройки оформления сброшены к исходным значениям!"
 
 ADMIN_SERVER_INCY_BTN_TITLE = "✏️ Имя профиля"
 ADMIN_SERVER_INCY_BTN_DESC = "✏️ Подзаголовок"
+ADMIN_SERVER_INCY_BTN_ORIGIN_NAME = "🇷🇺 Имя шлюза РФ"
 ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE = "🏷️ Бейдж шлюза РФ"
 ADMIN_SERVER_INCY_BTN_RELAY_BADGE = "🏷️ Бейдж Relay (по умолч.)"
-ADMIN_SERVER_INCY_BTN_RELAYS = "🌐 Бейджи конкретных Relay"
+ADMIN_SERVER_INCY_BTN_RELAYS = "🌐 Узлы (Релеи)"
 ADMIN_SERVER_INCY_BTN_CHANNEL = "🔗 Кнопка «Канал / Бот»"
 ADMIN_SERVER_INCY_BTN_SUPPORT = "🔗 Кнопка «Поддержка»"
 ADMIN_SERVER_INCY_BTN_RESET = "🔄 Сбросить к дефолтам"
 ADMIN_SERVER_INCY_BTN_BACK = "« Назад к оформлению"
 
-ADMIN_SERVER_INCY_VALUE_DISABLED = "— (отключено)"
-ADMIN_SERVER_INCY_VALUE_DEFAULT = "по умолч."
+ADMIN_SERVER_INCY_BTN_RELAY_EDIT_NAME = "✏️ Изменить название"
+ADMIN_SERVER_INCY_BTN_RELAY_EDIT_BADGE = "🏷️ Изменить бейдж"
+ADMIN_SERVER_INCY_BTN_BACK_TO_RELAYS = "« Назад к списку узлов"
+
+ADMIN_SERVER_INCY_VALUE_NONE = "— (не задан)"
 ADMIN_SERVER_INCY_NO_RELAYS = "На сервере нет подключенных Relay-узлов."
-ADMIN_SERVER_INCY_RELAY_BTN = "🌐 {name} [{badge}]"
+ADMIN_SERVER_INCY_RELAY_BTN = "🌐 {name}{badge_part}"

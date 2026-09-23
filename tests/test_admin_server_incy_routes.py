@@ -13,9 +13,12 @@ from aiogram.types import CallbackQuery, Chat, Message, User
 from bot.handlers.admin.servers.incy_routes import (
     process_server_incy_param_input,
     process_server_incy_relay_badge_input,
+    process_server_incy_relay_name_input,
     reset_server_incy_to_defaults,
     show_server_incy_card,
+    show_server_incy_relay_card,
     show_server_incy_relays,
+    start_edit_relay_specific_name,
     start_edit_server_incy_param,
 )
 from bot.states import AdminStates
@@ -199,6 +202,74 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["relay_badges"]["de"], "⚡ YouTube БЕЗ рекламы")
 
+    async def test_show_server_incy_relay_card(self):
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_server_incy_relay_view:1:de"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        server = Server(
+            id=1,
+            name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
+            is_active=True,
+            extra_data={
+                "relays": [{"code": "de", "name": "Германия"}],
+                "relay_names": {"de": "🇩🇪 Франкфурт"},
+                "relay_badges": {"de": "⚡ Пинг 20ms"},
+            },
+        )
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                await show_server_incy_relay_card(cb, self.state, self.mock_session)
+                cb.message.edit_text.assert_awaited_once()
+                call_args = cb.message.edit_text.call_args[0][0]
+                self.assertIn("🇩🇪 Франкфурт", call_args)
+                self.assertIn("⚡ Пинг 20ms", call_args)
+                self.assertIn("de", call_args)
+
+    async def test_edit_and_save_relay_specific_name(self):
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_server_incy_relay_edit_name:1:de"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        server = Server(
+            id=1,
+            name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
+            is_active=True,
+            extra_data={"relays": [{"code": "de", "name": "Германия"}]},
+        )
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                await start_edit_relay_specific_name(cb, self.state, self.mock_session)
+                current_state = await self.state.get_state()
+                self.assertEqual(current_state, AdminStates.editing_server_incy_relay_name)
+                data = await self.state.get_data()
+                self.assertEqual(data["server_id"], 1)
+                self.assertEqual(data["relay_code"], "de")
+
+        msg = MagicMock(spec=Message)
+        msg.from_user = self.admin_user
+        msg.text = "🇩🇪 Франкфурт Скоростной"
+        msg.answer = AsyncMock()
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
+                    await process_server_incy_relay_name_input(msg, self.state, self.mock_session)
+                    mock_update.assert_awaited_once()
+                    self.assertIs(mock_update.call_args[0][1], server)
+                    saved_extra = mock_update.call_args[1]["extra_data"]
+                    self.assertEqual(saved_extra["relay_names"]["de"], "🇩🇪 Франкфурт Скоростной")
+
     async def test_reset_server_incy_to_defaults(self):
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = self.admin_user
@@ -214,7 +285,10 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
             is_active=True,
             extra_data={
                 "profile_title": "Custom",
+                "origin_tag": "Custom Origin",
                 "origin_badge": "Custom Badge",
+                "relay_names": {"de": "Custom DE"},
+                "relay_badges": {"de": "Custom Badge"},
                 "relays": [{"code": "de", "name": "Германия"}],
             },
         )
@@ -227,6 +301,9 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     self.assertIs(mock_update.call_args[0][1], server)
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertNotIn("profile_title", saved_extra)
+                    self.assertNotIn("origin_tag", saved_extra)
                     self.assertNotIn("origin_badge", saved_extra)
+                    self.assertNotIn("relay_names", saved_extra)
+                    self.assertNotIn("relay_badges", saved_extra)
                     self.assertIn("relays", saved_extra)  # relays preserved
                     cb.answer.assert_awaited_once()

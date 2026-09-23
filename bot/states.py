@@ -41,5 +41,6 @@ class AdminStates(StatesGroup):
     sending_user_message = State()
     editing_server_incy_param = State()
     editing_server_incy_relay_badge = State()
+    editing_server_incy_relay_name = State()
 
 

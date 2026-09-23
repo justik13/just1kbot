@@ -233,8 +233,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             )
             return web.Response(status=403, text=limit_msg, headers=headers)
 
+        origin_tag = extra.get("origin_tag")
         origin_badge = extra.get("origin_badge")
         default_relay_badge = extra.get("relay_badge")
+        relay_names = extra.get("relay_names") if isinstance(extra.get("relay_names"), dict) else None
         relay_badges = extra.get("relay_badges") if isinstance(extra.get("relay_badges"), dict) else None
 
         vless_links = WhiteInternetService.generate_vless_links(
@@ -242,8 +244,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             cdn_domain=cdn_domain,
             path=base_path,
             relays=relays,
+            origin_tag=origin_tag,
             origin_badge=origin_badge,
             default_relay_badge=default_relay_badge,
+            relay_names=relay_names,
             relay_badges=relay_badges,
         )
         payload = "\n".join(vless_links)

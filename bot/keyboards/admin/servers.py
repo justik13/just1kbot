@@ -206,12 +206,12 @@ def get_admin_server_incy_keyboard(server_id: int) -> InlineKeyboardMarkup:
         callback_data=f"admin_server_incy_edit:{server_id}:desc",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE,
-        callback_data=f"admin_server_incy_edit:{server_id}:origin_badge",
+        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME,
+        callback_data=f"admin_server_incy_edit:{server_id}:origin_name",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_RELAY_BADGE,
-        callback_data=f"admin_server_incy_edit:{server_id}:relay_badge",
+        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE,
+        callback_data=f"admin_server_incy_edit:{server_id}:origin_badge",
     )
     builder.button(
         text=texts.ADMIN_SERVER_INCY_BTN_RELAYS,
@@ -240,21 +240,45 @@ def get_admin_server_incy_keyboard(server_id: int) -> InlineKeyboardMarkup:
 def get_admin_server_incy_relays_keyboard(
     server_id: int,
     relays: list[dict],
+    custom_names: dict[str, str] | None = None,
     custom_badges: dict[str, str] | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    custom_names = custom_names or {}
     custom_badges = custom_badges or {}
     for r in relays:
         code = r.get("code") or r.get("name") or "default"
-        name = r.get("name") or "Relay"
-        badge = custom_badges.get(code) or r.get("badge") or texts.ADMIN_SERVER_INCY_VALUE_DEFAULT
+        name = custom_names.get(code) or r.get("name") or code
+        badge = custom_badges.get(code) or r.get("badge")
+        badge_part = f" [{badge}]" if badge else ""
         builder.button(
-            text=texts.ADMIN_SERVER_INCY_RELAY_BTN.format(name=name, badge=badge),
-            callback_data=f"admin_server_incy_relay_edit:{server_id}:{code}",
+            text=texts.ADMIN_SERVER_INCY_RELAY_BTN.format(name=name, badge_part=badge_part),
+            callback_data=f"admin_server_incy_relay_view:{server_id}:{code}",
         )
     builder.button(
         text=texts.ADMIN_SERVER_INCY_BTN_BACK,
         callback_data=f"admin_server_incy:{server_id}",
     )
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_admin_server_incy_relay_actions_keyboard(
+    server_id: int,
+    relay_code: str,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.ADMIN_SERVER_INCY_BTN_RELAY_EDIT_NAME,
+        callback_data=f"admin_server_incy_relay_edit_name:{server_id}:{relay_code}",
+    )
+    builder.button(
+        text=texts.ADMIN_SERVER_INCY_BTN_RELAY_EDIT_BADGE,
+        callback_data=f"admin_server_incy_relay_edit_badge:{server_id}:{relay_code}",
+    )
+    builder.button(
+        text=texts.ADMIN_SERVER_INCY_BTN_BACK_TO_RELAYS,
+        callback_data=f"admin_server_incy_relays:{server_id}",
+    )
+    builder.adjust(2, 1)
     return builder.as_markup()

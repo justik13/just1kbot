@@ -1296,8 +1296,10 @@ class WhiteInternetService:
         path: str = DEFAULT_WHITE_INTERNET_PATH,
         relays: list[dict] | None = None,
         include_origin: bool = True,
+        origin_tag: str | None = None,
         origin_badge: str | None = None,
         default_relay_badge: str | None = None,
+        relay_names: dict[str, str] | None = None,
         relay_badges: dict[str, str] | None = None,
     ) -> list[str]:
         extra_dict = {
@@ -1317,33 +1319,45 @@ class WhiteInternetService:
         links: list[str] = []
 
         if include_origin or not relays:
-            origin_tag_str = texts.WL_ORIGIN_VLESS_TAG if relays else texts.WL_VLESS_TAG
-            effective_origin_badge = (
-                origin_badge
-                if origin_badge is not None
-                else (WHITE_INTERNET_ORIGIN_BADGE or texts.WL_DEFAULT_ORIGIN_BADGE)
+            default_origin_name = texts.WL_ORIGIN_VLESS_TAG if relays else texts.WL_VLESS_TAG
+            origin_tag_str = (
+                origin_tag.strip()
+                if origin_tag and isinstance(origin_tag, str) and origin_tag.strip()
+                else default_origin_name
             )
-            origin_tag = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
+            effective_origin_badge = (
+                origin_badge.strip()
+                if origin_badge and isinstance(origin_badge, str) and origin_badge.strip() and origin_badge.strip().lower() != "none"
+                else (WHITE_INTERNET_ORIGIN_BADGE.strip() if WHITE_INTERNET_ORIGIN_BADGE and WHITE_INTERNET_ORIGIN_BADGE.strip() else None)
+            )
+            origin_tag_formatted = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
             standalone_path = f"{base}/default"
-            origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{origin_tag}"
+            origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{origin_tag_formatted}"
             links.append(origin_link)
 
         if relays:
             for r in relays:
                 relay_code = r.get("code") or r.get("name") or "default"
                 r_path = r.get("path") or f"{base}/{relay_code}"
-                r_name = r.get("name") or texts.WL_VLESS_TAG
+                custom_name = relay_names.get(relay_code) if (relay_names and isinstance(relay_names, dict)) else None
+                r_name = (
+                    custom_name.strip()
+                    if custom_name and isinstance(custom_name, str) and custom_name.strip()
+                    else (r.get("name") or texts.WL_VLESS_TAG)
+                )
 
-                if relay_badges and relay_code in relay_badges:
-                    r_badge = relay_badges[relay_code]
-                elif r.get("badge"):
-                    r_badge = r.get("badge")
-                elif r.get("server_description"):
-                    r_badge = r.get("server_description")
-                elif default_relay_badge is not None:
-                    r_badge = default_relay_badge
+                if relay_badges and relay_code in relay_badges and relay_badges[relay_code] and relay_badges[relay_code].strip():
+                    r_badge = relay_badges[relay_code].strip()
+                elif r.get("badge") and str(r.get("badge")).strip():
+                    r_badge = str(r.get("badge")).strip()
+                elif r.get("server_description") and str(r.get("server_description")).strip():
+                    r_badge = str(r.get("server_description")).strip()
+                elif default_relay_badge and default_relay_badge.strip():
+                    r_badge = default_relay_badge.strip()
+                elif WHITE_INTERNET_RELAY_BADGE and WHITE_INTERNET_RELAY_BADGE.strip():
+                    r_badge = WHITE_INTERNET_RELAY_BADGE.strip()
                 else:
-                    r_badge = WHITE_INTERNET_RELAY_BADGE or texts.WL_DEFAULT_RELAY_BADGE
+                    r_badge = None
 
                 r_tag = WhiteInternetService._format_vless_tag(r_name, r_badge)
                 link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
