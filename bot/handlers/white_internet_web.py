@@ -267,7 +267,8 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             or WHITE_INTERNET_PROFILE_TITLE
             or texts.WL_PROFILE_NAME
         )
-        profile_title_b64 = base64.b64encode(str(profile_title).encode("utf-8")).decode("ascii")
+        profile_title_str = str(profile_title).strip()[:25]
+        profile_title_b64 = base64.b64encode(profile_title_str.encode("utf-8")).decode("ascii")
 
         bot_user = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
         default_bot_url = f"https://t.me/{bot_user}"

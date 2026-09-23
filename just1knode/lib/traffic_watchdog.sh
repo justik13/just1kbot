@@ -125,6 +125,7 @@ try:
     # 1. Чтение сырых TX-байт ядра (исключая loopback и виртуальные интерфейсы)
     tx_raw = 0
     proc_net = '/proc/net/dev'
+    proc_read_ok = False
     if os.path.exists(proc_net):
         try:
             with open(proc_net, 'r', encoding='utf-8', errors='replace') as f:
@@ -138,8 +139,19 @@ try:
                     cols = stats.split()
                     if len(cols) >= 9:
                         tx_raw += int(cols[8])
+            proc_read_ok = True
         except Exception:
             pass
+
+    limit_bytes = limit_gb * (1024 ** 3)
+    if not proc_read_ok:
+        sys.stderr.write("WARNING: Failed to read /proc/net/dev\n")
+        if cutoff_active:
+            print(f"ensure_stopped|0.00|{float(limit_bytes) / (1024 ** 3):.2f}|100.0")
+            sys.exit(0)
+        else:
+            print(f"none|0.00|{float(limit_bytes) / (1024 ** 3):.2f}|0.0")
+            sys.exit(0)
 
     # 2. Определение текущего биллингового периода
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -151,16 +163,28 @@ try:
         cycle_start = datetime.date(last_prev_month.year, last_prev_month.month, min(reset_day, last_prev_month.day))
     current_cycle = cycle_start.strftime('%Y-%m-%d')
 
-    # 3. Чтение сохраненного состояния
+    # 3. Чтение сохраненного состояния (Fail-Closed)
     data = {}
+    state_corrupted = False
     if os.path.exists(state_file):
         try:
             with open(state_file, 'r', encoding='utf-8', errors='replace') as f:
                 c = json.load(f)
                 if isinstance(c, dict):
                     data = c
+                else:
+                    state_corrupted = True
         except Exception:
-            pass
+            state_corrupted = True
+
+    if state_corrupted:
+        sys.stderr.write(f"CRITICAL: Failed to load corrupted traffic state file: {state_file}\n")
+        if cutoff_active:
+            print(f"ensure_stopped|0.00|{float(limit_bytes) / (1024 ** 3):.2f}|100.0")
+            sys.exit(0)
+        else:
+            print(f"none|0.00|{float(limit_bytes) / (1024 ** 3):.2f}|0.0")
+            sys.exit(0)
 
     saved_cycle = data.get('cycle', '')
     saved_reset_day = int(data.get('reset_day', 0))
@@ -268,6 +292,10 @@ finally:
             warn "Остановка службы Xray во избежание платного овердрафта у хостинг-провайдера..."
             touch "$TRAFFIC_CUTOFF_FLAG" 2>/dev/null || true
             systemctl stop xray 2>/dev/null || true
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet xray 2>/dev/null; then
+                warn "Xray не остановился по сигналу stop. Принудительное завершение..."
+                systemctl kill xray 2>/dev/null || true
+            fi
             set_state_val "traffic_cutoff_triggered" "true"
 
             local alert_msg="🚨 <b>ВНИМАНИЕ! Лимит трафика исчерпан!</b>
@@ -359,7 +387,7 @@ EOF
 remove_traffic_watchdog_timer() {
     local systemd_dir="${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl stop just1knode-traffic.timer 2>/dev/null || true
+        systemctl stop just1knode-traffic.timer just1knode-traffic.service 2>/dev/null || true
         systemctl disable just1knode-traffic.timer 2>/dev/null || true
     fi
     rm -f "${systemd_dir}/just1knode-traffic.service" "${systemd_dir}/just1knode-traffic.timer" 2>/dev/null || true

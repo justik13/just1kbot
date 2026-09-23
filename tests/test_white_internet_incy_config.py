@@ -109,6 +109,37 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
         self.assertNotIn("serverDescription=", links[0])
         self.assertNotIn("serverDescription=", links[1])
 
+    def test_origin_hidden_strict_when_no_relays(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+        # When origin is hidden (include_origin=False) and relays is empty,
+        # return empty list rather than forcing origin to be included.
+        links = WhiteInternetService.generate_vless_links(
+            sub,
+            cdn_domain="cdn.just1k.online",
+            relays=[],
+            include_origin=False,
+        )
+        self.assertEqual(links, [])
+
+    def test_badge_none_suppresses_fallback_completely(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+        relays = [{"code": "de", "name": "🇩🇪 Германия"}]
+        with patch("services.white_internet_service.WHITE_INTERNET_ORIGIN_BADGE", "GlobalOriginBadge"):
+            with patch("services.white_internet_service.WHITE_INTERNET_RELAY_BADGE", "GlobalRelayBadge"):
+                links = WhiteInternetService.generate_vless_links(
+                    sub,
+                    cdn_domain="cdn.just1k.online",
+                    relays=relays,
+                    origin_badge="none",
+                    relay_badges={"de": "none"},
+                )
+                self.assertEqual(len(links), 2)
+                # Both origin and relay should have no serverDescription=
+                self.assertNotIn("serverDescription=", links[0])
+                self.assertNotIn("serverDescription=", links[1])
+
 
 class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
     """Test HTTP subscription feed headers with configurable INCY options."""
@@ -332,3 +363,61 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     self.assertIn("nl", links[0])
                     self.assertNotIn("default", links[0])
                     self.assertNotIn("/de", links[0])
+
+    async def test_profile_title_truncated_to_25_chars(self):
+        now = now_utc()
+        sub = WhiteInternetSubscription(
+            id=4,
+            user_id=40,
+            origin_node_id=1,
+            token="valid-token-title-len-check",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=1000,
+            traffic_uplink_bytes=500,
+            traffic_downlink_bytes=500,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+            device_limit=1,
+            active_hwids={},
+        )
+        long_title = "A" * 50
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={"profile_title": long_title},
+        )
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch(
+                    "database.repositories.white_internet_repo.get_subscription_by_token",
+                    return_value=sub,
+                ):
+                    resp = await self.client.get(
+                        f"/sub/wl/{sub.token}",
+                        headers={"X-Hwid": "test-device"},
+                    )
+                    self.assertEqual(resp.status, 200)
+                    title_b64 = resp.headers.get("Profile-Title", "").split("base64:")[1]
+                    decoded_title = base64.b64decode(title_b64).decode("utf-8")
+                    self.assertEqual(len(decoded_title), 25)
+                    self.assertEqual(decoded_title, "A" * 25)

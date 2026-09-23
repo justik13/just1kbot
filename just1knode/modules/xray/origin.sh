@@ -348,15 +348,10 @@ rules.append({
     'outboundTag': 'just1k-wl-api'
 })
 
-# Запрет BitTorrent (P2P и трекеры) на уровне ядра Xray
+# Запрет BitTorrent (P2P трафик) на уровне ядра Xray
 rules.append({
     'type': 'field',
     'protocol': ['bittorrent'],
-    'outboundTag': 'just1k-wl-block'
-})
-rules.append({
-    'type': 'field',
-    'domain': ['geosite:bittorrent'],
     'outboundTag': 'just1k-wl-block'
 })
 
@@ -449,6 +444,10 @@ net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
         sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+    fi
+
+    if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+        error "Ошибка тестирования сгенерированной конфигурации Xray на Origin узле. Изменения не применены."
     fi
 
     deploy_xray_systemd_service
@@ -842,19 +841,14 @@ if not any(r.get('outboundTag') == 'just1k-wl-api' for r in rules):
         'outboundTag': 'just1k-wl-api'
     })
 
-# 4.1b. Блокировка BitTorrent (P2P и трекеры)
+# 4.1b. Блокировка BitTorrent (P2P трафик)
 if not any(r.get('protocol') == ['bittorrent'] and r.get('outboundTag') == 'just1k-wl-block' for r in rules):
     rules.insert(1, {
         'type': 'field',
         'protocol': ['bittorrent'],
         'outboundTag': 'just1k-wl-block'
     })
-if not any(r.get('domain') == ['geosite:bittorrent'] and r.get('outboundTag') == 'just1k-wl-block' for r in rules):
-    rules.insert(2, {
-        'type': 'field',
-        'domain': ['geosite:bittorrent'],
-        'outboundTag': 'just1k-wl-block'
-    })
+
 
 # 4.2. Правило Direct для доменов РФ
 ru_domains = [

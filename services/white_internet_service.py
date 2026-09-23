@@ -1318,18 +1318,21 @@ class WhiteInternetService:
 
         links: list[str] = []
 
-        if include_origin or not relays:
+        if include_origin:
             default_origin_name = texts.WL_ORIGIN_VLESS_TAG if relays else texts.WL_VLESS_TAG
             origin_tag_str = (
                 origin_tag.strip()
                 if origin_tag and isinstance(origin_tag, str) and origin_tag.strip()
                 else default_origin_name
             )
-            effective_origin_badge = (
-                origin_badge.strip()
-                if origin_badge and isinstance(origin_badge, str) and origin_badge.strip() and origin_badge.strip().lower() != "none"
-                else (WHITE_INTERNET_ORIGIN_BADGE.strip() if WHITE_INTERNET_ORIGIN_BADGE and WHITE_INTERNET_ORIGIN_BADGE.strip() else None)
-            )
+            if origin_badge and isinstance(origin_badge, str) and origin_badge.strip().lower() == "none":
+                effective_origin_badge = None
+            elif origin_badge and isinstance(origin_badge, str) and origin_badge.strip():
+                effective_origin_badge = origin_badge.strip()
+            elif WHITE_INTERNET_ORIGIN_BADGE and WHITE_INTERNET_ORIGIN_BADGE.strip():
+                effective_origin_badge = WHITE_INTERNET_ORIGIN_BADGE.strip()
+            else:
+                effective_origin_badge = None
             origin_tag_formatted = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
             standalone_path = f"{base}/default"
             origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{origin_tag_formatted}"
@@ -1346,14 +1349,23 @@ class WhiteInternetService:
                     else (r.get("name") or texts.WL_VLESS_TAG)
                 )
 
-                if relay_badges and relay_code in relay_badges and relay_badges[relay_code] and relay_badges[relay_code].strip():
-                    r_badge = relay_badges[relay_code].strip()
+                if relay_badges and relay_code in relay_badges and isinstance(relay_badges[relay_code], str):
+                    val = relay_badges[relay_code].strip()
+                    if val.lower() == "none":
+                        r_badge = None
+                    elif val:
+                        r_badge = val
+                    else:
+                        r_badge = None
                 elif r.get("badge") and str(r.get("badge")).strip():
-                    r_badge = str(r.get("badge")).strip()
+                    val = str(r.get("badge")).strip()
+                    r_badge = None if val.lower() == "none" else val
                 elif r.get("server_description") and str(r.get("server_description")).strip():
-                    r_badge = str(r.get("server_description")).strip()
-                elif default_relay_badge and default_relay_badge.strip():
-                    r_badge = default_relay_badge.strip()
+                    val = str(r.get("server_description")).strip()
+                    r_badge = None if val.lower() == "none" else val
+                elif default_relay_badge and isinstance(default_relay_badge, str) and default_relay_badge.strip():
+                    val = default_relay_badge.strip()
+                    r_badge = None if val.lower() == "none" else val
                 elif WHITE_INTERNET_RELAY_BADGE and WHITE_INTERNET_RELAY_BADGE.strip():
                     r_badge = WHITE_INTERNET_RELAY_BADGE.strip()
                 else:

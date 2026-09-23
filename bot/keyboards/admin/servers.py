@@ -256,7 +256,11 @@ def get_admin_server_incy_relays_keyboard(
     for r in relays:
         code = r.get("code") or r.get("name") or "default"
         name = custom_names.get(code) or r.get("name") or code
-        badge = custom_badges.get(code) or r.get("badge")
+        raw_b = custom_badges.get(code)
+        if raw_b and raw_b.strip().lower() == "none":
+            badge = None
+        else:
+            badge = raw_b or r.get("badge")
         badge_part = f" [{badge}]" if badge else ""
         status_part = f" [{texts.ADMIN_SERVER_INCY_STATUS_HIDDEN}]" if code in hidden_set else ""
         builder.button(

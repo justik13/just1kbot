@@ -328,6 +328,12 @@ async def show_server_relays(
                         error_msg = data.get("error") or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
                     else:
                         relays_list = data.get("relays", [])
+                        if not data.get("relays_error"):
+                            extra = dict(server.extra_data or {})
+                            if extra.get("relays") != relays_list:
+                                extra["relays"] = relays_list
+                                server.extra_data = extra
+                                await session.flush()
                 else:
                     error_msg = err or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
             else:

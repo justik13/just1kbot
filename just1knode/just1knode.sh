@@ -500,7 +500,7 @@ reset_node() {
     systemctl stop xray xray-api 2>/dev/null || true
     systemctl disable xray xray-api 2>/dev/null || true
     remove_traffic_watchdog_timer
-    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh 2>/dev/null || true
     rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api 2>/dev/null || true
     systemctl reload nginx 2>/dev/null || true
     log "Узел успешно сброшен в исходное состояние."

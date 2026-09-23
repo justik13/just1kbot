@@ -309,17 +309,11 @@ for r in rules:
         if 'domain' in r and 'domain:2ip.ru' not in r['domain']:
             r['domain'].append('domain:2ip.ru')
 
-# Запрет BitTorrent (P2P и трекеры)
+# Запрет BitTorrent (P2P трафик)
 if not any(r.get('protocol') == ['bittorrent'] for r in rules):
     rules.insert(0, {
         'type': 'field',
         'protocol': ['bittorrent'],
-        'outboundTag': 'just1k-wl-block'
-    })
-if not any(r.get('domain') == ['geosite:bittorrent'] for r in rules):
-    rules.insert(1, {
-        'type': 'field',
-        'domain': ['geosite:bittorrent'],
         'outboundTag': 'just1k-wl-block'
     })
 

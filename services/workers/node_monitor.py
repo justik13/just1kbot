@@ -617,7 +617,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             update_kwargs["last_successful_check"] = now_utc()
             if is_xray_node and xray_data:
                 extra_update = {}
-                if "relays" in xray_data:
+                if "relays" in xray_data and not xray_data.get("relays_error"):
                     extra_update["relays"] = xray_data["relays"]
                 if "secret_base_path" in xray_data:
                     extra_update["secret_base_path"] = xray_data["secret_base_path"]
@@ -668,6 +668,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                         extra = dict(updated_srv.extra_data or {})
                         extra_changed = False
                         for key in ("cdn_domain", "relays", "secret_base_path"):
+                            if key == "relays" and xray_data.get("relays_error"):
+                                continue
                             if key in xray_data and xray_data[key] and extra.get(key) != xray_data[key]:
                                 extra[key] = xray_data[key]
                                 extra_changed = True

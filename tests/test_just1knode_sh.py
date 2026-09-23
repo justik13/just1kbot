@@ -1536,7 +1536,6 @@ ensure_xrayapi_user
         # Verify BitTorrent filtering and blackhole block outbound injected
         rules = updated_cfg.get("routing", {}).get("rules", [])
         self.assertTrue(any("bittorrent" in r.get("protocol", []) for r in rules), "BitTorrent protocol rule must be present")
-        self.assertTrue(any("geosite:bittorrent" in r.get("domain", []) for r in rules), "BitTorrent geosite rule must be present")
         self.assertTrue(any(ob.get("tag") == "block" and ob.get("protocol") == "blackhole" for ob in updated_cfg.get("outbounds", [])), "Blackhole outbound must be present")
 
     # -------------------------------------------------------------------------

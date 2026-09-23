@@ -47,7 +47,13 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
     announce_url = extra.get("announce_url")
 
     origin_name = extra.get("origin_tag") or getattr(server, "name", None) or texts.WL_ORIGIN_VLESS_TAG
-    origin_badge = extra.get("origin_badge")
+    origin_badge_raw = extra.get("origin_badge")
+    if origin_badge_raw and origin_badge_raw.strip().lower() == "none":
+        origin_badge = texts.ADMIN_SERVER_INCY_VALUE_DISABLED
+    elif origin_badge_raw and origin_badge_raw.strip():
+        origin_badge = origin_badge_raw.strip()
+    else:
+        origin_badge = texts.ADMIN_SERVER_INCY_VALUE_NONE
     origin_hidden = bool(extra.get("origin_hidden", False))
 
     channel_url = extra.get("channel_url") or WHITE_INTERNET_CHANNEL_URL or default_bot_url
@@ -65,7 +71,7 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
         "announce": announce or texts.ADMIN_SERVER_INCY_VALUE_NONE,
         "announce_url": announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE,
         "origin_name": origin_name,
-        "origin_badge": origin_badge or texts.ADMIN_SERVER_INCY_VALUE_NONE,
+        "origin_badge": origin_badge,
         "origin_status": origin_status,
         "origin_hidden": origin_hidden,
         "channel_url": channel_url,
@@ -158,8 +164,6 @@ async def start_edit_server_incy_param(
         "announce_url": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL, details["announce_url"]),
         "origin_name": (texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_NAME, details["origin_name"]),
         "origin_badge": (texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_BADGE, details["origin_badge"]),
-        "channel": (texts.ADMIN_SERVER_INCY_PROMPT_CHANNEL, details.get("channel_url", "")),
-        "support": (texts.ADMIN_SERVER_INCY_PROMPT_SUPPORT, details.get("support_url", "")),
     }
 
     if param not in prompt_map:
@@ -200,7 +204,7 @@ async def process_server_incy_param_input(
         await state.clear()
         return
 
-    server = await get_server_by_id(session, server_id)
+    server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
         await message.answer(texts.ERROR_SERVER_NOT_FOUND)
         await state.clear()
@@ -229,8 +233,16 @@ async def process_server_incy_param_input(
         )
         return
 
-    is_clear = raw_text in ("/clear", "-", "none")
-    val = "" if is_clear else raw_text
+    is_clear = raw_text in ("/clear", "-")
+    is_none = raw_text.lower() == "none"
+
+    if param == "announce_url" and not (is_clear or is_none):
+        v = raw_text.strip()
+        if any(c in v for c in (" ", "\n", "\r", "\t")) or not (
+            v.startswith("https://") or v.startswith("http://") or v.startswith("tg://")
+        ):
+            await message.answer(texts.ADMIN_SERVER_INCY_ERR_INVALID_URL)
+            return
 
     extra = dict(server.extra_data or {})
     param_key_map = {
@@ -240,16 +252,19 @@ async def process_server_incy_param_input(
         "announce_url": "announce_url",
         "origin_name": "origin_tag",
         "origin_badge": "origin_badge",
-        "channel": "channel_url",
-        "support": "support_url",
     }
 
     key = param_key_map.get(param)
     if key:
         if is_clear:
             extra[key] = ""
+        elif param == "origin_badge" and is_none:
+            extra[key] = "none"
         else:
-            if param in ("title", "origin_name", "origin_badge"):
+            val = "" if is_none else raw_text
+            if param == "title":
+                val = val[:25]
+            elif param in ("origin_name", "origin_badge"):
                 val = val[:30]
             elif param == "desc":
                 val = val[:50]
@@ -299,7 +314,7 @@ async def toggle_server_incy_origin_visibility(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    server = await get_server_by_id(session, server_id)
+    server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
         await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
         return
@@ -419,11 +434,15 @@ async def show_server_incy_relay_card(
     relay = next((r for r in relays if (r.get("code") or r.get("name")) == relay_code), None)
     base_name = relay.get("name") if relay else relay_code
     custom_name = custom_names.get(relay_code) or base_name
-    custom_badge = (
-        custom_badges.get(relay_code)
-        or (relay.get("badge") if relay else None)
-        or texts.ADMIN_SERVER_INCY_VALUE_NONE
-    )
+    custom_badge_raw = custom_badges.get(relay_code)
+    if custom_badge_raw and custom_badge_raw.strip().lower() == "none":
+        custom_badge = texts.ADMIN_SERVER_INCY_VALUE_DISABLED
+    elif custom_badge_raw and custom_badge_raw.strip():
+        custom_badge = custom_badge_raw.strip()
+    elif relay and relay.get("badge"):
+        custom_badge = relay.get("badge")
+    else:
+        custom_badge = texts.ADMIN_SERVER_INCY_VALUE_NONE
     is_hidden = relay_code in hidden_relays
     status = (
         texts.ADMIN_SERVER_INCY_STATUS_HIDDEN
@@ -472,7 +491,7 @@ async def toggle_server_incy_relay_visibility(
         return
 
     relay_code = parts[2]
-    server = await get_server_by_id(session, server_id)
+    server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
         await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
         return
@@ -496,11 +515,15 @@ async def toggle_server_incy_relay_visibility(
     relay = next((r for r in relays if (r.get("code") or r.get("name")) == relay_code), None)
     base_name = relay.get("name") if relay else relay_code
     custom_name = custom_names.get(relay_code) or base_name
-    custom_badge = (
-        custom_badges.get(relay_code)
-        or (relay.get("badge") if relay else None)
-        or texts.ADMIN_SERVER_INCY_VALUE_NONE
-    )
+    custom_badge_raw = custom_badges.get(relay_code)
+    if custom_badge_raw and custom_badge_raw.strip().lower() == "none":
+        custom_badge = texts.ADMIN_SERVER_INCY_VALUE_DISABLED
+    elif custom_badge_raw and custom_badge_raw.strip():
+        custom_badge = custom_badge_raw.strip()
+    elif relay and relay.get("badge"):
+        custom_badge = relay.get("badge")
+    else:
+        custom_badge = texts.ADMIN_SERVER_INCY_VALUE_NONE
     is_hidden = relay_code in hidden_relays
     status = (
         texts.ADMIN_SERVER_INCY_STATUS_HIDDEN
@@ -602,7 +625,7 @@ async def process_server_incy_relay_name_input(
         await state.clear()
         return
 
-    server = await get_server_by_id(session, server_id)
+    server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
         await message.answer(texts.ERROR_SERVER_NOT_FOUND)
         await state.clear()
@@ -632,11 +655,15 @@ async def process_server_incy_relay_name_input(
     relay = next((r for r in relays if (r.get("code") or r.get("name")) == relay_code), None)
     base_name = relay.get("name") if relay else relay_code
     custom_name = custom_names.get(relay_code) or base_name
-    custom_badge = (
-        custom_badges.get(relay_code)
-        or (relay.get("badge") if relay else None)
-        or texts.ADMIN_SERVER_INCY_VALUE_NONE
-    )
+    custom_badge_raw = custom_badges.get(relay_code)
+    if custom_badge_raw and custom_badge_raw.strip().lower() == "none":
+        custom_badge = texts.ADMIN_SERVER_INCY_VALUE_DISABLED
+    elif custom_badge_raw and custom_badge_raw.strip():
+        custom_badge = custom_badge_raw.strip()
+    elif relay and relay.get("badge"):
+        custom_badge = relay.get("badge")
+    else:
+        custom_badge = texts.ADMIN_SERVER_INCY_VALUE_NONE
     is_hidden = relay_code in hidden_relays
     status = (
         texts.ADMIN_SERVER_INCY_STATUS_HIDDEN
@@ -700,11 +727,15 @@ async def start_edit_relay_specific_badge(
 
     relay = next((r for r in relays if (r.get("code") or r.get("name")) == relay_code), None)
     relay_name = relay.get("name") if relay else relay_code
-    current_badge = (
-        custom_badges.get(relay_code)
-        or (relay.get("badge") if relay else None)
-        or texts.ADMIN_SERVER_INCY_VALUE_NONE
-    )
+    custom_badge_raw = custom_badges.get(relay_code)
+    if custom_badge_raw and custom_badge_raw.strip().lower() == "none":
+        current_badge = texts.ADMIN_SERVER_INCY_VALUE_DISABLED
+    elif custom_badge_raw and custom_badge_raw.strip():
+        current_badge = custom_badge_raw.strip()
+    elif relay and relay.get("badge"):
+        current_badge = relay.get("badge")
+    else:
+        current_badge = texts.ADMIN_SERVER_INCY_VALUE_NONE
 
     await state.update_data(server_id=server_id, relay_code=relay_code)
     await state.set_state(AdminStates.editing_server_incy_relay_badge)
@@ -743,7 +774,7 @@ async def process_server_incy_relay_badge_input(
         await state.clear()
         return
 
-    server = await get_server_by_id(session, server_id)
+    server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
         await message.answer(texts.ERROR_SERVER_NOT_FOUND)
         await state.clear()
@@ -754,8 +785,10 @@ async def process_server_incy_relay_badge_input(
     relay_badges = dict(extra.get("relay_badges") or {})
 
     if raw_text != "/cancel":
-        if raw_text in ("/clear", "-", "none"):
+        if raw_text in ("/clear", "-"):
             relay_badges.pop(relay_code, None)
+        elif raw_text.lower() == "none":
+            relay_badges[relay_code] = "none"
         else:
             relay_badges[relay_code] = raw_text[:30]
 
@@ -773,11 +806,15 @@ async def process_server_incy_relay_badge_input(
     relay = next((r for r in relays if (r.get("code") or r.get("name")) == relay_code), None)
     base_name = relay.get("name") if relay else relay_code
     custom_name = custom_names.get(relay_code) or base_name
-    custom_badge = (
-        custom_badges.get(relay_code)
-        or (relay.get("badge") if relay else None)
-        or texts.ADMIN_SERVER_INCY_VALUE_NONE
-    )
+    custom_badge_raw = custom_badges.get(relay_code)
+    if custom_badge_raw and custom_badge_raw.strip().lower() == "none":
+        custom_badge = texts.ADMIN_SERVER_INCY_VALUE_DISABLED
+    elif custom_badge_raw and custom_badge_raw.strip():
+        custom_badge = custom_badge_raw.strip()
+    elif relay and relay.get("badge"):
+        custom_badge = relay.get("badge")
+    else:
+        custom_badge = texts.ADMIN_SERVER_INCY_VALUE_NONE
     is_hidden = relay_code in hidden_relays
     status = (
         texts.ADMIN_SERVER_INCY_STATUS_HIDDEN
@@ -817,7 +854,7 @@ async def reset_server_incy_to_defaults(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    server = await get_server_by_id(session, server_id)
+    server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
         await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
         return

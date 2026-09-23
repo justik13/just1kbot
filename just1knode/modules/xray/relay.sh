@@ -114,13 +114,6 @@ install_xray_relay_node() {
           "bittorrent"
         ],
         "outboundTag": "block"
-      },
-      {
-        "type": "field",
-        "domain": [
-          "geosite:bittorrent"
-        ],
-        "outboundTag": "block"
       }
     ]
   },
@@ -160,6 +153,10 @@ net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
         sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+    fi
+
+    if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+        error "Ошибка тестирования сгенерированной конфигурации Xray на Relay узле. Изменения не применены."
     fi
 
     deploy_xray_systemd_service
@@ -259,13 +256,6 @@ if not has_bt_proto:
     rules.insert(0, {
         'type': 'field',
         'protocol': ['bittorrent'],
-        'outboundTag': 'block'
-    })
-has_bt_domain = any(r.get('type') == 'field' and 'geosite:bittorrent' in r.get('domain', []) for r in rules)
-if not has_bt_domain:
-    rules.insert(1, {
-        'type': 'field',
-        'domain': ['geosite:bittorrent'],
         'outboundTag': 'block'
     })
 

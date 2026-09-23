@@ -548,7 +548,7 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         store_corrupted = True
 
     target_inbounds = get_target_inbounds()
-    relays, _ = get_active_relays()
+    relays, relays_err = get_active_relays()
     secret_path = get_secret_base_path()
 
     pid, starttime, boot_id, running_epoch = (
@@ -574,7 +574,8 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         "grpc_ok": bool(grpc_ok),
         "active_clients_count": len(active_clients),
         "inbounds": target_inbounds,
-        "relays": relays,
+        "relays": relays if not relays_err else [],
+        "relays_error": relays_err,
         "secret_base_path": secret_path,
         "cdn_domain": get_cdn_domain(),
         "sub_path_prefix": get_sub_path_prefix(),
