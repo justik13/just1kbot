@@ -5,14 +5,13 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.enums import AdminAuditAction
-from database.models import Payment, User
+from database.models import Order, Payment, User
 from services.user_cache import invalidate_user_cache
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
 )
 from services.audit_service import AuditService
-from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.profile_deletion_service import ProfileDeletionService
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
@@ -162,12 +161,17 @@ class BanService:
                 payment.user_cancel_requested_at = (
                     payment.user_cancel_requested_at or current_time
                 )
-                if payment.external_id:
-                    operation = await ensure_reconcile_payment_operation(
-                        session, payment, reason="user_banned"
-                    )
-                    if operation is not None:
-                        reconciliations_queued += 1
+        orders = (
+            await session.scalars(
+                select(Order).where(
+                    Order.user_id == locked_user.id,
+                    Order.status == "pending",
+                )
+            )
+        ).all()
+        for ord_item in orders:
+            ord_item.status = "canceled"
+            payments_closed += 1
 
         await update_user(
             session,

@@ -6,14 +6,11 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from database.models import Tariff
-from database.repositories import account_ledger_repo, audit_repo, users_repo
+from database.repositories import audit_repo, users_repo
 from services import (
-    account_purchase,
     audit_service,
     ban_service,
     referral_bonus,
-    tariff_value_calculator,
     yookassa_service,
 )
 
@@ -67,25 +64,6 @@ class ServicesCoreFullCoverageTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
 
-    async def test_tariff_value_calculator(self):
-        t_src = tariff_value_calculator.TariffVersionSnapshot(
-            tariff_id=1, version_id=1, duration_hours=720, price_rub=Decimal(300)
-        )
-        t_tgt = tariff_value_calculator.TariffVersionSnapshot(
-            tariff_id=2, version_id=2, duration_hours=720, price_rub=Decimal(600)
-        )
-
-        calc = tariff_value_calculator.calculate_tariff_value(
-            operation_type="change",
-            source_paid_hours=360,
-            source_paid_value_rub=Decimal(150),
-            source_tariff=t_src,
-            target_tariff=t_tgt,
-            confirmed_additional_payment_rub=Decimal(450),
-            bonus_hours=0,
-        )
-        self.assertTrue(calc.invariant_holds)
-
     async def test_referral_bonus(self):
         async with self.sessions.begin() as session:
             referrer = await users_repo.create_user(session, telegram_id=1001, username="ref_1")
@@ -100,30 +78,6 @@ class ServicesCoreFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                 topup_amount=Decimal(1000),
             )
             self.assertEqual(granted, Decimal(100))
-
-    async def test_account_purchase_and_topup(self):
-        async with self.sessions.begin() as session:
-            u = await users_repo.create_user(session, telegram_id=2001, username="buyer")
-            t = Tariff(name="Base", duration_days=30, device_limit=2, price_rub=500, is_active=True)
-            session.add(t)
-            await session.flush()
-
-            entry, _ = await account_ledger_repo.create_admin_adjustment(
-                session,
-                user_id=u.id,
-                signed_amount=Decimal(1000),
-                idempotency_key="adj_1001",
-                metadata={"reason": "test_topup"},
-            )
-            self.assertIsNotNone(entry.id)
-
-            intent = await account_purchase.prepare_account_purchase(
-                session,
-                user_id=u.id,
-                tariff_id=t.id,
-            )
-            self.assertIsNotNone(intent.quote)
-            self.assertEqual(intent.shortage, Decimal(0))
 
     async def test_ban_and_maintenance_service(self):
         async with self.sessions.begin() as session:

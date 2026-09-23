@@ -17,8 +17,11 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.maint_patch = patch("bot.handlers.payment.balance_routes.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True))
         self.maint_patch.start()
+        self.settings_patch = patch("bot.handlers.payment.balance_routes.get_settings", return_value=MagicMock(BALANCE_MIN_TOPUP_RUB=10, BALANCE_MAX_CUSTOM_TOPUP_RUB=50000))
+        self.settings_patch.start()
 
     async def asyncTearDown(self):
+        self.settings_patch.stop()
         self.maint_patch.stop()
 
     async def test_accept_custom_amount_deletes_invalid_text_input(self):
@@ -212,119 +215,6 @@ class TestReferralCycleDetection(unittest.IsolatedAsyncioTestCase):
             # 51 hops: user 100 referred by user 1 (chain from 1 to 52 has 51 hops)
             valid_51 = await SubscriptionService._validate_referral(session, telegram_id=100, ref_id=1)
             self.assertFalse(valid_51, "51-hop chain must exceed MAX_REFERRAL_CHAIN_DEPTH=50 and be rejected")
-
-
-class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
-    async def test_first_topup_push_includes_welcome_bonus_celebration(self):
-        from decimal import Decimal
-
-        from database.models import Payment
-        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
-        from services.account_topup import settle_succeeded_topup
-        from services.referral_bonus import ReferralBonusGrantResult
-        from utils.datetime_helpers import now_utc
-
-        session = AsyncMock()
-        session.add = MagicMock()
-        payment = Payment(
-            id=100,
-            user_id=20,
-            amount=Decimal(500),
-            currency="RUB",
-            provider_status="succeeded",
-            provider_confirmed_at=now_utc(),
-            fulfillment_status="pending",
-            credited_at=None,
-            topup_context={},
-        )
-        user = User(
-            id=20,
-            telegram_id=2000,
-            referred_by=1000,
-            is_deleted=False,
-            is_bot_blocked=False,
-        )
-
-        bot = MagicMock()
-
-        mock_settings = MagicMock(BALANCE_MAX_AVAILABLE_RUB="100000")
-
-        with patch("services.account_topup.lock_checkout_user", AsyncMock(return_value=user)), \
-        patch("services.account_topup.get_account_balance", AsyncMock(return_value=AccountBalanceSnapshot(
-            accounting_position=Decimal(550),
-            available=Decimal(550),
-            reserved=Decimal(0),
-            debt=Decimal(0),
-            real_position=Decimal(500),
-            bonus_position=Decimal(50),
-            real_available=Decimal(500),
-            bonus_available=Decimal(50),
-        ))), \
-        patch("services.account_topup.credit_succeeded_topup", AsyncMock(return_value=(MagicMock(), True))), \
-        patch("services.account_topup.refresh_user_dispute_hold", AsyncMock()), \
-        patch("services.referral_bonus.grant_referral_bonus_for_topup", AsyncMock(return_value=ReferralBonusGrantResult(
-            referrer_bonus=Decimal(50),
-            purchaser_welcome_bonus=Decimal(50),
-        ))):
-            await settle_succeeded_topup(session, payment=payment, source="test", settings=mock_settings, bot=bot)
-
-        self.assertEqual(payment.topup_context.get("purchaser_welcome_bonus"), 50)
-        self.assertEqual(payment.topup_context.get("referrer_bonus"), 50)
-
-    async def test_subsequent_topup_push_excludes_welcome_bonus(self):
-        from decimal import Decimal
-
-        from database.models import Payment
-        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
-        from services.account_topup import settle_succeeded_topup
-        from services.referral_bonus import ReferralBonusGrantResult
-        from utils.datetime_helpers import now_utc
-
-        session = AsyncMock()
-        session.add = MagicMock()
-        payment = Payment(
-            id=101,
-            user_id=20,
-            amount=Decimal(1000),
-            currency="RUB",
-            provider_status="succeeded",
-            provider_confirmed_at=now_utc(),
-            fulfillment_status="pending",
-            credited_at=None,
-            topup_context={},
-        )
-        user = User(
-            id=20,
-            telegram_id=2000,
-            referred_by=1000,
-            is_deleted=False,
-            is_bot_blocked=False,
-        )
-
-        bot = MagicMock()
-        mock_settings = MagicMock(BALANCE_MAX_AVAILABLE_RUB="100000")
-
-        with patch("services.account_topup.lock_checkout_user", AsyncMock(return_value=user)), \
-        patch("services.account_topup.get_account_balance", AsyncMock(return_value=AccountBalanceSnapshot(
-            accounting_position=Decimal(1550),
-            available=Decimal(1550),
-            reserved=Decimal(0),
-            debt=Decimal(0),
-            real_position=Decimal(1500),
-            bonus_position=Decimal(50),
-            real_available=Decimal(1500),
-            bonus_available=Decimal(50),
-        ))), \
-        patch("services.account_topup.credit_succeeded_topup", AsyncMock(return_value=(MagicMock(), True))), \
-        patch("services.account_topup.refresh_user_dispute_hold", AsyncMock()), \
-        patch("services.referral_bonus.grant_referral_bonus_for_topup", AsyncMock(return_value=ReferralBonusGrantResult(
-            referrer_bonus=Decimal(100),
-            purchaser_welcome_bonus=Decimal(0),
-        ))):
-            await settle_succeeded_topup(session, payment=payment, source="test", settings=mock_settings, bot=bot)
-
-        self.assertEqual(payment.topup_context.get("purchaser_welcome_bonus"), 0)
-        self.assertEqual(payment.topup_context.get("referrer_bonus"), 100)
 
 
 class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):

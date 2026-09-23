@@ -70,10 +70,6 @@ def get_admin_cat_finance_keyboard(
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_ISTORIYA_PLATEZHEJ, callback_data="admin_payments")
     builder.button(text=texts.BTN_ZHURNAL_POKUPOK, callback_data="admin_purchases")
-    dispute_label = texts.DASHBOARD_DISPUTY_COUNT.format(disputes_count=disputes_count) if disputes_count > 0 else texts.DASHBOARD_DISPUTY
-    builder.button(text=dispute_label, callback_data="admin_disputes")
-    queue_label = texts.DASHBOARD_OCHEREDI.format(dead_queues_count=dead_queues_count) if dead_queues_count > 0 else texts.DASHBOARD_OCHEREDI_TASKS
-    builder.button(text=queue_label, callback_data="aq:home")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()

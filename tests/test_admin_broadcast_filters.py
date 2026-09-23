@@ -106,7 +106,7 @@ class TestAdminBroadcastFilters(unittest.TestCase):
             self.assertIn("vpn_profiles.server_id = 42", compiled)
             self.assertIn("vpn_profiles.is_active IS true", compiled)
             self.assertIn("vpn_profiles.desired_is_active IS true", compiled)
-            self.assertIn("vpn_profiles.provisioning_status NOT IN ('deleting')", compiled)
+            self.assertIn("vpn_profiles.provisioning_status NOT IN ('deleting', 'delete_failed')", compiled)
             self.assertIn("users.subscription_end >", compiled)
 
             # White Internet branch invariants

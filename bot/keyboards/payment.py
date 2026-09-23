@@ -446,3 +446,67 @@ def get_topup_credit_keyboard(
     builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def get_order_checkout_keyboard(
+    tariff_id: int,
+    price: int,
+    can_pay_wallet: bool,
+    back_callback: str,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if price == 0:
+        builder.button(
+            text=texts.BTN_PAYMENT_CONFIRM_FREE_CHANGE,
+            callback_data=f"order_pay_wallet:{tariff_id}",
+            style="success",
+        )
+    elif can_pay_wallet:
+        builder.button(
+            text=texts.BTN_PAYMENT_BUY_FROM_BALANCE,
+            callback_data=f"order_pay_wallet:{tariff_id}",
+            style="success",
+        )
+        builder.button(
+            text=texts.BTN_PAYMENT_PAY_CARD.format(price=price),
+            callback_data=f"order_pay_card:{tariff_id}",
+        )
+    else:
+        builder.button(
+            text=texts.BTN_PAYMENT_PAY_CARD.format(price=price),
+            callback_data=f"order_pay_card:{tariff_id}",
+            style="success",
+        )
+        builder.button(
+            text=texts.BUTTON_TOPUP,
+            callback_data="balance_topup",
+        )
+    builder.button(text=texts.BTN_BACK, callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_order_invoice_keyboard(
+    payment_url: str,
+    order_id: str,
+    price: int,
+    back_callback: str,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_PAYMENT_PAY_ORDER.format(price=price),
+        url=payment_url,
+        style="success",
+    )
+    builder.button(
+        text=texts.BTN_PAYMENT_CHECK,
+        callback_data=f"order_check:{order_id}",
+        style="primary",
+    )
+    builder.button(
+        text=texts.BTN_CANCEL_ACTION,
+        callback_data=f"order_cancel:{order_id}",
+        style="danger",
+    )
+    builder.adjust(1)
+    return builder.as_markup()

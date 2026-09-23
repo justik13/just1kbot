@@ -427,11 +427,13 @@ async def _http_rate_limit_middleware(request: web.Request, handler):
     return await handler(request)
 
 
-async def start_webhook_server(port: int):
+async def start_webhook_server(port: int, bot: object | None = None):
     # YooKassa payloads are small. Reject unexpectedly large request bodies
     # before JSON parsing to limit memory use on the public endpoint.
     app = web.Application(client_max_size=64 * 1024)
     app["trusted_proxies"] = get_settings().TRUSTED_PROXIES
+    if bot is not None:
+        app["bot"] = bot
     app.middlewares.append(_http_correlation_middleware)
     app.middlewares.append(_http_rate_limit_middleware)
     setup_webhook_routes(app)
@@ -506,7 +508,8 @@ async def main():
         bot, dp = await setup_bot()
 
         webhook_runner = await start_webhook_server(
-            settings.YOOKASSA_WEBHOOK_PORT
+            settings.YOOKASSA_WEBHOOK_PORT,
+            bot=bot,
         )
 
         if ci_test_mode:

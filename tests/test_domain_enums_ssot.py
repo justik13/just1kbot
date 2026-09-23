@@ -48,7 +48,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
 
     def test_all_enums_declared_are_strenums_with_values(self):
         """Every exported enum in config.enums must be a valid StrEnum with non-empty members."""
-        self.assertEqual(len(config.enums.__all__), 26)
+        self.assertEqual(len(config.enums.__all__), 28)
         for enum_name in config.enums.__all__:
             enum_cls = getattr(config.enums, enum_name)
             self.assertTrue(
@@ -225,18 +225,14 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.ApiOperationStatus),
         )
 
-        # 11. ProviderRefundOperation status
-        from database.refund_models import ProviderRefundOperation
+        # 11. Order status & service_type
         self.assertEqual(
-            _extract_check_constraint_in(ProviderRefundOperation.__table__, "ck_provider_refund_operations_status"),
-            set(config.enums.ProviderRefundOperationStatus),
+            _extract_check_constraint_in(models.Order.__table__, "ck_orders_status"),
+            set(config.enums.OrderStatus),
         )
-
-        # 12. PaymentDispute status
-        from database.dispute_models import PaymentDispute
         self.assertEqual(
-            _extract_check_constraint_in(PaymentDispute.__table__, "ck_payment_disputes_status"),
-            set(config.enums.PaymentDisputeStatus),
+            _extract_check_constraint_in(models.Order.__table__, "ck_orders_service_type"),
+            set(config.enums.OrderServiceType),
         )
 
     def test_exact_spelling_and_serialization_integrity(self):

@@ -1,5 +1,7 @@
+from datetime import datetime, timezone
 import logging
 import math
+import uuid
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -11,14 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from bot import texts
-from database.models import Payment
+from database.models import Order, Payment
+from config.enums import (
+    PaymentFulfillmentStatus,
+    PaymentProviderStatus,
+    PaymentReconciliationStatus,
+)
 from database.repositories.account_ledger_repo import get_payment_refundable_amount
 from database.repositories.payments_repo import get_payment_by_id
-from services.payment_status import payment_display_status
-from services.provider_refunds import (
-    BalanceRefundError,
-    request_balance_topup_refund,
-)
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
@@ -31,12 +33,57 @@ logger = logging.getLogger(__name__)
 PAYMENTS_PER_PAGE = 20
 
 
-def _refund_available(payment: Payment) -> bool:
-    return bool(
-        payment.provider_status == "succeeded"
-        and payment.external_id
-        and payment.currency == "RUB"
-    )
+def _normalize_dt(dt: datetime | None) -> datetime:
+    if dt is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def payment_display_status(payment) -> str:
+    if (
+        payment.reconciliation_status in {PaymentReconciliationStatus.MISMATCH, PaymentReconciliationStatus.MANUAL_REVIEW}
+        or payment.provider_status == PaymentProviderStatus.MANUAL_REVIEW
+        or payment.fulfillment_status == PaymentFulfillmentStatus.MANUAL_REVIEW
+    ):
+        return "requires_manual_review"
+    if (
+        payment.provider_status == PaymentProviderStatus.REFUNDED
+        or payment.fulfillment_status == PaymentFulfillmentStatus.REVERSED
+    ):
+        return "refunded"
+    if payment.provider_status == PaymentProviderStatus.CANCELED:
+        return "cancelled"
+    if (
+        payment.provider_status == PaymentProviderStatus.SUCCEEDED
+        and payment.fulfillment_status == PaymentFulfillmentStatus.SUCCEEDED
+    ):
+        return "completed"
+    if payment.provider_status == PaymentProviderStatus.SUCCEEDED:
+        return "paid_processing"
+    if payment.provider_status in {
+        PaymentProviderStatus.NOT_CREATED,
+        PaymentProviderStatus.CREATING,
+        PaymentProviderStatus.PENDING,
+        PaymentProviderStatus.WAITING_FOR_CAPTURE,
+        PaymentProviderStatus.UNKNOWN,
+    }:
+        return "pending"
+    return "failed"
+
+
+def order_display_status(order: Order) -> str:
+    if order.status == "paid":
+        return "completed"
+    if order.status == "canceled":
+        return "cancelled"
+    if order.status == "refunded":
+        return "refunded"
+    if order.status == "pending":
+        return "pending"
+    return "failed"
+
 
 
 def _get_payment_card_keyboard(
@@ -44,12 +91,6 @@ def _get_payment_card_keyboard(
     user_telegram_id: int | None,
 ) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
-
-    if _refund_available(payment):
-        builder.button(
-            text=texts.ADMIN_REFUND_START_BUTTON,
-            callback_data=f"admin_payment_refund:{payment.id}",
-        )
 
     if user_telegram_id:
         builder.button(
@@ -79,24 +120,44 @@ async def _build_payments_list_text_and_kb(
         rendered += texts.ADMIN_PAYMENTS_LIST_EMPTY
     else:
         for payment in payments:
-            display_status = payment_display_status(payment)
-            status_icon = texts.PAYMENT_STATUS_ICONS.get(
-                display_status,
-                texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
-            )
-            if payment.user and payment.user.username:
-                user_label = f"@{payment.user.username}"
-            elif payment.user:
-                user_label = texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=payment.user.telegram_id)
+            if isinstance(payment, Order):
+                display_status = order_display_status(payment)
+                status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                    display_status,
+                    texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
+                )
+                if payment.user and payment.user.username:
+                    user_label = f"@{payment.user.username}"
+                elif payment.user:
+                    user_label = texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=payment.user.telegram_id)
+                else:
+                    user_label = texts.PLACEHOLDER_DASH
+                button_text = truncate_button_text(
+                    f"{status_icon} #{str(payment.id)[:8]} • {user_label} • {int(payment.amount_rub)} ₽"
+                )
+                builder.button(
+                    text=button_text,
+                    callback_data=f"admin_order_card:{payment.id}",
+                )
             else:
-                user_label = texts.PLACEHOLDER_DASH
-            button_text = truncate_button_text(
-                texts.ADMIN_PAYMENTS_ROW_ENTRY.format(status_icon=status_icon, payment_id=payment.id, user_label=user_label, amount_rub=payment.amount)
-            )
-            builder.button(
-                text=button_text,
-                callback_data=f"admin_payment_card:{payment.id}",
-            )
+                display_status = payment_display_status(payment)
+                status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                    display_status,
+                    texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
+                )
+                if payment.user and payment.user.username:
+                    user_label = f"@{payment.user.username}"
+                elif payment.user:
+                    user_label = texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=payment.user.telegram_id)
+                else:
+                    user_label = texts.PLACEHOLDER_DASH
+                button_text = truncate_button_text(
+                    texts.ADMIN_PAYMENTS_ROW_ENTRY.format(status_icon=status_icon, payment_id=payment.id, user_label=user_label, amount_rub=payment.amount)
+                )
+                builder.button(
+                    text=button_text,
+                    callback_data=f"admin_payment_card:{payment.id}",
+                )
     if page > 1:
         builder.button(
             text=texts.ADMIN_BTN_PAGINATION_PREV,
@@ -118,28 +179,51 @@ async def _show_payments_list(
     session: AsyncSession,
     page: int = 1,
 ):
-    total_payments = await session.scalar(
-        select(func.count(Payment.id)),
-    ) or 0
+    total_orders = (
+        await session.scalar(
+            select(func.count(Order.id))
+        )
+        or 0
+    )
+    total_legacy = (
+        await session.scalar(
+            select(func.count(Payment.id))
+        )
+        or 0
+    )
+    total_payments = total_orders + total_legacy
     total_pages = max(
         1,
         math.ceil(total_payments / PAYMENTS_PER_PAGE),
     )
-    page = min(page, total_pages)
+    page = min(max(1, page), total_pages)
     offset = (page - 1) * PAYMENTS_PER_PAGE
-    stmt = (
-        select(Payment)
-        .options(
-            selectinload(Payment.user),
-        )
-        .order_by(Payment.created_at.desc())
-        .offset(offset)
-        .limit(PAYMENTS_PER_PAGE)
+    needed = offset + PAYMENTS_PER_PAGE
+
+    order_stmt = (
+        select(Order)
+        .options(selectinload(Order.user))
+        .order_by(Order.created_at.desc())
+        .limit(needed)
     )
-    result = await session.execute(stmt)
-    payments = result.scalars().all()
+    legacy_stmt = (
+        select(Payment)
+        .options(selectinload(Payment.user))
+        .order_by(Payment.created_at.desc())
+        .limit(needed)
+    )
+    orders = (await session.execute(order_stmt)).scalars().all()
+    legacy_payments = (await session.execute(legacy_stmt)).scalars().all()
+
+    combined = sorted(
+        [*orders, *legacy_payments],
+        key=lambda item: _normalize_dt(item.created_at),
+        reverse=True,
+    )
+    page_items = combined[offset : offset + PAYMENTS_PER_PAGE]
+
     rendered, kb = await _build_payments_list_text_and_kb(
-        payments,
+        page_items,
         page,
         total_pages,
         total_payments,
@@ -156,14 +240,10 @@ async def _show_payments_list(
 
 @router.callback_query(F.data == "stale_alerts:dismiss")
 async def dismiss_stale_alert(callback: CallbackQuery):
-    """Dismiss semantics: hide the card now, keep it silent while the
-    underlying state is unchanged, re-deliver a fresh card on change."""
+    """Dismiss semantics: hide the card now."""
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
-    from services.workers.payments import dismiss_stale_alert_card
-
-    dismiss_stale_alert_card(callback.from_user.id)
     try:
         await callback.message.delete()
     except Exception:
@@ -240,27 +320,47 @@ async def show_user_payments_list(
         return
 
     await state.clear()
-    total_payments = (
+    user_orders_count = (
+        await session.scalar(
+            select(func.count(Order.id)).where(Order.user_id == user.id)
+        )
+        or 0
+    )
+    user_legacy_count = (
         await session.scalar(
             select(func.count(Payment.id)).where(Payment.user_id == user.id)
         )
         or 0
     )
+    total_payments = user_orders_count + user_legacy_count
 
     total_pages = max(1, math.ceil(total_payments / PAYMENTS_PER_PAGE))
     page = min(max(1, page), total_pages)
     offset = (page - 1) * PAYMENTS_PER_PAGE
+    needed = offset + PAYMENTS_PER_PAGE
 
-    stmt = (
+    order_stmt = (
+        select(Order)
+        .where(Order.user_id == user.id)
+        .options(selectinload(Order.user))
+        .order_by(Order.created_at.desc())
+        .limit(needed)
+    )
+    payment_stmt = (
         select(Payment)
         .where(Payment.user_id == user.id)
         .options(selectinload(Payment.user))
         .order_by(Payment.created_at.desc())
-        .offset(offset)
-        .limit(PAYMENTS_PER_PAGE)
+        .limit(needed)
     )
-    result = await session.execute(stmt)
-    payments = result.scalars().all()
+    orders = (await session.execute(order_stmt)).scalars().all()
+    legacy = (await session.execute(payment_stmt)).scalars().all()
+    combined = sorted(
+        [*orders, *legacy],
+        key=lambda item: _normalize_dt(item.created_at),
+        reverse=True,
+    )
+    page_items = combined[offset : offset + PAYMENTS_PER_PAGE]
 
     user_label = user.username or str(user.telegram_id)
     header = texts.ADMIN_PAYMENTS_USER_TITLE.format(
@@ -271,23 +371,37 @@ async def show_user_payments_list(
     ) + "\n\n"
 
     builder = InlineKeyboardBuilder()
-    if not payments:
+    if not page_items:
         rendered = header + texts.ADMIN_PAYMENTS_USER_EMPTY
     else:
         rendered = header
-        for payment in payments:
-            display_status = payment_display_status(payment)
-            status_icon = texts.PAYMENT_STATUS_ICONS.get(
-                display_status,
-                texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
-            )
-            button_text = truncate_button_text(
-                f"{status_icon} #{payment.id} • {payment.amount} ₽ ({format_datetime(payment.created_at)})"
-            )
-            builder.button(
-                text=button_text,
-                callback_data=f"admin_payment_card:{payment.id}",
-            )
+        for item in page_items:
+            if isinstance(item, Order):
+                display_status = order_display_status(item)
+                status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                    display_status,
+                    texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
+                )
+                button_text = truncate_button_text(
+                    f"{status_icon} #{str(item.id)[:8]} • {int(item.amount_rub)} ₽ ({format_datetime(item.created_at)})"
+                )
+                builder.button(
+                    text=button_text,
+                    callback_data=f"admin_order_card:{item.id}",
+                )
+            else:
+                display_status = payment_display_status(item)
+                status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                    display_status,
+                    texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
+                )
+                button_text = truncate_button_text(
+                    f"{status_icon} #{item.id} • {item.amount} ₽ ({format_datetime(item.created_at)})"
+                )
+                builder.button(
+                    text=button_text,
+                    callback_data=f"admin_payment_card:{item.id}",
+                )
 
     if page > 1:
         builder.button(
@@ -379,12 +493,13 @@ async def show_payment_card(
         )
 
     refundable_line = ""
-    if _refund_available(payment):
+    if payment.provider_status == "succeeded" and payment.currency == "RUB":
         refundable = await get_payment_refundable_amount(
             session,
             payment_id=payment.id,
         )
-        refundable_line = texts.ADMIN_PAYMENT_REFUNDABLE_LINE.format(amount_rub=int(refundable))
+        if refundable > 0:
+            refundable_line = texts.ADMIN_PAYMENT_REFUNDABLE_LINE.format(amount_rub=int(refundable))
 
     rendered = (
         texts.ADMIN_PAYMENT_CARD_TEMPLATE.format(
@@ -420,109 +535,106 @@ async def show_payment_card(
     await callback.answer(show_alert=False)
 
 
-@router.callback_query(F.data.startswith("admin_payment_refund:"))
-async def confirm_payment_refund(
+@router.callback_query(F.data.startswith("admin_order_card:"))
+async def show_order_card(
     callback: CallbackQuery,
     state: FSMContext,
     session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-    payment_id = parse_callback_id(callback.data, 1)
-    payment = (
-        await get_payment_by_id(session, payment_id)
-        if payment_id is not None
-        else None
-    )
-    if payment is None or not _refund_available(payment):
-        await callback.answer(texts.ADMIN_REFUND_NOT_AVAILABLE_ALERT, show_alert=True)
-        return
-    refundable = await get_payment_refundable_amount(
-        session,
-        payment_id=payment.id,
-    )
-    if refundable <= 0:
-        await callback.answer(texts.ADMIN_REFUND_NO_REMAINDER_ALERT, show_alert=True)
-        return
-    await state.clear()
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.ADMIN_REFUND_CONFIRM_BUTTON.format(amount_rub=int(refundable)),
-        callback_data=f"admin_payment_refund_confirm:{payment.id}",
-    )
-    builder.button(
-        text=texts.ADMIN_BTN_BACK_TO_PAYMENT,
-        callback_data=f"admin_payment_card:{payment.id}",
-    )
-    builder.adjust(1)
-    await callback.message.edit_text(
-        texts.ADMIN_REFUND_CONFIRMATION_BODY.format(
-            payment_id=payment.id,
-            provider_payment_id=safe(payment.external_id),
-            amount_rub=int(refundable),
-        ),
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("admin_payment_refund_confirm:"))
-async def enqueue_payment_refund(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-    payment_id = parse_callback_id(callback.data, 1)
-    if payment_id is None:
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
     try:
-        request = await request_balance_topup_refund(
-            session,
-            payment_id=payment_id,
-            requested_by_admin_id=callback.from_user.id,
-        )
-    except BalanceRefundError as exc:
-        messages = {
-            "payment_not_found": texts.ADMIN_PAYMENT_NOT_FOUND_ALERT,
-            "refund_requires_balance_topup": texts.ADMIN_REFUND_ERR_ONLY_TOPUP,
-            "payment_not_refundable": texts.ADMIN_REFUND_ERR_NOT_REFUNDABLE,
-            "provider_payment_id_missing": texts.ADMIN_REFUND_ERR_NO_PROVIDER_ID,
-            "no_refundable_balance": texts.ADMIN_REFUND_NO_REMAINDER_ALERT,
-            "active_refund_reservation_missing": texts.ADMIN_REFUND_ERR_MANUAL_REVIEW,
-        }
-        await callback.answer(
-            messages.get(exc.code, texts.ADMIN_REFUND_ENQUEUE_FAILED_ALERT),
-            show_alert=True,
-        )
+        order_id_str = callback.data.split(":")[1]
+        order_uuid = uuid.UUID(order_id_str)
+    except (IndexError, ValueError, TypeError):
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
-
     await state.clear()
+    order = await session.scalar(
+        select(Order)
+        .where(Order.id == order_uuid)
+        .options(selectinload(Order.user), selectinload(Order.tariff))
+    )
+    if not order:
+        await callback.answer(texts.ADMIN_PAYMENT_NOT_FOUND_ALERT, show_alert=True)
+        return
+    user = order.user
+    if user and user.username:
+        user_label = texts.ADMIN_PAYMENT_USER_WITH_ID.format(
+            username=safe(user.username),
+            user_id=user.telegram_id,
+        )
+        user_telegram_id = user.telegram_id
+    elif user:
+        user_label = texts.ADMIN_PAYMENT_USER_ID.format(user_id=user.telegram_id)
+        user_telegram_id = user.telegram_id
+    else:
+        user_label = texts.PLACEHOLDER_DASH
+        user_telegram_id = None
+
+    display_status = order_display_status(order)
+    status_name = texts.PAYMENT_STATUS_NAMES.get(display_status, display_status)
+    status_icon = texts.PAYMENT_STATUS_ICONS.get(
+        display_status, texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON
+    )
+
+    tariff_label = order.tariff.name if order.tariff else order.service_type
+    paid_at_line = (
+        texts.ADMIN_ORDER_PAID_AT_LINE.format(paid_at=format_datetime(order.paid_at))
+        if order.paid_at
+        else ""
+    )
+    refunded_at_line = (
+        texts.ADMIN_ORDER_REFUNDED_AT_LINE.format(
+            refunded_at=format_datetime(order.refunded_at)
+        )
+        if order.refunded_at
+        else ""
+    )
+    external_id_line = (
+        texts.ADMIN_ORDER_EXTERNAL_ID_LINE.format(external_id=safe(order.external_id))
+        if order.external_id
+        else ""
+    )
+    description_line = (
+        texts.ADMIN_ORDER_DESCRIPTION_LINE.format(description=safe(order.description))
+        if order.description
+        else ""
+    )
+    rendered = texts.ADMIN_ORDER_CARD_TEMPLATE.format(
+        short_id=str(order.id)[:8],
+        user_label=user_label,
+        amount_rub=int(order.amount_rub),
+        tariff_label=safe(tariff_label),
+        service_type=safe(order.service_type),
+        status_icon=status_icon,
+        status_name=status_name,
+        status=order.status,
+        payment_method=safe(order.payment_method),
+        created_at=format_datetime(order.created_at),
+        paid_at_line=paid_at_line,
+        refunded_at_line=refunded_at_line,
+        external_id_line=external_id_line,
+        description_line=description_line,
+    )
     builder = InlineKeyboardBuilder()
+    if user_telegram_id:
+        builder.button(
+            text=texts.ADMIN_CLIENT_CARD_BUTTON,
+            callback_data=f"admin_user_card:{user_telegram_id}",
+        )
     builder.button(
-        text=texts.ADMIN_BTN_BACK_TO_PAYMENT,
-        callback_data=f"admin_payment_card:{payment_id}",
+        text=texts.ADMIN_BTN_BACK_TO_PAYMENTS,
+        callback_data="admin_payments",
     )
-    builder.button(text=texts.ADMIN_PAYMENTS_BACK_TO_LIST_BUTTON, callback_data="admin_payments")
     builder.adjust(1)
-    status_text = (
-        texts.ADMIN_REFUND_ENQUEUED_STATUS
-        if request.created
-        else texts.ADMIN_REFUND_ALREADY_QUEUED_STATUS
-    )
-    await callback.message.edit_text(
-        texts.ADMIN_REFUND_ACCEPTED_TEMPLATE.format(
-            status_text=status_text,
-            amount_rub=int(request.operation.amount),
-            operation_id=safe(request.operation.operation_id),
-            operation_status=safe(request.operation.status),
-        ),
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-    )
-    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            rendered,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug("show_order_card edit_text failed: %s", e)
+    await callback.answer(show_alert=False)

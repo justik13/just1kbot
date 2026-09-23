@@ -133,6 +133,9 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
             created_at=now,
         )
 
+        res_orders = MagicMock()
+        res_orders.scalars().all.return_value = []
+
         res_quote = MagicMock()
         res_quote.scalars().all.return_value = [quote]
 
@@ -142,7 +145,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         res_users = MagicMock()
         res_users.all.return_value = [user]
 
-        session.execute.side_effect = [res_quote, res_audit]
+        session.execute.side_effect = [res_orders, res_quote, res_audit]
         session.scalars.return_value = res_users
 
         entries, total = await get_purchase_logs_paginated(session, page=1, per_page=10)

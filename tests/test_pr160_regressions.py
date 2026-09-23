@@ -1,6 +1,5 @@
 import re
 import unittest
-import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -170,71 +169,6 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         state.clear.assert_not_awaited()
         show_dashboard.assert_not_awaited()
 
-    async def test_balance_purchase_back_cancels_commits_and_then_navigates(self):
-        from bot.handlers.payment import purchase_routes
-
-        quote_id = uuid.uuid4()
-        user = SimpleNamespace(id=42)
-        quote = SimpleNamespace(operation_type="purchase")
-        callback = MagicMock()
-        callback.data = f"balance_purchase_cancel:{quote_id}"
-        callback.answer = AsyncMock()
-        session = MagicMock()
-        session.commit = AsyncMock()
-
-        with (
-            patch.object(
-                purchase_routes,
-                "cancel_account_purchase_quote",
-                new=AsyncMock(return_value=quote),
-            ) as cancel_quote,
-            patch(
-                "bot.handlers.payment.common.render_tariff_showcase",
-                new=AsyncMock(),
-            ) as show_showcase,
-        ):
-            await purchase_routes.cancel_purchase(callback, session, user)
-
-        cancel_quote.assert_awaited_once_with(
-            session,
-            user_id=42,
-            quote_public_id=quote_id,
-        )
-        session.commit.assert_awaited_once()
-        callback.answer.assert_awaited_once_with(show_alert=False)
-        show_showcase.assert_awaited_once_with(callback.bot, callback.message.chat.id, session)
-
-    async def test_balance_purchase_back_does_not_navigate_when_cancel_fails(self):
-        from bot.handlers.payment import purchase_routes, showcase_routes
-        from services.account_purchase import AccountPurchaseError
-
-        quote_id = uuid.uuid4()
-        user = SimpleNamespace(id=42)
-        callback = MagicMock()
-        callback.data = f"balance_purchase_cancel:{quote_id}"
-        callback.answer = AsyncMock()
-        session = MagicMock()
-        session.commit = AsyncMock()
-
-        with (
-            patch.object(
-                purchase_routes,
-                "cancel_account_purchase_quote",
-                new=AsyncMock(
-                    side_effect=AccountPurchaseError("quote_not_active")
-                ),
-            ),
-            patch.object(
-                showcase_routes,
-                "show_tariff_showcase_callback",
-                new=AsyncMock(),
-            ) as show_showcase,
-        ):
-            await purchase_routes.cancel_purchase(callback, session, user)
-
-        callback.answer.assert_awaited_once()
-        session.commit.assert_not_awaited()
-        show_showcase.assert_not_awaited()
 
     def test_device_download_file_action_is_preserved(self):
         ready = get_device_keyboard(profile_id=123, config_ready=True)

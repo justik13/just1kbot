@@ -228,12 +228,106 @@ async def _insert_or_get_entry(
         "currency": values["currency"],
         "payment_id": values.get("payment_id"),
         "quote_id": values.get("quote_id"),
+        "order_id": values.get("order_id"),
         "reversal_of_id": values.get("reversal_of_id"),
         "idempotency_key": values["idempotency_key"],
     }
     if entry is None or not _same_entry(entry, expected):
         raise AccountLedgerConflictError("account_ledger_idempotency_conflict")
     return entry, False
+
+
+async def create_order_debit(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    amount_rub: Decimal,
+    order_id: object,
+    metadata: dict | None = None,
+) -> tuple[AccountLedgerEntry, bool]:
+    amount = -abs(whole_rubles(amount_rub))
+    values = {
+        "user_id": user_id,
+        "entry_type": "purchase_debit",
+        "amount": amount,
+        "currency": "RUB",
+        "payment_id": None,
+        "quote_id": None,
+        "order_id": order_id,
+        "reversal_of_id": None,
+        "idempotency_key": f"order_debit:{order_id}",
+        "metadata_": metadata or {},
+    }
+    return await _insert_or_get_entry(
+        session,
+        values=values,
+        economic_lookup=(
+            (AccountLedgerEntry.entry_type == "purchase_debit")
+            & (AccountLedgerEntry.order_id == order_id)
+        ),
+    )
+
+
+async def create_order_credit(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    amount_rub: Decimal,
+    order_id: object,
+    metadata: dict | None = None,
+) -> tuple[AccountLedgerEntry, bool]:
+    amount = abs(whole_rubles(amount_rub))
+    values = {
+        "user_id": user_id,
+        "entry_type": "payment_credit",
+        "amount": amount,
+        "currency": "RUB",
+        "payment_id": None,
+        "quote_id": None,
+        "order_id": order_id,
+        "reversal_of_id": None,
+        "idempotency_key": f"order_credit:{order_id}",
+        "metadata_": metadata or {},
+    }
+    return await _insert_or_get_entry(
+        session,
+        values=values,
+        economic_lookup=(
+            (AccountLedgerEntry.entry_type == "payment_credit")
+            & (AccountLedgerEntry.order_id == order_id)
+        ),
+    )
+
+
+async def create_order_refund_debit(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    amount_rub: Decimal,
+    order_id: object,
+    metadata: dict | None = None,
+) -> tuple[AccountLedgerEntry, bool]:
+    amount = -abs(whole_rubles(amount_rub))
+    values = {
+        "user_id": user_id,
+        "entry_type": "refund_debit",
+        "amount": amount,
+        "currency": "RUB",
+        "payment_id": None,
+        "quote_id": None,
+        "order_id": order_id,
+        "reversal_of_id": None,
+        "idempotency_key": f"order_refund:{order_id}",
+        "metadata_": metadata or {},
+    }
+    return await _insert_or_get_entry(
+        session,
+        values=values,
+        economic_lookup=(
+            (AccountLedgerEntry.entry_type == "refund_debit")
+            & (AccountLedgerEntry.order_id == order_id)
+        ),
+    )
 
 
 async def credit_succeeded_topup(

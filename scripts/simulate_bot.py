@@ -76,7 +76,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, BIGINT, JSONB
 from sqlalchemy.ext.asyncio import (
-    AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
@@ -109,8 +108,6 @@ from database.models import (
     User,
     VPNProfile,
 )
-from services.account_topup import AccountTopupError, settle_succeeded_topup
-import services.account_topup_refresh as topup_refresh
 from services.amnezia_client import (
     AmneziaAPIResult,
     AmneziaClient,
@@ -318,33 +315,6 @@ async def mock_yookassa_get_payment_result(cls, payment_id: str, **kwargs) -> Yo
     )
 
 
-async def mock_request_topup_status_refresh(
-    session: AsyncSession,
-    *,
-    payment_id: int,
-    source: str = "user_refresh",
-    bot: Bot | None = None,
-) -> Payment:
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
-    if payment is None:
-        raise AccountTopupError("topup_not_found")
-
-    payment.provider_status = "succeeded"
-    payment.provider_confirmed_at = now_utc()
-    payment.paid_at = now_utc()
-    payment.checkout_status = "completed"
-    if payment.fulfillment_status not in {"succeeded", "reversed", "manual_review"}:
-        await settle_succeeded_topup(session, payment=payment, source="simulation_refresh", bot=bot)
-    logging.getLogger("simulation.topup").info(
-        "💰 [TOPUP REFRESH] Succeeded and credited %s RUB to user %s",
-        payment.amount,
-        payment.user_id,
-    )
-    return payment
-
-
 async def mock_amnezia_healthcheck(self) -> bool:
     return True
 
@@ -366,7 +336,6 @@ AmneziaClient.healthcheck = mock_amnezia_healthcheck
 AmneziaClient.get_server_load = mock_amnezia_get_server_load
 YooKassaService.create_payment_result = classmethod(mock_yookassa_create_payment_result)
 YooKassaService.get_payment_result = classmethod(mock_yookassa_get_payment_result)
-topup_refresh.request_topup_status_refresh = mock_request_topup_status_refresh
 
 
 # --- 4. DYNAMIC USER AUTO-SEEDING MIDDLEWARE ---

@@ -39,7 +39,7 @@ class WorkerBackpressureTests(unittest.IsolatedAsyncioTestCase):
             stop.set()
             return []
 
-        async def execute(op):
+        async def execute(op, **kwargs):
             await release.wait()
 
         with (
