@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT, AdminAuditAction
 from database.models import APIOperation, Server, User, VPNProfile
-from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
+from database.repositories.profiles_repo import (
+    ALLOWED_DELETE_STATES,
+    PROFILE_LIST_HIDDEN_STATUSES,
+)
+from database.repositories.servers_repo import is_server_allocatable
 from services.amnezia_capacity import (
     ServerAtCapacity,
     ServerCapacityUnavailable,
@@ -34,7 +38,6 @@ RESERVING_STATUSES = (
     "pending_update",
     "update_failed",
     "create_cleanup_pending",
-    "delete_failed",
 )
 
 
@@ -110,7 +113,7 @@ class DeviceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if not server or server.protocol != AMNEZIA_PROTOCOL or not server.is_active:
+        if not is_server_allocatable(server, AMNEZIA_PROTOCOL):
             raise ServerUnavailable("Invalid or disabled server")
         if (
             user.is_banned
@@ -119,11 +122,21 @@ class DeviceService:
         ):
             raise NoActiveSubscription("No active subscription")
         if not device_name:
-            user_profiles = (
+            all_user_profiles = (
                 await session.execute(
                     select(VPNProfile).where(VPNProfile.user_id == user.id)
                 )
             ).scalars().all()
+            existing_names_on_server = {
+                p.device_name.lower()
+                for p in all_user_profiles
+                if p.server_id == server.id and p.device_name
+            }
+            user_profiles = [
+                p
+                for p in all_user_profiles
+                if p.provisioning_status not in PROFILE_LIST_HIDDEN_STATUSES
+            ]
             used = set()
             for p in user_profiles:
                 m = re.search(r"#(\d+)$", p.device_name)
@@ -132,11 +145,18 @@ class DeviceService:
             limit = user.device_limit or 5
             slot_index = 1
             for i in range(1, limit + 1):
-                if i not in used:
+                candidate_name = texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=i)
+                if i not in used and candidate_name.lower() not in existing_names_on_server:
                     slot_index = i
                     break
             else:
-                slot_index = max(used) + 1 if used else 1
+                candidate_index = max(used) + 1 if used else 1
+                while (
+                    texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=candidate_index).lower()
+                    in existing_names_on_server
+                ):
+                    candidate_index += 1
+                slot_index = candidate_index
             device_name = texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=slot_index)
         duplicate = (
             await session.execute(
@@ -368,7 +388,7 @@ class DeviceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if not target_server or target_server.protocol != AMNEZIA_PROTOCOL or not target_server.is_active:
+        if not is_server_allocatable(target_server, AMNEZIA_PROTOCOL):
             raise ServerUnavailable("Invalid or disabled server")
 
         if (

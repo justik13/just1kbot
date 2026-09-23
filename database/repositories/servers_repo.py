@@ -135,16 +135,42 @@ async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
     return counts
 
 
+def is_server_allocatable(server: Server | None, protocol: str = AMNEZIA_PROTOCOL) -> bool:
+    """Return True if server is valid, active, matching protocol, and healthy for allocation/migration."""
+    if not server:
+        return False
+    server_proto = getattr(server, "protocol", None)
+    if server_proto is not None and server_proto != protocol:
+        return False
+    if getattr(server, "is_active", True) is False:
+        return False
+    health = getattr(server, "health_state", None)
+    if health in (
+        ServerHealthState.AUTO_DISABLED,
+        ServerHealthState.MANUAL_DISABLED,
+        ServerHealthState.PROBLEM,
+    ):
+        return False
+    lifecycle = getattr(server, "lifecycle_status", None)
+    if lifecycle in (
+        ServerLifecycleStatus.DECOMMISSIONING,
+        ServerLifecycleStatus.DECOMMISSIONED,
+        ServerLifecycleStatus.ARCHIVED,
+    ):
+        return False
+    caps = getattr(server, "capabilities", None) or []
+    if protocol == AMNEZIA_PROTOCOL and "xray_origin" in caps:
+        return False
+    return True
+
+
 async def get_available_servers(session: AsyncSession) -> list[Server]:
     servers = await get_active_servers(session)
     if not servers:
         return []
 
-    # Filter servers for AWG allocation: strictly require AMNEZIA_PROTOCOL and exclude Xray Origin nodes
-    awg_servers = [
-        s for s in servers
-        if s.protocol == AMNEZIA_PROTOCOL and "xray_origin" not in (s.capabilities or [])
-    ]
+    # Filter servers for AWG allocation using canonical is_server_allocatable predicate
+    awg_servers = [s for s in servers if is_server_allocatable(s, AMNEZIA_PROTOCOL)]
     if not awg_servers:
         return []
 

@@ -260,7 +260,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
 
 
 async def _cleanup_stuck_profiles():
-    # Cleanup dangling pending_create, create_cleanup_pending, and deleting profiles.
+    # Cleanup dangling pending_create, create_cleanup_pending, deleting, and delete_failed profiles.
     # Only clean up profiles that do NOT have an active APIOperation in flight.
     from sqlalchemy import func
     from sqlalchemy import update as sa_update
@@ -274,7 +274,7 @@ async def _cleanup_stuck_profiles():
                     select(VPNProfile)
                     .where(
                         VPNProfile.provisioning_status.in_(
-                            ["pending_create", "create_cleanup_pending", "deleting"]
+                            ["pending_create", "create_cleanup_pending", "deleting", "delete_failed"]
                         ),
                         VPNProfile.created_at < cutoff_time,
                     )
@@ -319,6 +319,56 @@ async def _cleanup_stuck_profiles():
 
             if peer_id:
                 profile.peer_id = peer_id
+                from database.models import Server
+
+                server = await session.get(Server, profile.server_id)
+                if server and getattr(server, "is_active", True) is False:
+                    logger.info(
+                        "Skipping delete_peer queue for profile %s: server %s is inactive",
+                        profile.id,
+                        profile.server_id,
+                    )
+                    continue
+
+                from config.enums import ServerHealthState
+
+                if server and getattr(server, "health_state", None) in (
+                    ServerHealthState.AUTO_DISABLED,
+                    ServerHealthState.MANUAL_DISABLED,
+                    ServerHealthState.PROBLEM,
+                ):
+                    logger.info(
+                        "Skipping delete_peer queue for profile %s: server %s is in %s",
+                        profile.id,
+                        profile.server_id,
+                        server.health_state,
+                    )
+                    continue
+
+                # For delete_failed profiles, avoid infinite retry loops when operation reached dead status.
+                # Require at least 6 hours cooldown after the dead operation before cleanup revives it.
+                if profile.provisioning_status == "delete_failed":
+                    dead_op_res = await session.execute(
+                        select(APIOperation)
+                        .where(
+                            APIOperation.profile_id == profile.id,
+                            APIOperation.operation_type == "delete_peer",
+                            APIOperation.status.in_(["dead", "cancelled"]),
+                        )
+                        .order_by(APIOperation.id.desc())
+                        .limit(1)
+                    )
+                    dead_op = dead_op_res.scalar_one_or_none()
+                    if dead_op:
+                        op_time = dead_op.completed_at or dead_op.updated_at
+                        if op_time and op_time > now_utc() - timedelta(hours=6):
+                            logger.debug(
+                                "Skipping delete_failed profile %s retry: dead operation %s in cooldown",
+                                profile.id,
+                                dead_op.id,
+                            )
+                            continue
+
                 try:
                     from services.api_operations_queue import (
                         ensure_delete_operation,
@@ -349,14 +399,15 @@ async def _cleanup_stuck_profiles():
                         "Failed to queue delete_peer operation during stuck profile cleanup: %s",
                         exc,
                     )
-                    profile.provisioning_status = "create_cleanup_pending"
-            elif profile.provisioning_status in {"create_cleanup_pending", "deleting"}:
+                    if profile.provisioning_status != "delete_failed":
+                        profile.provisioning_status = "create_cleanup_pending"
+            elif profile.provisioning_status in {"create_cleanup_pending", "deleting", "delete_failed"}:
                 # Peer ID unknown: requeue create_peer for reconciliation by client_name on Amnezia
                 if create_op and create_op.status in {"dead", "cancelled"}:
                     from database.models import Server
 
                     server = await session.get(Server, profile.server_id)
-                    if server and server.is_active:
+                    if server and getattr(server, "is_active", True):
                         await session.execute(
                             sa_update(APIOperation)
                             .where(APIOperation.id == create_op.id)
@@ -380,6 +431,17 @@ async def _cleanup_stuck_profiles():
                 elif not create_op and profile.provisioning_status == "create_cleanup_pending":
                     # Recreate the durable reconciliation command instead of
                     # deleting a state that explicitly means a peer may exist.
+                    from database.models import Server
+
+                    server = await session.get(Server, profile.server_id)
+                    if server and getattr(server, "is_active", True) is False:
+                        logger.info(
+                            "Skipping CREATE reconciliation op for profile %s: server %s is inactive",
+                            profile.id,
+                            profile.server_id,
+                        )
+                        continue
+
                     try:
                         from services.api_operations_queue import (
                             enqueue_api_operation,
@@ -414,11 +476,13 @@ async def _cleanup_stuck_profiles():
                             profile.id,
                             type(exc).__name__,
                         )
-                elif not create_op and profile.provisioning_status == "deleting":
+                elif not create_op and profile.provisioning_status in {"deleting", "delete_failed"}:
                     # No operation ever existed and no peer_id; safe to delete local tombstone
                     await session.delete(profile)
                     logger.info(
-                        "Deleted orphaned tombstone profile %s without operations", profile.id
+                        "Deleted orphaned tombstone profile %s without operations (status=%s)",
+                        profile.id,
+                        profile.provisioning_status,
                     )
             else:
                 # pending_create where attempts == 0: safe to fail closed without side effects

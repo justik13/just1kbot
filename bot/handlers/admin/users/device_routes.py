@@ -60,7 +60,7 @@ async def admin_user_devices(
         )
         return
 
-    profiles = await get_user_profiles(session, user.id)
+    profiles = await get_user_profiles(session, user.id, include_deleting=True)
 
     header = format_admin_breadcrumbs(texts.BTN_USERS, f"ID {telegram_id}", texts.ADMIN_USERS_DEVICE_DEVICES)
     now = now_utc()

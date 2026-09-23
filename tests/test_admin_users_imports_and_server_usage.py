@@ -191,10 +191,9 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
             for button in row
         ]
         user_button = next(b for b in buttons if b.callback_data.startswith("admin_user_card:700"))
-        # 4 profiles count toward quota: active, pending_create, create_cleanup_pending, delete_failed
-        # (create_cleanup_pending and delete_failed still have real server peers)
-        # Only deleting (in-flight delete) and create_failed (no peer) are excluded
-        self.assertIn("4 устр.", user_button.text)
+        # 3 profiles count toward quota: active, pending_create, create_cleanup_pending
+        # deleting, create_failed, and delete_failed are excluded from user quota
+        self.assertIn("3 устр.", user_button.text)
         self.assertNotIn("6 устр.", user_button.text)
         self.assertNotIn("2 устр.", user_button.text)
 

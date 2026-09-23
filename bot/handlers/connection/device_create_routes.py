@@ -13,12 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import DeviceCreationStates
+from config.constants import AMNEZIA_PROTOCOL
 from database.connection import get_session
 from database.models import User, VPNProfile
 from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
+    is_server_allocatable,
 )
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.device_service import (
@@ -55,7 +57,7 @@ _creating_devices: TTLCache[int, bool] = TTLCache(
 
 async def _await_profile_ready(
     profile_id: int,
-    timeout_seconds: float = 6.0,
+    timeout_seconds: float = 15.0,
     poll_interval: float = 0.1,
 ) -> VPNProfile | None:
     """Poll for profile to become active or fail within a monotonic UI wait window.
@@ -281,7 +283,7 @@ async def _process_server_selection(
         await state.clear()
         return
 
-    if not server.is_active:
+    if not is_server_allocatable(server, AMNEZIA_PROTOCOL):
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -455,7 +457,7 @@ async def _process_server_selection(
         await state.clear()
         if new_profile:
             try:
-                ready_profile = await _await_profile_ready(new_profile.id, timeout_seconds=4.0)
+                ready_profile = await _await_profile_ready(new_profile.id, timeout_seconds=15.0)
             except Exception:
                 logger.exception("Error during _await_profile_ready for profile_id=%s", new_profile.id)
                 ready_profile = None
