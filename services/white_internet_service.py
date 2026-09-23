@@ -1338,8 +1338,10 @@ class WhiteInternetService:
             origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{origin_tag_formatted}"
             links.append(origin_link)
 
-        if relays:
+        if relays and isinstance(relays, list):
             for r in relays:
+                if not isinstance(r, dict):
+                    continue
                 relay_code = r.get("code") or r.get("name") or "default"
                 r_path = r.get("path") or f"{base}/{relay_code}"
                 custom_name = relay_names.get(relay_code) if (relay_names and isinstance(relay_names, dict)) else None

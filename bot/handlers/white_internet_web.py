@@ -198,7 +198,9 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             try:
                 relays = json.loads(os.environ["WHITE_INTERNET_RELAYS"])
             except Exception:
-                pass
+                relays = None
+        if not isinstance(relays, list):
+            relays = None
 
         # HWID (Device ID) strict enforcement
         hwid = (
@@ -240,9 +242,20 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         relay_badges = extra.get("relay_badges") if isinstance(extra.get("relay_badges"), dict) else None
 
         origin_hidden = bool(extra.get("origin_hidden", False))
-        relay_hidden = set(extra.get("relay_hidden", []))
+        relay_hidden_raw = extra.get("relay_hidden")
+        if isinstance(relay_hidden_raw, (list, tuple, set)):
+            relay_hidden = {str(item) for item in relay_hidden_raw}
+        elif isinstance(relay_hidden_raw, str) and relay_hidden_raw.strip():
+            relay_hidden = {item.strip() for item in relay_hidden_raw.split(",") if item.strip()}
+        else:
+            relay_hidden = set()
+
         active_relays = (
-            [r for r in relays if (r.get("code") or r.get("name")) not in relay_hidden]
+            [
+                r
+                for r in relays
+                if isinstance(r, dict) and (r.get("code") or r.get("name")) not in relay_hidden
+            ]
             if relays
             else None
         )
@@ -297,7 +310,12 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                     expire=expire_ts,
                 ),
                 "Profile-Title": f"base64:{profile_title_b64}",
-                "Profile-Update-Interval": os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6"),
+                "Profile-Update-Interval": (
+                    os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip()
+                    if os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip().isdigit()
+                    and int(os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip()) > 0
+                    else "6"
+                ),
                 "Support-Url": support_url,
                 "Profile-Web-Page-Url": channel_url,
                 "hide-url": "1",

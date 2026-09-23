@@ -256,6 +256,8 @@ manifest_rollback() {
             if "$XRAY_BIN" run -test -config "$XRAY_CONFIG" >/dev/null 2>&1; then
                 systemctl restart xray 2>/dev/null || true
             fi
+        else
+            systemctl stop xray 2>/dev/null || true
         fi
     fi
 

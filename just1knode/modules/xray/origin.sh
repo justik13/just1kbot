@@ -358,7 +358,7 @@ rules.append({
 # Split-Routing: прямой выход в Рунет с московского IP Origin-сервера
 rules.append({
     'type': 'field',
-    'inboundTag': ['just1k-wl-default', 'just1k-wl-inbounds'],
+    'inboundTag': ['just1k-wl-default'],
     'domain': [
         'geosite:category-ru',
         'geosite:tld-ru',
@@ -371,7 +371,7 @@ rules.append({
 })
 rules.append({
     'type': 'field',
-    'inboundTag': ['just1k-wl-default', 'just1k-wl-inbounds'],
+    'inboundTag': ['just1k-wl-default'],
     'ip': ['geoip:ru'],
     'outboundTag': 'just1k-wl-direct'
 })

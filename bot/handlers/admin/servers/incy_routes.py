@@ -211,29 +211,11 @@ async def process_server_incy_param_input(
         return
 
     raw_text = (message.text or "").strip()
-    if raw_text == "/cancel":
+    if raw_text.startswith("/"):
         await state.clear()
-        details = _get_server_incy_details(server)
-        flag = server.country_flag or texts.EMOJI_GLOBE
-        card_text = texts.ADMIN_SERVER_INCY_CARD.format(
-            flag=flag,
-            name=safe(server.name),
-            title=safe(details["title"]),
-            description=safe(details["description"]),
-            announce=safe(details["announce"]),
-            announce_url=safe(details["announce_url"]),
-            origin_name=safe(details["origin_name"]),
-            origin_badge=safe(details["origin_badge"]),
-            origin_status=safe(details["origin_status"]),
-        )
-        await message.answer(
-            card_text,
-            reply_markup=get_admin_server_incy_keyboard(server_id, origin_hidden=details["origin_hidden"]),
-            parse_mode="HTML",
-        )
         return
 
-    is_clear = raw_text in ("/clear", "-")
+    is_clear = raw_text in ("-", "—", "–")
     is_none = raw_text.lower() == "none"
 
     if param == "announce_url" and not (is_clear or is_none):
@@ -632,19 +614,21 @@ async def process_server_incy_relay_name_input(
         return
 
     raw_text = (message.text or "").strip()
+    if raw_text.startswith("/"):
+        await state.clear()
+        return
+
     extra = dict(server.extra_data or {})
     relay_names = dict(extra.get("relay_names") or {})
 
-    if raw_text != "/cancel":
-        if raw_text in ("/clear", "-", "none"):
-            relay_names.pop(relay_code, None)
-        else:
-            relay_names[relay_code] = raw_text[:30]
+    if raw_text in ("-", "—", "–"):
+        relay_names.pop(relay_code, None)
+    else:
+        relay_names[relay_code] = raw_text[:30]
 
-        extra["relay_names"] = relay_names
-        await update_server(session, server, extra_data=extra)
-        await session.refresh(server)
-
+    extra["relay_names"] = relay_names
+    await update_server(session, server, extra_data=extra)
+    await session.refresh(server)
     await state.clear()
 
     relays = extra.get("relays", [])
@@ -781,21 +765,23 @@ async def process_server_incy_relay_badge_input(
         return
 
     raw_text = (message.text or "").strip()
+    if raw_text.startswith("/"):
+        await state.clear()
+        return
+
     extra = dict(server.extra_data or {})
     relay_badges = dict(extra.get("relay_badges") or {})
 
-    if raw_text != "/cancel":
-        if raw_text in ("/clear", "-"):
-            relay_badges.pop(relay_code, None)
-        elif raw_text.lower() == "none":
-            relay_badges[relay_code] = "none"
-        else:
-            relay_badges[relay_code] = raw_text[:30]
+    if raw_text in ("-", "—", "–"):
+        relay_badges.pop(relay_code, None)
+    elif raw_text.lower() == "none":
+        relay_badges[relay_code] = "none"
+    else:
+        relay_badges[relay_code] = raw_text[:30]
 
-        extra["relay_badges"] = relay_badges
-        await update_server(session, server, extra_data=extra)
-        await session.refresh(server)
-
+    extra["relay_badges"] = relay_badges
+    await update_server(session, server, extra_data=extra)
+    await session.refresh(server)
     await state.clear()
 
     relays = extra.get("relays", [])

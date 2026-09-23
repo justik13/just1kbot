@@ -135,7 +135,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
 
         msg = MagicMock(spec=Message)
         msg.from_user = self.admin_user
-        msg.text = "/clear"
+        msg.text = "-"
         msg.answer = AsyncMock()
 
         server = Server(
@@ -504,3 +504,28 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     mock_update.assert_awaited_once()
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["relay_badges"]["de"], "none")
+
+    async def test_process_server_incy_param_input_slash_command_resets_state(self):
+        await self.state.set_state(AdminStates.editing_server_incy_param)
+        await self.state.update_data(server_id=1, incy_param="title")
+
+        msg = MagicMock(spec=Message)
+        msg.from_user = self.admin_user
+        msg.text = "/start"
+        msg.answer = AsyncMock()
+
+        server = Server(
+            id=1,
+            name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
+            is_active=True,
+            extra_data={},
+        )
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
+                    await process_server_incy_param_input(msg, self.state, self.mock_session)
+                    mock_update.assert_not_awaited()
+                    state_after = await self.state.get_state()
+                    self.assertIsNone(state_after)

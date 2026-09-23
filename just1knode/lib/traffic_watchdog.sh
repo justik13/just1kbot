@@ -134,7 +134,7 @@ try:
                         continue
                     name, stats = line.split(':', 1)
                     name = name.strip()
-                    if name == 'lo' or name.startswith(('docker', 'veth', 'br-', 'wg', 'tun', 'tap')):
+                    if name == 'lo' or name.startswith(('docker', 'veth', 'br-', 'wg', 'awg', 'tun', 'tap')):
                         continue
                     cols = stats.split()
                     if len(cols) >= 9:
@@ -280,7 +280,17 @@ finally:
             rm -f "$TRAFFIC_CUTOFF_FLAG" 2>/dev/null || true
             set_state_val "traffic_cutoff_triggered" "false"
             warn "Лимит трафика восстановлен / начат новый биллинговый период. Запуск службы Xray..."
-            systemctl start xray 2>/dev/null || true
+            local xray_bin="${XRAY_BIN:-/usr/local/bin/xray}"
+            local xray_cfg="${XRAY_CONFIG:-/usr/local/etc/xray/config.json}"
+            if [[ -f "$xray_cfg" && -x "$xray_bin" ]]; then
+                if "$xray_bin" run -test -config "$xray_cfg" >/dev/null 2>&1; then
+                    systemctl start xray 2>/dev/null || true
+                else
+                    warn "Конфигурация Xray некорректна при проверке run -test, автоматический запуск отменен."
+                fi
+            else
+                systemctl start xray 2>/dev/null || true
+            fi
             local resume_msg="✅ <b>Лимит трафика сброшен / обновлен</b>
 
 Сервер: <code>$(hostname)</code>
@@ -448,8 +458,19 @@ disable_traffic_limit() {
     set_state_val "traffic_cutoff_triggered" "false"
     remove_traffic_watchdog_timer
     if [[ "$cutoff_active" == "true" ]]; then
-        systemctl start xray 2>/dev/null || true
-        log "Служба Xray автоматически запущена после снятия лимита."
+        local xray_bin="${XRAY_BIN:-/usr/local/bin/xray}"
+        local xray_cfg="${XRAY_CONFIG:-/usr/local/etc/xray/config.json}"
+        if [[ -f "$xray_cfg" && -x "$xray_bin" ]]; then
+            if "$xray_bin" run -test -config "$xray_cfg" >/dev/null 2>&1; then
+                systemctl start xray 2>/dev/null || true
+                log "Служба Xray автоматически запущена после снятия лимита."
+            else
+                warn "Конфигурация Xray некорректна при проверке run -test, автоматический запуск отменен."
+            fi
+        else
+            systemctl start xray 2>/dev/null || true
+            log "Служба Xray автоматически запущена после снятия лимита."
+        fi
     fi
     log "Контроль лимита трафика успешно отключен. Сервер переведен в безлимитный режим."
 }
