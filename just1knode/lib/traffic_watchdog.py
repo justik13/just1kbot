@@ -96,34 +96,49 @@ def main():
         warn_sent = bool(data.get('warn_sent', False))
         cutoff_sent = bool(data.get('cutoff_sent', False))
 
-        # Если не смогли прочитать /proc/net/dev, делаем вид, что tx_raw не изменился
-        if not proc_read_ok:
-            tx_raw = raw_tx_last
-
-        if saved_cycle != current_cycle:
-            # Проверяем: это смена настроек reset_day администратором или новый календарный период хостера?
-            if saved_reset_day != 0 and saved_reset_day != reset_day and saved_cycle:
-                # Администратор перенастроил день сброса: сохраняем накопленный трафик периода
+        if proc_read_ok:
+            if saved_cycle != current_cycle:
+                # Проверяем: это смена настроек reset_day администратором или новый календарный период хостера?
+                if saved_reset_day != 0 and saved_reset_day != reset_day and saved_cycle:
+                    # Администратор перенастроил день сброса: сохраняем накопленный трафик периода
+                    if tx_raw >= raw_tx_last:
+                        delta = tx_raw - raw_tx_last
+                    else:
+                        delta = tx_raw
+                    accumulated += delta
+                    raw_tx_last = tx_raw
+                else:
+                    # Новый расчетный месяц у хостера: сброс накопленного счетчика
+                    accumulated = 0
+                    raw_tx_last = tx_raw
+                    warn_sent = False
+                    cutoff_sent = False
+            else:
                 if tx_raw >= raw_tx_last:
                     delta = tx_raw - raw_tx_last
                 else:
+                    # Сервер перезагружался: счетчик ядра сбросился
                     delta = tx_raw
                 accumulated += delta
                 raw_tx_last = tx_raw
-            else:
-                # Новый расчетный месяц у хостера: сброс накопленного счетчика
-                accumulated = 0
-                raw_tx_last = tx_raw
-                warn_sent = False
-                cutoff_sent = False
+            
+            cycle_to_save = current_cycle
         else:
-            if tx_raw >= raw_tx_last:
-                delta = tx_raw - raw_tx_last
+            # Не смогли прочитать /proc/net/dev. Не вычисляем delta и не обновляем raw_tx_last.
+            if saved_cycle != current_cycle and saved_cycle:
+                if saved_reset_day != 0 and saved_reset_day != reset_day:
+                    # Смена дня сброса: без tx_raw оставляем накопленный трафик как есть.
+                    pass
+                else:
+                    # Новый месяц: сброс накопленного счетчика, чтобы разблокировать доступ.
+                    accumulated = 0
+                    warn_sent = False
+                    cutoff_sent = False
+                cycle_to_save = current_cycle
             else:
-                # Сервер перезагружался: счетчик ядра сбросился
-                delta = tx_raw
-            accumulated += delta
-            raw_tx_last = tx_raw
+                # Тот же цикл или первый запуск (saved_cycle == '').
+                # При первом запуске не сохраняем текущий цикл, чтобы корректно инициализировать raw_tx_last при успешном чтении.
+                cycle_to_save = saved_cycle
 
         limit_bytes = limit_gb * (1024 ** 3)
         acc_gb_fmt = f'{float(accumulated) / (1024 ** 3):.2f}'
@@ -151,7 +166,7 @@ def main():
 
         # Атомарная запись через tempfile + os.replace (POSIX atomic rename)
         data = {
-            'cycle': current_cycle,
+            'cycle': cycle_to_save,
             'reset_day': reset_day,
             'raw_tx_last': raw_tx_last,
             'accumulated_tx': accumulated,
