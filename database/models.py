@@ -35,6 +35,8 @@ from config.enums import (
     ApiOperationStatus,
     ApiOperationType,
     EntitlementEntryType,
+    OrderStatus,
+    OrderServiceType,
     PaidValueEntryType,
     PaymentCheckoutStatus,
     PaymentDisputeStatus,
@@ -74,6 +76,8 @@ VPN_PROVISIONING_STATUSES = tuple(s.value for s in VPNProvisioningStatus)
 WEBHOOK_INBOX_STATUSES = tuple(s.value for s in WebhookInboxStatus)
 PAYMENT_DISPUTE_STATUSES = tuple(s.value for s in PaymentDisputeStatus)
 PAYMENT_CHECKOUT_STATUSES = tuple(s.value for s in PaymentCheckoutStatus)
+ORDER_STATUSES = tuple(s.value for s in OrderStatus)
+ORDER_SERVICE_TYPES = tuple(s.value for s in OrderServiceType)
 
 
 class Base(DeclarativeBase):
@@ -202,6 +206,11 @@ class User(Base):
 
     payments = relationship(
         "Payment",
+        back_populates="user",
+    )
+
+    orders = relationship(
+        "Order",
         back_populates="user",
     )
 
@@ -746,6 +755,75 @@ class Payment(Base):
     events = relationship("PaymentEvent", back_populates="payment", cascade="all, delete-orphan")
 
 
+class Order(Base):
+    """Clean commercial order entity for simple billing."""
+
+    __tablename__ = "orders"
+    __table_args__ = (
+        Index("ix_orders_user_created", "user_id", "created_at"),
+        Index(
+            "ix_orders_external_id",
+            "external_id",
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
+        Index("ix_orders_status", "status"),
+        CheckConstraint(
+            sql_enum_in("status", OrderStatus),
+            name="ck_orders_status",
+        ),
+        CheckConstraint(
+            sql_enum_in("service_type", OrderServiceType),
+            name="ck_orders_service_type",
+        ),
+        CheckConstraint(
+            "amount_rub >= 0 AND amount_rub = trunc(amount_rub)",
+            name="ck_orders_amount_rub",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    service_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="awg", server_default=text("'awg'")
+    )
+    tariff_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tariffs.id", ondelete="SET NULL"), nullable=True
+    )
+    amount_rub: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    duration_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    traffic_bytes: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    device_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payment_method: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="yookassa", server_default=text("'yookassa'")
+    )
+    external_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    payment_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user = relationship("User", back_populates="orders", foreign_keys=[user_id])
+    tariff = relationship("Tariff", foreign_keys=[tariff_id])
+    ledger_entries = relationship("AccountLedgerEntry", back_populates="order")
+
+
 class AccountLedgerEntry(Base):
     """Append-only real-money account history.
 
@@ -766,16 +844,16 @@ class AccountLedgerEntry(Base):
         ),
         CheckConstraint(
             "(entry_type = 'payment_credit' AND amount > 0 "
-            "AND payment_id IS NOT NULL AND quote_id IS NULL "
+            "AND (payment_id IS NOT NULL OR order_id IS NOT NULL) AND quote_id IS NULL "
             "AND reversal_of_id IS NULL) OR "
             "(entry_type = 'purchase_debit' AND amount < 0 "
-            "AND payment_id IS NULL AND quote_id IS NOT NULL "
+            "AND payment_id IS NULL AND (quote_id IS NOT NULL OR order_id IS NOT NULL) "
             "AND reversal_of_id IS NULL) OR "
             "(entry_type = 'purchase_reversal' AND amount > 0 "
-            "AND payment_id IS NULL AND quote_id IS NOT NULL "
+            "AND payment_id IS NULL AND (quote_id IS NOT NULL OR order_id IS NOT NULL) "
             "AND reversal_of_id IS NOT NULL) OR "
             "(entry_type IN ('refund_debit','chargeback_debit') "
-            "AND amount < 0 AND payment_id IS NOT NULL "
+            "AND amount < 0 AND (payment_id IS NOT NULL OR order_id IS NOT NULL) "
             "AND quote_id IS NULL AND reversal_of_id IS NULL) OR "
             "(entry_type = 'admin_adjustment' AND payment_id IS NULL "
             "AND quote_id IS NULL AND reversal_of_id IS NULL)",
@@ -791,13 +869,25 @@ class AccountLedgerEntry(Base):
             "uq_account_ledger_payment_credit",
             "payment_id",
             unique=True,
-            postgresql_where=text("entry_type='payment_credit'"),
+            postgresql_where=text("entry_type='payment_credit' AND payment_id IS NOT NULL"),
         ),
         Index(
             "uq_account_ledger_purchase_debit",
             "quote_id",
             unique=True,
-            postgresql_where=text("entry_type='purchase_debit'"),
+            postgresql_where=text("entry_type='purchase_debit' AND quote_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_account_ledger_order_debit",
+            "order_id",
+            unique=True,
+            postgresql_where=text("entry_type='purchase_debit' AND order_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_account_ledger_order_credit",
+            "order_id",
+            unique=True,
+            postgresql_where=text("entry_type='payment_credit' AND order_id IS NOT NULL"),
         ),
         Index(
             "uq_account_ledger_reversal",
@@ -809,6 +899,11 @@ class AccountLedgerEntry(Base):
             "ix_account_ledger_payment_debits",
             "payment_id",
             postgresql_where=text("entry_type IN ('refund_debit','chargeback_debit')"),
+        ),
+        Index(
+            "ix_account_ledger_order_id",
+            "order_id",
+            postgresql_where=text("order_id IS NOT NULL"),
         ),
     )
 
@@ -827,6 +922,11 @@ class AccountLedgerEntry(Base):
     quote_id: Mapped[int | None] = mapped_column(
         ForeignKey("tariff_quotes.id", ondelete="RESTRICT"), nullable=True
     )
+    order_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orders.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     reversal_of_id: Mapped[int | None] = mapped_column(
         ForeignKey("account_ledger_entries.id", ondelete="RESTRICT"), nullable=True
     )
@@ -837,6 +937,8 @@ class AccountLedgerEntry(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
     )
+
+    order = relationship("Order", back_populates="ledger_entries", foreign_keys=[order_id])
 
 
 class AccountLedgerAllocation(Base):

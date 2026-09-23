@@ -14,10 +14,10 @@ from database.repositories import (
     users_repo,
 )
 from services import (
-    account_purchase,
     ban_service,
     referral_bonus,
 )
+from services.order_service import OrderService
 
 DB = os.getenv("TEST_DATABASE_URL")
 
@@ -105,17 +105,16 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
             bal = (await account_ledger_repo.get_account_balance(session, user_id=user.id)).available
             self.assertEqual(bal, Decimal("500.00"))
 
-            # 5. Prepare Purchase Intent
-            intent = await account_purchase.prepare_account_purchase(
+            # 5. Purchase Subscription via Wallet
+            order = await OrderService.pay_from_wallet(
                 session,
                 user_id=user.id,
+                service_type="awg",
                 tariff_id=tariff.id,
             )
-            self.assertIsNotNone(intent.quote)
-            self.assertEqual(intent.shortage, Decimal(0))
+            self.assertIsNotNone(order)
+            self.assertEqual(order.status, "paid")
 
-            # Extend user subscription manually to simulate successful settlement
-            await users_repo.extend_subscription(session, user, 30)
             u_updated = await users_repo.get_user_by_telegram_id(session, user.telegram_id)
             self.assertIsNotNone(u_updated.subscription_end)
 

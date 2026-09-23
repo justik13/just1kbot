@@ -1,13 +1,9 @@
 import unittest
-from unittest.mock import AsyncMock
 
 from bot.handlers.webhook import (
     _validate_webhook_object,
     _validate_webhook_payload,
 )
-from services.workers.webhook_inbox import InboxClaim, fetch_provider
-from services.yookassa_service import YooKassaResult
-
 
 class WebhookObjectValidationTests(unittest.TestCase):
     def test_valid_payment_object(self):
@@ -73,41 +69,6 @@ class WebhookObjectValidationTests(unittest.TestCase):
                     "object": {"id": "payment-1"},
                 }
             )
-
-
-class WebhookProviderVerificationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_refund_webhook_gets_current_refund_object(self):
-        result = YooKassaResult(
-            True,
-            value={
-                "id": "refund-1",
-                "status": "succeeded",
-                "payment_id": "payment-1",
-                "amount": {"value": "10.00", "currency": "RUB"},
-            },
-        )
-        transport = type(
-            "Transport",
-            (),
-            {
-                "get_refund_result": AsyncMock(return_value=result),
-                "get_payment_result": AsyncMock(),
-            },
-        )
-        claim = InboxClaim(
-            1,
-            "worker",
-            1,
-            "refund.succeeded",
-            "payment-1",
-            None,
-            {"object": {"id": "refund-1"}},
-            "event-key",
-        )
-
-        self.assertIs(await fetch_provider(claim, transport), result)
-        transport.get_refund_result.assert_awaited_once_with("refund-1")
-        transport.get_payment_result.assert_not_awaited()
 
 
 class WebhookRouteRegistrationTests(unittest.TestCase):

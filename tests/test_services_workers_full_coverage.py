@@ -7,12 +7,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import Server, User, VPNProfile
-from services.payment_queue_health import PaymentQueueHealthSnapshot, QueueSnapshot
 from services.workers import (
     cleanup,
     heartbeat,
     notifications,
-    queue_health,
 )
 
 DB = os.getenv("TEST_DATABASE_URL")
@@ -159,27 +157,5 @@ class ServicesWorkersFullCoverageTests(unittest.IsolatedAsyncioTestCase):
             with patch("database.connection.session_scope") as mock_scope:
                 mock_scope.return_value.__aenter__.return_value = s2
                 await heartbeat._check_circuit_breakers()
-
-    async def test_queue_health_monitor_step(self):
-        bot = AsyncMock()
-        monitor = queue_health.QueueHealthMonitor(bot)
-        q_snap = QueueSnapshot(
-            name="test_q",
-            pending=0,
-            retry=0,
-            due=0,
-            overdue=0,
-            processing=0,
-            stale_processing=0,
-            dead=0,
-            oldest_due_age_seconds=None,
-            oldest_stale_age_seconds=None,
-            oldest_dead_age_seconds=None,
-            examples=(),
-        )
-        snapshot = PaymentQueueHealthSnapshot(observed_at=datetime.datetime.now(datetime.timezone.utc), queues=(q_snap,))
-        monitor.observe(snapshot)
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -5,15 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiohttp import web
 
 from config.enums import ServiceType
-from database.models import Tariff, Payment, User
+from database.models import Tariff, User
 from database.repositories.tariffs_repo import get_active_tariffs
-from services.account_purchase import (
-    AccountPurchaseError,
-    prepare_account_purchase,
-    _settle_account_purchase,
-)
 from services.ban_service import BanService
-from services.workers.payments import _retry_auto_fulfillment, _needs_attention
 from bot.main import HealthcheckAccessLogger
 
 
@@ -36,65 +30,6 @@ class AuditRemediationTests(unittest.IsolatedAsyncioTestCase):
         stmt = session.execute.call_args[0][0]
         compiled = str(stmt)
         self.assertIn("tariffs.service_type =", compiled)
-
-    async def test_prepare_account_purchase_blocks_white_internet_tariff(self):
-        """H1: prepare_account_purchase must reject white_internet tariffs."""
-        session = AsyncMock()
-        wi_tariff = Tariff(
-            id=99,
-            name="Белый Интернет 50 ГБ",
-            service_type=ServiceType.WHITE_INTERNET,
-            is_active=True,
-            device_limit=1,
-            duration_days=30,
-            price_rub=250,
-        )
-        session.scalar.return_value = wi_tariff
-        user = User(id=1, telegram_id=12345, financial_hold=False, is_deleted=False, is_banned=False)
-
-        with patch("services.account_purchase.lock_checkout_user", return_value=user), \
-             patch("services.account_purchase.get_account_balance") as mock_bal:
-            mock_bal.return_value = MagicMock(debt=0)
-            with self.assertRaises(AccountPurchaseError) as ctx:
-                await prepare_account_purchase(session, user_id=1, tariff_id=99)
-            self.assertEqual(ctx.exception.code, "tariff_unavailable")
-
-    async def test_settle_account_purchase_blocks_white_internet_tariff(self):
-        """H1: _settle_account_purchase must reject white_internet tariffs."""
-        from datetime import timedelta
-        from utils.datetime_helpers import now_utc
-
-        session = AsyncMock()
-        wi_tariff = Tariff(
-            id=99,
-            name="Белый Интернет 50 ГБ",
-            service_type=ServiceType.WHITE_INTERNET,
-            is_active=True,
-            device_limit=1,
-            duration_days=30,
-            price_rub=250,
-        )
-        user = User(id=1, telegram_id=12345, financial_hold=False, is_deleted=False, is_banned=False)
-        quote = MagicMock(
-            id=1,
-            user_id=1,
-            target_tariff_version_id=10,
-            operation_type="purchase",
-            status="active",
-            expires_at=now_utc() + timedelta(hours=1),
-            amount_due_rub=250,
-            currency="RUB",
-        )
-        version = MagicMock(tariff_id=99, duration_hours=720, price_rub=250, currency="RUB", device_limit=1)
-        session.get.return_value = version
-        # scalar will be called for quote lookup, then for tariff lookup
-        session.scalar.side_effect = [quote, wi_tariff]
-
-        with patch("services.account_purchase.lock_checkout_user", return_value=user), \
-             patch("services.account_purchase._settled_state", return_value=(None, False)):
-            with self.assertRaises(AccountPurchaseError) as ctx:
-                await _settle_account_purchase(session, user_id=1, quote_public_id="mock-uuid")
-            self.assertEqual(ctx.exception.code, "tariff_unavailable")
 
     def test_xray_presence_probe_non_destructive_lifecycle(self):
         """H2: probe_user_presence and verify_user_absent must be strictly non-destructive (zero AlterInbound calls)."""
@@ -153,31 +88,7 @@ class AuditRemediationTests(unittest.IsolatedAsyncioTestCase):
             calls = [str(call[0][0]) for call in session.execute.call_args_list]
             self.assertTrue(any("pg_advisory_xact_lock" in sql for sql in calls))
 
-    async def test_dead_auto_fulfill_sets_manual_review_status(self):
-        """D1: When auto_fulfill exhausts attempts and marks dead, fulfillment_status is manual_review."""
-        payment = Payment(
-            id=123,
-            user_id=1,
-            amount=500,
-            provider_status="succeeded",
-            fulfillment_status="succeeded",
-            topup_context={
-                "auto_fulfill_action": "purchase",
-                "quote_public_id": "00000000-0000-0000-0000-000000000001",
-                "auto_fulfill_attempts": 5,
-                "auto_fulfill_status": "failed",
-            },
-        )
-        session = AsyncMock()
-        await _retry_auto_fulfillment(session, payment)
 
-        self.assertEqual(payment.topup_context.get("auto_fulfill_status"), "dead")
-        self.assertEqual(payment.fulfillment_status, "manual_review")
-
-        # Verify _needs_attention includes dead status
-        compiled_clause = str(_needs_attention().compile(compile_kwargs={"literal_binds": True}))
-        self.assertIn("auto_fulfill_status", compiled_clause)
-        self.assertIn("dead", compiled_clause)
 
     def test_healthcheck_access_logger_masks_sub_wl_token(self):
         """M5: HealthcheckAccessLogger masks /sub/wl/{token} as /sub/wl/*** and logs 200 at DEBUG."""

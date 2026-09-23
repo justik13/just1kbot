@@ -1,18 +1,13 @@
-"""Persistence boundary for immutable tariff versions and checkout quotes."""
+"""Persistence boundary for checkout user locks and tariff versions."""
 
-import uuid
-from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import WHITE_INTERNET_BASE_TRAFFIC_BYTES
-from config.enums import ServiceType, TariffQuoteOperation, TariffQuoteStatus
-from database.models import Tariff, TariffQuote, TariffVersion, User
-from utils.datetime_helpers import now_utc
-
-QUOTE_LIFETIME = timedelta(minutes=15)
+from config.enums import ServiceType
+from database.models import Tariff, TariffVersion, User
 
 
 class CheckoutQuoteConflictError(RuntimeError):
@@ -30,7 +25,7 @@ async def lock_checkout_user(session: AsyncSession, user_id: int) -> User | None
 async def get_or_create_current_version(
     session: AsyncSession, tariff: Tariff
 ) -> TariffVersion:
-    # Serializes version allocation and prevents two distinct snapshots for one edit.
+    """Serializes version allocation and prevents two distinct snapshots for one edit."""
     await session.execute(
         text("SELECT pg_advisory_xact_lock(:key)"), {"key": tariff.id}
     )
@@ -79,106 +74,3 @@ async def get_or_create_current_version(
     session.add(version)
     await session.flush()
     return version
-
-
-async def expire_quotes(session: AsyncSession, user_id: int, as_of=None) -> None:
-    now = as_of or now_utc()
-    rows = (
-        await session.scalars(
-            select(TariffQuote)
-            .where(
-                TariffQuote.user_id == user_id,
-                TariffQuote.status == TariffQuoteStatus.ACTIVE,
-                TariffQuote.expires_at <= now,
-            )
-            .with_for_update()
-        )
-    ).all()
-    for quote in rows:
-        quote.status = TariffQuoteStatus.EXPIRED
-
-
-async def get_active_financial_quotes_for_update(
-    session: AsyncSession,
-    *,
-    user_id: int,
-    as_of=None,
-) -> list[TariffQuote]:
-    """Expire then lock financial quotes; caller already owns the user lock."""
-    await expire_quotes(session, user_id, as_of)
-    return list(
-        (
-            await session.scalars(
-                select(TariffQuote)
-                .where(
-                    TariffQuote.user_id == user_id,
-                    TariffQuote.status == TariffQuoteStatus.ACTIVE,
-                    TariffQuote.operation_type.in_((
-                        TariffQuoteOperation.PURCHASE,
-                        TariffQuoteOperation.RENEW,
-                        TariffQuoteOperation.CHANGE,
-                    )),
-                )
-                .order_by(TariffQuote.id)
-                .with_for_update()
-            )
-        ).all()
-    )
-
-
-async def get_or_create_checkout_quote(
-    session: AsyncSession,
-    *,
-    user_id: int,
-    tariff: Tariff,
-    operation_type: str,
-) -> tuple[TariffQuote, TariffVersion]:
-    if operation_type not in {TariffQuoteOperation.PURCHASE, TariffQuoteOperation.RENEW}:
-        raise ValueError("checkout quote must be purchase or renew")
-    active = await get_active_financial_quotes_for_update(session, user_id=user_id)
-    if any(row.operation_type == TariffQuoteOperation.CHANGE for row in active):
-        raise CheckoutQuoteConflictError("active_tariff_change_quote_exists")
-    version = await get_or_create_current_version(session, tariff)
-    existing = next(
-        (
-            row
-            for row in active
-            if row.operation_type in {TariffQuoteOperation.PURCHASE, TariffQuoteOperation.RENEW}
-            and row.target_tariff_version_id == version.id
-        ),
-        None,
-    )
-    if existing:
-        if (
-            existing.operation_type != operation_type
-            or existing.amount_due_rub != version.price_rub
-            or existing.resulting_paid_hours != version.duration_hours
-            or existing.resulting_paid_value_rub != version.price_rub
-            or existing.currency != version.currency
-        ):
-            raise CheckoutQuoteConflictError("active_checkout_quote_conflict")
-        return existing, version
-    now = now_utc()
-    quote = TariffQuote(
-        public_id=uuid.uuid4(),
-        user_id=user_id,
-        service_type=tariff.service_type,
-        operation_type=operation_type,
-        target_tariff_version_id=version.id,
-        current_paid_hours=0,
-        current_paid_value_rub=Decimal(0),
-        bonus_hours=0,
-        amount_due_rub=version.price_rub,
-        resulting_paid_hours=version.duration_hours,
-        resulting_paid_value_rub=version.price_rub,
-        resulting_bonus_hours=0,
-        rounding_loss_hours=Decimal(0),
-        rounding_loss_value_rub=Decimal(0),
-        currency="RUB",
-        status=TariffQuoteStatus.ACTIVE,
-        created_at=now,
-        expires_at=now + QUOTE_LIFETIME,
-    )
-    session.add(quote)
-    await session.flush()
-    return quote, version

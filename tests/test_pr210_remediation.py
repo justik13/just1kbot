@@ -136,73 +136,8 @@ class TestHubResilience(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(100, cached_ids)
 
 
-class TestMaintenanceGates(unittest.IsolatedAsyncioTestCase):
-    async def test_bal_short_custom_blocked_during_maintenance(self):
-        from bot.handlers.payment import purchase_routes as pr
-        import uuid
-
-        callback = MagicMock()
-        callback.data = f"bal_short_custom:{uuid.uuid4()}"
-        callback.from_user = MagicMock(id=555)
-        callback.answer = AsyncMock()
-        state = MagicMock()
-        state.clear = AsyncMock()
-
-        with patch.object(pr.MaintenanceService, "can_user_perform_action", AsyncMock(return_value=False)), \
-             patch("bot.handlers.payment.purchase_routes._render_maintenance", new=AsyncMock()) as mock_maint:
-            await pr.topup_custom_shortage(callback, state, AsyncMock(), db_user=SimpleNamespace(id=1))
-
-        state.clear.assert_awaited_once()
-        mock_maint.assert_awaited_once()
-        self.assertEqual(mock_maint.call_args.kwargs.get("back_to"), "menu_balance")
-
-    async def test_bal_chg_short_custom_blocked_during_maintenance(self):
-        from bot.handlers.payment import tariff_change_routes as tcr
-        import uuid
-
-        callback = MagicMock()
-        callback.data = f"bal_chg_short_custom:{uuid.uuid4()}"
-        callback.from_user = MagicMock(id=555)
-        callback.answer = AsyncMock()
-        state = MagicMock()
-        state.clear = AsyncMock()
-
-        with patch.object(tcr.MaintenanceService, "can_user_perform_action", AsyncMock(return_value=False)), \
-             patch("bot.handlers.payment.tariff_change_routes._render_maintenance", new=AsyncMock()) as mock_maint:
-            await tcr.topup_custom_change_shortage(callback, state, AsyncMock(), db_user=SimpleNamespace(id=1))
-
-        state.clear.assert_awaited_once()
-        mock_maint.assert_awaited_once()
-        self.assertEqual(mock_maint.call_args.kwargs.get("back_to"), "payment_change_tariff")
-
-    async def test_resume_purchase_blocked_during_maintenance(self):
-        from bot.handlers.payment import purchase_routes as pr
-
-        callback = MagicMock()
-        callback.data = "balance_resume_purchase:5:change"
-        callback.from_user = MagicMock(id=555)
-        callback.answer = AsyncMock()
-
-        with patch.object(pr.MaintenanceService, "can_user_perform_action", AsyncMock(return_value=False)), \
-             patch("bot.handlers.payment.purchase_routes._render_maintenance", new=AsyncMock()) as mock_maint, \
-             patch("services.tariff_change_quote.create_tariff_change_quote", new=AsyncMock()) as mock_quote:
-            await pr.resume_purchase_after_topup(callback, AsyncMock(), db_user=SimpleNamespace(id=1))
-
-        mock_maint.assert_awaited_once()
-        self.assertEqual(mock_maint.call_args.kwargs.get("back_to"), "payment_change_tariff")
-        mock_quote.assert_not_awaited()
 
 
-class TestSimulationContract(unittest.IsolatedAsyncioTestCase):
-    def test_simulate_bot_passes_required_source(self):
-        """simulate_bot must satisfy settle_succeeded_topup's keyword-only `source`."""
-        import re
-
-        src = open("scripts/simulate_bot.py", encoding="utf-8").read()
-        calls = re.findall(r"settle_succeeded_topup\(([^)]*)\)", src)
-        self.assertTrue(calls, "expected at least one call in simulate_bot")
-        for args in calls:
-            self.assertIn("source=", args)
 
 
 class TestEffectsWiring(unittest.IsolatedAsyncioTestCase):
@@ -240,33 +175,9 @@ class TestEffectsWiring(unittest.IsolatedAsyncioTestCase):
 
 
 class TestPaymentFixes(unittest.IsolatedAsyncioTestCase):
-    async def test_resume_purchase_same_tier_shows_renew_screen(self):
-        """T-09: same-tier rejection on resume shows renew guidance, not stale-op error."""
-        from bot import texts
-        from bot.handlers.payment import purchase_routes as pr
-
-        callback = MagicMock()
-        callback.data = "balance_resume_purchase:5:change"
-        callback.bot = MagicMock()
-        callback.message = MagicMock()
-        callback.message.chat = MagicMock(id=777)
-        callback.answer = AsyncMock()
-        db_user = SimpleNamespace(id=1)
-
-        quote_result = SimpleNamespace(failure_code="same_tariff_requires_renew")
-
-        with patch.object(pr.MaintenanceService, "can_user_perform_action", AsyncMock(return_value=True)), \
-             patch("services.tariff_change_quote.create_tariff_change_quote", AsyncMock(return_value=quote_result)), \
-             patch("bot.handlers.payment.purchase_routes.render_hub", new=AsyncMock()) as mock_hub:
-            await pr.resume_purchase_after_topup(callback, AsyncMock(), db_user=db_user)
-
-        mock_hub.assert_awaited_once()
-        args = mock_hub.call_args[0]
-        self.assertEqual(args[2], texts.PAYMENT_SHOWCASE)
-        self.assertIn("payment_quick_renew", _kb_callbacks(args[3]))
-
     async def test_select_tariff_inactive_same_tier_reports_unavailable(self):
         """T-12: inactive tariff check fires before the same-tier guard."""
+        from decimal import Decimal
         from bot import texts
         from bot.handlers.payment import showcase_routes as sr
 
@@ -282,6 +193,7 @@ class TestPaymentFixes(unittest.IsolatedAsyncioTestCase):
         db_user = SimpleNamespace(id=1, current_tariff_id=1, device_limit=2)
 
         with patch.object(sr.MaintenanceService, "can_user_perform_action", AsyncMock(return_value=True)), \
+             patch("bot.handlers.payment.showcase_routes.get_account_balance", AsyncMock(return_value=SimpleNamespace(available=Decimal(100), debt=Decimal(0), real_available=Decimal(100)))), \
              patch("bot.handlers.payment.showcase_routes.get_tariff_by_id", AsyncMock(return_value=tariff)), \
              patch("bot.handlers.payment.showcase_routes._get_effective_device_limit", AsyncMock(return_value=2)), \
              patch("bot.handlers.payment.showcase_routes.render_hub", new=AsyncMock()) as mock_hub:

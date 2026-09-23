@@ -18,13 +18,23 @@ from database.repositories.users_repo import (
     get_user_referrals_count,
     get_user_referrals_paginated,
 )
-from services.payment_status import payment_display_status
 from services.referral_bonus import get_referral_bonus_balance
 from utils.formatters import format_datetime
 from utils.telegram import render_hub, safe
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+def payment_display_status(payment: object) -> str:
+    status = (getattr(payment, "status", None) or "pending").lower()
+    if status in {"succeeded", "success", "paid"}:
+        return "succeeded"
+    if status in {"canceled", "cancelled"}:
+        return "canceled"
+    if status in {"refunded", "partially_refunded"}:
+        return "refunded"
+    return "pending"
 
 
 async def _get_inviter_line(session: AsyncSession, user: User) -> str:
