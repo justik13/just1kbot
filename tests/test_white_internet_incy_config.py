@@ -251,7 +251,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     # Zero-config system headers
                     self.assertEqual(resp.headers.get("hide-check"), "1")
                     self.assertEqual(resp.headers.get("sort-order"), "none")
-                    self.assertEqual(resp.headers.get("Profile-Update-Interval"), "3")
+                    self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
 
                     # Action buttons
                     self.assertEqual(resp.headers.get("Profile-Web-Page-Url"), "https://t.me/just1k_channel")

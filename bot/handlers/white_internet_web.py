@@ -296,7 +296,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                     expire=expire_ts,
                 ),
                 "Profile-Title": f"base64:{profile_title_b64}",
-                "Profile-Update-Interval": "3",
+                "Profile-Update-Interval": os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6"),
                 "Support-Url": support_url,
                 "Profile-Web-Page-Url": channel_url,
                 "hide-url": "1",
