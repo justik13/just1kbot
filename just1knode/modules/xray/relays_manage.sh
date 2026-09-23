@@ -158,6 +158,7 @@ add_relay_node() {
     local pubkey="${7:-}"
     local shortid="${8:-}"
     local sni="${9:-www.google.com}"
+    local badge="${10:-}"
 
     local role
     role="$(get_state_val "role")"
@@ -308,6 +309,14 @@ for r in rules:
         if 'domain' in r and 'domain:2ip.ru' not in r['domain']:
             r['domain'].append('domain:2ip.ru')
 
+# Запрет BitTorrent (P2P трафик)
+if not any(r.get('protocol') == ['bittorrent'] for r in rules):
+    rules.insert(0, {
+        'type': 'field',
+        'protocol': ['bittorrent'],
+        'outboundTag': 'just1k-wl-block'
+    })
+
 # Вставляем правило выхода на Relay СТРОГО ПОСЛЕ правил прямого выхода в Рунет
 direct_indices = [i for i, r in enumerate(rules) if r.get('outboundTag') == 'just1k-wl-direct']
 insert_idx = (max(direct_indices) + 1) if direct_indices else 0
@@ -387,8 +396,12 @@ location ^~ ${relay_inbound_path} {
     client_max_body_size 0;
     proxy_buffering off;
     proxy_request_buffering off;
+    proxy_max_temp_file_size 0;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    add_header CDN-Cache-Control "no-store" always;
+    add_header X-Accel-Buffering no always;
+    add_header Accept-Ranges none always;
 }
 EOF
 
@@ -406,9 +419,18 @@ EOF
     # Обновление relays.json (Durable-by-Default: атомарная запись через tempfile)
     python3 -c "
 import json, os, sys, tempfile
+
+def safe_arg(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return val.encode(sys.getfilesystemencoding(), 'surrogateescape').decode('utf-8', 'replace')
+    except Exception:
+        return val
+
 rf = sys.argv[1]
-code = sys.argv[2]
-name = sys.argv[3]
+code = safe_arg(sys.argv[2]).strip()
+name = safe_arg(sys.argv[3]).strip()
 ip = sys.argv[4]
 port = int(sys.argv[5])
 in_path = sys.argv[6]
@@ -416,11 +438,12 @@ in_tag = sys.argv[7]
 out_tag = sys.argv[8]
 sec = sys.argv[9]
 sni = sys.argv[10]
+badge = safe_arg(sys.argv[11]).strip() if len(sys.argv) > 11 else ''
 
 relays = []
 if os.path.exists(rf):
     try:
-        with open(rf, 'r', encoding='utf-8') as f:
+        with open(rf, 'r', encoding='utf-8', errors='replace') as f:
             data = json.load(f)
             if isinstance(data, list):
                 relays = data
@@ -428,7 +451,7 @@ if os.path.exists(rf):
         relays = []
 
 relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
-relays.append({
+new_entry = {
     'name': name,
     'code': code,
     'ip': ip,
@@ -438,12 +461,16 @@ relays.append({
     'outbound_tag': out_tag,
     'security': sec,
     'sni': sni
-})
+}
+if badge:
+    new_entry['badge'] = badge[:30]
+
+relays.append(new_entry)
 
 d = os.path.dirname(os.path.abspath(rf))
 os.makedirs(d, exist_ok=True)
 t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
-with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
     json.dump(relays, fp, ensure_ascii=False, indent=2)
     fp.flush()
     os.fsync(fp.fileno())
@@ -454,7 +481,7 @@ try:
     os.chmod(rf, 0o660)
 except Exception:
     pass
-" "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni"
+" "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni" "$badge"
 
     nginx -t && systemctl reload nginx
     set +e
@@ -557,12 +584,21 @@ with open(cfg_file, 'w') as f: json.dump(cfg, f, indent=2)
     # Удаление из relays.json (Durable-by-Default: атомарная запись через tempfile)
     python3 -c "
 import json, os, sys, tempfile
+
+def safe_arg(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return val.encode(sys.getfilesystemencoding(), 'surrogateescape').decode('utf-8', 'replace')
+    except Exception:
+        return val
+
 rf = sys.argv[1]
-code = sys.argv[2]
+code = safe_arg(sys.argv[2]).strip()
 relays = []
 if os.path.exists(rf):
     try:
-        with open(rf, 'r', encoding='utf-8') as f:
+        with open(rf, 'r', encoding='utf-8', errors='replace') as f:
             data = json.load(f)
             if isinstance(data, list):
                 relays = data
@@ -572,7 +608,7 @@ relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
 d = os.path.dirname(os.path.abspath(rf))
 os.makedirs(d, exist_ok=True)
 t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
-with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
     json.dump(relays, fp, ensure_ascii=False, indent=2)
     fp.flush()
     os.fsync(fp.fileno())
@@ -629,16 +665,25 @@ rename_relay_node() {
     local updated
     updated=$(python3 -c "
 import json, os, sys, tempfile
+
+def safe_arg(val):
+    if not isinstance(val, str):
+        return val
+    try:
+        return val.encode(sys.getfilesystemencoding(), 'surrogateescape').decode('utf-8', 'replace')
+    except Exception:
+        return val
+
 rf = sys.argv[1]
-target = sys.argv[2].strip().lower()
-new_name = sys.argv[3].strip()
+target = safe_arg(sys.argv[2]).strip().lower()
+new_name = safe_arg(sys.argv[3]).strip()
 
 if not os.path.exists(rf):
     print('no_file')
     sys.exit(0)
 
 try:
-    with open(rf, 'r', encoding='utf-8') as f:
+    with open(rf, 'r', encoding='utf-8', errors='replace') as f:
         relays = json.load(f)
 except Exception as e:
     print(f'read_error: {e}')
@@ -663,7 +708,7 @@ try:
     d = os.path.dirname(os.path.abspath(rf))
     os.makedirs(d, exist_ok=True)
     t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
-    with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+    with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
         json.dump(relays, fp, ensure_ascii=False, indent=2)
         fp.flush()
         os.fsync(fp.fileno())
@@ -697,7 +742,7 @@ import json, os
 rf = '$RELAYS_FILE'
 if os.path.exists(rf):
     try:
-        with open(rf, 'r', encoding='utf-8') as f:
+        with open(rf, 'r', encoding='utf-8', errors='replace') as f:
             data = json.load(f)
         for i, r in enumerate(data, 1):
             print(f\"{i}\t{r.get('code','')}\t{r.get('name','')}\t{r.get('ip','')}\")
@@ -750,7 +795,8 @@ try:
         pk = tokens[6] if len(tokens) > 6 else ''
         sid = tokens[7] if len(tokens) > 7 else ''
         sni = tokens[8] if len(tokens) > 8 else 'www.google.com'
-        print(' '.join(shlex.quote(x) for x in [name, ip, port, uuid, code, sec, pk, sid, sni]))
+        badge = tokens[9] if len(tokens) > 9 else ''
+        print(' '.join(shlex.quote(x) for x in [name, ip, port, uuid, code, sec, pk, sid, sni, badge]))
     else:
         sys.exit(1)
 except Exception:
@@ -791,7 +837,8 @@ except Exception:
                     if [[ -z "$r_sni_in" ]]; then error "Домен SNI обязателен для TLS."; fi
                     r_sni="$r_sni_in"
                 fi
-                add_relay_node "$r_name" "$r_ip" "$r_port" "$r_uuid" "$r_code" "$r_sec" "$r_pubkey" "$r_shortid" "$r_sni"
+                read -rp "Бейдж узла в INCY (например: ⚡ Зарубежный узел, Enter по умолчанию): " r_badge
+                add_relay_node "$r_name" "$r_ip" "$r_port" "$r_uuid" "$r_code" "$r_sec" "$r_pubkey" "$r_shortid" "$r_sni" "$r_badge"
             fi
             ;;
         2)

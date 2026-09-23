@@ -100,10 +100,23 @@ install_xray_relay_node() {
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["tls", "http"]
+        "destOverride": ["tls", "http", "quic"],
+        "metadataOnly": false
       }
     }
   ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "protocol": [
+          "bittorrent"
+        ],
+        "outboundTag": "block"
+      }
+    ]
+  },
   "outbounds": [
     {
       "tag": "direct",
@@ -140,6 +153,10 @@ net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
         sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+    fi
+
+    if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+        error "Ошибка тестирования сгенерированной конфигурации Xray на Relay узле. Изменения не применены."
     fi
 
     deploy_xray_systemd_service
@@ -223,6 +240,30 @@ with open(cfg_file, 'r', encoding='utf-8') as f:
 for ob in cfg.get('outbounds', []):
     if ob.get('tag') == 'direct' or ob.get('protocol') == 'freedom':
         ob.setdefault('settings', {})['domainStrategy'] = 'UseIPv4'
+
+has_block = any(ob.get('tag') == 'block' for ob in cfg.get('outbounds', []))
+if not has_block:
+    cfg.setdefault('outbounds', []).append({
+        'tag': 'block',
+        'protocol': 'blackhole'
+    })
+
+routing = cfg.setdefault('routing', {})
+routing.setdefault('domainStrategy', 'IPIfNonMatch')
+rules = routing.setdefault('rules', [])
+has_bt_proto = any(r.get('type') == 'field' and 'bittorrent' in r.get('protocol', []) for r in rules)
+if not has_bt_proto:
+    rules.insert(0, {
+        'type': 'field',
+        'protocol': ['bittorrent'],
+        'outboundTag': 'block'
+    })
+
+for ib in cfg.get('inbounds', []):
+    sniff = ib.setdefault('sniffing', {})
+    sniff['enabled'] = True
+    sniff.setdefault('destOverride', ['tls', 'http', 'quic'])
+    sniff.setdefault('metadataOnly', False)
 
 cfg['dns'] = {
     'servers': ['1.1.1.1', '1.0.0.1', '8.8.8.8', 'localhost'],

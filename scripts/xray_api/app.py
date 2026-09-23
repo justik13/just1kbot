@@ -372,17 +372,19 @@ def get_target_inbounds() -> List[str]:
     return discovered_tags
 
 
-def get_active_relays() -> List[Dict[str, Any]]:
-    """Return active relay configurations from relays.json."""
+def get_active_relays() -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Return active relay configurations from relays.json and optional error message."""
     if RELAYS_FILE_PATH.exists():
         try:
             with open(RELAYS_FILE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
-                    return data
+                    return data, None
+                return [], f"Expected list in {RELAYS_FILE_PATH}, got {type(data).__name__}"
         except Exception as e:
             logger.warning("Failed to load relays from %s: %s", RELAYS_FILE_PATH, e)
-    return []
+            return [], f"Corrupted {RELAYS_FILE_PATH.name}: {e}"
+    return [], None
 
 
 grpc_client = XrayGrpcClient(host=GRPC_HOST, port=GRPC_PORT)
@@ -456,6 +458,9 @@ app = FastAPI(
     title="Just1kBot Xray API Agent",
     description="Autonomous server agent for Xray management and traffic stats",
     version="2.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
     lifespan=lifespan,
 )
 
@@ -543,7 +548,7 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         store_corrupted = True
 
     target_inbounds = get_target_inbounds()
-    relays = get_active_relays()
+    relays, relays_err = get_active_relays()
     secret_path = get_secret_base_path()
 
     pid, starttime, boot_id, running_epoch = (
@@ -569,7 +574,8 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         "grpc_ok": bool(grpc_ok),
         "active_clients_count": len(active_clients),
         "inbounds": target_inbounds,
-        "relays": relays,
+        "relays": relays if not relays_err else [],
+        "relays_error": relays_err,
         "secret_base_path": secret_path,
         "cdn_domain": get_cdn_domain(),
         "sub_path_prefix": get_sub_path_prefix(),
@@ -585,11 +591,109 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
 @app.get("/v1/relays")
 def list_relays(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """Returns list of active relays configured on the node."""
-    relays = get_active_relays()
+    relays, err = get_active_relays()
+    if err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Relays configuration error: {err}",
+        )
     return {
         "status": "ok",
         "count": len(relays),
         "relays": relays,
+    }
+
+
+async def _probe_single_relay(relay: Dict[str, Any], timeout: float = 2.5) -> Dict[str, Any]:
+    ip = relay.get("ip")
+    port = relay.get("port")
+    code = relay.get("code", "")
+    name = relay.get("name", "")
+
+    if not ip or not port:
+        return {
+            "name": name,
+            "code": code,
+            "ip": ip,
+            "port": port,
+            "healthy": False,
+            "rtt_ms": None,
+            "error": "Missing IP or port",
+        }
+
+    t0 = time.perf_counter()
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(str(ip), int(port)),
+            timeout=timeout,
+        )
+        rtt_ms = round((time.perf_counter() - t0) * 1000, 1)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return {
+            "name": name,
+            "code": code,
+            "ip": ip,
+            "port": port,
+            "healthy": True,
+            "rtt_ms": rtt_ms,
+            "error": None,
+        }
+    except asyncio.TimeoutError:
+        return {
+            "name": name,
+            "code": code,
+            "ip": ip,
+            "port": port,
+            "healthy": False,
+            "rtt_ms": None,
+            "error": f"Timeout ({timeout}s)",
+        }
+    except Exception as exc:
+        return {
+            "name": name,
+            "code": code,
+            "ip": ip,
+            "port": port,
+            "healthy": False,
+            "rtt_ms": None,
+            "error": str(exc),
+        }
+
+
+@app.get("/v1/relays/health")
+async def check_relays_health(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+    """Probes all configured relay nodes from this Origin node via TCP connection.
+
+    Measures RTT and connectivity. Returns status 'ok' if all relays are healthy,
+    'degraded' if some are unreachable, 'error' if relays config is invalid,
+    or 'empty' if no relays configured.
+    """
+    relays, err = get_active_relays()
+    if err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load relays config: {err}",
+        )
+    if not relays:
+        return {
+            "status": "empty",
+            "count": 0,
+            "all_healthy": True,
+            "relays": [],
+        }
+
+    tasks = [_probe_single_relay(r) for r in relays]
+    results = await asyncio.gather(*tasks)
+    all_healthy = all(r["healthy"] for r in results)
+    return {
+        "status": "ok" if all_healthy else "degraded",
+        "count": len(results),
+        "all_healthy": all_healthy,
+        "relays": list(results),
     }
 
 

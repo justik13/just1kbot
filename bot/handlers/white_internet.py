@@ -185,16 +185,37 @@ def get_white_internet_overview_keyboard(
                 callback_data="wl_renew_preview",
             )
 
+    has_topup = False
+    has_add_device = False
     if not getattr(sub, "is_trial", False):
         builder.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+        has_topup = True
         if sub_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
             builder.button(text=texts.BTN_WL_ADD_DEVICE, callback_data="wl_add_device_menu")
+            has_add_device = True
 
+    has_reset = False
     if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
         builder.button(text=texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices")
+        has_reset = True
 
     builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
-    builder.adjust(1)
+
+    pattern: list[int] = []
+    if has_sub_link:
+        pattern.extend([1, 1])
+    if can_renew:
+        pattern.append(1)
+    if has_topup and has_add_device:
+        pattern.append(2)
+    elif has_topup:
+        pattern.append(1)
+    if has_reset:
+        pattern.append(2)
+    else:
+        pattern.append(1)
+
+    builder.adjust(*pattern)
 
     return builder.as_markup()
 

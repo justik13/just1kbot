@@ -13,6 +13,13 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# Принудительная UTF-8 локаль и режим UTF-8 в Python (PEP 540)
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export LANG="${LANG:-C.UTF-8}"
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
+
 log() {
     echo -e "${GREEN}[+]${NC} $1"
 }

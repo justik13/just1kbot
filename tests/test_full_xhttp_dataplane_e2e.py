@@ -136,22 +136,28 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
             path="/w_abcdef12",
             relays=relays,
         )
-        self.assertEqual(len(links), 3)
+        self.assertEqual(len(links), 4)
 
-        de_parsed = urllib.parse.urlparse(links[0])
+        # First link is Origin node (direct egress)
+        origin_parsed = urllib.parse.urlparse(links[0])
+        origin_params = urllib.parse.parse_qs(origin_parsed.query)
+        self.assertEqual(origin_params["path"][0], "/w_abcdef12/default")
+        self.assertIn("Россия", urllib.parse.unquote(origin_parsed.fragment))
+
+        de_parsed = urllib.parse.urlparse(links[1])
         de_params = urllib.parse.parse_qs(de_parsed.query)
         self.assertEqual(de_params["path"][0], "/w_abcdef12/de")
-        self.assertEqual(urllib.parse.unquote(de_parsed.fragment), "Германия")
+        self.assertEqual(urllib.parse.unquote(de_parsed.fragment).split("?")[0], "Германия")
 
-        nl_parsed = urllib.parse.urlparse(links[1])
+        nl_parsed = urllib.parse.urlparse(links[2])
         nl_params = urllib.parse.parse_qs(nl_parsed.query)
         self.assertEqual(nl_params["path"][0], "/w_abcdef12/nl")
-        self.assertEqual(urllib.parse.unquote(nl_parsed.fragment), "Нидерланды")
+        self.assertEqual(urllib.parse.unquote(nl_parsed.fragment).split("?")[0], "Нидерланды")
 
-        se_parsed = urllib.parse.urlparse(links[2])
+        se_parsed = urllib.parse.urlparse(links[3])
         se_params = urllib.parse.parse_qs(se_parsed.query)
         self.assertEqual(se_params["path"][0], "/w_abcdef12/se")
-        self.assertEqual(urllib.parse.unquote(se_parsed.fragment), "Швеция")
+        self.assertEqual(urllib.parse.unquote(se_parsed.fragment).split("?")[0], "Швеция")
 
     def test_padding_placement_is_query_in_header(self) -> None:
         """XPadding parameter must be set to queryInHeader per Yandex Cloud CDN spec."""
@@ -199,7 +205,7 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
 
         # In standalone mode (install_xray_origin_node), default inbound routes to blackhole block
         self.assertIn(
-            "'inboundTag': ['just1k-wl-default'],\n    'outboundTag': 'just1k-wl-block'",
+            "first_relay_tag = ('just1k-wl-outbound-' + str(relays[0]['code'])) if relays and relays[0].get('code') else 'just1k-wl-block'",
             sh_content,
         )
 

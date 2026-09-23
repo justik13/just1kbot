@@ -65,8 +65,10 @@ deploy_certbot_renewal_hook() {
     cat > "${LETSENCRYPT_DIR}/renewal-hooks/deploy/restart-xray-nginx.sh" <<'EOF'
 #!/bin/bash
 systemctl reload nginx 2>/dev/null || true
-systemctl restart xray 2>/dev/null || true
-systemctl restart xray-api 2>/dev/null || true
+if [[ ! -f /etc/just1knode/traffic_cutoff.active ]]; then
+    systemctl restart xray 2>/dev/null || true
+    systemctl restart xray-api 2>/dev/null || true
+fi
 EOF
     chmod +x "${LETSENCRYPT_DIR}/renewal-hooks/deploy/restart-xray-nginx.sh"
 }

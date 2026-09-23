@@ -55,9 +55,9 @@ PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения з
 AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими проверками в режиме AUTO_DISABLED
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
-REQUIRED_INGRESS_FAILS = 2  # Требуется 2 цикла сбоя подряд (>= 30с) перед отправкой алерта
+REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 45-60с) перед отправкой алерта
 REQUIRED_INGRESS_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
-INGRESS_RETRY_DELAY = 0.2  # Задержка перед повторным запросом зонда при ошибке/таймауте
+INGRESS_RETRY_DELAY = 1.5  # Базовая задержка перед повторным запросом зонда при ошибке/таймауте
 # A hung node can hold a healthcheck for tens of seconds; checking servers in
 # bounded parallel batches keeps one degraded node from freezing alerts for
 # every other node in the cycle.
@@ -288,10 +288,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                             sub_prefix = f"/{sub_prefix}"
                         probe_url = f"https://{probe_domain}{sub_prefix}/ping"
                         try:
-                            timeout = aiohttp.ClientTimeout(total=10.0, connect=5.0)
+                            timeout = aiohttp.ClientTimeout(total=15.0, connect=10.0)
                             connector = aiohttp.TCPConnector(family=socket.AF_INET)
                             async with aiohttp.ClientSession(timeout=timeout, connector=connector) as probe_sess:
-                                for attempt in range(2):
+                                for attempt in range(3):
                                     try:
                                         async with probe_sess.get(
                                             probe_url,
@@ -300,8 +300,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             if probe_resp.status == 200:
                                                 ingress_probe_result = (True, "200")
                                                 break
-                                            if attempt == 0 and probe_resp.status in (502, 503, 504):
-                                                await asyncio.sleep(INGRESS_RETRY_DELAY)
+                                            if attempt < 2 and probe_resp.status in (502, 503, 504):
+                                                await asyncio.sleep(INGRESS_RETRY_DELAY * (attempt + 1))
                                                 continue
                                             logger.warning(
                                                 "Xray origin node %s (%s) subscription proxy returned HTTP %s on %s",
@@ -310,8 +310,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             ingress_probe_result = (False, str(probe_resp.status))
                                             break
                                     except Exception as probe_exc:
-                                        if attempt == 0:
-                                            await asyncio.sleep(INGRESS_RETRY_DELAY)
+                                        if attempt < 2:
+                                            await asyncio.sleep(INGRESS_RETRY_DELAY * (attempt + 1))
                                             continue
                                         err_msg = str(probe_exc).strip()
                                         if not err_msg:
@@ -617,7 +617,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             update_kwargs["last_successful_check"] = now_utc()
             if is_xray_node and xray_data:
                 extra_update = {}
-                if "relays" in xray_data:
+                if "relays" in xray_data and not xray_data.get("relays_error"):
                     extra_update["relays"] = xray_data["relays"]
                 if "secret_base_path" in xray_data:
                     extra_update["secret_base_path"] = xray_data["secret_base_path"]
@@ -668,6 +668,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                         extra = dict(updated_srv.extra_data or {})
                         extra_changed = False
                         for key in ("cdn_domain", "relays", "secret_base_path"):
+                            if key == "relays" and xray_data.get("relays_error"):
+                                continue
                             if key in xray_data and xray_data[key] and extra.get(key) != xray_data[key]:
                                 extra[key] = xray_data[key]
                                 extra_changed = True

@@ -16,7 +16,11 @@ from config.constants import (
     DEFAULT_WHITE_INTERNET_PATH,
     DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+    WHITE_INTERNET_CHANNEL_URL,
+    WHITE_INTERNET_PROFILE_DESCRIPTION,
+    WHITE_INTERNET_PROFILE_TITLE,
     WHITE_INTERNET_SUB_PATH_PREFIX,
+    WHITE_INTERNET_SUPPORT_URL,
     XRAY_PROTOCOL,
 )
 from config.enums import ServerHealthState, WhiteInternetStatus
@@ -194,7 +198,9 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             try:
                 relays = json.loads(os.environ["WHITE_INTERNET_RELAYS"])
             except Exception:
-                pass
+                relays = None
+        if not isinstance(relays, list):
+            relays = None
 
         # HWID (Device ID) strict enforcement
         hwid = (
@@ -229,16 +235,70 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             )
             return web.Response(status=403, text=limit_msg, headers=headers)
 
+        origin_tag = extra.get("origin_tag")
+        origin_badge = extra.get("origin_badge")
+        default_relay_badge = extra.get("relay_badge")
+        relay_names = extra.get("relay_names") if isinstance(extra.get("relay_names"), dict) else None
+        relay_badges = extra.get("relay_badges") if isinstance(extra.get("relay_badges"), dict) else None
+
+        origin_hidden = bool(extra.get("origin_hidden", False))
+        relay_hidden_raw = extra.get("relay_hidden")
+        if isinstance(relay_hidden_raw, (list, tuple, set)):
+            relay_hidden = {str(item) for item in relay_hidden_raw}
+        elif isinstance(relay_hidden_raw, str) and relay_hidden_raw.strip():
+            relay_hidden = {item.strip() for item in relay_hidden_raw.split(",") if item.strip()}
+        else:
+            relay_hidden = set()
+
+        active_relays = (
+            [
+                r
+                for r in relays
+                if isinstance(r, dict) and (r.get("code") or r.get("name")) not in relay_hidden
+            ]
+            if relays
+            else None
+        )
+
         vless_links = WhiteInternetService.generate_vless_links(
             sub,
             cdn_domain=cdn_domain,
             path=base_path,
-            relays=relays,
+            relays=active_relays,
+            include_origin=not origin_hidden,
+            origin_tag=origin_tag,
+            origin_badge=origin_badge,
+            default_relay_badge=default_relay_badge,
+            relay_names=relay_names,
+            relay_badges=relay_badges,
         )
         payload = "\n".join(vless_links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
 
-        profile_title_b64 = base64.b64encode(texts.WL_PROFILE_NAME.encode("utf-8")).decode("ascii")
+        profile_title = (
+            extra.get("profile_title")
+            or WHITE_INTERNET_PROFILE_TITLE
+            or texts.WL_PROFILE_NAME
+        )
+        profile_title_str = str(profile_title).strip()[:25]
+        profile_title_b64 = base64.b64encode(profile_title_str.encode("utf-8")).decode("ascii")
+
+        bot_user = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+        default_bot_url = f"https://t.me/{bot_user}"
+        support_user = (os.getenv("SUPPORT_USERNAME") or os.getenv("SUPPORT_BOT_USERNAME") or "").lstrip("@")
+        default_support_url = f"https://t.me/{support_user}" if support_user else default_bot_url
+
+        channel_url = (
+            extra.get("channel_url")
+            or WHITE_INTERNET_CHANNEL_URL
+            or default_bot_url
+        )
+        support_url = (
+            extra.get("support_url")
+            or WHITE_INTERNET_SUPPORT_URL
+            or default_support_url
+        )
+
         response_headers = dict(common_headers)
         response_headers.update(
             {
@@ -250,11 +310,37 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                     expire=expire_ts,
                 ),
                 "Profile-Title": f"base64:{profile_title_b64}",
-                "Profile-Update-Interval": "6",
+                "Profile-Update-Interval": (
+                    os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip()
+                    if os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip().isdigit()
+                    and int(os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip()) > 0
+                    else "6"
+                ),
+                "Support-Url": support_url,
+                "Profile-Web-Page-Url": channel_url,
                 "hide-url": "1",
+                "hide-check": "1",
+                "sort-order": "none",
                 "no-limit-enabled": "1",
             }
         )
+
+        announce = extra.get("announce")
+        if announce and str(announce).strip():
+            clean_announce = str(announce).strip()[:200]
+            announce_b64 = base64.b64encode(clean_announce.encode("utf-8")).decode("ascii")
+            response_headers["Announce"] = f"base64:{announce_b64}"
+            announce_url = extra.get("announce_url")
+            if announce_url and str(announce_url).strip():
+                response_headers["Announce-Url"] = str(announce_url).strip()
+
+        profile_desc = extra.get("profile_description")
+        if profile_desc is None:
+            profile_desc = WHITE_INTERNET_PROFILE_DESCRIPTION
+
+        if profile_desc and str(profile_desc).strip():
+            profile_desc_b64 = base64.b64encode(str(profile_desc).strip().encode("utf-8")).decode("ascii")
+            response_headers["Profile-Description"] = f"base64:{profile_desc_b64}"
 
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 

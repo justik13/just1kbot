@@ -56,6 +56,7 @@ deploy_xray_systemd_service() {
 Description=Xray Service
 Documentation=https://github.com/xtls
 After=network.target nss-lookup.target
+ConditionPathExists=!/etc/just1knode/traffic_cutoff.active
 
 [Service]
 User=root

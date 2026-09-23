@@ -140,7 +140,7 @@ class XrayNodeClient:
                             "%s %s failed with status %d (attempt %d/%d), retrying...",
                             method, safe_url, status_code, attempt + 1, self.max_retries + 1
                         )
-                        await asyncio.sleep(0.5 * (2**attempt))
+                        await asyncio.sleep(1.5 * (2**attempt))
                         continue
                     return status_code, None, f"HTTP {status_code}: {sanitize_short(text, limit=200)}"
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
@@ -149,7 +149,7 @@ class XrayNodeClient:
                         "%s %s failed with %s (attempt %d/%d), retrying...",
                         method, safe_url, exc, attempt + 1, self.max_retries + 1
                     )
-                    await asyncio.sleep(0.5 * (2**attempt))
+                    await asyncio.sleep(1.5 * (2**attempt))
                     continue
                 return 0, None, f"Network failure: {exc}"
             except Exception as exc:
@@ -288,3 +288,15 @@ class XrayNodeClient:
             return node_epoch, node_boot_id, node_starttime, users
         logger.error("Traffic snapshot fetch failed for %s: %s", _sanitize_url(url), err)
         return None, None, None, None
+
+    async def get_relays_health(
+        self, api_url: str, api_key: str
+    ) -> tuple[bool, dict[str, Any] | None, str | None]:
+        """Fetch real-time health status of all relay nodes connected through Origin."""
+        url = f"{api_url.rstrip('/')}/v1/relays/health"
+        headers = self._get_headers(api_key)
+        status_code, data, err = await self._make_request("GET", url, headers)
+        if status_code == 200 and isinstance(data, dict):
+            return True, data, None
+        return False, None, err or f"Relays health check failed with HTTP {status_code}"
+

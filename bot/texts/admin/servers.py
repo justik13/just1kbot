@@ -41,6 +41,25 @@ ADMIN_SERVER_ADDED_NO_RELAYS_WARNING = (
 
 ADMIN_SERVER_BTN_DELETE = "🗑 Удалить сервер"
 ADMIN_SERVER_BTN_MIGRATE = "📦 Мигрировать подписчиков"
+ADMIN_SERVER_BTN_RELAYS = "🌐 Статус Relay-узлов"
+ADMIN_SERVER_RELAYS_CHECKING = "⚡ Опрос Relay-узлов..."
+ADMIN_SERVER_RELAYS_HEADER = """{header}🌐 <b>Статус Relay-узлов для {flag} {server_name}</b>
+
+• 🇷🇺 <b>Origin (Прямой выход):</b> {origin_status_badge}
+"""
+ADMIN_SERVER_RELAYS_EMPTY = """\n<i>На этом сервере нет подключенных Relay-узлов. Доступен прямой выход в зону RU (зарубежный трафик блокируется).</i>\n"""
+ADMIN_SERVER_RELAYS_ROW = "• {flag} <b>{name}</b> (<code>{ip}:{port}</code>)\n  Статус: {status_badge}\n"
+ADMIN_SERVER_RELAYS_API_ERROR = "\n🔴 <b>Ошибка проверки узлов:</b> <code>{error}</code>\n"
+ADMIN_SERVER_RELAYS_ORIGIN_RTT = " (RTT: {origin_rtt} ms)"
+ADMIN_SERVER_RELAYS_ORIGIN_UNAVAILABLE = " (API недоступен)"
+ADMIN_SERVER_RELAYS_ERR_FETCH = "Не удалось получить статус релеев"
+ADMIN_SERVER_RELAYS_FALLBACK_NAME = "Релей"
+ADMIN_SERVER_RELAYS_STATUS_ONLINE_RTT = "🟢 Онлайн (RTT: {rtt_ms} ms)"
+ADMIN_SERVER_RELAYS_STATUS_ONLINE = "🟢 Онлайн"
+ADMIN_SERVER_RELAYS_STATUS_OFFLINE_ERR = "🔴 Офлайн ({error})"
+ADMIN_SERVER_RELAYS_STATUS_OFFLINE = "🔴 Офлайн"
+ADMIN_SERVER_BTN_REFRESH_RELAYS = "🔄 Обновить статус узлов"
+ADMIN_SERVER_BTN_BACK_TO_SERVER = "« Назад к серверу"
 
 ADMIN_SERVER_BTN_CHANGE_LIMIT = "👥 Изменить лимит"
 
@@ -236,3 +255,105 @@ ADMIN_SERVER_MIGRATE_SELECT_TARGET_PROMPT = """📦 <b>Миграция подп
 Подписчиков для переноса: <b>{count}</b>
 
 Выберите целевой сервер Origin:"""
+
+ADMIN_SERVER_BTN_INCY = "🎨 Оформление INCY"
+ADMIN_SERVER_INCY_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> › 🎨 <b>Оформление INCY</b>
+
+Настройки внешнего вида подписки для приложения INCY:
+
+• <b>Имя профиля:</b> <code>{title}</code>
+• <b>Подзаголовок:</b> <code>{description}</code>
+• <b>Баннер (объявление):</b> <code>{announce}</code>
+• <b>Ссылка баннера:</b> <code>{announce_url}</code>
+• <b>Шлюз РФ в клиенте:</b> <code>{origin_name}</code>
+• <b>Бейдж шлюза РФ:</b> <code>{origin_badge}</code>
+• <b>Статус шлюза РФ:</b> <code>{origin_status}</code>
+
+<i>Для изменения выберите нужный пункт ниже:</i>"""
+
+ADMIN_SERVER_INCY_PROMPT_TITLE = """🎨 <b>Изменение имени профиля в INCY</b>
+
+Текущее значение: <code>{current}</code>
+
+Отправьте новое название профиля (до 25 символов) или дефис «-» для сброса:"""
+
+ADMIN_SERVER_INCY_PROMPT_DESC = """🎨 <b>Изменение подзаголовка профиля в INCY</b>
+
+Текущее значение: <code>{current}</code>
+
+Отправьте подзаголовок (до 50 символов) или дефис «-» для отключения:"""
+
+ADMIN_SERVER_INCY_PROMPT_ANNOUNCE = """🎨 <b>Изменение объявления (баннера) в INCY</b>
+
+Текущее значение: <code>{current}</code>
+
+Отправьте текст объявления (до 200 символов, отображается плашкой в шапке клиента) или дефис «-» для отключения:"""
+
+ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL = """🎨 <b>Изменение ссылки баннера в INCY</b>
+
+Текущее значение: <code>{current}</code>
+
+Отправьте URL для клика по баннеру (например <code>https://t.me/your_channel</code>) или дефис «-» для удаления ссылки:"""
+
+ADMIN_SERVER_INCY_PROMPT_ORIGIN_NAME = """🎨 <b>Изменение имени шлюза РФ в клиенте</b>
+
+Текущее имя: <code>{current}</code>
+
+Отправьте отображаемое имя узла (до 30 символов, например <code>🇷🇺 Россия (Мск)</code>) или дефис «-» для сброса к имени сервера:"""
+
+ADMIN_SERVER_INCY_PROMPT_ORIGIN_BADGE = """🎨 <b>Изменение бейджа шлюза РФ (Origin)</b>
+
+Текущий бейдж: <code>{current}</code>
+
+Отправьте текст бейджа (до 30 символов, например <code>Прямой шлюз</code>), <code>none</code> для отключения или дефис «-» для сброса:"""
+
+ADMIN_SERVER_INCY_PROMPT_RELAY_NAME = """🎨 <b>Изменение имени узла {relay_code}</b>
+
+Текущее имя: <code>{current}</code>
+
+Отправьте отображаемое имя узла в клиенте (до 30 символов, например <code>🇩🇪 Германия (10 Гбит/с)</code>) или дефис «-» для сброса:"""
+
+ADMIN_SERVER_INCY_PROMPT_RELAY_SPECIFIC = """🎨 <b>Настройка бейджа для узла {relay_name} ({relay_code})</b>
+
+Текущий бейдж: <code>{current}</code>
+
+Отправьте персональный бейдж (до 30 символов, например <code>Скоростной канал</code>), <code>none</code> для отключения или дефис «-» для сброса:"""
+
+ADMIN_SERVER_INCY_SAVED = "✅ Настройка сохранена!"
+ADMIN_SERVER_INCY_ERR_INVALID_URL = "❌ Некорректный URL. Ссылка должна начинаться с https://, http:// или tg://"
+ADMIN_SERVER_INCY_RELAYS_TITLE = "🎨 <b>Управление узлами (Релеями) в INCY:</b>\n\nВыберите узел для настройки его названия и синего бейджа:"
+ADMIN_SERVER_INCY_RELAY_CARD = """🎨 <b>Настройка узла {relay_name} ({relay_code})</b>
+
+• <b>Имя в клиенте:</b> <code>{custom_name}</code>
+• <b>Бейдж в клиенте:</b> <code>{custom_badge}</code>
+• <b>Статус в подписке:</b> <code>{status}</code>
+
+<i>Выберите действие:</i>"""
+
+ADMIN_SERVER_INCY_RESET_SUCCESS = "✅ Настройки оформления сброшены к исходным значениям!"
+
+ADMIN_SERVER_INCY_BTN_TITLE = "✏️ Имя профиля"
+ADMIN_SERVER_INCY_BTN_DESC = "✏️ Подзаголовок"
+ADMIN_SERVER_INCY_BTN_ANNOUNCE = "📢 Объявление"
+ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL = "🔗 Ссылка баннера"
+ADMIN_SERVER_INCY_BTN_ORIGIN_NAME = "🇷🇺 Имя шлюза РФ"
+ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE = "🏷️ Бейдж шлюза РФ"
+ADMIN_SERVER_INCY_BTN_ORIGIN_TOGGLE = "👁️ Шлюз РФ: {status}"
+ADMIN_SERVER_INCY_BTN_RELAYS = "🌐 Узлы (Релеи)"
+ADMIN_SERVER_INCY_BTN_RESET = "🔄 Сбросить к дефолтам"
+ADMIN_SERVER_INCY_BTN_BACK = "« Назад к оформлению"
+
+ADMIN_SERVER_INCY_BTN_RELAY_EDIT_NAME = "✏️ Изменить название"
+ADMIN_SERVER_INCY_BTN_RELAY_EDIT_BADGE = "🏷️ Изменить бейдж"
+ADMIN_SERVER_INCY_BTN_RELAY_TOGGLE = "👁️ {action} в подписке"
+ADMIN_SERVER_INCY_BTN_BACK_TO_RELAYS = "« Назад к списку узлов"
+
+ADMIN_SERVER_INCY_STATUS_ACTIVE = "Активен"
+ADMIN_SERVER_INCY_STATUS_HIDDEN = "Скрыт"
+ADMIN_SERVER_INCY_ACTION_HIDE = "Скрыть"
+ADMIN_SERVER_INCY_ACTION_SHOW = "Показать"
+
+ADMIN_SERVER_INCY_VALUE_NONE = "— (не задан)"
+ADMIN_SERVER_INCY_VALUE_DISABLED = "Отключен"
+ADMIN_SERVER_INCY_NO_RELAYS = "На сервере нет подключенных Relay-узлов."
+ADMIN_SERVER_INCY_RELAY_BTN = "🌐 {name}{badge_part}{status_part}"

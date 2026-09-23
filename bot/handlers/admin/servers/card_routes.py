@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -287,6 +288,132 @@ async def ping_server(
         ping_res = texts.ADMIN_SERVER_PING_ERROR.format(error=type(exc).__name__)
 
     await _show_server_card(callback, session, server, ping_result=ping_res)
+
+
+@router.callback_query(F.data.startswith("admin_server_relays:"))
+async def show_server_relays(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    server_id = parse_callback_id(callback.data, 1)
+    if server_id is None:
+        await callback.answer(texts.ERROR_SERVER_ID_REQUIRED, show_alert=True)
+        return
+
+    server = await get_server_by_id(session, server_id)
+    if not server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    await callback.answer(texts.ADMIN_SERVER_RELAYS_CHECKING, show_alert=False)
+
+    from bot.formatters import format_admin_breadcrumbs
+    from bot.keyboards.admin.servers import get_admin_server_relays_keyboard
+    from services.xray_node_client import XrayNodeClient
+
+    flag = server.country_flag or texts.EMOJI_GLOBE
+    header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}", "Relays")
+
+    origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_OFFLINE
+    error_msg = None
+    relays_list: list[dict] = []
+
+    try:
+        async with XrayNodeClient(timeout=3.5, max_retries=0) as xclient:
+            t0 = time.monotonic()
+            is_ok, _epoch, detail = await xclient.check_health(server.api_url, server.api_key)
+            origin_rtt = int((time.monotonic() - t0) * 1000)
+            if is_ok:
+                origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_ONLINE_RTT.format(rtt_ms=origin_rtt)
+                success, data, err = await xclient.get_relays_health(server.api_url, server.api_key)
+                if success and isinstance(data, dict):
+                    if data.get("status") == "error":
+                        error_msg = data.get("error") or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
+                    else:
+                        relays_list = data.get("relays", [])
+                        if not data.get("relays_error"):
+                            extra = dict(server.extra_data or {})
+                            if extra.get("relays") != relays_list:
+                                extra["relays"] = relays_list
+                                server.extra_data = extra
+                                await session.flush()
+                else:
+                    error_msg = err or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
+            else:
+                origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_OFFLINE
+                error_msg = detail or texts.ADMIN_SERVER_RELAYS_ORIGIN_UNAVAILABLE
+    except Exception as exc:
+        origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_OFFLINE
+        error_msg = str(exc)
+
+    rendered = texts.ADMIN_SERVER_RELAYS_HEADER.format(
+        header=header,
+        flag=flag,
+        server_name=safe(server.name),
+        origin_status_badge=origin_status_badge,
+    )
+
+    if error_msg:
+        rendered += texts.ADMIN_SERVER_RELAYS_API_ERROR.format(error=safe(error_msg))
+    elif not relays_list:
+        rendered += texts.ADMIN_SERVER_RELAYS_EMPTY
+    else:
+        for r in relays_list:
+            r_name = r.get("name") or r.get("code") or texts.ADMIN_SERVER_RELAYS_FALLBACK_NAME
+            r_ip = r.get("ip", "-")
+            r_port = r.get("port", "-")
+            r_healthy = r.get("healthy", False)
+            r_rtt = r.get("rtt_ms")
+            r_err = r.get("error")
+
+            r_code = (r.get("code") or "").lower()
+            if r_code in ("de", "germany"):
+                r_flag = "🇩🇪"
+            elif r_code in ("pl", "poland"):
+                r_flag = "🇵🇱"
+            elif r_code in ("nl", "netherlands"):
+                r_flag = "🇳🇱"
+            elif r_code in ("us", "usa"):
+                r_flag = "🇺🇸"
+            else:
+                r_flag = texts.EMOJI_GLOBE
+
+            if r_healthy:
+                status_badge = (
+                    texts.ADMIN_SERVER_RELAYS_STATUS_ONLINE_RTT.format(rtt_ms=r_rtt)
+                    if r_rtt is not None
+                    else texts.ADMIN_SERVER_RELAYS_STATUS_ONLINE
+                )
+            else:
+                status_badge = (
+                    texts.ADMIN_SERVER_RELAYS_STATUS_OFFLINE_ERR.format(error=safe(str(r_err)))
+                    if r_err
+                    else texts.ADMIN_SERVER_RELAYS_STATUS_OFFLINE
+                )
+
+            rendered += texts.ADMIN_SERVER_RELAYS_ROW.format(
+                flag=r_flag,
+                name=safe(r_name),
+                ip=safe(str(r_ip)),
+                port=safe(str(r_port)),
+                status_badge=status_badge,
+            )
+
+    try:
+        await callback.message.edit_text(
+            rendered,
+            reply_markup=get_admin_server_relays_keyboard(server.id),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        if "not_modified" in str(e).lower():
+            pass
+        else:
+            logger.warning("TelegramBadRequest in show_server_relays: %s", e)
 
 
 @router.callback_query(F.data.startswith("admin_dismiss_alert"))
