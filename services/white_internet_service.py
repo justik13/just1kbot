@@ -739,6 +739,7 @@ class WhiteInternetService:
         tariff = await cls.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
 
+        quote: TariffQuote | None = None
         if debit_balance:
             quote = cls._new_quote(
                 user_id=user.id,
@@ -789,8 +790,9 @@ class WhiteInternetService:
             subscription_id=sub.id,
             extra_bytes=WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
         )
-        quote.status = TariffQuoteStatus.CONSUMED
-        quote.consumed_at = now_utc()
+        if debit_balance and quote is not None:
+            quote.status = TariffQuoteStatus.CONSUMED
+            quote.consumed_at = now_utc()
 
         if old_origin_for_cleanup:
             await white_internet_repo.enqueue_orphan_cleanup(
@@ -892,6 +894,7 @@ class WhiteInternetService:
         tariff_version = await get_or_create_current_version(session, tariff)
 
         quote_id: int = 0
+        quote: TariffQuote | None = None
         if debit_balance:
             quote = cls._new_quote(
                 user_id=user.id,
@@ -947,8 +950,9 @@ class WhiteInternetService:
             pack_gb=pack_gb,
             price_rub=pack_price,
         )
-        quote.status = TariffQuoteStatus.CONSUMED
-        quote.consumed_at = now_utc()
+        if debit_balance and quote is not None:
+            quote.status = TariffQuoteStatus.CONSUMED
+            quote.consumed_at = now_utc()
 
         if old_origin_for_cleanup:
             await white_internet_repo.enqueue_orphan_cleanup(

@@ -112,27 +112,32 @@ class YooKassaGateway(BasePaymentGateway):
         payload: dict,
         headers: dict | None = None,
     ) -> WebhookResult:
+        payload = payload or {}
         event = payload.get("event", "")
-        obj = payload.get("object", {})
-
-        is_refund_event = event in ("refund.succeeded", "payment.refunded")
-        external_id = obj.get("payment_id") if is_refund_event else obj.get("id", "")
-        if not external_id:
-            external_id = obj.get("id", "")
-
-        metadata = obj.get("metadata", {}) or {}
-        order_id = metadata.get("order_id")
-
-        amount_val = obj.get("amount", {}).get("value")
-        amount_rub = Decimal(str(amount_val)) if amount_val is not None else None
+        obj = payload.get("object") or {}
 
         status = obj.get("status", "")
-        if event:
-            is_paid = event == "payment.succeeded"
-            is_refunded = is_refund_event
+        metadata = obj.get("metadata") or {}
+        order_id = metadata.get("order_id")
+
+        amount_obj = obj.get("amount") or {}
+        amount_val = amount_obj.get("value")
+        amount_rub = Decimal(str(amount_val)) if amount_val is not None else None
+
+        related_external_id = None
+        if event == "refund.succeeded":
+            external_id = obj.get("id", "")
+            related_external_id = obj.get("payment_id")
+            is_paid = False
+            is_refunded = True
+        elif event == "payment.succeeded":
+            external_id = obj.get("id", "")
+            is_paid = True
+            is_refunded = False
         else:
-            is_paid = status == "succeeded"
-            is_refunded = status == "refunded"
+            external_id = obj.get("id", "")
+            is_paid = False
+            is_refunded = False
 
         return WebhookResult(
             order_id=order_id,
@@ -141,6 +146,7 @@ class YooKassaGateway(BasePaymentGateway):
             external_id=external_id,
             amount_rub=amount_rub,
             event_type=event or status,
+            related_external_id=related_external_id,
         )
 
     async def check_payment_status(

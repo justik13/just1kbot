@@ -205,7 +205,7 @@ async def _insert_or_get_entry(
     session: AsyncSession,
     *,
     values: dict,
-    economic_lookup,
+    economic_lookup=None,
 ) -> tuple[AccountLedgerEntry, bool]:
     entry_id = await session.scalar(
         insert(AccountLedgerEntry)
@@ -215,11 +215,11 @@ async def _insert_or_get_entry(
     )
     if entry_id is not None:
         return await session.get(AccountLedgerEntry, entry_id), True
+    lookup_cond = AccountLedgerEntry.idempotency_key == values["idempotency_key"]
+    if economic_lookup is not None:
+        lookup_cond = lookup_cond | economic_lookup
     entry = await session.scalar(
-        select(AccountLedgerEntry).where(
-            (AccountLedgerEntry.idempotency_key == values["idempotency_key"])
-            | economic_lookup
-        )
+        select(AccountLedgerEntry).where(lookup_cond)
     )
     expected = {
         "user_id": values["user_id"],
@@ -305,9 +305,13 @@ async def create_order_refund_debit(
     user_id: int,
     amount_rub: Decimal,
     order_id: object,
+    refund_id: str,
     metadata: dict | None = None,
 ) -> tuple[AccountLedgerEntry, bool]:
+    if not isinstance(refund_id, str) or not refund_id.strip():
+        raise ValueError("refund_id must be a non-empty string")
     amount = -abs(whole_rubles(amount_rub))
+    idempotency_key = f"order_refund:{order_id}:{refund_id.strip()}"
     values = {
         "user_id": user_id,
         "entry_type": "refund_debit",
@@ -317,16 +321,12 @@ async def create_order_refund_debit(
         "quote_id": None,
         "order_id": order_id,
         "reversal_of_id": None,
-        "idempotency_key": f"order_refund:{order_id}",
+        "idempotency_key": idempotency_key,
         "metadata_": metadata or {},
     }
     return await _insert_or_get_entry(
         session,
         values=values,
-        economic_lookup=(
-            (AccountLedgerEntry.entry_type == "refund_debit")
-            & (AccountLedgerEntry.order_id == order_id)
-        ),
     )
 
 

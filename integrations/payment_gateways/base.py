@@ -19,6 +19,11 @@ class WebhookResult:
     external_id: str
     amount_rub: Decimal | None = None
     event_type: str = ""
+    related_external_id: str | None = None
+
+    @property
+    def payment_id(self) -> str | None:
+        return self.related_external_id
 
 
 @dataclass(frozen=True)
