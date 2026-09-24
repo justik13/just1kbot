@@ -376,11 +376,11 @@ rules.append({
     'outboundTag': 'just1k-wl-direct'
 })
 
-# Standalone Origin: блокировать весь зарубежный трафик клиентов до подключения зарубежного Relay
+# Default inbound (Россия): прямой выход в интернет через московский IP Origin-сервера
 rules.append({
     'type': 'field',
     'inboundTag': ['just1k-wl-default'],
-    'outboundTag': 'just1k-wl-block'
+    'outboundTag': 'just1k-wl-direct'
 })
 
 final_config = dict(existing)
@@ -890,19 +890,16 @@ else:
     curr_ib = ip_rule.get('inboundTag', [])
     ip_rule['inboundTag'] = list(dict.fromkeys((curr_ib if isinstance(curr_ib, list) else [curr_ib]) + known_client_inbounds))
 
-# 4.4. Дефолтное правило для just1k-wl-default
+# 4.4. Дефолтное правило для just1k-wl-default (Россия — прямой выход с московского IP)
 def_rule = next((r for r in rules if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r), None)
-first_relay_tag = ('just1k-wl-outbound-' + str(relays[0]['code'])) if relays and relays[0].get('code') else 'just1k-wl-block'
 if not def_rule:
     rules.append({
         'type': 'field',
         'inboundTag': ['just1k-wl-default'],
-        'outboundTag': first_relay_tag
+        'outboundTag': 'just1k-wl-direct'
     })
 else:
-    curr_out = def_rule.get('outboundTag')
-    if not any(ob.get('tag') == curr_out for ob in outbounds):
-        def_rule['outboundTag'] = first_relay_tag
+    def_rule['outboundTag'] = 'just1k-wl-direct'
 
 # 4.5. Правила маршрутизации для каждого индивидуального релея
 for r in relays:

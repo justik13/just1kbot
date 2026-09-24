@@ -421,3 +421,48 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     decoded_title = base64.b64decode(title_b64).decode("utf-8")
                     self.assertEqual(len(decoded_title), 25)
                     self.assertEqual(decoded_title, "A" * 25)
+
+    def test_ensure_country_flag_logic(self):
+        # Auto prepend flag
+        self.assertEqual(WhiteInternetService._ensure_country_flag("Швеция", "se"), "🇸🇪 Швеция")
+        self.assertEqual(WhiteInternetService._ensure_country_flag("Германия", "de"), "🇩🇪 Германия")
+        self.assertEqual(WhiteInternetService._ensure_country_flag("Эстония", "ee"), "🇪🇪 Эстония")
+        self.assertEqual(WhiteInternetService._ensure_country_flag("Россия", "ru"), "🇷🇺 Россия")
+
+        # Do not duplicate if already present
+        self.assertEqual(WhiteInternetService._ensure_country_flag("🇸🇪 Швеция", "se"), "🇸🇪 Швеция")
+        self.assertEqual(WhiteInternetService._ensure_country_flag("🇩🇪 Германия", "de"), "🇩🇪 Германия")
+        self.assertEqual(WhiteInternetService._ensure_country_flag("🇷🇺 Россия", "ru"), "🇷🇺 Россия")
+
+        # Keep non-country names as is
+        self.assertEqual(
+            WhiteInternetService._ensure_country_flag("⚪️ Белый Интернет (XHTTP)", ""),
+            "⚪️ Белый Интернет (XHTTP)",
+        )
+
+    def test_generate_vless_links_origin_default_is_russia_without_parentheses(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+        relays = [
+            {"code": "se", "name": "Швеция"},
+            {"code": "de", "name": "Германия"},
+        ]
+        links = WhiteInternetService.generate_vless_links(
+            sub,
+            cdn_domain="cdn.example.com",
+            relays=relays,
+        )
+        self.assertEqual(len(links), 3)
+
+        # Origin link: must be "🇷🇺 Россия" without "(Прямой выход)"
+        origin_link = links[0]
+        self.assertIn(urllib.parse.quote("🇷🇺 Россия"), origin_link)
+        self.assertNotIn("Прямой выход", origin_link)
+
+        # Relay links: must have flags prepended automatically
+        se_link = links[1]
+        self.assertIn(urllib.parse.quote("🇸🇪 Швеция"), se_link)
+
+        de_link = links[2]
+        self.assertIn(urllib.parse.quote("🇩🇪 Германия"), de_link)
+

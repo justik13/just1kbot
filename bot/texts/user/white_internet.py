@@ -233,7 +233,7 @@ WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включ
 
 
 WL_VLESS_TAG = "⚪️ Белый Интернет (XHTTP)"
-WL_ORIGIN_VLESS_TAG = "🇷🇺 Россия (Прямой выход)"
+WL_ORIGIN_VLESS_TAG = "🇷🇺 Россия"
 WL_DEFAULT_TARIFF_NAME = "Белый Интернет 50 ГБ"
 WL_PROFILE_NAME = "✦ Just1k"
 WL_PROFILE_DESCRIPTION = ""
