@@ -166,6 +166,82 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         assert entry.reversal_of_id is None
         assert entry.payment_id is None
 
+    def test_reverse_referral_bonus_for_order(self):
+        import asyncio
+        import uuid
+
+        from database.models import AccountLedgerEntry, Order
+        from services.referral_bonus import reverse_referral_bonus_for_topup
+
+        captured_entry = {}
+
+        existing_bonus_credit = MagicMock()
+        existing_bonus_credit.id = 101
+        existing_bonus_credit.user_id = 1
+        existing_bonus_credit.amount = Decimal(25)
+        existing_bonus_credit.metadata_ = {"topup_order_id": "test-order-uuid", "source_type": "referral_bonus"}
+
+        def fake_add(entry):
+            if isinstance(entry, AccountLedgerEntry):
+                captured_entry["obj"] = entry
+
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=4,
+            service_type="topup",
+            amount_rub=Decimal("250.00"),
+            status="paid",
+        )
+
+        purchaser = MagicMock()
+        purchaser.id = 4
+        purchaser.referred_by = 111
+        purchaser.telegram_id = 444
+
+        referrer = MagicMock()
+        referrer.id = 1
+
+        def fake_get(model, pk, *args, **kwargs):
+            if pk == order_uuid:
+                return order
+            if pk == 4:
+                return purchaser
+            return None
+
+        scalars_mock_1 = MagicMock()
+        scalars_mock_1.all.return_value = [existing_bonus_credit]
+        scalars_mock_2 = MagicMock()
+        scalars_mock_2.all.return_value = []
+
+        session = AsyncMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        session.begin_nested = MagicMock(return_value=mock_ctx)
+        session.get = AsyncMock(side_effect=fake_get)
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, None, None])
+        session.scalars = AsyncMock(side_effect=[scalars_mock_1, scalars_mock_2, scalars_mock_2])
+        session.add = fake_add
+        session.flush = AsyncMock()
+
+        with patch(
+            "services.referral_bonus._credit_capacity",
+            AsyncMock(return_value=Decimal(25)),
+        ):
+            reversed_amount = asyncio.run(
+                reverse_referral_bonus_for_topup(session, order_id=order_uuid)
+            )
+
+        assert reversed_amount == Decimal(25)
+        entry = captured_entry.get("obj")
+        assert entry is not None
+        assert entry.user_id == 1
+        assert entry.amount == Decimal(-25)
+        assert entry.reversal_of_id is None
+        assert entry.payment_id is None
+        assert entry.metadata_["topup_order_id"] == str(order_uuid)
+
 
 
 class TestGrantReferralBonusForTopup(unittest.TestCase):

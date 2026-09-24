@@ -91,7 +91,8 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.is_paid)
         self.assertTrue(result.is_refunded)
         self.assertEqual(result.order_id, "ord-777")
-        self.assertEqual(result.external_id, "ext-pay-999")
+        self.assertEqual(result.external_id, "ref-111")
+        self.assertEqual(result.payment_id, "ext-pay-999")
 
     @patch("integrations.payment_gateways.yookassa.YooKassaService.get_payment_result")
     async def test_check_payment_status(self, mock_get):
@@ -801,6 +802,170 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
                 await FulfillmentService.fulfill_order(session, order)
             self.assertIn("Renewal error", str(cm.exception))
 
+    @patch("services.white_internet_service.white_internet_repo")
+    @patch("services.white_internet_service.get_or_create_current_version")
+    @patch("services.white_internet_service.lock_checkout_user")
+    async def test_fulfill_white_internet_device_slot_real_service_debit_balance_false(
+        self, mock_lock_user, mock_get_ver, mock_wi_repo
+    ):
+        """Verify ITEM_WHITE_INTERNET_DEVICE fulfillment executes real purchase_device_slot without UnboundLocalError."""
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+        from database.models import Server, WhiteInternetSubscription
+        from services.white_internet_service import WhiteInternetService
+
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, telegram_id=12345678)
+        session.get.return_value = user
+        mock_lock_user.return_value = user
+
+        sub = WhiteInternetSubscription(
+            id=100,
+            user_id=10,
+            status="ACTIVE",
+            origin_node_id=1,
+            device_limit=2,
+            base_traffic_bytes=10 * 1024**3,
+            extra_traffic_bytes=0,
+            uuid="test-uuid",
+            desired_version=1,
+            expires_at=now_utc() + timedelta(days=20),
+        )
+        mock_wi_repo.get_subscription_by_user_id = AsyncMock(return_value=sub)
+
+        origin_node = Server(
+            id=1,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            extra_data={"relays": ["relay1"]},
+            protocol="xray",
+        )
+        session.scalar.return_value = origin_node
+
+        mock_version = AsyncMock()
+        mock_version.id = 1
+        mock_version.price_rub = 150
+        mock_get_ver.return_value = mock_version
+
+        updated_sub = WhiteInternetSubscription(
+            id=100,
+            user_id=10,
+            status="ACTIVE",
+            origin_node_id=1,
+            device_limit=3,
+            base_traffic_bytes=10 * 1024**3,
+            extra_traffic_bytes=5 * 1024**3,
+            uuid="test-uuid",
+            desired_version=1,
+            expires_at=now_utc() + timedelta(days=20),
+        )
+        mock_wi_repo.add_device_slot_atomic = AsyncMock(return_value=updated_sub)
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="white_internet",
+            device_limit=1,
+            duration_days=0,
+            traffic_bytes=0,
+            amount_rub=Decimal("150.00"),
+            status="paid",
+        )
+
+        with patch.object(
+            WhiteInternetService,
+            "get_or_create_white_internet_tariff",
+            new_callable=AsyncMock,
+            return_value=Tariff(id=1, name="WI", duration_days=30, price_rub=Decimal("300.00"), is_active=True),
+        ), patch(
+            "database.repositories.white_internet_repo.get_subscription_by_user_id",
+            new_callable=AsyncMock,
+            return_value=sub,
+        ):
+            # Real WhiteInternetService.purchase_device_slot is executed!
+            await FulfillmentService.fulfill_order(session, order)
+
+        mock_wi_repo.add_device_slot_atomic.assert_called_once()
+        self.assertEqual(updated_sub.device_limit, 3)
+
+    @patch("services.white_internet_service.white_internet_repo")
+    @patch("services.white_internet_service.get_or_create_current_version")
+    @patch("services.white_internet_service.lock_checkout_user")
+    async def test_fulfill_white_internet_quota_pack_real_service_debit_balance_false(
+        self, mock_lock_user, mock_get_ver, mock_wi_repo
+    ):
+        """Verify ITEM_WHITE_INTERNET_PACK fulfillment executes real topup_quota without UnboundLocalError."""
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+        from database.models import Server, WhiteInternetSubscription
+        from services.white_internet_service import WhiteInternetService
+
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, telegram_id=12345678)
+        session.get.return_value = user
+        mock_lock_user.return_value = user
+
+        sub = WhiteInternetSubscription(
+            id=100,
+            user_id=10,
+            status="ACTIVE",
+            origin_node_id=1,
+            device_limit=2,
+            base_traffic_bytes=10 * 1024**3,
+            extra_traffic_bytes=0,
+            uuid="test-uuid",
+            desired_version=1,
+            expires_at=now_utc() + timedelta(days=20),
+        )
+        mock_wi_repo.get_subscription_by_user_id = AsyncMock(return_value=sub)
+
+        origin_node = Server(
+            id=1,
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            extra_data={"relays": ["relay1"]},
+            protocol="xray",
+        )
+        session.scalar.return_value = origin_node
+
+        mock_version = AsyncMock()
+        mock_version.id = 1
+        mock_version.price_rub = 100
+        mock_get_ver.return_value = mock_version
+
+        mock_grant = MagicMock()
+        mock_grant.id = 55
+        mock_wi_repo.topup_quota_atomic = AsyncMock(return_value=mock_grant)
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="white_internet",
+            traffic_bytes=25 * (1024**3),
+            duration_days=0,
+            amount_rub=Decimal("100.00"),
+            status="paid",
+        )
+
+        with patch.object(
+            WhiteInternetService,
+            "get_or_create_white_internet_tariff",
+            new_callable=AsyncMock,
+            return_value=Tariff(id=1, name="WI", duration_days=30, price_rub=Decimal("300.00"), is_active=True),
+        ), patch(
+            "database.repositories.white_internet_repo.get_subscription_by_user_id",
+            new_callable=AsyncMock,
+            return_value=sub,
+        ):
+            # Real WhiteInternetService.topup_quota is executed!
+            await FulfillmentService.fulfill_order(session, order)
+
+        mock_wi_repo.topup_quota_atomic.assert_called_once()
+        call_kwargs = mock_wi_repo.topup_quota_atomic.call_args[1]
+        self.assertEqual(call_kwargs["subscription_id"], 100)
+        self.assertEqual(call_kwargs["pack_gb"], 25)
+        self.assertEqual(call_kwargs["quote_id"], 0)
+
     @patch("services.order_service.FulfillmentService.fulfill_order")
     async def test_mark_order_paid_revives_canceled_order(self, mock_fulfill):
         session = AsyncMock(spec=AsyncSession)
@@ -882,11 +1047,12 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             payload = mock_create.call_args[0][0]
             self.assertEqual(payload["confirmation"]["return_url"], "https://t.me/env_configured_bot")
 
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
     @patch("services.order_service.FulfillmentService.revoke_order")
     @patch("services.order_service.create_order_refund_debit")
     @patch("services.order_service.get_payment_gateway")
     async def test_process_webhook_event_partial_refund(
-        self, mock_gw_factory, mock_refund_debit, mock_revoke
+        self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
     ):
         mock_gw = AsyncMock()
         order_uuid = uuid.uuid4()
@@ -918,8 +1084,11 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             user_id=10,
             amount_rub=Decimal("80.00"),
             order_id=order_uuid,
+            refund_id="ext-pay-888",
             metadata={"source": "yookassa_refund"},
         )
+        mock_rev_bonus.assert_called_once_with(session, order_id=order_uuid)
+        mock_revoke.assert_not_called()
 
     @patch("services.fulfillment_service.invalidate_user_cache")
     @patch("services.fulfillment_service.SubscriptionService.sync_access_state")
@@ -1072,11 +1241,12 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("200" in t for t in button_texts))
         self.assertIn("Всего: 2", rendered)
 
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
     @patch("services.order_service.FulfillmentService.revoke_order")
     @patch("services.order_service.create_order_refund_debit")
     @patch("services.order_service.get_payment_gateway")
     async def test_process_webhook_event_sequential_partial_refunds(
-        self, mock_gw_factory, mock_refund_debit, mock_revoke
+        self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
     ):
         mock_gw = AsyncMock()
         order_uuid = uuid.uuid4()
@@ -1111,14 +1281,20 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             user_id=10,
             amount_rub=Decimal("80.00"),
             order_id=order_uuid,
+            refund_id="refund-part-1",
             metadata={"source": "yookassa_refund"},
         )
+        mock_rev_bonus.assert_called_once_with(session, order_id=order_uuid)
+        mock_revoke.assert_not_called()
 
         # 2. Duplicate of first partial refund should be ignored
         mock_refund_debit.reset_mock()
+        mock_rev_bonus.reset_mock()
         res_dup = await OrderService.process_webhook_event(session, {"ref": 1})
         self.assertEqual(res_dup, order)
         mock_refund_debit.assert_not_called()
+        mock_rev_bonus.assert_not_called()
+        mock_revoke.assert_not_called()
 
         # 3. Second partial refund: 120 RUB (completes the 200 RUB order)
         mock_gw.parse_webhook.return_value = WebhookResult(
@@ -1137,8 +1313,54 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             user_id=10,
             amount_rub=Decimal("120.00"),
             order_id=order_uuid,
+            refund_id="refund-part-2",
             metadata={"source": "yookassa_refund"},
         )
+        mock_rev_bonus.assert_called_once_with(session, order_id=order_uuid)
+        mock_revoke.assert_called_once_with(session, order)
+
+    @patch("services.order_service.FulfillmentService.revoke_order")
+    @patch("services.order_service.create_order_refund_debit")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_refund_finds_order_by_payment_id(
+        self, mock_gw_factory, mock_refund_debit, mock_revoke
+    ):
+        """Verify webhook refund finds order by payment_id when metadata lacks order_id."""
+        mock_gw = AsyncMock()
+        mock_gw_factory.return_value = mock_gw
+
+        order_uuid = uuid.uuid4()
+        payment_ext_id = "yoo-pay-123456"
+        refund_ext_id = "yoo-ref-987654"
+
+        # Webhook lacks order_id in metadata (e.g. manual refund from YooKassa dashboard)
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=None,
+            is_paid=False,
+            is_refunded=True,
+            external_id=refund_ext_id,
+            payment_id=payment_ext_id,
+            amount_rub=Decimal("300.00"),
+        )
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="awg",
+            duration_days=30,
+            amount_rub=Decimal("300.00"),
+            status="paid",
+            external_id=payment_ext_id,
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        res = await OrderService.process_webhook_event(session, {"event": "refund.succeeded"})
+        self.assertIsNotNone(res)
+        self.assertEqual(res.id, order_uuid)
+        self.assertEqual(res.status, "refunded")
+        mock_revoke.assert_called_once_with(session, order)
 
     @patch("bot.handlers.webhook.session_scope")
     @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")

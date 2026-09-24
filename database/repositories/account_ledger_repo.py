@@ -305,9 +305,17 @@ async def create_order_refund_debit(
     user_id: int,
     amount_rub: Decimal,
     order_id: object,
+    refund_id: str | None = None,
+    external_id: str | None = None,
     metadata: dict | None = None,
 ) -> tuple[AccountLedgerEntry, bool]:
     amount = -abs(whole_rubles(amount_rub))
+    ref_suffix = refund_id or external_id
+    idempotency_key = (
+        f"order_refund:{order_id}:{ref_suffix}"
+        if ref_suffix
+        else f"order_refund:{order_id}"
+    )
     values = {
         "user_id": user_id,
         "entry_type": "refund_debit",
@@ -317,7 +325,7 @@ async def create_order_refund_debit(
         "quote_id": None,
         "order_id": order_id,
         "reversal_of_id": None,
-        "idempotency_key": f"order_refund:{order_id}",
+        "idempotency_key": idempotency_key,
         "metadata_": metadata or {},
     }
     return await _insert_or_get_entry(
@@ -326,6 +334,7 @@ async def create_order_refund_debit(
         economic_lookup=(
             (AccountLedgerEntry.entry_type == "refund_debit")
             & (AccountLedgerEntry.order_id == order_id)
+            & (AccountLedgerEntry.idempotency_key == idempotency_key)
         ),
     )
 

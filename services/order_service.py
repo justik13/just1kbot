@@ -20,6 +20,7 @@ from database.repositories.account_ledger_repo import (
 )
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.fulfillment_service import FulfillmentService
+from services.referral_bonus import reverse_referral_bonus_for_topup
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -389,6 +390,11 @@ class OrderService:
             except (ValueError, TypeError):
                 pass
 
+        if not order and getattr(result, "payment_id", None):
+            order = await session.scalar(
+                select(Order).where(Order.external_id == result.payment_id).with_for_update()
+            )
+
         if not order and result.external_id:
             order = await session.scalar(
                 select(Order).where(Order.external_id == result.external_id).with_for_update()
@@ -453,18 +459,38 @@ class OrderService:
                     user_id=order.user_id,
                     amount_rub=refund_amount,
                     order_id=order.id,
+                    refund_id=result.external_id,
                     metadata={"source": "yookassa_refund"},
                 )
+                try:
+                    await reverse_referral_bonus_for_topup(
+                        session,
+                        order_id=order.id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to reverse referral bonus for order %s: %s",
+                        order.id,
+                        exc,
+                    )
 
-            await FulfillmentService.revoke_order(session, order)
+            if new_total_refunded >= order.amount_rub or order.status == "refunded":
+                await FulfillmentService.revoke_order(session, order)
+                logger.info(
+                    "Order %s fully refunded (total %s / %s) and revoked",
+                    order.id,
+                    new_total_refunded,
+                    order.amount_rub,
+                )
+            else:
+                logger.info(
+                    "Order %s partially refunded %s RUB (total %s / %s), revocation deferred until full refund",
+                    order.id,
+                    refund_amount,
+                    new_total_refunded,
+                    order.amount_rub,
+                )
             await session.flush()
-            logger.info(
-                "Order %s refunded %s RUB (total %s / %s) and revoked",
-                order.id,
-                refund_amount,
-                new_total_refunded,
-                order.amount_rub,
-            )
             return order
 
         return None

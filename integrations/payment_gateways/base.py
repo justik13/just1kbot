@@ -19,6 +19,7 @@ class WebhookResult:
     external_id: str
     amount_rub: Decimal | None = None
     event_type: str = ""
+    payment_id: str | None = None
 
 
 @dataclass(frozen=True)
