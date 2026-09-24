@@ -92,6 +92,7 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_refunded)
         self.assertEqual(result.order_id, "ord-777")
         self.assertEqual(result.external_id, "ref-111")
+        self.assertEqual(result.related_external_id, "ext-pay-999")
         self.assertEqual(result.payment_id, "ext-pay-999")
 
     @patch("integrations.payment_gateways.yookassa.YooKassaService.get_payment_result")
@@ -1050,7 +1051,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
     async def test_yookassa_gateway_parse_webhook_refund_and_payment_discrimination(self):
         gw = YooKassaGateway()
 
-        # 1. Standard refund event
+        # 1. Standard refund event (refund.succeeded)
         res1 = await gw.parse_webhook({
             "event": "refund.succeeded",
             "object": {
@@ -1062,27 +1063,30 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             },
         })
         self.assertEqual(res1.external_id, "ref-111")
+        self.assertEqual(res1.related_external_id, "pay-222")
         self.assertEqual(res1.payment_id, "pay-222")
         self.assertTrue(res1.is_refunded)
         self.assertFalse(res1.is_paid)
         self.assertEqual(res1.amount_rub, Decimal("150.00"))
 
-        # 2. Refund payload without event envelope (status=succeeded + payment_id present)
+        # 2. Refund payload with status=refunded without event envelope
         res2 = await gw.parse_webhook({
             "object": {
                 "id": "ref-444",
                 "payment_id": "pay-555",
-                "status": "succeeded",
+                "status": "refunded",
                 "amount": {"value": "200.00", "currency": "RUB"},
             },
         })
         self.assertEqual(res2.external_id, "ref-444")
+        self.assertEqual(res2.related_external_id, "pay-555")
         self.assertEqual(res2.payment_id, "pay-555")
         self.assertTrue(res2.is_refunded)
         self.assertFalse(res2.is_paid)
 
-        # 3. Payment payload without event envelope (status=succeeded, no payment_id)
+        # 3. Payment payload (payment.succeeded)
         res3 = await gw.parse_webhook({
+            "event": "payment.succeeded",
             "object": {
                 "id": "pay-666",
                 "status": "succeeded",
@@ -1090,6 +1094,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             },
         })
         self.assertEqual(res3.external_id, "pay-666")
+        self.assertIsNone(res3.related_external_id)
         self.assertIsNone(res3.payment_id)
         self.assertFalse(res3.is_refunded)
         self.assertTrue(res3.is_paid)
@@ -1408,6 +1413,70 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.id, order_uuid)
         self.assertEqual(res.status, "refunded")
         mock_revoke.assert_called_once_with(session, order)
+
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
+    @patch("services.order_service.create_order_refund_debit")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_fail_closed_on_referral_bonus_reversal_error(
+        self, mock_gw_factory, mock_refund_debit, mock_rev_bonus
+    ):
+        mock_gw = AsyncMock()
+        mock_gw_factory.return_value = mock_gw
+        order_uuid = uuid.uuid4()
+
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            amount_rub=Decimal("100.00"),
+            external_id="refund-err-1",
+        )
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="paid",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        mock_rev_bonus.side_effect = RuntimeError("DB referral reversal lock failed")
+
+        with self.assertRaises(RuntimeError) as cm:
+            await OrderService.process_webhook_event(session, {"ref": 1})
+
+        self.assertIn("DB referral reversal lock failed", str(cm.exception))
+
+    @patch("database.repositories.account_ledger_repo._insert_or_get_entry")
+    async def test_create_order_refund_debit_contract(self, mock_insert):
+        from database.repositories.account_ledger_repo import create_order_refund_debit
+
+        session = AsyncMock(spec=AsyncSession)
+        mock_entry = MagicMock()
+        mock_insert.return_value = (mock_entry, True)
+
+        order_uuid = uuid.uuid4()
+        entry, created = await create_order_refund_debit(
+            session,
+            user_id=42,
+            amount_rub=Decimal("150.00"),
+            order_id=order_uuid,
+            refund_id="yoo-ref-999",
+            metadata={"source": "test"},
+        )
+        self.assertTrue(created)
+        mock_insert.assert_called_once()
+        values = mock_insert.call_args[1]["values"]
+        self.assertEqual(values["user_id"], 42)
+        self.assertEqual(values["entry_type"], "refund_debit")
+        self.assertEqual(values["amount"], Decimal("-150"))
+        self.assertEqual(values["order_id"], order_uuid)
+        self.assertEqual(values["idempotency_key"], f"order_refund:{order_uuid}:yoo-ref-999")
+        self.assertEqual(values["metadata_"], {"source": "test"})
 
     @patch("bot.handlers.webhook.session_scope")
     @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")

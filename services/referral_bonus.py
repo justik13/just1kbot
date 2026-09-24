@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.enums import AdminAuditAction
 from database.models import AccountLedgerAllocation, AccountLedgerEntry, User
 from database.repositories.account_ledger_repo import (
-    _credit_capacity,
+    _credit_capacity,  # noqa: F401
     get_account_balance,
 )
 
@@ -193,7 +193,7 @@ async def grant_referral_bonus_for_topup(
                     "referred_user_id": purchaser.id,
                     "referred_telegram_id": purchaser.telegram_id,
                     "topup_payment_id": payment_id,
-                    "topup_order_id": order_id,
+                    "topup_order_id": str(order_id) if order_id is not None else None,
                     "bonus_rate": str(REFERRAL_BONUS_RATE),
                 },
             )
@@ -280,7 +280,7 @@ async def grant_referral_bonus_for_topup(
                         "purchaser_user_id": purchaser.id,
                         "referrer_telegram_id": purchaser.referred_by,
                         "topup_payment_id": payment_id,
-                        "topup_order_id": order_id,
+                        "topup_order_id": str(order_id) if order_id is not None else None,
                         "bonus_rate": str(REFERRAL_BONUS_RATE),
                     },
                 )
@@ -316,238 +316,114 @@ async def reverse_referral_bonus_for_topup(
     order_id: str | uuid.UUID | None = None,
 ) -> Decimal:
     """Debit/reverse the referral bonus previously credited for a top-up if the top-up is refunded."""
-    from database.models import Order, Payment
     from sqlalchemy import text
 
     if payment_id is None and order_id is None:
         return Decimal(0)
 
-    purchaser_user_id: int | None = None
-    if payment_id is not None:
-        payment = await session.get(Payment, payment_id, with_for_update=True)
-        if payment is not None:
-            purchaser_user_id = payment.user_id
-    elif order_id is not None:
+    order_str: str | None = None
+    if order_id is not None:
         try:
-            order_uuid = uuid.UUID(str(order_id)) if isinstance(order_id, str) else order_id
-            order = await session.get(Order, order_uuid, with_for_update=True)
-            if order is not None:
-                purchaser_user_id = order.user_id
-        except (ValueError, TypeError):
-            order = None
+            order_uuid = (
+                uuid.UUID(str(order_id))
+                if not isinstance(order_id, uuid.UUID)
+                else order_id
+            )
+            order_str = str(order_uuid)
+        except (ValueError, TypeError, AttributeError) as err:
+            raise ValueError(f"Invalid order_id for referral reversal: {order_id}") from err
 
-    if purchaser_user_id is None:
-        return Decimal(0)
+    op_id = order_str if order_str is not None else str(payment_id)
 
-    purchaser = await session.scalar(
-        select(User)
-        .where(User.id == purchaser_user_id)
-    )
-    if purchaser is None:
-        return Decimal(0)
+    if order_str is not None:
+        metadata_filter = {
+            "topup_order_id": order_str,
+            "source_type": REFERRAL_BONUS_SOURCE,
+        }
+    else:
+        metadata_filter = {
+            "topup_payment_id": payment_id,
+            "source_type": REFERRAL_BONUS_SOURCE,
+        }
 
-    referrer = None
-    referred_by = getattr(purchaser, "referred_by", None)
-    purchaser_tg = getattr(purchaser, "telegram_id", None)
-    if referred_by and referred_by != purchaser_tg:
-        referrer = await session.scalar(
-            select(User)
-            .where(User.telegram_id == referred_by)
-        )
-
-    if referrer is None and order_id is not None:
-        # Fallback: if purchaser.referred_by was altered or cleared after top-up,
-        # find the original referrer credit by matching the order in metadata
-        order_str = str(order_id)
-        candidate = await session.scalar(
+    credits = (
+        await session.scalars(
             select(AccountLedgerEntry).where(
                 AccountLedgerEntry.entry_type == "admin_adjustment",
                 AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.reversal_of_id.is_(None),
                 text("metadata @> CAST(:metadata_filter AS jsonb)").bindparams(
-                    metadata_filter=json.dumps(
-                        {"topup_order_id": order_str, "source_type": REFERRAL_BONUS_SOURCE}
+                    metadata_filter=json.dumps(metadata_filter)
+                ),
+            )
+        )
+    ).all()
+
+    total_reversed = Decimal(0)
+    for credit in credits:
+        idempotency_key = f"referral-bonus-reversal:{op_id}:{credit.user_id}"
+        orig_filter = json.dumps({"original_credit_id": credit.id})
+        existing = await session.scalar(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.user_id == credit.user_id,
+                AccountLedgerEntry.entry_type == "admin_adjustment",
+                AccountLedgerEntry.amount < 0,
+                (
+                    (AccountLedgerEntry.idempotency_key == idempotency_key)
+                    | (
+                        AccountLedgerEntry.idempotency_key
+                        == f"referral-bonus-reversal:topup:{op_id}:{credit.user_id}"
+                    )
+                    | (
+                        AccountLedgerEntry.idempotency_key
+                        == f"referral-bonus-reversal:first-topup-welcome:{op_id}:{credit.user_id}"
+                    )
+                    | text("metadata @> CAST(:orig_filter AS jsonb)").bindparams(
+                        orig_filter=orig_filter
                     )
                 ),
             )
         )
-        if candidate is not None:
-            referrer = await session.get(User, candidate.user_id)
-
-    total_reversed = Decimal(0)
-    op_id = str(order_id) if order_id is not None else str(payment_id)
-
-    # 1. Reverse referrer bonus for this top-up if present and referrer exists.
-    if referrer is not None:
-        if order_id is not None:
-            order_str = str(order_id)
-            referrer_cond = (
-                (AccountLedgerEntry.idempotency_key == f"referral-bonus:topup:{order_str}:{referrer.id}")
-                | text("metadata @> CAST(:metadata_filter AS jsonb)").bindparams(
-                    metadata_filter=json.dumps(
-                        {"topup_order_id": order_str, "source_type": REFERRAL_BONUS_SOURCE}
-                    )
-                )
-            )
-        else:
-            referrer_cond = text("metadata @> CAST(:metadata_filter AS jsonb)").bindparams(
-                metadata_filter=json.dumps(
-                    {"topup_payment_id": payment_id, "source_type": REFERRAL_BONUS_SOURCE}
-                )
-            )
-
-        candidate_credits = (
-            await session.scalars(
-                select(AccountLedgerEntry).where(
-                    AccountLedgerEntry.user_id == referrer.id,
-                    AccountLedgerEntry.entry_type == "admin_adjustment",
-                    AccountLedgerEntry.amount > 0,
-                    AccountLedgerEntry.reversal_of_id.is_(None),
-                    referrer_cond,
-                )
-            )
-        ).all()
-        matching_credit = candidate_credits[0] if candidate_credits else None
-
-        if matching_credit is not None:
-            idempotency_key = f"referral-bonus-reversal:topup:{op_id}:{matching_credit.user_id}"
-            existing = await session.scalar(
-                select(AccountLedgerEntry).where(
-                    AccountLedgerEntry.idempotency_key == idempotency_key
-                )
-            )
-            if existing is None:
-                reversal_amount = -abs(Decimal(matching_credit.amount))
-                entry = AccountLedgerEntry(
-                    user_id=matching_credit.user_id,
-                    entry_type="admin_adjustment",
-                    amount=reversal_amount,
-                    currency="RUB",
-                    payment_id=None,
-                    quote_id=None,
-                    reversal_of_id=None,
-                    idempotency_key=idempotency_key,
-                    metadata_={
-                        "source_type": REFERRAL_BONUS_SOURCE,
-                        "reason": "topup_refund_reversal",
-                        "topup_payment_id": payment_id,
-                        "topup_order_id": str(order_id) if order_id is not None else None,
-                        "original_credit_id": matching_credit.id,
-                    },
-                )
-                session.add(entry)
-                await session.flush()
-                reversal_capacity = await _credit_capacity(session, matching_credit)
-                allocation_amount = min(abs(reversal_amount), reversal_capacity)
-                if allocation_amount > 0:
-                    session.add(
-                        AccountLedgerAllocation(
-                            user_id=matching_credit.user_id,
-                            credit_entry_id=matching_credit.id,
-                            debit_entry_id=entry.id,
-                            amount=allocation_amount,
-                            idempotency_key=f"alloc:{idempotency_key}",
-                        )
-                    )
-                _logger.debug(
-                    "Referral bonus reversal created for referrer user_id=%s, op_id=%s, amount=%s",
-                    matching_credit.user_id, op_id, reversal_amount,
-                )
-                total_reversed += abs(reversal_amount)
-            else:
-                _logger.debug(
-                    "Referral bonus reversal already exists for referrer, op_id=%s", op_id
-                )
-                total_reversed += Decimal(abs(existing.amount))
-        else:
+        if (
+            existing is not None
+            and getattr(existing, "entry_type", None) == "admin_adjustment"
+            and isinstance(getattr(existing, "amount", None), (int, float, Decimal))
+        ):
             _logger.debug(
-                "No referral bonus credit found for referrer, op_id=%s", op_id
+                "Referral bonus reversal already exists for credit_id=%s, user_id=%s, op_id=%s",
+                credit.id,
+                credit.user_id,
+                op_id,
             )
+            total_reversed += Decimal(abs(existing.amount))
+            continue
 
-    # 2. Reverse purchaser welcome bonus for this top-up if present
-    if order_id is not None:
-        order_str = str(order_id)
-        purchaser_cond = text("metadata @> CAST(:metadata_filter2 AS jsonb)").bindparams(
-            metadata_filter2=json.dumps(
-                {"topup_order_id": order_str, "reason": "first_topup_welcome"}
-            )
+        reversal_amount = -abs(Decimal(credit.amount))
+        reversal_entry = AccountLedgerEntry(
+            user_id=credit.user_id,
+            entry_type="admin_adjustment",
+            amount=reversal_amount,
+            currency="RUB",
+            payment_id=None,
+            quote_id=None,
+            reversal_of_id=None,
+            idempotency_key=idempotency_key,
+            metadata_={
+                "source_type": REFERRAL_BONUS_SOURCE,
+                "reason": "topup_refund_reversal",
+                "topup_payment_id": payment_id,
+                "topup_order_id": order_str,
+                "original_credit_id": credit.id,
+            },
         )
-    else:
-        purchaser_cond = text("metadata @> CAST(:metadata_filter2 AS jsonb)").bindparams(
-            metadata_filter2=json.dumps(
-                {"topup_payment_id": payment_id, "reason": "first_topup_welcome"}
-            )
-        )
-
-    purchaser_credits = (
-        await session.scalars(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.user_id == purchaser.id,
-                AccountLedgerEntry.entry_type == "admin_adjustment",
-                AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.reversal_of_id.is_(None),
-                purchaser_cond,
-            )
-        )
-    ).all()
-    matching_purchaser_credit = purchaser_credits[0] if purchaser_credits else None
-
-    if matching_purchaser_credit is not None:
-        purchaser_rev_key = f"referral-bonus-reversal:first-topup-welcome:{op_id}:{purchaser.id}"
-        existing_purchaser_rev = await session.scalar(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.idempotency_key == purchaser_rev_key
-            )
-        )
-        if existing_purchaser_rev is None:
-            p_reversal_amount = -abs(Decimal(matching_purchaser_credit.amount))
-            p_entry = AccountLedgerEntry(
-                user_id=purchaser.id,
-                entry_type="admin_adjustment",
-                amount=p_reversal_amount,
-                currency="RUB",
-                payment_id=None,
-                quote_id=None,
-                reversal_of_id=None,
-                idempotency_key=purchaser_rev_key,
-                metadata_={
-                    "source_type": REFERRAL_BONUS_SOURCE,
-                    "reason": "topup_refund_reversal",
-                    "topup_payment_id": payment_id,
-                    "topup_order_id": str(order_id) if order_id is not None else None,
-                    "original_credit_id": matching_purchaser_credit.id,
-                },
-            )
-            session.add(p_entry)
-            await session.flush()
-            p_reversal_capacity = await _credit_capacity(
-                session, matching_purchaser_credit
-            )
-            p_allocation_amount = min(abs(p_reversal_amount), p_reversal_capacity)
-            if p_allocation_amount > 0:
-                session.add(
-                    AccountLedgerAllocation(
-                        user_id=purchaser.id,
-                        credit_entry_id=matching_purchaser_credit.id,
-                        debit_entry_id=p_entry.id,
-                        amount=p_allocation_amount,
-                        idempotency_key=f"alloc:{purchaser_rev_key}",
-                    )
-                )
-            _logger.debug(
-                "Welcome bonus reversal created for purchaser user_id=%s, op_id=%s, amount=%s",
-                purchaser.id, op_id, p_reversal_amount,
-            )
-            total_reversed += abs(p_reversal_amount)
-        else:
-            _logger.debug(
-                "Welcome bonus reversal already exists for purchaser, op_id=%s", op_id
-            )
-            total_reversed += Decimal(abs(existing_purchaser_rev.amount))
-    else:
+        session.add(reversal_entry)
         _logger.debug(
-            "No welcome bonus credit found for purchaser, op_id=%s", op_id
+            "Referral bonus reversal created for credit_id=%s, user_id=%s, op_id=%s, amount=%s",
+            credit.id,
+            credit.user_id,
+            op_id,
+            reversal_amount,
         )
+        total_reversed += abs(reversal_amount)
 
     await session.flush()
     return total_reversed

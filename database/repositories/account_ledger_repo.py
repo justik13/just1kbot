@@ -205,7 +205,7 @@ async def _insert_or_get_entry(
     session: AsyncSession,
     *,
     values: dict,
-    economic_lookup,
+    economic_lookup=None,
 ) -> tuple[AccountLedgerEntry, bool]:
     entry_id = await session.scalar(
         insert(AccountLedgerEntry)
@@ -215,11 +215,11 @@ async def _insert_or_get_entry(
     )
     if entry_id is not None:
         return await session.get(AccountLedgerEntry, entry_id), True
+    lookup_cond = AccountLedgerEntry.idempotency_key == values["idempotency_key"]
+    if economic_lookup is not None:
+        lookup_cond = lookup_cond | economic_lookup
     entry = await session.scalar(
-        select(AccountLedgerEntry).where(
-            (AccountLedgerEntry.idempotency_key == values["idempotency_key"])
-            | economic_lookup
-        )
+        select(AccountLedgerEntry).where(lookup_cond)
     )
     expected = {
         "user_id": values["user_id"],
@@ -305,17 +305,11 @@ async def create_order_refund_debit(
     user_id: int,
     amount_rub: Decimal,
     order_id: object,
-    refund_id: str | None = None,
-    external_id: str | None = None,
+    refund_id: str,
     metadata: dict | None = None,
 ) -> tuple[AccountLedgerEntry, bool]:
     amount = -abs(whole_rubles(amount_rub))
-    ref_suffix = refund_id or external_id
-    idempotency_key = (
-        f"order_refund:{order_id}:{ref_suffix}"
-        if ref_suffix
-        else f"order_refund:{order_id}"
-    )
+    idempotency_key = f"order_refund:{order_id}:{refund_id}"
     values = {
         "user_id": user_id,
         "entry_type": "refund_debit",
@@ -331,11 +325,6 @@ async def create_order_refund_debit(
     return await _insert_or_get_entry(
         session,
         values=values,
-        economic_lookup=(
-            (AccountLedgerEntry.entry_type == "refund_debit")
-            & (AccountLedgerEntry.order_id == order_id)
-            & (AccountLedgerEntry.idempotency_key == idempotency_key)
-        ),
     )
 
 

@@ -116,26 +116,28 @@ class YooKassaGateway(BasePaymentGateway):
         obj = payload.get("object", {})
 
         status = obj.get("status", "")
-        payment_id = obj.get("payment_id")
-        is_refund_event = (
-            event in ("refund.succeeded", "payment.refunded")
-            or status == "refunded"
-            or bool(payment_id)
-        )
-        external_id = obj.get("id", "")
-
         metadata = obj.get("metadata", {}) or {}
         order_id = metadata.get("order_id")
 
         amount_val = obj.get("amount", {}).get("value")
         amount_rub = Decimal(str(amount_val)) if amount_val is not None else None
 
-        if event:
-            is_paid = event == "payment.succeeded"
-            is_refunded = is_refund_event
+        related_external_id = None
+        if event == "refund.succeeded":
+            external_id = obj.get("id", "")
+            related_external_id = obj.get("payment_id")
+            is_paid = False
+            is_refunded = True
+        elif event == "payment.succeeded":
+            external_id = obj.get("id", "")
+            is_paid = True
+            is_refunded = False
         else:
-            is_paid = status == "succeeded" and not is_refund_event
-            is_refunded = is_refund_event
+            external_id = obj.get("id", "")
+            is_refunded = status == "refunded"
+            is_paid = status == "succeeded" and not is_refunded
+            if is_refunded:
+                related_external_id = obj.get("payment_id")
 
         return WebhookResult(
             order_id=order_id,
@@ -144,7 +146,7 @@ class YooKassaGateway(BasePaymentGateway):
             external_id=external_id,
             amount_rub=amount_rub,
             event_type=event or status,
-            payment_id=payment_id,
+            related_external_id=related_external_id,
         )
 
     async def check_payment_status(

@@ -390,9 +390,10 @@ class OrderService:
             except (ValueError, TypeError):
                 pass
 
-        if not order and getattr(result, "payment_id", None):
+        related_id = getattr(result, "related_external_id", None) or getattr(result, "payment_id", None)
+        if not order and related_id:
             order = await session.scalar(
-                select(Order).where(Order.external_id == result.payment_id).with_for_update()
+                select(Order).where(Order.external_id == related_id).with_for_update()
             )
 
         if not order and result.external_id:
@@ -462,17 +463,10 @@ class OrderService:
                     refund_id=result.external_id,
                     metadata={"source": "yookassa_refund"},
                 )
-                try:
-                    await reverse_referral_bonus_for_topup(
-                        session,
-                        order_id=order.id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to reverse referral bonus for order %s: %s",
-                        order.id,
-                        exc,
-                    )
+                await reverse_referral_bonus_for_topup(
+                    session,
+                    order_id=order.id,
+                )
 
             if new_total_refunded >= order.amount_rub or order.status == "refunded":
                 await FulfillmentService.revoke_order(session, order)
