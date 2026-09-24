@@ -1320,6 +1320,62 @@ class WhiteInternetService:
         return True, "ok", sub
 
     @staticmethod
+    def _ensure_country_flag(name: str, code: str = "") -> str:
+        """Prepend country flag emoji if missing based on ISO code or common country name."""
+        clean_name = (name or "").strip()
+        if not clean_name:
+            return clean_name
+        known_flags = (
+            "🇷🇺", "🇩🇪", "🇸🇪", "🇪🇪", "🇫🇮", "🇳🇱", "🇵🇱",
+            "🇫🇷", "🇬🇧", "🇺🇸", "🇹🇷", "🇰🇿", "🇦🇹", "🇨🇭",
+        )
+        if any(f in clean_name for f in known_flags):
+            return clean_name
+
+        c = (code or "").strip().lower()
+        lookup = f"{c} {clean_name.lower()}"
+        flag = ""
+        country_keyword_flags = getattr(texts, "WL_COUNTRY_KEYWORD_FLAGS", {})
+        for kw, fl in country_keyword_flags.items():
+            if kw in lookup:
+                flag = fl
+                break
+
+        if not flag:
+            if c in ("de", "germany") or "germany" in lookup:
+                flag = "🇩🇪"
+            elif c in ("se", "sweden") or "sweden" in lookup:
+                flag = "🇸🇪"
+            elif c in ("ee", "estonia") or "estonia" in lookup:
+                flag = "🇪🇪"
+            elif c in ("fi", "finland") or "finland" in lookup:
+                flag = "🇫🇮"
+            elif c in ("nl", "netherlands") or "netherlands" in lookup:
+                flag = "🇳🇱"
+            elif c in ("pl", "poland") or "poland" in lookup:
+                flag = "🇵🇱"
+            elif c in ("fr", "france") or "france" in lookup:
+                flag = "🇫🇷"
+            elif c in ("gb", "uk", "united_kingdom") or "britain" in lookup:
+                flag = "🇬🇧"
+            elif c in ("us", "usa") or "usa" in lookup:
+                flag = "🇺🇸"
+            elif c in ("ru", "russia") or "russia" in lookup:
+                flag = "🇷🇺"
+            elif c in ("tr", "turkey") or "turkey" in lookup:
+                flag = "🇹🇷"
+            elif c in ("kz", "kazakhstan") or "kazakhstan" in lookup:
+                flag = "🇰🇿"
+            elif c in ("at", "austria") or "austria" in lookup:
+                flag = "🇦🇹"
+            elif c in ("ch", "switzerland") or "switzerland" in lookup:
+                flag = "🇨🇭"
+
+        if flag and not clean_name.startswith(flag):
+            return f"{flag} {clean_name}"
+        return clean_name
+
+    @staticmethod
     def _format_vless_tag(tag_name: str, badge: str | None) -> str:
         quoted_tag = urllib.parse.quote(tag_name)
         if badge and isinstance(badge, str) and badge.strip() and badge.strip().lower() != "none":
@@ -1365,6 +1421,7 @@ class WhiteInternetService:
                 if origin_tag and isinstance(origin_tag, str) and origin_tag.strip()
                 else default_origin_name
             )
+            origin_tag_str = WhiteInternetService._ensure_country_flag(origin_tag_str, "ru")
             if origin_badge and isinstance(origin_badge, str) and origin_badge.strip().lower() == "none":
                 effective_origin_badge = None
             elif origin_badge and isinstance(origin_badge, str) and origin_badge.strip():
@@ -1390,6 +1447,7 @@ class WhiteInternetService:
                     if custom_name and isinstance(custom_name, str) and custom_name.strip()
                     else (r.get("name") or texts.WL_VLESS_TAG)
                 )
+                r_name = WhiteInternetService._ensure_country_flag(r_name, relay_code)
 
                 if relay_badges and relay_code in relay_badges and isinstance(relay_badges[relay_code], str):
                     val = relay_badges[relay_code].strip()

@@ -534,6 +534,53 @@ class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(due_rub, Decimal("250.00"))
         self.assertEqual(resulting_days, 30)
 
+    def test_calculate_tariff_change_multi_month_proportional(self):
+        now = datetime.now(timezone.utc)
+        base_tariff = Tariff(
+            id=1,
+            name="100 RUB / 30 days",
+            price_rub=Decimal("100.00"),
+            duration_days=30,
+        )
+        pro_tariff = Tariff(
+            id=2,
+            name="200 RUB / 30 days",
+            price_rub=Decimal("200.00"),
+            duration_days=30,
+        )
+
+        # Case 1: 200 days of Base -> switch to Pro
+        # Value = 200 * (100 / 30) = 667 RUB >= target cost (200 RUB)
+        # due_rub = 0, resulting_days = round(667 / (200 / 30)) = 100 days
+        sub_end_200 = now + timedelta(days=200)
+        due_rub, resulting_days = OrderService.calculate_tariff_change(
+            base_tariff, pro_tariff, sub_end_200, now=now
+        )
+        self.assertEqual(due_rub, Decimal("0.00"))
+        self.assertEqual(resulting_days, 100)
+
+        # Case 2: 200 days of Base -> switch to another Base variant with identical daily rate
+        # Exact days must be preserved without drift
+        same_rate_tariff = Tariff(
+            id=3,
+            name="100 RUB / 30 days variant",
+            price_rub=Decimal("100.00"),
+            duration_days=30,
+        )
+        due_rub_same, resulting_days_same = OrderService.calculate_tariff_change(
+            base_tariff, same_rate_tariff, sub_end_200, now=now
+        )
+        self.assertEqual(due_rub_same, Decimal("0.00"))
+        self.assertEqual(resulting_days_same, 200)
+
+        # Case 3: Expired subscription (0 days left) -> full price, standard duration
+        sub_end_expired = now - timedelta(days=1)
+        due_expired, days_expired = OrderService.calculate_tariff_change(
+            base_tariff, pro_tariff, sub_end_expired, now=now
+        )
+        self.assertEqual(due_expired, Decimal("200.00"))
+        self.assertEqual(days_expired, 30)
+
     @patch("services.referral_bonus.grant_referral_bonus_for_topup")
     @patch("services.order_service.create_order_credit")
     @patch("services.order_service.FulfillmentService.fulfill_order")
@@ -1669,6 +1716,50 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             await handle_order_cancel(cb_topup, session, db_user=user)
             self.assertEqual(topup_order.status, "canceled")
             mock_bal.assert_called_once()
+
+        # Case 3: Cancel AWG order for active subscriber -> _show_hub
+        awg_active_uuid = uuid.uuid4()
+        awg_active_order = Order(
+            id=awg_active_uuid,
+            user_id=10,
+            service_type="awg",
+            status="pending",
+            metadata_={},
+        )
+        session.get.return_value = awg_active_order
+        user.subscription_end = now_utc() + timedelta(days=20)
+
+        cb_awg_active = AsyncMock()
+        cb_awg_active.data = f"order_cancel:{awg_active_uuid}"
+        cb_awg_active.bot = AsyncMock()
+        cb_awg_active.message = AsyncMock()
+
+        with patch("bot.handlers.payment.common._show_hub") as mock_hub:
+            await handle_order_cancel(cb_awg_active, session, db_user=user)
+            self.assertEqual(awg_active_order.status, "canceled")
+            mock_hub.assert_called_once_with(cb_awg_active, user, session)
+
+        # Case 4: Cancel AWG order for inactive subscriber -> render_tariff_showcase
+        awg_inactive_uuid = uuid.uuid4()
+        awg_inactive_order = Order(
+            id=awg_inactive_uuid,
+            user_id=10,
+            service_type="awg",
+            status="pending",
+            metadata_={},
+        )
+        session.get.return_value = awg_inactive_order
+        user.subscription_end = None
+
+        cb_awg_inactive = AsyncMock()
+        cb_awg_inactive.data = f"order_cancel:{awg_inactive_uuid}"
+        cb_awg_inactive.bot = AsyncMock()
+        cb_awg_inactive.message = AsyncMock()
+
+        with patch("bot.handlers.payment.common.render_tariff_showcase") as mock_showcase:
+            await handle_order_cancel(cb_awg_inactive, session, db_user=user)
+            self.assertEqual(awg_inactive_order.status, "canceled")
+            mock_showcase.assert_called_once()
 
     async def test_handle_order_pay_card_zero_cost_routes_to_wallet(self):
         from bot.handlers.payment.purchase_routes import handle_order_pay_card

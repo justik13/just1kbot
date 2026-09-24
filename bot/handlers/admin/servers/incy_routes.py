@@ -47,7 +47,7 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
     announce = extra.get("announce")
     announce_url = extra.get("announce_url")
 
-    origin_name = extra.get("origin_tag") or getattr(server, "name", None) or texts.WL_ORIGIN_VLESS_TAG
+    origin_name = extra.get("origin_tag") or texts.WL_ORIGIN_VLESS_TAG
     origin_badge_raw = extra.get("origin_badge")
     if origin_badge_raw and origin_badge_raw.strip().lower() == "none":
         origin_badge = texts.ADMIN_SERVER_INCY_VALUE_DISABLED

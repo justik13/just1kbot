@@ -147,17 +147,17 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         de_parsed = urllib.parse.urlparse(links[1])
         de_params = urllib.parse.parse_qs(de_parsed.query)
         self.assertEqual(de_params["path"][0], "/w_abcdef12/de")
-        self.assertEqual(urllib.parse.unquote(de_parsed.fragment).split("?")[0], "Германия")
+        self.assertEqual(urllib.parse.unquote(de_parsed.fragment).split("?")[0], "🇩🇪 Германия")
 
         nl_parsed = urllib.parse.urlparse(links[2])
         nl_params = urllib.parse.parse_qs(nl_parsed.query)
         self.assertEqual(nl_params["path"][0], "/w_abcdef12/nl")
-        self.assertEqual(urllib.parse.unquote(nl_parsed.fragment).split("?")[0], "Нидерланды")
+        self.assertEqual(urllib.parse.unquote(nl_parsed.fragment).split("?")[0], "🇳🇱 Нидерланды")
 
         se_parsed = urllib.parse.urlparse(links[3])
         se_params = urllib.parse.parse_qs(se_parsed.query)
         self.assertEqual(se_params["path"][0], "/w_abcdef12/se")
-        self.assertEqual(urllib.parse.unquote(se_parsed.fragment).split("?")[0], "Швеция")
+        self.assertEqual(urllib.parse.unquote(se_parsed.fragment).split("?")[0], "🇸🇪 Швеция")
 
     def test_padding_placement_is_query_in_header(self) -> None:
         """XPadding parameter must be set to queryInHeader per Yandex Cloud CDN spec."""
@@ -200,18 +200,12 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertIn("'xPaddingPlacement': 'queryInHeader'", sh_content)
 
     def test_origin_routing_default_fallback_and_ru_split(self) -> None:
-        """On Origin node, default inbound routes to relay/block, while RU domains route to just1k-wl-direct."""
+        """On Origin node, default inbound routes to just1k-wl-direct (Russian IP egress), and RU domains route direct."""
         sh_content = _read_just1knode_content()
 
-        # In standalone mode (install_xray_origin_node), default inbound routes to blackhole block
-        self.assertIn(
-            "first_relay_tag = ('just1k-wl-outbound-' + str(relays[0]['code'])) if relays and relays[0].get('code') else 'just1k-wl-block'",
-            sh_content,
-        )
-
-        # In add_relay_node, default inbound routes to the primary relay outbound
-        self.assertIn("primary_relay_tag = f'just1k-wl-outbound-{primary_relay_code}'", sh_content)
-        self.assertIn("r['outboundTag'] = primary_relay_tag", sh_content)
+        # Default inbound always routes directly to just1k-wl-direct (Moscow IP egress)
+        self.assertIn("def_rule['outboundTag'] = 'just1k-wl-direct'", sh_content)
+        self.assertIn("r['outboundTag'] = 'just1k-wl-direct'", sh_content)
 
         # Server-side split routing uses geosite:category-ru and geosite:tld-ru
         self.assertIn("'geosite:category-ru'", sh_content)

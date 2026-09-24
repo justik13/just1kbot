@@ -57,18 +57,39 @@ class OrderService:
             return Decimal(target_tariff.price_rub), target_tariff.duration_days
 
         days_left = max(0, (subscription_end - now).days)
-        if current_tariff.duration_days > 0 and current_tariff.price_rub > 0:
-            remaining_rub = Decimal(
-                round(
-                    (days_left / current_tariff.duration_days)
-                    * float(current_tariff.price_rub)
-                )
-            )
-        else:
-            remaining_rub = Decimal(0)
+        if days_left <= 0:
+            return Decimal(target_tariff.price_rub), target_tariff.duration_days
 
-        due_rub = max(Decimal(0), Decimal(target_tariff.price_rub) - remaining_rub)
-        return due_rub, target_tariff.duration_days
+        c_days = float(current_tariff.duration_days) if current_tariff.duration_days > 0 else 30.0
+        c_price = float(current_tariff.price_rub) if current_tariff.price_rub > 0 else 0.0
+        t_days = float(target_tariff.duration_days) if target_tariff.duration_days > 0 else 30.0
+        t_price = float(target_tariff.price_rub) if target_tariff.price_rub > 0 else 0.0
+
+        if c_price <= 0.0 or t_price <= 0.0:
+            return Decimal(target_tariff.price_rub), target_tariff.duration_days
+
+        c_daily = c_price / c_days
+        t_daily = t_price / t_days
+
+        remaining_rub = Decimal(round(days_left * c_daily))
+        target_cost = Decimal(target_tariff.price_rub)
+
+        if remaining_rub >= target_cost:
+            # User has sufficient unspent value for at least 1 cycle of target tariff.
+            # Free switch (0 ₽ due), unspent value converts to target tariff days:
+            due_rub = Decimal("0.00")
+            if abs(c_daily - t_daily) < 1e-6:
+                # Same daily rate: exact days preserved without any rounding drift
+                resulting_days = days_left
+            else:
+                resulting_days = max(1, round(float(remaining_rub) / t_daily))
+        else:
+            # Remaining value is less than 1 cycle of target tariff.
+            # Unspent value is applied as a discount on the target tariff:
+            due_rub = max(Decimal("0.00"), target_cost - remaining_rub)
+            resulting_days = target_tariff.duration_days
+
+        return due_rub, resulting_days
 
     @staticmethod
     async def create_order(

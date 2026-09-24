@@ -188,18 +188,19 @@ EOF
         if [[ -n "$c_code" && "$c_code" != "ru" ]]; then
             detected_code="$c_code"
             case "$c_code" in
-                de) detected_country="Германия" ;;
-                nl) detected_country="Нидерланды" ;;
-                fi) detected_country="Финляндия" ;;
-                se) detected_country="Швеция" ;;
-                us) detected_country="США" ;;
-                gb|uk) detected_country="Великобритания" ;;
-                fr) detected_country="Франция" ;;
-                tr) detected_country="Турция" ;;
-                kz) detected_country="Казахстан" ;;
-                pl) detected_country="Польша" ;;
-                at) detected_country="Австрия" ;;
-                ch) detected_country="Швейцария" ;;
+                de) detected_country="🇩🇪 Германия" ;;
+                nl) detected_country="🇳🇱 Нидерланды" ;;
+                fi) detected_country="🇫🇮 Финляндия" ;;
+                se) detected_country="🇸🇪 Швеция" ;;
+                us) detected_country="🇺🇸 США" ;;
+                gb|uk) detected_country="🇬🇧 Великобритания" ;;
+                fr) detected_country="🇫🇷 Франция" ;;
+                tr) detected_country="🇹🇷 Турция" ;;
+                kz) detected_country="🇰🇿 Казахстан" ;;
+                pl) detected_country="🇵🇱 Польша" ;;
+                at) detected_country="🇦🇹 Австрия" ;;
+                ch) detected_country="🇨🇭 Швейцария" ;;
+                ee) detected_country="🇪🇪 Эстония" ;;
                 *) detected_country="${c_code^^}" ;;
             esac
         fi
