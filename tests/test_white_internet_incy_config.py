@@ -465,4 +465,3 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
 
         de_link = links[2]
         self.assertIn(urllib.parse.quote("🇩🇪 Германия"), de_link)
-
