@@ -1335,34 +1335,41 @@ class WhiteInternetService:
         c = (code or "").strip().lower()
         lookup = f"{c} {clean_name.lower()}"
         flag = ""
-        if c in ("de", "germany") or "германия" in lookup or "germany" in lookup:
-            flag = "🇩🇪"
-        elif c in ("se", "sweden") or "швеция" in lookup or "sweden" in lookup:
-            flag = "🇸🇪"
-        elif c in ("ee", "estonia") or "эстония" in lookup or "estonia" in lookup:
-            flag = "🇪🇪"
-        elif c in ("fi", "finland") or "финляндия" in lookup or "finland" in lookup:
-            flag = "🇫🇮"
-        elif c in ("nl", "netherlands") or "нидерланды" in lookup or "netherlands" in lookup:
-            flag = "🇳🇱"
-        elif c in ("pl", "poland") or "польша" in lookup or "poland" in lookup:
-            flag = "🇵🇱"
-        elif c in ("fr", "france") or "франция" in lookup or "france" in lookup:
-            flag = "🇫🇷"
-        elif c in ("gb", "uk", "united_kingdom") or "великобритания" in lookup or "britain" in lookup:
-            flag = "🇬🇧"
-        elif c in ("us", "usa") or "сша" in lookup or "usa" in lookup:
-            flag = "🇺🇸"
-        elif c in ("ru", "russia") or "россия" in lookup or "russia" in lookup:
-            flag = "🇷🇺"
-        elif c in ("tr", "turkey") or "турция" in lookup or "turkey" in lookup:
-            flag = "🇹🇷"
-        elif c in ("kz", "kazakhstan") or "казахстан" in lookup or "kazakhstan" in lookup:
-            flag = "🇰🇿"
-        elif c in ("at", "austria") or "австрия" in lookup or "austria" in lookup:
-            flag = "🇦🇹"
-        elif c in ("ch", "switzerland") or "швейцария" in lookup or "switzerland" in lookup:
-            flag = "🇨🇭"
+        country_keyword_flags = getattr(texts, "WL_COUNTRY_KEYWORD_FLAGS", {})
+        for kw, fl in country_keyword_flags.items():
+            if kw in lookup:
+                flag = fl
+                break
+
+        if not flag:
+            if c in ("de", "germany") or "germany" in lookup:
+                flag = "🇩🇪"
+            elif c in ("se", "sweden") or "sweden" in lookup:
+                flag = "🇸🇪"
+            elif c in ("ee", "estonia") or "estonia" in lookup:
+                flag = "🇪🇪"
+            elif c in ("fi", "finland") or "finland" in lookup:
+                flag = "🇫🇮"
+            elif c in ("nl", "netherlands") or "netherlands" in lookup:
+                flag = "🇳🇱"
+            elif c in ("pl", "poland") or "poland" in lookup:
+                flag = "🇵🇱"
+            elif c in ("fr", "france") or "france" in lookup:
+                flag = "🇫🇷"
+            elif c in ("gb", "uk", "united_kingdom") or "britain" in lookup:
+                flag = "🇬🇧"
+            elif c in ("us", "usa") or "usa" in lookup:
+                flag = "🇺🇸"
+            elif c in ("ru", "russia") or "russia" in lookup:
+                flag = "🇷🇺"
+            elif c in ("tr", "turkey") or "turkey" in lookup:
+                flag = "🇹🇷"
+            elif c in ("kz", "kazakhstan") or "kazakhstan" in lookup:
+                flag = "🇰🇿"
+            elif c in ("at", "austria") or "austria" in lookup:
+                flag = "🇦🇹"
+            elif c in ("ch", "switzerland") or "switzerland" in lookup:
+                flag = "🇨🇭"
 
         if flag and not clean_name.startswith(flag):
             return f"{flag} {clean_name}"

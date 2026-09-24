@@ -200,6 +200,11 @@ async def handle_order_pay_card(
         price=price,
     )
 
+    from .common import _is_subscription_active
+
+    is_active = await _is_subscription_active(db_user)
+    back_target = "menu_subscription" if is_active else "payment_showcase"
+
     await render_hub(
         callback.bot,
         callback.message.chat.id,
@@ -208,7 +213,7 @@ async def handle_order_pay_card(
             payment_url=order.payment_url or "",
             order_id=str(order.id),
             price=price,
-            back_callback="payment_showcase",
+            back_callback=back_target,
         ),
     )
 
@@ -390,6 +395,11 @@ async def handle_order_cancel(
         )
         return
 
-    from .common import render_tariff_showcase
+    from .common import _is_subscription_active, _show_hub, render_tariff_showcase
+
+    is_change = bool(order and order.metadata_ and order.metadata_.get("is_tariff_change"))
+    if is_change or (db_user and await _is_subscription_active(db_user)):
+        await _show_hub(callback, db_user, session)
+        return
 
     await render_tariff_showcase(callback.bot, callback.message.chat.id, session)

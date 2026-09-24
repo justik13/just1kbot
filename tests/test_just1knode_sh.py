@@ -1053,13 +1053,13 @@ run_doctor
         self.assertIn("just1k-wl-direct", outbound_tags)
         self.assertIn("just1k-wl-block", outbound_tags)
 
-        # Standalone origin routing must route default traffic to block (no Russian ISP exit)
+        # Standalone origin routing must route default traffic directly to just1k-wl-direct (Russian egress)
         rules = xray_conf["routing"]["rules"]
         default_rule = next(
             (r for r in rules if r.get("inboundTag") == ["just1k-wl-default"]), None
         )
         self.assertIsNotNone(default_rule)
-        self.assertEqual(default_rule["outboundTag"], "just1k-wl-block")
+        self.assertEqual(default_rule["outboundTag"], "just1k-wl-direct")
 
         # 2. Verify Nginx configurations
         nginx_conf = self.nginx_conf_dir / "sites-available" / "just1k-origin.conf"
@@ -1137,13 +1137,13 @@ run_doctor
         self.assertEqual(de_ob["streamSettings"]["realitySettings"]["publicKey"], "pubkey123")
         self.assertEqual(de_ob["streamSettings"]["realitySettings"]["serverName"], "www.google.com")
 
-        # Verify default traffic is routed through the relay outbound (anti-Russian exit)
+        # Verify default traffic is routed directly through Moscow IP (just1k-wl-direct)
         rules = xray_conf["routing"]["rules"]
         default_rule = next(
             (r for r in rules if r.get("inboundTag") == ["just1k-wl-default"]), None
         )
         self.assertIsNotNone(default_rule)
-        self.assertEqual(default_rule["outboundTag"], "just1k-wl-outbound-de")
+        self.assertEqual(default_rule["outboundTag"], "just1k-wl-direct")
 
     # -------------------------------------------------------------------------
     # Functional Validation: Role Guard in manage_relays_menu
