@@ -366,21 +366,35 @@ async def show_server_relays(
             r_name = r.get("name") or r.get("code") or texts.ADMIN_SERVER_RELAYS_FALLBACK_NAME
             r_ip = r.get("ip", "-")
             r_port = r.get("port", "-")
-            r_healthy = r.get("healthy", False)
+            r_healthy = bool(r.get("healthy") or r.get("status") == "online" or r.get("reachable") is True)
             r_rtt = r.get("rtt_ms")
             r_err = r.get("error")
 
-            r_code = (r.get("code") or "").lower()
-            if r_code in ("de", "germany"):
-                r_flag = "🇩🇪"
-            elif r_code in ("pl", "poland"):
-                r_flag = "🇵🇱"
-            elif r_code in ("nl", "netherlands"):
-                r_flag = "🇳🇱"
-            elif r_code in ("us", "usa"):
-                r_flag = "🇺🇸"
-            else:
-                r_flag = texts.EMOJI_GLOBE
+            r_flag = r.get("flag")
+            if not r_flag:
+                r_code = (r.get("code") or "").lower()
+                if r_code.startswith("de") or "germany" in r_code:
+                    r_flag = "🇩🇪"
+                elif r_code.startswith("pl") or "poland" in r_code:
+                    r_flag = "🇵🇱"
+                elif r_code.startswith("nl") or "netherlands" in r_code:
+                    r_flag = "🇳🇱"
+                elif r_code.startswith("se") or "sweden" in r_code:
+                    r_flag = "🇸🇪"
+                elif r_code.startswith("fi") or "finland" in r_code:
+                    r_flag = "🇫🇮"
+                elif r_code.startswith("ee") or "estonia" in r_code:
+                    r_flag = "🇪🇪"
+                elif r_code.startswith("fr") or "france" in r_code:
+                    r_flag = "🇫🇷"
+                elif r_code.startswith("gb") or r_code.startswith("uk") or "united_kingdom" in r_code:
+                    r_flag = "🇬🇧"
+                elif r_code.startswith("us") or "usa" in r_code:
+                    r_flag = "🇺🇸"
+                elif r_code.startswith("ru") or "russia" in r_code:
+                    r_flag = "🇷🇺"
+                else:
+                    r_flag = texts.EMOJI_GLOBE
 
             if r_healthy:
                 status_badge = (

@@ -387,24 +387,34 @@ async def mock_xray_get_relays_health(self, api_url: str, api_key: str):
     logger.info("📡 [MOCK XRAY] Queried real-time relay health from Origin (%s)", api_url)
     return True, {
         "status": "ok",
+        "count": 2,
+        "all_healthy": True,
         "relays": [
             {
                 "code": "de-relay-01",
                 "tag": "de-relay-01",
                 "name": "Германия Релей #1",
                 "flag": "🇩🇪",
+                "ip": "185.190.140.1",
+                "port": 10443,
+                "healthy": True,
                 "status": "online",
                 "rtt_ms": 14.2,
                 "reachable": True,
+                "error": None,
             },
             {
                 "code": "se-relay-01",
                 "tag": "se-relay-01",
                 "name": "Швеция Релей #1",
                 "flag": "🇸🇪",
+                "ip": "194.26.229.2",
+                "port": 10443,
+                "healthy": True,
                 "status": "online",
                 "rtt_ms": 28.5,
                 "reachable": True,
+                "error": None,
             },
         ],
     }, None
@@ -852,9 +862,9 @@ async def run_simulation(args: argparse.Namespace):
             ),
             Server(
                 id=5,
-                name="Нидерланды Xray Origin",
-                country_flag="🇳🇱",
-                api_url="http://nl-origin.just1k.net:8444",
+                name="Россия Xray Origin",
+                country_flag="🇷🇺",
+                api_url="http://ru-origin.just1k.net:8444",
                 api_key="enc_key_xray",
                 protocol=XRAY_PROTOCOL,
                 capabilities=["xray_origin"],
@@ -866,6 +876,9 @@ async def run_simulation(args: argparse.Namespace):
                             "tag": "de-relay-01",
                             "name": "Германия Релей #1",
                             "flag": "🇩🇪",
+                            "ip": "185.190.140.1",
+                            "port": 10443,
+                            "healthy": True,
                             "status": "online",
                             "rtt_ms": 14.2,
                         },
@@ -874,11 +887,14 @@ async def run_simulation(args: argparse.Namespace):
                             "tag": "se-relay-01",
                             "name": "Швеция Релей #1",
                             "flag": "🇸🇪",
+                            "ip": "194.26.229.2",
+                            "port": 10443,
+                            "healthy": True,
                             "status": "online",
                             "rtt_ms": 28.5,
                         },
                     ],
-                    "origin_tag": "NL-Origin",
+                    "origin_tag": "RU-Origin",
                     "profile_title": "Just1k INCY White Internet",
                 },
                 is_active=True,
@@ -894,6 +910,9 @@ async def run_simulation(args: argparse.Namespace):
             if not existing_s:
                 session.add(s)
             else:
+                existing_s.name = s.name
+                existing_s.country_flag = s.country_flag
+                existing_s.api_url = s.api_url
                 existing_s.protocol = s.protocol
                 if s.capabilities:
                     existing_s.capabilities = s.capabilities
