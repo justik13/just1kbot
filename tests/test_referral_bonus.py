@@ -185,14 +185,14 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
 
     def test_reverse_referral_bonus_with_invalid_uuid_returns_zero(self):
         import asyncio
-        import pytest
         from services.referral_bonus import reverse_referral_bonus_for_topup
 
         session = AsyncMock()
-        with pytest.raises(ValueError, match="Invalid order_id for referral reversal"):
+        with self.assertRaises(ValueError) as cm:
             asyncio.run(
                 reverse_referral_bonus_for_topup(session, order_id="invalid-not-a-uuid")
             )
+        self.assertIn("Invalid order_id for referral reversal", str(cm.exception))
 
     def test_reverse_referral_bonus_reverses_purchaser_welcome_bonus_for_matching_order(self):
         import asyncio
