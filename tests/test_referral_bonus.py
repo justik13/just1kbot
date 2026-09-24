@@ -183,7 +183,7 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         assert entry.metadata_["topup_order_id"] == str(order_uuid)
         assert entry.metadata_["original_credit_id"] == 101
 
-    def test_reverse_referral_bonus_with_invalid_uuid_returns_zero(self):
+    def test_reverse_referral_bonus_with_invalid_uuid_raises_value_error(self):
         import asyncio
         from services.referral_bonus import reverse_referral_bonus_for_topup
 
@@ -193,6 +193,88 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
                 reverse_referral_bonus_for_topup(session, order_id="invalid-not-a-uuid")
             )
         self.assertIn("Invalid order_id for referral reversal", str(cm.exception))
+
+    def test_reverse_referral_bonus_with_integer_order_id_raises_value_error(self):
+        import asyncio
+        from services.referral_bonus import reverse_referral_bonus_for_topup
+
+        session = AsyncMock()
+        with self.assertRaises(ValueError) as cm:
+            asyncio.run(
+                reverse_referral_bonus_for_topup(session, order_id=12345)
+            )
+        self.assertIn("Invalid order_id for referral reversal", str(cm.exception))
+
+    def test_reverse_referral_bonus_is_idempotent_when_reversal_already_exists(self):
+        import asyncio
+        import uuid
+
+        from services.referral_bonus import reverse_referral_bonus_for_topup
+
+        order_uuid = uuid.uuid4()
+        existing_bonus_credit = MagicMock()
+        existing_bonus_credit.id = 101
+        existing_bonus_credit.user_id = 1
+        existing_bonus_credit.amount = Decimal(25)
+        existing_bonus_credit.metadata_ = {
+            "topup_order_id": str(order_uuid),
+            "source_type": "referral_bonus",
+        }
+
+        existing_reversal = MagicMock()
+        existing_reversal.entry_type = "admin_adjustment"
+        existing_reversal.amount = Decimal(-25)
+
+        captured_entries = []
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [existing_bonus_credit]
+
+        session = AsyncMock()
+        session.scalars = AsyncMock(return_value=scalars_mock)
+        session.scalar = AsyncMock(return_value=existing_reversal)
+        session.add = lambda entry: captured_entries.append(entry)
+        session.flush = AsyncMock()
+
+        reversed_amount = asyncio.run(
+            reverse_referral_bonus_for_topup(session, order_id=order_uuid)
+        )
+
+        self.assertEqual(reversed_amount, Decimal(25))
+        self.assertEqual(len(captured_entries), 0)
+
+    def test_reverse_referral_bonus_returns_zero_when_no_credits_exist(self):
+        import asyncio
+        import uuid
+
+        from services.referral_bonus import reverse_referral_bonus_for_topup
+
+        order_uuid = uuid.uuid4()
+        captured_entries = []
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = []
+
+        session = AsyncMock()
+        session.scalars = AsyncMock(return_value=scalars_mock)
+        session.scalar = AsyncMock(return_value=None)
+        session.add = lambda entry: captured_entries.append(entry)
+        session.flush = AsyncMock()
+
+        reversed_amount = asyncio.run(
+            reverse_referral_bonus_for_topup(session, order_id=order_uuid)
+        )
+
+        self.assertEqual(reversed_amount, Decimal(0))
+        self.assertEqual(len(captured_entries), 0)
+
+    def test_reverse_referral_bonus_returns_zero_when_both_ids_none(self):
+        import asyncio
+        from services.referral_bonus import reverse_referral_bonus_for_topup
+
+        session = AsyncMock()
+        reversed_amount = asyncio.run(
+            reverse_referral_bonus_for_topup(session, payment_id=None, order_id=None)
+        )
+        self.assertEqual(reversed_amount, Decimal(0))
 
     def test_reverse_referral_bonus_reverses_purchaser_welcome_bonus_for_matching_order(self):
         import asyncio

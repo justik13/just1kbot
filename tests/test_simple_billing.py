@@ -1478,6 +1478,20 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(values["idempotency_key"], f"order_refund:{order_uuid}:yoo-ref-999")
         self.assertEqual(values["metadata_"], {"source": "test"})
 
+    async def test_create_order_refund_debit_rejects_empty_refund_id(self):
+        from database.repositories.account_ledger_repo import create_order_refund_debit
+
+        session = AsyncMock(spec=AsyncSession)
+        with self.assertRaises(ValueError) as cm:
+            await create_order_refund_debit(
+                session,
+                user_id=42,
+                amount_rub=Decimal("150.00"),
+                order_id=uuid.uuid4(),
+                refund_id="   ",
+            )
+        self.assertIn("refund_id must be a non-empty string", str(cm.exception))
+
     @patch("bot.handlers.webhook.session_scope")
     @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")
     @patch("bot.handlers.webhook._is_yookassa_ip", return_value=True)

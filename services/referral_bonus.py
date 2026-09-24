@@ -397,6 +397,8 @@ async def reverse_referral_bonus_for_topup(
             total_reversed += Decimal(abs(existing.amount))
             continue
 
+        meta_payment_id = payment_id or (credit.metadata_ or {}).get("topup_payment_id")
+        meta_order_id = order_str or (credit.metadata_ or {}).get("topup_order_id")
         reversal_amount = -abs(Decimal(credit.amount))
         reversal_entry = AccountLedgerEntry(
             user_id=credit.user_id,
@@ -410,8 +412,8 @@ async def reverse_referral_bonus_for_topup(
             metadata_={
                 "source_type": REFERRAL_BONUS_SOURCE,
                 "reason": "topup_refund_reversal",
-                "topup_payment_id": payment_id,
-                "topup_order_id": order_str,
+                "topup_payment_id": meta_payment_id,
+                "topup_order_id": meta_order_id,
                 "original_credit_id": credit.id,
             },
         )
