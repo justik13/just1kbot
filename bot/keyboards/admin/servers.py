@@ -304,3 +304,19 @@ def get_admin_server_incy_relay_actions_keyboard(
     )
     builder.adjust(2, 1, 1)
     return builder.as_markup()
+
+
+def get_admin_server_incy_reset_confirm_keyboard(
+    server_id: int,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.ADMIN_SERVER_INCY_BTN_CONFIRM_RESET,
+        callback_data=f"admin_server_incy_reset_apply:{server_id}",
+    )
+    builder.button(
+        text=texts.BTN_CANCEL,
+        callback_data=f"admin_server_incy:{server_id}",
+    )
+    builder.adjust(1, 1)
+    return builder.as_markup()

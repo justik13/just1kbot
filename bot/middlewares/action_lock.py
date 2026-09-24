@@ -51,6 +51,7 @@ LOCKED_ACTION_PREFIXES = (
     "confirm_server_purge:",
     "admin_server_toggle_apply:",
     "admin_server_migrate_confirm:",
+    "admin_server_incy_reset_apply:",
     # Админские действия с тарифами.
     "admin_tariff_toggle_apply:",
     # Режим технических работ.
@@ -98,6 +99,7 @@ STALE_ACTION_PREFIXES = (
     "confirm_server_purge:",
     "admin_server_toggle_apply:",
     "admin_server_migrate_confirm:",
+    "admin_server_incy_reset_apply:",
     "admin_tariff_toggle_apply:",
     "admin_maintenance_toggle_apply",
     "broadcast_confirm_launch",

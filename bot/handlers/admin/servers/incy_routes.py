@@ -18,6 +18,7 @@ from bot.keyboards.admin.servers import (
     get_admin_server_incy_keyboard,
     get_admin_server_incy_relay_actions_keyboard,
     get_admin_server_incy_relays_keyboard,
+    get_admin_server_incy_reset_confirm_keyboard,
 )
 from bot.states import AdminStates
 from config.constants import (
@@ -826,6 +827,42 @@ async def process_server_incy_relay_badge_input(
 
 
 @router.callback_query(F.data.startswith("admin_server_incy_reset:"))
+async def confirm_server_incy_reset(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    server_id = parse_callback_id(callback.data, 1)
+    if server_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    server = await get_server_by_id(session, server_id)
+    if not server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    await callback.answer(show_alert=False)
+
+    confirm_text = texts.ADMIN_SERVER_INCY_RESET_CONFIRM_TITLE.format(
+        name=safe(server.name)
+    )
+
+    try:
+        await callback.message.edit_text(
+            confirm_text,
+            reply_markup=get_admin_server_incy_reset_confirm_keyboard(server_id),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"confirm_server_incy_reset edit_text failed: {e}")
+
+
+@router.callback_query(F.data.startswith("admin_server_incy_reset_apply:"))
 async def reset_server_incy_to_defaults(
     callback: CallbackQuery,
     state: FSMContext,
@@ -890,3 +927,4 @@ async def reset_server_incy_to_defaults(
         )
     except TelegramBadRequest as e:
         logger.debug(f"reset_server_incy_to_defaults edit_text failed: {e}")
+
