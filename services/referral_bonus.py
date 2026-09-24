@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -327,10 +328,13 @@ async def reverse_referral_bonus_for_topup(
         if payment is not None:
             purchaser_user_id = payment.user_id
     elif order_id is not None:
-        order_uuid = uuid.UUID(str(order_id)) if isinstance(order_id, str) else order_id
-        order = await session.get(Order, order_uuid, with_for_update=True)
-        if order is not None:
-            purchaser_user_id = order.user_id
+        try:
+            order_uuid = uuid.UUID(str(order_id)) if isinstance(order_id, str) else order_id
+            order = await session.get(Order, order_uuid, with_for_update=True)
+            if order is not None:
+                purchaser_user_id = order.user_id
+        except (ValueError, TypeError):
+            order = None
 
     if purchaser_user_id is None:
         return Decimal(0)
@@ -351,6 +355,25 @@ async def reverse_referral_bonus_for_topup(
             .where(User.telegram_id == referred_by)
         )
 
+    if referrer is None and order_id is not None:
+        # Fallback: if purchaser.referred_by was altered or cleared after top-up,
+        # find the original referrer credit by matching the order in metadata
+        order_str = str(order_id)
+        candidate = await session.scalar(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.entry_type == "admin_adjustment",
+                AccountLedgerEntry.amount > 0,
+                AccountLedgerEntry.reversal_of_id.is_(None),
+                text("metadata @> CAST(:metadata_filter AS jsonb)").bindparams(
+                    metadata_filter=json.dumps(
+                        {"topup_order_id": order_str, "source_type": REFERRAL_BONUS_SOURCE}
+                    )
+                ),
+            )
+        )
+        if candidate is not None:
+            referrer = await session.get(User, candidate.user_id)
+
     total_reversed = Decimal(0)
     op_id = str(order_id) if order_id is not None else str(payment_id)
 
@@ -361,12 +384,16 @@ async def reverse_referral_bonus_for_topup(
             referrer_cond = (
                 (AccountLedgerEntry.idempotency_key == f"referral-bonus:topup:{order_str}:{referrer.id}")
                 | text("metadata @> CAST(:metadata_filter AS jsonb)").bindparams(
-                    metadata_filter='{"topup_order_id": "%s", "source_type": "%s"}' % (order_str, REFERRAL_BONUS_SOURCE)
+                    metadata_filter=json.dumps(
+                        {"topup_order_id": order_str, "source_type": REFERRAL_BONUS_SOURCE}
+                    )
                 )
             )
         else:
             referrer_cond = text("metadata @> CAST(:metadata_filter AS jsonb)").bindparams(
-                metadata_filter='{"topup_payment_id": %d, "source_type": "%s"}' % (payment_id, REFERRAL_BONUS_SOURCE)
+                metadata_filter=json.dumps(
+                    {"topup_payment_id": payment_id, "source_type": REFERRAL_BONUS_SOURCE}
+                )
             )
 
         candidate_credits = (
@@ -440,15 +467,16 @@ async def reverse_referral_bonus_for_topup(
     # 2. Reverse purchaser welcome bonus for this top-up if present
     if order_id is not None:
         order_str = str(order_id)
-        purchaser_cond = (
-            (AccountLedgerEntry.idempotency_key == f"referral-bonus:first-topup-welcome:{purchaser.id}")
-            | text("metadata @> CAST(:metadata_filter2 AS jsonb)").bindparams(
-                metadata_filter2='{"topup_order_id": "%s", "reason": "first_topup_welcome"}' % order_str
+        purchaser_cond = text("metadata @> CAST(:metadata_filter2 AS jsonb)").bindparams(
+            metadata_filter2=json.dumps(
+                {"topup_order_id": order_str, "reason": "first_topup_welcome"}
             )
         )
     else:
         purchaser_cond = text("metadata @> CAST(:metadata_filter2 AS jsonb)").bindparams(
-            metadata_filter2='{"topup_payment_id": %d, "reason": "first_topup_welcome"}' % payment_id
+            metadata_filter2=json.dumps(
+                {"topup_payment_id": payment_id, "reason": "first_topup_welcome"}
+            )
         )
 
     purchaser_credits = (

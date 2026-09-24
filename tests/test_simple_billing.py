@@ -1047,6 +1047,53 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             payload = mock_create.call_args[0][0]
             self.assertEqual(payload["confirmation"]["return_url"], "https://t.me/env_configured_bot")
 
+    async def test_yookassa_gateway_parse_webhook_refund_and_payment_discrimination(self):
+        gw = YooKassaGateway()
+
+        # 1. Standard refund event
+        res1 = await gw.parse_webhook({
+            "event": "refund.succeeded",
+            "object": {
+                "id": "ref-111",
+                "payment_id": "pay-222",
+                "status": "succeeded",
+                "amount": {"value": "150.00", "currency": "RUB"},
+                "metadata": {"order_id": "order-333"},
+            },
+        })
+        self.assertEqual(res1.external_id, "ref-111")
+        self.assertEqual(res1.payment_id, "pay-222")
+        self.assertTrue(res1.is_refunded)
+        self.assertFalse(res1.is_paid)
+        self.assertEqual(res1.amount_rub, Decimal("150.00"))
+
+        # 2. Refund payload without event envelope (status=succeeded + payment_id present)
+        res2 = await gw.parse_webhook({
+            "object": {
+                "id": "ref-444",
+                "payment_id": "pay-555",
+                "status": "succeeded",
+                "amount": {"value": "200.00", "currency": "RUB"},
+            },
+        })
+        self.assertEqual(res2.external_id, "ref-444")
+        self.assertEqual(res2.payment_id, "pay-555")
+        self.assertTrue(res2.is_refunded)
+        self.assertFalse(res2.is_paid)
+
+        # 3. Payment payload without event envelope (status=succeeded, no payment_id)
+        res3 = await gw.parse_webhook({
+            "object": {
+                "id": "pay-666",
+                "status": "succeeded",
+                "amount": {"value": "300.00", "currency": "RUB"},
+            },
+        })
+        self.assertEqual(res3.external_id, "pay-666")
+        self.assertIsNone(res3.payment_id)
+        self.assertFalse(res3.is_refunded)
+        self.assertTrue(res3.is_paid)
+
     @patch("services.order_service.reverse_referral_bonus_for_topup")
     @patch("services.order_service.FulfillmentService.revoke_order")
     @patch("services.order_service.create_order_refund_debit")
