@@ -90,7 +90,7 @@ from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.correlation import CorrelationMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_context import UserContextMiddleware
-from config.constants import AMNEZIA_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
 from config.settings import Settings
 from config.tariffs import DEFAULT_TARIFFS_SEEDS
 import database.connection as db_conn
@@ -113,6 +113,11 @@ from services.amnezia_client import (
     AmneziaClient,
     AmneziaClientCreateResponse,
     AmneziaClientListItem,
+)
+from services.xray_node_client import (
+    SyncResponse,
+    SyncResult,
+    XrayNodeClient,
 )
 from services.yookassa_service import YooKassaResult, YooKassaService
 from utils.datetime_helpers import now_utc
@@ -338,6 +343,91 @@ YooKassaService.create_payment_result = classmethod(mock_yookassa_create_payment
 YooKassaService.get_payment_result = classmethod(mock_yookassa_get_payment_result)
 
 
+async def mock_xray_check_health(self, api_url: str, api_key: str):
+    logger = logging.getLogger("simulation.xray")
+    logger.debug("🩺 [MOCK XRAY] Healthcheck OK (%s)", api_url)
+    return True, "sim_epoch_1", {
+        "status": "ok",
+        "xray_running": True,
+        "grpc_ok": True,
+        "node_epoch": "sim_epoch_1",
+    }
+
+
+async def mock_xray_sync_client(self, api_url: str, api_key: str, client_uuid: str, is_active: bool, **kwargs):
+    logger = logging.getLogger("simulation.xray")
+    logger.info("⚡ [MOCK XRAY] Synced client %s (active=%s)", client_uuid, is_active)
+    return SyncResponse(
+        SyncResult.APPLIED,
+        verified_epoch="sim_epoch_1",
+        verified_inbounds=[
+            "just1k-wl-default",
+            "just1k-wl-inbound-de-relay-01",
+            "just1k-wl-inbound-se-relay-01",
+        ],
+    )
+
+
+async def mock_xray_get_inventory(self, api_url: str, api_key: str, client_ids=None):
+    return True, {"clients": [], "epoch": "sim_epoch_1"}, None
+
+
+async def mock_xray_remove_client(self, api_url: str, api_key: str, client_uuid: str, version=None):
+    logger = logging.getLogger("simulation.xray")
+    logger.info("🗑 [MOCK XRAY] Removed client %s", client_uuid)
+    return SyncResult.APPLIED, None
+
+
+async def mock_xray_get_traffic_snapshot(self, api_url: str, api_key: str):
+    return "sim_epoch_1", "sim_boot_1", 1700000000, {}
+
+
+async def mock_xray_get_relays_health(self, api_url: str, api_key: str):
+    logger = logging.getLogger("simulation.xray")
+    logger.info("📡 [MOCK XRAY] Queried real-time relay health from Origin (%s)", api_url)
+    return True, {
+        "status": "ok",
+        "count": 2,
+        "all_healthy": True,
+        "relays": [
+            {
+                "code": "de-relay-01",
+                "tag": "de-relay-01",
+                "name": "Германия Релей #1",
+                "flag": "🇩🇪",
+                "ip": "185.190.140.1",
+                "port": 10443,
+                "healthy": True,
+                "status": "online",
+                "rtt_ms": 14.2,
+                "reachable": True,
+                "error": None,
+            },
+            {
+                "code": "se-relay-01",
+                "tag": "se-relay-01",
+                "name": "Швеция Релей #1",
+                "flag": "🇸🇪",
+                "ip": "194.26.229.2",
+                "port": 10443,
+                "healthy": True,
+                "status": "online",
+                "rtt_ms": 28.5,
+                "reachable": True,
+                "error": None,
+            },
+        ],
+    }, None
+
+
+XrayNodeClient.check_health = mock_xray_check_health
+XrayNodeClient.sync_client = mock_xray_sync_client
+XrayNodeClient.get_inventory = mock_xray_get_inventory
+XrayNodeClient.remove_client = mock_xray_remove_client
+XrayNodeClient.get_traffic_snapshot = mock_xray_get_traffic_snapshot
+XrayNodeClient.get_relays_health = mock_xray_get_relays_health
+
+
 # --- 4. DYNAMIC USER AUTO-SEEDING MIDDLEWARE ---
 
 class SimulationAutoSeedMiddleware:
@@ -361,15 +451,29 @@ class SimulationAutoSeedMiddleware:
         if not user:
             return await handler(event, data)
 
+        # In simulation mode, dynamically grant admin rights to connecting tester
+        from config.settings import get_settings
+        sim_settings = get_settings()
+        if user.id not in sim_settings.ADMIN_IDS:
+            sim_settings.ADMIN_IDS.append(user.id)
+
         async with session_scope() as session:
             db_user = await session.scalar(
                 select(User).where(User.telegram_id == user.id)
             )
             if not db_user:
                     tariff = await session.scalar(
-                        select(Tariff).where(Tariff.is_active.is_(True)).order_by(Tariff.id.asc()).limit(1)
+                        select(Tariff)
+                        .where(
+                            Tariff.is_active.is_(True),
+                            Tariff.service_type == "awg",
+                            Tariff.duration_days == 30,
+                        )
+                        .order_by(Tariff.device_limit.asc())
+                        .limit(1)
                     )
                     tariff_id = tariff.id if tariff else None
+                    device_limit = getattr(tariff, "device_limit", 2)
                     tv = await session.scalar(
                         select(TariffVersion).where(TariffVersion.tariff_id == tariff_id).limit(1)
                     ) if tariff_id else None
@@ -385,7 +489,7 @@ class SimulationAutoSeedMiddleware:
                         telegram_id=user.id,
                         username=user.username or f"user_{user.id}",
                         first_name=user.first_name or "Tester",
-                        device_limit=5,
+                        device_limit=device_limit,
                         current_tariff_id=tariff_id,
                         subscription_end=now_utc() + timedelta(days=28),
                         created_at=now_utc() - timedelta(days=2),
@@ -557,10 +661,19 @@ async def run_simulation(args: argparse.Namespace):
     # Parse admin IDs
     admin_ids = []
     if args.admin_id:
-        for aid_raw in args.admin_id.split(","):
-            aid = aid_raw.strip()
-            if aid.isdigit():
-                admin_ids.append(int(aid))
+        raw_admin = args.admin_id.strip()
+        if raw_admin.startswith("[") and raw_admin.endswith("]"):
+            try:
+                parsed_list = json.loads(raw_admin)
+                if isinstance(parsed_list, list):
+                    admin_ids = [int(x) for x in parsed_list if str(x).isdigit()]
+            except Exception:
+                pass
+        if not admin_ids:
+            for aid_raw in raw_admin.strip("[]").split(","):
+                aid = aid_raw.strip().strip("'\"")
+                if aid.isdigit():
+                    admin_ids.append(int(aid))
     if not admin_ids:
         admin_ids = [999999999]  # Dummy non-existent admin ID to satisfy validator
 
@@ -747,15 +860,66 @@ async def run_simulation(args: argparse.Namespace):
                 is_active=True,
                 max_clients=100,
             ),
+            Server(
+                id=5,
+                name="Россия Xray Origin",
+                country_flag="🇷🇺",
+                api_url="http://ru-origin.just1k.net:8444",
+                api_key="enc_key_xray",
+                protocol=XRAY_PROTOCOL,
+                capabilities=["xray_origin"],
+                xray_instance_epoch="sim_epoch_1",
+                extra_data={
+                    "relays": [
+                        {
+                            "code": "de-relay-01",
+                            "tag": "de-relay-01",
+                            "name": "Германия Релей #1",
+                            "flag": "🇩🇪",
+                            "ip": "185.190.140.1",
+                            "port": 10443,
+                            "healthy": True,
+                            "status": "online",
+                            "rtt_ms": 14.2,
+                        },
+                        {
+                            "code": "se-relay-01",
+                            "tag": "se-relay-01",
+                            "name": "Швеция Релей #1",
+                            "flag": "🇸🇪",
+                            "ip": "194.26.229.2",
+                            "port": 10443,
+                            "healthy": True,
+                            "status": "online",
+                            "rtt_ms": 28.5,
+                        },
+                    ],
+                    "origin_tag": "RU-Origin",
+                    "profile_title": "Just1k INCY White Internet",
+                },
+                is_active=True,
+                max_clients=100,
+            ),
         ]
         for s in servers:
             existing_s = await session.scalar(
-                select(Server.id).where(
+                select(Server).where(
                     (Server.id == s.id) | (Server.api_url == s.api_url)
                 )
             )
             if not existing_s:
                 session.add(s)
+            else:
+                existing_s.name = s.name
+                existing_s.country_flag = s.country_flag
+                existing_s.api_url = s.api_url
+                existing_s.protocol = s.protocol
+                if s.capabilities:
+                    existing_s.capabilities = s.capabilities
+                if s.xray_instance_epoch:
+                    existing_s.xray_instance_epoch = s.xray_instance_epoch
+                if s.extra_data:
+                    existing_s.extra_data = s.extra_data
         await session.commit()
     logger.info("Tariffs and high-speed simulation servers seeded successfully.")
 
@@ -816,6 +980,7 @@ async def run_simulation(args: argparse.Namespace):
     from bot.handlers.profile import router as profile_router
     from bot.handlers.start import router as start_router
     from bot.handlers.support import router as support_router
+    from bot.handlers.white_internet import router as white_internet_router
     from integrations import get_all_bot_routers
 
     integration_routers = get_all_bot_routers()
@@ -824,6 +989,7 @@ async def run_simulation(args: argparse.Namespace):
         start_router,
         profile_router,
         connection_router,
+        white_internet_router,
         *integration_routers,
         support_router,
         payment_router,

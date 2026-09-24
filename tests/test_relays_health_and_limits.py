@@ -430,6 +430,79 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Failed to parse relays.json: invalid JSON", rendered_text)
             self.assertNotIn("На этом сервере нет подключенных Relay-узлов", rendered_text)
 
+    async def test_show_server_relays_flags_and_resilient_health(self):
+        server = Server(
+            id=5,
+            name="Россия Xray Origin",
+            country_flag="🇷🇺",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://ru-origin.node:8444",
+            api_key="key-5",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+
+        mock_session = AsyncMock()
+        mock_callback = AsyncMock(spec=CallbackQuery)
+        mock_callback.answer = AsyncMock()
+        mock_callback.from_user = TgUser(id=1001, is_bot=False, first_name="Admin")
+        mock_callback.data = "admin_server_relays:5"
+        mock_callback.message = AsyncMock()
+
+        relays_data = {
+            "status": "ok",
+            "count": 3,
+            "all_healthy": True,
+            "relays": [
+                {
+                    "name": "Германия Релей #1",
+                    "code": "de-relay-01",
+                    "flag": "🇩🇪",
+                    "ip": "185.190.140.1",
+                    "port": 10443,
+                    "healthy": True,
+                    "rtt_ms": 14.2,
+                },
+                {
+                    "name": "Швеция Релей #1",
+                    "code": "se-relay-01",
+                    "ip": "194.26.229.2",
+                    "port": 10443,
+                    "reachable": True,
+                    "rtt_ms": 28.5,
+                },
+                {
+                    "name": "Финляндия Релей #1",
+                    "code": "fi-01",
+                    "ip": "95.217.100.3",
+                    "port": 10443,
+                    "status": "online",
+                    "rtt_ms": 19.1,
+                },
+            ],
+        }
+
+        with patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.card_routes.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch.object(XrayNodeClient, "check_health", new_callable=AsyncMock, return_value=(True, "epoch-1", {})), \
+             patch.object(XrayNodeClient, "get_relays_health", new_callable=AsyncMock, return_value=(True, relays_data, None)):
+
+            await show_server_relays(mock_callback, mock_session)
+
+            mock_callback.message.edit_text.assert_called_once()
+            call_args = mock_callback.message.edit_text.call_args
+            rendered_text = call_args.args[0] if call_args.args else call_args.kwargs.get("text", "")
+            self.assertIn("🇷🇺 <b>Origin (Прямой выход):</b>", rendered_text)
+            self.assertIn("🇩🇪", rendered_text)
+            self.assertIn("🇸🇪", rendered_text)
+            self.assertIn("🇫🇮", rendered_text)
+            self.assertIn("185.190.140.1:10443", rendered_text)
+            self.assertIn("194.26.229.2:10443", rendered_text)
+            self.assertIn("95.217.100.3:10443", rendered_text)
+            self.assertNotIn("🔴 Офлайн", rendered_text)
+
 
 if __name__ == "__main__":
     unittest.main()
+

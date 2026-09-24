@@ -45,7 +45,7 @@ ADMIN_SERVER_BTN_RELAYS = "🌐 Статус Relay-узлов"
 ADMIN_SERVER_RELAYS_CHECKING = "⚡ Опрос Relay-узлов..."
 ADMIN_SERVER_RELAYS_HEADER = """{header}🌐 <b>Статус Relay-узлов для {flag} {server_name}</b>
 
-• 🇷🇺 <b>Origin (Прямой выход):</b> {origin_status_badge}
+• {flag} <b>Origin (Прямой выход):</b> {origin_status_badge}
 """
 ADMIN_SERVER_RELAYS_EMPTY = """\n<i>На этом сервере нет подключенных Relay-узлов. Доступен прямой выход в зону RU (зарубежный трафик блокируется).</i>\n"""
 ADMIN_SERVER_RELAYS_ROW = "• {flag} <b>{name}</b> (<code>{ip}:{port}</code>)\n  Статус: {status_badge}\n"
@@ -329,6 +329,14 @@ ADMIN_SERVER_INCY_RELAY_CARD = """🎨 <b>Настройка узла {relay_nam
 • <b>Статус в подписке:</b> <code>{status}</code>
 
 <i>Выберите действие:</i>"""
+
+ADMIN_SERVER_INCY_RESET_CONFIRM_TITLE = """⚠️ <b>Подтверждение сброса оформления</b>
+
+Вы действительно хотите сбросить оформление INCY для сервера <b>{name}</b> к исходным значениям?
+
+Все кастомные названия узлов, бейджи, текст объявления и настройки видимости шлюза/релеев будут удалены."""
+
+ADMIN_SERVER_INCY_BTN_CONFIRM_RESET = "🗑 Да, сбросить к дефолтам"
 
 ADMIN_SERVER_INCY_RESET_SUCCESS = "✅ Настройки оформления сброшены к исходным значениям!"
 

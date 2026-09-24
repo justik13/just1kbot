@@ -46,6 +46,8 @@ BTN_TARIFF_SHOWCASE_ITEM = "{group_name} — от {min_price} ₽"
 
 PAYMENT = " 🔽"
 
+PAYMENT_ARCHIVED_TARIFF_NOTICE = "Ваш текущий тариф является архивным и больше недоступен для прямого продления. Выберите один из актуальных тарифов для продления доступа:"
+
 PAYMENT_ACTIVE_CHECKOUT_EXISTS = "У вас уже есть незавершённая оплата. Завершите её или отмените перед сменой тарифа."
 
 PAYMENT_CHANGE_TARIFF_IN_PROGRESS_NOTICE = "Сначала завершите или отмените смену тарифа."

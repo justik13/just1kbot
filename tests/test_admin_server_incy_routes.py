@@ -13,6 +13,7 @@ from aiogram.types import CallbackQuery, Chat, Message, User
 from bot import texts
 from bot.handlers.admin.servers.incy_routes import (
     _get_server_incy_details,
+    confirm_server_incy_reset,
     process_server_incy_param_input,
     process_server_incy_relay_badge_input,
     process_server_incy_relay_name_input,
@@ -274,10 +275,39 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["relay_names"]["de"], "🇩🇪 Франкфурт Скоростной")
 
-    async def test_reset_server_incy_to_defaults(self):
+    async def test_confirm_server_incy_reset(self):
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = self.admin_user
         cb.data = "admin_server_incy_reset:1"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        server = Server(
+            id=1,
+            name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
+            is_active=True,
+            extra_data={"profile_title": "Custom"},
+        )
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
+                    await confirm_server_incy_reset(cb, self.state, self.mock_session)
+                    mock_update.assert_not_called()
+                    cb.message.edit_text.assert_called_once()
+                    args, kwargs = cb.message.edit_text.call_args
+                    self.assertIn("Подтверждение сброса оформления", args[0])
+                    self.assertIn("Origin-RU", args[0])
+                    kb = kwargs["reply_markup"]
+                    self.assertEqual(kb.inline_keyboard[0][0].callback_data, "admin_server_incy_reset_apply:1")
+                    self.assertEqual(kb.inline_keyboard[1][0].callback_data, "admin_server_incy:1")
+
+    async def test_reset_server_incy_to_defaults(self):
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_server_incy_reset_apply:1"
         cb.answer = AsyncMock()
         cb.message = MagicMock()
         cb.message.edit_text = AsyncMock()
@@ -311,6 +341,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("relay_badges", saved_extra)
                     self.assertIn("relays", saved_extra)  # relays preserved
                     cb.answer.assert_awaited_once()
+
 
     async def test_toggle_server_incy_origin_visibility(self):
         cb = MagicMock(spec=CallbackQuery)

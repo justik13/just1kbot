@@ -51,7 +51,7 @@ class SubscriptionService:
         current_tariff_id = getattr(user, "current_tariff_id", None)
         if current_tariff_id:
             tariff = await get_tariff_by_id(session, current_tariff_id)
-            if tariff:
+            if tariff and getattr(tariff, "service_type", "awg") == "awg":
                 return getattr(tariff, "device_limit", 0) or 0
         return getattr(user, "device_limit", 0) or 0
 

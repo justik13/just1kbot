@@ -337,6 +337,15 @@ async def render_quick_renew(
         return
 
     tariffs = await get_active_tariffs(session)
+    if not tariffs:
+        await render_hub(
+            bot,
+            chat_id,
+            texts.PAYMENT_NO_TARIFFS,
+            get_back_button("menu_subscription"),
+        )
+        return
+
     current_limit = await _get_effective_device_limit(session, db_user)
 
     renew_tariffs = [
@@ -346,11 +355,40 @@ async def render_quick_renew(
     ]
 
     if not renew_tariffs:
+        # Fallback to standard active tier for legacy / discontinued limits:
+        # - current_limit <= 2 -> Standard Базовый (2 devices)
+        # - 2 < current_limit <= 5 -> Standard Семейный (5 devices)
+        # - current_limit > 5 -> Standard Pro (10 devices)
+        fallback_limit = 2 if current_limit <= 2 else (5 if current_limit <= 5 else 10)
+        renew_tariffs = [
+            t
+            for t in tariffs
+            if getattr(t, "device_limit", 2) == fallback_limit
+        ]
+
+    if not renew_tariffs:
+        # If still no matching tier tariffs, offer active tariffs choice instead of dead-end error
+        current_tariff = (
+            await get_tariff_by_id(session, db_user.current_tariff_id)
+            if getattr(db_user, "current_tariff_id", None)
+            else None
+        )
+        current_duration_days = (
+            getattr(current_tariff, "duration_days", 30) if current_tariff else 30
+        )
+        is_active = await _is_subscription_active(db_user)
+        keyboard = get_change_tariff_keyboard(
+            tariffs,
+            current_limit,
+            is_subscription_active=is_active,
+            current_tariff_id=getattr(db_user, "current_tariff_id", None),
+            current_duration_days=current_duration_days,
+        )
         await render_hub(
             bot,
             chat_id,
-            texts.PAYMENT_NO_TARIFFS,
-            get_back_button("menu_subscription"),
+            texts.PAYMENT_ARCHIVED_TARIFF_NOTICE,
+            keyboard,
         )
         return
 
