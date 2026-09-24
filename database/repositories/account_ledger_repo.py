@@ -308,7 +308,7 @@ async def create_order_refund_debit(
     refund_id: str,
     metadata: dict | None = None,
 ) -> tuple[AccountLedgerEntry, bool]:
-    if not refund_id or not str(refund_id).strip():
+    if not isinstance(refund_id, str) or not refund_id.strip():
         raise ValueError("refund_id must be a non-empty string")
     amount = -abs(whole_rubles(amount_rub))
     idempotency_key = f"order_refund:{order_id}:{refund_id}"

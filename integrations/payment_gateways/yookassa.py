@@ -134,10 +134,8 @@ class YooKassaGateway(BasePaymentGateway):
             is_refunded = False
         else:
             external_id = obj.get("id", "")
-            is_refunded = status == "refunded"
-            is_paid = status == "succeeded" and not is_refunded
-            if is_refunded:
-                related_external_id = obj.get("payment_id")
+            is_paid = False
+            is_refunded = False
 
         return WebhookResult(
             order_id=order_id,

@@ -21,31 +21,8 @@ class WebhookResult:
     event_type: str = ""
     related_external_id: str | None = None
 
-    def __init__(
-        self,
-        order_id: str | None,
-        is_paid: bool,
-        is_refunded: bool,
-        external_id: str,
-        amount_rub: Decimal | None = None,
-        event_type: str = "",
-        related_external_id: str | None = None,
-        payment_id: str | None = None,
-    ):
-        object.__setattr__(self, "order_id", order_id)
-        object.__setattr__(self, "is_paid", is_paid)
-        object.__setattr__(self, "is_refunded", is_refunded)
-        object.__setattr__(self, "external_id", external_id)
-        object.__setattr__(self, "amount_rub", amount_rub)
-        object.__setattr__(self, "event_type", event_type)
-        resolved_related = (
-            related_external_id if related_external_id is not None else payment_id
-        )
-        object.__setattr__(self, "related_external_id", resolved_related)
-
     @property
     def payment_id(self) -> str | None:
-        """Backward compatibility alias for related_external_id."""
         return self.related_external_id
 
 

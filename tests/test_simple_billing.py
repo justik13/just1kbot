@@ -1069,19 +1069,20 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res1.is_paid)
         self.assertEqual(res1.amount_rub, Decimal("150.00"))
 
-        # 2. Refund payload with status=refunded without event envelope
+        # 2. Unhandled event (e.g. payment.canceled or unknown event)
         res2 = await gw.parse_webhook({
+            "event": "payment.canceled",
             "object": {
-                "id": "ref-444",
+                "id": "pay-444",
                 "payment_id": "pay-555",
-                "status": "refunded",
+                "status": "canceled",
                 "amount": {"value": "200.00", "currency": "RUB"},
             },
         })
-        self.assertEqual(res2.external_id, "ref-444")
-        self.assertEqual(res2.related_external_id, "pay-555")
-        self.assertEqual(res2.payment_id, "pay-555")
-        self.assertTrue(res2.is_refunded)
+        self.assertEqual(res2.external_id, "pay-444")
+        self.assertIsNone(res2.related_external_id)
+        self.assertIsNone(res2.payment_id)
+        self.assertFalse(res2.is_refunded)
         self.assertFalse(res2.is_paid)
 
         # 3. Payment payload (payment.succeeded)
@@ -1391,7 +1392,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             is_paid=False,
             is_refunded=True,
             external_id=refund_ext_id,
-            payment_id=payment_ext_id,
+            related_external_id=payment_ext_id,
             amount_rub=Decimal("300.00"),
         )
 
@@ -1482,15 +1483,16 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         from database.repositories.account_ledger_repo import create_order_refund_debit
 
         session = AsyncMock(spec=AsyncSession)
-        with self.assertRaises(ValueError) as cm:
-            await create_order_refund_debit(
-                session,
-                user_id=42,
-                amount_rub=Decimal("150.00"),
-                order_id=uuid.uuid4(),
-                refund_id="   ",
-            )
-        self.assertIn("refund_id must be a non-empty string", str(cm.exception))
+        for invalid_refund_id in ["   ", "", None, 123]:
+            with self.assertRaises(ValueError) as cm:
+                await create_order_refund_debit(
+                    session,
+                    user_id=42,
+                    amount_rub=Decimal("150.00"),
+                    order_id=uuid.uuid4(),
+                    refund_id=invalid_refund_id,  # type: ignore
+                )
+            self.assertIn("refund_id must be a non-empty string", str(cm.exception))
 
     @patch("bot.handlers.webhook.session_scope")
     @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")
