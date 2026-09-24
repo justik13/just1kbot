@@ -311,7 +311,7 @@ async def create_order_refund_debit(
     if not isinstance(refund_id, str) or not refund_id.strip():
         raise ValueError("refund_id must be a non-empty string")
     amount = -abs(whole_rubles(amount_rub))
-    idempotency_key = f"order_refund:{order_id}:{refund_id}"
+    idempotency_key = f"order_refund:{order_id}:{refund_id.strip()}"
     values = {
         "user_id": user_id,
         "entry_type": "refund_debit",

@@ -106,6 +106,60 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status_result.is_paid)
         self.assertFalse(status_result.is_canceled)
 
+    def test_webhook_result_dataclass_contract(self):
+        import dataclasses
+        res = WebhookResult(
+            order_id="ord-1",
+            is_paid=True,
+            is_refunded=False,
+            external_id="ext-1",
+        )
+        self.assertEqual(res.order_id, "ord-1")
+        self.assertTrue(res.is_paid)
+        self.assertFalse(res.is_refunded)
+        self.assertEqual(res.external_id, "ext-1")
+        self.assertIsNone(res.amount_rub)
+        self.assertEqual(res.event_type, "")
+        self.assertIsNone(res.related_external_id)
+        self.assertIsNone(res.payment_id)
+
+        # Immutability
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            res.is_paid = False  # type: ignore
+
+        # related_external_id and payment_id property
+        res_refund = WebhookResult(
+            order_id=None,
+            is_paid=False,
+            is_refunded=True,
+            external_id="ref-1",
+            related_external_id="pay-99",
+        )
+        self.assertEqual(res_refund.related_external_id, "pay-99")
+        self.assertEqual(res_refund.payment_id, "pay-99")
+
+    async def test_parse_webhook_null_safety(self):
+        # 1. Payload with None object
+        res_none_obj = await self.gateway.parse_webhook({"event": "payment.succeeded", "object": None})
+        self.assertTrue(res_none_obj.is_paid)
+        self.assertEqual(res_none_obj.external_id, "")
+        self.assertIsNone(res_none_obj.amount_rub)
+
+        # 2. Object with None amount
+        res_none_amt = await self.gateway.parse_webhook({
+            "event": "payment.succeeded",
+            "object": {"id": "pay-123", "amount": None},
+        })
+        self.assertTrue(res_none_amt.is_paid)
+        self.assertEqual(res_none_amt.external_id, "pay-123")
+        self.assertIsNone(res_none_amt.amount_rub)
+
+        # 3. Empty payload
+        res_empty = await self.gateway.parse_webhook({})
+        self.assertFalse(res_empty.is_paid)
+        self.assertFalse(res_empty.is_refunded)
+        self.assertEqual(res_empty.external_id, "")
+
 
 class TestFulfillmentService(unittest.IsolatedAsyncioTestCase):
     @patch("services.fulfillment_service.invalidate_user_cache")

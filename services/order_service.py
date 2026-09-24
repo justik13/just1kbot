@@ -460,7 +460,7 @@ class OrderService:
                     user_id=order.user_id,
                     amount_rub=refund_amount,
                     order_id=order.id,
-                    refund_id=result.external_id or "refund",
+                    refund_id=(result.external_id or "").strip() or "refund",
                     metadata={"source": "yookassa_refund"},
                 )
                 await reverse_referral_bonus_for_topup(

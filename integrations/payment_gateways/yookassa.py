@@ -112,14 +112,16 @@ class YooKassaGateway(BasePaymentGateway):
         payload: dict,
         headers: dict | None = None,
     ) -> WebhookResult:
+        payload = payload or {}
         event = payload.get("event", "")
-        obj = payload.get("object", {})
+        obj = payload.get("object") or {}
 
         status = obj.get("status", "")
-        metadata = obj.get("metadata", {}) or {}
+        metadata = obj.get("metadata") or {}
         order_id = metadata.get("order_id")
 
-        amount_val = obj.get("amount", {}).get("value")
+        amount_obj = obj.get("amount") or {}
+        amount_val = amount_obj.get("value")
         amount_rub = Decimal(str(amount_val)) if amount_val is not None else None
 
         related_external_id = None
