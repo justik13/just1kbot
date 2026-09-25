@@ -96,7 +96,7 @@ WL_INCY_INSTRUCTIONS_TEXT = (
     "1️⃣ <b>Установите приложение INCY:</b>\n"
     "   🍏 <a href=\"https://apps.apple.com/app/incy/id6756943388\">Скачать в App Store (для iPhone / iPad)</a>\n"
     "   🤖 <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Скачать в Google Play (для Android)</a>\n"
-    "   📦 <a href=\"https://github.com/INCY-DEV/incy-platforms/releases\">Скачать APK файл напрямую (GitHub)</a>\n\n"
+    "   💻 / 📦 <a href=\"https://github.com/INCY-DEV/incy-platforms/releases\">Скачать для ПК (Windows, macOS, Linux) или APK (GitHub)</a>\n\n"
     "2️⃣ <b>Скопируйте вашу ссылку подписки:</b>\n"
     "<code>{url}</code>\n"
     "<i>(нажмите на ссылку выше или на кнопку внизу)</i>\n\n"

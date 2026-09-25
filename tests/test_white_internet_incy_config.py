@@ -279,9 +279,12 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     self.assertEqual(base64.b64decode(announce_b64).decode("utf-8"), "Внимание: технические работы")
                     self.assertEqual(resp.headers.get("Announce-Url"), "https://t.me/just1k_channel/123")
 
-                    # Zero-config system headers
-                    self.assertEqual(resp.headers.get("hide-check"), "1")
-                    self.assertEqual(resp.headers.get("sort-order"), "none")
+                    # Zero-config system headers (canonical casing)
+                    self.assertEqual(resp.headers.get("Hide-Url"), "1")
+                    self.assertEqual(resp.headers.get("Hide-Check"), "1")
+                    self.assertEqual(resp.headers.get("Sort-Order"), "none")
+                    self.assertEqual(resp.headers.get("No-Limit-Enabled"), "1")
+                    self.assertEqual(resp.headers.get("CDN-Cache-Control"), "no-store")
                     self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
 
                     # Action buttons
@@ -421,6 +424,21 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     decoded_title = base64.b64decode(title_b64).decode("utf-8")
                     self.assertEqual(len(decoded_title), 25)
                     self.assertEqual(decoded_title, "A" * 25)
+
+    async def test_web_feed_error_headers_have_cdn_cache_control(self):
+        # 1. Invalid short token (404)
+        resp_404 = await self.client.get("/sub/wl/short")
+        self.assertEqual(resp_404.status, 404)
+        self.assertEqual(resp_404.headers.get("CDN-Cache-Control"), "no-store")
+        self.assertEqual(resp_404.headers.get("Cache-Control"), "no-store")
+
+        # 2. Rate limit IP exhaustion (429)
+        with patch("bot.handlers.white_internet_web._ip_rate_limiter.check", return_value=(False, 30)):
+            resp_429 = await self.client.get("/sub/wl/valid-length-token-12345")
+            self.assertEqual(resp_429.status, 429)
+            self.assertEqual(resp_429.headers.get("CDN-Cache-Control"), "no-store")
+            self.assertEqual(resp_429.headers.get("Cache-Control"), "no-store")
+            self.assertEqual(resp_429.headers.get("Retry-After"), "30")
 
     def test_ensure_country_flag_logic(self):
         # Auto prepend flag

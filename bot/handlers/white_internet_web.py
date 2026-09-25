@@ -48,24 +48,37 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         return web.Response(
             status=429,
             text=texts.WL_WEB_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(retry_after_ip), "Cache-Control": "no-store"},
+            headers={
+                "Retry-After": str(retry_after_ip),
+                "Cache-Control": "no-store",
+                "CDN-Cache-Control": "no-store",
+            },
         )
 
     token = request.match_info.get("token", "").strip()
     if not token or len(token) < 16:
-        return web.Response(status=404, text="Not Found", headers={"Cache-Control": "no-store"})
+        return web.Response(
+            status=404,
+            text="Not Found",
+            headers={"Cache-Control": "no-store", "CDN-Cache-Control": "no-store"},
+        )
 
     allowed_tok, retry_after_tok = _token_rate_limiter.check(token)
     if not allowed_tok:
         return web.Response(
             status=429,
             text=texts.WL_WEB_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(retry_after_tok), "Cache-Control": "no-store"},
+            headers={
+                "Retry-After": str(retry_after_tok),
+                "Cache-Control": "no-store",
+                "CDN-Cache-Control": "no-store",
+            },
         )
 
     now = now_utc()
     common_headers = {
         "Cache-Control": "no-store, private, no-cache, must-revalidate",
+        "CDN-Cache-Control": "no-store",
         "Pragma": "no-cache",
         "X-Content-Type-Options": "nosniff",
     }
@@ -318,10 +331,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 ),
                 "Support-Url": support_url,
                 "Profile-Web-Page-Url": channel_url,
-                "hide-url": "1",
-                "hide-check": "1",
-                "sort-order": "none",
-                "no-limit-enabled": "1",
+                "Hide-Url": "1",
+                "Hide-Check": "1",
+                "Sort-Order": "none",
+                "No-Limit-Enabled": "1",
             }
         )
 
