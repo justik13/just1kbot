@@ -115,11 +115,11 @@ async def process_add_server(
     if step == "name":
         name = message.text.strip()
 
-        if len(name) > 255:
+        if len(name) > 50:
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.ERROR_NAME_TOO_LONG.format(max=255),
+                texts.ERROR_NAME_TOO_LONG.format(max=50),
                 get_back_button("admin_servers"),
             )
             return

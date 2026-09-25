@@ -436,7 +436,18 @@ async def process_balance_reason(
         )
         return
 
-    reason = message.text.strip() if message.text and message.text.strip() != "-" else texts.ADMIN_USERS_BALANCE_KORREKTIROVKA_ADMINISTRATOROM
+    raw_reason = message.text.strip() if message.text else ""
+    if len(raw_reason) > 100:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_NAME_TOO_LONG.format(max=100),
+            get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
+        )
+        return
+
+    reason = raw_reason if raw_reason and raw_reason != "-" else texts.ADMIN_USERS_BALANCE_KORREKTIROVKA_ADMINISTRATOROM
     adjustment_id = uuid4().hex
     await state.update_data(reason=reason, adjustment_id=adjustment_id)
 

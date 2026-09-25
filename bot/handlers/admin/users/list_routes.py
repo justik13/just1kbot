@@ -298,14 +298,29 @@ async def process_search_user(
             pass
         return
 
+    query_text = message.text.strip()
+    if len(query_text) > 64:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ADMIN_USERS_LIST_USER_PO_ZAPROSU_NE_NAYDE.format(
+                safe_message_text=safe(query_text[:32] + "…")
+            ),
+            get_back_button("admin_users"),
+            trigger_message_id=message.message_id,
+            parse_mode="HTML",
+        )
+        await state.clear()
+        return
+
     from database.repositories.users_repo import search_user_flexible
-    user = await search_user_flexible(session, message.text)
+    user = await search_user_flexible(session, query_text)
 
     if not user:
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ADMIN_USERS_LIST_USER_PO_ZAPROSU_NE_NAYDE.format(safe_message_text=safe(message.text)),
+            texts.ADMIN_USERS_LIST_USER_PO_ZAPROSU_NE_NAYDE.format(safe_message_text=safe(query_text)),
             get_back_button("admin_users"),
             trigger_message_id=message.message_id,
             parse_mode="HTML",

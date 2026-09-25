@@ -6,7 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, Message
 
 from services.workers import _send_alert
 from services.workers.node_monitor import _send_admin_alert_msg
-from utils.telegram import safe_send_message
+from utils.telegram import safe_send_message, strip_html_tags
 
 
 class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
@@ -200,3 +200,135 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
         second_call = self.mock_bot.send_message.call_args_list[1].kwargs
         self.assertIsNone(second_call["parse_mode"])
         self.assertIn("class 'ValueError'", second_call["text"])
+
+    def test_strip_html_tags_with_tg_time_and_expandable_blockquote(self):
+        """strip_html_tags strips Telegram formatting tags including tg-time and expandable-blockquote."""
+        sample_html = (
+            'Server <b>DE-1</b> restarted at <tg-time unix="1710000000" format="f">14:30</tg-time>.\n'
+            '<expandable-blockquote>Detailed incident report &amp; diagnostic logs</expandable-blockquote>\n'
+            'Visit <a href="https://example.com">dashboard</a> for info.'
+        )
+        plain = strip_html_tags(sample_html)
+        self.assertNotIn("<tg-time", plain)
+        self.assertNotIn("</tg-time>", plain)
+        self.assertNotIn("<expandable-blockquote>", plain)
+        self.assertNotIn("</expandable-blockquote>", plain)
+        self.assertNotIn("<b>", plain)
+        self.assertIn("Server DE-1 restarted at 14:30.", plain)
+        self.assertIn("Detailed incident report & diagnostic logs", plain)
+        self.assertIn("Visit dashboard (https://example.com) for info.", plain)
+
+    async def test_extract_msg_id_rejects_bool(self):
+        """safe_send_message does not treat boolean True as a message_id."""
+        self.mock_bot.send_message.return_value = True
+
+        res = await safe_send_message(
+            self.mock_bot,
+            chat_id=self.chat_id,
+            text="Test message",
+        )
+
+        self.assertIsNone(res)
+
+    async def test_traffic_quota_alert_escapes_dangerous_server_name(self):
+        """_send_quota_alert escapes dangerous HTML characters in server_name."""
+        fake_msg = MagicMock(spec=Message)
+        fake_msg.message_id = 777
+        self.mock_bot.send_message.return_value = fake_msg
+
+        with patch("services.workers.traffic.get_settings") as mock_settings:
+            mock_settings.return_value.ADMIN_IDS = [100]
+            from services.workers.traffic import _send_quota_alert
+
+            await _send_quota_alert(
+                self.mock_bot,
+                telegram_id=99999,
+                server_name="Node <DE-1> & 'Frankfurt' <b>test</b>",
+                total_bytes=1024**4,
+                profile_id=1,
+            )
+
+        self.mock_bot.send_message.assert_called_once()
+        sent_text = self.mock_bot.send_message.call_args.kwargs["text"]
+        # HTML special chars must be escaped with safe()
+        self.assertIn("&lt;DE-1&gt;", sent_text)
+        self.assertIn("&amp;", sent_text)
+        self.assertIn("&lt;b&gt;test&lt;/b&gt;", sent_text)
+        self.assertNotIn("<DE-1>", sent_text)
+
+    async def test_admin_server_name_length_limit(self):
+        """Server add name longer than 50 chars is rejected."""
+        from bot.handlers.admin.servers.add_routes import process_add_server
+
+        msg = MagicMock()
+        msg.from_user = MagicMock(id=100)
+        msg.text = "A" * 51
+        msg.bot = self.mock_bot
+        msg.chat.id = 100
+
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"step": "name"})
+        session = AsyncMock()
+
+        with patch("bot.handlers.admin.servers.add_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.add_routes.render_hub") as mock_render:
+            await process_add_server(msg, state, session)
+
+            mock_render.assert_called_once()
+            rendered_text = mock_render.call_args[0][2]
+            self.assertIn("50", rendered_text)
+            state.update_data.assert_not_called()
+
+    async def test_admin_balance_reason_length_limit(self):
+        """Balance adjustment reason longer than 100 chars is rejected."""
+        from bot.handlers.admin.users.balance_routes import process_balance_reason
+
+        msg = MagicMock()
+        msg.from_user = MagicMock(id=100)
+        msg.text = "R" * 101
+        msg.bot = self.mock_bot
+        msg.chat.id = 100
+        msg.message_id = 55
+
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={
+            "target_telegram_id": 12345,
+            "amount": 100,
+            "action_type": "topup",
+        })
+        session = AsyncMock()
+
+        with patch("bot.handlers.admin.users.balance_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.balance_routes.render_hub") as mock_render:
+            await process_balance_reason(msg, state, session)
+
+            mock_render.assert_called_once()
+            rendered_text = mock_render.call_args[0][2]
+            self.assertIn("100", rendered_text)
+            state.update_data.assert_not_called()
+
+    async def test_admin_user_search_length_limit(self):
+        """User search query longer than 64 chars is rejected immediately."""
+        from bot.handlers.admin.users.list_routes import process_search_user
+
+        msg = MagicMock()
+        msg.from_user = MagicMock(id=100)
+        msg.text = "S" * 65
+        msg.bot = self.mock_bot
+        msg.chat.id = 100
+        msg.message_id = 66
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with patch("bot.handlers.admin.users.list_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.list_routes.render_hub") as mock_render, \
+             patch("database.repositories.users_repo.search_user_flexible") as mock_search:
+            await process_search_user(msg, state, session)
+
+            mock_render.assert_called_once()
+            rendered_text = mock_render.call_args[0][2]
+            self.assertIn("не найден", rendered_text)
+            # search_user_flexible must not be called for overlong queries
+            mock_search.assert_not_called()
+            state.clear.assert_called_once()

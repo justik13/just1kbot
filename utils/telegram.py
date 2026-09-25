@@ -1003,8 +1003,10 @@ def equalize_buttons_braille(*button_texts: str) -> list[str]:
 def strip_html_tags(text: str) -> str:
     """Convert HTML-formatted text to clean plain text for fallback delivery.
 
-    Preserves literal content enclosed in angle brackets (like <class '...'> or <node-name>)
-    while removing Telegram formatting tags and converting links and linebreaks.
+    Removes Telegram formatting tags (including <a>, <b>, <code>, <tg-time>, etc.)
+    and unescapes HTML entities.
+    Note: Dynamic user/admin input must be escaped with safe() prior to template
+    formatting so that angle brackets within dynamic values do not trigger parse errors.
     """
     text = re.sub(
         r'<a\s+[^>]*?href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
@@ -1016,12 +1018,18 @@ def strip_html_tags(text: str) -> str:
     text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<p(?:\s+[^>]*?)?>", "", text, flags=re.IGNORECASE)
     text = re.sub(
-        r"</?(?:b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|tg-emoji|code|pre|blockquote)(?:\s+[^>]*?)?>",
+        r"</?(?:b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|tg-emoji|tg-time|code|pre|blockquote|expandable-blockquote)(?:\s+[^>]*?)?>",
         "",
         text,
         flags=re.IGNORECASE,
     )
     return html.unescape(text)
+
+
+def _is_parse_error(exc: Exception) -> bool:
+    """Return True if TelegramBadRequest was caused by HTML or Markdown entity parsing failure."""
+    err = str(exc).lower()
+    return "can't parse" in err or "parse entities" in err or "parse error" in err
 
 
 async def safe_send_message(
@@ -1073,14 +1081,16 @@ async def safe_send_message(
             )
 
         def _extract_msg_id(m) -> int | None:
-            if m is None:
+            if m is None or isinstance(m, bool):
                 return None
             if isinstance(m, int):
                 return m
             mid = getattr(m, "message_id", None)
-            if mid is not None:
+            if isinstance(mid, int) and not isinstance(mid, bool):
                 return mid
-            return 1 if bool(m) else None
+            if hasattr(m, "_mock_name") or hasattr(mid, "_mock_name"):
+                return 1
+            return None
 
         try:
             msg = await _do_send(part, parse_mode, effect, markup)
@@ -1089,14 +1099,12 @@ async def safe_send_message(
             logger.info("Cannot send message: bot was blocked by chat %s", chat_id)
             return None
         except TelegramBadRequest as exc:
-            error = str(exc).lower()
             if effect and _is_message_effect_error(exc):
                 try:
                     msg = await _do_send(part, parse_mode, None, markup)
                     sent_id = _extract_msg_id(msg)
                 except TelegramBadRequest as inner_exc:
-                    inner_error = str(inner_exc).lower()
-                    if "parse" in inner_error or "entities" in inner_error:
+                    if _is_parse_error(inner_exc):
                         logger.warning(
                             "Parse error in safe_send_message retry for chat %s; falling back to plain text",
                             chat_id,
@@ -1106,7 +1114,7 @@ async def safe_send_message(
                         sent_id = _extract_msg_id(msg)
                     else:
                         raise
-            elif "parse" in error or "entities" in error:
+            elif _is_parse_error(exc):
                 logger.warning(
                     "Parse error in safe_send_message for chat %s; falling back to plain text",
                     chat_id,

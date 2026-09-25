@@ -255,7 +255,34 @@ async def process_mass_bonus_reason(
         await state.clear()
         return
 
-    reason = message.text.strip() if message.text else texts.ADMIN_USERS_MASS_BONUS_MASSOVAYA_KOMPENSATSIYA
+    if message.text and message.text.startswith("/"):
+        await state.clear()
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_OPERATION_CANCELLED,
+            get_back_button("admin_mass_bonus"),
+            trigger_message_id=message.message_id,
+        )
+        return
+
+    raw_reason = message.text.strip() if message.text else ""
+    if len(raw_reason) > 100:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_NAME_TOO_LONG.format(max=100),
+            get_back_button("admin_mass_bonus"),
+            parse_mode="HTML",
+            trigger_message_id=message.message_id,
+        )
+        return
+
+    reason = raw_reason if raw_reason else texts.ADMIN_USERS_MASS_BONUS_MASSOVAYA_KOMPENSATSIYA
     data = await state.get_data()
     target_aud = data.get("target_aud", "all")
     amount = data.get("amount", 0)

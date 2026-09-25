@@ -453,7 +453,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(server.last_alert_sent_state, ServerHealthState.PROBLEM)
 
             # Tick 3 (15s later): Telegram API recovers!
-            self.mock_bot.send_message = AsyncMock(return_value=True)
+            self.mock_bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
             await check_node_resources_and_alerts(self.mock_bot)
 

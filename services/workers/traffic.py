@@ -20,7 +20,7 @@ from database.models import Server, User, VPNProfile
 from services.amnezia_client import AmneziaClient
 from services.slots_cache import update_cached_peer_count
 from utils.datetime_helpers import now_utc
-from utils.telegram import safe_send_message
+from utils.telegram import safe, safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +352,7 @@ async def _send_quota_alert(
         tib = total_bytes / (1024**4)
         msg = ALERT_TRAFFIC_OVERUSAGE.format(
             telegram_id=telegram_id,
-            server_name=server_name,
+            server_name=safe(server_name),
             tib=tib,
             profile_id=profile_id,
         )
