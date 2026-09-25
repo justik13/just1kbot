@@ -13,6 +13,7 @@ from bot.texts.runtime.alerts import (
     ALERT_WORKER_CRASH,
 )
 from config.settings import get_settings
+from utils.telegram import safe_send_message
 
 from .account_balance import account_balance_notifications_loop
 from .api_operations import api_operations_loop
@@ -156,7 +157,7 @@ async def _send_alert(bot: Bot, title: str, worker: str,
     try:
         for admin_id in get_settings().ADMIN_IDS:
             try:
-                await bot.send_message(admin_id, message, parse_mode="HTML")
+                await safe_send_message(bot, admin_id, message, parse_mode="HTML")
             except Exception:
                 logger.exception("Failed to send worker alert to admin")
     except Exception:

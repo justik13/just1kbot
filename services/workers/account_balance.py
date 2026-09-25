@@ -38,7 +38,7 @@ from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import mark_user_bot_blocked
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
-from utils.telegram import render_hub
+from utils.telegram import render_hub, safe_send_message
 
 logger = logging.getLogger(__name__)
 BALANCE_NOTIFICATION_INTERVAL = 10.0
@@ -355,7 +355,7 @@ async def process_balance_notifications(bot: Bot) -> int:
                     )
                     for admin_id in get_settings().ADMIN_IDS:
                         await global_send_limiter.acquire()
-                        await bot.send_message(admin_id, diagnostic, parse_mode="HTML")
+                        await safe_send_message(bot, admin_id, diagnostic, parse_mode="HTML")
                 user_sent = True
             except TelegramForbiddenError:
                 user_blocked = True
