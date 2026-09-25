@@ -1241,7 +1241,13 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             refund_id="ext-pay-888",
             metadata={"source": "yookassa_refund"},
         )
-        mock_rev_bonus.assert_called_once_with(session, order_id=order_uuid)
+        mock_rev_bonus.assert_called_once_with(
+            session,
+            order_id=order_uuid,
+            refund_amount=Decimal("80.00"),
+            original_topup_amount=Decimal("200.00"),
+            refund_id="ext-pay-888",
+        )
         mock_revoke.assert_not_called()
 
     @patch("services.fulfillment_service.invalidate_user_cache")
@@ -1438,7 +1444,13 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             refund_id="refund-part-1",
             metadata={"source": "yookassa_refund"},
         )
-        mock_rev_bonus.assert_called_once_with(session, order_id=order_uuid)
+        mock_rev_bonus.assert_called_once_with(
+            session,
+            order_id=order_uuid,
+            refund_amount=Decimal("80.00"),
+            original_topup_amount=Decimal("200.00"),
+            refund_id="refund-part-1",
+        )
         mock_revoke.assert_not_called()
 
         # 2. Duplicate of first partial refund should be ignored
@@ -1470,7 +1482,13 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             refund_id="refund-part-2",
             metadata={"source": "yookassa_refund"},
         )
-        mock_rev_bonus.assert_called_once_with(session, order_id=order_uuid)
+        mock_rev_bonus.assert_called_once_with(
+            session,
+            order_id=order_uuid,
+            refund_amount=Decimal("120.00"),
+            original_topup_amount=Decimal("200.00"),
+            refund_id="refund-part-2",
+        )
         mock_revoke.assert_called_once_with(session, order)
 
     @patch("services.order_service.FulfillmentService.revoke_order")
@@ -1935,5 +1953,147 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(order.amount_rub, Decimal("500.00"))
             self.assertEqual(order.payment_url, "https://pay.link/new")
+
+    async def test_order_deduplication_dynamic_tariff_change_recalculated_amount(self):
+        """Verify dynamic tariff change dedup uses calculated final_amount instead of initial None."""
+        mock_gw = AsyncMock()
+        mock_gw.create_payment_url.return_value = PaymentInvoice(
+            external_id="ext-dyn",
+            payment_url="https://pay.link/dyn",
+        )
+        with patch("services.order_service.get_payment_gateway", return_value=mock_gw):
+            session = AsyncMock(spec=AsyncSession)
+            now = now_utc()
+            # User currently has 2 devices (300 RUB), upgrading to 3 devices (450 RUB), 15 days left
+            curr_tariff = Tariff(id=1, name="Standard", price_rub=Decimal("300.00"), duration_days=30, device_limit=2)
+            target_tariff = Tariff(id=2, name="Pro", price_rub=Decimal("450.00"), duration_days=30, device_limit=3)
+            user = User(
+                id=42,
+                current_tariff_id=1,
+                subscription_end=now + timedelta(days=15),
+            )
+
+            def mock_get(model, pk):
+                if model == User:
+                    return user
+                if model == Tariff and pk == 1:
+                    return curr_tariff
+                if model == Tariff and pk == 2:
+                    return target_tariff
+                return None
+
+            session.get.side_effect = mock_get
+            # scalar dedup query returns None (no pending order with calculated final_amount)
+            session.scalar.return_value = None
+
+            order = await OrderService.create_order(
+                session,
+                user_id=42,
+                service_type="tariff_change",
+                tariff_id=2,
+                amount_rub=None,  # dynamic calculation
+                payment_method="yookassa",
+                metadata={"is_tariff_change": True},
+            )
+            # 15 days left out of 30: unspent credit is 150 RUB. Target is 450. Due: 300 RUB.
+            self.assertEqual(order.amount_rub, Decimal("300.00"))
+            self.assertEqual(order.payment_url, "https://pay.link/dyn")
+            # Verify scalar query was called with Order.amount_rub == final_amount
+            self.assertTrue(session.scalar.called)
+
+    @patch("bot.handlers.webhook.session_scope")
+    @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")
+    @patch("bot.handlers.webhook._is_yookassa_ip", return_value=True)
+    async def test_yookassa_webhook_reprocesses_pending_inbox_event(
+        self, mock_ip, mock_real, mock_scope
+    ):
+        """Verify WebhookInbox with status=pending is NOT skipped on retry, and gets updated to succeeded."""
+        from bot.handlers.webhook import yookassa_webhook_handler
+        from config.enums import WebhookInboxStatus
+        from database.models import WebhookInbox
+
+        session = AsyncMock(spec=AsyncSession)
+        pending_inbox = WebhookInbox(
+            id=77,
+            provider="yookassa",
+            status=WebhookInboxStatus.PENDING.value,
+        )
+        session.scalar.return_value = pending_inbox
+        mock_scope.return_value.__aenter__.return_value = session
+
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="paid",
+        )
+        order._newly_paid = False
+
+        request = AsyncMock()
+        request.content_length = 200
+        request.app = {"bot": AsyncMock()}
+        request.json.return_value = {
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-pending-123",
+                "status": "succeeded",
+                "metadata": {"order_id": str(order_uuid)},
+            },
+        }
+
+        with patch("services.order_service.OrderService.process_webhook_event", return_value=order) as mock_process:
+            response = await yookassa_webhook_handler(request)
+            self.assertEqual(response.status, 200)
+            mock_process.assert_called_once()
+            self.assertEqual(pending_inbox.status, WebhookInboxStatus.SUCCEEDED.value)
+
+    @patch("bot.handlers.webhook.session_scope")
+    @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")
+    @patch("bot.handlers.webhook._is_yookassa_ip", return_value=True)
+    async def test_yookassa_webhook_returns_503_when_order_pending(
+        self, mock_ip, mock_real, mock_scope
+    ):
+        """Verify webhook returns 503 when order is not yet found, allowing YooKassa retry."""
+        from bot.handlers.webhook import yookassa_webhook_handler
+
+        session = AsyncMock(spec=AsyncSession)
+        session.scalar.return_value = None
+        mock_scope.return_value.__aenter__.return_value = session
+
+        request = AsyncMock()
+        request.content_length = 200
+        request.app = {"bot": AsyncMock()}
+        request.json.return_value = {
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-unprocessed-123",
+                "status": "succeeded",
+                "metadata": {"order_id": str(uuid.uuid4())},
+            },
+        }
+
+        with patch("services.order_service.OrderService.process_webhook_event", return_value=None):
+            response = await yookassa_webhook_handler(request)
+            self.assertEqual(response.status, 503)
+            self.assertIn("pending", response.text.lower())
+
+    async def test_audit_invariants_extra_traffic_scales_with_devices(self):
+        """Verify assert_inv_4_subscription_traffic_pools allows up to device_limit * 150 GiB extra traffic."""
+        from scripts.audit_invariants import assert_inv_4_subscription_traffic_pools
+
+        session = AsyncMock(spec=AsyncSession)
+        scalars_mock = MagicMock()
+        # 1 device, 50 GiB base, 150 GiB extra (total 200 GiB) -> valid
+        scalars_mock.all.return_value = []
+        session.scalars.return_value = scalars_mock
+
+        res = await assert_inv_4_subscription_traffic_pools(session)
+        self.assertTrue(res.passed)
+        self.assertIn("satisfy traffic pool", res.details)
+
 
 

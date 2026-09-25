@@ -142,14 +142,13 @@ async def assert_inv_4_subscription_traffic_pools(session: AsyncSession) -> Inva
     """Inv 4: Subscriptions have non-negative base and extra traffic pools within Hard Cap."""
     from config.constants import WHITE_INTERNET_MAX_QUOTA_BYTES
 
+    max_extra_allowed = func.greatest(1, func.coalesce(WhiteInternetSubscription.device_limit, 1)) * WHITE_INTERNET_MAX_QUOTA_BYTES
     violations = await session.scalars(
         select(WhiteInternetSubscription).where(
             or_(
                 WhiteInternetSubscription.base_traffic_bytes < 0,
                 WhiteInternetSubscription.extra_traffic_bytes < 0,
-                WhiteInternetSubscription.base_traffic_bytes
-                + WhiteInternetSubscription.extra_traffic_bytes
-                > WHITE_INTERNET_MAX_QUOTA_BYTES,
+                WhiteInternetSubscription.extra_traffic_bytes > max_extra_allowed,
             )
         )
     )

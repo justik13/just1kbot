@@ -661,14 +661,6 @@ class WhiteInternetService:
                 context=f"renew sub {sub.id}",
             )
 
-        target_origin = new_origin_server or origin_node
-        if target_origin is not None:
-            await cls._try_inline_sync(
-                session,
-                renewed,
-                target_origin,
-                idempotency_key=f"renew:{renewed.id}:{renewed.desired_version}:True",
-            )
 
         logger.info(
             "White Internet subscription renewed: user_id=%s, sub_id=%s, days=%s, node_id=%s",
@@ -827,14 +819,6 @@ class WhiteInternetService:
                 context=f"add_device_slot sub {sub.id}",
             )
 
-        target_origin = new_origin_server or origin_node
-        if target_origin is not None:
-            await cls._try_inline_sync(
-                session,
-                updated_sub,
-                target_origin,
-                idempotency_key=f"add_device:{updated_sub.id}:{updated_sub.desired_version}:True",
-            )
 
         logger.info(
             "White Internet device slot purchased: user_id=%s, sub_id=%s, new_limit=%s",
@@ -995,14 +979,6 @@ class WhiteInternetService:
                 context=f"topup sub {sub.id}",
             )
 
-        target_origin = new_origin_server or origin_node
-        if target_origin is not None:
-            await cls._try_inline_sync(
-                session,
-                sub,
-                target_origin,
-                idempotency_key=f"topup:{sub.id}:{sub.desired_version}:True",
-            )
 
         logger.info(
             "White Internet traffic topped up: user_id=%s, sub_id=%s, pack_gb=%s",
@@ -1193,10 +1169,6 @@ class WhiteInternetService:
                         sub.id,
                     )
         except Exception as exc:
-            try:
-                await session.rollback()
-            except Exception:
-                pass
             logger.warning(
                 "Synchronous activation fallback to background worker: %s", exc
             )

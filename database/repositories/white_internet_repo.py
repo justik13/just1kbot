@@ -399,8 +399,9 @@ async def topup_quota_atomic(
     effective_devices = _effective_device_limit(sub)
     max_extra_allowed = effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES
     if (sub.extra_traffic_bytes or 0) + pack_bytes > max_extra_allowed:
+        max_extra_gb = effective_devices * (WHITE_INTERNET_MAX_QUOTA_BYTES // (1024**3))
         raise WhiteInternetQuotaCapExceededError(
-            f"Adding {pack_gb} GiB would exceed the maximum extra traffic cap of {effective_devices * 150} GiB."
+            f"Adding {pack_gb} GiB would exceed the maximum extra traffic cap of {max_extra_gb} GiB."
         )
 
     sub.extra_traffic_bytes = (sub.extra_traffic_bytes or 0) + pack_bytes
@@ -915,6 +916,9 @@ async def set_device_limit_atomic(
         raise WhiteInternetTrialSubscriptionError("Cannot change device limit for trial subscription")
 
     sub.device_limit = limit
+    max_extra_allowed = limit * WHITE_INTERNET_MAX_QUOTA_BYTES
+    if (sub.extra_traffic_bytes or 0) > max_extra_allowed:
+        sub.extra_traffic_bytes = max_extra_allowed
     current_hwids: dict[str, str] = dict(sub.active_hwids or {})
     if len(current_hwids) > limit:
         sorted_hwids = sorted(current_hwids.items(), key=lambda item: item[1], reverse=True)

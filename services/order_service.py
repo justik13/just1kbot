@@ -115,29 +115,6 @@ class OrderService:
         bot_username: str | None = None,
     ) -> Order:
         """Create a new commercial order and obtain payment link if external gateway."""
-        # 1. Deduplication guard for pending external orders (prevent double-clicks)
-        if payment_method != "wallet":
-            cutoff = now_utc() - timedelta(minutes=15)
-            dedup_conditions = [
-                Order.user_id == user_id,
-                Order.service_type == service_type,
-                Order.tariff_id == tariff_id,
-                Order.payment_method == payment_method,
-                Order.status == "pending",
-                Order.created_at >= cutoff,
-                Order.payment_url.is_not(None),
-            ]
-            if amount_rub is not None:
-                dedup_conditions.append(Order.amount_rub == Decimal(str(amount_rub)))
-            existing = await session.scalar(
-                select(Order)
-                .where(*dedup_conditions)
-                .order_by(Order.created_at.desc())
-                .limit(1)
-            )
-            if existing and existing.payment_url:
-                return existing
-
         user = await session.get(User, user_id)
         order_meta: dict = dict(metadata) if metadata else {}
         if tariff_id is not None:
@@ -176,6 +153,27 @@ class OrderService:
         final_amount = amount_rub if amount_rub is not None else Decimal("0.00")
         final_duration = duration_days if duration_days is not None else 0
         final_desc = description or texts.CHECKOUT_DESCRIPTION_DEFAULT
+
+        # 1. Deduplication guard for pending external orders (prevent double-clicks)
+        if payment_method != "wallet":
+            cutoff = now_utc() - timedelta(minutes=15)
+            existing = await session.scalar(
+                select(Order)
+                .where(
+                    Order.user_id == user_id,
+                    Order.service_type == service_type,
+                    Order.tariff_id == tariff_id,
+                    Order.payment_method == payment_method,
+                    Order.amount_rub == final_amount,
+                    Order.status == "pending",
+                    Order.created_at >= cutoff,
+                    Order.payment_url.is_not(None),
+                )
+                .order_by(Order.created_at.desc())
+                .limit(1)
+            )
+            if existing and existing.payment_url:
+                return existing
 
         order = Order(
             id=uuid.uuid4(),
@@ -377,20 +375,15 @@ class OrderService:
                 order_id=order.id,
                 metadata=credit_meta,
             )
-            try:
-                from services.referral_bonus import grant_referral_bonus_for_topup
+            from services.referral_bonus import grant_referral_bonus_for_topup
 
-                grant_res = await grant_referral_bonus_for_topup(
-                    session,
-                    purchaser_user_id=order.user_id,
-                    order_id=str(order.id),
-                    topup_amount=order.amount_rub,
-                )
-                order._grant_result = grant_res
-            except Exception as exc:
-                logger.warning(
-                    "Failed to process referral bonus for order %s: %s", order.id, exc
-                )
+            grant_res = await grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=order.user_id,
+                order_id=str(order.id),
+                topup_amount=order.amount_rub,
+            )
+            order._grant_result = grant_res
 
         # Fulfill benefits linearly
         await FulfillmentService.fulfill_order(session, order)
@@ -498,6 +491,9 @@ class OrderService:
                 await reverse_referral_bonus_for_topup(
                     session,
                     order_id=order.id,
+                    refund_amount=refund_amount,
+                    original_topup_amount=order.amount_rub,
+                    refund_id=(result.external_id or "").strip() or None,
                 )
 
             is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")

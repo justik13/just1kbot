@@ -161,6 +161,12 @@ async def notify_referrer_topup_bonus(
         if not purchaser or not purchaser.referred_by:
             return
         ref_text = REFERRAL_BONUS_ACCREDITED.format(bonus=int(grant_res.referrer_bonus))
-        await render_hub(bot, purchaser.referred_by, ref_text, get_referral_bonus_keyboard())
+        await render_hub(
+            bot,
+            purchaser.referred_by,
+            ref_text,
+            get_referral_bonus_keyboard(),
+            session=session,
+        )
     except Exception as exc:
         logger.warning("Failed to send referral bonus push to referrer: %s", exc)

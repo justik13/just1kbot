@@ -656,3 +656,61 @@ class TestCalculateExtensionEnd(unittest.TestCase):
         now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
         res = calculate_extension_end(now, PERMANENT_SUBSCRIPTION_DAYS, now=now)
         self.assertEqual(res, PERMANENT_END_DATE)
+
+
+class TestWhiteInternetQuotaAndDeviceAuditFixes(unittest.IsolatedAsyncioTestCase):
+    """Test device limit downgrade extra traffic clamping and dynamic cap messages."""
+
+    async def test_set_device_limit_downgrade_clamps_extra_traffic(self):
+        from config.constants import WHITE_INTERNET_MAX_QUOTA_BYTES
+        from database.models import WhiteInternetSubscription
+        from database.repositories import white_internet_repo
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=3,
+            extra_traffic_bytes=300 * 1024**3,  # 300 GiB extra
+            active_hwids={"hw1": "ts1", "hw2": "ts2", "hw3": "ts3"},
+        )
+
+        session = AsyncMock()
+        session.get.return_value = sub
+
+        # Downgrade to 1 device: extra cap is now 1 * 150 GiB
+        updated = await white_internet_repo.set_device_limit_atomic(
+            session, subscription_id=1, limit=1
+        )
+        self.assertEqual(updated.device_limit, 1)
+        self.assertEqual(updated.extra_traffic_bytes, 1 * WHITE_INTERNET_MAX_QUOTA_BYTES)
+        self.assertEqual(len(updated.active_hwids), 1)
+
+    async def test_topup_quota_atomic_error_message_uses_configured_cap(self):
+        from config.constants import WHITE_INTERNET_MAX_QUOTA_BYTES
+        from database.models import WhiteInternetSubscription
+        from database.repositories import white_internet_repo
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=2,
+            base_traffic_bytes=100 * 1024**3,
+            extra_traffic_bytes=250 * 1024**3,  # 250 GiB
+            expires_at=now_utc() + timedelta(days=10),
+        )
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        session.execute.return_value = mock_result
+        session.get.return_value = sub
+
+        expected_cap_gb = 2 * (WHITE_INTERNET_MAX_QUOTA_BYTES // (1024**3))
+        # Adding 60 GiB would make 250 + 60 = 310 > 300 GiB
+        with self.assertRaises(white_internet_repo.WhiteInternetQuotaCapExceededError) as cm:
+            await white_internet_repo.topup_quota_atomic(
+                session, subscription_id=1, quote_id=1, pack_gb=60, price_rub=Decimal("200")
+            )
+        self.assertIn(f"maximum extra traffic cap of {expected_cap_gb} GiB", str(cm.exception))
