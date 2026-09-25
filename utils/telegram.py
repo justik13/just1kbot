@@ -4,7 +4,12 @@ import logging
 import re
 import time
 
-from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+)
 from aiogram.types import InlineKeyboardMarkup, InputFile, LinkPreviewOptions
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -355,6 +360,7 @@ def _is_message_effect_error(exc: Exception) -> bool:
             "effect_chat_invalid",
             "message_effect_invalid",
             "message effect invalid",
+            "message effect id is invalid",
             "can't be sent with effect",
         )
     )
@@ -992,3 +998,139 @@ def equalize_buttons_braille(*button_texts: str) -> list[str]:
         return []
     max_len = max(len(t) for t in button_texts)
     return [pad_braille(t, max_len, align="center") for t in button_texts]
+
+
+def strip_html_tags(text: str) -> str:
+    """Convert HTML-formatted text to clean plain text for fallback delivery.
+
+    Removes Telegram formatting tags (including <a>, <b>, <code>, <tg-time>, etc.)
+    and unescapes HTML entities.
+    Note: Dynamic user/admin input must be escaped with safe() prior to template
+    formatting so that angle brackets within dynamic values do not trigger parse errors.
+    """
+    text = re.sub(
+        r'<a\s+[^>]*?href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+        r"\2 (\1)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<p(?:\s+[^>]*?)?>", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"</?(?:b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|tg-emoji|tg-time|code|pre|blockquote|expandable-blockquote)(?:\s+[^>]*?)?>",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return html.unescape(text)
+
+
+def _is_parse_error(exc: Exception) -> bool:
+    """Return True if TelegramBadRequest was caused by HTML or Markdown entity parsing failure."""
+    err = str(exc).lower()
+    return "can't parse" in err or "parse entities" in err or "parse error" in err
+
+
+async def safe_send_message(
+    bot,
+    chat_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = "HTML",
+    disable_web_page_preview: bool = True,
+    message_effect_id: str | None = None,
+) -> int | None:
+    """Send a Telegram message with resilience and automatic plain-text fallback on parse errors.
+
+    Guarantees:
+    - Splits text exceeding 4096 chars if needed.
+    - Retries safely on TelegramRetryAfter.
+    - If TelegramBadRequest occurs due to entities parse errors:
+      for HTML (parse_mode="HTML"), strips HTML formatting tags via strip_html_tags();
+      for other modes, falls back to raw plain text; retries with parse_mode=None.
+    - If message_effect_id is invalid, retries without effect.
+    - Catches TelegramForbiddenError (user blocked bot) and returns None gracefully.
+    - Returns the message_id of the sent message (or last part if split), or None on terminal error.
+    """
+    link_preview_opts = LinkPreviewOptions(is_disabled=True) if disable_web_page_preview else None
+    text_parts = split_text_by_lines(text, limit=4096) or ["—"]
+    sent_id = None
+
+    try:
+        for index, part in enumerate(text_parts):
+            is_last = index == len(text_parts) - 1
+            markup = reply_markup if is_last else None
+            effect = message_effect_id if index == 0 else None
+
+            async def _do_send(
+                p_text: str,
+                p_mode: str | None,
+                p_eff: str | None,
+                p_markup: InlineKeyboardMarkup | None = markup,
+            ):
+                return await _send_with_resilience(
+                    lambda: bot.send_message(
+                        chat_id=chat_id,
+                        text=p_text,
+                        reply_markup=p_markup,
+                        parse_mode=p_mode,
+                        link_preview_options=link_preview_opts,
+                        message_effect_id=p_eff,
+                    ),
+                    chat_id=chat_id,
+                    context="safe_send_message",
+                )
+
+            def _extract_msg_id(m) -> int | None:
+                if m is None or isinstance(m, bool):
+                    return None
+                if isinstance(m, int):
+                    return m
+                mid = getattr(m, "message_id", None)
+                if isinstance(mid, int) and not isinstance(mid, bool):
+                    return mid
+                return None
+
+            try:
+                msg = await _do_send(part, parse_mode, effect, markup)
+                sent_id = _extract_msg_id(msg)
+            except TelegramBadRequest as exc:
+                if effect and _is_message_effect_error(exc):
+                    try:
+                        msg = await _do_send(part, parse_mode, None, markup)
+                        sent_id = _extract_msg_id(msg)
+                    except TelegramBadRequest as inner_exc:
+                        if _is_parse_error(inner_exc):
+                            logger.warning(
+                                "Parse error in safe_send_message retry for chat %s; falling back to plain text",
+                                chat_id,
+                            )
+                            plain = (strip_html_tags(part) if parse_mode == "HTML" else part)[:4096]
+                            msg = await _do_send(plain, None, None, markup)
+                            sent_id = _extract_msg_id(msg)
+                        else:
+                            raise
+                elif _is_parse_error(exc):
+                    logger.warning(
+                        "Parse error in safe_send_message for chat %s; falling back to plain text",
+                        chat_id,
+                    )
+                    plain = (strip_html_tags(part) if parse_mode == "HTML" else part)[:4096]
+                    try:
+                        msg = await _do_send(plain, None, effect, markup)
+                        sent_id = _extract_msg_id(msg)
+                    except TelegramBadRequest as effect_exc:
+                        if effect and _is_message_effect_error(effect_exc):
+                            msg = await _do_send(plain, None, None, markup)
+                            sent_id = _extract_msg_id(msg)
+                        else:
+                            raise
+                else:
+                    raise
+    except TelegramForbiddenError:
+        logger.info("Cannot send message: bot was blocked by chat %s", chat_id)
+        return None
+
+    return sent_id
+

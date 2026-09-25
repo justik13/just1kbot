@@ -126,11 +126,11 @@ async def process_edit_server_name(
 
     new_name = message.text.strip()
 
-    if len(new_name) > 255:
+    if len(new_name) > 50:
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_NAME_TOO_LONG.format(max=255),
+            texts.ERROR_NAME_TOO_LONG.format(max=50),
             get_back_button("admin_servers"),
         )
         return

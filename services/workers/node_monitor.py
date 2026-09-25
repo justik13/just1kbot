@@ -43,7 +43,7 @@ from database.repositories.servers_repo import (
 )
 from services.amnezia_client import AmneziaClient
 from utils.datetime_helpers import now_utc
-from utils.telegram import safe
+from utils.telegram import safe, safe_send_message
 
 _build_alert_keyboard = get_node_monitor_alert_keyboard
 
@@ -163,13 +163,15 @@ async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
     success = False
     for admin_id in admin_ids:
         try:
-            await bot.send_message(
+            msg_id = await safe_send_message(
+                bot,
                 chat_id=admin_id,
                 text=text,
                 reply_markup=reply_markup,
                 parse_mode="HTML",
             )
-            success = True
+            if msg_id:
+                success = True
         except Exception as exc:
             logger.warning("Failed to send node monitor alert to admin %s: %s", admin_id, exc)
     return success
