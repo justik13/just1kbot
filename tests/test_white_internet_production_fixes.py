@@ -177,7 +177,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         3. When /sub/wl/ping recovers with 200 OK, ALERT_INGRESS_RESTORED is sent.
         """
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=True)
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=10,
@@ -307,7 +307,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
     async def test_node_monitor_ingress_probe_flags_404_non_200_as_failure(self):
         """Any non-200 HTTP response (including 404 Not Found) triggers ALERT_INGRESS_PROBLEM."""
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=True)
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=11,
@@ -389,7 +389,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """Redirect 301 is not followed and is reported as failure with allow_redirects=False."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=True)
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=12,
@@ -481,7 +481,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """Redirect 302 is treated as failure."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=True)
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=13,
@@ -566,7 +566,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """TLS certificate verification failure triggers alert and keeps core node healthy."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=True)
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=14,

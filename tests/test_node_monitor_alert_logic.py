@@ -39,7 +39,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         self.mock_settings = MagicMock()
         self.mock_settings.ADMIN_IDS = [100]
         self.mock_bot = AsyncMock()
-        self.mock_bot.send_message = AsyncMock()
+        self.mock_bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         self.patcher_settings_1 = patch("services.workers.node_monitor.get_settings", return_value=self.mock_settings)
         self.patcher_settings_2 = patch("config.settings.get_settings", return_value=self.mock_settings)

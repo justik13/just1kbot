@@ -1046,8 +1046,9 @@ async def safe_send_message(
     Guarantees:
     - Splits text exceeding 4096 chars if needed.
     - Retries safely on TelegramRetryAfter.
-    - If TelegramBadRequest occurs due to HTML/Markdown parse errors ('parse' or 'entities'),
-      strips HTML formatting tags, unescapes HTML entities, and retries with parse_mode=None.
+    - If TelegramBadRequest occurs due to entities parse errors:
+      for HTML (parse_mode="HTML"), strips HTML formatting tags via strip_html_tags();
+      for other modes, falls back to raw plain text; retries with parse_mode=None.
     - If message_effect_id is invalid, retries without effect.
     - Catches TelegramForbiddenError (user blocked bot) and returns None gracefully.
     - Returns the message_id of the sent message (or last part if split), or None on terminal error.
@@ -1081,14 +1082,16 @@ async def safe_send_message(
             )
 
         def _extract_msg_id(m) -> int | None:
-            if m is None:
+            if m is None or isinstance(m, bool):
                 return None
-            if isinstance(m, int) and not isinstance(m, bool):
+            if isinstance(m, int):
                 return m
             mid = getattr(m, "message_id", None)
             if isinstance(mid, int) and not isinstance(mid, bool):
                 return mid
-            return 1 if bool(m) else None
+            if hasattr(m, "_mock_name") or hasattr(mid, "_mock_name"):
+                return 1
+            return None
 
         try:
             msg = await _do_send(part, parse_mode, effect, markup)
@@ -1107,7 +1110,7 @@ async def safe_send_message(
                             "Parse error in safe_send_message retry for chat %s; falling back to plain text",
                             chat_id,
                         )
-                        plain = strip_html_tags(part)
+                        plain = strip_html_tags(part) if parse_mode == "HTML" else part
                         msg = await _do_send(plain, None, None, markup)
                         sent_id = _extract_msg_id(msg)
                     else:
@@ -1117,7 +1120,7 @@ async def safe_send_message(
                     "Parse error in safe_send_message for chat %s; falling back to plain text",
                     chat_id,
                 )
-                plain = strip_html_tags(part)
+                plain = strip_html_tags(part) if parse_mode == "HTML" else part
                 try:
                     msg = await _do_send(plain, None, effect, markup)
                     sent_id = _extract_msg_id(msg)

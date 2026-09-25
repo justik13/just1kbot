@@ -201,6 +201,27 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(second_call["parse_mode"])
         self.assertIn("class 'ValueError'", second_call["text"])
 
+    async def test_worker_supervision_send_alert_standard_clean(self):
+        """Worker crash alert with standard exception name delivers cleanly via HTML."""
+        fake_msg = MagicMock(spec=Message)
+        fake_msg.message_id = 665
+        self.mock_bot.send_message.return_value = fake_msg
+
+        with patch("services.workers.get_settings") as mock_settings:
+            mock_settings.return_value.ADMIN_IDS = [100]
+            await _send_alert(
+                self.mock_bot,
+                title="CRITICAL STOP",
+                worker="node_monitor",
+                failure_count=3,
+                error_type="ValueError",
+            )
+
+        self.mock_bot.send_message.assert_called_once()
+        call_kwargs = self.mock_bot.send_message.call_args.kwargs
+        self.assertEqual(call_kwargs["parse_mode"], "HTML")
+        self.assertIn("ValueError", call_kwargs["text"])
+
     def test_strip_html_tags_with_tg_time_and_expandable_blockquote(self):
         """strip_html_tags strips Telegram formatting tags including tg-time and expandable-blockquote."""
         sample_html = (
@@ -218,8 +239,8 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Detailed incident report & diagnostic logs", plain)
         self.assertIn("Visit dashboard (https://example.com) for info.", plain)
 
-    async def test_extract_msg_id_supports_mock_returns(self):
-        """safe_send_message safely returns fallback ID 1 when test mocks return boolean True or truthy object."""
+    async def test_extract_msg_id_rejects_bool(self):
+        """safe_send_message rejects boolean True/False as message_id and strictly returns None."""
         self.mock_bot.send_message.return_value = True
 
         res = await safe_send_message(
@@ -228,15 +249,15 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
             text="Test message",
         )
 
-        self.assertEqual(res, 1)
+        self.assertIsNone(res)
 
-        self.mock_bot.send_message.return_value = None
-        res_none = await safe_send_message(
+        self.mock_bot.send_message.return_value = False
+        res_false = await safe_send_message(
             self.mock_bot,
             chat_id=self.chat_id,
             text="Test message",
         )
-        self.assertIsNone(res_none)
+        self.assertIsNone(res_false)
 
     async def test_traffic_quota_alert_escapes_dangerous_server_name(self):
         """_send_quota_alert escapes dangerous HTML characters in server_name."""
@@ -336,7 +357,7 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
 
             mock_render.assert_called_once()
             rendered_text = mock_render.call_args[0][2]
-            self.assertIn("не найден", rendered_text)
+            self.assertIn("64", rendered_text)
             # search_user_flexible must not be called for overlong queries
             mock_search.assert_not_called()
             state.clear.assert_called_once()

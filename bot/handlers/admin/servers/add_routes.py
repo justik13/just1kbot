@@ -398,7 +398,7 @@ async def process_add_server(
 
             api_max_peers = SAFE_DEFAULT_MAX_PEERS
 
-        api_server_name = server_info.name or all_data["name"]
+        api_server_name = (server_info.name or all_data["name"])[:50]
 
         existing = await get_server_by_api_url(
             session,
