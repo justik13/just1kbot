@@ -284,6 +284,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     self.assertEqual(resp.headers.get("Hide-Check"), "1")
                     self.assertEqual(resp.headers.get("Sort-Order"), "none")
                     self.assertEqual(resp.headers.get("No-Limit-Enabled"), "1")
+                    self.assertEqual(resp.headers.get("CDN-Cache-Control"), "no-store")
                     self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
 
                     # Action buttons

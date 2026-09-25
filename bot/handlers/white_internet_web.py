@@ -66,6 +66,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
     now = now_utc()
     common_headers = {
         "Cache-Control": "no-store, private, no-cache, must-revalidate",
+        "CDN-Cache-Control": "no-store",
         "Pragma": "no-cache",
         "X-Content-Type-Options": "nosniff",
     }

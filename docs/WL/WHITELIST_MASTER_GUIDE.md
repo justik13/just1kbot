@@ -405,6 +405,9 @@
    - **Критическая опция «Параметры запроса»:** В панели управления Timeweb **строго обязательно выключить** чекбокс *«Игнорировать параметры запроса»* (Ignore Query String). XHTTP передает идентификаторы сессий и параметры стрима в строке запроса; если CDN их отсечет, соединение завершится ошибкой 400 Bad Request.
    - **Кеширование и компрессия:** Отключить кеширование, Gzip и Brotli.
    - **Маскировка:** Рекомендуемый путь `/content/media/stream.m3u8` (имитация манифеста HLS-видеопотока).
+   - > [!CAUTION]
+     > **Критический дефект совместимости Timeweb CDN с XHTTP (актуально на сентябрь 2026 г.):**  
+     > Практические тесты на живых ресурсах показали, что Edge-ноды Timeweb CDN принудительно проверяют наличие расширения файла **исключительно в последнем сегменте пути URL**. Поскольку транспорт XHTTP динамически формирует URL сессий вида `/<path>/<session_id>/<seq>`, расширение в середине пути (`/stream.m3u8/<session>/0`) Edge-нодами игнорируется, и соединение сбрасывается с ошибкой **`403 Forbidden`**, не доходя до Origin-сервера. Обойти это поведение со стороны стандартных Xray-клиентов невозможно, поэтому Timeweb CDN не рекомендуется для production-эксплуатации.
 
 3. **VK Cloud CDN:**
    - **Схема Origin:** Подключение к источнику осуществляется по HTTP (порт 80).
@@ -2351,7 +2354,7 @@ curl -fsSL https://cheburcheck.ru/install-probe.sh | sudo sh
    - [VPN Configs for Russia Repository](https://github.com/igareck/vpn-configs-for-russia)
    - [runetfreedom/per-app-split-bypass-poc: PoC утечки локальных портов через 127.0.0.1](https://github.com/runetfreedom/per-app-split-bypass-poc)
    - [cherepavel/VPN-Detector: Библиотека обнаружения VPN в Android-приложениях](https://github.com/cherepavel/VPN-Detector)
-   - [CraftStick/node-installer-cdn: Автоматизированный скрипт развертывания VPN-нод за российскими CDN (VK Cloud, Yandex Cloud, Beeline CDNvideo, Timeweb) с поддержкой Remnawave 3.x / 3x-ui и Caddy/Nginx](https://github.com/CraftStick/node-installer-cdn)
+   - [CraftStick/node-installer-cdn: Автоматизированный скрипт развертывания VPN-нод за Yandex Cloud CDN с Remnawave 3.x и Nginx (версия v2.0; поддержка 3x-ui, VK Cloud, Beeline и Timeweb прекращена из-за несовместимости с XHTTP)](https://github.com/CraftStick/node-installer-cdn)
    - [zxcstas/yandex-cdn-mobile-only: Nginx geo-фильтр для ограничения доступа к CDN только с мобильных операторов РФ (LTE/5G) по базе RIPEstat API для экономии квот](https://github.com/zxcstas/yandex-cdn-mobile-only)
    - [catoo-hub/yandex-cdn-controller: Контроллер автоматической ротации CDN-ресурсов Yandex Cloud, автовыпуска Let's Encrypt через Certificate Manager, переключения CNAME в Cloudflare и обновления хостов в Remnawave](https://github.com/catoo-hub/yandex-cdn-controller)
    - [frank-underwood64/whitelists_bypass: Аналитика архитектуры VLESS XHTTP через CDN РФ, сравнительный анализ рисков покупки «белых IP» против CDN-фронтинга и послойная диагностика 502/504](https://github.com/frank-underwood64/whitelists_bypass)
