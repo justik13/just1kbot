@@ -652,6 +652,15 @@ class WhiteInternetService:
                 context=f"renew sub {sub.id}",
             )
 
+        target_origin = new_origin_server or origin_node
+        if target_origin is not None:
+            await cls._try_inline_sync(
+                session,
+                renewed,
+                target_origin,
+                idempotency_key=f"renew:{renewed.id}:{renewed.desired_version}:True",
+            )
+
         logger.info(
             "White Internet subscription renewed: user_id=%s, sub_id=%s, days=%s, node_id=%s",
             user.id,
@@ -695,12 +704,9 @@ class WhiteInternetService:
         if current_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
             return False, texts.WL_DEVICE_LIMIT_MAX_REACHED, None
 
-        total_accumulated = (
-            (sub.base_traffic_bytes or 0)
-            + (sub.extra_traffic_bytes or 0)
-            + WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES
-        )
-        if total_accumulated > WHITE_INTERNET_MAX_QUOTA_BYTES:
+        new_device_limit = current_limit + 1
+        max_extra_allowed = new_device_limit * WHITE_INTERNET_MAX_QUOTA_BYTES
+        if (sub.extra_traffic_bytes or 0) + WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES > max_extra_allowed:
             current_available = await white_internet_repo.get_available_quota_bytes(
                 session, sub.id, now
             )
@@ -812,6 +818,15 @@ class WhiteInternetService:
                 context=f"add_device_slot sub {sub.id}",
             )
 
+        target_origin = new_origin_server or origin_node
+        if target_origin is not None:
+            await cls._try_inline_sync(
+                session,
+                updated_sub,
+                target_origin,
+                idempotency_key=f"add_device:{updated_sub.id}:{updated_sub.desired_version}:True",
+            )
+
         logger.info(
             "White Internet device slot purchased: user_id=%s, sub_id=%s, new_limit=%s",
             user.id,
@@ -877,10 +892,9 @@ class WhiteInternetService:
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         pack_bytes = pack_gb * 1024 * 1024 * 1024
-        total_accumulated = (
-            (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0) + pack_bytes
-        )
-        if total_accumulated > WHITE_INTERNET_MAX_QUOTA_BYTES:
+        effective_devices = max(1, getattr(sub, "device_limit", 1) or 1)
+        max_extra_allowed = effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES
+        if (sub.extra_traffic_bytes or 0) + pack_bytes > max_extra_allowed:
             current_available = await white_internet_repo.get_available_quota_bytes(
                 session, sub.id, now
             )
@@ -970,6 +984,15 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"topup sub {sub.id}",
+            )
+
+        target_origin = new_origin_server or origin_node
+        if target_origin is not None:
+            await cls._try_inline_sync(
+                session,
+                sub,
+                target_origin,
+                idempotency_key=f"topup:{sub.id}:{sub.desired_version}:True",
             )
 
         logger.info(
@@ -1087,7 +1110,12 @@ class WhiteInternetService:
         """
         expected_inbound_tags: set[str] = set()
         for relay in (origin_node.extra_data or {}).get("relays", []) or []:
-            code = (relay or {}).get("code")
+            if isinstance(relay, dict):
+                code = relay.get("code")
+            elif isinstance(relay, str):
+                code = relay
+            else:
+                code = None
             if code:
                 expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
         if not expected_inbound_tags:

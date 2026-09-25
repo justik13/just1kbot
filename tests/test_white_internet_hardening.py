@@ -520,9 +520,10 @@ class TestGroupIWhiteInternetRepoGrantConservation(unittest.IsolatedAsyncioTestC
         session = AsyncMock(spec=AsyncSession)
         sub = WhiteInternetSubscription(
             id=1,
+            device_limit=1,
             status=WhiteInternetStatus.ACTIVE,
-            base_traffic_bytes=WHITE_INTERNET_MAX_QUOTA_BYTES - 10,
-            extra_traffic_bytes=0,
+            base_traffic_bytes=50 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=WHITE_INTERNET_MAX_QUOTA_BYTES - 10,
             expires_at=now_utc() + timedelta(days=10),
         )
         with patch(
@@ -734,10 +735,55 @@ class TestGroupRAtomicTraffic90pEmitsWithoutPrematureFlag(unittest.IsolatedAsync
         self.assertEqual(sub.traffic_uplink_bytes, 100)
         self.assertEqual(sub.traffic_downlink_bytes, 910)
         self.assertEqual(event, "traffic_90p")
-        # Invariant: sub.notified_90p must remain False in repo; flipped only post-send via CAS in worker
+        # Invariant: sub.notified_90p must remain False in repo; flipped only post-send CAS in worker
         self.assertFalse(sub.notified_90p)
         mock_session.flush.assert_awaited()
+
+    async def test_quota_cap_scales_with_device_limit(self):
+        """Verify each device allows up to +150 GiB extra traffic."""
+        mock_session = AsyncMock(spec=AsyncSession)
+        sub = WhiteInternetSubscription(
+            id=1,
+            device_limit=2,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=100 * 1024 * 1024 * 1024,
+            extra_traffic_bytes=100 * 1024 * 1024 * 1024,
+            expires_at=now_utc() + timedelta(days=10),
+            desired_version=1,
+        )
+
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
+        ):
+            # 2 devices -> max extra is 2 * 150 = 300 GiB.
+            # Currently extra is 100 GiB. Adding 50 GiB -> 150 GiB total extra (succeeds).
+            pack_bytes = await white_internet_repo.topup_quota_atomic(
+                mock_session, subscription_id=1, quote_id=1, pack_gb=50, price_rub=Decimal("200.00")
+            )
+            self.assertEqual(pack_bytes, 50 * 1024 * 1024 * 1024)
+            self.assertEqual(sub.extra_traffic_bytes, 150 * 1024 * 1024 * 1024)
+
+            # Adding another 50 GiB -> 200 GiB total extra (succeeds, exceeds 150 GiB single device limit!).
+            pack_bytes2 = await white_internet_repo.topup_quota_atomic(
+                mock_session, subscription_id=1, quote_id=2, pack_gb=50, price_rub=Decimal("200.00")
+            )
+            self.assertEqual(pack_bytes2, 50 * 1024 * 1024 * 1024)
+            self.assertEqual(sub.extra_traffic_bytes, 200 * 1024 * 1024 * 1024)
+
+            # Trying to add 150 GiB more -> 200 + 150 = 350 GiB > 300 GiB (cap exceeded for 2 devices).
+            with self.assertRaises(WhiteInternetQuotaCapExceededError):
+                await white_internet_repo.topup_quota_atomic(
+                    mock_session, subscription_id=1, quote_id=3, pack_gb=150, price_rub=Decimal("600.00")
+                )
+
+            # Adding 3rd device slot: scales cap to 3 * 150 = 450 GiB
+            updated = await white_internet_repo.add_device_slot_atomic(
+                mock_session, subscription_id=1, extra_bytes=50 * 1024 * 1024 * 1024
+            )
+            self.assertEqual(updated.device_limit, 3)
+            self.assertEqual(updated.extra_traffic_bytes, 250 * 1024 * 1024 * 1024)
 
 
 if __name__ == "__main__":
     unittest.main()
+

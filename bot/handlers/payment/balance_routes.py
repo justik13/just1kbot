@@ -1,8 +1,11 @@
 """Telegram account-balance, top-up, and financial-history screens."""
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 import logging
+
+from utils.datetime_helpers import now_utc
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -97,6 +100,7 @@ def _history_lines(entries: list) -> str:
 async def _get_pending_topup_order(
     session: AsyncSession, user_id: int
 ) -> Order | None:
+    cutoff = now_utc() - timedelta(minutes=30)
     return await session.scalar(
         select(Order)
         .where(
@@ -104,6 +108,7 @@ async def _get_pending_topup_order(
             Order.service_type == "topup",
             Order.status == "pending",
             Order.payment_url.is_not(None),
+            Order.created_at >= cutoff,
         )
         .order_by(Order.created_at.desc())
         .limit(1)
@@ -372,7 +377,7 @@ async def choose_topup_amount(
     bonus_notice = ""
     if is_first_eligible:
         bonus_lines = "\n".join(
-            texts.BALANCE_NA_BONUS_BALANCE.format(amt=amt, amt____10=amt // 10)
+            texts.BALANCE_NA_BONUS_BALANCE.format(amt=amt, amt____10=amt * 20 // 100)
             for amt in amounts
         )
         bonus_notice = (

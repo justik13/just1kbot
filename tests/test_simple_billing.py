@@ -1862,3 +1862,78 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
                 mig_0030.downgrade()
             self.assertIn("paid orders exist in orders table", str(cm.exception))
 
+    async def test_batch_credit_capacities_with_order_refund_debit(self):
+        """Verify _batch_credit_capacities subtracts refund debits linked by order_id."""
+        from database.models import AccountLedgerEntry
+        from database.repositories.account_ledger_repo import _batch_credit_capacities
+
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        credit = AccountLedgerEntry(
+            id=1,
+            user_id=10,
+            amount=Decimal(500),
+            entry_type="payment_credit",
+            currency="RUB",
+            order_id=order_uuid,
+            payment_id=None,
+        )
+
+        mock_allocations = MagicMock()
+        mock_allocations.all.return_value = []
+        session.scalars.return_value = mock_allocations
+
+        # Return 200 RUB refunded for this order
+        mock_order_refund_rows = MagicMock()
+        mock_order_refund_rows.all.return_value = [(order_uuid, 200)]
+        session.execute.return_value = mock_order_refund_rows
+
+        capacities = await _batch_credit_capacities(session, [credit])
+        # 500 credit - 200 refunded = 300 capacity
+        self.assertEqual(capacities[1], Decimal(300))
+
+    def test_calculate_tariff_change_preserves_partial_days_with_ceil(self):
+        """Verify calculate_tariff_change uses math.ceil so 36 hours counts as 2 days."""
+        now = datetime(2026, 9, 26, 12, 0, 0, tzinfo=timezone.utc)
+        sub_end = now + timedelta(hours=36)  # 1.5 days left
+        current_tariff = Tariff(id=1, name="Basic", price_rub=Decimal("300.00"), duration_days=30)
+        target_tariff = Tariff(id=2, name="Pro", price_rub=Decimal("600.00"), duration_days=30)
+
+        # 36 hours -> ceil(36/24) = 2 days left
+        # Current daily = 300/30 = 10 RUB. 2 days * 10 = 20 RUB unspent credit.
+        # Pro daily = 600/30 = 20 RUB.
+        # Required payment: 600 - 20 = 580 RUB.
+        cost, days = OrderService.calculate_tariff_change(
+            current_tariff=current_tariff,
+            target_tariff=target_tariff,
+            subscription_end=sub_end,
+            now=now,
+        )
+        self.assertEqual(cost, Decimal("580.00"))
+        self.assertEqual(days, 30)
+
+    async def test_order_deduplication_different_amount_creates_new_order(self):
+        """Verify create_order does not deduplicate orders with different amounts."""
+        mock_gw = AsyncMock()
+        mock_gw.create_payment_url.return_value = PaymentInvoice(
+            external_id="ext-new",
+            payment_url="https://pay.link/new",
+        )
+        with patch("services.order_service.get_payment_gateway", return_value=mock_gw):
+            session = AsyncMock(spec=AsyncSession)
+            # scalar finds no order with amount_rub == 500
+            session.scalar.return_value = None
+            tariff = Tariff(id=1, name="Basic", price_rub=Decimal("150.00"), duration_days=30, device_limit=2)
+            session.get.return_value = tariff
+
+            order = await OrderService.create_order(
+                session,
+                user_id=42,
+                service_type="topup",
+                amount_rub=Decimal("500.00"),
+                payment_method="yookassa",
+            )
+            self.assertEqual(order.amount_rub, Decimal("500.00"))
+            self.assertEqual(order.payment_url, "https://pay.link/new")
+
+

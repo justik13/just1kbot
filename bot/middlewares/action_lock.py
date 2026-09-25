@@ -30,6 +30,10 @@ LOCKED_ACTION_PREFIXES = (
     "bal_short_exact:",
     "bal_chg_short_exact:",
     "aq:x:",
+    "order_pay_wallet:",
+    "order_pay_card:",
+    "order_check:",
+    "order_cancel:",
     # Админские платежи и споры.
     "admin_payment_refund_confirm:",
     "admin_dispute_apply:",

@@ -181,6 +181,13 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                                     force_new=True,
                                     custom_keyboard=kb,
                                 )
+                                from bot.handlers.payment.common import (
+                                    notify_referrer_topup_bonus,
+                                )
+
+                                await notify_referrer_topup_bonus(
+                                    bot, session, order
+                                )
                             else:
                                 balance = await get_account_balance(
                                     session, user_id=user.id

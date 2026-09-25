@@ -20,7 +20,7 @@ from database.repositories.account_ledger_repo import (
 
 _logger = logging.getLogger(__name__)
 
-REFERRAL_BONUS_RATE = Decimal("0.10")
+REFERRAL_BONUS_RATE = Decimal("0.20")
 REFERRAL_BONUS_SOURCE = "referral_bonus"
 
 
@@ -66,7 +66,7 @@ class ReferralBonusGrantResult:
 
 
 def calculate_referral_bonus(purchase_amount: object) -> Decimal:
-    """Return 10% of a purchase, rounded down to whole rubles."""
+    """Return 20% of a purchase, rounded down to whole rubles."""
     amount = Decimal(str(purchase_amount))
     if not amount.is_finite() or amount <= 0:
         return Decimal(0)
@@ -521,4 +521,4 @@ async def get_referral_bonus_balance(
     if balance.debt > 0:
         remaining = max(Decimal(0), remaining - balance.debt)
 
-    return remaining
+    return min(remaining, balance.bonus_available)

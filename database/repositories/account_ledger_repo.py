@@ -443,6 +443,7 @@ async def _batch_credit_capacities(
 
     credit_ids = [c.id for c in credits]
     payment_ids = [c.payment_id for c in credits if c.payment_id is not None]
+    order_ids = [c.order_id for c in credits if getattr(c, "order_id", None) is not None]
 
     allocations = (
         await session.scalars(
@@ -485,6 +486,25 @@ async def _batch_credit_capacities(
             if p_id is not None:
                 external_debits_by_payment[p_id] = abs(Decimal(sum_amt))
 
+    external_debits_by_order: dict[object, Decimal] = {}
+    if order_ids:
+        rows = (
+            await session.execute(
+                select(
+                    AccountLedgerEntry.order_id,
+                    func.coalesce(func.sum(AccountLedgerEntry.amount), 0),
+                ).where(
+                    AccountLedgerEntry.order_id.in_(order_ids),
+                    AccountLedgerEntry.entry_type.in_(
+                        ("refund_debit", "chargeback_debit")
+                    ),
+                ).group_by(AccountLedgerEntry.order_id)
+            )
+        ).all()
+        for o_id, sum_amt in rows:
+            if o_id is not None:
+                external_debits_by_order[o_id] = abs(Decimal(sum_amt))
+
     used_by_credit: dict[int, Decimal] = {}
     for alloc in allocations:
         if alloc.debit_entry_id not in reversed_debit_ids:
@@ -496,11 +516,11 @@ async def _batch_credit_capacities(
     capacities: dict[int, Decimal] = {}
     for credit in credits:
         used = used_by_credit.get(credit.id, ZERO)
-        ext_debit = (
-            external_debits_by_payment.get(credit.payment_id, ZERO)
-            if credit.payment_id is not None
-            else ZERO
-        )
+        ext_debit = ZERO
+        if credit.payment_id is not None:
+            ext_debit += external_debits_by_payment.get(credit.payment_id, ZERO)
+        if getattr(credit, "order_id", None) is not None:
+            ext_debit += external_debits_by_order.get(credit.order_id, ZERO)
         capacities[credit.id] = Decimal(credit.amount) - used - ext_debit
 
     return capacities

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
+import math
 import uuid
 
 from sqlalchemy import select
@@ -56,7 +57,12 @@ class OrderService:
         if not subscription_end or subscription_end <= now or not current_tariff:
             return Decimal(target_tariff.price_rub), target_tariff.duration_days
 
-        days_left = max(0, (subscription_end - now).days)
+        days_left = max(
+            0,
+            math.ceil((subscription_end - now).total_seconds() / 86400.0)
+            if subscription_end > now
+            else 0,
+        )
         if days_left <= 0:
             return Decimal(target_tariff.price_rub), target_tariff.duration_days
 
@@ -112,16 +118,20 @@ class OrderService:
         # 1. Deduplication guard for pending external orders (prevent double-clicks)
         if payment_method != "wallet":
             cutoff = now_utc() - timedelta(minutes=15)
+            dedup_conditions = [
+                Order.user_id == user_id,
+                Order.service_type == service_type,
+                Order.tariff_id == tariff_id,
+                Order.payment_method == payment_method,
+                Order.status == "pending",
+                Order.created_at >= cutoff,
+                Order.payment_url.is_not(None),
+            ]
+            if amount_rub is not None:
+                dedup_conditions.append(Order.amount_rub == Decimal(str(amount_rub)))
             existing = await session.scalar(
                 select(Order)
-                .where(
-                    Order.user_id == user_id,
-                    Order.service_type == service_type,
-                    Order.tariff_id == tariff_id,
-                    Order.status == "pending",
-                    Order.created_at >= cutoff,
-                    Order.payment_url.is_not(None),
-                )
+                .where(*dedup_conditions)
                 .order_by(Order.created_at.desc())
                 .limit(1)
             )
@@ -370,12 +380,13 @@ class OrderService:
             try:
                 from services.referral_bonus import grant_referral_bonus_for_topup
 
-                await grant_referral_bonus_for_topup(
+                grant_res = await grant_referral_bonus_for_topup(
                     session,
                     purchaser_user_id=order.user_id,
                     order_id=str(order.id),
                     topup_amount=order.amount_rub,
                 )
+                order._grant_result = grant_res
             except Exception as exc:
                 logger.warning(
                     "Failed to process referral bonus for order %s: %s", order.id, exc
@@ -489,7 +500,8 @@ class OrderService:
                     order_id=order.id,
                 )
 
-            if new_total_refunded >= order.amount_rub or order.status == "refunded":
+            is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")
+            if is_fully_refunded:
                 await FulfillmentService.revoke_order(session, order)
                 logger.info(
                     "Order %s fully refunded (total %s / %s) and revoked",

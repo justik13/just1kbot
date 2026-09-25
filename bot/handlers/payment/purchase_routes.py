@@ -321,6 +321,11 @@ async def handle_order_check(
                     force_new=True,
                     custom_keyboard=kb,
                 )
+                from .common import notify_referrer_topup_bonus
+
+                await notify_referrer_topup_bonus(
+                    callback.bot, session, paid_order
+                )
                 return
 
             balance = await get_account_balance(session, user_id=db_user.id)

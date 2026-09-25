@@ -1,28 +1,28 @@
 import unittest
 
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from services.referral_bonus import calculate_referral_bonus
 
 
 
 class TestReferralBonusCalculation(unittest.TestCase):
-    def test_referral_bonus_is_ten_percent_for_every_purchase_amount(self):
+    def test_referral_bonus_is_twenty_percent_for_every_purchase_amount(self):
         assert calculate_referral_bonus(1) == Decimal(0)
-        assert calculate_referral_bonus(10) == Decimal(1)
-        assert calculate_referral_bonus(30) == Decimal(3)
-        assert calculate_referral_bonus(99) == Decimal(9)
-        assert calculate_referral_bonus(100) == Decimal(10)
-        assert calculate_referral_bonus(999) == Decimal(99)
-        assert calculate_referral_bonus(1000) == Decimal(100)
+        assert calculate_referral_bonus(10) == Decimal(2)
+        assert calculate_referral_bonus(30) == Decimal(6)
+        assert calculate_referral_bonus(99) == Decimal(19)
+        assert calculate_referral_bonus(100) == Decimal(20)
+        assert calculate_referral_bonus(999) == Decimal(199)
+        assert calculate_referral_bonus(1000) == Decimal(200)
 
 
     def test_referral_bonus_has_no_duration_or_first_purchase_gate(self):
         # The calculation depends only on the successfully spent amount.
         for purchase_amount in (10, 50, 123, 500, 999):
             assert calculate_referral_bonus(purchase_amount) == (
-                Decimal(str(purchase_amount)) * Decimal("0.10")
+                Decimal(str(purchase_amount)) * Decimal("0.20")
             ).quantize(Decimal(1), rounding="ROUND_DOWN")
 
 
@@ -95,7 +95,7 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
             "ck_account_ledger_entry_shape constraint forbids non-NULL payment_id here"
         )
         assert entry.entry_type == "admin_adjustment"
-        assert entry.amount == Decimal(3)
+        assert entry.amount == Decimal(6)
         assert entry.metadata_["topup_payment_id"] == 42, \
             "topup_payment_id should be preserved in metadata for traceability"
 
@@ -409,10 +409,10 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         purchaser_entry = added_entries[1]
 
         assert referrer_entry.user_id == 10
-        assert referrer_entry.amount == Decimal(50)
+        assert referrer_entry.amount == Decimal(100)
 
         assert purchaser_entry.user_id == 20
-        assert purchaser_entry.amount == Decimal(50)
+        assert purchaser_entry.amount == Decimal(100)
         assert purchaser_entry.metadata_["reason"] == "first_topup_welcome"
 
 
@@ -460,7 +460,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         assert len(added_entries) == 1
         referrer_entry = added_entries[0]
         assert referrer_entry.user_id == 10
-        assert referrer_entry.amount == Decimal(100)
+        assert referrer_entry.amount == Decimal(200)
 
 
     def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus(self):
@@ -589,6 +589,47 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
     
         res = asyncio.run(grant_referral_bonus_for_topup(session, purchaser_user_id=10, payment_id=1, topup_amount=Decimal(100)))
     
-        # Welcome bonus MUST be granted (10% of 100 = 10)
-        assert res.purchaser_welcome_bonus == Decimal(10)
+        # Welcome bonus MUST be granted (20% of 100 = 20)
+        assert res.purchaser_welcome_bonus == Decimal(20)
+
+    def test_get_referral_bonus_balance_clamped_to_bonus_available(self):
+        import asyncio
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from services.referral_bonus import get_referral_bonus_balance
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+
+        session = AsyncMock(spec=AsyncSession)
+        # 1. credits
+        mock_credits = MagicMock()
+        credit1 = MagicMock()
+        credit1.id = 1
+        credit1.amount = Decimal(100)
+        mock_credits.all.return_value = [credit1]
+
+        # 2. fully reversed
+        mock_rev = MagicMock()
+        mock_rev.all.return_value = []
+
+        # 3. allocations
+        mock_allocs = MagicMock()
+        mock_allocs.all.return_value = []
+
+        session.scalars.side_effect = [mock_credits, mock_rev]
+        session.execute = AsyncMock(return_value=mock_allocs)
+
+        # balance has bonus_available = 40 (less than 100)
+        balance_snap = AccountBalanceSnapshot(
+            accounting_position=Decimal(40),
+            available=Decimal(40),
+            reserved=Decimal(0),
+            debt=Decimal(0),
+            real_available=Decimal(0),
+            bonus_available=Decimal(40),
+        )
+
+        with patch("services.referral_bonus.get_account_balance", return_value=balance_snap):
+            bonus = asyncio.run(get_referral_bonus_balance(session, user_id=10))
+            # Should be clamped to 40
+            assert bonus == Decimal(40)
+
 

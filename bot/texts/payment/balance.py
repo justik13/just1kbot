@@ -73,8 +73,9 @@ BALANCE_TOPUP_CREATING_LINK_CARD = """⏳ <b>Создаём ссылку на п
 
 BALANCE_TOTAL_AVAILABLE_LABEL = "💰 Баланс: <b>{int_balance_real_available} ₽</b>"
 
-BALANCE_VY_POLUCHITE_10_OT_SUMMY_POPOL = """Вы получите <b>+10%</b> от суммы пополнения на бонусный баланс!
+BALANCE_VY_POLUCHITE_10_OT_SUMMY_POPOL = """Вы получите <b>+20%</b> от суммы пополнения на бонусный баланс!
 """
+BALANCE_VY_POLUCHITE_20_OT_SUMMY_POPOL = BALANCE_VY_POLUCHITE_10_OT_SUMMY_POPOL
 
 HISTORY_EMPTY = "<i>История пуста. У вас пока не было пополнений.</i>"
 
