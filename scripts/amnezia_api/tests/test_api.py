@@ -335,6 +335,21 @@ def test_clients_crud_lifecycle(mock_awg_env):
     get_resp2 = client.get("/clients", headers=headers)
     assert len(get_resp2.json()) == 2
 
+    # 3b. Verify pagination (skip & limit) for AmneziaClient compatibility
+    p1_resp = client.get("/clients?skip=0&limit=1", headers=headers)
+    assert p1_resp.status_code == 200
+    assert len(p1_resp.json()) == 1
+    assert p1_resp.json()[0]["username"] == "test_peer_1"
+
+    p2_resp = client.get("/clients?skip=1&limit=1", headers=headers)
+    assert p2_resp.status_code == 200
+    assert len(p2_resp.json()) == 1
+    assert p2_resp.json()[0]["username"] == "user_42"
+
+    p3_resp = client.get("/clients?skip=2&limit=1", headers=headers)
+    assert p3_resp.status_code == 200
+    assert len(p3_resp.json()) == 0
+
     # 4. PATCH /clients (Disable client)
     patch_payload = {
         "clientId": new_client_id,

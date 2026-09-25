@@ -594,10 +594,15 @@ async def get_server_load():
 
 
 @app.get("/clients", dependencies=[Depends(verify_api_key)])
-async def get_clients():
-    """Return all clients formatted for AmneziaClient consumption."""
+async def get_clients(skip: int = 0, limit: int | None = None):
+    """Return all clients formatted for AmneziaClient consumption with pagination support."""
     clients = load_clients_table()
     stats = fetch_live_transfer_stats()
+
+    if skip > 0:
+        clients = clients[skip:]
+    if limit is not None and limit > 0:
+        clients = clients[:limit]
 
     result = []
     for c in clients:

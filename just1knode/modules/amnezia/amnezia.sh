@@ -178,8 +178,7 @@ install_amnezia_node() {
     if [[ ! -d "$AMNEZIA_API_DIR/venv" ]]; then
         python3 -m venv "$AMNEZIA_API_DIR/venv"
     fi
-    "$AMNEZIA_API_DIR/venv/bin/pip" install --upgrade pip --quiet
-    "$AMNEZIA_API_DIR/venv/bin/pip" install -r "$AMNEZIA_API_DIR/requirements.txt" --quiet
+    "$AMNEZIA_API_DIR/venv/bin/pip" install --no-cache-dir -r "$AMNEZIA_API_DIR/requirements.txt" --quiet
 
     # 7. Генерация API-ключа
     local api_key=""
