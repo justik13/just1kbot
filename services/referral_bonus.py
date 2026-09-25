@@ -121,7 +121,7 @@ async def grant_referral_bonus_for_topup(
     order_id: str | None = None,
     topup_amount: object,
 ) -> ReferralBonusGrantResult:
-    """Credit the referrer with 10% of a top-up, and credit the purchaser with 10% if it is their first top-up."""
+    """Credit the referrer with 20% of a top-up, and credit the purchaser with 20% if it is their first top-up."""
     bonus = calculate_referral_bonus(topup_amount)
     if bonus <= 0:
         return ReferralBonusGrantResult(
@@ -167,7 +167,7 @@ async def grant_referral_bonus_for_topup(
             purchaser_welcome_bonus=Decimal(0),
         )
 
-    # 1. Grant 10% bonus to referrer for every top-up
+    # 1. Grant 20% bonus to referrer for every top-up
     referrer_bonus_granted = Decimal(0)
     op_id = order_id or str(payment_id or "unknown")
     idempotency_key = f"referral-bonus:topup:{op_id}:{referrer.id}"
@@ -216,7 +216,7 @@ async def grant_referral_bonus_for_topup(
     else:
         referrer_bonus_granted = Decimal(0)
 
-    # 2. Check if this is the purchaser's first successful top-up. If so, grant purchaser +10% bonus as well.
+    # 2. Check if this is the purchaser's first successful top-up. If so, grant purchaser +20% bonus as well.
     purchaser_welcome_granted = Decimal(0)
     from sqlalchemy import func
 

@@ -700,7 +700,7 @@ class WhiteInternetService:
         if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
             return False, texts.WL_SUB_EXPIRED, None
 
-        current_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+        current_limit = white_internet_repo._effective_device_limit(sub)
         if current_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
             return False, texts.WL_DEVICE_LIMIT_MAX_REACHED, None
 
@@ -892,7 +892,7 @@ class WhiteInternetService:
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         pack_bytes = pack_gb * 1024 * 1024 * 1024
-        effective_devices = max(1, getattr(sub, "device_limit", 1) or 1)
+        effective_devices = white_internet_repo._effective_device_limit(sub)
         max_extra_allowed = effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES
         if (sub.extra_traffic_bytes or 0) + pack_bytes > max_extra_allowed:
             current_available = await white_internet_repo.get_available_quota_bytes(
