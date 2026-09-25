@@ -279,9 +279,11 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     self.assertEqual(base64.b64decode(announce_b64).decode("utf-8"), "Внимание: технические работы")
                     self.assertEqual(resp.headers.get("Announce-Url"), "https://t.me/just1k_channel/123")
 
-                    # Zero-config system headers
-                    self.assertEqual(resp.headers.get("hide-check"), "1")
-                    self.assertEqual(resp.headers.get("sort-order"), "none")
+                    # Zero-config system headers (canonical casing)
+                    self.assertEqual(resp.headers.get("Hide-Url"), "1")
+                    self.assertEqual(resp.headers.get("Hide-Check"), "1")
+                    self.assertEqual(resp.headers.get("Sort-Order"), "none")
+                    self.assertEqual(resp.headers.get("No-Limit-Enabled"), "1")
                     self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
 
                     # Action buttons

@@ -318,10 +318,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 ),
                 "Support-Url": support_url,
                 "Profile-Web-Page-Url": channel_url,
-                "hide-url": "1",
-                "hide-check": "1",
-                "sort-order": "none",
-                "no-limit-enabled": "1",
+                "Hide-Url": "1",
+                "Hide-Check": "1",
+                "Sort-Order": "none",
+                "No-Limit-Enabled": "1",
             }
         )
 
