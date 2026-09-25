@@ -82,6 +82,49 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(res)
 
+    async def test_forbidden_error_during_fallback_returns_none(self):
+        """If parse error occurs and fallback attempt encounters TelegramForbiddenError, returns None."""
+        parse_err = TelegramBadRequest(
+            method="send_message",
+            message="Bad Request: can't parse entities",
+        )
+        forbidden_err = TelegramForbiddenError(
+            method="send_message",
+            message="Forbidden: bot was blocked by the user",
+        )
+        self.mock_bot.send_message.side_effect = [parse_err, forbidden_err]
+
+        res = await safe_send_message(
+            self.mock_bot,
+            chat_id=self.chat_id,
+            text="<invalid>Text</invalid>",
+            parse_mode="HTML",
+        )
+
+        self.assertIsNone(res)
+        self.assertEqual(self.mock_bot.send_message.call_count, 2)
+
+    async def test_fallback_plain_text_capped_at_4096(self):
+        """If plain text fallback exceeds 4096 characters, it is capped to 4096."""
+        parse_err = TelegramBadRequest(
+            method="send_message",
+            message="Bad Request: can't parse entities",
+        )
+        fake_msg = MagicMock(spec=Message)
+        fake_msg.message_id = 77
+        self.mock_bot.send_message.side_effect = [parse_err, fake_msg]
+
+        with patch("utils.telegram.strip_html_tags", return_value="A" * 5000):
+            res = await safe_send_message(
+                self.mock_bot,
+                chat_id=self.chat_id,
+                text="<b>test</b>",
+                parse_mode="HTML",
+            )
+        self.assertEqual(res, 77)
+        second_call = self.mock_bot.send_message.call_args_list[1].kwargs
+        self.assertEqual(len(second_call["text"]), 4096)
+
     async def test_unrelated_bad_request_raises(self):
         """Unrelated TelegramBadRequest (e.g. Chat not found) is re-raised."""
         unrelated_err = TelegramBadRequest(
@@ -310,6 +353,7 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_admin_balance_reason_length_limit(self):
         """Balance adjustment reason longer than 100 chars is rejected."""
+        from bot import texts
         from bot.handlers.admin.users.balance_routes import process_balance_reason
 
         msg = MagicMock()
@@ -333,11 +377,36 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
 
             mock_render.assert_called_once()
             rendered_text = mock_render.call_args[0][2]
-            self.assertIn("100", rendered_text)
+            self.assertEqual(rendered_text, texts.ERROR_REASON_TOO_LONG.format(max=100))
+            state.update_data.assert_not_called()
+
+    async def test_admin_mass_bonus_reason_length_limit(self):
+        """Mass bonus reason longer than 100 chars is rejected."""
+        from bot import texts
+        from bot.handlers.admin.users.mass_bonus import process_mass_bonus_reason
+
+        msg = MagicMock()
+        msg.from_user = MagicMock(id=100)
+        msg.text = "M" * 101
+        msg.bot = self.mock_bot
+        msg.chat.id = 100
+        msg.message_id = 56
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with patch("bot.handlers.admin.users.mass_bonus.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.mass_bonus.render_hub") as mock_render:
+            await process_mass_bonus_reason(msg, state, session)
+
+            mock_render.assert_called_once()
+            rendered_text = mock_render.call_args[0][2]
+            self.assertEqual(rendered_text, texts.ERROR_REASON_TOO_LONG.format(max=100))
             state.update_data.assert_not_called()
 
     async def test_admin_user_search_length_limit(self):
         """User search query longer than 64 chars is rejected immediately."""
+        from bot import texts
         from bot.handlers.admin.users.list_routes import process_search_user
 
         msg = MagicMock()
@@ -357,7 +426,7 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
 
             mock_render.assert_called_once()
             rendered_text = mock_render.call_args[0][2]
-            self.assertIn("64", rendered_text)
+            self.assertEqual(rendered_text, texts.ERROR_SEARCH_QUERY_TOO_LONG.format(max=64))
             # search_user_flexible must not be called for overlong queries
             mock_search.assert_not_called()
             state.clear.assert_called_once()

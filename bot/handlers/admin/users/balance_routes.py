@@ -441,7 +441,7 @@ async def process_balance_reason(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_NAME_TOO_LONG.format(max=100),
+            texts.ERROR_REASON_TOO_LONG.format(max=100),
             get_back_button(f"admin_user_balance:{telegram_id}"),
             trigger_message_id=message.message_id,
         )

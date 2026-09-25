@@ -57,6 +57,10 @@ ERROR_LOCATION_NOT_FOUND = "❌ Локация не найдена"
 
 ERROR_NAME_TOO_LONG = "⚠️ Слишком длинное имя (макс. {max} символов)."
 
+ERROR_REASON_TOO_LONG = "⚠️ Слишком длинная причина (макс. {max} символов)."
+
+ERROR_SEARCH_QUERY_TOO_LONG = "⚠️ Слишком длинный поисковый запрос (макс. {max} символов)."
+
 ERROR_NO_FREE_SLOTS = "❌ На всех серверах закончились свободные слоты."
 
 ERROR_NO_SUBSCRIPTION = """⚠️ <b>У вас нет активной подписки.</b>

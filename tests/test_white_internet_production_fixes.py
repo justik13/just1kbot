@@ -744,7 +744,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """When core Xray client check_health throws an unhandled exception, ingress synthetic probe still executes."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=MagicMock())
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=16,
@@ -833,7 +833,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """Ingress synthetic probe respects WHITE_INTERNET_SUB_PATH_PREFIX env variable."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=MagicMock())
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=17,
@@ -905,7 +905,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """Ingress synthetic probe prioritizes server.extra_data['sub_path_prefix'] over env variable."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=MagicMock())
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=170,
@@ -983,7 +983,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """Ingress problem and restored alerts display the custom endpoint in message text."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=MagicMock())
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=171,
@@ -1094,7 +1094,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """When an exception produces an empty str(e) (like TimeoutError), alert reports Timeout, not empty string."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=MagicMock())
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=172,
@@ -1164,7 +1164,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """When DB already marks ingress_problem=True, repeated failures do not dispatch duplicate alerts."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=MagicMock())
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=18,
@@ -1236,7 +1236,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """Single transient timeout/502 does NOT trigger an alert; subsequent 200 OK resets fail streak."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=MagicMock())
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=19,
@@ -1318,7 +1318,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         """When ingress is in problem state, recovery requires 2 consecutive successes to avoid flapping."""
         clear_monitor_states()
         bot = MagicMock()
-        bot.send_message = AsyncMock(return_value=MagicMock())
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
 
         server = Server(
             id=20,

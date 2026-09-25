@@ -303,7 +303,7 @@ async def process_search_user(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_NAME_TOO_LONG.format(max=64),
+            texts.ERROR_SEARCH_QUERY_TOO_LONG.format(max=64),
             get_back_button("admin_users"),
             trigger_message_id=message.message_id,
             parse_mode="HTML",

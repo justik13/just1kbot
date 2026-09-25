@@ -275,7 +275,7 @@ async def process_mass_bonus_reason(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_NAME_TOO_LONG.format(max=100),
+            texts.ERROR_REASON_TOO_LONG.format(max=100),
             get_back_button("admin_mass_bonus"),
             parse_mode="HTML",
             trigger_message_id=message.message_id,
