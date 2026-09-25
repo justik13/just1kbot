@@ -425,6 +425,21 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     self.assertEqual(len(decoded_title), 25)
                     self.assertEqual(decoded_title, "A" * 25)
 
+    async def test_web_feed_error_headers_have_cdn_cache_control(self):
+        # 1. Invalid short token (404)
+        resp_404 = await self.client.get("/sub/wl/short")
+        self.assertEqual(resp_404.status, 404)
+        self.assertEqual(resp_404.headers.get("CDN-Cache-Control"), "no-store")
+        self.assertEqual(resp_404.headers.get("Cache-Control"), "no-store")
+
+        # 2. Rate limit IP exhaustion (429)
+        with patch("bot.handlers.white_internet_web._ip_rate_limiter.check", return_value=(False, 30)):
+            resp_429 = await self.client.get("/sub/wl/valid-length-token-12345")
+            self.assertEqual(resp_429.status, 429)
+            self.assertEqual(resp_429.headers.get("CDN-Cache-Control"), "no-store")
+            self.assertEqual(resp_429.headers.get("Cache-Control"), "no-store")
+            self.assertEqual(resp_429.headers.get("Retry-After"), "30")
+
     def test_ensure_country_flag_logic(self):
         # Auto prepend flag
         self.assertEqual(WhiteInternetService._ensure_country_flag("Швеция", "se"), "🇸🇪 Швеция")

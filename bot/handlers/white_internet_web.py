@@ -48,19 +48,31 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         return web.Response(
             status=429,
             text=texts.WL_WEB_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(retry_after_ip), "Cache-Control": "no-store"},
+            headers={
+                "Retry-After": str(retry_after_ip),
+                "Cache-Control": "no-store",
+                "CDN-Cache-Control": "no-store",
+            },
         )
 
     token = request.match_info.get("token", "").strip()
     if not token or len(token) < 16:
-        return web.Response(status=404, text="Not Found", headers={"Cache-Control": "no-store"})
+        return web.Response(
+            status=404,
+            text="Not Found",
+            headers={"Cache-Control": "no-store", "CDN-Cache-Control": "no-store"},
+        )
 
     allowed_tok, retry_after_tok = _token_rate_limiter.check(token)
     if not allowed_tok:
         return web.Response(
             status=429,
             text=texts.WL_WEB_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(retry_after_tok), "Cache-Control": "no-store"},
+            headers={
+                "Retry-After": str(retry_after_tok),
+                "Cache-Control": "no-store",
+                "CDN-Cache-Control": "no-store",
+            },
         )
 
     now = now_utc()
