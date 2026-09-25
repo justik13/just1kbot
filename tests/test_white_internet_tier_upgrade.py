@@ -235,16 +235,16 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(result)
 
     async def test_purchase_device_slot_quota_cap_pre_debit_validation(self):
-        """Pre-debit validation must reject before debit if quota exceeds 150 GiB."""
+        """Pre-debit validation must reject before debit if quota exceeds cap."""
         mock_session = AsyncMock()
-        # Already 50 GiB base + 60 GiB extra = 110 GiB. Adding 50 GiB extra = 160 GiB > 150 GiB cap!
+        # For 2 devices, max extra is 300 GiB. Already 260 GiB extra. Adding 50 GiB = 310 GiB > 300 GiB cap!
         self.sub.base_traffic_bytes = 50 * 1024**3
-        self.sub.extra_traffic_bytes = 60 * 1024**3
+        self.sub.extra_traffic_bytes = 260 * 1024**3
 
         with patch("services.white_internet_service.is_admin", return_value=True), \
              patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=self.sub), \
-             patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=110 * 1024**3), \
+             patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=310 * 1024**3), \
              patch("database.repositories.account_ledger_repo.create_purchase_debit", new_callable=AsyncMock) as mock_debit:
 
             ok, msg, result = await WhiteInternetService.purchase_device_slot(
@@ -406,12 +406,12 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
             mock_debit.assert_not_called()
 
     async def test_renew_subscription_quota_cap_150_gib_rollover(self):
-        """Rollover extra bytes must be capped so total does not exceed 150 GiB."""
+        """Rollover extra bytes must be capped by effective_devices * 150 GiB."""
         mock_session = AsyncMock()
         now = self.now
 
         # Case A: device_limit = 2 (base = 100 GiB), extra_traffic_bytes = 70 GiB
-        # Total extra rollover must be min(70 GiB, 150 - 100 = 50 GiB) -> 50 GiB
+        # Total extra rollover allows up to 2 * 150 = 300 GiB, so all 70 GiB carried over
         sub2 = WhiteInternetSubscription(
             id=1,
             user_id=42,
@@ -436,11 +436,11 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
                 now=now,
             )
             self.assertEqual(renewed.base_traffic_bytes, 100 * 1024**3)
-            self.assertEqual(renewed.extra_traffic_bytes, 50 * 1024**3)
-            self.assertEqual(renewed.traffic_limit_bytes, 150 * 1024**3)
+            self.assertEqual(renewed.extra_traffic_bytes, 70 * 1024**3)
+            self.assertEqual(renewed.traffic_limit_bytes, 170 * 1024**3)
 
         # Case B: device_limit = 3 (base = 150 GiB), extra_traffic_bytes = 50 GiB
-        # Total extra rollover must be min(50 GiB, 150 - 150 = 0 GiB) -> 0 GiB
+        # Total extra rollover allows up to 3 * 150 = 450 GiB, so all 50 GiB carried over
         sub3 = WhiteInternetSubscription(
             id=2,
             user_id=42,
@@ -465,8 +465,37 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
                 now=now,
             )
             self.assertEqual(renewed.base_traffic_bytes, 150 * 1024**3)
-            self.assertEqual(renewed.extra_traffic_bytes, 0)
-            self.assertEqual(renewed.traffic_limit_bytes, 150 * 1024**3)
+            self.assertEqual(renewed.extra_traffic_bytes, 50 * 1024**3)
+            self.assertEqual(renewed.traffic_limit_bytes, 200 * 1024**3)
+
+        # Case C: device_limit = 1 (base = 50 GiB), extra_traffic_bytes = 180 GiB
+        # Total extra rollover must be capped at 1 * 150 = 150 GiB
+        sub1 = WhiteInternetSubscription(
+            id=3,
+            user_id=42,
+            origin_node_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=1,
+            expires_at=now + timedelta(days=5),
+            base_traffic_bytes=50 * 1024**3,
+            extra_traffic_bytes=180 * 1024**3,
+            traffic_used_bytes=0,
+            desired_version=1,
+        )
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub1):
+            renewed = await white_internet_repo.renew_subscription_atomic(
+                mock_session,
+                subscription_id=3,
+                quote_id=12,
+                price_rub=Decimal("250.00"),
+                duration_days=30,
+                base_bytes=50 * 1024**3,
+                now=now,
+            )
+            self.assertEqual(renewed.base_traffic_bytes, 50 * 1024**3)
+            self.assertEqual(renewed.extra_traffic_bytes, 150 * 1024**3)
+            self.assertEqual(renewed.traffic_limit_bytes, 200 * 1024**3)
 
 
 class TestWhiteInternetAdminAndCooldown(unittest.IsolatedAsyncioTestCase):

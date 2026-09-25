@@ -125,7 +125,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
             started_at=now,
             expires_at=now + timedelta(days=15),
             base_traffic_bytes=50 * 1024**3,
-            extra_traffic_bytes=90 * 1024**3,
+            extra_traffic_bytes=140 * 1024**3,
             traffic_used_bytes=0,
             desired_version=1,
             actual_version=1,
@@ -137,7 +137,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
         with patch(
             "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
         ):
-            # Base (50) + Extra (90) + Pack (25) = 165 GiB > 150 GiB Hard Cap!
+            # Extra (140) + Pack (25) = 165 GiB > 150 GiB Extra Traffic Hard Cap!
             with self.assertRaises(white_internet_repo.WhiteInternetQuotaCapExceededError):
                 await white_internet_repo.topup_quota_atomic(
                     mock_session,
@@ -147,7 +147,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                     price_rub=Decimal("100.00"),
                 )
 
-            # Buying +10 GiB is allowed: 50 + 90 + 10 = 150 GiB <= 150 GiB
+            # Buying +10 GiB is allowed: 140 + 10 = 150 GiB <= 150 GiB
             await white_internet_repo.topup_quota_atomic(
                 mock_session,
                 subscription_id=1,
@@ -155,8 +155,8 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                 pack_gb=10,
                 price_rub=Decimal("40.00"),
             )
-            self.assertEqual(sub.extra_traffic_bytes, 100 * 1024**3)
-            self.assertEqual(sub.traffic_limit_bytes, 150 * 1024**3)
+            self.assertEqual(sub.extra_traffic_bytes, 150 * 1024**3)
+            self.assertEqual(sub.traffic_limit_bytes, 200 * 1024**3)
 
     async def test_renew_subscription_resets_period_usage_and_preserves_carried_topup(self):
         """Renewal must reset period usage to 0, preserve node snapshots, and carry unused topup."""

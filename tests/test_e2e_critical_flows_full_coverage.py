@@ -147,7 +147,7 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                 payment_id=100,
                 topup_amount=Decimal("1000.00"),
             )
-            self.assertEqual(bonus_amount, Decimal("100.00"))
+            self.assertEqual(bonus_amount, Decimal("200.00"))
 
     async def test_e2e_ban_revocation_flow(self):
         async with self.sessions.begin() as session:

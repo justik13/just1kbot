@@ -330,13 +330,13 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         successes = sum(1 for r in results if r is True)
         cap_errors = sum(1 for r in results if r is False)
 
-        # 50 GiB base + 2 * 50 GiB topups = 150 GiB (exactly at cap). Remaining 8 must fail!
-        self.assertEqual(successes, 2)
-        self.assertEqual(cap_errors, 8)
+        # 50 GiB base + 3 * 50 GiB topups = 150 GiB extra (exactly at cap, 200 GiB total). Remaining 7 must fail!
+        self.assertEqual(successes, 3)
+        self.assertEqual(cap_errors, 7)
 
         async with self.sessions() as session:
             avail = await white_internet_repo.get_available_quota_bytes(session, sub_id, now=now)
-            self.assertEqual(avail, 150 * 1024**3)
+            self.assertEqual(avail, 200 * 1024**3)
 
     async def test_concurrent_purchase_subscription_atomic_exclusion(self):
         """Two concurrent purchases for the same user must serialize: exactly one debits and activates, the other returns WL_ALREADY_ACTIVE without double-debit."""
