@@ -18,15 +18,11 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from scripts.amnezia_api.app import (
-    allocate_next_ip,
-    app,
-    build_client_configs,
-    generate_keypair,
-    generate_psk,
-    get_server_public_key,
-    parse_awg_conf,
-)
+try:
+    import app as amnezia_app
+except ImportError:
+    from scripts.amnezia_api import app as amnezia_app
+
 from services.amnezia_client import (
     AmneziaClient,
     AmneziaClientCreateResponse,
@@ -101,15 +97,15 @@ def mock_awg_env(tmp_path):
     pub_file = awg_dir / "server_public_key.key"
     pub_file.write_text("serverpubkey1234567890=", encoding="utf-8")
 
-    with patch("scripts.amnezia_api.app.AWG_DIR", str(awg_dir)), \
-         patch("scripts.amnezia_api.app.AWG_CONF_PATH", str(conf_file)), \
-         patch("scripts.amnezia_api.app.CLIENTS_TABLE_PATH", str(clients_file)), \
-         patch("scripts.amnezia_api.app.SERVER_PSK_PATH", str(psk_file)), \
-         patch("scripts.amnezia_api.app.SERVER_PUBKEY_PATH", str(pub_file)), \
-         patch("scripts.amnezia_api.app.API_KEY", "secret-test-api-key"), \
-         patch("scripts.amnezia_api.app.SERVER_HOST_NAME", "vpn.example.com"), \
-         patch("scripts.amnezia_api.app.run_docker_exec", return_value=(0, "ok", "")), \
-         patch("scripts.amnezia_api.app._inspect_docker_running", return_value=True):
+    with patch.object(amnezia_app, "AWG_DIR", str(awg_dir)), \
+         patch.object(amnezia_app, "AWG_CONF_PATH", str(conf_file)), \
+         patch.object(amnezia_app, "CLIENTS_TABLE_PATH", str(clients_file)), \
+         patch.object(amnezia_app, "SERVER_PSK_PATH", str(psk_file)), \
+         patch.object(amnezia_app, "SERVER_PUBKEY_PATH", str(pub_file)), \
+         patch.object(amnezia_app, "API_KEY", "secret-test-api-key"), \
+         patch.object(amnezia_app, "SERVER_HOST_NAME", "vpn.example.com"), \
+         patch.object(amnezia_app, "run_docker_exec", return_value=(0, "ok", "")), \
+         patch.object(amnezia_app, "_inspect_docker_running", return_value=True):
         yield {
             "awg_dir": awg_dir,
             "conf_file": conf_file,
@@ -123,7 +119,7 @@ def mock_awg_env(tmp_path):
 # Unit Tests: Cryptography & Key Generation
 # =============================================================================
 def test_generate_keypair():
-    priv, pub = generate_keypair()
+    priv, pub = amnezia_app.generate_keypair()
     assert isinstance(priv, str) and len(priv) == 44  # 32 bytes base64 with '='
     assert isinstance(pub, str) and len(pub) == 44
     assert priv != pub
@@ -133,7 +129,7 @@ def test_generate_keypair():
 
 
 def test_generate_psk():
-    psk = generate_psk()
+    psk = amnezia_app.generate_psk()
     assert isinstance(psk, str) and len(psk) == 44
     assert len(base64.b64decode(psk)) == 32
 
@@ -142,7 +138,7 @@ def test_generate_psk():
 # Unit Tests: Config Parser & Public Key Derivation
 # =============================================================================
 def test_parse_awg_conf():
-    parsed = parse_awg_conf(SAMPLE_WG0_CONF)
+    parsed = amnezia_app.parse_awg_conf(SAMPLE_WG0_CONF)
     iface = parsed["interface"]
     peers = parsed["peers"]
 
@@ -160,9 +156,9 @@ def test_parse_awg_conf():
 
 def test_get_server_public_key_derived():
     # When file doesn't exist, derives from PrivateKey
-    with patch("scripts.amnezia_api.app.SERVER_PUBKEY_PATH", "/non/existent/path"):
+    with patch.object(amnezia_app, "SERVER_PUBKEY_PATH", "/non/existent/path"):
         iface = {"PrivateKey": "uC6xUgdQDF4+fAOiw37ZQCG7XljilDsnBCl7VH7bAl8="}
-        pub = get_server_public_key(iface)
+        pub = amnezia_app.get_server_public_key(iface)
         assert pub
         assert len(base64.b64decode(pub)) == 32
 
@@ -172,7 +168,7 @@ def test_get_server_public_key_derived():
 # =============================================================================
 def test_allocate_next_ip_standard_24():
     clients = [{"clientIp": "10.8.1.2"}]
-    ip = allocate_next_ip("10.8.1.1/24", clients)
+    ip = amnezia_app.allocate_next_ip("10.8.1.1/24", clients)
     assert ip == "10.8.1.3"
 
 
@@ -181,7 +177,7 @@ def test_allocate_next_ip_subnet_22_support():
     # In our implementation, /22 allows 1022 usable hosts
     clients = [{"clientIp": f"10.8.1.{i}"} for i in range(2, 255)]
     # All 10.8.1.x are taken; next must roll into 10.8.2.1
-    ip = allocate_next_ip("10.8.0.1/22", clients)
+    ip = amnezia_app.allocate_next_ip("10.8.0.1/22", clients)
     assert ip == "10.8.0.2"
 
 
@@ -189,7 +185,7 @@ def test_allocate_next_ip_exhaustion():
     # Tiny /30 network: 10.8.1.0/30 (hosts: .1 server, .2 client)
     clients = [{"clientIp": "10.8.1.2"}]
     with pytest.raises(Exception) as excinfo:
-        allocate_next_ip("10.8.1.1/30", clients)
+        amnezia_app.allocate_next_ip("10.8.1.1/30", clients)
     assert "exhausted" in str(excinfo.value).lower()
 
 
@@ -217,7 +213,7 @@ def test_build_client_configs_and_vpn_uri():
         "H3": "500-600",
         "H4": "700-800",
     }
-    raw_conf, vpn_uri = build_client_configs(
+    raw_conf, vpn_uri = amnezia_app.build_client_configs(
         client,
         interface_params,
         server_pubkey="srvpub=",
@@ -252,7 +248,7 @@ def test_build_client_configs_and_vpn_uri():
 # Integration Tests: FastAPI Endpoints
 # =============================================================================
 def test_healthz_endpoint(mock_awg_env):
-    client = TestClient(app)
+    client = TestClient(amnezia_app.app)
     response = client.get("/healthz")
     assert response.status_code == 200
     data = response.json()
@@ -262,7 +258,7 @@ def test_healthz_endpoint(mock_awg_env):
 
 
 def test_auth_failure(mock_awg_env):
-    client = TestClient(app)
+    client = TestClient(amnezia_app.app)
     # No header
     resp1 = client.get("/server")
     assert resp1.status_code == 401
@@ -273,7 +269,7 @@ def test_auth_failure(mock_awg_env):
 
 
 def test_server_endpoint(mock_awg_env):
-    client = TestClient(app)
+    client = TestClient(amnezia_app.app)
     resp = client.get("/server", headers={"x-api-key": "secret-test-api-key"})
     assert resp.status_code == 200
     data = resp.json()
@@ -288,7 +284,7 @@ def test_server_endpoint(mock_awg_env):
 
 
 def test_server_load_endpoint(mock_awg_env):
-    client = TestClient(app)
+    client = TestClient(amnezia_app.app)
     resp = client.get("/server/load", headers={"x-api-key": "secret-test-api-key"})
     assert resp.status_code == 200
     data = resp.json()
@@ -301,7 +297,7 @@ def test_server_load_endpoint(mock_awg_env):
 
 
 def test_clients_crud_lifecycle(mock_awg_env):
-    client = TestClient(app)
+    client = TestClient(amnezia_app.app)
     headers = {"x-api-key": "secret-test-api-key"}
 
     # 1. GET /clients

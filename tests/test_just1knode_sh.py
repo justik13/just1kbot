@@ -1827,6 +1827,22 @@ remove_traffic_watchdog_timer
         self.assertFalse(timer_file.exists(), "Traffic timer unit must be removed")
         self.assertFalse(dropin_file.exists(), "xray.service.d/traffic-cutoff.conf must be removed")
 
+    def test_amnezia_node_and_api_artifacts_invariants(self):
+        """Verify amnezia_api microservice files and just1knode Amnezia module invariants."""
+        amnezia_api_dir = REPO_ROOT / "scripts" / "amnezia_api"
+        self.assertTrue((amnezia_api_dir / "app.py").exists(), "app.py must exist in amnezia_api")
+        self.assertTrue((amnezia_api_dir / "requirements.txt").exists(), "requirements.txt must exist in amnezia_api")
+        self.assertTrue((amnezia_api_dir / "amnezia-api.service").exists(), "amnezia-api.service unit must exist")
+        self.assertTrue((amnezia_api_dir / "tests" / "test_api.py").exists(), "test_api.py must exist in amnezia_api/tests")
+
+        amnezia_sh = REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh"
+        self.assertTrue(amnezia_sh.exists(), "just1knode amnezia.sh must exist")
+        content = amnezia_sh.read_text(encoding="utf-8")
+        self.assertIn("install_amnezia_node", content)
+        self.assertIn("apply_amnezia_abuse_protection", content)
+        self.assertIn("--dport 25 -j REJECT --reject-with tcp-reset", content)
+        self.assertIn('--string "BitTorrent protocol" --algo bm', content)
+
 
 if __name__ == "__main__":
     unittest.main()
