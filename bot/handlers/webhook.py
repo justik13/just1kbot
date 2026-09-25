@@ -250,7 +250,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         logger.exception("[%s] webhook inbox commit failed", request_id)
         return web.Response(status=500, text="Database unavailable")
     if not order:
-        return web.Response(status=503, text="Order pending retry")
+        return web.Response(status=503, text="order_pending_retry")
     return web.Response(status=200, text="OK")
 
 
