@@ -133,8 +133,37 @@ get_node_status() {
         relay)
             echo "relay"
             ;;
+        awg)
+            echo "awg"
+            ;;
+        dual)
+            echo "dual"
+            ;;
         *)
             echo "unconfigured"
+            ;;
+    esac
+}
+
+has_role() {
+    local check_role="$1"
+    local current_role
+    current_role="$(get_node_status)"
+    case "$check_role" in
+        origin)
+            [[ "$current_role" == "origin" ]]
+            ;;
+        relay)
+            [[ "$current_role" == "relay" || "$current_role" == "dual" ]]
+            ;;
+        awg)
+            [[ "$current_role" == "awg" || "$current_role" == "dual" ]]
+            ;;
+        dual)
+            [[ "$current_role" == "dual" ]]
+            ;;
+        *)
+            false
             ;;
     esac
 }

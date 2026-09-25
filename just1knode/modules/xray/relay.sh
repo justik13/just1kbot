@@ -170,7 +170,14 @@ EOF
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
 
-    set_state_val "role" "relay"
+    local prev_role
+    prev_role="$(get_node_status)"
+    if [[ "$prev_role" == "awg" ]]; then
+        set_state_val "role" "dual"
+        log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"
+    else
+        set_state_val "role" "relay"
+    fi
     set_state_val "relay_port" "$relay_port"
     set_state_val "origin_ip" "$origin_ip"
     set_state_val "tunnel_uuid" "$tunnel_uuid"
