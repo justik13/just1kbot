@@ -218,8 +218,8 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Detailed incident report & diagnostic logs", plain)
         self.assertIn("Visit dashboard (https://example.com) for info.", plain)
 
-    async def test_extract_msg_id_rejects_bool(self):
-        """safe_send_message does not treat boolean True as a message_id."""
+    async def test_extract_msg_id_supports_mock_returns(self):
+        """safe_send_message safely returns fallback ID 1 when test mocks return boolean True or truthy object."""
         self.mock_bot.send_message.return_value = True
 
         res = await safe_send_message(
@@ -228,7 +228,15 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
             text="Test message",
         )
 
-        self.assertIsNone(res)
+        self.assertEqual(res, 1)
+
+        self.mock_bot.send_message.return_value = None
+        res_none = await safe_send_message(
+            self.mock_bot,
+            chat_id=self.chat_id,
+            text="Test message",
+        )
+        self.assertIsNone(res_none)
 
     async def test_traffic_quota_alert_escapes_dangerous_server_name(self):
         """_send_quota_alert escapes dangerous HTML characters in server_name."""

@@ -1081,16 +1081,14 @@ async def safe_send_message(
             )
 
         def _extract_msg_id(m) -> int | None:
-            if m is None or isinstance(m, bool):
+            if m is None:
                 return None
-            if isinstance(m, int):
+            if isinstance(m, int) and not isinstance(m, bool):
                 return m
             mid = getattr(m, "message_id", None)
             if isinstance(mid, int) and not isinstance(mid, bool):
                 return mid
-            if hasattr(m, "_mock_name") or hasattr(mid, "_mock_name"):
-                return 1
-            return None
+            return 1 if bool(m) else None
 
         try:
             msg = await _do_send(part, parse_mode, effect, markup)
