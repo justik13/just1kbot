@@ -206,11 +206,13 @@ install_amnezia_node() {
     local existing_legacy_env=""
     local legacy_api_key=""
     local legacy_host=""
+    local legacy_max_peers=""
     for candidate_env in "$AMNEZIA_API_ETC/config.env" /root/amnezia-api/.env ~/amnezia-api/.env /opt/amnezia-api/.env; do
         if [[ -f "$candidate_env" ]]; then
             existing_legacy_env="$candidate_env"
             legacy_api_key="$(grep -E "^(AMNEZIA_API_KEY|FASTIFY_API_KEY)=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
             legacy_host="$(grep -E "^(SERVER_PUBLIC_HOST|SERVER_HOST_NAME)=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+            legacy_max_peers="$(grep -E "^SERVER_MAX_PEERS=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
             break
         fi
     done
@@ -460,7 +462,7 @@ SERVER_PUBLIC_HOST=${api_domain}
 SERVER_DNS1=1.1.1.1
 SERVER_DNS2=1.0.0.1
 EOF
-    if [[ -n "$legacy_max_peers" ]]; then
+    if [[ -n "${legacy_max_peers:-}" ]]; then
         echo "SERVER_MAX_PEERS=${legacy_max_peers}" >> "$AMNEZIA_API_ETC/config.env"
     fi
     chmod 600 "$AMNEZIA_API_ETC/config.env"
