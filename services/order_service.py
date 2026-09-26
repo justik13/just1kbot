@@ -317,11 +317,15 @@ class OrderService:
     @staticmethod
     def mark_order_canceled(order: Order, reason: str = "gateway_canceled") -> None:
         """Mark order canceled and record cancellation reason to prevent invalid revival."""
-        if order.status in ("pending", "canceled"):
+        order_meta = dict(order.metadata_ or {})
+        if order.status == "pending":
             order.status = "canceled"
-            order_meta = dict(order.metadata_ or {})
-            order_meta["cancellation_reason"] = reason
+            order_meta.setdefault("cancellation_reason", reason)
             order.metadata_ = order_meta
+        elif order.status == "canceled":
+            if "cancellation_reason" not in order_meta:
+                order_meta["cancellation_reason"] = reason
+                order.metadata_ = order_meta
 
     @staticmethod
     async def mark_order_paid(
@@ -452,6 +456,25 @@ class OrderService:
                 result.external_id,
             )
             return None
+
+        # Verify gateway payment identity matches order.external_id
+        if order.external_id:
+            if result.is_paid and result.external_id and order.external_id != result.external_id:
+                logger.warning(
+                    "Order %s payment ID mismatch: order.external_id=%s, webhook.external_id=%s",
+                    order.id,
+                    order.external_id,
+                    result.external_id,
+                )
+                return None
+            if result.is_refunded and related_id and order.external_id != related_id:
+                logger.warning(
+                    "Order %s refund payment_id mismatch: order.external_id=%s, webhook.payment_id=%s",
+                    order.id,
+                    order.external_id,
+                    related_id,
+                )
+                return None
 
         if result.is_paid:
             paid_order = await OrderService.mark_order_paid(

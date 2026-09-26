@@ -2736,3 +2736,47 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(paid_order.status, "paid")
             self.assertNotIn("cancellation_reason", paid_order.metadata_)
 
+    def test_mark_order_canceled_preserves_existing_cancellation_reason(self):
+        """Verify mark_order_canceled does not overwrite user_canceled with gateway_canceled."""
+        from services.order_service import OrderService
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=1,
+            status="canceled",
+            metadata_={"cancellation_reason": "user_canceled"},
+        )
+        OrderService.mark_order_canceled(order, reason="gateway_canceled")
+        self.assertEqual(order.metadata_["cancellation_reason"], "user_canceled")
+
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_rejects_mismatched_external_id(self, mock_gw_factory):
+        """Verify process_webhook_event rejects webhook if order.external_id != payment external_id."""
+        from services.order_service import OrderService
+
+        order_uuid = uuid.uuid4()
+        mock_gw = AsyncMock()
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=True,
+            is_refunded=False,
+            is_canceled=False,
+            external_id="ext-diff-999",
+            amount_rub=Decimal("100.00"),
+        )
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            status="pending",
+            external_id="ext-orig-111",
+            amount_rub=Decimal("100.00"),
+        )
+        session.scalar.return_value = order
+
+        result = await OrderService.process_webhook_event(session, {"event": "payment.succeeded"})
+        self.assertIsNone(result)
+        self.assertEqual(order.status, "pending")
+
