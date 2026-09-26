@@ -565,10 +565,15 @@ EOF
     set_state_val "awg_port" "$public_port"
     set_state_val "awg_installed" "true"
 
-    # 13. Отключение старых служб (PM2) если производилась миграция
+    # 13. Зачистка и отключение старых служб (PM2 / Node.js) при миграции
     if [[ $legacy_pm2_stopped -eq 1 ]]; then
+        command -v pm2 >/dev/null 2>&1 && pm2 delete all >/dev/null 2>&1 || true
+        command -v pm2 >/dev/null 2>&1 && pm2 save --force >/dev/null 2>&1 || true
         systemctl disable pm2-root.service >/dev/null 2>&1 || true
-        log "✔ Служба PM2 отключена из автозагрузки systemd"
+        rm -f /etc/systemd/system/pm2-root.service 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
+        rm -rf /root/amnezia-api ~/amnezia-api 2>/dev/null || true
+        log "✔ Служба PM2 отключена, старые файлы Node.js API (/root/amnezia-api) удалены"
     fi
 
     # Вывод карточки подключения
