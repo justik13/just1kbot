@@ -344,19 +344,24 @@ EOF
     local cert_file=""
     local key_file=""
 
-    # Проверка Let's Encrypt для домена
-    if [[ -n "$domain_in" && -f "/etc/letsencrypt/live/${domain_in}/fullchain.pem" ]]; then
-        cert_file="/etc/letsencrypt/live/${domain_in}/fullchain.pem"
-        key_file="/etc/letsencrypt/live/${domain_in}/privkey.pem"
-        log "✔ Используется существующий Let's Encrypt SSL сертификат для ${domain_in}"
-    elif [[ -n "$domain_in" ]]; then
-        log "Попытка получения Let's Encrypt SSL сертификата для ${domain_in}..."
+    # Проверка Let's Encrypt для домена (если это не IP адрес)
+    local is_ip=0
+    if [[ "$api_domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        is_ip=1
+    fi
+
+    if [[ $is_ip -eq 0 && -f "/etc/letsencrypt/live/${api_domain}/fullchain.pem" ]]; then
+        cert_file="/etc/letsencrypt/live/${api_domain}/fullchain.pem"
+        key_file="/etc/letsencrypt/live/${api_domain}/privkey.pem"
+        log "✔ Используется существующий Let's Encrypt SSL сертификат для ${api_domain}"
+    elif [[ $is_ip -eq 0 && -n "$api_domain" ]]; then
+        log "Попытка получения Let's Encrypt SSL сертификата для ${api_domain}..."
         if command -v certbot >/dev/null 2>&1; then
             systemctl stop nginx 2>/dev/null || true
-            if certbot certonly --standalone -d "$domain_in" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
-                cert_file="/etc/letsencrypt/live/${domain_in}/fullchain.pem"
-                key_file="/etc/letsencrypt/live/${domain_in}/privkey.pem"
-                log "✔ SSL сертификат Let's Encrypt успешно получен для ${domain_in}"
+            if certbot certonly --standalone -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
+                cert_file="/etc/letsencrypt/live/${api_domain}/fullchain.pem"
+                key_file="/etc/letsencrypt/live/${api_domain}/privkey.pem"
+                log "✔ SSL сертификат Let's Encrypt успешно получен для ${api_domain}"
             fi
             systemctl start nginx 2>/dev/null || true
         fi
