@@ -42,6 +42,8 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
         if [[ -d "/app/scripts/amnezia_api" ]]; then
             mkdir -p "${AMNEZIA_API_DIR:-/opt/amnezia-api}"
             cp -a /app/scripts/amnezia_api/. "${AMNEZIA_API_DIR:-/opt/amnezia-api}/"
+            mkdir -p "$INSTALL_DIR/scripts/amnezia_api"
+            cp -a /app/scripts/amnezia_api/. "$INSTALL_DIR/scripts/amnezia_api/"
         fi
     else
         JUST1KBOT_REPO_URL="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"

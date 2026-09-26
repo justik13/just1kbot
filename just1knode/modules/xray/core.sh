@@ -371,9 +371,17 @@ update_node() {
                     chmod +x "${node_dir}/just1knode.sh" 2>/dev/null || true
                     ln -sf "${node_dir}/just1knode.sh" /usr/local/bin/just1knode 2>/dev/null || true
                 fi
-                if [[ -d "${tmp_dir}/scripts/amnezia_api" ]]; then
-                    mkdir -p "${node_dir}/scripts/amnezia_api"
-                    cp -a "${tmp_dir}/scripts/amnezia_api/." "${node_dir}/scripts/amnezia_api/" 2>/dev/null || true
+                if [[ -f "${tmp_dir}/scripts/amnezia_api/app.py" && -f "${tmp_dir}/scripts/amnezia_api/requirements.txt" ]]; then
+                    local cache_staging="${node_dir}/scripts/.amnezia_api_stage_$$"
+                    rm -rf "$cache_staging"
+                    mkdir -p "$cache_staging"
+                    if cp -a "${tmp_dir}/scripts/amnezia_api/." "$cache_staging/" 2>/dev/null; then
+                        if [[ -f "${cache_staging}/app.py" && -f "${cache_staging}/requirements.txt" ]]; then
+                            mkdir -p "${node_dir}/scripts/amnezia_api"
+                            cp -a "${cache_staging}/." "${node_dir}/scripts/amnezia_api/" 2>/dev/null || true
+                        fi
+                    fi
+                    rm -rf "$cache_staging"
                 fi
                 log "Модули ${node_dir} успешно обновлены и проверены."
             fi
@@ -413,8 +421,13 @@ update_node() {
                     error "Не удалось скопировать исходные файлы ${amnezia_api_dir}. Обновление прервано."
                 fi
                 if [[ -d "${amnezia_api_dir}/amnezia_api" && ! -f "${amnezia_api_dir}/app.py" ]]; then
-                    cp -a "${amnezia_api_dir}/amnezia_api/." "${amnezia_api_dir}/" 2>/dev/null || true
-                    rm -rf "${amnezia_api_dir}/amnezia_api"
+                    if [[ -f "${amnezia_api_dir}/amnezia_api/app.py" ]]; then
+                        if cp -a "${amnezia_api_dir}/amnezia_api/." "${amnezia_api_dir}/" 2>/dev/null; then
+                            if [[ -f "${amnezia_api_dir}/app.py" ]]; then
+                                rm -rf "${amnezia_api_dir}/amnezia_api"
+                            fi
+                        fi
+                    fi
                 fi
                 if [[ -x "${amnezia_api_dir}/venv/bin/pip" && -f "${amnezia_api_dir}/requirements.txt" ]]; then
                     if ! "${amnezia_api_dir}/venv/bin/pip" install -q -r "${amnezia_api_dir}/requirements.txt" --no-cache-dir; then
