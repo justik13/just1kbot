@@ -235,6 +235,19 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         self.use_session(FakeResponse(204))
         self.assertTrue(await self.client.healthcheck())
 
+    async def test_healthcheck_ok_boolean_payload(self):
+        # 1. {"ok": True} -> True
+        self.use_session(FakeResponse(200, {"ok": True, "status": "ok"}))
+        self.assertTrue(await self.client.healthcheck())
+
+        # 2. {"ok": False} -> False
+        self.use_session(FakeResponse(200, {"ok": False, "status": "degraded"}))
+        self.assertFalse(await self.client.healthcheck())
+
+        # 3. HTTP 503 -> False
+        self.use_session(FakeResponse(503, {"ok": False, "status": "degraded"}))
+        self.assertFalse(await self.client.healthcheck())
+
     async def test_request_failure_remains_none(self):
         self.use_session(FakeResponse(400))
         self.assertIsNone(await self.client._request("GET", "/server"))
@@ -377,5 +390,23 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         clients = await get_all_clients_with_retry(self.client)
         self.assertIsNone(clients)
 
+    async def test_backup_and_reboot_methods(self):
+        # 1. get_server_backup success
+        self.use_session(FakeResponse(200, {"conf_content": "[Interface]\nAddress=10.8.1.1/24", "clients_table": []}))
+        backup = await self.client.get_server_backup()
+        self.assertIsNotNone(backup)
+        self.assertIn("conf_content", backup)
+
+        # 2. restore_server_backup success
+        self.use_session(FakeResponse(200, {"status": "ok", "message": "Restored"}))
+        restore_ok = await self.client.restore_server_backup({"conf_content": "[Interface]"})
+        self.assertTrue(restore_ok)
+
+        # 3. reboot_server success
+        self.use_session(FakeResponse(200, {"status": "ok", "message": "Rebooting"}))
+        reboot_ok = await self.client.reboot_server()
+        self.assertTrue(reboot_ok)
+
 if __name__ == "__main__":
     unittest.main()
+

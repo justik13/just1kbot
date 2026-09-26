@@ -471,7 +471,7 @@ async def process_edit_server_url(
             await state.clear()
             return
 
-        if AMNEZIA_PROTOCOL not in server_info.protocols:
+        if AMNEZIA_PROTOCOL not in server_info.protocols and "amneziawg3" not in server_info.protocols:
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -772,7 +772,7 @@ async def process_edit_server_key(
             await state.clear()
             return
 
-        if AMNEZIA_PROTOCOL not in server_info.protocols:
+        if AMNEZIA_PROTOCOL not in server_info.protocols and "amneziawg3" not in server_info.protocols:
             await render_hub(
                 message.bot,
                 message.chat.id,

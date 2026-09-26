@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import ipaddress
 import json
 import logging
 import time
@@ -301,7 +302,12 @@ async def close_http_session():
 
 
 class AmneziaClient:
-    def __init__(self, api_url: str, api_key: str):
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        ssl_verify: bool | None = None,
+    ):
         self.api_url = (api_url or "").rstrip("/")
         self.api_key = api_key or ""
         self._log_target = _safe_api_target(self.api_url)
@@ -310,6 +316,21 @@ class AmneziaClient:
             "Content-Type": "application/json",
         }
         self._key_error_logged = False
+        parsed = urlsplit(self.api_url)
+        self._is_ip_endpoint = False
+        if parsed.hostname:
+            try:
+                ipaddress.ip_address(parsed.hostname.strip("[]"))
+                self._is_ip_endpoint = True
+            except ValueError:
+                self._is_ip_endpoint = False
+
+        if ssl_verify is not None:
+            self._ssl: bool | None = ssl_verify
+        elif parsed.scheme == "https" and self._is_ip_endpoint:
+            self._ssl = False
+        else:
+            self._ssl = None
 
     async def is_circuit_available(self) -> bool:
         """Check if circuit breaker allows requests to this server endpoint."""
@@ -450,6 +471,10 @@ class AmneziaClient:
                     ambiguous=False,
                 )
 
+            request_kwargs = dict(kwargs)
+            if "ssl" not in request_kwargs and self._ssl is not None:
+                request_kwargs["ssl"] = self._ssl
+
             request_started = False
             try:
                 session = await get_http_session()
@@ -459,7 +484,7 @@ class AmneziaClient:
                     url,
                     headers=self._headers,
                     allow_redirects=False,
-                    **kwargs,
+                    **request_kwargs,
                 ) as response:
                     if response.status == 204:
                         await cb.record_success()
@@ -674,7 +699,14 @@ class AmneziaClient:
                         else False
                     ),
                 )
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as error:
+                logger.error(
+                    "Value/TypeError for %s%s: %s",
+                    self._log_target,
+                    path,
+                    error,
+                    exc_info=True,
+                )
                 return self._failure(
                     AmneziaErrorKind.INVALID_RESPONSE,
                     semantics,
@@ -862,13 +894,16 @@ class AmneziaClient:
         return None
 
     async def healthcheck(self) -> bool:
-        return (
-            await self._request(
-                "GET",
-                "/healthz",
-                semantics=RequestSemantics.READ,
-            )
-        ) is not None
+        data = await self._request(
+            "GET",
+            "/healthz",
+            semantics=RequestSemantics.READ,
+        )
+        if isinstance(data, dict):
+            if "ok" in data:
+                return data["ok"] is True
+            return True
+        return False
 
     async def get_server_load(self, timeout: float = 10.0) -> dict | None:
         """
@@ -891,6 +926,31 @@ class AmneziaClient:
             return res
         return None
 
+    async def get_server_backup(self) -> dict | None:
+        """Скачивает полную резервную копию конфигурации и пиров ноды."""
+        res = await self._request("GET", "/server/backup", semantics=RequestSemantics.READ)
+        if isinstance(res, dict) and "conf_content" in res:
+            return res
+        return None
+
+    async def restore_server_backup(self, backup_data: dict) -> bool:
+        """Восстанавливает резервную копию на ноде."""
+        res = await self._request(
+            "POST",
+            "/server/backup",
+            json=backup_data,
+            semantics=RequestSemantics.IDEMPOTENT_WRITE,
+        )
+        return bool(res and isinstance(res, dict) and res.get("status") == "ok")
+
+    async def reboot_server(self) -> bool:
+        """Инициирует перезагрузку ноды."""
+        res = await self._request(
+            "POST",
+            "/server/reboot",
+            semantics=RequestSemantics.IDEMPOTENT_WRITE,
+        )
+        return bool(res and isinstance(res, dict) and res.get("status") == "ok")
 
     async def get_all_clients(
         self,
@@ -901,9 +961,22 @@ class AmneziaClient:
 
     @staticmethod
     def _parse_clients_page(
-        items_raw: list,
+        items_raw: list | dict,
     ) -> list[AmneziaClientListItem]:
         clients: list[AmneziaClientListItem] = []
+
+        if isinstance(items_raw, dict):
+            items_raw = (
+                items_raw.get("items")
+                or items_raw.get("clients")
+                or items_raw.get("data")
+                or []
+            )
+            if isinstance(items_raw, dict):
+                items_raw = [items_raw]
+
+        if not isinstance(items_raw, list):
+            return clients
 
         for item in items_raw:
             if not isinstance(item, dict):

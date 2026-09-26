@@ -3,6 +3,7 @@ import json
 import logging
 import struct
 import zlib
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ def _parse_last_config(awg: dict) -> dict | None:
     return last_config
 
 
-def _build_conf_fallback(data: dict, last_config: dict) -> str | None:
+def _build_conf_fallback(data: dict, last_config: dict, awg: dict | None = None) -> str | None:
     client_priv_key = last_config.get("client_priv_key")
     server_pub_key = last_config.get("server_pub_key")
     host_name = last_config.get("hostName") or data.get("hostName")
@@ -132,9 +133,17 @@ def _build_conf_fallback(data: dict, last_config: dict) -> str | None:
     else:
         allowed_ips_line = "0.0.0.0/0, ::/0"
 
+    def get_param(k: str) -> Any:
+        v = last_config.get(k)
+        if v is not None:
+            return v
+        if awg:
+            return awg.get(k)
+        return None
+
     awg_required_keys = ["Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4"]
     for key in awg_required_keys:
-        if last_config.get(key) is None:
+        if get_param(key) is None:
             return None
 
     lines = ["[Interface]", f"Address = {client_ip}", f"DNS = {dns1}, {dns2}"]
@@ -142,23 +151,33 @@ def _build_conf_fallback(data: dict, last_config: dict) -> str | None:
         lines.append(f"MTU = {mtu}")
     lines.append(f"PrivateKey = {client_priv_key}")
     lines.extend([
-        f"Jc = {last_config.get('Jc')}",
-        f"Jmin = {last_config.get('Jmin')}",
-        f"Jmax = {last_config.get('Jmax')}",
-        f"S1 = {last_config.get('S1')}",
-        f"S2 = {last_config.get('S2')}",
-        f"S3 = {last_config.get('S3')}",
-        f"S4 = {last_config.get('S4')}",
-        f"H1 = {last_config.get('H1')}",
-        f"H2 = {last_config.get('H2')}",
-        f"H3 = {last_config.get('H3')}",
-        f"H4 = {last_config.get('H4')}",
+        f"Jc = {get_param('Jc')}",
+        f"Jmin = {get_param('Jmin')}",
+        f"Jmax = {get_param('Jmax')}",
+        f"S1 = {get_param('S1')}",
+        f"S2 = {get_param('S2')}",
+        f"S3 = {get_param('S3')}",
+        f"S4 = {get_param('S4')}",
+        f"H1 = {get_param('H1')}",
+        f"H2 = {get_param('H2')}",
+        f"H3 = {get_param('H3')}",
+        f"H4 = {get_param('H4')}",
     ])
 
     for i in range(1, 6):
-        val = last_config.get(f"I{i}")
+        val = get_param(f"I{i}")
         if val and str(val).strip():
             lines.append(f"I{i} = {val}")
+
+    awg3_keys = [
+        "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime",
+        "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout",
+        "MaxHandshakeAttempts", "RandomTrailers", "DisableCookies",
+    ]
+    for key in awg3_keys:
+        val = get_param(key)
+        if val is not None and str(val).strip():
+            lines.append(f"{key} = {val}")
 
     lines.extend([
         "",
@@ -190,7 +209,7 @@ def build_conf_file_from_dict(data: dict) -> str | None:
         config_str = last_config.get("config")
         if _looks_like_awg_conf(config_str):
             return config_str
-        fallback_conf = _build_conf_fallback(data, last_config)
+        fallback_conf = _build_conf_fallback(data, last_config, awg)
         if _looks_like_awg_conf(fallback_conf):
             return fallback_conf
         raise VPNConfigParseError("Failed to build AWG conf")
@@ -234,12 +253,12 @@ def is_valid_vpn_uri(uri: str) -> bool:
         if not awg:
             return False
         protocol_version = awg.get("protocol_version")
-        if str(protocol_version) == "2":
+        if str(protocol_version) in ("2", "3.1", "3"):
             return True
         last_config = _parse_last_config(awg)
         if not last_config:
             return False
-        fallback_conf = _build_conf_fallback(data, last_config)
+        fallback_conf = _build_conf_fallback(data, last_config, awg)
         if fallback_conf and _looks_like_awg_conf(fallback_conf):
             return True
         return False

@@ -52,9 +52,17 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
     if [[ -f "$tmp_tar" ]]; then
         tar -xzf "$tmp_tar" -C "$tmp_extract" --strip-components=1
         cp -r "$tmp_extract/just1knode"/* "$INSTALL_DIR/"
+        if [[ -d "$tmp_extract/scripts" ]]; then
+            mkdir -p "$INSTALL_DIR/scripts"
+            cp -r "$tmp_extract/scripts"/* "$INSTALL_DIR/scripts/"
+        fi
         if [[ -d "$tmp_extract/scripts/xray_api" ]]; then
             mkdir -p /opt/xray-api
             cp -r "$tmp_extract/scripts/xray_api"/* /opt/xray-api/
+        fi
+        if [[ -d "$tmp_extract/scripts/amnezia_api" ]]; then
+            mkdir -p /opt/amnezia-api
+            cp -r "$tmp_extract/scripts/amnezia_api"/* /opt/amnezia-api/
         fi
         rm -rf "$tmp_tar" "$tmp_extract"
         chmod +x "$INSTALL_DIR/just1knode.sh"

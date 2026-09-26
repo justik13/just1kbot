@@ -60,7 +60,7 @@ async def show_server_peers(
         return
 
     server_proto = getattr(server, "protocol", None) or "amneziawg2"
-    if server_proto not in ("amneziawg2", "awg"):
+    if server_proto not in ("amneziawg2", "awg", "amneziawg3"):
         await callback.answer(
             texts.ADMIN_SERVER_PEERS_AWG_ONLY,
             show_alert=True,

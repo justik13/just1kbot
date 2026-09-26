@@ -39,6 +39,10 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
             mkdir -p "${XRAY_API_DIR:-/opt/xray-api}"
             cp -a /app/scripts/xray_api/. "${XRAY_API_DIR:-/opt/xray-api}/"
         fi
+        if [[ -d "/app/scripts/amnezia_api" ]]; then
+            mkdir -p "${AMNEZIA_API_DIR:-/opt/amnezia-api}"
+            cp -a /app/scripts/amnezia_api/. "${AMNEZIA_API_DIR:-/opt/amnezia-api}/"
+        fi
     else
         JUST1KBOT_REPO_URL="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
         JUST1KBOT_REF="${JUST1KBOT_REF:-main}"
@@ -68,6 +72,10 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
         if [[ -d "$tmp_extract/scripts/xray_api" ]]; then
             mkdir -p "${XRAY_API_DIR:-/opt/xray-api}"
             cp -a "$tmp_extract/scripts/xray_api/." "${XRAY_API_DIR:-/opt/xray-api}/"
+        fi
+        if [[ -d "$tmp_extract/scripts/amnezia_api" ]]; then
+            mkdir -p "${AMNEZIA_API_DIR:-/opt/amnezia-api}"
+            cp -a "$tmp_extract/scripts/amnezia_api/." "${AMNEZIA_API_DIR:-/opt/amnezia-api}/"
         fi
         rm -rf "$tmp_tar" "$tmp_extract"
     fi
@@ -169,6 +177,46 @@ show_status() {
 
         echo -e "\n  Службы:"
         systemctl is-active --quiet xray && echo -e "    Xray Relay:  ${GREEN}● Активен${NC}" || echo -e "    Xray Relay:  ${RED}○ Не работает${NC}"
+    elif [[ "$role" == "awg" ]]; then
+        local a_url a_port
+        a_url="$(get_state_val "awg_api_url" "-")"
+        a_port="$(get_state_val "awg_port" "8443")"
+
+        echo -e "  Amnezia API URL:      ${CYAN}${a_url}${NC}"
+        echo -e "  HTTPS Порт:           ${CYAN}${a_port}${NC}"
+
+        echo -e "\n  Службы:"
+        local c_name
+        c_name="$(detect_amnezia_container 2>/dev/null || echo "amnezia-awg2")"
+        if is_amnezia_container_running 2>/dev/null; then
+            echo -e "    Docker (${c_name}): ${GREEN}● Активен${NC}"
+        else
+            echo -e "    Docker (${c_name}): ${RED}○ Не запущен${NC}"
+        fi
+        systemctl is-active --quiet amnezia-api && echo -e "    amnezia-api:          ${GREEN}● Активен${NC}" || echo -e "    amnezia-api:          ${RED}○ Не работает${NC}"
+        systemctl is-active --quiet nginx && echo -e "    Nginx (8443):         ${GREEN}● Активен${NC}" || echo -e "    Nginx (8443):         ${RED}○ Не работает${NC}"
+    elif [[ "$role" == "dual" ]]; then
+        local r_port r_orig r_sni a_url a_port
+        r_port="$(get_state_val "relay_port" "-")"
+        r_orig="$(get_state_val "origin_ip" "-")"
+        r_sni="$(get_state_val "sni" "-")"
+        a_url="$(get_state_val "awg_api_url" "-")"
+        a_port="$(get_state_val "awg_port" "8443")"
+
+        echo -e "  [Relay] Порт REALITY: ${CYAN}${r_port}${NC} (Origin: ${r_orig}, SNI: ${r_sni})"
+        echo -e "  [AWG]   API URL:      ${CYAN}${a_url}${NC} (HTTPS Порт: ${a_port})"
+
+        echo -e "\n  Службы:"
+        systemctl is-active --quiet xray && echo -e "    Xray Relay:           ${GREEN}● Активен${NC}" || echo -e "    Xray Relay:           ${RED}○ Не работает${NC}"
+        local c_name_dual
+        c_name_dual="$(detect_amnezia_container 2>/dev/null || echo "amnezia-awg2")"
+        if is_amnezia_container_running 2>/dev/null; then
+            echo -e "    Docker (${c_name_dual}): ${GREEN}● Активен${NC}"
+        else
+            echo -e "    Docker (${c_name_dual}): ${RED}○ Не запущен${NC}"
+        fi
+        systemctl is-active --quiet amnezia-api && echo -e "    amnezia-api:          ${GREEN}● Активен${NC}" || echo -e "    amnezia-api:          ${RED}○ Не работает${NC}"
+        systemctl is-active --quiet nginx && echo -e "    Nginx (8443):         ${GREEN}● Активен${NC}" || echo -e "    Nginx (8443):         ${RED}○ Не работает${NC}"
     fi
 
     local t_status
@@ -215,8 +263,8 @@ show_relay_credentials() {
     title "ДАННЫЕ ПОДКЛЮЧЕНИЯ RELAY (КОМАНДА ДЛЯ ORIGIN)"
     local role
     role="$(get_state_val "role")"
-    if [[ "$role" != "relay" ]]; then
-        warn "Данные доступны только на сервере с ролью Relay."
+    if [[ "$role" != "relay" && "$role" != "dual" ]]; then
+        warn "Данные доступны только на сервере с ролью Relay или Dual."
         return
     fi
 
@@ -239,9 +287,15 @@ run_doctor() {
     role="$(get_state_val "role" "не определена")"
 
     log "1. Проверка системных служб..."
-    local services_to_check=("xray")
+    local services_to_check=()
     if [[ "$role" == "origin" ]]; then
-        services_to_check+=("nginx" "xray-api")
+        services_to_check+=("xray" "nginx" "xray-api")
+    elif [[ "$role" == "relay" ]]; then
+        services_to_check+=("xray")
+    elif [[ "$role" == "awg" ]]; then
+        services_to_check+=("amnezia-api" "nginx")
+    elif [[ "$role" == "dual" ]]; then
+        services_to_check+=("xray" "amnezia-api" "nginx")
     fi
     for srv in "${services_to_check[@]}"; do
         if systemctl is-active --quiet "$srv" 2>/dev/null; then
@@ -261,7 +315,7 @@ run_doctor() {
             echo -e "  ${RED}✗${NC} gRPC сокет Xray недоступен"
             failed=$((failed + 1))
         fi
-    else
+    elif [[ "$role" == "relay" || "$role" == "dual" ]]; then
         log "2. Проверка Relay инбаунд порта..."
         local r_port
         r_port="$(get_state_val "relay_port" "10443")"
@@ -272,15 +326,53 @@ run_doctor() {
         fi
     fi
 
-    log "3. Проверка конфигурации Xray..."
-    if [[ -f "$XRAY_CONFIG" ]] && "$XRAY_BIN" run -test -config "$XRAY_CONFIG" 2>/dev/null; then
-        echo -e "  ${GREEN}✔${NC} Конфигурация Xray валидна"
-    else
-        echo -e "  ${RED}✗${NC} Ошибка конфигурации Xray"
-        failed=$((failed + 1))
+    if [[ "$role" == "awg" || "$role" == "dual" ]]; then
+        log "2b. Проверка Amnezia API сокета (127.0.0.1:4001)..."
+        if python3 -c "import socket; s = socket.create_connection(('127.0.0.1', 4001), timeout=2); s.close()" 2>/dev/null; then
+            echo -e "  ${GREEN}✔${NC} Локальный порт 4001 (amnezia-api) отвечает"
+        else
+            echo -e "  ${RED}✗${NC} Локальный порт 4001 (amnezia-api) недоступен"
+            failed=$((failed + 1))
+        fi
     fi
 
-    if [[ "$role" == "origin" ]]; then
+    if [[ "$role" == "origin" || "$role" == "relay" || "$role" == "dual" ]]; then
+        log "3. Проверка конфигурации Xray..."
+        if [[ -f "$XRAY_CONFIG" ]] && "$XRAY_BIN" run -test -config "$XRAY_CONFIG" 2>/dev/null; then
+            echo -e "  ${GREEN}✔${NC} Конфигурация Xray валидна"
+        else
+            echo -e "  ${RED}✗${NC} Ошибка конфигурации Xray"
+            failed=$((failed + 1))
+        fi
+    fi
+
+    if [[ "$role" == "awg" || "$role" == "dual" ]]; then
+        log "3b. Проверка контейнера и конфигурации AmneziaWG..."
+        local c_doc
+        c_doc="$(detect_amnezia_container 2>/dev/null || echo "amnezia-awg2")"
+        if is_amnezia_container_running 2>/dev/null; then
+            echo -e "  ${GREEN}✔${NC} Docker контейнер ${c_doc} активен"
+        else
+            echo -e "  ${RED}✗${NC} Docker контейнер ${c_doc} не запущен"
+            failed=$((failed + 1))
+        fi
+        local conf_name="awg0.conf"
+        [[ "$c_doc" == "amnezia-awg" ]] && conf_name="wg0.conf"
+        local conf_found=false
+        if docker exec "$c_doc" test -f "/opt/amnezia/awg/$conf_name" 2>/dev/null; then
+            conf_found=true
+        elif [[ -f "/opt/amnezia/awg/$conf_name" ]]; then
+            conf_found=true
+        fi
+        if [[ "$conf_found" == "true" ]]; then
+            echo -e "  ${GREEN}✔${NC} Конфигурационный файл ${conf_name} найден"
+        else
+            echo -e "  ${RED}✗${NC} Конфигурационный файл ${conf_name} отсутствует"
+            failed=$((failed + 1))
+        fi
+    fi
+
+    if [[ "$role" == "origin" || "$role" == "awg" || "$role" == "dual" ]]; then
         log "4. Проверка синтаксиса Nginx..."
         if nginx -t 2>/dev/null; then
             echo -e "  ${GREEN}✔${NC} Конфигурация Nginx корректна"
@@ -476,6 +568,20 @@ if os.path.exists(rf):
         fi
     fi
 
+    if [[ "$role" == "awg" || "$role" == "dual" ]]; then
+        log "10. Проверка правил сетевой защиты Anti-Abuse..."
+        if iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null; then
+            echo -e "  ${GREEN}✔${NC} Блокировка SMTP:25 активна (tcp-reset)"
+        else
+            echo -e "  ${YELLOW}!${NC} Блокировка SMTP:25 не найдена в iptables"
+        fi
+        if iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null; then
+            echo -e "  ${GREEN}✔${NC} Фильтрация BitTorrent L7 активна (xt_string)"
+        else
+            echo -e "  ${YELLOW}!${NC} Фильтрация BitTorrent L7 не найдена в iptables"
+        fi
+    fi
+
     if [[ $failed -eq 0 ]]; then
         echo -e "\n${BOLD}${GREEN}Все проверки пройдены успешно! Узел полностью здоров.${NC}\n"
     else
@@ -497,11 +603,12 @@ reset_node() {
         return
     fi
 
-    systemctl stop xray xray-api 2>/dev/null || true
-    systemctl disable xray xray-api 2>/dev/null || true
+    systemctl stop xray xray-api amnezia-api 2>/dev/null || true
+    systemctl disable xray xray-api amnezia-api 2>/dev/null || true
     remove_traffic_watchdog_timer
-    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh 2>/dev/null || true
-    rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api 2>/dev/null || true
+    remove_amnezia_abuse_protection 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh 2>/dev/null || true
+    rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api /etc/amnezia-api /opt/amnezia-api /etc/ssl/just1k_amnezia 2>/dev/null || true
     systemctl reload nginx 2>/dev/null || true
     log "Узел успешно сброшен в исходное состояние."
 }
@@ -620,6 +727,8 @@ uninstall_node() {
         "${XRAY_API_DIR:-/opt/xray-api}"
         "${XRAY_API_ETC:-/etc/xray-api}"
         "${XRAY_API_LIB:-/var/lib/xray-api}"
+        "${AMNEZIA_API_DIR:-/opt/amnezia-api}"
+        "${AMNEZIA_API_ETC:-/etc/amnezia-api}"
         "${STATE_DIR:-/etc/just1knode}"
         "${BACKUP_DIR:-/var/backups/just1knode}"
     )
@@ -633,11 +742,11 @@ uninstall_node() {
 
     info "1/11. Остановка и отключение системных служб systemd..."
     remove_traffic_watchdog_timer
-    systemctl stop xray xray-api 2>/dev/null || true
-    systemctl disable xray xray-api 2>/dev/null || true
-    rm -f "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray.service" "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray-api.service" 2>/dev/null || true
+    systemctl stop xray xray-api amnezia-api 2>/dev/null || true
+    systemctl disable xray xray-api amnezia-api 2>/dev/null || true
+    rm -f "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray.service" "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray-api.service" "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/amnezia-api.service" 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
-    systemctl reset-failed xray xray-api just1knode-traffic 2>/dev/null || true
+    systemctl reset-failed xray xray-api amnezia-api just1knode-traffic 2>/dev/null || true
 
     info "2/11. Завершение активных процессов ядра и API..."
     local xray_proc_name
@@ -658,20 +767,25 @@ uninstall_node() {
     rm -rf "${XRAY_CONFIG_DIR:-/usr/local/etc/xray}" 2>/dev/null || true
     rm -rf "${XRAY_SHARE_DIR:-/usr/local/share/xray}" 2>/dev/null || true
 
-    info "5/11. Удаление агента Xray-API и виртуального окружения..."
+    info "5/11. Удаление агентов API (Xray-API, Amnezia-API) и виртуальных окружений..."
     rm -rf "${XRAY_API_DIR:-/opt/xray-api}" 2>/dev/null || true
     rm -rf "${XRAY_API_ETC:-/etc/xray-api}" 2>/dev/null || true
     rm -rf "${XRAY_API_LIB:-/var/lib/xray-api}" 2>/dev/null || true
+    rm -rf "${AMNEZIA_API_DIR:-/opt/amnezia-api}" 2>/dev/null || true
+    rm -rf "${AMNEZIA_API_ETC:-/etc/amnezia-api}" 2>/dev/null || true
 
-    info "6/11. Очистка конфигурации Nginx..."
+    info "6/11. Очистка конфигурации Nginx и сетевых правил..."
     local nginx_conf_dir="${NGINX_CONF_DIR:-/etc/nginx}"
     rm -f "${nginx_conf_dir}/sites-enabled/just1k-origin.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/sites-available/just1k-origin.conf" 2>/dev/null || true
+    rm -f "${nginx_conf_dir}/sites-enabled/just1k-amnezia.conf" 2>/dev/null || true
+    rm -f "${nginx_conf_dir}/sites-available/just1k-amnezia.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/just1k-origin.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/origin.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/just1k-bootstrap.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/xhttp-map.conf" 2>/dev/null || true
     rm -rf "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" 2>/dev/null || true
+    remove_amnezia_abuse_protection 2>/dev/null || true
 
     if [[ -f "${nginx_conf_dir}/sites-available/default.user.bak" ]]; then
         info "Восстановление исходного default сайта в Nginx..."
@@ -700,7 +814,7 @@ uninstall_node() {
     if [[ -d "$certbot_dir" ]] && [[ -z "$(ls -A "$certbot_dir" 2>/dev/null)" ]]; then
         rmdir "$certbot_dir" 2>/dev/null || true
     fi
-    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" 2>/dev/null || true
+    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" 2>/dev/null || true
 
     info "8/11. Удаление конфигурации ядра sysctl и восстановление IPv6..."
     local sysctl_ipv6_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
@@ -773,6 +887,9 @@ uninstall_node() {
     fi
     if [[ -e "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray-api.service" ]]; then
         node_cleanup_errors+=("Служба systemd xray-api.service все еще существует")
+    fi
+    if [[ -e "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/amnezia-api.service" ]]; then
+        node_cleanup_errors+=("Служба systemd amnezia-api.service все еще существует")
     fi
 
     echo ""
@@ -850,15 +967,17 @@ main_menu() {
             echo -e "  Статус текущего сервера: ${BOLD}${YELLOW}⚪ НЕ НАСТРОЕН${NC}\n"
             echo -e "  ${BOLD}[1]${NC} 🌐 Установить Origin узел (Белый Интернет — Входной шлюз в РФ)"
             echo -e "  ${BOLD}[2]${NC} 🛡️  Установить Relay узел (Белый Интернет — Зарубежный выход VLESS REALITY)"
-            echo -e "  ${BOLD}[3]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[3]${NC} ⚡ Настроить AmneziaWG узел (Зарубежный выход AmneziaWG API)"
+            echo -e "  ${BOLD}[4]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-3]: " choice
+            read -rp "Выберите действие [0-4]: " choice
 
             case "$choice" in
                 1) install_xray_origin_node; read -rp "Нажмите Enter для продолжения...";;
                 2) install_xray_relay_node; read -rp "Нажмите Enter для продолжения...";;
-                3) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                3) install_amnezia_node; read -rp "Нажмите Enter для продолжения...";;
+                4) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -909,10 +1028,44 @@ main_menu() {
 
             echo -e "  ${BOLD}[1]${NC} 📋 Показать данные подключения (команда для Origin)"
             echo -e "  ${BOLD}[2]${NC} 📊 Статус туннеля и сетевой трафик"
-            echo -e "  ${BOLD}[3]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
-            echo -e "  ${BOLD}[4]${NC} 🩺 Комплексная самодиагностика (Doctor)"
-            echo -e "  ${BOLD}[5]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[6]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[3]${NC} ⚡ Добавить AmneziaWG на этот сервер (Режим Dual)"
+            echo -e "  ${BOLD}[4]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[5]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[7]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[8]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[9]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[0]${NC} ❌ Выход"
+            echo ""
+            read -rp "Выберите действие [0-9]: " choice
+
+            case "$choice" in
+                1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
+                2) show_status; read -rp "Нажмите Enter для продолжения...";;
+                3) install_amnezia_node; read -rp "Нажмите Enter для продолжения...";;
+                4) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                5) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                6) update_node; read -rp "Нажмите Enter для продолжения...";;
+                7) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                8) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
+                *) warn "Неверный выбор."; sleep 1;;
+            esac
+
+        elif [[ "$status" == "awg" ]]; then
+            local a_url
+            a_url="$(get_state_val "awg_api_url" "-")"
+
+            echo -e "  Статус текущего сервера: ${BOLD}${GREEN}⚡ AMNEZIAWG (Зарубежный выход)${NC}"
+            echo -e "  API URL: ${CYAN}${a_url}${NC}\n"
+
+            echo -e "  ${BOLD}[1]${NC} 🔑 Показать данные для Telegram-бота (/admin)"
+            echo -e "  ${BOLD}[2]${NC} 📊 Статус узла и активные клиенты"
+            echo -e "  ${BOLD}[3]${NC} 🛡️  Добавить Relay на этот сервер (Режим Dual)"
+            echo -e "  ${BOLD}[4]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[5]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
             echo -e "  ${BOLD}[7]${NC} ⚠️ Сбросить / переустановить узел"
             echo -e "  ${BOLD}[8]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
@@ -920,14 +1073,49 @@ main_menu() {
             read -rp "Выберите действие [0-8]: " choice
 
             case "$choice" in
-                1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
+                1) show_amnezia_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
                 2) show_status; read -rp "Нажмите Enter для продолжения...";;
-                3) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
-                4) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                5) update_node; read -rp "Нажмите Enter для продолжения...";;
-                6) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                3) install_xray_relay_node; read -rp "Нажмите Enter для продолжения...";;
+                4) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                5) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                6) update_node; read -rp "Нажмите Enter для продолжения...";;
                 7) reset_node; read -rp "Нажмите Enter для продолжения...";;
                 8) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
+                *) warn "Неверный выбор."; sleep 1;;
+            esac
+
+        elif [[ "$status" == "dual" ]]; then
+            local r_port a_url
+            r_port="$(get_state_val "relay_port" "10443")"
+            a_url="$(get_state_val "awg_api_url" "-")"
+
+            echo -e "  Статус текущего сервера: ${BOLD}${GREEN}⚡🛡️ DUAL (Relay + AmneziaWG)${NC}"
+            echo -e "  Relay Port: ${CYAN}${r_port}${NC}  |  Amnezia API: ${CYAN}${a_url}${NC}\n"
+
+            echo -e "  ${BOLD}[1]${NC} 📋 Показать данные подключения Relay (для Origin)"
+            echo -e "  ${BOLD}[2]${NC} 🔑 Показать данные AmneziaWG для Telegram-бота (/admin)"
+            echo -e "  ${BOLD}[3]${NC} 📊 Статус всех служб и сетевой трафик"
+            echo -e "  ${BOLD}[4]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[5]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[7]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[8]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[9]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[0]${NC} ❌ Выход"
+            echo ""
+            read -rp "Выберите действие [0-9]: " choice
+
+            case "$choice" in
+                1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
+                2) show_amnezia_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
+                3) show_status; read -rp "Нажмите Enter для продолжения...";;
+                4) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                5) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                6) update_node; read -rp "Нажмите Enter для продолжения...";;
+                7) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                8) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -945,8 +1133,8 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 case "${2:-}" in
                     origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}" "${9:-}" ;;
                     relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-www.google.com}" ;;
-                    amnezia) install_amnezia_node ;;
-                    *) error "Неизвестный тип установки: $2. Доступно: origin, relay, amnezia" ;;
+                    amnezia|awg) install_amnezia_node "${3:-}" "${4:-}" ;;
+                    *) error "Неизвестный тип установки: $2. Доступно: origin, relay, amnezia, awg" ;;
                 esac
                 ;;
             relay)
@@ -956,6 +1144,29 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                     rename) rename_relay_node "${3:-}" "${4:-}" ;;
                     list) list_relays ;;
                     *) manage_relays_menu ;;
+                esac
+                ;;
+            amnezia|awg)
+                case "${2:-}" in
+                    install|setup) install_amnezia_node "${3:-}" "${4:-}" ;;
+                    status) show_amnezia_status ;;
+                    creds|bot) show_amnezia_bot_credentials ;;
+                    backup) backup_amnezia_node "${3:-}" ;;
+                    restore) restore_amnezia_node "${3:-}" ;;
+                    uninstall|remove) uninstall_amnezia_component ;;
+                    *) install_amnezia_node "${2:-}" "${3:-}" ;;
+                esac
+                ;;
+            backup)
+                case "${2:-}" in
+                    amnezia|awg) backup_amnezia_node "${3:-}" ;;
+                    *) backup_amnezia_node "${2:-}" ;;
+                esac
+                ;;
+            restore)
+                case "${2:-}" in
+                    amnezia|awg) restore_amnezia_node "${3:-}" ;;
+                    *) restore_amnezia_node "${2:-}" ;;
                 esac
                 ;;
             limit|traffic)
@@ -976,7 +1187,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                         role="$(get_state_val "role")"
                         if [[ "$role" == "origin" ]]; then
                             heal_and_update_origin_config
-                        elif [[ "$role" == "relay" ]]; then
+                        elif [[ "$role" == "relay" || "$role" == "dual" ]]; then
                             heal_and_update_relay_config
                         else
                             error "Узел не настроен."

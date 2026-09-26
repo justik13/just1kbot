@@ -22,13 +22,19 @@ _LOCAL_HOSTNAMES = {
 
 
 def _allow_local_http() -> bool:
-    from config.settings import get_settings
-    return get_settings().ALLOW_LOCAL_HTTP
+    try:
+        from config.settings import get_settings
+        return get_settings().ALLOW_LOCAL_HTTP
+    except Exception:
+        return False
 
 
 def _allow_local_https() -> bool:
-    from config.settings import get_settings
-    return get_settings().ALLOW_LOCAL_HTTPS
+    try:
+        from config.settings import get_settings
+        return get_settings().ALLOW_LOCAL_HTTPS
+    except Exception:
+        return False
 
 
 def allow_local_networks() -> bool:

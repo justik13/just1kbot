@@ -157,6 +157,11 @@ jobs:
           python -m pip install -r scripts/xray_api/requirements.txt -r scripts/xray_api/requirements-dev.txt
           (cd scripts/xray_api && pytest -v)
 
+      - name: Run amnezia-api microservice tests
+        run: |
+          python -m pip install -r scripts/amnezia_api/requirements.txt -r scripts/amnezia_api/requirements-dev.txt
+          (cd scripts/amnezia_api && pytest -v)
+
       - name: Audit locked dependencies for known CVEs
         run: |
           python -m pip install pip-audit==2.10.1
