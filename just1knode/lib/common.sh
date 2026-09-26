@@ -78,6 +78,17 @@ install_base_deps() {
     apt-get install -y -qq curl wget unzip jq python3 python3-pip python3-venv ufw openssl ca-certificates
 }
 
+install_nginx_if_missing() {
+    if ! command -v nginx >/dev/null 2>&1; then
+        log "Установка Nginx и Certbot..."
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get install -y -qq nginx certbot python3-certbot-nginx ca-certificates
+        systemctl enable nginx 2>/dev/null || true
+        systemctl start nginx 2>/dev/null || true
+    fi
+}
+
 # Безопасная настройка UFW с детекцией SSH
 configure_safe_ufw() {
     local ports=("$@")
