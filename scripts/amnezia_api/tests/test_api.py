@@ -473,7 +473,7 @@ async def test_server_backup_export_and_import(monkeypatch):
     async def mock_load_table():
         return list(current_table)
 
-    async def mock_get_psk():
+    async def mock_get_psk(*args, **kwargs):
         return current_psk
 
     saved_files = {}
@@ -782,6 +782,142 @@ async def test_sync_kernel_peer_add_without_psk(monkeypatch):
     sh_cmd = captured_commands[0][2]
     assert "preshared-key" not in sh_cmd
     assert "allowed-ips '10.8.1.5/32'" in sh_cmd
+
+
+def test_import_backup_upstream_kyoresuas_v1_format(mock_awg_env):
+    """Verify POST /server/backup correctly restores upstream kyoresuas wire format (wgConfig, clients, presharedKey)."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+
+    upstream_payload = {
+        "generatedAt": "2026-09-26T12:00:00Z",
+        "serverId": "upstream-node",
+        "protocols": ["amneziawg2"],
+        "amneziaWg2": {
+            "wgConfig": SAMPLE_AWG0_CONF,
+            "clients": [
+                {
+                    "clientId": "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o=",
+                    "clientName": "upstream_peer",
+                    "status": "active",
+                }
+            ],
+            "presharedKey": "PGh2rNsBmWVJC7qpa3fZ1dwB6tLjBUVKsxSZK6pMQRY=",
+        },
+    }
+
+    resp = client.post("/server/backup", json=upstream_payload, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    assert resp.json()["kernel_synced"] is True
+
+    # Verify GET /server/backup provides upstream compatible fields
+    get_resp = client.get("/server/backup", headers=headers)
+    assert get_resp.status_code == 200
+    b_data = get_resp.json()
+    assert "amneziaWg2" in b_data
+    assert b_data["amneziaWg2"]["wgConfig"] == SAMPLE_AWG0_CONF
+    assert len(b_data["amneziaWg2"]["clients"]) == 1
+
+
+def test_import_backup_rolls_back_original_files_on_syncconf_failure(mock_awg_env, monkeypatch):
+    """Verify POST /server/backup rolls back old configuration if syncconf fails."""
+    # Ensure original config has a known marker
+    conf_file = mock_awg_env["conf_file"]
+    original_text = conf_file.read_text(encoding="utf-8")
+    assert "10.8.1.1/24" in original_text
+
+    monkeypatch.setattr(amnezia_app, "syncconf_container", AsyncMock(return_value=False))
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+
+    new_conf = SAMPLE_AWG0_CONF.replace("10.8.1.1/24", "10.9.9.1/24")
+    import_payload = {
+        "conf_content": new_conf,
+        "clients_table": [],
+    }
+
+    resp = client.post("/server/backup", json=import_payload, headers=headers)
+    assert resp.status_code == 500
+    assert "rolled back" in resp.json()["detail"].lower()
+
+    # Conf file on disk must be restored to original_text
+    current_text = conf_file.read_text(encoding="utf-8")
+    assert "10.8.1.1/24" in current_text
+    assert "10.9.9.1/24" not in current_text
+
+
+def test_get_server_backup_is_read_only_does_not_create_psk(tmp_path, monkeypatch):
+    """Verify GET /server/backup does not generate or persist PSK if none existed."""
+    awg_dir = tmp_path / "awg_no_psk"
+    awg_dir.mkdir()
+    conf_file = awg_dir / "awg0.conf"
+    conf_file.write_text(SAMPLE_AWG0_CONF, encoding="utf-8")
+    clients_file = awg_dir / "clientsTable"
+    clients_file.write_text("[]", encoding="utf-8")
+
+    psk_file = awg_dir / "wireguard_psk.key"
+    assert not psk_file.exists()
+
+    monkeypatch.setattr(amnezia_app, "API_KEY", "secret-test-api-key")
+    monkeypatch.setattr(amnezia_app, "AWG_DIR", str(awg_dir))
+    monkeypatch.setattr(amnezia_app, "SERVER_PSK_PATH", str(psk_file))
+
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+
+    resp = client.get("/server/backup", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["server_psk"] == ""
+    # PSK file must NOT be created on disk
+    assert not psk_file.exists()
+
+
+def test_create_and_patch_client_unsupported_protocol_rejects_422(mock_awg_env):
+    """Verify unsupported protocols return HTTP 422 Unprocessable Entity."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+
+    # 1. create_client with unsupported protocol
+    resp1 = client.post(
+        "/clients",
+        json={"clientName": "bad_proto", "protocol": "xray"},
+        headers=headers,
+    )
+    assert resp1.status_code == 422
+    assert "unsupported protocol" in resp1.json()["detail"].lower()
+
+    # 2. patch_client with unsupported protocol
+    peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
+    resp2 = client.patch(
+        f"/clients/{peer_pub}",
+        json={"clientId": peer_pub, "protocol": "openvpn"},
+        headers=headers,
+    )
+    assert resp2.status_code == 422
+    assert "unsupported protocol" in resp2.json()["detail"].lower()
+
+
+def test_delete_client_fails_closed_and_rolls_back_on_kernel_sync_failure(mock_awg_env, monkeypatch):
+    """Verify DELETE /clients rolls back awg0.conf and clientsTable if kernel sync fails."""
+    monkeypatch.setattr(amnezia_app, "sync_kernel_peer_remove", AsyncMock(return_value=False))
+    monkeypatch.setattr(amnezia_app, "syncconf_container", AsyncMock(return_value=False))
+
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+    peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
+
+    conf_file = mock_awg_env["conf_file"]
+    original_conf = conf_file.read_text(encoding="utf-8")
+
+    resp = client.delete(f"/clients/{peer_pub}", headers=headers)
+    assert resp.status_code == 500
+
+    # Peer must still exist on disk due to rollback
+    current_conf = conf_file.read_text(encoding="utf-8")
+    assert peer_pub in current_conf
+    assert current_conf == original_conf
+
 
 
 

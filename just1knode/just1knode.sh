@@ -263,8 +263,8 @@ show_relay_credentials() {
     title "ДАННЫЕ ПОДКЛЮЧЕНИЯ RELAY (КОМАНДА ДЛЯ ORIGIN)"
     local role
     role="$(get_state_val "role")"
-    if [[ "$role" != "relay" ]]; then
-        warn "Данные доступны только на сервере с ролью Relay."
+    if [[ "$role" != "relay" && "$role" != "dual" ]]; then
+        warn "Данные доступны только на сервере с ролью Relay или Dual."
         return
     fi
 
@@ -1186,7 +1186,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                         role="$(get_state_val "role")"
                         if [[ "$role" == "origin" ]]; then
                             heal_and_update_origin_config
-                        elif [[ "$role" == "relay" ]]; then
+                        elif [[ "$role" == "relay" || "$role" == "dual" ]]; then
                             heal_and_update_relay_config
                         else
                             error "Узел не настроен."

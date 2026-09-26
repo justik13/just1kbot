@@ -194,12 +194,54 @@ class ClientPatchRequest(BaseModel):
     protocol: str = "amneziawg2"
 
 
+SUPPORTED_PROTOCOLS = {"amneziawg2", "amneziawg3", "awg", "amneziawg"}
+
+
 class ServerBackupImportRequest(BaseModel):
     conf_content: str | None = None
     clients_table: list[dict[str, Any]] | None = None
     server_psk: str | None = None
     amnezia: dict[str, Any] | None = None
+    amneziaWg: dict[str, Any] | None = None
+    amneziaWg2: dict[str, Any] | None = None
     amneziaWg3: dict[str, Any] | None = None
+
+
+def normalize_backup_payload(
+    req: ServerBackupImportRequest,
+) -> tuple[str | None, list[dict[str, Any]] | None, str | None]:
+    """Normalize backup payload across native flat format and upstream kyoresuas/amnezia-api wire formats.
+
+    Supports wire-format keys:
+    - Config: conf_content, wgConfig, config
+    - Clients: clients_table, clientsTable, clients
+    - PSK: server_psk, presharedKey, psk
+    Across nested blocks (amneziaWg2, amneziaWg, amneziaWg3, amnezia) or top-level.
+    """
+    conf_content = req.conf_content
+    clients_table = req.clients_table
+    psk = req.server_psk
+
+    candidates = [
+        req.amneziaWg2,
+        req.amneziaWg,
+        req.amneziaWg3,
+        req.amnezia,
+    ]
+
+    for d in candidates:
+        if not isinstance(d, dict):
+            continue
+        if not conf_content:
+            conf_content = d.get("wgConfig") or d.get("config") or d.get("conf_content")
+        if clients_table is None:
+            c = d.get("clients") or d.get("clientsTable") or d.get("clients_table")
+            if isinstance(c, list):
+                clients_table = c
+        if not psk:
+            psk = d.get("presharedKey") or d.get("server_psk") or d.get("psk")
+
+    return conf_content, clients_table, psk
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +481,7 @@ async def get_server_public_key_async(container: str, interface_params: dict[str
     return ""
 
 
-async def get_server_psk_async() -> str:
+async def get_server_psk_async(create_if_missing: bool = True) -> str:
     psk_path = get_server_psk_path()
     psk = (await read_container_file_async(psk_path)).strip()
     if psk:
@@ -451,6 +493,9 @@ async def get_server_psk_async() -> str:
         psk = (await read_container_file_async(legacy_psk_path)).strip()
         if psk:
             return psk
+
+    if not create_if_missing:
+        return ""
 
     new_psk = generate_psk()
     await write_container_file_async(psk_path, new_psk + "\n")
@@ -933,7 +978,7 @@ async def get_server_backup():
         conf_path = get_config_path(container)
         conf_content = await read_container_file_async(conf_path)
         clients_table = await load_clients_table_async()
-        psk = await get_server_psk_async()
+        psk = await get_server_psk_async(create_if_missing=False)
 
         parsed = parse_awg_conf(conf_content)
         protocols = (
@@ -941,6 +986,16 @@ async def get_server_backup():
             if is_awg3_detected(parsed.get("interface", {}))
             else ["amneziawg2"]
         )
+        server_pub = await get_server_public_key_async(container, parsed.get("interface", {}))
+
+        upstream_block = {
+            "config": conf_content,
+            "wgConfig": conf_content,
+            "clientsTable": clients_table,
+            "clients": clients_table,
+            "presharedKey": psk,
+            "serverPublicKey": server_pub,
+        }
 
         return {
             "version": 1,
@@ -951,38 +1006,32 @@ async def get_server_backup():
             "conf_content": conf_content,
             "clients_table": clients_table,
             "server_psk": psk,
-            "amnezia": {
-                "config": conf_content,
-                "clientsTable": clients_table,
-            },
+            "amnezia": upstream_block,
+            "amneziaWg": upstream_block,
+            "amneziaWg2": upstream_block,
         }
 
 
 @app.post("/server/backup", dependencies=[Depends(verify_api_key)])
 async def import_server_backup(req: ServerBackupImportRequest):
-    """Restore server state from backup and apply to kernel runtime."""
+    """Restore server state from backup and apply to kernel runtime with transactional rollback."""
     async with state_lock:
         container = get_target_container()
         conf_path = get_config_path(container)
 
-        conf_content = req.conf_content
-        clients_table = req.clients_table
-        psk = req.server_psk
-
-        if not conf_content and req.amnezia:
-            conf_content = req.amnezia.get("config") or req.amnezia.get("conf_content")
-            if clients_table is None:
-                clients_table = req.amnezia.get("clientsTable") or req.amnezia.get("clients_table")
-        if not conf_content and req.amneziaWg3:
-            conf_content = req.amneziaWg3.get("config") or req.amneziaWg3.get("conf_content")
-            if clients_table is None:
-                clients_table = req.amneziaWg3.get("clientsTable") or req.amneziaWg3.get("clients_table")
+        conf_content, clients_table, psk = normalize_backup_payload(req)
 
         if not conf_content or "[Interface]" not in conf_content:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid backup: missing valid WireGuard/AmneziaWG [Interface] configuration",
             )
+
+        # Snapshot existing state before mutations for rollback guarantee
+        old_conf = await read_container_file_async(conf_path)
+        old_table = await load_clients_table_async()
+        old_psk = await get_server_psk_async(create_if_missing=False)
+        psk_path = SERVER_PSK_PATH or f"{AWG_DIR}/wireguard_psk.key"
 
         saved_conf = await write_container_file_async(conf_path, conf_content)
         if not saved_conf:
@@ -994,15 +1043,22 @@ async def import_server_backup(req: ServerBackupImportRequest):
         if clients_table is not None:
             saved_table = await save_clients_table_async(clients_table)
             if not saved_table:
+                # Rollback conf file
+                if old_conf:
+                    await write_container_file_async(conf_path, old_conf)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to write restored clients table to container",
                 )
 
         if psk:
-            psk_path = SERVER_PSK_PATH or f"{AWG_DIR}/wireguard_psk.key"
             saved_psk = await write_container_file_async(psk_path, psk.strip() + "\n")
             if not saved_psk:
+                # Rollback conf and table
+                if old_conf:
+                    await write_container_file_async(conf_path, old_conf)
+                if old_table is not None:
+                    await save_clients_table_async(old_table)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to write restored server PSK to container",
@@ -1010,10 +1066,18 @@ async def import_server_backup(req: ServerBackupImportRequest):
 
         sync_ok = await syncconf_container(container, conf_path)
         if not sync_ok:
-            logger.error("Failed to sync kernel configuration during backup import on container %s", container)
+            logger.error("Failed to sync kernel configuration during backup import on container %s, rolling back", container)
+            # Full rollback of files and kernel state
+            if old_conf:
+                await write_container_file_async(conf_path, old_conf)
+            if old_table is not None:
+                await save_clients_table_async(old_table)
+            if old_psk:
+                await write_container_file_async(psk_path, old_psk.strip() + "\n")
+            await syncconf_container(container, conf_path)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to sync running kernel state with restored configuration",
+                detail="Failed to sync running kernel state with restored configuration (rolled back)",
             )
 
         logger.info(
@@ -1258,6 +1322,12 @@ async def get_clients(skip: int = 0, limit: int | None = None):
 @app.post("/clients", dependencies=[Depends(verify_api_key)])
 async def create_client(req: ClientCreateRequest):
     """Create a new client with native X25519 key generation and non-destructive sync."""
+    if req.protocol and req.protocol.strip().lower() not in SUPPORTED_PROTOCOLS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3",
+        )
+
     async with state_lock:
         container = get_target_container()
         conf_path = get_config_path(container)
@@ -1435,8 +1505,18 @@ async def _do_delete_client(client_id: str):
             )
 
         # Remove from active kernel runtime
-        await sync_kernel_peer_remove(target_pub, container)
-        await syncconf_container(container, conf_path)
+        sync_ok = await sync_kernel_peer_remove(target_pub, container)
+        if not sync_ok:
+            sync_ok = await syncconf_container(container, conf_path)
+
+        if not sync_ok:
+            logger.error("Failed to remove peer %s from kernel runtime, rolling back file changes", target_pub)
+            await write_container_file_async(conf_path, conf_content)
+            await save_clients_table_async(clients_table)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to remove peer from kernel runtime",
+            )
 
         logger.info("Deleted peer %s", target_pub)
         return {"message": "Клиент успешно удален", "status": "ok"}
@@ -1455,6 +1535,12 @@ async def patch_client_by_path(client_id: str, req: ClientPatchRequest):
 
 
 async def _do_patch_client(client_id: str, req: ClientPatchRequest):
+    if req.protocol and req.protocol.strip().lower() not in SUPPORTED_PROTOCOLS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3",
+        )
+
     async with state_lock:
         container = get_target_container()
         conf_path = get_config_path(container)
@@ -1495,7 +1581,7 @@ async def _do_patch_client(client_id: str, req: ClientPatchRequest):
                             break
 
                 # 1. Remove from active kernel runtime
-                await sync_kernel_peer_remove(target_pub, container)
+                sync_ok = await sync_kernel_peer_remove(target_pub, container)
                 # 2. Non-destructively remove [Peer] block from awg0.conf so it does not reload on reboot
                 new_conf_text, removed = remove_peer_from_conf_text(conf_content, target_pub)
                 if removed:
@@ -1505,8 +1591,16 @@ async def _do_patch_client(client_id: str, req: ClientPatchRequest):
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Failed to update configuration file while disabling peer",
                         )
-                    conf_content = new_conf_text
-                await syncconf_container(container, conf_path)
+                if not sync_ok:
+                    sync_ok = await syncconf_container(container, conf_path)
+
+                if not sync_ok:
+                    logger.error("Failed to disable peer %s in kernel runtime, rolling back file changes", target_pub)
+                    await write_container_file_async(conf_path, conf_content)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to disable peer in kernel runtime",
+                    )
             elif new_status == "active" and target_pub:
                 # Find peer IP and PSK from conf or table
                 peer_ip = target.get("clientIp", "")
@@ -1538,10 +1632,18 @@ async def _do_patch_client(client_id: str, req: ClientPatchRequest):
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Failed to update configuration file while re-enabling peer",
                         )
-                    conf_content = new_conf_text
 
-                await sync_kernel_peer_add(target_pub, peer_ip, peer_psk, container)
-                await syncconf_container(container, conf_path)
+                sync_ok = await sync_kernel_peer_add(target_pub, peer_ip, peer_psk, container)
+                if not sync_ok:
+                    sync_ok = await syncconf_container(container, conf_path)
+
+                if not sync_ok:
+                    logger.error("Failed to re-enable peer %s in kernel runtime, rolling back file changes", target_pub)
+                    await write_container_file_async(conf_path, conf_content)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to re-enable peer in kernel runtime",
+                    )
 
         if "expiresAt" in req.model_fields_set:
             target["expiresAt"] = req.expiresAt
@@ -1551,6 +1653,8 @@ async def _do_patch_client(client_id: str, req: ClientPatchRequest):
             target["updatedAt"] = int(time.time())
             saved = await save_clients_table_async(clients_table)
             if not saved:
+                await write_container_file_async(conf_path, conf_content)
+                await syncconf_container(container, conf_path)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to save clients table",

@@ -59,7 +59,7 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("stop_grace_period: 30s", compose)
         self.assertIn('shm_size: "256m"', compose)
 
-    def test_caddy_ingress_routes_are_strictly_bounded_and_fail_closed_404(self):
+    def test_caddy_ingress_routes_serve_camouflage_and_restrict_backend_proxy(self):
         root = Path(__file__).parents[1]
         for fname in ("Caddyfile", "Caddyfile.ci"):
             content = (root / fname).read_text(encoding="utf-8")
