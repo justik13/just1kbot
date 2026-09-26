@@ -442,6 +442,20 @@ class OrderService:
                 paid_amount_rub=result.amount_rub,
             )
 
+        if result.is_canceled:
+            if order.status == "pending":
+                order.status = "canceled"
+                order_meta = dict(order.metadata_ or {})
+                order_meta["cancellation_reason"] = "gateway_canceled"
+                order.metadata_ = order_meta
+                await session.flush()
+                logger.info(
+                    "Order %s marked canceled via gateway webhook (external_id=%s)",
+                    order.id,
+                    result.external_id,
+                )
+            return order
+
         if result.is_refunded:
             if order.status not in ("paid", "refunded"):
                 logger.warning(
@@ -524,5 +538,9 @@ class OrderService:
                 )
             await session.flush()
             return order
-
-        return None
+        logger.info(
+            "Webhook event %s for order %s has no actionable transition, acknowledging",
+            result.event_type,
+            order.id,
+        )
+        return order

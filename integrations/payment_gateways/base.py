@@ -20,6 +20,7 @@ class WebhookResult:
     amount_rub: Decimal | None = None
     event_type: str = ""
     related_external_id: str | None = None
+    is_canceled: bool = False
 
     @property
     def payment_id(self) -> str | None:

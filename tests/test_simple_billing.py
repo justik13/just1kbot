@@ -95,6 +95,23 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.related_external_id, "ext-pay-999")
         self.assertEqual(result.payment_id, "ext-pay-999")
 
+    async def test_parse_webhook_payment_canceled(self):
+        payload = {
+            "type": "notification",
+            "event": "payment.canceled",
+            "object": {
+                "id": "ext-pay-000",
+                "status": "canceled",
+                "metadata": {"order_id": "ord-888"},
+            },
+        }
+        result = await self.gateway.parse_webhook(payload)
+        self.assertFalse(result.is_paid)
+        self.assertFalse(result.is_refunded)
+        self.assertTrue(result.is_canceled)
+        self.assertEqual(result.order_id, "ord-888")
+        self.assertEqual(result.external_id, "ext-pay-000")
+
     @patch("integrations.payment_gateways.yookassa.YooKassaService.get_payment_result")
     async def test_check_payment_status(self, mock_get):
         mock_get.return_value = YooKassaResult(
@@ -117,6 +134,7 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.order_id, "ord-1")
         self.assertTrue(res.is_paid)
         self.assertFalse(res.is_refunded)
+        self.assertFalse(res.is_canceled)
         self.assertEqual(res.external_id, "ext-1")
         self.assertIsNone(res.amount_rub)
         self.assertEqual(res.event_type, "")
@@ -439,6 +457,103 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.status, "pending")
         mock_revoke.assert_not_called()
         mock_refund_debit.assert_not_called()
+
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_payment_canceled_marks_pending_order_canceled(
+        self, mock_gw_factory
+    ):
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=False,
+            is_canceled=True,
+            external_id="ext-pay-canceled",
+        )
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="pending",
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        result = await OrderService.process_webhook_event(session, {"some": "payload"})
+
+        self.assertIsNotNone(result)
+        self.assertEqual(order.status, "canceled")
+        self.assertEqual((order.metadata_ or {}).get("cancellation_reason"), "gateway_canceled")
+        session.flush.assert_called()
+
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_payment_canceled_leaves_paid_order_intact(
+        self, mock_gw_factory
+    ):
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=False,
+            is_canceled=True,
+            external_id="ext-pay-canceled-late",
+        )
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="paid",
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        result = await OrderService.process_webhook_event(session, {"some": "payload"})
+
+        self.assertIsNotNone(result)
+        self.assertEqual(order.status, "paid")
+        self.assertNotIn("cancellation_reason", order.metadata_ or {})
+
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_unactionable_event_acknowledges_order(
+        self, mock_gw_factory
+    ):
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=False,
+            is_canceled=False,
+            external_id="ext-pay-waiting",
+            event_type="payment.waiting_for_capture",
+        )
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="pending",
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        result = await OrderService.process_webhook_event(session, {"some": "payload"})
+
+        self.assertEqual(result, order)
+        self.assertEqual(order.status, "pending")
 
 
 class TestOrderKeyboards(unittest.TestCase):
@@ -2190,6 +2305,55 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             response = await yookassa_webhook_handler(request)
             self.assertEqual(response.status, 503)
             self.assertIn("pending", response.text.lower())
+
+    @patch("bot.handlers.webhook.session_scope")
+    @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")
+    @patch("bot.handlers.webhook._is_yookassa_ip", return_value=True)
+    async def test_yookassa_webhook_payment_canceled_returns_200_ok(
+        self, mock_ip, mock_real, mock_scope
+    ):
+        """Verify payment.canceled webhook marks inbox succeeded and returns 200 OK."""
+        from bot.handlers.webhook import yookassa_webhook_handler
+        from config.enums import WebhookInboxStatus
+        from database.models import WebhookInbox
+
+        session = AsyncMock(spec=AsyncSession)
+        pending_inbox = WebhookInbox(
+            id=78,
+            provider="yookassa",
+            status=WebhookInboxStatus.PENDING.value,
+        )
+        session.scalar.return_value = pending_inbox
+        mock_scope.return_value.__aenter__.return_value = session
+
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="canceled",
+            metadata_={"cancellation_reason": "gateway_canceled"},
+        )
+
+        request = AsyncMock()
+        request.content_length = 200
+        request.app = {"bot": AsyncMock()}
+        request.json.return_value = {
+            "type": "notification",
+            "event": "payment.canceled",
+            "object": {
+                "id": "pay-canceled-456",
+                "status": "canceled",
+                "metadata": {"order_id": str(order_uuid)},
+            },
+        }
+
+        with patch("services.order_service.OrderService.process_webhook_event", return_value=order) as mock_process:
+            response = await yookassa_webhook_handler(request)
+            self.assertEqual(response.status, 200)
+            mock_process.assert_called_once()
+            self.assertEqual(pending_inbox.status, WebhookInboxStatus.SUCCEEDED.value)
 
     async def test_audit_invariants_extra_traffic_scales_with_devices(self):
         """Verify assert_inv_4_subscription_traffic_pools allows up to device_limit * 150 GiB extra traffic."""
