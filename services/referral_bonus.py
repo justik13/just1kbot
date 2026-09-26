@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.enums import AdminAuditAction
@@ -368,27 +368,13 @@ async def reverse_referral_bonus_for_topup(
 
     for credit in credits:
         idempotency_key = f"referral-bonus-reversal:{op_id}:{credit.user_id}{ref_suffix}"
-        existing_conds = [
-            AccountLedgerEntry.idempotency_key == idempotency_key,
-            AccountLedgerEntry.idempotency_key
-            == f"referral-bonus-reversal:topup:{op_id}:{credit.user_id}{ref_suffix}",
-            AccountLedgerEntry.idempotency_key
-            == f"referral-bonus-reversal:first-topup-welcome:{op_id}:{credit.user_id}{ref_suffix}",
-        ]
-        if not refund_id:
-            orig_filter = json.dumps({"original_credit_id": credit.id})
-            existing_conds.append(
-                text("metadata @> CAST(:orig_filter AS jsonb)").bindparams(
-                    orig_filter=orig_filter
-                )
-            )
 
         existing = await session.scalar(
             select(AccountLedgerEntry).where(
                 AccountLedgerEntry.user_id == credit.user_id,
                 AccountLedgerEntry.entry_type == "admin_adjustment",
                 AccountLedgerEntry.amount < 0,
-                or_(*existing_conds),
+                AccountLedgerEntry.idempotency_key == idempotency_key,
             )
         )
         if (
