@@ -1280,6 +1280,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             order_id=order_uuid,
             refund_amount=Decimal("80.00"),
             original_topup_amount=Decimal("200.00"),
+            total_refunded_amount=Decimal("80.00"),
             refund_id="ext-pay-888",
         )
         mock_revoke.assert_not_called()
@@ -1483,6 +1484,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             order_id=order_uuid,
             refund_amount=Decimal("80.00"),
             original_topup_amount=Decimal("200.00"),
+            total_refunded_amount=Decimal("80.00"),
             refund_id="refund-part-1",
         )
         mock_revoke.assert_not_called()
@@ -1521,6 +1523,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             order_id=order_uuid,
             refund_amount=Decimal("120.00"),
             original_topup_amount=Decimal("200.00"),
+            total_refunded_amount=Decimal("200.00"),
             refund_id="refund-part-2",
         )
         mock_revoke.assert_called_once_with(session, order)
@@ -1646,6 +1649,79 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
                     refund_id=invalid_refund_id,  # type: ignore
                 )
             self.assertIn("refund_id must be a non-empty string", str(cm.exception))
+
+    @patch("database.repositories.account_ledger_repo._insert_or_get_entry")
+    async def test_create_order_refund_debit_quantizes_fractional_kopecks(self, mock_insert):
+        from database.repositories.account_ledger_repo import create_order_refund_debit
+
+        session = AsyncMock(spec=AsyncSession)
+        mock_entry = MagicMock()
+        mock_insert.return_value = (mock_entry, True)
+
+        order_uuid = uuid.uuid4()
+        # 5.50 RUB should quantize to 6 RUB on ledger
+        entry, created = await create_order_refund_debit(
+            session,
+            user_id=42,
+            amount_rub=Decimal("5.50"),
+            order_id=order_uuid,
+            refund_id="yoo-ref-kopecks",
+        )
+        self.assertTrue(created)
+        values = mock_insert.call_args[1]["values"]
+        self.assertEqual(values["amount"], Decimal("-6"))
+
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
+    @patch("services.order_service.FulfillmentService.revoke_order")
+    @patch("services.order_service.create_order_refund_debit")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_fractional_kopecks_refund(
+        self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
+    ):
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="paid",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            amount_rub=Decimal("5.50"),
+            external_id="refund-kopecks-1",
+        )
+        res = await OrderService.process_webhook_event(session, {"ref": "kopecks"})
+        self.assertIsNotNone(res)
+        self.assertEqual(order.status, "paid")
+        self.assertEqual(order.metadata_["refunded_amount_rub"], "5.50")
+        mock_refund_debit.assert_called_once_with(
+            session,
+            user_id=10,
+            amount_rub=Decimal("5.50"),
+            order_id=order_uuid,
+            refund_id="refund-kopecks-1",
+            metadata={"source": "yookassa_refund"},
+        )
+        mock_rev_bonus.assert_called_once_with(
+            session,
+            order_id=order_uuid,
+            refund_amount=Decimal("5.50"),
+            original_topup_amount=Decimal("1000.00") if False else Decimal("100.00"),
+            total_refunded_amount=Decimal("5.50"),
+            refund_id="refund-kopecks-1",
+        )
+        mock_revoke.assert_not_called()
 
     @patch("bot.handlers.webhook.session_scope")
     @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")

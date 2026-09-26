@@ -317,6 +317,7 @@ async def reverse_referral_bonus_for_topup(
     order_id: str | uuid.UUID | None = None,
     refund_amount: Decimal | None = None,
     original_topup_amount: Decimal | None = None,
+    total_refunded_amount: Decimal | None = None,
     refund_id: str | None = None,
 ) -> Decimal:
     """Debit/reverse the referral bonus previously credited for a top-up if the top-up is refunded."""
@@ -432,10 +433,19 @@ async def reverse_referral_bonus_for_topup(
             )
             continue
 
-        if refund_amount is not None and original_topup_amount and original_topup_amount > 0:
-            ratio = Decimal(str(refund_amount)) / Decimal(str(original_topup_amount))
-            reversal_val = (Decimal(credit.amount) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-            reversal_val = min(max_can_reverse, reversal_val)
+        # Cumulative calculation prevents rounding abuse across series of partial refunds
+        if total_refunded_amount is not None and original_topup_amount and original_topup_amount > 0:
+            ratio = Decimal(str(total_refunded_amount)) / Decimal(str(original_topup_amount))
+            ratio = min(Decimal(1), max(Decimal(0), ratio))
+            target_cumulative = (Decimal(credit.amount) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            reversal_val = min(max_can_reverse, max(Decimal(0), target_cumulative - already_reversed))
+        elif refund_amount is not None and original_topup_amount and original_topup_amount > 0:
+            bonus_ratio = Decimal(credit.amount) / Decimal(original_topup_amount)
+            implied_prev_refunded = (already_reversed / bonus_ratio) if bonus_ratio > 0 else Decimal(0)
+            eff_total_refunded = implied_prev_refunded + Decimal(str(refund_amount))
+            ratio = min(Decimal(1), max(Decimal(0), eff_total_refunded / Decimal(original_topup_amount)))
+            target_cumulative = (Decimal(credit.amount) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            reversal_val = min(max_can_reverse, max(Decimal(0), target_cumulative - already_reversed))
         elif refund_amount is not None:
             reversal_val = min(max_can_reverse, calculate_referral_bonus(refund_amount))
         else:
@@ -464,6 +474,7 @@ async def reverse_referral_bonus_for_topup(
                 "original_credit_id": credit.id,
                 "refund_id": refund_id,
                 "refund_amount": str(refund_amount) if refund_amount is not None else None,
+                "total_refunded_amount": str(total_refunded_amount) if total_refunded_amount is not None else None,
             },
         )
         session.add(reversal_entry)
@@ -514,11 +525,18 @@ async def get_referral_bonus_balance(
             )
         )
     ).all()
-    fully_reversed_credit_ids: set[int] = set()
+    reversals_by_credit: dict[int, Decimal] = {}
     for reversal in reversal_rows:
         original_credit_id = (reversal.metadata_ or {}).get("original_credit_id")
-        if original_credit_id in credit_ids:
-            fully_reversed_credit_ids.add(int(original_credit_id))
+        if original_credit_id is not None:
+            try:
+                cid = int(original_credit_id)
+                if cid in credit_ids:
+                    reversals_by_credit[cid] = reversals_by_credit.get(cid, Decimal(0)) + abs(
+                        Decimal(str(reversal.amount))
+                    )
+            except (ValueError, TypeError):
+                pass
 
     allocations = (
         await session.execute(
@@ -546,8 +564,6 @@ async def get_referral_bonus_balance(
 
     used_by_credit: dict[int, Decimal] = {}
     for row in allocations:
-        if row.credit_entry_id in fully_reversed_credit_ids:
-            continue
         if row.debit_entry_id in reversed_debits:
             continue
         used_by_credit[row.credit_entry_id] = (
@@ -558,9 +574,8 @@ async def get_referral_bonus_balance(
     remaining = sum(
         max(
             Decimal(0),
-            Decimal(0)
-            if credit.id in fully_reversed_credit_ids
-            else Decimal(credit.amount)
+            Decimal(credit.amount)
+            - reversals_by_credit.get(credit.id, Decimal(0))
             - used_by_credit.get(credit.id, Decimal(0)),
         )
         for credit in credits

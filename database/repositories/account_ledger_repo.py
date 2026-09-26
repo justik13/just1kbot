@@ -310,7 +310,12 @@ async def create_order_refund_debit(
 ) -> tuple[AccountLedgerEntry, bool]:
     if not isinstance(refund_id, str) or not refund_id.strip():
         raise ValueError("refund_id must be a non-empty string")
-    amount = -abs(whole_rubles(amount_rub))
+    from decimal import ROUND_HALF_UP
+
+    quantized_amount = Decimal(str(amount_rub)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    if quantized_amount <= 0:
+        raise ValueError("Refund debit amount must be at least 1 ruble")
+    amount = -abs(whole_rubles(quantized_amount))
     idempotency_key = f"order_refund:{order_id}:{refund_id.strip()}"
     values = {
         "user_id": user_id,

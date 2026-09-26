@@ -501,6 +501,7 @@ class OrderService:
                     order_id=order.id,
                     refund_amount=refund_amount,
                     original_topup_amount=order.amount_rub,
+                    total_refunded_amount=new_total_refunded,
                     refund_id=(result.external_id or "").strip() or None,
                 )
 
