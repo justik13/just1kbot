@@ -606,8 +606,9 @@ reset_node() {
     systemctl stop xray xray-api amnezia-api 2>/dev/null || true
     systemctl disable xray xray-api amnezia-api 2>/dev/null || true
     remove_traffic_watchdog_timer
-    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh 2>/dev/null || true
-    rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api /etc/amnezia-api /etc/ssl/just1k_amnezia 2>/dev/null || true
+    remove_amnezia_abuse_protection 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh 2>/dev/null || true
+    rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api /etc/amnezia-api /opt/amnezia-api /etc/ssl/just1k_amnezia 2>/dev/null || true
     systemctl reload nginx 2>/dev/null || true
     log "Узел успешно сброшен в исходное состояние."
 }
@@ -813,7 +814,7 @@ uninstall_node() {
     if [[ -d "$certbot_dir" ]] && [[ -z "$(ls -A "$certbot_dir" 2>/dev/null)" ]]; then
         rmdir "$certbot_dir" 2>/dev/null || true
     fi
-    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" 2>/dev/null || true
+    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" 2>/dev/null || true
 
     info "8/11. Удаление конфигурации ядра sysctl и восстановление IPv6..."
     local sysctl_ipv6_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"

@@ -135,6 +135,17 @@ remove_amnezia_abuse_protection() {
     fi
 }
 
+deploy_amnezia_certbot_renewal_hook() {
+    local hook_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy"
+    mkdir -p "$hook_dir"
+    cat > "${hook_dir}/restart-amnezia-nginx.sh" <<'EOF'
+#!/bin/bash
+systemctl reload nginx 2>/dev/null || true
+systemctl restart amnezia-api 2>/dev/null || true
+EOF
+    chmod +x "${hook_dir}/restart-amnezia-nginx.sh"
+}
+
 # =============================================================================
 # УСТАНОВКА И НАСТРОЙКА AMNEZIAWG УЗЛА
 # =============================================================================
@@ -242,11 +253,21 @@ install_amnezia_node() {
         fi
     fi
 
+    local legacy_docker_stopped=0
+    rollback_legacy_if_needed() {
+        if [[ $legacy_docker_stopped -eq 1 ]]; then
+            warn "Восстановление и перезапуск исходного Docker-контейнера amnezia-api..."
+            docker start amnezia-api >/dev/null 2>&1 || true
+        fi
+    }
+
     # Остановка контейнера amnezia-api если он запущен в Docker (для освобождения портов 4001 / 8443)
     if command -v docker >/dev/null 2>&1; then
         if docker ps --filter "name=^/amnezia-api$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-api$"; then
             log "Обнаружен работающий Docker-контейнер amnezia-api (kyoresuas). Выполняется безопасная остановка для переключения на нативный сервис..."
-            docker stop amnezia-api >/dev/null 2>&1 || true
+            if docker stop amnezia-api >/dev/null 2>&1; then
+                legacy_docker_stopped=1
+            fi
         fi
     fi
 
@@ -295,6 +316,7 @@ install_amnezia_node() {
         local conflict_proc
         conflict_proc=$(ss -tlnp 2>/dev/null | grep ":${public_port} " || true)
         if ! echo "$conflict_proc" | grep -qE "nginx|amnezia"; then
+            rollback_legacy_if_needed
             error "Порт ${public_port}/tcp уже занят другим процессом на хосте:\n$conflict_proc"
             return 1
         fi
@@ -326,6 +348,7 @@ install_amnezia_node() {
     fi
 
     if [[ ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
+        rollback_legacy_if_needed
         error "Не удалось найти $AMNEZIA_API_DIR/app.py. Проверьте репозиторий."
         return 1
     fi
@@ -335,7 +358,11 @@ install_amnezia_node() {
     if [[ ! -d "$AMNEZIA_API_DIR/venv" ]]; then
         python3 -m venv "$AMNEZIA_API_DIR/venv"
     fi
-    "$AMNEZIA_API_DIR/venv/bin/pip" install --no-cache-dir -r "$AMNEZIA_API_DIR/requirements.txt" --quiet
+    if ! "$AMNEZIA_API_DIR/venv/bin/pip" install --no-cache-dir -r "$AMNEZIA_API_DIR/requirements.txt" --quiet; then
+        rollback_legacy_if_needed
+        error "Не удалось установить зависимости Python для amnezia-api."
+        return 1
+    fi
 
     # 7. Определение API-ключа (приоритет: chosen_api_key -> existing config.env -> legacy amnezia-api .env -> генерация нового)
     local api_key="$chosen_api_key"
@@ -386,6 +413,7 @@ EOF
     done
 
     if [[ $started -ne 1 ]]; then
+        rollback_legacy_if_needed
         error "Сервис amnezia-api не запустился или контейнер недоступен на 127.0.0.1:${AMNEZIA_LOCAL_PORT}. Проверьте: journalctl -u amnezia-api -n 30"
         return 1
     fi
@@ -465,13 +493,17 @@ server {
 }
 EOF
 
+    # Удаление конфликтующих старых симлинков amnezia в sites-enabled
+    rm -f /etc/nginx/sites-enabled/amnezia-api* /etc/nginx/sites-enabled/just1kbot-amnezia* /etc/nginx/sites-enabled/amnezia* 2>/dev/null || true
     mkdir -p /etc/nginx/sites-enabled
     ln -sf "$nginx_conf" /etc/nginx/sites-enabled/just1k-amnezia.conf
     if nginx -t >/dev/null 2>&1; then
         systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
         log "✔ Nginx reverse proxy успешно настроен и перезагружен"
+        deploy_amnezia_certbot_renewal_hook
     else
         rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf "$nginx_conf" 2>/dev/null || true
+        rollback_legacy_if_needed
         error "Ошибка проверки конфигурации Nginx (nginx -t). Установка прервана."
         return 1
     fi
@@ -743,6 +775,7 @@ uninstall_amnezia_component() {
 
     rm -rf "$AMNEZIA_API_DIR" "$AMNEZIA_API_ETC" /etc/ssl/just1k_amnezia 2>/dev/null || true
     rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf 2>/dev/null || true
+    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" 2>/dev/null || true
     if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
         systemctl reload nginx 2>/dev/null || true
     fi

@@ -235,6 +235,19 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         self.use_session(FakeResponse(204))
         self.assertTrue(await self.client.healthcheck())
 
+    async def test_healthcheck_ok_boolean_payload(self):
+        # 1. {"ok": True} -> True
+        self.use_session(FakeResponse(200, {"ok": True, "status": "ok"}))
+        self.assertTrue(await self.client.healthcheck())
+
+        # 2. {"ok": False} -> False
+        self.use_session(FakeResponse(200, {"ok": False, "status": "degraded"}))
+        self.assertFalse(await self.client.healthcheck())
+
+        # 3. HTTP 503 -> False
+        self.use_session(FakeResponse(503, {"ok": False, "status": "degraded"}))
+        self.assertFalse(await self.client.healthcheck())
+
     async def test_request_failure_remains_none(self):
         self.use_session(FakeResponse(400))
         self.assertIsNone(await self.client._request("GET", "/server"))

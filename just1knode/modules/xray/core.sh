@@ -416,6 +416,10 @@ update_node() {
                     fi
                 fi
                 chmod -R 750 "$amnezia_api_dir" 2>/dev/null || true
+                if [[ -f "${amnezia_api_dir}/amnezia-api.service" ]]; then
+                    cp "${amnezia_api_dir}/amnezia-api.service" /etc/systemd/system/amnezia-api.service 2>/dev/null || true
+                    systemctl daemon-reload 2>/dev/null || true
+                fi
                 if [[ "$amnezia_api_was_active" == "true" ]]; then
                     if ! systemctl restart amnezia-api 2>/dev/null || ! systemctl is-active --quiet amnezia-api 2>/dev/null; then
                         rollback_node_components || true

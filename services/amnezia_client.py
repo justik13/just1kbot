@@ -894,13 +894,16 @@ class AmneziaClient:
         return None
 
     async def healthcheck(self) -> bool:
-        return (
-            await self._request(
-                "GET",
-                "/healthz",
-                semantics=RequestSemantics.READ,
-            )
-        ) is not None
+        data = await self._request(
+            "GET",
+            "/healthz",
+            semantics=RequestSemantics.READ,
+        )
+        if isinstance(data, dict):
+            if "ok" in data:
+                return data["ok"] is True
+            return True
+        return False
 
     async def get_server_load(self, timeout: float = 10.0) -> dict | None:
         """

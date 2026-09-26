@@ -919,5 +919,98 @@ def test_delete_client_fails_closed_and_rolls_back_on_kernel_sync_failure(mock_a
     assert current_conf == original_conf
 
 
+def test_healthcheck_status_codes(mock_awg_env, monkeypatch):
+    """Verify /healthz returns 200 OK when healthy and 503 Service Unavailable when degraded."""
+    client = TestClient(amnezia_app.app)
+
+    # 1. Healthy -> 200 OK
+    monkeypatch.setattr(amnezia_app, "is_container_running", AsyncMock(return_value=True))
+    monkeypatch.setattr(amnezia_app, "run_docker_exec_async", AsyncMock(return_value=(0, "interface info", "")))
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["status"] == "ok"
+
+    # 2. Degraded (container down) -> 503 Service Unavailable
+    monkeypatch.setattr(amnezia_app, "is_container_running", AsyncMock(return_value=False))
+    resp_down = client.get("/healthz")
+    assert resp_down.status_code == 503
+    assert resp_down.json()["ok"] is False
+    assert resp_down.json()["status"] == "degraded"
+
+    # 3. Degraded (interface not ready) -> 503 Service Unavailable
+    monkeypatch.setattr(amnezia_app, "is_container_running", AsyncMock(return_value=True))
+    monkeypatch.setattr(amnezia_app, "run_docker_exec_async", AsyncMock(return_value=(1, "", "interface not ready")))
+    resp_iface = client.get("/healthz")
+    assert resp_iface.status_code == 503
+    assert resp_iface.json()["ok"] is False
+    assert resp_iface.json()["status"] == "degraded"
+
+
+@pytest.mark.asyncio
+async def test_get_server_psk_failure_raises_500(monkeypatch):
+    """Verify get_server_psk_async raises 500 when saving generated PSK fails."""
+    monkeypatch.setattr(amnezia_app, "read_container_file_async", AsyncMock(return_value=""))
+    monkeypatch.setattr(amnezia_app, "write_container_file_async", AsyncMock(return_value=False))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await amnezia_app.get_server_psk_async(create_if_missing=True)
+    assert exc_info.value.status_code == 500
+    assert "Failed to persist server preshared key" in exc_info.value.detail
+
+
+def test_delete_client_rolls_back_conf_when_table_save_fails(mock_awg_env, monkeypatch):
+    """Verify DELETE /clients restores conf_file if save_clients_table_async fails."""
+    monkeypatch.setattr(amnezia_app, "save_clients_table_async", AsyncMock(return_value=False))
+
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+    peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
+
+    conf_file = mock_awg_env["conf_file"]
+    original_conf = conf_file.read_text(encoding="utf-8")
+
+    resp = client.delete(f"/clients/{peer_pub}", headers=headers)
+    assert resp.status_code == 500
+
+    current_conf = conf_file.read_text(encoding="utf-8")
+    assert peer_pub in current_conf
+    assert current_conf == original_conf
+
+
+def test_patch_client_reallocate_ip_on_collision(mock_awg_env):
+    """Verify re-enabling a peer whose IP was re-assigned to another peer allocates a new IP."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+    peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
+
+    # 1. Disable the peer (removes from conf, leaves in clientsTable with 10.8.1.2)
+    resp = client.patch(
+        f"/clients/{peer_pub}",
+        json={"clientId": peer_pub, "status": "disabled"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+
+    # 2. Add another peer to conf manually that takes 10.8.1.2
+    conf_file = mock_awg_env["conf_file"]
+    conf_text = conf_file.read_text(encoding="utf-8")
+    conf_text += "\n[Peer]\nPublicKey = occupied_pub_key==\nAllowedIPs = 10.8.1.2/32\n"
+    conf_file.write_text(conf_text, encoding="utf-8")
+
+    # 3. Re-enable the peer -> must detect that 10.8.1.2 is occupied and allocate next IP (10.8.1.3)
+    resp_enable = client.patch(
+        f"/clients/{peer_pub}",
+        json={"clientId": peer_pub, "status": "active"},
+        headers=headers,
+    )
+    assert resp_enable.status_code == 200
+    data = resp_enable.json()
+    new_ip = data["client"]["clientIp"]
+    assert new_ip != "10.8.1.2"
+    assert new_ip.startswith("10.8.1.")
+
+
+
 
 

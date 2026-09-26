@@ -31,6 +31,7 @@ from typing import Any
 import psutil
 from cryptography.hazmat.primitives.asymmetric import x25519
 from fastapi import Depends, FastAPI, HTTPException, Header, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 AWG3_EXCLUSIVE_KEYS = (
@@ -498,7 +499,13 @@ async def get_server_psk_async(create_if_missing: bool = True) -> str:
         return ""
 
     new_psk = generate_psk()
-    await write_container_file_async(psk_path, new_psk + "\n")
+    saved = await write_container_file_async(psk_path, new_psk + "\n")
+    if not saved:
+        logger.error("Failed to persist server preshared key to %s", psk_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to persist server preshared key",
+        )
     return new_psk
 
 
@@ -845,15 +852,19 @@ async def healthcheck():
         iface_ready = (rc == 0)
 
     is_healthy = docker_running and iface_ready
-    return {
-        "ok": is_healthy,
-        "status": "ok" if is_healthy else "degraded",
-        "service": "amnezia-api",
-        "container": container,
-        "container_running": docker_running,
-        "interface_ready": iface_ready,
-        "timestamp": int(time.time()),
-    }
+    status_code = status.HTTP_200_OK if is_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "ok": is_healthy,
+            "status": "ok" if is_healthy else "degraded",
+            "service": "amnezia-api",
+            "container": container,
+            "container_running": docker_running,
+            "interface_ready": iface_ready,
+            "timestamp": int(time.time()),
+        },
+    )
 
 
 @app.get("/server", dependencies=[Depends(verify_api_key)])
@@ -1499,6 +1510,8 @@ async def _do_delete_client(client_id: str):
 
         saved_table = await save_clients_table_async(remaining_table)
         if not saved_table:
+            if removed:
+                await write_container_file_async(conf_path, conf_content)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to update clients table during deletion",
@@ -1613,16 +1626,26 @@ async def _do_patch_client(client_id: str, req: ClientPatchRequest):
                 if peer_psk and not target.get("psk"):
                     target["psk"] = peer_psk
 
-                if not peer_ip:
+                parsed_current = parse_awg_conf(conf_content)
+                # Verify that peer_ip is not currently occupied by another peer
+                ip_conflict = False
+                if peer_ip:
+                    for p in parsed_current.get("peers", []):
+                        if p.get("PublicKey") != target_pub:
+                            p_ip = p.get("AllowedIPs", "").split("/")[0].strip()
+                            if p_ip and p_ip == peer_ip:
+                                ip_conflict = True
+                                break
+
+                if not peer_ip or ip_conflict:
                     peer_ip = allocate_next_ip(
                         parsed.get("interface", {}).get("Address", "10.8.1.1/24"),
-                        parsed["peers"],
+                        parsed_current.get("peers", []),
                         clients_table,
                     )
                     target["clientIp"] = peer_ip
 
                 # Re-add [Peer] block to awg0.conf if not already present
-                parsed_current = parse_awg_conf(conf_content)
                 already_in_conf = any(p.get("PublicKey") == target_pub for p in parsed_current["peers"])
                 if not already_in_conf and peer_ip:
                     new_conf_text = append_peer_to_conf_text(conf_content, target_pub, peer_psk, peer_ip)

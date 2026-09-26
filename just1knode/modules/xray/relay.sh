@@ -242,7 +242,7 @@ heal_and_update_relay_config() {
 
     local role
     role="$(get_state_val "role")"
-    if [[ "$role" != "relay" ]]; then
+    if [[ "$role" != "relay" && "$role" != "dual" ]]; then
         error "Функция доступна только на Relay-узле (текущая роль: ${role:-не установлена})."
     fi
 
