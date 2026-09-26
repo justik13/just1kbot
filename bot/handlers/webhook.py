@@ -139,7 +139,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 else WebhookInboxStatus.PENDING.value
             )
 
-            if order and order.status == "paid" and getattr(order, "_newly_paid", True):
+            if order and order.status == "paid" and getattr(order, "_newly_paid", False):
                 bot = request.app.get("bot")
                 if bot:
                     try:
@@ -181,13 +181,6 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                                     message_effect_id=EFFECT_CONFETTI,
                                     force_new=True,
                                     custom_keyboard=kb,
-                                )
-                                from bot.handlers.payment.common import (
-                                    notify_referrer_topup_bonus,
-                                )
-
-                                await notify_referrer_topup_bonus(
-                                    bot, session, order
                                 )
                             else:
                                 balance = await get_account_balance(

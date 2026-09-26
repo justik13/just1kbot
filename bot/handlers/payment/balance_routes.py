@@ -382,7 +382,7 @@ async def choose_topup_amount(
         )
         bonus_notice = (
             texts.BALANCE_BONUS_NA_PERVOE_TOPUP.format()
-            + texts.BALANCE_VY_POLUCHITE_10_OT_SUMMY_POPOL.format()
+            + texts.BALANCE_VY_POLUCHITE_20_OT_SUMMY_POPOL.format()
             + texts.BALANCE_PODROBNEE_V_MENYU_PRIGLASIT_DR.format()
             + texts.BALANCE_RASCHET_BONUSA_K_SUMME.format(bonus_lines=bonus_lines)
         )

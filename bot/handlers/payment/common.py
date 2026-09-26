@@ -139,34 +139,3 @@ async def _show_hub(
         builder.as_markup(),
         session=session,
     )
-
-
-async def notify_referrer_topup_bonus(
-    bot,
-    session: AsyncSession,
-    order,
-) -> None:
-    """Notify the referrer when a referral bonus was credited for a top-up."""
-    if bot is None or getattr(order, "service_type", None) != "topup":
-        return
-    grant_res = getattr(order, "_grant_result", None)
-    if not grant_res or getattr(grant_res, "referrer_bonus", 0) <= 0:
-        return
-    try:
-        from database.models import User
-        from bot.keyboards.notifications import get_referral_bonus_keyboard
-        from bot.texts.runtime.notifications import REFERRAL_BONUS_ACCREDITED
-
-        purchaser = await session.get(User, order.user_id)
-        if not purchaser or not purchaser.referred_by:
-            return
-        ref_text = REFERRAL_BONUS_ACCREDITED.format(bonus=int(grant_res.referrer_bonus))
-        await render_hub(
-            bot,
-            purchaser.referred_by,
-            ref_text,
-            get_referral_bonus_keyboard(),
-            session=session,
-        )
-    except Exception as exc:
-        logger.warning("Failed to send referral bonus push to referrer: %s", exc)

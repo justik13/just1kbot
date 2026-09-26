@@ -105,7 +105,7 @@ class FulfillmentService:
     @staticmethod
     async def revoke_order(session: AsyncSession, order: Order) -> None:
         """Revoke order benefits upon external refund."""
-        user = await session.get(User, order.user_id)
+        user = await session.get(User, order.user_id, with_for_update=True)
         if not user:
             return
 

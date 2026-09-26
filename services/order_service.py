@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import logging
 import math
 import uuid
@@ -312,6 +312,15 @@ class OrderService:
         return order
 
     @staticmethod
+    def mark_order_canceled(order: Order, reason: str = "gateway_canceled") -> None:
+        """Mark order canceled and record cancellation reason to prevent invalid revival."""
+        if order.status in ("pending", "canceled"):
+            order.status = "canceled"
+            order_meta = dict(order.metadata_ or {})
+            order_meta["cancellation_reason"] = reason
+            order.metadata_ = order_meta
+
+    @staticmethod
     async def mark_order_paid(
         session: AsyncSession,
         order_id: uuid.UUID | str,
@@ -340,6 +349,14 @@ class OrderService:
 
         was_canceled = order.status == "canceled"
         if was_canceled:
+            cancellation_reason = (order.metadata_ or {}).get("cancellation_reason")
+            if cancellation_reason == "gateway_canceled":
+                logger.warning(
+                    "Cannot mark order %s paid: order was canceled by payment gateway",
+                    order.id,
+                )
+                order._newly_paid = False
+                return None
             logger.info(
                 "Reviving canceled order %s on valid payment received", order.id
             )
@@ -377,13 +394,12 @@ class OrderService:
             )
             from services.referral_bonus import grant_referral_bonus_for_topup
 
-            grant_res = await grant_referral_bonus_for_topup(
+            await grant_referral_bonus_for_topup(
                 session,
                 purchaser_user_id=order.user_id,
                 order_id=str(order.id),
                 topup_amount=order.amount_rub,
             )
-            order._grant_result = grant_res
 
         # Fulfill benefits linearly
         await FulfillmentService.fulfill_order(session, order)
@@ -444,10 +460,7 @@ class OrderService:
 
         if result.is_canceled:
             if order.status == "pending":
-                order.status = "canceled"
-                order_meta = dict(order.metadata_ or {})
-                order_meta["cancellation_reason"] = "gateway_canceled"
-                order.metadata_ = order_meta
+                OrderService.mark_order_canceled(order, reason="gateway_canceled")
                 await session.flush()
                 logger.info(
                     "Order %s marked canceled via gateway webhook (external_id=%s)",
@@ -502,21 +515,34 @@ class OrderService:
             order.refunded_at = now_utc()
 
             if order.service_type == "topup":
-                await create_order_refund_debit(
-                    session,
-                    user_id=order.user_id,
-                    amount_rub=refund_amount,
-                    order_id=order.id,
-                    refund_id=(result.external_id or "").strip() or "refund",
-                    metadata={"source": "yookassa_refund"},
+                refund_ref = (
+                    (result.external_id or "").strip()
+                    or f"refund_{len(processed_refund_ids)}"
                 )
+                target_cumulative = new_total_refunded.quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+                prev_cumulative = refunded_so_far.quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+                ledger_delta = target_cumulative - prev_cumulative
+
+                if ledger_delta > 0:
+                    await create_order_refund_debit(
+                        session,
+                        user_id=order.user_id,
+                        amount_rub=ledger_delta,
+                        order_id=order.id,
+                        refund_id=refund_ref,
+                        metadata={"source": "yookassa_refund"},
+                    )
                 await reverse_referral_bonus_for_topup(
                     session,
                     order_id=order.id,
                     refund_amount=refund_amount,
                     original_topup_amount=order.amount_rub,
                     total_refunded_amount=new_total_refunded,
-                    refund_id=(result.external_id or "").strip() or None,
+                    refund_id=refund_ref,
                 )
 
             is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")

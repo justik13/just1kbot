@@ -1823,7 +1823,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         mock_refund_debit.assert_called_once_with(
             session,
             user_id=10,
-            amount_rub=Decimal("5.50"),
+            amount_rub=Decimal("6"),
             order_id=order_uuid,
             refund_id="refund-kopecks-1",
             metadata={"source": "yookassa_refund"},
@@ -2368,6 +2368,212 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         res = await assert_inv_4_subscription_traffic_pools(session)
         self.assertTrue(res.passed)
         self.assertIn("satisfy traffic pool", res.details)
+
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
+    @patch("services.order_service.FulfillmentService.revoke_order")
+    @patch("services.order_service.create_order_refund_debit")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_multiple_partial_refunds_cumulative_ledger_delta(
+        self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
+    ):
+        """Verify 18 x 5.50 RUB refunds result in exactly 99 RUB debited from ledger via cumulative rounding."""
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("200.00"),
+            status="paid",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        refund_part_amount = Decimal("5.50")
+        total_calls = 18
+
+        for i in range(1, total_calls + 1):
+            ref_id = f"refund-part-{i}"
+            mock_gw.parse_webhook.return_value = WebhookResult(
+                order_id=str(order_uuid),
+                is_paid=False,
+                is_refunded=True,
+                amount_rub=refund_part_amount,
+                external_id=ref_id,
+            )
+            res = await OrderService.process_webhook_event(session, {"ref_seq": i})
+            self.assertIsNotNone(res)
+
+        # 18 calls should have been made to create_order_refund_debit
+        self.assertEqual(mock_refund_debit.call_count, total_calls)
+
+        # Sum of debited integer rubles must equal exactly 99 (18 * 5.50 = 99.00)
+        debited_amounts = [
+            call.kwargs["amount_rub"] for call in mock_refund_debit.call_args_list
+        ]
+        self.assertEqual(sum(debited_amounts), Decimal("99"))
+        # Each debit must be an integer (whole rubles)
+        for amt in debited_amounts:
+            self.assertEqual(amt, amt.to_integral_value())
+
+        # Metadata must accurately reflect cumulative total
+        self.assertEqual(order.metadata_["refunded_amount_rub"], "99.00")
+        self.assertEqual(len(order.metadata_["processed_refund_ids"]), total_calls)
+
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
+    @patch("services.order_service.FulfillmentService.revoke_order")
+    @patch("services.order_service.create_order_refund_debit")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_micro_refund_kopecks_no_zero_ledger_debit(
+        self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
+    ):
+        """Verify micro refund of 0.49 RUB does not create a 0 RUB ledger debit but records in metadata."""
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="paid",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            amount_rub=Decimal("0.49"),
+            external_id="refund-micro-1",
+        )
+        res = await OrderService.process_webhook_event(session, {"micro": True})
+        self.assertIsNotNone(res)
+        # No 0 RUB debit should be created
+        mock_refund_debit.assert_not_called()
+        # But order metadata tracks the 0.49 RUB refund accurately
+        self.assertEqual(order.metadata_["refunded_amount_rub"], "0.49")
+        self.assertIn("refund-micro-1", order.metadata_["processed_refund_ids"])
+
+    async def test_mark_order_paid_rejects_gateway_canceled_order(self):
+        """Verify an order canceled by gateway cannot be revived."""
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="canceled",
+            metadata_={"cancellation_reason": "gateway_canceled"},
+        )
+        session.scalar.return_value = order
+
+        paid_order = await OrderService.mark_order_paid(session, order_uuid)
+        self.assertIsNone(paid_order)
+        self.assertEqual(order.status, "canceled")
+        self.assertFalse(getattr(order, "_newly_paid", True))
+
+    async def test_mark_order_paid_allows_reviving_user_canceled_order(self):
+        """Verify an order canceled by user (not gateway) can be revived if payment actually arrived."""
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="canceled",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+
+        with patch("services.order_service.create_order_credit") as mock_credit, \
+             patch("services.referral_bonus.grant_referral_bonus_for_topup") as mock_grant, \
+             patch("services.order_service.FulfillmentService.fulfill_order") as mock_fulfill:
+            paid_order = await OrderService.mark_order_paid(session, order_uuid)
+            self.assertIsNotNone(paid_order)
+            self.assertEqual(paid_order.status, "paid")
+            self.assertTrue(paid_order.metadata_["revived_from_canceled"])
+            self.assertTrue(paid_order._newly_paid)
+            mock_credit.assert_called_once()
+            mock_grant.assert_called_once()
+            mock_fulfill.assert_called_once()
+
+    async def test_revoke_order_locks_user_row_with_for_update(self):
+        """Verify FulfillmentService.revoke_order locks User row with with_for_update=True."""
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=42,
+            service_type="white_internet",
+            amount_rub=Decimal("100.00"),
+        )
+        user = User(id=42, telegram_id=999)
+        session.get.return_value = user
+
+        with patch("services.white_internet_service.WhiteInternetService.deactivate_user_subscriptions") as mock_deact:
+            await FulfillmentService.revoke_order(session, order)
+            session.get.assert_called_once_with(User, 42, with_for_update=True)
+            mock_deact.assert_called_once_with(session, 42)
+
+    @patch("bot.handlers.payment.balance_routes._render_balance")
+    @patch("bot.handlers.webhook.session_scope")
+    @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")
+    @patch("bot.handlers.webhook._is_yookassa_ip", return_value=True)
+    async def test_yookassa_webhook_informational_event_does_not_send_duplicate_notification(
+        self, mock_ip, mock_real, mock_scope, mock_render_balance
+    ):
+        """Verify informational webhook (already paid, _newly_paid=False) suppresses push notifications."""
+        from bot.handlers.webhook import yookassa_webhook_handler
+        from config.enums import WebhookInboxStatus
+        from database.models import WebhookInbox
+
+        session = AsyncMock(spec=AsyncSession)
+        pending_inbox = WebhookInbox(
+            id=99,
+            provider="yookassa",
+            status=WebhookInboxStatus.PENDING.value,
+        )
+        session.scalar.return_value = pending_inbox
+        mock_scope.return_value.__aenter__.return_value = session
+
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="paid",
+        )
+        order._newly_paid = False  # already processed before
+
+        request = AsyncMock()
+        request.content_length = 200
+        request.app = {"bot": AsyncMock()}
+        request.json.return_value = {
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-already-processed-123",
+                "status": "succeeded",
+                "metadata": {"order_id": str(order_uuid)},
+            },
+        }
+
+        with patch("services.order_service.OrderService.process_webhook_event", return_value=order):
+            response = await yookassa_webhook_handler(request)
+            self.assertEqual(response.status, 200)
+            mock_render_balance.assert_not_called()
+
 
 
 
