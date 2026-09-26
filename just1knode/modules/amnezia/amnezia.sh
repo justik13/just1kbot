@@ -514,6 +514,140 @@ show_amnezia_status() {
 }
 
 # =============================================================================
+# РЕЗЕРВНОЕ КОПИРОВАНИЕ И ВОССТАНОВЛЕНИЕ (BACKUP & RESTORE)
+# =============================================================================
+backup_amnezia_node() {
+    local target_file="${1:-}"
+    init_state_dir
+    local api_key
+    api_key="$(get_state_val "awg_api_key" "")"
+    if [[ -z "$api_key" && -f "${AMNEZIA_API_ETC}/config.env" ]]; then
+        api_key="$(grep "^AMNEZIA_API_KEY=" "${AMNEZIA_API_ETC}/config.env" 2>/dev/null | cut -d= -f2- | tr -d '"'\'' ' || true)"
+    fi
+    if [[ -z "$api_key" && -f "${AMNEZIA_API_ETC}/config.env" ]]; then
+        api_key="$(grep "^FASTIFY_API_KEY=" "${AMNEZIA_API_ETC}/config.env" 2>/dev/null | cut -d= -f2- | tr -d '"'\'' ' || true)"
+    fi
+
+    local backup_json=""
+    if [[ -n "$api_key" ]]; then
+        backup_json="$(curl -s --max-time 10 -H "X-API-Key: ${api_key}" "http://127.0.0.1:${AMNEZIA_LOCAL_PORT}/server/backup" 2>/dev/null || true)"
+    fi
+
+    # Fallback to direct container read if API is not responding
+    if ! echo "$backup_json" | grep -q '"conf_content"'; then
+        local c
+        c="$(detect_amnezia_container)"
+        if is_amnezia_container_running; then
+            local conf_txt
+            conf_txt="$(docker exec "$c" cat /opt/amnezia/awg/awg0.conf 2>/dev/null || true)"
+            local table_txt
+            table_txt="$(docker exec "$c" cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo "[]")"
+            local psk_txt
+            psk_txt="$(docker exec "$c" cat /opt/amnezia/awg/wireguard_psk.key 2>/dev/null || echo "")"
+            if [[ -n "$conf_txt" ]]; then
+                backup_json="$(python3 -c "
+import json, sys, time
+try:
+    tbl = json.loads(sys.argv[3]) if sys.argv[3].strip() else []
+except Exception:
+    tbl = []
+print(json.dumps({
+    'version': 1,
+    'generatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    'container': sys.argv[1],
+    'conf_content': sys.argv[2],
+    'clients_table': tbl,
+    'server_psk': sys.argv[4].strip(),
+}, indent=2))
+" "$c" "$conf_txt" "$table_txt" "$psk_txt" 2>/dev/null || true)"
+            fi
+        fi
+    fi
+
+    if [[ -z "$backup_json" ]] || ! echo "$backup_json" | grep -q '"conf_content"'; then
+        error "Не удалось сформировать резервную копию AmneziaWG (сервис и контейнер недоступны)"
+        return 1
+    fi
+
+    if [[ -n "$target_file" ]]; then
+        echo "$backup_json" > "$target_file"
+        log "✔ Резервная копия сохранена в файл: $target_file"
+    else
+        echo "$backup_json"
+    fi
+    return 0
+}
+
+restore_amnezia_node() {
+    local source_file="${1:-}"
+    if [[ -z "$source_file" || ! -f "$source_file" ]]; then
+        error "Укажите существующий файл резервной копии: just1knode amnezia restore <backup.json>"
+        return 1
+    fi
+    check_root
+    init_state_dir
+
+    local api_key
+    api_key="$(get_state_val "awg_api_key" "")"
+    if [[ -z "$api_key" && -f "${AMNEZIA_API_ETC}/config.env" ]]; then
+        api_key="$(grep "^AMNEZIA_API_KEY=" "${AMNEZIA_API_ETC}/config.env" 2>/dev/null | cut -d= -f2- | tr -d '"'\'' ' || true)"
+    fi
+
+    local resp=""
+    if [[ -n "$api_key" ]]; then
+        resp="$(curl -s --max-time 15 -H "X-API-Key: ${api_key}" -H "Content-Type: application/json" -d @"${source_file}" "http://127.0.0.1:${AMNEZIA_LOCAL_PORT}/server/backup" 2>/dev/null || true)"
+    fi
+
+    if echo "$resp" | grep -q '"status":"ok"'; then
+        log "✔ Резервная копия успешно восстановлена через API."
+        return 0
+    fi
+
+    # Fallback to direct container write
+    local c
+    c="$(detect_amnezia_container)"
+    if is_amnezia_container_running; then
+        log "Восстановление напрямую в Docker контейнер ${c}..."
+        if python3 -c "
+import json, sys, subprocess
+
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+c = sys.argv[2]
+conf = data.get('conf_content') or (data.get('amnezia') or {}).get('config')
+table = data.get('clients_table') or (data.get('amnezia') or {}).get('clientsTable')
+psk = data.get('server_psk')
+
+if not conf or '[Interface]' not in conf:
+    sys.exit(1)
+
+p = subprocess.Popen(['docker', 'exec', '-i', c, 'sh', '-c', 'cat > /opt/amnezia/awg/awg0.conf'], stdin=subprocess.PIPE)
+p.communicate(conf.encode('utf-8'))
+if p.returncode != 0:
+    sys.exit(2)
+
+if table is not None:
+    p = subprocess.Popen(['docker', 'exec', '-i', c, 'sh', '-c', 'cat > /opt/amnezia/awg/clientsTable'], stdin=subprocess.PIPE)
+    p.communicate(json.dumps(table).encode('utf-8'))
+
+if psk:
+    p = subprocess.Popen(['docker', 'exec', '-i', c, 'sh', '-c', 'cat > /opt/amnezia/awg/wireguard_psk.key'], stdin=subprocess.PIPE)
+    p.communicate((psk.strip() + '\n').encode('utf-8'))
+
+tool = 'awg' if ('awg2' in c or 'awg3' in c) else 'wg'
+subprocess.run(['docker', 'exec', c, tool, 'syncconf', 'awg0', '/opt/amnezia/awg/awg0.conf'], check=False)
+" "$source_file" "$c"; then
+            log "✔ Резервная копия успешно восстановлена напрямую в контейнер ${c}."
+            return 0
+        fi
+    fi
+
+    error "Не удалось восстановить резервную копию AmneziaWG."
+    return 1
+}
+
+# =============================================================================
 # ДЕИНСТАЛЛЯЦИЯ КОМПОНЕНТА AMNEZIAWG
 # =============================================================================
 uninstall_amnezia_component() {

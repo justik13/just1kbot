@@ -51,6 +51,7 @@ SERVER_PSK_PATH = os.getenv("SERVER_PSK_PATH", "")
 SERVER_HOST_NAME = os.getenv("SERVER_HOST_NAME") or os.getenv("SERVER_PUBLIC_HOST", "")
 SERVER_DNS1 = os.getenv("SERVER_DNS1", "1.1.1.1")
 SERVER_DNS2 = os.getenv("SERVER_DNS2", "1.0.0.1")
+SERVER_ID = os.getenv("SERVER_ID", "")
 
 state_lock = asyncio.Lock()
 
@@ -156,6 +157,14 @@ class ClientPatchRequest(BaseModel):
     status: str | None = None  # "active" | "disabled"
     expiresAt: int | None = None
     protocol: str = "amneziawg2"
+
+
+class ServerBackupImportRequest(BaseModel):
+    conf_content: str | None = None
+    clients_table: list[dict[str, Any]] | None = None
+    server_psk: str | None = None
+    amnezia: dict[str, Any] | None = None
+    amneziaWg3: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -833,6 +842,126 @@ async def get_server_load():
         "uptime_seconds": uptime,
         "total_peers": len(peers),
         "active_peers": len(peers),
+    }
+
+
+@app.get("/server/backup", dependencies=[Depends(verify_api_key)])
+async def get_server_backup():
+    """Export complete server state (config, clientsTable, PSK)."""
+    async with state_lock:
+        container = get_target_container()
+        conf_path = get_config_path(container)
+        conf_content = await read_container_file_async(conf_path)
+        clients_table = await load_clients_table_async()
+        psk = await get_server_psk_async()
+
+        parsed = parse_awg_conf(conf_content)
+        protocols = (
+            ["amneziawg2", "amneziawg3"]
+            if any(k in parsed.get("interface", {}) for k in ("HeaderProtectionKey", "RekeyAfterTime"))
+            else ["amneziawg2"]
+        )
+
+        return {
+            "version": 1,
+            "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "serverId": SERVER_ID or container,
+            "protocols": protocols,
+            "container": container,
+            "conf_content": conf_content,
+            "clients_table": clients_table,
+            "server_psk": psk,
+            "amnezia": {
+                "config": conf_content,
+                "clientsTable": clients_table,
+            },
+        }
+
+
+@app.post("/server/backup", dependencies=[Depends(verify_api_key)])
+async def import_server_backup(req: ServerBackupImportRequest):
+    """Restore server state from backup and apply to kernel runtime."""
+    async with state_lock:
+        container = get_target_container()
+        conf_path = get_config_path(container)
+
+        conf_content = req.conf_content
+        clients_table = req.clients_table
+        psk = req.server_psk
+
+        if not conf_content and req.amnezia:
+            conf_content = req.amnezia.get("config") or req.amnezia.get("conf_content")
+            if clients_table is None:
+                clients_table = req.amnezia.get("clientsTable") or req.amnezia.get("clients_table")
+        if not conf_content and req.amneziaWg3:
+            conf_content = req.amneziaWg3.get("config") or req.amneziaWg3.get("conf_content")
+            if clients_table is None:
+                clients_table = req.amneziaWg3.get("clientsTable") or req.amneziaWg3.get("clients_table")
+
+        if not conf_content or "[Interface]" not in conf_content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid backup: missing valid WireGuard/AmneziaWG [Interface] configuration",
+            )
+
+        saved_conf = await write_container_file_async(conf_path, conf_content)
+        if not saved_conf:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to write restored configuration to container",
+            )
+
+        if clients_table is not None:
+            await save_clients_table_async(clients_table)
+
+        if psk:
+            psk_path = SERVER_PSK_PATH or f"{AWG_DIR}/wireguard_psk.key"
+            await write_container_file_async(psk_path, psk.strip() + "\n")
+
+        sync_ok = await syncconf_container(container, conf_path)
+        logger.info(
+            "Restored backup on container %s (syncconf ok: %s, peers count: %s)",
+            container,
+            sync_ok,
+            len(clients_table) if clients_table else 0,
+        )
+
+        return {
+            "message": "Резервная копия успешно восстановлена",
+            "status": "ok",
+            "peers_count": len(clients_table) if clients_table else 0,
+            "kernel_synced": sync_ok,
+        }
+
+
+@app.post("/server/reboot", dependencies=[Depends(verify_api_key)])
+async def reboot_server():
+    """Trigger asynchronous server reboot."""
+    async def _delayed_reboot():
+        await asyncio.sleep(1.0)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "sudo", "reboot",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+        except Exception as e:
+            logger.warning("Reboot execution via sudo failed: %s, trying systemctl", e)
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "systemctl", "reboot",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+            except Exception as e2:
+                logger.error("Reboot execution failed completely: %s", e2)
+
+    asyncio.create_task(_delayed_reboot())
+    return {
+        "message": "Сервер перезагружается",
+        "status": "ok",
     }
 
 

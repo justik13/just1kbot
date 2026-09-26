@@ -456,3 +456,100 @@ def test_clients_crud_lifecycle(mock_awg_env):
     assert orig_check.json()["total"] == 1
     assert len(orig_check.json()["items"]) == 1
     assert orig_check.json()["items"][0]["username"] == "test_peer_1"
+
+
+@pytest.mark.asyncio
+async def test_server_backup_export_and_import(monkeypatch):
+    """Test full server backup export and import endpoints."""
+    monkeypatch.setattr(amnezia_app, "API_KEY", "secret-test-key")
+    headers = {"X-API-Key": "secret-test-key"}
+
+    current_conf = SAMPLE_AWG0_CONF
+    current_table = [{"clientId": "peer1", "clientPubKey": "peer1", "clientIp": "10.8.1.2"}]
+    current_psk = "vI9V78j2eX4uGv7l0i1XN9b9yP4oR2tQ8uY4wI7qB3o="
+
+    async def mock_read(path):
+        return current_conf
+
+    async def mock_load_table():
+        return list(current_table)
+
+    async def mock_get_psk():
+        return current_psk
+
+    saved_files = {}
+
+    async def mock_write(path, content):
+        saved_files[path] = content
+        return True
+
+    saved_tables = []
+
+    async def mock_save_table(table):
+        saved_tables.append(table)
+        return True
+
+    mock_syncconf = AsyncMock(return_value=True)
+
+    monkeypatch.setattr(amnezia_app, "read_container_file_async", mock_read)
+    monkeypatch.setattr(amnezia_app, "load_clients_table_async", mock_load_table)
+    monkeypatch.setattr(amnezia_app, "get_server_psk_async", mock_get_psk)
+    monkeypatch.setattr(amnezia_app, "write_container_file_async", mock_write)
+    monkeypatch.setattr(amnezia_app, "save_clients_table_async", mock_save_table)
+    monkeypatch.setattr(amnezia_app, "syncconf_container", mock_syncconf)
+
+    client = TestClient(amnezia_app.app)
+
+    # 1. GET /server/backup
+    resp = client.get("/server/backup", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["version"] == 1
+    assert "generatedAt" in data
+    assert data["conf_content"] == SAMPLE_AWG0_CONF
+    assert len(data["clients_table"]) == 1
+    assert data["server_psk"] == current_psk
+    assert "amnezia" in data
+
+    # 2. POST /server/backup with valid direct payload
+    import_payload = {
+        "conf_content": SAMPLE_AWG0_CONF,
+        "clients_table": [{"clientId": "restored_peer", "clientPubKey": "restored_peer"}],
+        "server_psk": "new_psk==",
+    }
+    import_resp = client.post("/server/backup", json=import_payload, headers=headers)
+    assert import_resp.status_code == 200
+    assert import_resp.json()["status"] == "ok"
+    assert import_resp.json()["peers_count"] == 1
+    assert import_resp.json()["kernel_synced"] is True
+    assert mock_syncconf.called
+
+    # 3. POST /server/backup with upstream kyoresuas nested payload
+    upstream_payload = {
+        "amnezia": {
+            "config": SAMPLE_AWG0_CONF,
+            "clientsTable": [{"clientId": "upstream_peer"}],
+        }
+    }
+    upstream_resp = client.post("/server/backup", json=upstream_payload, headers=headers)
+    assert upstream_resp.status_code == 200
+    assert upstream_resp.json()["status"] == "ok"
+
+    # 4. POST /server/backup with invalid config (missing [Interface])
+    bad_resp = client.post("/server/backup", json={"conf_content": "invalid data"}, headers=headers)
+    assert bad_resp.status_code == 400
+    assert "Interface" in bad_resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_server_reboot_endpoint(monkeypatch):
+    """Test /server/reboot endpoint returns 200 OK and starts background reboot."""
+    monkeypatch.setattr(amnezia_app, "API_KEY", "secret-test-key")
+    headers = {"X-API-Key": "secret-test-key"}
+
+    client = TestClient(amnezia_app.app)
+    resp = client.post("/server/reboot", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    assert "Сервер перезагружается" in resp.json()["message"]
+

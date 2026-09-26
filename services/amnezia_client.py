@@ -891,6 +891,31 @@ class AmneziaClient:
             return res
         return None
 
+    async def get_server_backup(self) -> dict | None:
+        """Скачивает полную резервную копию конфигурации и пиров ноды."""
+        res = await self._request("GET", "/server/backup", semantics=RequestSemantics.READ)
+        if isinstance(res, dict) and "conf_content" in res:
+            return res
+        return None
+
+    async def restore_server_backup(self, backup_data: dict) -> bool:
+        """Восстанавливает резервную копию на ноде."""
+        res = await self._request(
+            "POST",
+            "/server/backup",
+            json=backup_data,
+            semantics=RequestSemantics.IDEMPOTENT_WRITE,
+        )
+        return bool(res and isinstance(res, dict) and res.get("status") == "ok")
+
+    async def reboot_server(self) -> bool:
+        """Инициирует перезагрузку ноды."""
+        res = await self._request(
+            "POST",
+            "/server/reboot",
+            semantics=RequestSemantics.IDEMPOTENT_WRITE,
+        )
+        return bool(res and isinstance(res, dict) and res.get("status") == "ok")
 
     async def get_all_clients(
         self,

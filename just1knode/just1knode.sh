@@ -1150,8 +1150,22 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                     install|setup) install_amnezia_node ;;
                     status) show_amnezia_status ;;
                     creds|bot) show_amnezia_bot_credentials ;;
+                    backup) backup_amnezia_node "${3:-}" ;;
+                    restore) restore_amnezia_node "${3:-}" ;;
                     uninstall|remove) uninstall_amnezia_component ;;
                     *) install_amnezia_node ;;
+                esac
+                ;;
+            backup)
+                case "${2:-}" in
+                    amnezia|awg) backup_amnezia_node "${3:-}" ;;
+                    *) backup_amnezia_node "${2:-}" ;;
+                esac
+                ;;
+            restore)
+                case "${2:-}" in
+                    amnezia|awg) restore_amnezia_node "${3:-}" ;;
+                    *) restore_amnezia_node "${2:-}" ;;
                 esac
                 ;;
             limit|traffic)
