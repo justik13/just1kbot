@@ -2703,3 +2703,36 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
 
         session.get.assert_called_with(Order, order_uuid, with_for_update=True)
 
+    async def test_handle_order_cancel_locks_with_for_update_and_preserves_paid_order(self):
+        """Verify handle_order_cancel locks with with_for_update and does not overwrite paid order."""
+        from bot.handlers.payment.purchase_routes import handle_order_cancel
+
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        user = User(id=42, telegram_id=999)
+
+        # Case 1: Pending order gets canceled with user_canceled reason
+        pending_order = Order(id=order_uuid, user_id=42, status="pending", metadata_={})
+        session.get.return_value = pending_order
+
+        callback = AsyncMock()
+        callback.data = f"order_cancel:{order_uuid}"
+        callback.bot = AsyncMock()
+        callback.message = AsyncMock()
+
+        with patch("bot.handlers.payment.common.render_tariff_showcase") as mock_showcase:
+            await handle_order_cancel(callback, session, db_user=user)
+            session.get.assert_called_with(Order, order_uuid, with_for_update=True)
+            self.assertEqual(pending_order.status, "canceled")
+            self.assertEqual(pending_order.metadata_.get("cancellation_reason"), "user_canceled")
+            mock_showcase.assert_called_once()
+
+        # Case 2: Concurrent webhook already marked order as paid -> cancel must NOT overwrite status
+        paid_order = Order(id=order_uuid, user_id=42, status="paid", metadata_={})
+        session.get.return_value = paid_order
+
+        with patch("bot.handlers.payment.common.render_tariff_showcase") as mock_showcase:
+            await handle_order_cancel(callback, session, db_user=user)
+            self.assertEqual(paid_order.status, "paid")
+            self.assertNotIn("cancellation_reason", paid_order.metadata_)
+

@@ -368,9 +368,9 @@ async def handle_order_cancel(
     order_id = _uuid_from_callback(callback.data)
     order = None
     if order_id and db_user:
-        order = await session.get(Order, order_id)
+        order = await session.get(Order, order_id, with_for_update=True)
         if order and order.user_id == db_user.id and order.status == "pending":
-            order.status = "canceled"
+            OrderService.mark_order_canceled(order, reason="user_canceled")
             await session.flush()
 
     await callback.answer(show_alert=False)
