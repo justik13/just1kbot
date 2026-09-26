@@ -180,13 +180,42 @@ install_amnezia_node() {
 
     log "✔ Контейнер ${target_container} активен, конфигурация ${conf_in_container} найдена."
 
+    # 2b. Проверка наличия существующей установки kyoresuas/amnezia-api (для бесшовной миграции)
+    local existing_legacy_env=""
+    local legacy_api_key=""
+    local legacy_host=""
+    local legacy_max_peers=""
+    for candidate_env in /root/amnezia-api/.env ~/amnezia-api/.env /opt/amnezia-api/.env; do
+        if [[ -f "$candidate_env" ]]; then
+            existing_legacy_env="$candidate_env"
+            legacy_api_key="$(grep -E "^(FASTIFY_API_KEY|AMNEZIA_API_KEY)=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+            legacy_host="$(grep -E "^(SERVER_PUBLIC_HOST|SERVER_HOST_NAME)=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+            legacy_max_peers="$(grep -E "^SERVER_MAX_PEERS=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+            break
+        fi
+    done
+
+    if [[ -n "$existing_legacy_env" && -n "$legacy_api_key" ]]; then
+        log "✔ Обнаружена существующая конфигурация kyoresuas/amnezia-api (${existing_legacy_env})."
+        log "  API-ключ и параметры сервера будут импортированы автоматически без изменения настроек в боте."
+    fi
+
+    # Остановка контейнера amnezia-api если он запущен в Docker (для освобождения портов 4001 / 8443)
+    if command -v docker >/dev/null 2>&1; then
+        if docker ps --filter "name=^/amnezia-api$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-api$"; then
+            log "Обнаружен работающий Docker-контейнер amnezia-api (kyoresuas). Выполняется безопасная остановка для переключения на нативный сервис..."
+            docker stop amnezia-api >/dev/null 2>&1 || true
+        fi
+    fi
+
     # 3. Интерактивный опрос: домен и порт
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
 
+    local default_domain="${legacy_host:-$my_ip}"
     echo ""
-    read -rp "Введите доменное имя для API (например: fi.example.com, либо нажмите Enter для IP): " domain_in || true
-    local api_domain="${domain_in:-$my_ip}"
+    read -rp "Введите доменное имя для API [по умолчанию: ${default_domain}]: " domain_in || true
+    local api_domain="${domain_in:-$default_domain}"
 
     read -rp "Публичный HTTPS порт для API [по умолчанию: ${AMNEZIA_PUBLIC_PORT}]: " port_in || true
     local public_port="${port_in:-$AMNEZIA_PUBLIC_PORT}"
@@ -236,10 +265,14 @@ install_amnezia_node() {
     fi
     "$AMNEZIA_API_DIR/venv/bin/pip" install --no-cache-dir -r "$AMNEZIA_API_DIR/requirements.txt" --quiet
 
-    # 7. Генерация API-ключа
+    # 7. Определение API-ключа (приоритет: existing config.env -> legacy amnezia-api .env -> генерация нового)
     local api_key=""
     if [[ -f "$AMNEZIA_API_ETC/config.env" ]]; then
-        api_key="$(grep "^AMNEZIA_API_KEY=" "$AMNEZIA_API_ETC/config.env" | cut -d= -f2- || true)"
+        api_key="$(grep -E "^(AMNEZIA_API_KEY|FASTIFY_API_KEY)=" "$AMNEZIA_API_ETC/config.env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+    fi
+    if [[ -z "$api_key" && -n "$legacy_api_key" ]]; then
+        api_key="$legacy_api_key"
+        log "✔ Импортирован существующий API-ключ из ${existing_legacy_env}"
     fi
     if [[ -z "$api_key" ]]; then
         api_key="$(openssl rand -hex 24)"
@@ -248,13 +281,18 @@ install_amnezia_node() {
     # Запись конфигурации окружения
     cat > "$AMNEZIA_API_ETC/config.env" <<EOF
 AMNEZIA_API_KEY=${api_key}
+FASTIFY_API_KEY=${api_key}
 AWG_DIR=${AMNEZIA_AWG_DIR}
 AWG_CONF_PATH=${conf_in_container}
 AWG_CONTAINER_NAME=${target_container}
 SERVER_HOST_NAME=${api_domain}
+SERVER_PUBLIC_HOST=${api_domain}
 SERVER_DNS1=1.1.1.1
 SERVER_DNS2=1.0.0.1
 EOF
+    if [[ -n "$legacy_max_peers" ]]; then
+        echo "SERVER_MAX_PEERS=${legacy_max_peers}" >> "$AMNEZIA_API_ETC/config.env"
+    fi
     chmod 600 "$AMNEZIA_API_ETC/config.env"
 
     # 8. Установка systemd службы

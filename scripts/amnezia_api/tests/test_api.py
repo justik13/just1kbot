@@ -291,6 +291,7 @@ def test_healthz_endpoint(mock_awg_env):
     response = client.get("/healthz")
     assert response.status_code == 200
     data = response.json()
+    assert data["ok"] is True
     assert data["status"] == "ok"
     assert data["service"] == "amnezia-api"
     assert data["container"] == "amnezia-awg2"
@@ -322,6 +323,8 @@ def test_server_endpoint(mock_awg_env):
     assert data["protocols"] == ["amneziawg2"]
     assert data["port"] == 44321
     assert data["maxPeers"] > 0
+    assert "id" in data
+    assert "totalPeers" in data
 
     # Contract check: services.amnezia_client.AmneziaServerInfo must parse it
     info = AmneziaServerInfo(**data)
@@ -337,6 +340,9 @@ def test_server_load_endpoint(mock_awg_env):
     assert "ram_percent" in data
     assert "disk_percent" in data
     assert "uptime_seconds" in data
+    assert "uptimeSec" in data
+    assert "memory" in data
+    assert "disk" in data
     assert data["total_peers"] == 1
     assert data["active_peers"] == 1
 
@@ -348,15 +354,21 @@ def test_clients_crud_lifecycle(mock_awg_env):
     # 1. GET /clients
     get_resp = client.get("/clients", headers=headers)
     assert get_resp.status_code == 200
-    clients_list = get_resp.json()
-    assert len(clients_list) == 1
-    assert clients_list[0]["username"] == "test_peer_1"
+    clients_payload = get_resp.json()
+    assert clients_payload["total"] == 1
+    assert len(clients_payload["items"]) == 1
+    assert clients_payload["items"][0]["username"] == "test_peer_1"
 
     # Contract check: services.amnezia_client.AmneziaClient._parse_clients_page
-    parsed_items = AmneziaClient._parse_clients_page(clients_list)
+    parsed_items = AmneziaClient._parse_clients_page(clients_payload)
     assert len(parsed_items) == 1
     assert parsed_items[0].username == "test_peer_1"
     assert parsed_items[0].status == "active"
+
+    # Also check passing raw items list directly
+    parsed_items_direct = AmneziaClient._parse_clients_page(clients_payload["items"])
+    assert len(parsed_items_direct) == 1
+    assert parsed_items_direct[0].username == "test_peer_1"
 
     # 2. POST /clients (Create new client)
     create_payload = {
@@ -367,6 +379,8 @@ def test_clients_crud_lifecycle(mock_awg_env):
     assert create_resp.status_code == 200
     created = create_resp.json()
     assert "id" in created
+    assert "client" in created
+    assert created["client"]["id"] == created["id"]
     assert created["config"].startswith("vpn://")
     assert created["protocol"] == "amneziawg2"
     new_client_id = created["id"]
@@ -378,22 +392,26 @@ def test_clients_crud_lifecycle(mock_awg_env):
 
     # 3. Verify in clients list
     get_resp2 = client.get("/clients", headers=headers)
-    assert len(get_resp2.json()) == 2
+    assert get_resp2.json()["total"] == 2
+    assert len(get_resp2.json()["items"]) == 2
 
     # 3b. Verify pagination (skip & limit) for AmneziaClient compatibility
     p1_resp = client.get("/clients?skip=0&limit=1", headers=headers)
     assert p1_resp.status_code == 200
-    assert len(p1_resp.json()) == 1
-    assert p1_resp.json()[0]["username"] == "test_peer_1"
+    assert p1_resp.json()["total"] == 2
+    assert len(p1_resp.json()["items"]) == 1
+    assert p1_resp.json()["items"][0]["username"] == "test_peer_1"
 
     p2_resp = client.get("/clients?skip=1&limit=1", headers=headers)
     assert p2_resp.status_code == 200
-    assert len(p2_resp.json()) == 1
-    assert p2_resp.json()[0]["username"] == "user_42"
+    assert p2_resp.json()["total"] == 2
+    assert len(p2_resp.json()["items"]) == 1
+    assert p2_resp.json()["items"][0]["username"] == "user_42"
 
     p3_resp = client.get("/clients?skip=2&limit=1", headers=headers)
     assert p3_resp.status_code == 200
-    assert len(p3_resp.json()) == 0
+    assert p3_resp.json()["total"] == 2
+    assert len(p3_resp.json()["items"]) == 0
 
     # 4. PATCH /clients (Disable client)
     patch_payload = {
@@ -403,6 +421,7 @@ def test_clients_crud_lifecycle(mock_awg_env):
     patch_resp = client.patch("/clients", json=patch_payload, headers=headers)
     assert patch_resp.status_code == 200
     assert patch_resp.json()["status"] == "updated"
+    assert "message" in patch_resp.json()
 
     # Verify status changed to disabled
     single_resp = client.get(f"/clients/{new_client_id}", headers=headers)
@@ -425,7 +444,8 @@ def test_clients_crud_lifecycle(mock_awg_env):
         json={"clientId": new_client_id, "protocol": "amneziawg2"},
         headers=headers,
     )
-    assert del_resp.status_code == 204
+    assert del_resp.status_code == 200
+    assert del_resp.json()["status"] == "ok"
 
     # Verify deleted
     del_check = client.get(f"/clients/{new_client_id}", headers=headers)
@@ -433,5 +453,6 @@ def test_clients_crud_lifecycle(mock_awg_env):
 
     # Existing peer is still present!
     orig_check = client.get("/clients", headers=headers)
-    assert len(orig_check.json()) == 1
-    assert orig_check.json()[0]["username"] == "test_peer_1"
+    assert orig_check.json()["total"] == 1
+    assert len(orig_check.json()["items"]) == 1
+    assert orig_check.json()["items"][0]["username"] == "test_peer_1"

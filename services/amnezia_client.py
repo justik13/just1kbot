@@ -901,9 +901,22 @@ class AmneziaClient:
 
     @staticmethod
     def _parse_clients_page(
-        items_raw: list,
+        items_raw: list | dict,
     ) -> list[AmneziaClientListItem]:
         clients: list[AmneziaClientListItem] = []
+
+        if isinstance(items_raw, dict):
+            items_raw = (
+                items_raw.get("items")
+                or items_raw.get("clients")
+                or items_raw.get("data")
+                or []
+            )
+            if isinstance(items_raw, dict):
+                items_raw = [items_raw]
+
+        if not isinstance(items_raw, list):
+            return clients
 
         for item in items_raw:
             if not isinstance(item, dict):

@@ -29,7 +29,7 @@ from typing import Any
 
 import psutil
 from cryptography.hazmat.primitives.asymmetric import x25519
-from fastapi import Depends, FastAPI, HTTPException, Header, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Header, status
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("amnezia_api")
@@ -41,14 +41,14 @@ logging.basicConfig(
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-API_KEY = os.getenv("AMNEZIA_API_KEY", "")
+API_KEY = os.getenv("AMNEZIA_API_KEY") or os.getenv("FASTIFY_API_KEY", "")
 AWG_CONTAINER_NAME = os.getenv("AWG_CONTAINER_NAME", "amnezia-awg2")
 AWG_DIR = os.getenv("AWG_DIR", "/opt/amnezia/awg")
 AWG_CONF_PATH = os.getenv("AWG_CONF_PATH", "")
 CLIENTS_TABLE_PATH = os.getenv("CLIENTS_TABLE_PATH", "")
 SERVER_PUBKEY_PATH = os.getenv("SERVER_PUBKEY_PATH", "")
 SERVER_PSK_PATH = os.getenv("SERVER_PSK_PATH", "")
-SERVER_HOST_NAME = os.getenv("SERVER_HOST_NAME", "")
+SERVER_HOST_NAME = os.getenv("SERVER_HOST_NAME") or os.getenv("SERVER_PUBLIC_HOST", "")
 SERVER_DNS1 = os.getenv("SERVER_DNS1", "1.1.1.1")
 SERVER_DNS2 = os.getenv("SERVER_DNS2", "1.0.0.1")
 
@@ -719,6 +719,7 @@ async def healthcheck():
 
     is_healthy = docker_running and iface_ready
     return {
+        "ok": is_healthy,
         "status": "ok" if is_healthy else "degraded",
         "service": "amnezia-api",
         "container": container,
@@ -745,15 +746,25 @@ async def get_server():
     except Exception:
         max_peers = 254
 
+    env_max_peers = os.getenv("SERVER_MAX_PEERS")
+    if env_max_peers and env_max_peers.isdigit() and int(env_max_peers) > 0:
+        max_peers = int(env_max_peers)
+
     port_str = iface.get("ListenPort", "44321")
     port = int(port_str) if port_str.isdigit() else 44321
 
+    peers = parsed.get("peers", [])
+
     return {
-        "name": container,
+        "id": os.getenv("SERVER_ID", container),
+        "name": os.getenv("SERVER_NAME", container),
+        "region": os.getenv("SERVER_REGION", ""),
+        "weight": int(os.getenv("SERVER_WEIGHT", "0")),
         "protocols": ["amneziawg2"],
         "maxPeers": max_peers,
         "serverMaxPeers": max_peers,
         "SERVER_MAX_PEERS": max_peers,
+        "totalPeers": len(peers),
         "port": port,
         "publicKey": server_pub,
         "dns1": SERVER_DNS1,
@@ -768,7 +779,7 @@ async def get_server_load():
     conf_path = get_config_path(container)
     conf_content = await read_container_file_async(conf_path)
     parsed = parse_awg_conf(conf_content)
-    peers = parsed["peers"]
+    peers = parsed.get("peers", [])
 
     uptime = 0
     try:
@@ -776,10 +787,37 @@ async def get_server_load():
     except Exception:
         pass
 
+    cpu_cores = psutil.cpu_count(logical=True) or 1
+    load_avg = [0.0, 0.0, 0.0]
+    try:
+        load_avg = list(os.getloadavg())
+    except Exception:
+        pass
+
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
     return {
+        # Upstream kyoresuas/amnezia-api payload structure
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "uptimeSec": uptime,
+        "loadavg": load_avg,
+        "cpu": {"cores": cpu_cores},
+        "memory": {
+            "totalBytes": mem.total,
+            "freeBytes": mem.available,
+            "usedBytes": mem.used,
+        },
+        "disk": {
+            "totalBytes": disk.total,
+            "usedBytes": disk.used,
+            "availableBytes": disk.free,
+            "usedPercent": disk.percent,
+        },
+        # Flat fields for simple consumers / existing tests
         "cpu_percent": psutil.cpu_percent(interval=None),
-        "ram_percent": psutil.virtual_memory().percent,
-        "disk_percent": psutil.disk_usage("/").percent,
+        "ram_percent": mem.percent,
+        "disk_percent": disk.percent,
         "uptime_seconds": uptime,
         "total_peers": len(peers),
         "active_peers": len(peers),
@@ -793,7 +831,7 @@ async def get_clients(skip: int = 0, limit: int | None = None):
     conf_path = get_config_path(container)
     conf_content = await read_container_file_async(conf_path)
     parsed = parse_awg_conf(conf_content)
-    peers = parsed["peers"]
+    peers = parsed.get("peers", [])
 
     clients_table = await load_clients_table_async()
     clients_map: dict[str, dict[str, Any]] = {}
@@ -805,6 +843,7 @@ async def get_clients(skip: int = 0, limit: int | None = None):
     stats = await fetch_live_transfer_stats(container)
 
     result = []
+    now_ts = time.time()
     for p in peers:
         pub = p.get("PublicKey", "")
         if not pub:
@@ -826,13 +865,49 @@ async def get_clients(skip: int = 0, limit: int | None = None):
         rx = peer_stats.get("rx", 0)
         tx = peer_stats.get("tx", 0)
         handshake = peer_stats.get("lastHandshake")
+        is_online = bool(handshake and (now_ts - handshake < 180))
+
+        peer_entry = {
+            "id": pub,
+            "clientId": pub,
+            "name": name,
+            "status": status_val,
+            "allowedIps": [f"{client_ip}/32"] if client_ip else [],
+            "lastHandshake": handshake,
+            "lastSeen": handshake,
+            "traffic": {
+                "received": rx,
+                "sent": tx,
+            },
+            "traffics": {
+                "received": rx,
+                "sent": tx,
+                "totalDownload": rx,
+                "totalUpload": tx,
+            },
+            "endpoint": "",
+            "online": is_online,
+            "expiresAt": c_meta.get("expiresAt"),
+            "protocol": "amneziawg2",
+        }
 
         item = {
-            "id": pub,
+            # Upstream format: username + peers array
             "username": name,
+            "peers": [peer_entry],
+            # Dual flat format for direct item consumers:
+            "id": pub,
+            "clientId": pub,
+            "clientPubKey": pub,
             "name": name,
             "peer_name": name,
+            "clientName": name,
             "status": status_val,
+            "clientIp": client_ip,
+            "traffic": {
+                "received": rx,
+                "sent": tx,
+            },
             "traffics": {
                 "received": rx,
                 "sent": tx,
@@ -842,17 +917,22 @@ async def get_clients(skip: int = 0, limit: int | None = None):
             "lastHandshake": handshake,
             "lastSeen": handshake,
             "updatedAt": c_meta.get("updatedAt", c_meta.get("createdAt")),
-            "clientIp": client_ip,
-            "clientPubKey": pub,
+            "expiresAt": c_meta.get("expiresAt"),
+            "protocol": "amneziawg2",
         }
         result.append(item)
 
+    total_count = len(result)
+    paged_items = result
     if skip > 0:
-        result = result[skip:]
+        paged_items = paged_items[skip:]
     if limit is not None and limit > 0:
-        result = result[:limit]
+        paged_items = paged_items[:limit]
 
-    return result
+    return {
+        "total": total_count,
+        "items": paged_items,
+    }
 
 
 @app.post("/clients", dependencies=[Depends(verify_api_key)])
@@ -946,11 +1026,16 @@ async def create_client(req: ClientCreateRequest):
 
         logger.info("Created client %s (%s, IP: %s)", client_pub, req.clientName, client_ip)
 
-        return {
+        client_obj = {
             "id": client_pub,
             "config": vpn_uri,
             "raw_config": raw_conf,
             "protocol": "amneziawg2",
+        }
+        return {
+            "message": "Клиент успешно создан",
+            "client": client_obj,
+            **client_obj,
         }
 
 
@@ -995,7 +1080,7 @@ async def _do_delete_client(client_id: str):
 
         if not target_pub:
             # Idempotent success (not_found_as_success)
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
+            return {"message": "Клиент успешно удален", "status": "ok"}
 
         # Remove only the target peer section from config
         new_conf_text, removed = remove_peer_from_conf_text(conf_content, target_pub)
@@ -1009,7 +1094,7 @@ async def _do_delete_client(client_id: str):
         await syncconf_container(container, conf_path)
 
         logger.info("Deleted peer %s", target_pub)
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return {"message": "Клиент успешно удален", "status": "ok"}
 
 
 @app.patch("/clients", dependencies=[Depends(verify_api_key)])
@@ -1073,7 +1158,12 @@ async def _do_patch_client(client_id: str, new_status: str | None, expires_at: i
             target["updatedAt"] = int(time.time())
             await save_clients_table_async(clients_table)
 
-        return {"status": "updated", "clientId": client_id, "client": target}
+        return {
+            "message": "Данные успешно сохранены",
+            "status": "updated",
+            "clientId": client_id,
+            "client": target,
+        }
 
 
 @app.get("/clients/{client_id:path}", dependencies=[Depends(verify_api_key)])
