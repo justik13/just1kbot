@@ -371,6 +371,10 @@ update_node() {
                     chmod +x "${node_dir}/just1knode.sh" 2>/dev/null || true
                     ln -sf "${node_dir}/just1knode.sh" /usr/local/bin/just1knode 2>/dev/null || true
                 fi
+                if [[ -d "${tmp_dir}/scripts/amnezia_api" ]]; then
+                    mkdir -p "${node_dir}/scripts/amnezia_api"
+                    cp -a "${tmp_dir}/scripts/amnezia_api/." "${node_dir}/scripts/amnezia_api/" 2>/dev/null || true
+                fi
                 log "Модули ${node_dir} успешно обновлены и проверены."
             fi
 
@@ -407,6 +411,10 @@ update_node() {
                     rollback_node_components || true
                     rm -rf "$tmp_tar" "$tmp_dir"
                     error "Не удалось скопировать исходные файлы ${amnezia_api_dir}. Обновление прервано."
+                fi
+                if [[ -d "${amnezia_api_dir}/amnezia_api" && ! -f "${amnezia_api_dir}/app.py" ]]; then
+                    cp -a "${amnezia_api_dir}/amnezia_api/." "${amnezia_api_dir}/" 2>/dev/null || true
+                    rm -rf "${amnezia_api_dir}/amnezia_api"
                 fi
                 if [[ -x "${amnezia_api_dir}/venv/bin/pip" && -f "${amnezia_api_dir}/requirements.txt" ]]; then
                     if ! "${amnezia_api_dir}/venv/bin/pip" install -q -r "${amnezia_api_dir}/requirements.txt" --no-cache-dir; then

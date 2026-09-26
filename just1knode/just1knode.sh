@@ -76,6 +76,8 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
         if [[ -d "$tmp_extract/scripts/amnezia_api" ]]; then
             mkdir -p "${AMNEZIA_API_DIR:-/opt/amnezia-api}"
             cp -a "$tmp_extract/scripts/amnezia_api/." "${AMNEZIA_API_DIR:-/opt/amnezia-api}/"
+            mkdir -p "$INSTALL_DIR/scripts/amnezia_api"
+            cp -a "$tmp_extract/scripts/amnezia_api/." "$INSTALL_DIR/scripts/amnezia_api/"
         fi
         rm -rf "$tmp_tar" "$tmp_extract"
     fi

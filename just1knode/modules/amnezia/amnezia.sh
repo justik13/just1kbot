@@ -366,14 +366,27 @@ install_amnezia_node() {
     elif [[ ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
         log "Загрузка скриптов amnezia_api из репозитория..."
         local tmp_dl="/tmp/amnezia_api_$$.tar.gz"
+        local tmp_extract="/tmp/amnezia_extract_$$"
         local repo_url="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
         local repo_ref="${JUST1KBOT_REF:-main}"
         local archive_url="${repo_url%.git}/archive/refs/heads/${repo_ref}.tar.gz"
+        rm -rf "$tmp_dl" "$tmp_extract"
+        mkdir -p "$tmp_extract"
         curl -fsSL "$archive_url" -o "$tmp_dl" 2>/dev/null || wget -qO "$tmp_dl" "$archive_url" 2>/dev/null || true
         if [[ -f "$tmp_dl" ]]; then
-            tar -xzf "$tmp_dl" --strip-components=2 -C "$AMNEZIA_API_DIR" "*/scripts/amnezia_api" 2>/dev/null || true
-            rm -f "$tmp_dl"
+            if tar -xzf "$tmp_dl" -C "$tmp_extract" --strip-components=1 2>/dev/null; then
+                if [[ -d "$tmp_extract/scripts/amnezia_api" ]]; then
+                    cp -a "$tmp_extract/scripts/amnezia_api/." "$AMNEZIA_API_DIR/"
+                fi
+            fi
+            rm -rf "$tmp_dl" "$tmp_extract"
         fi
+    fi
+
+    # Авто-восстановление в случае, если файлы оказались во вложенной папке amnezia_api
+    if [[ -d "$AMNEZIA_API_DIR/amnezia_api" && ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
+        cp -a "$AMNEZIA_API_DIR/amnezia_api/." "$AMNEZIA_API_DIR/" 2>/dev/null || true
+        rm -rf "$AMNEZIA_API_DIR/amnezia_api"
     fi
 
     if [[ ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
