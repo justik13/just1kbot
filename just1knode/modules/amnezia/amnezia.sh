@@ -353,32 +353,101 @@ install_amnezia_node() {
 
     # 5. Развертывание файлов scripts/amnezia_api в /opt/amnezia-api
     mkdir -p "$AMNEZIA_API_DIR" "$AMNEZIA_API_ETC"
-    local source_api_dir="${SCRIPT_DIR}/../scripts/amnezia_api"
-    if [[ ! -d "$source_api_dir" ]]; then
-        source_api_dir="/opt/just1knode/scripts/amnezia_api"
-    fi
-    if [[ ! -d "$source_api_dir" && -d "/app/scripts/amnezia_api" ]]; then
-        source_api_dir="/app/scripts/amnezia_api"
-    fi
+    chmod 750 "$AMNEZIA_API_DIR" 2>/dev/null || true
 
-    if [[ -d "$source_api_dir" ]]; then
-        cp -a "$source_api_dir/." "$AMNEZIA_API_DIR/"
-    elif [[ ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
-        log "Загрузка скриптов amnezia_api из репозитория..."
-        local tmp_dl="/tmp/amnezia_api_$$.tar.gz"
-        local repo_url="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
-        local repo_ref="${JUST1KBOT_REF:-main}"
-        local archive_url="${repo_url%.git}/archive/refs/heads/${repo_ref}.tar.gz"
-        curl -fsSL "$archive_url" -o "$tmp_dl" 2>/dev/null || wget -qO "$tmp_dl" "$archive_url" 2>/dev/null || true
-        if [[ -f "$tmp_dl" ]]; then
-            tar -xzf "$tmp_dl" --strip-components=2 -C "$AMNEZIA_API_DIR" "*/scripts/amnezia_api" 2>/dev/null || true
-            rm -f "$tmp_dl"
+    # Проверка полной валидности комплекта файлов микросервиса
+    is_amnezia_api_valid() {
+        local target="${1:-$AMNEZIA_API_DIR}"
+        [[ -f "${target}/app.py" && \
+           -f "${target}/requirements.txt" && \
+           -f "${target}/amnezia-api.service" ]]
+    }
+
+    # Поиск валидного локального источника микросервиса (все 3 обязательных файла)
+    local source_api_dir=""
+    local cand_dirs=(
+        "${SCRIPT_DIR}/scripts/amnezia_api"
+        "${INSTALL_DIR:-/opt/just1knode}/scripts/amnezia_api"
+        "/opt/just1knode/scripts/amnezia_api"
+        "/app/scripts/amnezia_api"
+        "${SCRIPT_DIR}/../scripts/amnezia_api"
+    )
+    for cand in "${cand_dirs[@]}"; do
+        if is_amnezia_api_valid "$cand"; then
+            source_api_dir="$cand"
+            break
+        fi
+    done
+
+    local copy_ok=0
+    if [[ -n "$source_api_dir" ]]; then
+        log "Использование локального источника микросервиса: ${source_api_dir}"
+        if cp -a "${source_api_dir}/." "$AMNEZIA_API_DIR/" 2>/dev/null; then
+            if is_amnezia_api_valid "$AMNEZIA_API_DIR"; then
+                copy_ok=1
+            fi
         fi
     fi
 
-    if [[ ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
+    # Если в целевом каталоге комплект не полон -> Сетевой fallback
+    if ! is_amnezia_api_valid "$AMNEZIA_API_DIR"; then
+        log "Локальные файлы микросервиса не найдены или неполны. Загрузка из репозитория GitHub..."
+        local tmp_extract
+        tmp_extract="$(mktemp -d /tmp/amnezia_extract.XXXXXXXXXX 2>/dev/null || mktemp -d)"
+        local tmp_dl="${tmp_extract}/archive.tar.gz"
+        local repo_url="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
+        local repo_ref="${JUST1KBOT_REF:-main}"
+        local archive_url
+        if [[ "$repo_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            archive_url="${repo_url%.git}/archive/${repo_ref}.tar.gz"
+        elif [[ "$repo_ref" =~ ^v[0-9] ]]; then
+            archive_url="${repo_url%.git}/archive/refs/tags/${repo_ref}.tar.gz"
+        else
+            archive_url="${repo_url%.git}/archive/refs/heads/${repo_ref}.tar.gz"
+        fi
+
+        if curl -fsSL --connect-timeout 10 --max-time 60 "$archive_url" -o "$tmp_dl" 2>/dev/null || \
+           wget -q --timeout=60 -O "$tmp_dl" "$archive_url" 2>/dev/null; then
+            local extract_dir="${tmp_extract}/src"
+            mkdir -p "$extract_dir"
+            if tar -xzf "$tmp_dl" -C "$extract_dir" --strip-components=1 2>/dev/null; then
+                local found_scripts="${extract_dir}/scripts/amnezia_api"
+                if is_amnezia_api_valid "$found_scripts"; then
+                    cp -a "${found_scripts}/." "$AMNEZIA_API_DIR/" 2>/dev/null || true
+                    # Атомарный прогрев локального кэша для будущих запусков
+                    local cache_target="${SCRIPT_DIR}/scripts/amnezia_api"
+                    local cache_stage="${SCRIPT_DIR}/scripts/.amnezia_cache_stage_$$"
+                    rm -rf "$cache_stage"
+                    mkdir -p "$cache_stage" 2>/dev/null || true
+                    if cp -a "${found_scripts}/." "$cache_stage/" 2>/dev/null; then
+                        if is_amnezia_api_valid "$cache_stage"; then
+                            rm -rf "${cache_target}.old"
+                            [[ -d "$cache_target" ]] && mv "$cache_target" "${cache_target}.old" 2>/dev/null || true
+                            mv "$cache_stage" "$cache_target" 2>/dev/null || true
+                            rm -rf "${cache_target}.old"
+                        fi
+                    fi
+                    rm -rf "$cache_stage"
+                fi
+            fi
+        fi
+        rm -rf "$tmp_extract"
+    fi
+
+    # Авто-восстановление в случае, если файлы оказались во вложенной папке amnezia_api (от старых версий)
+    if ! is_amnezia_api_valid "$AMNEZIA_API_DIR" && [[ -d "$AMNEZIA_API_DIR/amnezia_api" ]]; then
+        if is_amnezia_api_valid "$AMNEZIA_API_DIR/amnezia_api"; then
+            if cp -a "$AMNEZIA_API_DIR/amnezia_api/." "$AMNEZIA_API_DIR/" 2>/dev/null; then
+                if is_amnezia_api_valid "$AMNEZIA_API_DIR"; then
+                    rm -rf "$AMNEZIA_API_DIR/amnezia_api"
+                fi
+            fi
+        fi
+    fi
+
+    if ! is_amnezia_api_valid "$AMNEZIA_API_DIR"; then
         rollback_legacy_if_needed
-        error "Не удалось найти $AMNEZIA_API_DIR/app.py. Проверьте репозиторий."
+        error "Не удалось развернуть компоненты amnezia-api в $AMNEZIA_API_DIR (файлы app.py, requirements.txt или amnezia-api.service отсутствуют). Проверьте доступ к сети или репозиторию."
         return 1
     fi
 
