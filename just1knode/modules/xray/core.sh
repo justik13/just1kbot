@@ -371,14 +371,21 @@ update_node() {
                     chmod +x "${node_dir}/just1knode.sh" 2>/dev/null || true
                     ln -sf "${node_dir}/just1knode.sh" /usr/local/bin/just1knode 2>/dev/null || true
                 fi
-                if [[ -f "${tmp_dir}/scripts/amnezia_api/app.py" && -f "${tmp_dir}/scripts/amnezia_api/requirements.txt" ]]; then
+                if [[ -f "${tmp_dir}/scripts/amnezia_api/app.py" && \
+                      -f "${tmp_dir}/scripts/amnezia_api/requirements.txt" && \
+                      -f "${tmp_dir}/scripts/amnezia_api/amnezia-api.service" ]]; then
                     local cache_staging="${node_dir}/scripts/.amnezia_api_stage_$$"
+                    local cache_dest="${node_dir}/scripts/amnezia_api"
                     rm -rf "$cache_staging"
                     mkdir -p "$cache_staging"
                     if cp -a "${tmp_dir}/scripts/amnezia_api/." "$cache_staging/" 2>/dev/null; then
-                        if [[ -f "${cache_staging}/app.py" && -f "${cache_staging}/requirements.txt" ]]; then
-                            mkdir -p "${node_dir}/scripts/amnezia_api"
-                            cp -a "${cache_staging}/." "${node_dir}/scripts/amnezia_api/" 2>/dev/null || true
+                        if [[ -f "${cache_staging}/app.py" && \
+                              -f "${cache_staging}/requirements.txt" && \
+                              -f "${cache_staging}/amnezia-api.service" ]]; then
+                            rm -rf "${cache_dest}.old"
+                            [[ -d "$cache_dest" ]] && mv "$cache_dest" "${cache_dest}.old" 2>/dev/null || true
+                            mv "$cache_staging" "$cache_dest" 2>/dev/null || true
+                            rm -rf "${cache_dest}.old"
                         fi
                     fi
                     rm -rf "$cache_staging"
@@ -421,7 +428,9 @@ update_node() {
                     error "Не удалось скопировать исходные файлы ${amnezia_api_dir}. Обновление прервано."
                 fi
                 if [[ -d "${amnezia_api_dir}/amnezia_api" && ! -f "${amnezia_api_dir}/app.py" ]]; then
-                    if [[ -f "${amnezia_api_dir}/amnezia_api/app.py" ]]; then
+                    if [[ -f "${amnezia_api_dir}/amnezia_api/app.py" && \
+                          -f "${amnezia_api_dir}/amnezia_api/requirements.txt" && \
+                          -f "${amnezia_api_dir}/amnezia_api/amnezia-api.service" ]]; then
                         if cp -a "${amnezia_api_dir}/amnezia_api/." "${amnezia_api_dir}/" 2>/dev/null; then
                             if [[ -f "${amnezia_api_dir}/app.py" ]]; then
                                 rm -rf "${amnezia_api_dir}/amnezia_api"

@@ -355,7 +355,15 @@ install_amnezia_node() {
     mkdir -p "$AMNEZIA_API_DIR" "$AMNEZIA_API_ETC"
     chmod 750 "$AMNEZIA_API_DIR" 2>/dev/null || true
 
-    # Поиск валидного локального источника микросервиса (наличие ключевых файлов, а не просто пустая папка)
+    # Проверка полной валидности комплекта файлов микросервиса
+    is_amnezia_api_valid() {
+        local target="${1:-$AMNEZIA_API_DIR}"
+        [[ -f "${target}/app.py" && \
+           -f "${target}/requirements.txt" && \
+           -f "${target}/amnezia-api.service" ]]
+    }
+
+    # Поиск валидного локального источника микросервиса (все 3 обязательных файла)
     local source_api_dir=""
     local cand_dirs=(
         "${SCRIPT_DIR}/scripts/amnezia_api"
@@ -365,7 +373,7 @@ install_amnezia_node() {
         "${SCRIPT_DIR}/../scripts/amnezia_api"
     )
     for cand in "${cand_dirs[@]}"; do
-        if [[ -f "${cand}/app.py" && -f "${cand}/requirements.txt" ]]; then
+        if is_amnezia_api_valid "$cand"; then
             source_api_dir="$cand"
             break
         fi
@@ -375,15 +383,15 @@ install_amnezia_node() {
     if [[ -n "$source_api_dir" ]]; then
         log "Использование локального источника микросервиса: ${source_api_dir}"
         if cp -a "${source_api_dir}/." "$AMNEZIA_API_DIR/" 2>/dev/null; then
-            if [[ -f "$AMNEZIA_API_DIR/app.py" && -f "$AMNEZIA_API_DIR/requirements.txt" ]]; then
+            if is_amnezia_api_valid "$AMNEZIA_API_DIR"; then
                 copy_ok=1
             fi
         fi
     fi
 
-    # Если локальный источник отсутствует или не полон, и в целевом каталоге нет app.py -> Сетевой fallback
-    if [[ $copy_ok -eq 0 && ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
-        log "Загрузка скриптов amnezia_api из репозитория GitHub..."
+    # Если в целевом каталоге комплект не полон -> Сетевой fallback
+    if ! is_amnezia_api_valid "$AMNEZIA_API_DIR"; then
+        log "Локальные файлы микросервиса не найдены или неполны. Загрузка из репозитория GitHub..."
         local tmp_extract
         tmp_extract="$(mktemp -d /tmp/amnezia_extract.XXXXXXXXXX 2>/dev/null || mktemp -d)"
         local tmp_dl="${tmp_extract}/archive.tar.gz"
@@ -392,6 +400,8 @@ install_amnezia_node() {
         local archive_url
         if [[ "$repo_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
             archive_url="${repo_url%.git}/archive/${repo_ref}.tar.gz"
+        elif [[ "$repo_ref" =~ ^v[0-9] ]]; then
+            archive_url="${repo_url%.git}/archive/refs/tags/${repo_ref}.tar.gz"
         else
             archive_url="${repo_url%.git}/archive/refs/heads/${repo_ref}.tar.gz"
         fi
@@ -402,12 +412,22 @@ install_amnezia_node() {
             mkdir -p "$extract_dir"
             if tar -xzf "$tmp_dl" -C "$extract_dir" --strip-components=1 2>/dev/null; then
                 local found_scripts="${extract_dir}/scripts/amnezia_api"
-                if [[ -f "${found_scripts}/app.py" && -f "${found_scripts}/requirements.txt" ]]; then
+                if is_amnezia_api_valid "$found_scripts"; then
                     cp -a "${found_scripts}/." "$AMNEZIA_API_DIR/" 2>/dev/null || true
-                    # Прогрев локального кэша для будущих запусков
+                    # Атомарный прогрев локального кэша для будущих запусков
                     local cache_target="${SCRIPT_DIR}/scripts/amnezia_api"
-                    mkdir -p "$cache_target" 2>/dev/null || true
-                    cp -a "${found_scripts}/." "$cache_target/" 2>/dev/null || true
+                    local cache_stage="${SCRIPT_DIR}/scripts/.amnezia_cache_stage_$$"
+                    rm -rf "$cache_stage"
+                    mkdir -p "$cache_stage" 2>/dev/null || true
+                    if cp -a "${found_scripts}/." "$cache_stage/" 2>/dev/null; then
+                        if is_amnezia_api_valid "$cache_stage"; then
+                            rm -rf "${cache_target}.old"
+                            [[ -d "$cache_target" ]] && mv "$cache_target" "${cache_target}.old" 2>/dev/null || true
+                            mv "$cache_stage" "$cache_target" 2>/dev/null || true
+                            rm -rf "${cache_target}.old"
+                        fi
+                    fi
+                    rm -rf "$cache_stage"
                 fi
             fi
         fi
@@ -415,19 +435,19 @@ install_amnezia_node() {
     fi
 
     # Авто-восстановление в случае, если файлы оказались во вложенной папке amnezia_api (от старых версий)
-    if [[ -d "$AMNEZIA_API_DIR/amnezia_api" && ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
-        if [[ -f "$AMNEZIA_API_DIR/amnezia_api/app.py" ]]; then
+    if ! is_amnezia_api_valid "$AMNEZIA_API_DIR" && [[ -d "$AMNEZIA_API_DIR/amnezia_api" ]]; then
+        if is_amnezia_api_valid "$AMNEZIA_API_DIR/amnezia_api"; then
             if cp -a "$AMNEZIA_API_DIR/amnezia_api/." "$AMNEZIA_API_DIR/" 2>/dev/null; then
-                if [[ -f "$AMNEZIA_API_DIR/app.py" ]]; then
+                if is_amnezia_api_valid "$AMNEZIA_API_DIR"; then
                     rm -rf "$AMNEZIA_API_DIR/amnezia_api"
                 fi
             fi
         fi
     fi
 
-    if [[ ! -f "$AMNEZIA_API_DIR/app.py" || ! -f "$AMNEZIA_API_DIR/requirements.txt" ]]; then
+    if ! is_amnezia_api_valid "$AMNEZIA_API_DIR"; then
         rollback_legacy_if_needed
-        error "Не удалось развернуть компоненты amnezia-api в $AMNEZIA_API_DIR (файлы app.py или requirements.txt отсутствуют). Проверьте доступ к сети или репозиторию."
+        error "Не удалось развернуть компоненты amnezia-api в $AMNEZIA_API_DIR (файлы app.py, requirements.txt или amnezia-api.service отсутствуют). Проверьте доступ к сети или репозиторию."
         return 1
     fi
 
