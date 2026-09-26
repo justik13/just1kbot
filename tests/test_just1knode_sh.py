@@ -1180,7 +1180,7 @@ run_doctor
         html_content = index_file.read_text(encoding="utf-8")
         self.assertIn("<!DOCTYPE html>", html_content)
         self.assertIn("<html", html_content)
-        self.assertIn("Cloud Ingress", html_content)
+        self.assertIn("SimpleCalc", html_content)
 
         # 2. Certbot renewal hook
         hook_file = self.letsencrypt_dir / "renewal-hooks" / "deploy" / "restart-xray-nginx.sh"

@@ -65,7 +65,8 @@ class DockerComposeSecurityTests(unittest.TestCase):
             content = (root / fname).read_text(encoding="utf-8")
             self.assertIn("@allowed_paths path /webhook/* /yookassa/*", content)
             self.assertIn("@limited_body_paths path /health", content)
-            self.assertIn('respond "Not Found" 404', content)
+            self.assertIn("file_server", content)
+            self.assertIn("try_files {path} /index.html", content)
             # Ensure no catch-all reverse_proxy block exists
             self.assertNotIn("handle {\n\t\treverse_proxy bot:8080", content)
             self.assertNotIn("handle {\n        reverse_proxy bot:8080", content)
