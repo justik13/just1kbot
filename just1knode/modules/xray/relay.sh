@@ -169,16 +169,24 @@ EOF
     deploy_xray_systemd_service
     systemctl restart xray
 
-    # Защита порта туннеля через UFW
-    configure_safe_ufw
+    local prev_role
+    prev_role="$(get_node_status)"
+
+    # Защита порта туннеля через UFW (с сохранением порта Amnezia API при Dual-режиме)
+    local extra_ufw_ports=()
+    local existing_awg_port
+    existing_awg_port="$(get_state_val "awg_port" 2>/dev/null || true)"
+    [[ -z "$existing_awg_port" ]] && existing_awg_port="8443"
+    if [[ "$prev_role" == "awg" || "$prev_role" == "dual" || -f "/etc/nginx/sites-available/just1k-amnezia.conf" ]]; then
+        extra_ufw_ports+=("${existing_awg_port}/tcp")
+    fi
+    configure_safe_ufw "${extra_ufw_ports[@]}"
     ufw allow from "$origin_ip" to any port "$relay_port" proto tcp || true
     log "Порт туннеля ${relay_port}/tcp открыт строго для ${origin_ip}."
 
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
 
-    local prev_role
-    prev_role="$(get_node_status)"
     if [[ "$prev_role" == "awg" || "$prev_role" == "dual" ]]; then
         set_state_val "role" "dual"
         log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"
