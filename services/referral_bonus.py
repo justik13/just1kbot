@@ -421,15 +421,7 @@ async def reverse_referral_bonus_for_topup(
 
         # Cumulative calculation prevents rounding abuse across series of partial refunds
         if total_refunded_amount is not None and original_topup_amount and original_topup_amount > 0:
-            ratio = Decimal(str(total_refunded_amount)) / Decimal(str(original_topup_amount))
-            ratio = min(Decimal(1), max(Decimal(0), ratio))
-            target_cumulative = (Decimal(credit.amount) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-            reversal_val = min(max_can_reverse, max(Decimal(0), target_cumulative - already_reversed))
-        elif refund_amount is not None and original_topup_amount and original_topup_amount > 0:
-            bonus_ratio = Decimal(credit.amount) / Decimal(original_topup_amount)
-            implied_prev_refunded = (already_reversed / bonus_ratio) if bonus_ratio > 0 else Decimal(0)
-            eff_total_refunded = implied_prev_refunded + Decimal(str(refund_amount))
-            ratio = min(Decimal(1), max(Decimal(0), eff_total_refunded / Decimal(original_topup_amount)))
+            ratio = min(Decimal(1), max(Decimal(0), Decimal(str(total_refunded_amount)) / Decimal(str(original_topup_amount))))
             target_cumulative = (Decimal(credit.amount) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
             reversal_val = min(max_can_reverse, max(Decimal(0), target_cumulative - already_reversed))
         elif refund_amount is not None:
