@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import ipaddress
 import json
 import logging
 import time
@@ -301,7 +302,12 @@ async def close_http_session():
 
 
 class AmneziaClient:
-    def __init__(self, api_url: str, api_key: str):
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        ssl_verify: bool | None = None,
+    ):
         self.api_url = (api_url or "").rstrip("/")
         self.api_key = api_key or ""
         self._log_target = _safe_api_target(self.api_url)
@@ -310,6 +316,21 @@ class AmneziaClient:
             "Content-Type": "application/json",
         }
         self._key_error_logged = False
+        parsed = urlsplit(self.api_url)
+        self._is_ip_endpoint = False
+        if parsed.hostname:
+            try:
+                ipaddress.ip_address(parsed.hostname.strip("[]"))
+                self._is_ip_endpoint = True
+            except ValueError:
+                self._is_ip_endpoint = False
+
+        if ssl_verify is not None:
+            self._ssl: bool | None = ssl_verify
+        elif parsed.scheme == "https" and self._is_ip_endpoint:
+            self._ssl = False
+        else:
+            self._ssl = None
 
     async def is_circuit_available(self) -> bool:
         """Check if circuit breaker allows requests to this server endpoint."""
@@ -450,6 +471,10 @@ class AmneziaClient:
                     ambiguous=False,
                 )
 
+            request_kwargs = dict(kwargs)
+            if "ssl" not in request_kwargs and self._ssl is not None:
+                request_kwargs["ssl"] = self._ssl
+
             request_started = False
             try:
                 session = await get_http_session()
@@ -459,7 +484,7 @@ class AmneziaClient:
                     url,
                     headers=self._headers,
                     allow_redirects=False,
-                    **kwargs,
+                    **request_kwargs,
                 ) as response:
                     if response.status == 204:
                         await cb.record_success()
@@ -674,7 +699,14 @@ class AmneziaClient:
                         else False
                     ),
                 )
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as error:
+                logger.error(
+                    "Value/TypeError for %s%s: %s",
+                    self._log_target,
+                    path,
+                    error,
+                    exc_info=True,
+                )
                 return self._failure(
                     AmneziaErrorKind.INVALID_RESPONSE,
                     semantics,

@@ -206,9 +206,40 @@ install_amnezia_node() {
         fi
     done
 
+    # Определение публичного IP узла
+    local my_ip
+    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+    [[ -z "$my_ip" ]] && my_ip="127.0.0.1"
+
+    local chosen_api_key=""
+    local api_domain=""
+    local migration_selected=0
+
     if [[ -n "$existing_legacy_env" && -n "$legacy_api_key" ]]; then
         log "✔ Обнаружена существующая конфигурация kyoresuas/amnezia-api (${existing_legacy_env})."
-        log "  API-ключ и параметры сервера будут импортированы автоматически без изменения настроек в боте."
+        if [[ -t 0 && -z "$arg_domain" ]]; then
+            echo ""
+            echo -e "${BOLD}${CYAN}Обнаружена существующая конфигурация kyoresuas/amnezia-api:${NC}"
+            echo -e "  • Файл:      ${YELLOW}${existing_legacy_env}${NC}"
+            echo -e "  • Хост:      ${YELLOW}${legacy_host:-$my_ip}${NC}"
+            echo -e "  • API-ключ:  ${YELLOW}${legacy_api_key:0:8}...${legacy_api_key: -4}${NC}"
+            echo ""
+            echo -e "${BOLD}Выберите режим настройки:${NC}"
+            echo -e "  ${GREEN}[1]${NC} Бесшовная миграция (сохранить хост и API-ключ) ${GREEN}[Рекомендуется]${NC}"
+            echo -e "  ${CYAN}[2]${NC} Новая настройка (задать домен и ключ вручную)"
+            echo ""
+            read -rp "Ваш выбор [по умолчанию: 1]: " mode_choice || true
+            mode_choice="${mode_choice:-1}"
+            if [[ "$mode_choice" == "1" ]]; then
+                migration_selected=1
+                chosen_api_key="$legacy_api_key"
+                api_domain="${legacy_host:-$my_ip}"
+                log "✔ Выбран режим бесшовной миграции. Параметры сохранены."
+            fi
+        else
+            chosen_api_key="$legacy_api_key"
+            api_domain="${arg_domain:-${legacy_host:-$my_ip}}"
+        fi
     fi
 
     # Остановка контейнера amnezia-api если он запущен в Docker (для освобождения портов 4001 / 8443)
@@ -219,23 +250,44 @@ install_amnezia_node() {
         fi
     fi
 
-    # 3. Домен и порт API (интерактивно или из параметров/дефолтов)
-    local my_ip
-    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
-
-    local default_domain="${arg_domain:-${legacy_host:-$my_ip}}"
-    local api_domain="$default_domain"
-    if [[ -z "$arg_domain" && -t 0 ]]; then
-        echo ""
-        read -rp "Введите доменное имя для API [по умолчанию: ${default_domain}]: " domain_in || true
-        api_domain="${domain_in:-$default_domain}"
+    # 3. Домен и порт API (интерактивный опросник или дефолт)
+    if [[ -z "$api_domain" ]]; then
+        if [[ -n "$arg_domain" ]]; then
+            api_domain="$arg_domain"
+        elif [[ -t 0 ]]; then
+            echo ""
+            echo -e "${BOLD}Выберите тип адреса для подключения Telegram-бота:${NC}"
+            echo -e "  ${GREEN}[1]${NC} Доменное имя с доверенным Let's Encrypt SSL ${GREEN}[Рекомендуется]${NC}"
+            echo -e "  ${CYAN}[2]${NC} IP-адрес сервера (${my_ip}) с самоподписанным SSL-сертификатом"
+            echo ""
+            read -rp "Ваш выбор [по умолчанию: 1]: " conn_type || true
+            conn_type="${conn_type:-1}"
+            if [[ "$conn_type" == "1" ]]; then
+                read -rp "Введите доменное имя (например: vpn.example.com): " domain_in || true
+                domain_in="$(echo "$domain_in" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's|^https\?://||' -e 's|/.*$||')"
+                api_domain="${domain_in:-$my_ip}"
+            else
+                api_domain="$my_ip"
+            fi
+        else
+            api_domain="$my_ip"
+        fi
     fi
 
     local default_port="${arg_port:-$AMNEZIA_PUBLIC_PORT}"
     local public_port="$default_port"
-    if [[ -z "$arg_port" && -t 0 ]]; then
+    if [[ -z "$arg_port" && -t 0 && $migration_selected -eq 0 ]]; then
         read -rp "Публичный HTTPS порт для API [по умолчанию: ${default_port}]: " port_in || true
         public_port="${port_in:-$default_port}"
+    fi
+
+    local enable_abuse="Y"
+    if [[ -t 0 && $migration_selected -eq 0 ]]; then
+        read -rp "Активировать защиту от спама и торрентов (SMTP:25 + BitTorrent L7)? [Y/n]: " abuse_in || true
+        abuse_in="${abuse_in:-Y}"
+        if [[ "$abuse_in" =~ ^[Nn] ]]; then
+            enable_abuse="N"
+        fi
     fi
 
     # 4. Проверка доступности публичного порта
@@ -283,9 +335,9 @@ install_amnezia_node() {
     fi
     "$AMNEZIA_API_DIR/venv/bin/pip" install --no-cache-dir -r "$AMNEZIA_API_DIR/requirements.txt" --quiet
 
-    # 7. Определение API-ключа (приоритет: existing config.env -> legacy amnezia-api .env -> генерация нового)
-    local api_key=""
-    if [[ -f "$AMNEZIA_API_ETC/config.env" ]]; then
+    # 7. Определение API-ключа (приоритет: chosen_api_key -> existing config.env -> legacy amnezia-api .env -> генерация нового)
+    local api_key="$chosen_api_key"
+    if [[ -z "$api_key" && -f "$AMNEZIA_API_ETC/config.env" ]]; then
         api_key="$(grep -E "^(AMNEZIA_API_KEY|FASTIFY_API_KEY)=" "$AMNEZIA_API_ETC/config.env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
     fi
     if [[ -z "$api_key" && -n "$legacy_api_key" ]]; then
@@ -428,7 +480,11 @@ EOF
     fi
 
     # 11. Активация защиты от абуза (SMTP 25 + BitTorrent)
-    apply_amnezia_abuse_protection
+    if [[ "$enable_abuse" == "Y" ]]; then
+        apply_amnezia_abuse_protection
+    else
+        log "Защита от абуза (SMTP 25 / BitTorrent) пропущена по выбору пользователя"
+    fi
 
     # 12. Обновление состояния и определение мультироли (Coexistence)
     if [[ "$prev_role" == "relay" || "$prev_role" == "dual" ]]; then
@@ -553,12 +609,16 @@ backup_amnezia_node() {
         local c
         c="$(detect_amnezia_container)"
         if is_amnezia_container_running; then
+            local conf_file="/opt/amnezia/awg/awg0.conf"
+            if [[ "$c" == "amnezia-awg" ]]; then
+                conf_file="/opt/amnezia/awg/wg0.conf"
+            fi
             local conf_txt
-            conf_txt="$(docker exec "$c" cat /opt/amnezia/awg/awg0.conf 2>/dev/null || true)"
+            conf_txt="$(docker exec "$c" cat "$conf_file" 2>/dev/null || docker exec "$c" cat /opt/amnezia/awg/awg0.conf 2>/dev/null || docker exec "$c" cat /opt/amnezia/awg/wg0.conf 2>/dev/null || true)"
             local table_txt
             table_txt="$(docker exec "$c" cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo "[]")"
             local psk_txt
-            psk_txt="$(docker exec "$c" cat /opt/amnezia/awg/wireguard_psk.key 2>/dev/null || echo "")"
+            psk_txt="$(docker exec "$c" cat /opt/amnezia/awg/wireguard_psk.key 2>/dev/null || docker exec "$c" cat /opt/amnezia/awg/psk.key 2>/dev/null || echo "")"
             if [[ -n "$conf_txt" ]]; then
                 backup_json="$(python3 -c "
 import json, sys, time
@@ -637,7 +697,12 @@ psk = data.get('server_psk')
 if not conf or '[Interface]' not in conf:
     sys.exit(1)
 
-p = subprocess.Popen(['docker', 'exec', '-i', c, 'sh', '-c', 'cat > /opt/amnezia/awg/awg0.conf'], stdin=subprocess.PIPE)
+conf_name = 'wg0.conf' if ('awg2' not in c and 'awg3' not in c) else 'awg0.conf'
+iface = 'wg0' if ('awg2' not in c and 'awg3' not in c) else 'awg0'
+tool = 'wg' if ('awg2' not in c and 'awg3' not in c) else 'awg'
+conf_path = f'/opt/amnezia/awg/{conf_name}'
+
+p = subprocess.Popen(['docker', 'exec', '-i', c, 'sh', '-c', f'cat > {conf_path}'], stdin=subprocess.PIPE)
 p.communicate(conf.encode('utf-8'))
 if p.returncode != 0:
     sys.exit(2)
@@ -650,8 +715,7 @@ if psk:
     p = subprocess.Popen(['docker', 'exec', '-i', c, 'sh', '-c', 'cat > /opt/amnezia/awg/wireguard_psk.key'], stdin=subprocess.PIPE)
     p.communicate((psk.strip() + '\n').encode('utf-8'))
 
-tool = 'awg' if ('awg2' in c or 'awg3' in c) else 'wg'
-subprocess.run(['docker', 'exec', c, tool, 'syncconf', 'awg0', '/opt/amnezia/awg/awg0.conf'], check=False)
+subprocess.run(['docker', 'exec', c, tool, 'syncconf', iface, conf_path], check=False)
 " "$source_file" "$c"; then
             log "✔ Резервная копия успешно восстановлена напрямую в контейнер ${c}."
             return 0

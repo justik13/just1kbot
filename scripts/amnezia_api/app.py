@@ -14,6 +14,7 @@ High-performance native Python implementation replacing kyoresuas/amnezia-api:
 
 import asyncio
 import base64
+import contextlib
 import ipaddress
 import json
 import logging
@@ -31,6 +32,40 @@ import psutil
 from cryptography.hazmat.primitives.asymmetric import x25519
 from fastapi import Depends, FastAPI, HTTPException, Header, status
 from pydantic import BaseModel, Field
+
+AWG3_EXCLUSIVE_KEYS = (
+    "HeaderProtectionKey",
+    "ContentPaddingAddition",
+    "RekeyAfterTime",
+    "RekeyTimeout",
+    "RejectAfterTime",
+    "KeepaliveTimeout",
+    "MaxHandshakeAttempts",
+    "RandomTrailers",
+    "DisableCookies",
+)
+
+
+def is_awg3_detected(params: dict[str, Any]) -> bool:
+    """Detect if AWG 3.x exclusive parameters are present (I1..I5 belong to AWG 2.0)."""
+    return any(k in params or k.upper() in params for k in AWG3_EXCLUSIVE_KEYS)
+
+
+@contextlib.contextmanager
+def file_lock(lock_path: str):
+    """Advisory file lock using fcntl.flock on POSIX, no-op fallback on Windows."""
+    try:
+        import fcntl
+        dirname = os.path.dirname(os.path.abspath(lock_path))
+        os.makedirs(dirname, exist_ok=True)
+        with open(lock_path, "a") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+    except (ImportError, OSError):
+        yield
 
 logger = logging.getLogger("amnezia_api")
 logging.basicConfig(
@@ -228,19 +263,21 @@ async def is_container_running(container: str | None = None) -> bool:
 def _write_file_atomic_host(path: str, content: str) -> None:
     dirname = os.path.dirname(os.path.abspath(path))
     os.makedirs(dirname, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", dir=dirname, delete=False, encoding="utf-8") as tf:
-        tf.write(content)
-        tf.flush()
-        os.fsync(tf.fileno())
-        tmp_name = tf.name
-    os.replace(tmp_name, path)
+    with file_lock(f"{path}.lock"):
+        with tempfile.NamedTemporaryFile("w", dir=dirname, delete=False, encoding="utf-8") as tf:
+            tf.write(content)
+            tf.flush()
+            os.fsync(tf.fileno())
+            tmp_name = tf.name
+        os.replace(tmp_name, path)
 
 
 def _read_host_file(path: str) -> str | None:
     if os.path.exists(path):
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                return f.read()
+            with file_lock(f"{path}.lock"):
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    return f.read()
         except Exception as e:
             logger.error("Failed to read host file %s: %s", path, e)
     return None
@@ -415,7 +452,9 @@ async def get_server_psk_async() -> str:
         if psk:
             return psk
 
-    return generate_psk()
+    new_psk = generate_psk()
+    await write_container_file_async(psk_path, new_psk + "\n")
+    return new_psk
 
 
 def allocate_next_ip(interface_addr: str, existing_peers: list[dict[str, str]]) -> str:
@@ -525,16 +564,8 @@ def build_client_configs(
     ])
     raw_conf = "\n".join(conf_lines) + "\n"
 
-    # Determine protocol version for vpn://
-    has_awg3 = any(
-        k in detected_awg
-        for k in (
-            "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime",
-            "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout",
-            "MaxHandshakeAttempts", "RandomTrailers", "DisableCookies",
-            "I1", "I2", "I3", "I4", "I5",
-        )
-    )
+    # Determine protocol version for vpn:// (I1..I5 belong to AWG 2.0)
+    has_awg3 = is_awg3_detected(detected_awg)
     protocol_version = "3.1" if has_awg3 else "2"
 
     last_config_data = {
@@ -652,18 +683,35 @@ async def syncconf_container(container: str, conf_path: str) -> bool:
 
 
 async def _fetch_public_ip_async() -> str:
+    for url in ("https://ifconfig.me", "https://icanhazip.com", "https://api.ipify.org"):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "curl", "-s", "--max-time", "3", url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+            ip = stdout_b.decode("utf-8", errors="ignore").strip()
+            if ip and not ip.startswith("<") and len(ip.split(".")) == 4:
+                return ip
+        except Exception:
+            continue
+
+    # Fallback to default route interface IP via hostname -I
     try:
         proc = await asyncio.create_subprocess_exec(
-            "curl", "-s", "--max-time", "3", "https://ifconfig.me",
+            "hostname", "-I",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
-        ip = stdout_b.decode("utf-8", errors="ignore").strip()
-        if ip:
-            return ip
+        stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+        candidates = stdout_b.decode("utf-8", errors="ignore").strip().split()
+        for cand in candidates:
+            if cand and not cand.startswith("127.") and not cand.startswith("::") and len(cand.split(".")) == 4:
+                return cand
     except Exception:
         pass
+
     return "127.0.0.1"
 
 
@@ -752,9 +800,10 @@ async def get_server():
     addr = iface.get("Address", "10.8.1.1/24")
     try:
         network = ipaddress.ip_interface(addr).network
-        max_peers = max(1, network.num_addresses - 2)
+        # Subnet, server (.1), and broadcast are reserved
+        max_peers = max(1, network.num_addresses - 3)
     except Exception:
-        max_peers = 254
+        max_peers = 253
 
     env_max_peers = os.getenv("SERVER_MAX_PEERS")
     if env_max_peers and env_max_peers.isdigit() and int(env_max_peers) > 0:
@@ -765,15 +814,7 @@ async def get_server():
 
     peers = parsed.get("peers", [])
 
-    has_awg3 = any(
-        k in iface
-        for k in (
-            "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime",
-            "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout",
-            "MaxHandshakeAttempts", "RandomTrailers", "DisableCookies",
-            "I1", "I2", "I3", "I4", "I5",
-        )
-    )
+    has_awg3 = is_awg3_detected(iface)
     protocols = ["amneziawg2", "amneziawg3"] if has_awg3 else ["amneziawg2"]
 
     return {
@@ -858,7 +899,7 @@ async def get_server_backup():
         parsed = parse_awg_conf(conf_content)
         protocols = (
             ["amneziawg2", "amneziawg3"]
-            if any(k in parsed.get("interface", {}) for k in ("HeaderProtectionKey", "RekeyAfterTime"))
+            if is_awg3_detected(parsed.get("interface", {}))
             else ["amneziawg2"]
         )
 
@@ -912,13 +953,30 @@ async def import_server_backup(req: ServerBackupImportRequest):
             )
 
         if clients_table is not None:
-            await save_clients_table_async(clients_table)
+            saved_table = await save_clients_table_async(clients_table)
+            if not saved_table:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to write restored clients table to container",
+                )
 
         if psk:
             psk_path = SERVER_PSK_PATH or f"{AWG_DIR}/wireguard_psk.key"
-            await write_container_file_async(psk_path, psk.strip() + "\n")
+            saved_psk = await write_container_file_async(psk_path, psk.strip() + "\n")
+            if not saved_psk:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to write restored server PSK to container",
+                )
 
         sync_ok = await syncconf_container(container, conf_path)
+        if not sync_ok:
+            logger.error("Failed to sync kernel configuration during backup import on container %s", container)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to sync running kernel state with restored configuration",
+            )
+
         logger.info(
             "Restored backup on container %s (syncconf ok: %s, peers count: %s)",
             container,
@@ -930,7 +988,7 @@ async def import_server_backup(req: ServerBackupImportRequest):
             "message": "Резервная копия успешно восстановлена",
             "status": "ok",
             "peers_count": len(clients_table) if clients_table else 0,
-            "kernel_synced": sync_ok,
+            "kernel_synced": True,
         }
 
 
@@ -972,7 +1030,10 @@ async def get_clients(skip: int = 0, limit: int | None = None):
     conf_path = get_config_path(container)
     conf_content = await read_container_file_async(conf_path)
     parsed = parse_awg_conf(conf_content)
+    iface = parsed.get("interface", {})
     peers = parsed.get("peers", [])
+    has_awg3 = is_awg3_detected(iface)
+    proto = "amneziawg3" if has_awg3 else "amneziawg2"
 
     clients_table = await load_clients_table_async()
     clients_map: dict[str, dict[str, Any]] = {}
@@ -1029,7 +1090,7 @@ async def get_clients(skip: int = 0, limit: int | None = None):
             "endpoint": "",
             "online": is_online,
             "expiresAt": c_meta.get("expiresAt"),
-            "protocol": "amneziawg2",
+            "protocol": proto,
         }
 
         item = {
@@ -1059,7 +1120,7 @@ async def get_clients(skip: int = 0, limit: int | None = None):
             "lastSeen": handshake,
             "updatedAt": c_meta.get("updatedAt", c_meta.get("createdAt")),
             "expiresAt": c_meta.get("expiresAt"),
-            "protocol": "amneziawg2",
+            "protocol": proto,
         }
         result.append(item)
 
@@ -1146,7 +1207,14 @@ async def create_client(req: ClientCreateRequest):
         # 4. Append to clientsTable
         clients_table = await load_clients_table_async()
         clients_table.append(new_client_meta)
-        await save_clients_table_async(clients_table)
+        saved_table = await save_clients_table_async(clients_table)
+        if not saved_table:
+            # Rollback conf file
+            await write_container_file_async(conf_path, conf_content)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to save clients table",
+            )
 
         # 5. Register in active kernel runtime
         sync_ok = await sync_kernel_peer_add(client_pub, client_ip, psk, container)
@@ -1165,13 +1233,16 @@ async def create_client(req: ClientCreateRequest):
                 detail="Failed to register peer in kernel runtime",
             )
 
-        logger.info("Created client %s (%s, IP: %s)", client_pub, req.clientName, client_ip)
+        has_awg3 = is_awg3_detected(iface)
+        proto = "amneziawg3" if has_awg3 else "amneziawg2"
+
+        logger.info("Created client %s (%s, IP: %s, Proto: %s)", client_pub, req.clientName, client_ip, proto)
 
         client_obj = {
             "id": client_pub,
             "config": vpn_uri,
             "raw_config": raw_conf,
-            "protocol": "amneziawg2",
+            "protocol": proto,
         }
         return {
             "message": "Клиент успешно создан",
@@ -1226,9 +1297,19 @@ async def _do_delete_client(client_id: str):
         # Remove only the target peer section from config
         new_conf_text, removed = remove_peer_from_conf_text(conf_content, target_pub)
         if removed:
-            await write_container_file_async(conf_path, new_conf_text)
+            saved_conf = await write_container_file_async(conf_path, new_conf_text)
+            if not saved_conf:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update configuration file during deletion",
+                )
 
-        await save_clients_table_async(remaining_table)
+        saved_table = await save_clients_table_async(remaining_table)
+        if not saved_table:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update clients table during deletion",
+            )
 
         # Remove from active kernel runtime
         await sync_kernel_peer_remove(target_pub, container)
@@ -1241,16 +1322,16 @@ async def _do_delete_client(client_id: str):
 @app.patch("/clients", dependencies=[Depends(verify_api_key)])
 async def patch_client_by_body(req: ClientPatchRequest):
     """Update client status (active/disabled) or expiration."""
-    return await _do_patch_client(req.clientId, req.status, req.expiresAt)
+    return await _do_patch_client(req.clientId, req)
 
 
 @app.patch("/clients/{client_id:path}", dependencies=[Depends(verify_api_key)])
 async def patch_client_by_path(client_id: str, req: ClientPatchRequest):
     """Update client by path parameter."""
-    return await _do_patch_client(client_id, req.status, req.expiresAt)
+    return await _do_patch_client(client_id, req)
 
 
-async def _do_patch_client(client_id: str, new_status: str | None, expires_at: int | None):
+async def _do_patch_client(client_id: str, req: ClientPatchRequest):
     async with state_lock:
         container = get_target_container()
         conf_path = get_config_path(container)
@@ -1275,11 +1356,34 @@ async def _do_patch_client(client_id: str, new_status: str | None, expires_at: i
         target_pub = target.get("clientPubKey") or target.get("clientId")
         changed = False
 
+        new_status = req.status
         if new_status in ("active", "disabled") and new_status != target.get("status"):
             target["status"] = new_status
             changed = True
             if new_status == "disabled" and target_pub:
+                # Enrich IP and PSK from awg0.conf before removing peer so it can be re-enabled later
+                if not target.get("clientIp") or not target.get("psk"):
+                    for p in parsed["peers"]:
+                        if p.get("PublicKey") == target_pub:
+                            if not target.get("clientIp"):
+                                target["clientIp"] = p.get("AllowedIPs", "").split("/")[0]
+                            if not target.get("psk"):
+                                target["psk"] = p.get("PresharedKey", "")
+                            break
+
+                # 1. Remove from active kernel runtime
                 await sync_kernel_peer_remove(target_pub, container)
+                # 2. Non-destructively remove [Peer] block from awg0.conf so it does not reload on reboot
+                new_conf_text, removed = remove_peer_from_conf_text(conf_content, target_pub)
+                if removed:
+                    saved = await write_container_file_async(conf_path, new_conf_text)
+                    if not saved:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Failed to update configuration file while disabling peer",
+                        )
+                    conf_content = new_conf_text
+                await syncconf_container(container, conf_path)
             elif new_status == "active" and target_pub:
                 # Find peer IP and PSK from conf or table
                 peer_ip = target.get("clientIp", "")
@@ -1289,15 +1393,45 @@ async def _do_patch_client(client_id: str, new_status: str | None, expires_at: i
                         if p.get("PublicKey") == target_pub:
                             peer_ip = peer_ip or p.get("AllowedIPs", "").split("/")[0]
                             peer_psk = peer_psk or p.get("PresharedKey", "")
-                await sync_kernel_peer_add(target_pub, peer_ip, peer_psk, container)
+                if not peer_psk:
+                    peer_psk = await get_server_psk_async()
+                    target["psk"] = peer_psk
 
-        if expires_at is not None:
-            target["expiresAt"] = expires_at
+                if not peer_ip:
+                    peer_ip = allocate_next_ip(
+                        parsed.get("interface", {}).get("Address", "10.8.1.1/24"),
+                        parsed["peers"],
+                    )
+                    target["clientIp"] = peer_ip
+
+                # Re-add [Peer] block to awg0.conf if not already present
+                parsed_current = parse_awg_conf(conf_content)
+                already_in_conf = any(p.get("PublicKey") == target_pub for p in parsed_current["peers"])
+                if not already_in_conf and peer_ip:
+                    new_conf_text = append_peer_to_conf_text(conf_content, target_pub, peer_psk, peer_ip)
+                    saved = await write_container_file_async(conf_path, new_conf_text)
+                    if not saved:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Failed to update configuration file while re-enabling peer",
+                        )
+                    conf_content = new_conf_text
+
+                await sync_kernel_peer_add(target_pub, peer_ip, peer_psk, container)
+                await syncconf_container(container, conf_path)
+
+        if "expiresAt" in req.model_fields_set:
+            target["expiresAt"] = req.expiresAt
             changed = True
 
         if changed:
             target["updatedAt"] = int(time.time())
-            await save_clients_table_async(clients_table)
+            saved = await save_clients_table_async(clients_table)
+            if not saved:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to save clients table",
+                )
 
         return {
             "message": "Данные успешно сохранены",
@@ -1345,21 +1479,39 @@ async def get_client_by_id(client_id: str):
             detail=f"Client {client_id} not found",
         )
 
-    host = SERVER_HOST_NAME or "127.0.0.1"
-    raw_conf, vpn_uri = build_client_configs(
-        target,
-        iface,
-        server_pub,
-        host,
-        SERVER_DNS1,
-        SERVER_DNS2,
-        container,
-    )
+    target_pub = target.get("clientPubKey") or target.get("clientId") or client_id
+    if not target.get("clientIp") or not target.get("psk"):
+        for p in parsed["peers"]:
+            if p.get("PublicKey") == target_pub:
+                if not target.get("clientIp"):
+                    target["clientIp"] = p.get("AllowedIPs", "").split("/")[0]
+                if not target.get("psk"):
+                    target["psk"] = p.get("PresharedKey", "")
+                break
+
+    has_awg3 = is_awg3_detected(iface)
+    proto = "amneziawg3" if has_awg3 else "amneziawg2"
+
+    raw_conf: str | None = None
+    vpn_uri: str | None = None
+
+    # Only generate configs if client private key is present (desktop app clients don't have it on server)
+    if target.get("clientPrivKey"):
+        host = SERVER_HOST_NAME or "127.0.0.1"
+        raw_conf, vpn_uri = build_client_configs(
+            target,
+            iface,
+            server_pub,
+            host,
+            SERVER_DNS1,
+            SERVER_DNS2,
+            container,
+        )
 
     return {
         "id": client_id,
         "client": target,
         "config": vpn_uri,
         "raw_config": raw_conf,
-        "protocol": "amneziawg2",
+        "protocol": proto,
     }

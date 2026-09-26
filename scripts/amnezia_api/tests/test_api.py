@@ -379,10 +379,9 @@ def test_clients_crud_lifecycle(mock_awg_env):
     assert create_resp.status_code == 200
     created = create_resp.json()
     assert "id" in created
-    assert "client" in created
     assert created["client"]["id"] == created["id"]
     assert created["config"].startswith("vpn://")
-    assert created["protocol"] == "amneziawg2"
+    assert created["protocol"] == "amneziawg3"
     new_client_id = created["id"]
 
     # Contract check: services.amnezia_client.AmneziaClientCreateResponse
@@ -552,4 +551,146 @@ async def test_server_reboot_endpoint(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
     assert "Сервер перезагружается" in resp.json()["message"]
+
+
+def test_awg2_vs_awg3_exclusive_detection():
+    """Verify that I1..I5 are treated as AWG 2.0 and only exclusive keys trigger AWG 3.x."""
+    # AWG 2.0 with I1..I5 parameters
+    awg2_params = {
+        "Jc": "4",
+        "S1": "79",
+        "H1": "169154911-1234371153",
+        "I1": "1234",
+        "I2": "5678",
+    }
+    assert amnezia_app.is_awg3_detected(awg2_params) is False
+
+    # AWG 3.x with HeaderProtectionKey
+    awg3_params = dict(awg2_params)
+    awg3_params["HeaderProtectionKey"] = "secret_key=="
+    assert amnezia_app.is_awg3_detected(awg3_params) is True
+
+    # AWG 3.x with RekeyAfterTime
+    awg3_params_2 = dict(awg2_params)
+    awg3_params_2["RekeyAfterTime"] = "120"
+    assert amnezia_app.is_awg3_detected(awg3_params_2) is True
+
+
+def test_client_without_privkey_safe_response(mock_awg_env):
+    """Verify that desktop app clients without private key don't get broken configs."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+
+    # Existing peer in mock_awg_env has no clientPrivKey in clientsTable
+    peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
+    resp = client.get(f"/clients/{peer_pub}", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == peer_pub
+    assert data["config"] is None
+    assert data["raw_config"] is None
+    assert data["client"]["clientIp"] == "10.8.1.2"
+    assert data["client"]["psk"] == "PGh2rNsBmWVJC7qpa3fZ1dwB6tLjBUVKsxSZK6pMQRY="
+
+
+def test_patch_client_disable_removes_from_conf_and_active_readds(mock_awg_env):
+    """Verify disabling peer removes [Peer] from conf text and enabling re-appends it."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+    peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
+    conf_file = mock_awg_env["conf_file"]
+
+    # Initial state: peer is in awg0.conf
+    assert peer_pub in conf_file.read_text(encoding="utf-8")
+
+    # 1. Disable peer
+    patch_resp = client.patch(
+        f"/clients/{peer_pub}",
+        json={"clientId": peer_pub, "status": "disabled"},
+        headers=headers,
+    )
+    assert patch_resp.status_code == 200
+    # [Peer] block removed from file on disk
+    conf_after_disable = conf_file.read_text(encoding="utf-8")
+    assert peer_pub not in conf_after_disable
+
+    # 2. Re-enable peer
+    patch_resp2 = client.patch(
+        f"/clients/{peer_pub}",
+        json={"clientId": peer_pub, "status": "active"},
+        headers=headers,
+    )
+    assert patch_resp2.status_code == 200
+    # [Peer] block re-appended to file on disk
+    conf_after_enable = conf_file.read_text(encoding="utf-8")
+    assert peer_pub in conf_after_enable
+    assert "AllowedIPs = 10.8.1.2/32" in conf_after_enable
+
+
+def test_patch_client_clear_expires_at(mock_awg_env):
+    """Verify explicit null/None clears expiresAt."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+    peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
+
+    # 1. Set an expiration timestamp
+    client.patch(
+        f"/clients/{peer_pub}",
+        json={"clientId": peer_pub, "expiresAt": 1893456000},
+        headers=headers,
+    )
+    resp = client.get(f"/clients/{peer_pub}", headers=headers)
+    assert resp.json()["client"]["expiresAt"] == 1893456000
+
+    # 2. Clear expiration by sending null
+    client.patch(
+        f"/clients/{peer_pub}",
+        json={"clientId": peer_pub, "expiresAt": None},
+        headers=headers,
+    )
+    resp = client.get(f"/clients/{peer_pub}", headers=headers)
+    assert resp.json()["client"]["expiresAt"] is None
+
+
+@pytest.mark.asyncio
+async def test_persistent_psk_generation(tmp_path, monkeypatch):
+    """Verify generated PSK is persisted to wireguard_psk.key."""
+    psk_file = tmp_path / "wireguard_psk.key"
+    monkeypatch.setattr(amnezia_app, "SERVER_PSK_PATH", str(psk_file))
+    monkeypatch.setattr(amnezia_app, "AWG_DIR", str(tmp_path))
+
+    # First call generates and persists PSK
+    psk1 = await amnezia_app.get_server_psk_async()
+    assert isinstance(psk1, str) and len(psk1) == 44
+    assert psk_file.exists()
+    assert psk_file.read_text(encoding="utf-8").strip() == psk1
+
+    # Second call returns the persisted PSK
+    psk2 = await amnezia_app.get_server_psk_async()
+    assert psk1 == psk2
+
+
+def test_max_peers_off_by_one_fixed(mock_awg_env):
+    """Verify /24 subnet has maxPeers=253 (256 - 3)."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+    resp = client.get("/server", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["maxPeers"] == 253
+
+
+def test_import_backup_fail_closed_on_syncconf_error(mock_awg_env, monkeypatch):
+    """Verify POST /server/backup raises HTTP 500 if syncconf fails."""
+    monkeypatch.setattr(amnezia_app, "syncconf_container", AsyncMock(return_value=False))
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+
+    import_payload = {
+        "conf_content": SAMPLE_AWG0_CONF,
+        "clients_table": [],
+    }
+    resp = client.post("/server/backup", json=import_payload, headers=headers)
+    assert resp.status_code == 500
+    assert "sync" in resp.json()["detail"].lower()
+
 
