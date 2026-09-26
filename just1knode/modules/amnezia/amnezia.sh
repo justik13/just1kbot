@@ -254,10 +254,15 @@ install_amnezia_node() {
     fi
 
     local legacy_docker_stopped=0
+    local legacy_pm2_stopped=0
     rollback_legacy_if_needed() {
         if [[ $legacy_docker_stopped -eq 1 ]]; then
             warn "Восстановление и перезапуск исходного Docker-контейнера amnezia-api..."
             docker start amnezia-api >/dev/null 2>&1 || true
+        fi
+        if [[ $legacy_pm2_stopped -eq 1 ]]; then
+            warn "Восстановление и перезапуск процессов PM2..."
+            systemctl start pm2-root.service >/dev/null 2>&1 || pm2 start all >/dev/null 2>&1 || true
         fi
     }
 
@@ -268,6 +273,19 @@ install_amnezia_node() {
             if docker stop amnezia-api >/dev/null 2>&1; then
                 legacy_docker_stopped=1
             fi
+        fi
+    fi
+
+    # Остановка процессов Node.js / Fastify в PM2 (для освобождения локального порта 4001)
+    if command -v pm2 >/dev/null 2>&1 && pm2 list 2>/dev/null | grep -qiE "amnezia|main"; then
+        log "Обнаружен работающий процесс amnezia-api в PM2. Выполняется безопасная остановка для переключения на нативный сервис..."
+        if pm2 stop all >/dev/null 2>&1; then
+            legacy_pm2_stopped=1
+        fi
+    elif systemctl is-active --quiet pm2-root.service 2>/dev/null; then
+        log "Обнаружена активная служба pm2-root. Выполняется безопасная остановка для переключения на нативный сервис..."
+        if systemctl stop pm2-root.service >/dev/null 2>&1; then
+            legacy_pm2_stopped=1
         fi
     fi
 
@@ -318,6 +336,17 @@ install_amnezia_node() {
         if ! echo "$conflict_proc" | grep -qE "nginx|amnezia"; then
             rollback_legacy_if_needed
             error "Порт ${public_port}/tcp уже занят другим процессом на хосте:\n$conflict_proc"
+            return 1
+        fi
+    fi
+
+    # Проверка доступности локального порта API (4001)
+    if ss -tlnp 2>/dev/null | grep -q ":${AMNEZIA_LOCAL_PORT} "; then
+        local local_conflict
+        local_conflict=$(ss -tlnp 2>/dev/null | grep ":${AMNEZIA_LOCAL_PORT} " || true)
+        if ! echo "$local_conflict" | grep -qE "amnezia|uvicorn|python"; then
+            rollback_legacy_if_needed
+            error "Локальный порт ${AMNEZIA_LOCAL_PORT}/tcp уже занят другим процессом на хосте:\n$local_conflict"
             return 1
         fi
     fi
@@ -535,6 +564,12 @@ EOF
     set_state_val "awg_domain" "$api_domain"
     set_state_val "awg_port" "$public_port"
     set_state_val "awg_installed" "true"
+
+    # 13. Отключение старых служб (PM2) если производилась миграция
+    if [[ $legacy_pm2_stopped -eq 1 ]]; then
+        systemctl disable pm2-root.service >/dev/null 2>&1 || true
+        log "✔ Служба PM2 отключена из автозагрузки systemd"
+    fi
 
     # Вывод карточки подключения
     show_amnezia_bot_credentials
