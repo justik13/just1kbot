@@ -139,6 +139,9 @@ remove_amnezia_abuse_protection() {
 # УСТАНОВКА И НАСТРОЙКА AMNEZIAWG УЗЛА
 # =============================================================================
 install_amnezia_node() {
+    local arg_domain="${1:-}"
+    local arg_port="${2:-}"
+
     title "НАСТРОЙКА И ИНТЕГРАЦИЯ УЗЛА AMNEZIAWG"
     check_root
     init_state_dir
@@ -216,17 +219,24 @@ install_amnezia_node() {
         fi
     fi
 
-    # 3. Интерактивный опрос: домен и порт
+    # 3. Домен и порт API (интерактивно или из параметров/дефолтов)
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
 
-    local default_domain="${legacy_host:-$my_ip}"
-    echo ""
-    read -rp "Введите доменное имя для API [по умолчанию: ${default_domain}]: " domain_in || true
-    local api_domain="${domain_in:-$default_domain}"
+    local default_domain="${arg_domain:-${legacy_host:-$my_ip}}"
+    local api_domain="$default_domain"
+    if [[ -z "$arg_domain" && -t 0 ]]; then
+        echo ""
+        read -rp "Введите доменное имя для API [по умолчанию: ${default_domain}]: " domain_in || true
+        api_domain="${domain_in:-$default_domain}"
+    fi
 
-    read -rp "Публичный HTTPS порт для API [по умолчанию: ${AMNEZIA_PUBLIC_PORT}]: " port_in || true
-    local public_port="${port_in:-$AMNEZIA_PUBLIC_PORT}"
+    local default_port="${arg_port:-$AMNEZIA_PUBLIC_PORT}"
+    local public_port="$default_port"
+    if [[ -z "$arg_port" && -t 0 ]]; then
+        read -rp "Публичный HTTPS порт для API [по умолчанию: ${default_port}]: " port_in || true
+        public_port="${port_in:-$default_port}"
+    fi
 
     # 4. Проверка доступности публичного порта
     if ss -tlnp 2>/dev/null | grep -q ":${public_port} "; then

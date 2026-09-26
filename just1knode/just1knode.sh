@@ -1132,7 +1132,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 case "${2:-}" in
                     origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}" "${9:-}" ;;
                     relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-www.google.com}" ;;
-                    amnezia|awg) install_amnezia_node ;;
+                    amnezia|awg) install_amnezia_node "${3:-}" "${4:-}" ;;
                     *) error "Неизвестный тип установки: $2. Доступно: origin, relay, amnezia, awg" ;;
                 esac
                 ;;
@@ -1147,13 +1147,13 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 ;;
             amnezia|awg)
                 case "${2:-}" in
-                    install|setup) install_amnezia_node ;;
+                    install|setup) install_amnezia_node "${3:-}" "${4:-}" ;;
                     status) show_amnezia_status ;;
                     creds|bot) show_amnezia_bot_credentials ;;
                     backup) backup_amnezia_node "${3:-}" ;;
                     restore) restore_amnezia_node "${3:-}" ;;
                     uninstall|remove) uninstall_amnezia_component ;;
-                    *) install_amnezia_node ;;
+                    *) install_amnezia_node "${2:-}" "${3:-}" ;;
                 esac
                 ;;
             backup)
