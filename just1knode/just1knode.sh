@@ -186,10 +186,12 @@ show_status() {
         echo -e "  HTTPS Порт:           ${CYAN}${a_port}${NC}"
 
         echo -e "\n  Службы:"
+        local c_name
+        c_name="$(detect_amnezia_container 2>/dev/null || echo "amnezia-awg2")"
         if is_amnezia_container_running 2>/dev/null; then
-            echo -e "    Docker (amnezia-awg): ${GREEN}● Активен${NC}"
+            echo -e "    Docker (${c_name}): ${GREEN}● Активен${NC}"
         else
-            echo -e "    Docker (amnezia-awg): ${RED}○ Не запущен${NC}"
+            echo -e "    Docker (${c_name}): ${RED}○ Не запущен${NC}"
         fi
         systemctl is-active --quiet amnezia-api && echo -e "    amnezia-api:          ${GREEN}● Активен${NC}" || echo -e "    amnezia-api:          ${RED}○ Не работает${NC}"
         systemctl is-active --quiet nginx && echo -e "    Nginx (8443):         ${GREEN}● Активен${NC}" || echo -e "    Nginx (8443):         ${RED}○ Не работает${NC}"
@@ -206,10 +208,12 @@ show_status() {
 
         echo -e "\n  Службы:"
         systemctl is-active --quiet xray && echo -e "    Xray Relay:           ${GREEN}● Активен${NC}" || echo -e "    Xray Relay:           ${RED}○ Не работает${NC}"
+        local c_name_dual
+        c_name_dual="$(detect_amnezia_container 2>/dev/null || echo "amnezia-awg2")"
         if is_amnezia_container_running 2>/dev/null; then
-            echo -e "    Docker (amnezia-awg): ${GREEN}● Активен${NC}"
+            echo -e "    Docker (${c_name_dual}): ${GREEN}● Активен${NC}"
         else
-            echo -e "    Docker (amnezia-awg): ${RED}○ Не запущен${NC}"
+            echo -e "    Docker (${c_name_dual}): ${RED}○ Не запущен${NC}"
         fi
         systemctl is-active --quiet amnezia-api && echo -e "    amnezia-api:          ${GREEN}● Активен${NC}" || echo -e "    amnezia-api:          ${RED}○ Не работает${NC}"
         systemctl is-active --quiet nginx && echo -e "    Nginx (8443):         ${GREEN}● Активен${NC}" || echo -e "    Nginx (8443):         ${RED}○ Не работает${NC}"
@@ -344,16 +348,26 @@ run_doctor() {
 
     if [[ "$role" == "awg" || "$role" == "dual" ]]; then
         log "3b. Проверка контейнера и конфигурации AmneziaWG..."
+        local c_doc
+        c_doc="$(detect_amnezia_container 2>/dev/null || echo "amnezia-awg2")"
         if is_amnezia_container_running 2>/dev/null; then
-            echo -e "  ${GREEN}✔${NC} Docker контейнер amnezia-awg активен"
+            echo -e "  ${GREEN}✔${NC} Docker контейнер ${c_doc} активен"
         else
-            echo -e "  ${RED}✗${NC} Docker контейнер amnezia-awg не запущен"
+            echo -e "  ${RED}✗${NC} Docker контейнер ${c_doc} не запущен"
             failed=$((failed + 1))
         fi
-        if [[ -f "${AMNEZIA_AWG_CONF:-/opt/amnezia/awg/wg0.conf}" ]]; then
-            echo -e "  ${GREEN}✔${NC} Конфигурационный файл wg0.conf найден"
+        local conf_name="awg0.conf"
+        [[ "$c_doc" == "amnezia-awg" ]] && conf_name="wg0.conf"
+        local conf_found=false
+        if docker exec "$c_doc" test -f "/opt/amnezia/awg/$conf_name" 2>/dev/null; then
+            conf_found=true
+        elif [[ -f "/opt/amnezia/awg/$conf_name" ]]; then
+            conf_found=true
+        fi
+        if [[ "$conf_found" == "true" ]]; then
+            echo -e "  ${GREEN}✔${NC} Конфигурационный файл ${conf_name} найден"
         else
-            echo -e "  ${RED}✗${NC} Конфигурационный файл wg0.conf отсутствует"
+            echo -e "  ${RED}✗${NC} Конфигурационный файл ${conf_name} отсутствует"
             failed=$((failed + 1))
         fi
     fi
@@ -589,11 +603,11 @@ reset_node() {
         return
     fi
 
-    systemctl stop xray xray-api 2>/dev/null || true
-    systemctl disable xray xray-api 2>/dev/null || true
+    systemctl stop xray xray-api amnezia-api 2>/dev/null || true
+    systemctl disable xray xray-api amnezia-api 2>/dev/null || true
     remove_traffic_watchdog_timer
-    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh 2>/dev/null || true
-    rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh 2>/dev/null || true
+    rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api /etc/amnezia-api /etc/ssl/just1k_amnezia 2>/dev/null || true
     systemctl reload nginx 2>/dev/null || true
     log "Узел успешно сброшен в исходное состояние."
 }
@@ -1118,8 +1132,8 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 case "${2:-}" in
                     origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}" "${9:-}" ;;
                     relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-www.google.com}" ;;
-                    amnezia) install_amnezia_node ;;
-                    *) error "Неизвестный тип установки: $2. Доступно: origin, relay, amnezia" ;;
+                    amnezia|awg) install_amnezia_node ;;
+                    *) error "Неизвестный тип установки: $2. Доступно: origin, relay, amnezia, awg" ;;
                 esac
                 ;;
             relay)

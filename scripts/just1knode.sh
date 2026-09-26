@@ -56,6 +56,9 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
             mkdir -p /opt/xray-api
             cp -r "$tmp_extract/scripts/xray_api"/* /opt/xray-api/
         fi
+        if [[ -d "$tmp_extract/scripts/amnezia_api" && -d "/opt/amnezia-api" ]]; then
+            cp -r "$tmp_extract/scripts/amnezia_api"/* /opt/amnezia-api/
+        fi
         rm -rf "$tmp_tar" "$tmp_extract"
         chmod +x "$INSTALL_DIR/just1knode.sh"
         ln -sf "$INSTALL_DIR/just1knode.sh" /usr/local/bin/just1knode

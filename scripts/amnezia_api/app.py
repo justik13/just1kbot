@@ -2,9 +2,12 @@
 
 High-performance native Python implementation replacing kyoresuas/amnezia-api:
 - Native Curve25519 keypair generation via cryptography (< 0.1ms vs 2000ms docker exec)
-- Atomic file operations with rollbacks and asyncio mutex
-- Dynamic IP allocation supporting arbitrary subnets (/24, /23, /22, etc.)
-- Direct kernel peer control (awg set) without Cryptokey Routing collision
+- Strict compatibility with upstream Amnezia Awg2 container (amnezia-awg2 / awg0 / awg0.conf)
+- Upstream-compatible clientsTable model (clientId = public key, userData object)
+- Non-destructive peer management (append [Peer] section, never overwrite existing peers)
+- Faithful AWG 2.0 and 3.x parameter propagation (Jc, S1-S4, H1-H4, I1-I5, HeaderProtectionKey, etc.)
+- Fail-closed API key authentication
+- Asynchronous container execution without event loop blocking
 - Memory footprint: ~25 MB RAM (vs ~150 MB for Node.js container)
 - Full vpn:// and .conf format compatibility
 """
@@ -17,12 +20,9 @@ import logging
 import os
 import re
 import secrets
-import shutil
 import struct
-import subprocess
 import tempfile
 import time
-import uuid
 import zlib
 from contextlib import asynccontextmanager
 from typing import Any
@@ -42,12 +42,12 @@ logging.basicConfig(
 # Configuration
 # ---------------------------------------------------------------------------
 API_KEY = os.getenv("AMNEZIA_API_KEY", "")
+AWG_CONTAINER_NAME = os.getenv("AWG_CONTAINER_NAME", "amnezia-awg2")
 AWG_DIR = os.getenv("AWG_DIR", "/opt/amnezia/awg")
-AWG_CONF_PATH = os.getenv("AWG_CONF_PATH", os.path.join(AWG_DIR, "wg0.conf"))
-CLIENTS_TABLE_PATH = os.getenv("CLIENTS_TABLE_PATH", os.path.join(AWG_DIR, "clientsTable"))
-SERVER_PUBKEY_PATH = os.getenv("SERVER_PUBKEY_PATH", os.path.join(AWG_DIR, "server_public_key.key"))
-SERVER_PSK_PATH = os.getenv("SERVER_PSK_PATH", os.path.join(AWG_DIR, "psk.key"))
-AWG_CONTAINER_NAME = os.getenv("AWG_CONTAINER_NAME", "amnezia-awg")
+AWG_CONF_PATH = os.getenv("AWG_CONF_PATH", "")
+CLIENTS_TABLE_PATH = os.getenv("CLIENTS_TABLE_PATH", "")
+SERVER_PUBKEY_PATH = os.getenv("SERVER_PUBKEY_PATH", "")
+SERVER_PSK_PATH = os.getenv("SERVER_PSK_PATH", "")
 SERVER_HOST_NAME = os.getenv("SERVER_HOST_NAME", "")
 SERVER_DNS1 = os.getenv("SERVER_DNS1", "1.1.1.1")
 SERVER_DNS2 = os.getenv("SERVER_DNS2", "1.0.0.1")
@@ -55,29 +55,80 @@ SERVER_DNS2 = os.getenv("SERVER_DNS2", "1.0.0.1")
 state_lock = asyncio.Lock()
 
 
+def get_target_container() -> str:
+    """Return effective container name, defaulting to amnezia-awg2."""
+    if AWG_CONTAINER_NAME:
+        return AWG_CONTAINER_NAME
+    return "amnezia-awg2"
+
+
+def get_interface_name(container: str | None = None) -> str:
+    """Return kernel interface name (awg0 for Awg2, wg0 for legacy)."""
+    c = container or get_target_container()
+    return "awg0" if "awg2" in c else "wg0"
+
+
+def get_tool_binary(container: str | None = None) -> str:
+    """Return CLI tool name (awg for Awg2, wg for legacy)."""
+    c = container or get_target_container()
+    return "awg" if "awg2" in c else "wg"
+
+
+def get_config_path(container: str | None = None) -> str:
+    if AWG_CONF_PATH:
+        return AWG_CONF_PATH
+    c = container or get_target_container()
+    conf_name = "awg0.conf" if "awg2" in c else "wg0.conf"
+    return os.path.join(AWG_DIR, conf_name)
+
+
+def get_clients_table_path() -> str:
+    if CLIENTS_TABLE_PATH:
+        return CLIENTS_TABLE_PATH
+    return os.path.join(AWG_DIR, "clientsTable")
+
+
+def get_server_pubkey_path() -> str:
+    if SERVER_PUBKEY_PATH:
+        return SERVER_PUBKEY_PATH
+    return os.path.join(AWG_DIR, "wireguard_server_public_key.key")
+
+
+def get_server_psk_path() -> str:
+    if SERVER_PSK_PATH:
+        return SERVER_PSK_PATH
+    return os.path.join(AWG_DIR, "wireguard_psk.key")
+
+
 # ---------------------------------------------------------------------------
 # Lifespan
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    container = get_target_container()
     logger.info("Starting AmneziaWG API Service (Native Python)")
-    logger.info("AWG config path: %s", AWG_CONF_PATH)
-    logger.info("Clients table path: %s", CLIENTS_TABLE_PATH)
+    logger.info("Target container: %s (interface: %s)", container, get_interface_name(container))
+    logger.info("AWG config path: %s", get_config_path(container))
+    logger.info("Clients table path: %s", get_clients_table_path())
     if not API_KEY:
-        logger.warning("AMNEZIA_API_KEY is not set! API is currently running unauthenticated.")
+        logger.error("AMNEZIA_API_KEY is not set! Protected endpoints will fail closed with HTTP 500.")
     yield
     logger.info("Shutting down AmneziaWG API Service")
 
 
-app = FastAPI(title="Just1kBot AmneziaWG API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Just1kBot AmneziaWG API", version="2.1.0", lifespan=lifespan)
 
 
 # ---------------------------------------------------------------------------
-# Authentication
+# Authentication (Fail-Closed)
 # ---------------------------------------------------------------------------
 def verify_api_key(x_api_key: str | None = Header(None)) -> bool:
     if not API_KEY:
-        return True
+        logger.error("Authentication rejected: AMNEZIA_API_KEY environment variable is empty or unset")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server configuration error: AMNEZIA_API_KEY is not configured",
+        )
     if not x_api_key or not secrets.compare_digest(x_api_key, API_KEY):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -108,20 +159,64 @@ class ClientPatchRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Helpers: Atomic File I/O
+# Container & Filesystem Helpers
 # ---------------------------------------------------------------------------
-def read_file_safe(path: str, default: str = "") -> str:
-    if not os.path.exists(path):
-        return default
+async def run_docker_exec_async(
+    cmd: list[str],
+    input_data: str | None = None,
+    timeout: float = 8.0,
+) -> tuple[int, str, str]:
+    """Execute command inside Docker container asynchronously without blocking event loop."""
+    container = get_target_container()
+    full_cmd = ["docker", "exec", "-i", container] + cmd
+    stdin_mode = asyncio.subprocess.PIPE if input_data is not None else None
+
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read()
+        proc = await asyncio.create_subprocess_exec(
+            *full_cmd,
+            stdin=stdin_mode,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        in_bytes = input_data.encode("utf-8") if input_data is not None else None
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(input=in_bytes),
+                timeout=timeout,
+            )
+            stdout = stdout_b.decode("utf-8", errors="replace")
+            stderr = stderr_b.decode("utf-8", errors="replace")
+            return proc.returncode or 0, stdout, stderr
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            logger.warning("Docker exec timed out (%ss): %s", timeout, cmd)
+            return -1, "", "timeout"
+    except FileNotFoundError:
+        # Docker binary not installed or not in PATH (local test environment)
+        return -1, "", "docker binary not found"
     except Exception as e:
-        logger.error("Failed to read file %s: %s", path, e)
-        return default
+        logger.warning("Docker exec failed: %s: %s", cmd, e)
+        return -1, "", str(e)
 
 
-def write_file_atomic(path: str, content: str) -> None:
+async def is_container_running(container: str | None = None) -> bool:
+    c = container or get_target_container()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "inspect", "-f", "{{.State.Running}}", c,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+        return stdout_b.decode("utf-8", errors="ignore").strip().lower() == "true"
+    except Exception:
+        return False
+
+
+def _write_file_atomic_host(path: str, content: str) -> None:
     dirname = os.path.dirname(os.path.abspath(path))
     os.makedirs(dirname, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", dir=dirname, delete=False, encoding="utf-8") as tf:
@@ -132,8 +227,63 @@ def write_file_atomic(path: str, content: str) -> None:
     os.replace(tmp_name, path)
 
 
-def load_clients_table() -> list[dict[str, Any]]:
-    content = read_file_safe(CLIENTS_TABLE_PATH, "[]").strip()
+def _read_host_file(path: str) -> str | None:
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read()
+        except Exception as e:
+            logger.error("Failed to read host file %s: %s", path, e)
+    return None
+
+
+def _write_host_file(path: str, content: str) -> bool:
+    dirname = os.path.dirname(os.path.abspath(path))
+    if os.path.exists(dirname) or os.path.exists(path):
+        try:
+            _write_file_atomic_host(path, content)
+            return True
+        except Exception as e:
+            logger.debug("Failed writing host file %s: %s", path, e)
+    return False
+
+
+async def read_container_file_async(path: str, default: str = "") -> str:
+    """Read file content from host (if available) or from inside container."""
+    # 1. Prefer host path if it physically exists (e.g. test fixtures, mounted volumes)
+    host_content = await asyncio.to_thread(_read_host_file, path)
+    if host_content is not None:
+        return host_content
+
+    # 2. Read inside container via docker exec
+    rc, stdout, stderr = await run_docker_exec_async(["cat", path])
+    if rc == 0:
+        return stdout
+    logger.debug("Container file read failed (%s): %s", path, stderr)
+    return default
+
+
+async def write_container_file_async(path: str, content: str) -> bool:
+    """Write file content to host (if dir exists) and/or inside container atomically."""
+    written_host = await asyncio.to_thread(_write_host_file, path, content)
+
+    # In addition, if container is running or docker is available, inject into container
+    dir_in_container = os.path.dirname(path)
+    sh_cmd = f"mkdir -p '{dir_in_container}' && cat > '{path}.tmp' && mv -f '{path}.tmp' '{path}'"
+    rc, _, stderr = await run_docker_exec_async(["sh", "-c", sh_cmd], input_data=content)
+    if rc == 0:
+        return True
+
+    return written_host
+
+
+# ---------------------------------------------------------------------------
+# Clients Table I/O (Upstream Amnezia Format Compatible)
+# ---------------------------------------------------------------------------
+async def load_clients_table_async() -> list[dict[str, Any]]:
+    path = get_clients_table_path()
+    content = await read_container_file_async(path, "[]")
+    content = content.strip()
     if not content:
         return []
     try:
@@ -145,12 +295,14 @@ def load_clients_table() -> list[dict[str, Any]]:
     return []
 
 
-def save_clients_table(clients: list[dict[str, Any]]) -> None:
-    write_file_atomic(CLIENTS_TABLE_PATH, json.dumps(clients, indent=2, ensure_ascii=False))
+async def save_clients_table_async(clients: list[dict[str, Any]]) -> bool:
+    path = get_clients_table_path()
+    content = json.dumps(clients, indent=2, ensure_ascii=False)
+    return await write_container_file_async(path, content)
 
 
 # ---------------------------------------------------------------------------
-# Helpers: AWG Configuration & Cryptography
+# Cryptography & Key Management
 # ---------------------------------------------------------------------------
 def generate_keypair() -> tuple[str, str]:
     """Generate X25519 private and public keys in base64."""
@@ -166,7 +318,7 @@ def generate_psk() -> str:
 
 
 def parse_awg_conf(content: str) -> dict[str, Any]:
-    """Parse wg0.conf to extract Interface params and Peers."""
+    """Parse awg0.conf/wg0.conf to extract Interface params and Peers."""
     interface_params: dict[str, str] = {}
     peers: list[dict[str, str]] = []
 
@@ -175,7 +327,18 @@ def parse_awg_conf(content: str) -> dict[str, Any]:
 
     for raw_line in content.splitlines():
         line = raw_line.strip()
-        if not line or line.startswith("#"):
+        if not line:
+            continue
+
+        # Extract commented AWG parameters (e.g. # I1 = 123)
+        if line.startswith("#"):
+            comment_content = line.lstrip("#").strip()
+            if "=" in comment_content:
+                k, v = comment_content.split("=", 1)
+                k_clean = k.strip()
+                v_clean = v.strip()
+                if k_clean.upper() in ("I1", "I2", "I3", "I4", "I5") and current_section == "interface":
+                    interface_params[k_clean.upper()] = v_clean
             continue
 
         if line.lower() == "[interface]":
@@ -206,10 +369,19 @@ def parse_awg_conf(content: str) -> dict[str, Any]:
     }
 
 
-def get_server_public_key(interface_params: dict[str, str]) -> str:
-    pub = read_file_safe(SERVER_PUBKEY_PATH).strip()
+async def get_server_public_key_async(container: str, interface_params: dict[str, str]) -> str:
+    pub_path = get_server_pubkey_path()
+    pub = (await read_container_file_async(pub_path)).strip()
     if pub:
         return pub
+
+    # Fallback to legacy filename
+    legacy_pub_path = os.path.join(AWG_DIR, "server_public_key.key")
+    if legacy_pub_path != pub_path:
+        pub = (await read_container_file_async(legacy_pub_path)).strip()
+        if pub:
+            return pub
+
     priv_b64 = interface_params.get("PrivateKey", "")
     if priv_b64:
         try:
@@ -221,14 +393,23 @@ def get_server_public_key(interface_params: dict[str, str]) -> str:
     return ""
 
 
-def get_server_psk() -> str:
-    psk = read_file_safe(SERVER_PSK_PATH).strip()
+async def get_server_psk_async() -> str:
+    psk_path = get_server_psk_path()
+    psk = (await read_container_file_async(psk_path)).strip()
     if psk:
         return psk
+
+    # Fallback to legacy filename
+    legacy_psk_path = os.path.join(AWG_DIR, "psk.key")
+    if legacy_psk_path != psk_path:
+        psk = (await read_container_file_async(legacy_psk_path)).strip()
+        if psk:
+            return psk
+
     return generate_psk()
 
 
-def allocate_next_ip(interface_addr: str, clients: list[dict[str, Any]]) -> str:
+def allocate_next_ip(interface_addr: str, existing_peers: list[dict[str, str]]) -> str:
     """Dynamically allocate the next available client IP from the interface subnet."""
     if not interface_addr:
         interface_addr = "10.8.1.1/24"
@@ -238,8 +419,8 @@ def allocate_next_ip(interface_addr: str, clients: list[dict[str, Any]]) -> str:
     server_ip = iface.ip
 
     used_ips = {server_ip}
-    for c in clients:
-        cip = c.get("clientIp") or c.get("ip")
+    for p in existing_peers:
+        cip = p.get("AllowedIPs") or p.get("clientIp") or p.get("ip")
         if cip:
             try:
                 clean_ip = cip.split("/")[0].strip()
@@ -252,130 +433,129 @@ def allocate_next_ip(interface_addr: str, clients: list[dict[str, Any]]) -> str:
             return str(host)
 
     raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail=f"Subnet {network} address pool exhausted (no available IP addresses)",
+        status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+        detail=f"Subnet {network} is fully allocated ({len(used_ips)} IPs used)",
     )
 
 
 # ---------------------------------------------------------------------------
-# Helpers: Amnezia vpn:// URI Encoder
+# Client Config & vpn:// URI Builder
 # ---------------------------------------------------------------------------
-def encode_vpn_uri(config_dict: dict[str, Any]) -> str:
-    """Encode config dictionary into standard Amnezia vpn:// URI."""
-    json_bytes = json.dumps(config_dict, ensure_ascii=False).encode("utf-8")
-    header = struct.pack(">I", len(json_bytes))
-    compressed = zlib.compress(json_bytes, level=9)
-    payload = header + compressed
-    b64 = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
-    return f"vpn://{b64}"
+def encode_vpn_uri(data: dict[str, Any]) -> str:
+    """Encode connection profile into Amnezia vpn:// URI."""
+    json_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    orig_len = len(json_bytes)
+    compressed = zlib.compress(json_bytes)
+    payload = struct.pack(">I", orig_len) + compressed
+    b64_url = (
+        base64.urlsafe_b64encode(payload)
+        .decode("ascii")
+        .rstrip("=")
+        .replace("+", "-")
+        .replace("/", "_")
+    )
+    return f"vpn://{b64_url}"
 
 
 def build_client_configs(
     client: dict[str, Any],
-    interface_params: dict[str, str],
+    iface: dict[str, str],
     server_pubkey: str,
     host_name: str,
     dns1: str,
     dns2: str,
+    container_name: str,
 ) -> tuple[str, str]:
-    """Generate raw WireGuard INI config and packed vpn:// URI for a client."""
-    port_str = interface_params.get("ListenPort", "44321")
+    """Generate raw .conf and vpn:// connection profile preserving all AWG 2.0/3.x parameters."""
+    client_ip = client.get("clientIp", "")
+    client_priv = client.get("clientPrivKey", "")
+    client_pub = client.get("clientPubKey", "")
+    psk = client.get("psk", "")
+
+    port_str = iface.get("ListenPort", "44321")
     port_int = int(port_str) if port_str.isdigit() else 44321
 
-    jc = interface_params.get("Jc", "4")
-    jmin = interface_params.get("Jmin", "10")
-    jmax = interface_params.get("Jmax", "50")
-    s1 = interface_params.get("S1", "79")
-    s2 = interface_params.get("S2", "115")
-    s3 = interface_params.get("S3", "5")
-    s4 = interface_params.get("S4", "1")
-    h1 = interface_params.get("H1", "169154911-1234371153")
-    h2 = interface_params.get("H2", "2057051984-2121122945")
-    h3 = interface_params.get("H3", "2132872968-2133668229")
-    h4 = interface_params.get("H4", "2136455412-2141801388")
+    # Extract all AWG parameters from server [Interface]
+    awg_keys = [
+        "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4",
+        "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5",
+        "HeaderProtectionKey", "ContentPaddingAddition",
+        "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime",
+        "KeepaliveTimeout", "MaxHandshakeAttempts",
+        "RandomTrailers", "DisableCookies",
+    ]
 
-    client_ip = client["clientIp"]
-    client_priv = client["clientPrivKey"]
-    client_pub = client["clientPubKey"]
-    psk = client["psk"]
+    detected_awg: dict[str, str] = {}
+    for k in awg_keys:
+        if k in iface:
+            detected_awg[k] = iface[k]
+        elif k.upper() in iface:
+            detected_awg[k] = iface[k.upper()]
 
-    # 1. Raw WireGuard / AmneziaWG INI
-    raw_lines = [
+    # Construct raw .conf
+    conf_lines = [
         "[Interface]",
         f"Address = {client_ip}/32",
         f"DNS = {dns1}, {dns2}",
-        "MTU = 1280",
         f"PrivateKey = {client_priv}",
-        f"Jc = {jc}",
-        f"Jmin = {jmin}",
-        f"Jmax = {jmax}",
-        f"S1 = {s1}",
-        f"S2 = {s2}",
-        f"S3 = {s3}",
-        f"S4 = {s4}",
-        f"H1 = {h1}",
-        f"H2 = {h2}",
-        f"H3 = {h3}",
-        f"H4 = {h4}",
+    ]
+    for k, v in detected_awg.items():
+        conf_lines.append(f"{k} = {v}")
+
+    conf_lines.extend([
         "",
         "[Peer]",
         f"PublicKey = {server_pubkey}",
-        f"PresharedKey = {psk}",
+    ])
+    if psk:
+        conf_lines.append(f"PresharedKey = {psk}")
+    conf_lines.extend([
         "AllowedIPs = 0.0.0.0/0, ::/0",
         f"Endpoint = {host_name}:{port_int}",
         "PersistentKeepalive = 25",
-    ]
-    raw_conf = "\n".join(raw_lines)
+    ])
+    raw_conf = "\n".join(conf_lines) + "\n"
 
-    # 2. Amnezia native JSON format (.vpn / vpn://)
+    # Determine protocol version for vpn://
+    has_awg3 = any(
+        k in detected_awg
+        for k in (
+            "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime",
+            "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout",
+            "MaxHandshakeAttempts", "RandomTrailers", "DisableCookies",
+            "I1", "I2", "I3", "I4", "I5",
+        )
+    )
+    protocol_version = "3.1" if has_awg3 else "2"
+
     last_config_data = {
-        "H1": str(h1),
-        "H2": str(h2),
-        "H3": str(h3),
-        "H4": str(h4),
-        "Jc": str(jc),
-        "Jmin": str(jmin),
-        "Jmax": str(jmax),
-        "S1": str(s1),
-        "S2": str(s2),
-        "S3": str(s3),
-        "S4": str(s4),
-        "allowed_ips": ["0.0.0.0/0", "::/0"],
+        "clientId": client_pub,
         "client_ip": client_ip,
         "client_priv_key": client_priv,
         "client_pub_key": client_pub,
-        "config": raw_conf,
         "hostName": host_name,
-        "mtu": "1280",
         "port": port_int,
         "psk_key": psk,
         "server_pub_key": server_pubkey,
     }
 
+    awg_container_dict: dict[str, Any] = {
+        "protocol_version": protocol_version,
+        "port": str(port_int),
+        "transport_proto": "udp",
+        "last_config": json.dumps(last_config_data, ensure_ascii=False),
+    }
+    for k, v in detected_awg.items():
+        awg_container_dict[k] = str(v)
+
     vpn_data = {
         "containers": [
             {
-                "container": "amnezia-awg",
-                "awg": {
-                    "protocol_version": "2",
-                    "port": str(port_int),
-                    "transport_proto": "udp",
-                    "Jc": str(jc),
-                    "Jmin": str(jmin),
-                    "Jmax": str(jmax),
-                    "S1": str(s1),
-                    "S2": str(s2),
-                    "S3": str(s3),
-                    "S4": str(s4),
-                    "H1": str(h1),
-                    "H2": str(h2),
-                    "H3": str(h3),
-                    "H4": str(h4),
-                    "last_config": json.dumps(last_config_data, ensure_ascii=False),
-                },
+                "container": container_name,
+                "awg": awg_container_dict,
             }
         ],
-        "defaultContainer": "amnezia-awg",
+        "defaultContainer": container_name,
         "description": host_name,
         "dns1": dns1,
         "dns2": dns2,
@@ -387,98 +567,52 @@ def build_client_configs(
 
 
 # ---------------------------------------------------------------------------
-# Helpers: Docker & Kernel Sync
+# Kernel & Runtime Peer Sync
 # ---------------------------------------------------------------------------
-def run_docker_exec(cmd: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
-    full_cmd = ["docker", "exec", AWG_CONTAINER_NAME] + cmd
-    try:
-        proc = subprocess.run(
-            full_cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        return proc.returncode, proc.stdout, proc.stderr
-    except subprocess.TimeoutExpired:
-        logger.warning("Docker exec timed out: %s", cmd)
-        return -1, "", "timeout"
-    except Exception as e:
-        logger.warning("Docker exec failed: %s: %s", cmd, e)
-        return -1, "", str(e)
+async def sync_kernel_peer_add(pubkey: str, ip: str, psk: str, container: str) -> bool:
+    """Add or update peer in active kernel runtime without restarting container."""
+    iface = get_interface_name(container)
+    binary = get_tool_binary(container)
 
-
-def _inspect_docker_running() -> bool:
-    try:
-        proc = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Running}}", AWG_CONTAINER_NAME],
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-            check=False,
-        )
-        return proc.stdout.strip().lower() == "true"
-    except Exception:
-        return False
-
-
-def _fetch_public_ip() -> str:
-    try:
-        proc = subprocess.run(
-            ["curl", "-s", "--max-time", "3", "https://ifconfig.me"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        ip = proc.stdout.strip()
-        if ip:
-            return ip
-    except Exception:
-        pass
-    return "127.0.0.1"
-
-
-def sync_kernel_peer_add(pubkey: str, ip: str, psk: str) -> bool:
-    """Add or update peer in active kernel runtime without restart."""
-    # Write PSK to container temp file to avoid exposing secret in process listing
     safe_psk = re.sub(r"[^A-Za-z0-9+/=]", "", psk)
     safe_pub = re.sub(r"[^A-Za-z0-9+/=]", "", pubkey)
-    safe_ip = re.sub(r"[^0-9.]", "", ip)
+    safe_ip = re.sub(r"[^0-9.]", "", ip.split("/")[0])
+    tmp_token = secrets.token_hex(8)
 
-    sh_cmd = f"echo '{safe_psk}' > /tmp/psk.tmp && awg set wg0 peer '{safe_pub}' allowed-ips '{safe_ip}/32' preshared-key /tmp/psk.tmp && rm -f /tmp/psk.tmp"
-    rc, stdout, stderr = run_docker_exec(["sh", "-c", sh_cmd])
+    # Securely feed PSK using trap to clean up temporary file immediately upon exit
+    sh_cmd = (
+        f"TMP_PSK='/tmp/awg_psk_{tmp_token}.tmp'; "
+        f"trap 'rm -f \"$TMP_PSK\"' EXIT; "
+        f"echo '{safe_psk}' > \"$TMP_PSK\" && "
+        f"{binary} set {iface} peer '{safe_pub}' allowed-ips '{safe_ip}/32' preshared-key \"$TMP_PSK\""
+    )
+    rc, _, stderr = await run_docker_exec_async(["sh", "-c", sh_cmd])
     if rc == 0:
         return True
-
-    # Fallback to syncconf if awg set failed
-    logger.warning("awg set failed (code %s: %s), falling back to wg syncconf", rc, stderr.strip())
-    rc2, _, _ = run_docker_exec(["sh", "-c", "awg syncconf wg0 <(wg-quick strip wg0)"])
-    return rc2 == 0
+    logger.warning("Kernel peer add failed (%s): %s", pubkey, stderr)
+    return False
 
 
-def sync_kernel_peer_remove(pubkey: str) -> bool:
-    """Instantly remove peer from active kernel runtime without routing collisions."""
+async def sync_kernel_peer_remove(pubkey: str, container: str) -> bool:
+    """Remove peer from active kernel runtime."""
+    iface = get_interface_name(container)
+    binary = get_tool_binary(container)
     safe_pub = re.sub(r"[^A-Za-z0-9+/=]", "", pubkey)
-    rc, stdout, stderr = run_docker_exec(["awg", "set", "wg0", "peer", safe_pub, "remove"])
-    if rc == 0:
-        return True
-    logger.warning("awg set peer remove failed (code %s: %s)", rc, stderr.strip())
-    rc2, _, _ = run_docker_exec(["sh", "-c", "awg syncconf wg0 <(wg-quick strip wg0)"])
-    return rc2 == 0
+    rc, _, stderr = await run_docker_exec_async([binary, "set", iface, "peer", safe_pub, "remove"])
+    return rc == 0
 
 
-def fetch_live_transfer_stats() -> dict[str, dict[str, Any]]:
+async def fetch_live_transfer_stats(container: str) -> dict[str, dict[str, Any]]:
     """Fetch live transfer and handshake stats from kernel for each peer."""
     stats: dict[str, dict[str, Any]] = {}
-    rc, stdout, _ = run_docker_exec(["awg", "show", "wg0", "dump"])
+    iface = get_interface_name(container)
+    binary = get_tool_binary(container)
+    rc, stdout, _ = await run_docker_exec_async([binary, "show", iface, "dump"])
     if rc != 0 or not stdout:
         return stats
 
     for line in stdout.splitlines():
         parts = line.strip().split("\t")
-        # Dump format:
-        # Interface: <privkey> <pubkey> <listen_port> <fwmark>
-        # Peer: <pubkey> <psk> <endpoint> <allowed_ips> <latest_handshake> <rx_bytes> <tx_bytes> <persistent_keepalive>
         if len(parts) >= 8:
             peer_pub = parts[0]
             try:
@@ -496,32 +630,76 @@ def fetch_live_transfer_stats() -> dict[str, dict[str, Any]]:
     return stats
 
 
-def rewrite_wg0_conf(interface_params: dict[str, str], clients: list[dict[str, Any]]) -> None:
-    """Atomically rewrite wg0.conf to match active clients in clientsTable."""
-    lines = ["[Interface]"]
-    for k, v in interface_params.items():
-        lines.append(f"{k} = {v}")
+async def syncconf_container(container: str, conf_path: str) -> bool:
+    """Sync running kernel state with config file."""
+    iface = get_interface_name(container)
+    binary = get_tool_binary(container)
+    sh_cmd = f"{binary} syncconf {iface} <({binary}-quick strip '{conf_path}')"
+    rc, _, stderr = await run_docker_exec_async(["bash", "-c", sh_cmd])
+    if rc != 0:
+        logger.warning("syncconf failed: %s", stderr)
+    return rc == 0
 
-    for c in clients:
-        if c.get("status") == "active":
-            lines.append("")
-            lines.append("[Peer]")
-            lines.append(f"PublicKey = {c['clientPubKey']}")
-            if c.get("psk"):
-                lines.append(f"PresharedKey = {c['psk']}")
-            lines.append(f"AllowedIPs = {c['clientIp']}/32")
 
-    lines.append("")
-    content = "\n".join(lines)
+async def _fetch_public_ip_async() -> str:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "curl", "-s", "--max-time", "3", "https://ifconfig.me",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+        ip = stdout_b.decode("utf-8", errors="ignore").strip()
+        if ip:
+            return ip
+    except Exception:
+        pass
+    return "127.0.0.1"
 
-    # Backup original before replacement
-    if os.path.exists(AWG_CONF_PATH):
-        try:
-            shutil.copy2(AWG_CONF_PATH, f"{AWG_CONF_PATH}.bak")
-        except Exception:
-            pass
 
-    write_file_atomic(AWG_CONF_PATH, content)
+# ---------------------------------------------------------------------------
+# Non-destructive Peer Management Helpers
+# ---------------------------------------------------------------------------
+def append_peer_to_conf_text(conf_text: str, pubkey: str, psk: str, ip: str) -> str:
+    """Non-destructively append a new [Peer] section to awg0.conf."""
+    clean_conf = conf_text.rstrip()
+    peer_block = [
+        "",
+        "[Peer]",
+        f"PublicKey = {pubkey}",
+    ]
+    if psk:
+        peer_block.append(f"PresharedKey = {psk}")
+    peer_block.append(f"AllowedIPs = {ip}/32")
+    peer_block.append("")
+    return clean_conf + "\n" + "\n".join(peer_block) + "\n"
+
+
+def remove_peer_from_conf_text(conf_text: str, target_pubkey: str) -> tuple[str, bool]:
+    """Remove only the specific [Peer] section matching target_pubkey."""
+    sections = conf_text.split("[")
+    new_sections = []
+    removed = False
+
+    for s in sections:
+        if not s.strip():
+            continue
+        reconstructed = "[" + s
+        if reconstructed.lower().startswith("[peer]"):
+            lines = reconstructed.splitlines()
+            peer_pub = ""
+            for line in lines:
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    if k.strip().lower() == "publickey":
+                        peer_pub = v.strip()
+                        break
+            if peer_pub == target_pubkey:
+                removed = True
+                continue  # skip this section
+        new_sections.append(reconstructed)
+
+    return "\n".join(new_sections), removed
 
 
 # ---------------------------------------------------------------------------
@@ -529,13 +707,23 @@ def rewrite_wg0_conf(interface_params: dict[str, str], clients: list[dict[str, A
 # ---------------------------------------------------------------------------
 @app.get("/healthz")
 async def healthcheck():
-    """Service liveness probe."""
-    docker_running = await asyncio.to_thread(_inspect_docker_running)
+    """Service liveness and readiness probe."""
+    container = get_target_container()
+    docker_running = await is_container_running(container)
+    iface_ready = False
+    if docker_running:
+        iface = get_interface_name(container)
+        binary = get_tool_binary(container)
+        rc, _, _ = await run_docker_exec_async([binary, "show", iface])
+        iface_ready = (rc == 0)
 
+    is_healthy = docker_running and iface_ready
     return {
-        "status": "ok",
+        "status": "ok" if is_healthy else "degraded",
         "service": "amnezia-api",
+        "container": container,
         "container_running": docker_running,
+        "interface_ready": iface_ready,
         "timestamp": int(time.time()),
     }
 
@@ -543,10 +731,12 @@ async def healthcheck():
 @app.get("/server", dependencies=[Depends(verify_api_key)])
 async def get_server():
     """Return server parameters and capacity."""
-    conf_content = read_file_safe(AWG_CONF_PATH)
+    container = get_target_container()
+    conf_path = get_config_path(container)
+    conf_content = await read_container_file_async(conf_path)
     parsed = parse_awg_conf(conf_content)
     iface = parsed["interface"]
-    server_pub = get_server_public_key(iface)
+    server_pub = await get_server_public_key_async(container, iface)
 
     addr = iface.get("Address", "10.8.1.1/24")
     try:
@@ -559,7 +749,7 @@ async def get_server():
     port = int(port_str) if port_str.isdigit() else 44321
 
     return {
-        "name": AWG_CONTAINER_NAME,
+        "name": container,
         "protocols": ["amneziawg2"],
         "maxPeers": max_peers,
         "serverMaxPeers": max_peers,
@@ -574,8 +764,11 @@ async def get_server():
 @app.get("/server/load", dependencies=[Depends(verify_api_key)])
 async def get_server_load():
     """Return live system resource utilization."""
-    clients = load_clients_table()
-    active_peers = sum(1 for c in clients if c.get("status") == "active")
+    container = get_target_container()
+    conf_path = get_config_path(container)
+    conf_content = await read_container_file_async(conf_path)
+    parsed = parse_awg_conf(conf_content)
+    peers = parsed["peers"]
 
     uptime = 0
     try:
@@ -588,36 +781,58 @@ async def get_server_load():
         "ram_percent": psutil.virtual_memory().percent,
         "disk_percent": psutil.disk_usage("/").percent,
         "uptime_seconds": uptime,
-        "total_peers": len(clients),
-        "active_peers": active_peers,
+        "total_peers": len(peers),
+        "active_peers": len(peers),
     }
 
 
 @app.get("/clients", dependencies=[Depends(verify_api_key)])
 async def get_clients(skip: int = 0, limit: int | None = None):
-    """Return all clients formatted for AmneziaClient consumption with pagination support."""
-    clients = load_clients_table()
-    stats = fetch_live_transfer_stats()
+    """Return all clients merged with live kernel stats and pagination."""
+    container = get_target_container()
+    conf_path = get_config_path(container)
+    conf_content = await read_container_file_async(conf_path)
+    parsed = parse_awg_conf(conf_content)
+    peers = parsed["peers"]
 
-    if skip > 0:
-        clients = clients[skip:]
-    if limit is not None and limit > 0:
-        clients = clients[:limit]
+    clients_table = await load_clients_table_async()
+    clients_map: dict[str, dict[str, Any]] = {}
+    for c in clients_table:
+        cid = c.get("clientId") or c.get("id") or c.get("clientPubKey")
+        if cid:
+            clients_map[cid] = c
+
+    stats = await fetch_live_transfer_stats(container)
 
     result = []
-    for c in clients:
-        pub = c.get("clientPubKey", "")
+    for p in peers:
+        pub = p.get("PublicKey", "")
+        if not pub:
+            continue
+
+        c_meta = clients_map.get(pub, {})
+        user_data = c_meta.get("userData", {}) if isinstance(c_meta.get("userData"), dict) else {}
+
+        name = (
+            user_data.get("clientName")
+            or c_meta.get("clientName")
+            or c_meta.get("name")
+            or f"Peer {pub[:8]}"
+        )
+        status_val = c_meta.get("status", "active")
+        client_ip = p.get("AllowedIPs", "").split("/")[0]
+
         peer_stats = stats.get(pub, {})
         rx = peer_stats.get("rx", 0)
         tx = peer_stats.get("tx", 0)
         handshake = peer_stats.get("lastHandshake")
 
         item = {
-            "id": c.get("clientId", ""),
-            "username": c.get("clientName", ""),
-            "name": c.get("clientName", ""),
-            "peer_name": c.get("clientName", ""),
-            "status": c.get("status", "active"),
+            "id": pub,
+            "username": name,
+            "name": name,
+            "peer_name": name,
+            "status": status_val,
             "traffics": {
                 "received": rx,
                 "sent": tx,
@@ -626,39 +841,52 @@ async def get_clients(skip: int = 0, limit: int | None = None):
             },
             "lastHandshake": handshake,
             "lastSeen": handshake,
-            "updatedAt": c.get("updatedAt", c.get("createdAt")),
-            "clientIp": c.get("clientIp", ""),
+            "updatedAt": c_meta.get("updatedAt", c_meta.get("createdAt")),
+            "clientIp": client_ip,
+            "clientPubKey": pub,
         }
         result.append(item)
+
+    if skip > 0:
+        result = result[skip:]
+    if limit is not None and limit > 0:
+        result = result[:limit]
 
     return result
 
 
 @app.post("/clients", dependencies=[Depends(verify_api_key)])
 async def create_client(req: ClientCreateRequest):
-    """Create a new client with native X25519 key generation and instant activation."""
+    """Create a new client with native X25519 key generation and non-destructive sync."""
     async with state_lock:
-        clients = load_clients_table()
-        conf_content = read_file_safe(AWG_CONF_PATH)
+        container = get_target_container()
+        conf_path = get_config_path(container)
+        conf_content = await read_container_file_async(conf_path)
         parsed = parse_awg_conf(conf_content)
         iface = parsed["interface"]
+        existing_peers = parsed["peers"]
 
-        server_pub = get_server_public_key(iface)
+        server_pub = await get_server_public_key_async(container, iface)
         if not server_pub:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Server public key is not configured or could not be derived",
             )
 
-        client_ip = allocate_next_ip(iface.get("Address", "10.8.1.1/24"), clients)
+        client_ip = allocate_next_ip(iface.get("Address", "10.8.1.1/24"), existing_peers)
         client_priv, client_pub = generate_keypair()
-        psk = get_server_psk()
+        psk = await get_server_psk_async()
 
-        client_id = str(uuid.uuid4())
         now_ts = int(time.time())
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_ts))
 
-        new_client = {
-            "clientId": client_id,
+        # 1. Prepare new client entry adhering strictly to upstream Amnezia schema
+        new_client_meta = {
+            "clientId": client_pub,
+            "userData": {
+                "clientName": req.clientName,
+                "creationDate": now_iso,
+            },
             "clientName": req.clientName,
             "clientIp": client_ip,
             "clientPrivKey": client_priv,
@@ -670,37 +898,56 @@ async def create_client(req: ClientCreateRequest):
             "expiresAt": req.expiresAt,
         }
 
-        # Determine host name
+        # 2. Host name determination
         host = SERVER_HOST_NAME
         if not host:
-            host = await asyncio.to_thread(_fetch_public_ip)
+            host = await _fetch_public_ip_async()
 
         raw_conf, vpn_uri = build_client_configs(
-            new_client,
+            new_client_meta,
             iface,
             server_pub,
             host,
             SERVER_DNS1,
             SERVER_DNS2,
+            container,
         )
 
-        # Update clientsTable and wg0.conf
-        clients.append(new_client)
-        save_clients_table(clients)
-        rewrite_wg0_conf(iface, clients)
+        # 3. Non-destructively append [Peer] to awg0.conf
+        new_conf_text = append_peer_to_conf_text(conf_content, client_pub, psk, client_ip)
+        saved_conf = await write_container_file_async(conf_path, new_conf_text)
+        if not saved_conf:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to write configuration file",
+            )
 
-        # Register in kernel runtime
-        sync_kernel_peer_add(client_pub, client_ip, psk)
+        # 4. Append to clientsTable
+        clients_table = await load_clients_table_async()
+        clients_table.append(new_client_meta)
+        await save_clients_table_async(clients_table)
 
-        logger.info(
-            "Created client %s (%s, IP: %s)",
-            client_id,
-            req.clientName,
-            client_ip,
-        )
+        # 5. Register in active kernel runtime
+        sync_ok = await sync_kernel_peer_add(client_pub, client_ip, psk, container)
+        if not sync_ok:
+            # Attempt syncconf fallback
+            sync_ok = await syncconf_container(container, conf_path)
+
+        if not sync_ok:
+            # Rollback file writes if kernel sync completely failed
+            logger.error("Kernel peer sync failed for %s, rolling back file updates", client_pub)
+            await write_container_file_async(conf_path, conf_content)
+            clients_table = [c for c in clients_table if c.get("clientId") != client_pub]
+            await save_clients_table_async(clients_table)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to register peer in kernel runtime",
+            )
+
+        logger.info("Created client %s (%s, IP: %s)", client_pub, req.clientName, client_ip)
 
         return {
-            "id": client_id,
+            "id": client_pub,
             "config": vpn_uri,
             "raw_config": raw_conf,
             "protocol": "amneziawg2",
@@ -713,7 +960,7 @@ async def delete_client_by_body(req: ClientDeleteRequest):
     return await _do_delete_client(req.clientId)
 
 
-@app.delete("/clients/{client_id}", dependencies=[Depends(verify_api_key)])
+@app.delete("/clients/{client_id:path}", dependencies=[Depends(verify_api_key)])
 async def delete_client_by_path(client_id: str):
     """Delete client by path parameter."""
     return await _do_delete_client(client_id)
@@ -721,29 +968,47 @@ async def delete_client_by_path(client_id: str):
 
 async def _do_delete_client(client_id: str):
     async with state_lock:
-        clients = load_clients_table()
-        target = None
-        remaining = []
-        for c in clients:
-            if c.get("clientId") == client_id or c.get("id") == client_id:
-                target = c
-            else:
-                remaining.append(c)
+        container = get_target_container()
+        conf_path = get_config_path(container)
+        conf_content = await read_container_file_async(conf_path)
 
-        if not target:
+        clients_table = await load_clients_table_async()
+        target_pub = ""
+
+        # Identify target public key from clientsTable or direct pubkey
+        remaining_table = []
+        for c in clients_table:
+            cid = c.get("clientId") or c.get("id")
+            cpub = c.get("clientPubKey") or cid
+            if cid == client_id or cpub == client_id:
+                target_pub = cpub
+            else:
+                remaining_table.append(c)
+
+        if not target_pub:
+            # Check if client_id directly matches a peer in awg0.conf
+            parsed = parse_awg_conf(conf_content)
+            for p in parsed["peers"]:
+                if p.get("PublicKey") == client_id:
+                    target_pub = client_id
+                    break
+
+        if not target_pub:
             # Idempotent success (not_found_as_success)
             return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-        save_clients_table(remaining)
-        conf_content = read_file_safe(AWG_CONF_PATH)
-        parsed = parse_awg_conf(conf_content)
-        rewrite_wg0_conf(parsed["interface"], remaining)
+        # Remove only the target peer section from config
+        new_conf_text, removed = remove_peer_from_conf_text(conf_content, target_pub)
+        if removed:
+            await write_container_file_async(conf_path, new_conf_text)
 
-        pub = target.get("clientPubKey", "")
-        if pub:
-            sync_kernel_peer_remove(pub)
+        await save_clients_table_async(remaining_table)
 
-        logger.info("Deleted client %s (%s)", client_id, target.get("clientName", ""))
+        # Remove from active kernel runtime
+        await sync_kernel_peer_remove(target_pub, container)
+        await syncconf_container(container, conf_path)
+
+        logger.info("Deleted peer %s", target_pub)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -753,7 +1018,7 @@ async def patch_client_by_body(req: ClientPatchRequest):
     return await _do_patch_client(req.clientId, req.status, req.expiresAt)
 
 
-@app.patch("/clients/{client_id}", dependencies=[Depends(verify_api_key)])
+@app.patch("/clients/{client_id:path}", dependencies=[Depends(verify_api_key)])
 async def patch_client_by_path(client_id: str, req: ClientPatchRequest):
     """Update client by path parameter."""
     return await _do_patch_client(client_id, req.status, req.expiresAt)
@@ -761,10 +1026,17 @@ async def patch_client_by_path(client_id: str, req: ClientPatchRequest):
 
 async def _do_patch_client(client_id: str, new_status: str | None, expires_at: int | None):
     async with state_lock:
-        clients = load_clients_table()
+        container = get_target_container()
+        conf_path = get_config_path(container)
+        conf_content = await read_container_file_async(conf_path)
+        parsed = parse_awg_conf(conf_content)
+
+        clients_table = await load_clients_table_async()
         target = None
-        for c in clients:
-            if c.get("clientId") == client_id or c.get("id") == client_id:
+        for c in clients_table:
+            cid = c.get("clientId") or c.get("id")
+            cpub = c.get("clientPubKey") or cid
+            if cid == client_id or cpub == client_id:
                 target = c
                 break
 
@@ -774,15 +1046,24 @@ async def _do_patch_client(client_id: str, new_status: str | None, expires_at: i
                 detail=f"Client {client_id} not found",
             )
 
+        target_pub = target.get("clientPubKey") or target.get("clientId")
         changed = False
+
         if new_status in ("active", "disabled") and new_status != target.get("status"):
             target["status"] = new_status
             changed = True
-            pub = target.get("clientPubKey", "")
-            if new_status == "disabled" and pub:
-                sync_kernel_peer_remove(pub)
-            elif new_status == "active" and pub:
-                sync_kernel_peer_add(pub, target.get("clientIp", ""), target.get("psk", ""))
+            if new_status == "disabled" and target_pub:
+                await sync_kernel_peer_remove(target_pub, container)
+            elif new_status == "active" and target_pub:
+                # Find peer IP and PSK from conf or table
+                peer_ip = target.get("clientIp", "")
+                peer_psk = target.get("psk", "")
+                if not peer_ip or not peer_psk:
+                    for p in parsed["peers"]:
+                        if p.get("PublicKey") == target_pub:
+                            peer_ip = peer_ip or p.get("AllowedIPs", "").split("/")[0]
+                            peer_psk = peer_psk or p.get("PresharedKey", "")
+                await sync_kernel_peer_add(target_pub, peer_ip, peer_psk, container)
 
         if expires_at is not None:
             target["expiresAt"] = expires_at
@@ -790,34 +1071,48 @@ async def _do_patch_client(client_id: str, new_status: str | None, expires_at: i
 
         if changed:
             target["updatedAt"] = int(time.time())
-            save_clients_table(clients)
-            conf_content = read_file_safe(AWG_CONF_PATH)
-            parsed = parse_awg_conf(conf_content)
-            rewrite_wg0_conf(parsed["interface"], clients)
+            await save_clients_table_async(clients_table)
 
         return {"status": "updated", "clientId": client_id, "client": target}
 
 
-@app.get("/clients/{client_id}", dependencies=[Depends(verify_api_key)])
+@app.get("/clients/{client_id:path}", dependencies=[Depends(verify_api_key)])
 async def get_client_by_id(client_id: str):
     """Return full configuration for a single client."""
-    clients = load_clients_table()
+    container = get_target_container()
+    conf_path = get_config_path(container)
+    conf_content = await read_container_file_async(conf_path)
+    parsed = parse_awg_conf(conf_content)
+    iface = parsed["interface"]
+    server_pub = await get_server_public_key_async(container, iface)
+
+    clients_table = await load_clients_table_async()
     target = None
-    for c in clients:
-        if c.get("clientId") == client_id or c.get("id") == client_id:
+    for c in clients_table:
+        cid = c.get("clientId") or c.get("id")
+        cpub = c.get("clientPubKey") or cid
+        if cid == client_id or cpub == client_id:
             target = c
             break
+
+    if not target:
+        # Check directly in awg0.conf peers
+        for p in parsed["peers"]:
+            if p.get("PublicKey") == client_id:
+                target = {
+                    "clientId": client_id,
+                    "clientPubKey": client_id,
+                    "clientIp": p.get("AllowedIPs", "").split("/")[0],
+                    "psk": p.get("PresharedKey", ""),
+                    "status": "active",
+                }
+                break
 
     if not target:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Client {client_id} not found",
         )
-
-    conf_content = read_file_safe(AWG_CONF_PATH)
-    parsed = parse_awg_conf(conf_content)
-    iface = parsed["interface"]
-    server_pub = get_server_public_key(iface)
 
     host = SERVER_HOST_NAME or "127.0.0.1"
     raw_conf, vpn_uri = build_client_configs(
@@ -827,6 +1122,7 @@ async def get_client_by_id(client_id: str):
         host,
         SERVER_DNS1,
         SERVER_DNS2,
+        container,
     )
 
     return {

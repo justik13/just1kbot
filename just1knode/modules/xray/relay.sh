@@ -9,6 +9,13 @@ install_xray_relay_node() {
     init_state_dir
     install_base_deps
 
+    local prev_role
+    prev_role="$(get_node_status)"
+    if [[ "$prev_role" == "origin" ]]; then
+        error "Узел уже настроен как Origin. Установка Relay на Origin запрещена (контуры строго изолированы)."
+        return 1
+    fi
+
     local relay_port="${1:-}"
     local origin_ip="${2:-}"
     local dest_server="${3:-}"
@@ -172,7 +179,7 @@ EOF
 
     local prev_role
     prev_role="$(get_node_status)"
-    if [[ "$prev_role" == "awg" ]]; then
+    if [[ "$prev_role" == "awg" || "$prev_role" == "dual" ]]; then
         set_state_val "role" "dual"
         log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"
     else

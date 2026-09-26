@@ -7,17 +7,45 @@
 AMNEZIA_API_DIR="${AMNEZIA_API_DIR:-/opt/amnezia-api}"
 AMNEZIA_API_ETC="${AMNEZIA_API_ETC:-/etc/amnezia-api}"
 AMNEZIA_AWG_DIR="${AMNEZIA_AWG_DIR:-/opt/amnezia/awg}"
-AMNEZIA_AWG_CONF="${AMNEZIA_AWG_CONF:-${AMNEZIA_AWG_DIR}/wg0.conf}"
-AMNEZIA_CONTAINER="${AMNEZIA_CONTAINER:-amnezia-awg}"
+AMNEZIA_CONTAINER_OVERRIDE="${AMNEZIA_CONTAINER:-}"
 AMNEZIA_PUBLIC_PORT="${AMNEZIA_PUBLIC_PORT:-8443}"
 AMNEZIA_LOCAL_PORT="${AMNEZIA_LOCAL_PORT:-4001}"
 
-# Проверка наличия и активности Docker-контейнера amnezia-awg
+# Определение актуального имени контейнера: в приоритете amnezia-awg2 (AWG 2.0 / 3.x), затем amnezia-awg
+detect_amnezia_container() {
+    if [[ -n "$AMNEZIA_CONTAINER_OVERRIDE" ]]; then
+        echo "$AMNEZIA_CONTAINER_OVERRIDE"
+        return 0
+    fi
+    if command -v docker >/dev/null 2>&1; then
+        if docker ps --filter "name=^/amnezia-awg2$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg2$"; then
+            echo "amnezia-awg2"
+            return 0
+        fi
+        if docker ps --filter "name=^/amnezia-awg$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg$"; then
+            echo "amnezia-awg"
+            return 0
+        fi
+        if docker ps -a --filter "name=^/amnezia-awg2$" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg2$"; then
+            echo "amnezia-awg2"
+            return 0
+        fi
+        if docker ps -a --filter "name=^/amnezia-awg$" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg$"; then
+            echo "amnezia-awg"
+            return 0
+        fi
+    fi
+    echo "amnezia-awg2"
+}
+
+# Проверка наличия и активности Docker-контейнера AmneziaWG
 is_amnezia_container_running() {
     if ! command -v docker >/dev/null 2>&1; then
         return 1
     fi
-    docker ps --filter "name=^/${AMNEZIA_CONTAINER}$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^${AMNEZIA_CONTAINER}$"
+    local c
+    c="$(detect_amnezia_container)"
+    docker ps --filter "name=^/${c}$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^${c}$"
 }
 
 # =============================================================================
@@ -71,7 +99,8 @@ apply_amnezia_abuse_protection() {
     # Сохранение правил iptables для переживания перезагрузки
     if command -v netfilter-persistent >/dev/null 2>&1; then
         netfilter-persistent save >/dev/null 2>&1 || true
-    elif [[ -d /etc/iptables ]]; then
+    fi
+    if [[ -d /etc/iptables ]]; then
         iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
     fi
 }
@@ -93,6 +122,9 @@ remove_amnezia_abuse_protection() {
     if command -v netfilter-persistent >/dev/null 2>&1; then
         netfilter-persistent save >/dev/null 2>&1 || true
     fi
+    if [[ -d /etc/iptables ]]; then
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    fi
 }
 
 # =============================================================================
@@ -104,27 +136,49 @@ install_amnezia_node() {
     init_state_dir
     install_base_deps
 
-    # 1. Проверка наличия работающего контейнера amnezia-awg
+    local prev_role
+    prev_role="$(get_node_status)"
+    if [[ "$prev_role" == "origin" ]]; then
+        error "Узел уже настроен как Origin (Белый Интернет). Установка AmneziaWG на Origin запрещена (контуры строго изолированы)."
+        return 1
+    fi
+
+    local target_container
+    target_container="$(detect_amnezia_container)"
+
+    # 1. Проверка наличия работающего контейнера AmneziaWG
     if ! is_amnezia_container_running; then
         echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}"
-        echo -e "${BOLD}${RED}✗ КОНТЕЙНЕР '${AMNEZIA_CONTAINER}' НЕ ОБНАРУЖЕН В DOCKER${NC}"
+        echo -e "${BOLD}${RED}✗ КОНТЕЙНЕР '${target_container}' НЕ ОБНАРУЖЕН В DOCKER${NC}"
         echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}"
-        echo -e "Для интеграции AmneziaWG с just1knode выполните первоначальную установку:"
-        echo -e "  1. Скачайте официальное приложение ${BOLD}AmneziaVPN${NC} на ваш ПК."
-        echo -e "  2. Добавьте этот сервер (IP, root, пароль/SSH-ключ) в режиме ${BOLD}Self-hosted${NC}."
-        echo -e "  3. Выберите протокол ${BOLD}AmneziaWG${NC} и дождитесь завершения установки."
-        echo -e "  4. После того как контейнер '${AMNEZIA_CONTAINER}' запустится, повторите запуск данного меню."
+        echo -e "Для интеграции AmneziaWG выполните первоначальную установку:"
+        echo -e "  1. Скачайте официальное приложение Amnezia на ваш ПК."
+        echo -e "  2. Добавьте этот сервер (IP, root, пароль/SSH-ключ) в режиме Self-hosted."
+        echo -e "  3. Выберите протокол AmneziaWG (Awg2) и дождитесь завершения установки."
+        echo -e "  4. После того как контейнер '${target_container}' запустится, повторите запуск данного меню."
         echo -e "${RED}════════════════════════════════════════════════════════════════════════════════${NC}\n"
         return 1
     fi
 
-    # 2. Проверка конфигурационного файла на хосте
-    if [[ ! -f "$AMNEZIA_AWG_CONF" ]]; then
-        error "Файл конфигурации $AMNEZIA_AWG_CONF не найден. Убедитесь, что AmneziaWG развернут через AmneziaVPN."
+    # 2. Проверка конфигурационного файла внутри контейнера (или на хосте)
+    local conf_in_container="/opt/amnezia/awg/awg0.conf"
+    if [[ "$target_container" == "amnezia-awg" ]]; then
+        conf_in_container="/opt/amnezia/awg/wg0.conf"
+    fi
+
+    local conf_found=0
+    if docker exec "$target_container" test -f "$conf_in_container" 2>/dev/null; then
+        conf_found=1
+    elif [[ -f "/opt/amnezia/awg/awg0.conf" || -f "/opt/amnezia/awg/wg0.conf" ]]; then
+        conf_found=1
+    fi
+
+    if [[ $conf_found -ne 1 ]]; then
+        error "Файл конфигурации $conf_in_container не найден внутри контейнера $target_container. Убедитесь, что AmneziaWG развернут."
         return 1
     fi
 
-    log "✔ Контейнер ${AMNEZIA_CONTAINER} активен, конфигурация ${AMNEZIA_AWG_CONF} найдена."
+    log "✔ Контейнер ${target_container} активен, конфигурация ${conf_in_container} найдена."
 
     # 3. Интерактивный опрос: домен и порт
     local my_ip
@@ -143,6 +197,7 @@ install_amnezia_node() {
         conflict_proc=$(ss -tlnp 2>/dev/null | grep ":${public_port} " || true)
         if ! echo "$conflict_proc" | grep -qE "nginx|amnezia"; then
             error "Порт ${public_port}/tcp уже занят другим процессом на хосте:\n$conflict_proc"
+            return 1
         fi
     fi
 
@@ -171,6 +226,7 @@ install_amnezia_node() {
 
     if [[ ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
         error "Не удалось найти $AMNEZIA_API_DIR/app.py. Проверьте репозиторий."
+        return 1
     fi
 
     # 6. Установка зависимостей и venv
@@ -193,8 +249,8 @@ install_amnezia_node() {
     cat > "$AMNEZIA_API_ETC/config.env" <<EOF
 AMNEZIA_API_KEY=${api_key}
 AWG_DIR=${AMNEZIA_AWG_DIR}
-AWG_CONF_PATH=${AMNEZIA_AWG_CONF}
-AWG_CONTAINER_NAME=${AMNEZIA_CONTAINER}
+AWG_CONF_PATH=${conf_in_container}
+AWG_CONTAINER_NAME=${target_container}
 SERVER_HOST_NAME=${api_domain}
 SERVER_DNS1=1.1.1.1
 SERVER_DNS2=1.0.0.1
@@ -207,10 +263,12 @@ EOF
     systemctl enable amnezia-api.service
     systemctl restart amnezia-api.service
 
-    # Ожидание старта сервиса
+    # Ожидание старта сервиса и проверка работоспособности
     local started=0
-    for _ in {1..15}; do
-        if curl -s "http://127.0.0.1:${AMNEZIA_LOCAL_PORT}/healthz" 2>/dev/null | grep -q "amnezia-api"; then
+    for _ in {1..20}; do
+        local health_resp
+        health_resp="$(curl -s --max-time 3 "http://127.0.0.1:${AMNEZIA_LOCAL_PORT}/healthz" 2>/dev/null || true)"
+        if echo "$health_resp" | grep -q '"service":"amnezia-api"' && echo "$health_resp" | grep -q '"container_running":true'; then
             started=1
             break
         fi
@@ -218,9 +276,10 @@ EOF
     done
 
     if [[ $started -ne 1 ]]; then
-        error "Сервис amnezia-api не запустился на 127.0.0.1:${AMNEZIA_LOCAL_PORT}. Проверьте: journalctl -u amnezia-api -n 30"
+        error "Сервис amnezia-api не запустился или контейнер недоступен на 127.0.0.1:${AMNEZIA_LOCAL_PORT}. Проверьте: journalctl -u amnezia-api -n 30"
+        return 1
     fi
-    log "✔ Служба amnezia-api успешно запущена на 127.0.0.1:${AMNEZIA_LOCAL_PORT}"
+    log "✔ Служба amnezia-api успешно запущена и контейнер ${target_container} активен"
 
     # 9. Настройка Nginx reverse proxy и SSL
     log "Настройка веб-сервера Nginx (порт ${public_port})..."
@@ -254,7 +313,7 @@ EOF
         cert_file="${ssl_dir}/server.crt"
         key_file="${ssl_dir}/server.key"
         if [[ ! -f "$cert_file" ]]; then
-            log "Генерация надежного SSL-сертификата для HTTPS (${api_domain})..."
+            log "Генерация SSL-сертификата для HTTPS (${api_domain})..."
             openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
                 -keyout "$key_file" -out "$cert_file" \
                 -subj "/CN=${api_domain}" 2>/dev/null || true
@@ -297,7 +356,9 @@ EOF
         systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
         log "✔ Nginx reverse proxy успешно настроен и перезагружен"
     else
-        warn "Ошибка проверки конфигурации Nginx. Проверьте: nginx -t"
+        rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf "$nginx_conf" 2>/dev/null || true
+        error "Ошибка проверки конфигурации Nginx (nginx -t). Установка прервана."
+        return 1
     fi
 
     # 10. Открытие порта в UFW если фаервол активен
@@ -309,11 +370,9 @@ EOF
     apply_amnezia_abuse_protection
 
     # 12. Обновление состояния и определение мультироли (Coexistence)
-    local prev_role
-    prev_role="$(get_node_status)"
-    if [[ "$prev_role" == "relay" ]]; then
+    if [[ "$prev_role" == "relay" || "$prev_role" == "dual" ]]; then
         set_state_val "role" "dual"
-        log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"
+        log "Режим узла обновлен: DUAL (Совмещенный Relay + AmneziaWG)"
     else
         set_state_val "role" "awg"
         log "Режим узла установлен: AMNEZIAWG"
@@ -345,7 +404,10 @@ show_amnezia_bot_credentials() {
         api_url="https://${my_ip}:${AMNEZIA_PUBLIC_PORT}"
     fi
 
-    echo -e "  🌐 Протокол:           ${BOLD}${GREEN}AmneziaWG (amneziawg2)${NC}"
+    local container_name
+    container_name="$(detect_amnezia_container)"
+
+    echo -e "  🌐 Протокол:           ${BOLD}${GREEN}AmneziaWG (${container_name})${NC}"
     echo -e "  🔗 API URL бота:       ${CYAN}${api_url}${NC}"
     echo -e "  🔑 API Ключ:           ${YELLOW}${api_key}${NC}"
     echo -e "  🩺 Проверка API:       curl -k -H \"x-api-key: ${api_key}\" ${api_url}/healthz\n"
@@ -359,17 +421,18 @@ show_amnezia_status() {
     check_root
     init_state_dir
 
-    local api_url api_key
+    local api_url
     api_url="$(get_state_val "awg_api_url" "-")"
-    api_key="$(get_state_val "awg_api_key" "-")"
+    local container_name
+    container_name="$(detect_amnezia_container)"
 
     echo -e "  API URL:              ${CYAN}${api_url}${NC}"
 
     echo -e "\n  Службы:"
     if is_amnezia_container_running; then
-        echo -e "    Docker (amnezia-awg): ${GREEN}● Активен${NC}"
+        echo -e "    Docker (${container_name}): ${GREEN}● Активен${NC}"
     else
-        echo -e "    Docker (amnezia-awg): ${RED}○ Не запущен${NC}"
+        echo -e "    Docker (${container_name}): ${RED}○ Не запущен${NC}"
     fi
 
     if systemctl is-active --quiet amnezia-api 2>/dev/null; then
@@ -384,21 +447,11 @@ show_amnezia_status() {
         echo -e "    Nginx Reverse Proxy:  ${RED}○ Не работает${NC}"
     fi
 
-    # Клиенты и трафик из clientsTable
-    local clients_file="${AMNEZIA_AWG_DIR}/clientsTable"
-    if [[ -f "$clients_file" ]]; then
-        local clients_count
-        clients_count=$(python3 -c "
-import json, sys
-try:
-    with open(sys.argv[1], 'r', encoding='utf-8') as f:
-        data = json.load(f)
-        print(len(data))
-except Exception:
-    print(0)
-" "$clients_file" 2>/dev/null || echo "0")
-        echo -e "\n  Статистика клиентов:"
-        echo -e "    Всего клиентов:       ${CYAN}${clients_count}${NC}"
+    # Опрос live stats через healthz
+    local health_json
+    health_json="$(curl -s --max-time 3 "http://127.0.0.1:${AMNEZIA_LOCAL_PORT}/healthz" 2>/dev/null || true)"
+    if echo "$health_json" | grep -q '"interface_ready":true'; then
+        echo -e "    Ядро (Интерфейс):     ${GREEN}● Готов к приему пиров${NC}"
     fi
 
     echo -e "\n  Сетевая защита (Anti-Abuse):"
@@ -427,10 +480,17 @@ uninstall_amnezia_component() {
     rm -f /etc/systemd/system/amnezia-api.service 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
 
-    rm -rf "$AMNEZIA_API_DIR" "$AMNEZIA_API_ETC" 2>/dev/null || true
+    rm -rf "$AMNEZIA_API_DIR" "$AMNEZIA_API_ETC" /etc/ssl/just1k_amnezia 2>/dev/null || true
     rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf 2>/dev/null || true
     if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
         systemctl reload nginx 2>/dev/null || true
+    fi
+
+    # Закрытие порта в UFW
+    local pub_port
+    pub_port="$(get_state_val "awg_port" "${AMNEZIA_PUBLIC_PORT}")"
+    if command -v ufw >/dev/null 2>&1 && [[ -n "$pub_port" && "$pub_port" != "-" ]]; then
+        ufw delete allow "${pub_port}/tcp" >/dev/null 2>&1 || true
     fi
 
     remove_amnezia_abuse_protection
@@ -448,6 +508,8 @@ uninstall_amnezia_component() {
     set_state_val "awg_installed" "false"
     set_state_val "awg_api_url" ""
     set_state_val "awg_api_key" ""
+    set_state_val "awg_domain" ""
+    set_state_val "awg_port" ""
 
     log "✔ Компонент AmneziaWG API успешно удален с сервера."
 }

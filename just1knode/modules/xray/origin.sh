@@ -112,6 +112,13 @@ install_xray_origin_node() {
     init_state_dir
     install_base_deps
 
+    local prev_role
+    prev_role="$(get_node_status)"
+    if [[ "$prev_role" == "awg" || "$prev_role" == "relay" || "$prev_role" == "dual" ]]; then
+        error "На узле уже активна роль '${prev_role}'. Origin (Белый Интернет) требует выделенный изолированный сервер."
+        return 1
+    fi
+
     local domain="${1:-}"
     local email="${2:-}"
     local api_key="${3:-}"
