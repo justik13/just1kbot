@@ -125,6 +125,7 @@ class YooKassaGateway(BasePaymentGateway):
         amount_rub = Decimal(str(amount_val)) if amount_val is not None else None
 
         related_external_id = None
+        is_canceled = False
         if event == "refund.succeeded":
             external_id = obj.get("id", "")
             related_external_id = obj.get("payment_id")
@@ -134,6 +135,11 @@ class YooKassaGateway(BasePaymentGateway):
             external_id = obj.get("id", "")
             is_paid = True
             is_refunded = False
+        elif event == "payment.canceled":
+            external_id = obj.get("id", "")
+            is_paid = False
+            is_refunded = False
+            is_canceled = True
         else:
             external_id = obj.get("id", "")
             is_paid = False
@@ -143,6 +149,7 @@ class YooKassaGateway(BasePaymentGateway):
             order_id=order_id,
             is_paid=is_paid,
             is_refunded=is_refunded,
+            is_canceled=is_canceled,
             external_id=external_id,
             amount_rub=amount_rub,
             event_type=event or status,

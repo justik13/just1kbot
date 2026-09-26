@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import logging
+import math
 import uuid
 
 from sqlalchemy import select
@@ -56,7 +57,12 @@ class OrderService:
         if not subscription_end or subscription_end <= now or not current_tariff:
             return Decimal(target_tariff.price_rub), target_tariff.duration_days
 
-        days_left = max(0, (subscription_end - now).days)
+        days_left = max(
+            0,
+            math.ceil((subscription_end - now).total_seconds() / 86400.0)
+            if subscription_end > now
+            else 0,
+        )
         if days_left <= 0:
             return Decimal(target_tariff.price_rub), target_tariff.duration_days
 
@@ -109,25 +115,6 @@ class OrderService:
         bot_username: str | None = None,
     ) -> Order:
         """Create a new commercial order and obtain payment link if external gateway."""
-        # 1. Deduplication guard for pending external orders (prevent double-clicks)
-        if payment_method != "wallet":
-            cutoff = now_utc() - timedelta(minutes=15)
-            existing = await session.scalar(
-                select(Order)
-                .where(
-                    Order.user_id == user_id,
-                    Order.service_type == service_type,
-                    Order.tariff_id == tariff_id,
-                    Order.status == "pending",
-                    Order.created_at >= cutoff,
-                    Order.payment_url.is_not(None),
-                )
-                .order_by(Order.created_at.desc())
-                .limit(1)
-            )
-            if existing and existing.payment_url:
-                return existing
-
         user = await session.get(User, user_id)
         order_meta: dict = dict(metadata) if metadata else {}
         if tariff_id is not None:
@@ -166,6 +153,30 @@ class OrderService:
         final_amount = amount_rub if amount_rub is not None else Decimal("0.00")
         final_duration = duration_days if duration_days is not None else 0
         final_desc = description or texts.CHECKOUT_DESCRIPTION_DEFAULT
+
+        # 1. Deduplication guard for pending external orders (prevent double-clicks)
+        if payment_method != "wallet":
+            cutoff = now_utc() - timedelta(minutes=15)
+            existing = await session.scalar(
+                select(Order)
+                .where(
+                    Order.user_id == user_id,
+                    Order.service_type == service_type,
+                    Order.tariff_id == tariff_id,
+                    Order.duration_days == final_duration,
+                    Order.traffic_bytes == traffic_bytes,
+                    Order.device_limit == device_limit,
+                    Order.payment_method == payment_method,
+                    Order.amount_rub == final_amount,
+                    Order.status == "pending",
+                    Order.created_at >= cutoff,
+                    Order.payment_url.is_not(None),
+                )
+                .order_by(Order.created_at.desc())
+                .limit(1)
+            )
+            if existing and existing.payment_url:
+                return existing
 
         order = Order(
             id=uuid.uuid4(),
@@ -304,6 +315,19 @@ class OrderService:
         return order
 
     @staticmethod
+    def mark_order_canceled(order: Order, reason: str = "gateway_canceled") -> None:
+        """Mark order canceled and record cancellation reason to prevent invalid revival."""
+        order_meta = dict(order.metadata_ or {})
+        if order.status == "pending":
+            order.status = "canceled"
+            order_meta.setdefault("cancellation_reason", reason)
+            order.metadata_ = order_meta
+        elif order.status == "canceled":
+            if "cancellation_reason" not in order_meta:
+                order_meta["cancellation_reason"] = reason
+                order.metadata_ = order_meta
+
+    @staticmethod
     async def mark_order_paid(
         session: AsyncSession,
         order_id: uuid.UUID | str,
@@ -332,6 +356,14 @@ class OrderService:
 
         was_canceled = order.status == "canceled"
         if was_canceled:
+            cancellation_reason = (order.metadata_ or {}).get("cancellation_reason")
+            if cancellation_reason == "gateway_canceled":
+                logger.warning(
+                    "Cannot mark order %s paid: order was canceled by payment gateway",
+                    order.id,
+                )
+                order._newly_paid = False
+                return None
             logger.info(
                 "Reviving canceled order %s on valid payment received", order.id
             )
@@ -367,19 +399,14 @@ class OrderService:
                 order_id=order.id,
                 metadata=credit_meta,
             )
-            try:
-                from services.referral_bonus import grant_referral_bonus_for_topup
+            from services.referral_bonus import grant_referral_bonus_for_topup
 
-                await grant_referral_bonus_for_topup(
-                    session,
-                    purchaser_user_id=order.user_id,
-                    order_id=str(order.id),
-                    topup_amount=order.amount_rub,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to process referral bonus for order %s: %s", order.id, exc
-                )
+            await grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=order.user_id,
+                order_id=str(order.id),
+                topup_amount=order.amount_rub,
+            )
 
         # Fulfill benefits linearly
         await FulfillmentService.fulfill_order(session, order)
@@ -430,15 +457,69 @@ class OrderService:
             )
             return None
 
+        # Verify gateway payment identity matches order.external_id
+        if order.external_id:
+            if result.is_paid and result.external_id and order.external_id != result.external_id:
+                logger.warning(
+                    "Order %s payment ID mismatch: order.external_id=%s, webhook.external_id=%s",
+                    order.id,
+                    order.external_id,
+                    result.external_id,
+                )
+                return None
+            if result.is_refunded and related_id and order.external_id != related_id:
+                logger.warning(
+                    "Order %s refund payment_id mismatch: order.external_id=%s, webhook.payment_id=%s",
+                    order.id,
+                    order.external_id,
+                    related_id,
+                )
+                return None
+
         if result.is_paid:
-            return await OrderService.mark_order_paid(
+            paid_order = await OrderService.mark_order_paid(
                 session,
                 order.id,
                 external_id=result.external_id,
                 paid_amount_rub=result.amount_rub,
             )
+            if paid_order is None:
+                cancellation_reason = (order.metadata_ or {}).get("cancellation_reason")
+                if cancellation_reason == "gateway_canceled":
+                    logger.warning(
+                        "Ignoring payment.succeeded webhook for gateway_canceled order %s (ext_id=%s)",
+                        order.id,
+                        result.external_id,
+                    )
+                    order_meta = dict(order.metadata_ or {})
+                    order_meta["late_payment_attempt_rejected"] = str(result.external_id)
+                    order.metadata_ = order_meta
+                    order._newly_paid = False
+                    await session.flush()
+                    return order
+                return None
+            return paid_order
+
+        if result.is_canceled:
+            if order.status == "pending":
+                OrderService.mark_order_canceled(order, reason="gateway_canceled")
+                await session.flush()
+                logger.info(
+                    "Order %s marked canceled via gateway webhook (external_id=%s)",
+                    order.id,
+                    result.external_id,
+                )
+            return order
 
         if result.is_refunded:
+            if order.status not in ("paid", "refunded"):
+                logger.warning(
+                    "Refund received for non-paid order %s (status=%s), deferring to retry",
+                    order.id,
+                    order.status,
+                )
+                return None
+
             refund_amount = (
                 result.amount_rub
                 if result.amount_rub is not None
@@ -476,20 +557,38 @@ class OrderService:
             order.refunded_at = now_utc()
 
             if order.service_type == "topup":
-                await create_order_refund_debit(
-                    session,
-                    user_id=order.user_id,
-                    amount_rub=refund_amount,
-                    order_id=order.id,
-                    refund_id=(result.external_id or "").strip() or "refund",
-                    metadata={"source": "yookassa_refund"},
+                refund_ref = (
+                    (result.external_id or "").strip()
+                    or f"refund_{len(processed_refund_ids)}"
                 )
+                target_cumulative = new_total_refunded.quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+                prev_cumulative = refunded_so_far.quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+                ledger_delta = target_cumulative - prev_cumulative
+
+                if ledger_delta > 0:
+                    await create_order_refund_debit(
+                        session,
+                        user_id=order.user_id,
+                        amount_rub=ledger_delta,
+                        order_id=order.id,
+                        refund_id=refund_ref,
+                        metadata={"source": "yookassa_refund"},
+                    )
                 await reverse_referral_bonus_for_topup(
                     session,
                     order_id=order.id,
+                    refund_amount=refund_amount,
+                    original_topup_amount=order.amount_rub,
+                    total_refunded_amount=new_total_refunded,
+                    refund_id=refund_ref,
                 )
 
-            if new_total_refunded >= order.amount_rub or order.status == "refunded":
+            is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")
+            if is_fully_refunded:
                 await FulfillmentService.revoke_order(session, order)
                 logger.info(
                     "Order %s fully refunded (total %s / %s) and revoked",
@@ -507,5 +606,9 @@ class OrderService:
                 )
             await session.flush()
             return order
-
-        return None
+        logger.info(
+            "Webhook event %s for order %s has no actionable transition, acknowledging",
+            result.event_type,
+            order.id,
+        )
+        return order

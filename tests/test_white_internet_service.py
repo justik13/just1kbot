@@ -125,7 +125,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
             started_at=now,
             expires_at=now + timedelta(days=15),
             base_traffic_bytes=50 * 1024**3,
-            extra_traffic_bytes=90 * 1024**3,
+            extra_traffic_bytes=140 * 1024**3,
             traffic_used_bytes=0,
             desired_version=1,
             actual_version=1,
@@ -137,7 +137,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
         with patch(
             "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
         ):
-            # Base (50) + Extra (90) + Pack (25) = 165 GiB > 150 GiB Hard Cap!
+            # Extra (140) + Pack (25) = 165 GiB > 150 GiB Extra Traffic Hard Cap!
             with self.assertRaises(white_internet_repo.WhiteInternetQuotaCapExceededError):
                 await white_internet_repo.topup_quota_atomic(
                     mock_session,
@@ -147,7 +147,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                     price_rub=Decimal("100.00"),
                 )
 
-            # Buying +10 GiB is allowed: 50 + 90 + 10 = 150 GiB <= 150 GiB
+            # Buying +10 GiB is allowed: 140 + 10 = 150 GiB <= 150 GiB
             await white_internet_repo.topup_quota_atomic(
                 mock_session,
                 subscription_id=1,
@@ -155,8 +155,8 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                 pack_gb=10,
                 price_rub=Decimal("40.00"),
             )
-            self.assertEqual(sub.extra_traffic_bytes, 100 * 1024**3)
-            self.assertEqual(sub.traffic_limit_bytes, 150 * 1024**3)
+            self.assertEqual(sub.extra_traffic_bytes, 150 * 1024**3)
+            self.assertEqual(sub.traffic_limit_bytes, 200 * 1024**3)
 
     async def test_renew_subscription_resets_period_usage_and_preserves_carried_topup(self):
         """Renewal must reset period usage to 0, preserve node snapshots, and carry unused topup."""
@@ -656,3 +656,133 @@ class TestCalculateExtensionEnd(unittest.TestCase):
         now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
         res = calculate_extension_end(now, PERMANENT_SUBSCRIPTION_DAYS, now=now)
         self.assertEqual(res, PERMANENT_END_DATE)
+
+
+class TestWhiteInternetQuotaAndDeviceAuditFixes(unittest.IsolatedAsyncioTestCase):
+    """Test device limit downgrade extra traffic clamping and dynamic cap messages."""
+
+    async def test_set_device_limit_downgrade_clamps_extra_traffic(self):
+        from config.constants import WHITE_INTERNET_MAX_QUOTA_BYTES
+        from database.models import WhiteInternetSubscription
+        from database.repositories import white_internet_repo
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=3,
+            extra_traffic_bytes=300 * 1024**3,  # 300 GiB extra
+            active_hwids={"hw1": "ts1", "hw2": "ts2", "hw3": "ts3"},
+        )
+
+        session = AsyncMock()
+        session.get.return_value = sub
+
+        # Downgrade to 1 device: extra cap is now 1 * 150 GiB
+        updated = await white_internet_repo.set_device_limit_atomic(
+            session, subscription_id=1, limit=1
+        )
+        self.assertEqual(updated.device_limit, 1)
+        self.assertEqual(updated.extra_traffic_bytes, 1 * WHITE_INTERNET_MAX_QUOTA_BYTES)
+        self.assertEqual(len(updated.active_hwids), 1)
+
+    async def test_topup_quota_atomic_error_message_uses_configured_cap(self):
+        from config.constants import WHITE_INTERNET_MAX_QUOTA_BYTES
+        from database.models import WhiteInternetSubscription
+        from database.repositories import white_internet_repo
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=2,
+            base_traffic_bytes=100 * 1024**3,
+            extra_traffic_bytes=250 * 1024**3,  # 250 GiB
+            expires_at=now_utc() + timedelta(days=10),
+        )
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        session.execute.return_value = mock_result
+        session.get.return_value = sub
+
+        expected_cap_gb = 2 * (WHITE_INTERNET_MAX_QUOTA_BYTES // (1024**3))
+        # Adding 60 GiB would make 250 + 60 = 310 > 300 GiB
+        with self.assertRaises(white_internet_repo.WhiteInternetQuotaCapExceededError) as cm:
+            await white_internet_repo.topup_quota_atomic(
+                session, subscription_id=1, quote_id=1, pack_gb=60, price_rub=Decimal("200")
+            )
+        self.assertIn(f"maximum extra traffic cap of {expected_cap_gb} GiB", str(cm.exception))
+
+    def test_dispatch_deprovision_queues_post_commit_when_session_provided(self):
+        from database.models import Server
+        from services.white_internet_service import _dispatch_deprovision
+
+        server = Server(
+            id=1,
+            api_url="http://node.test:8080",
+            api_key="secret",
+            protocol="xray",
+        )
+        session = MagicMock()
+        session.info = {}
+
+        _dispatch_deprovision(
+            server,
+            client_uuid="uuid-123",
+            version=2,
+            session=session,
+            context="test_post_commit",
+        )
+
+        self.assertIn("post_commit_tasks", session.info)
+        self.assertEqual(len(session.info["post_commit_tasks"]), 1)
+        task_callable = session.info["post_commit_tasks"][0]
+        self.assertTrue(callable(task_callable))
+
+    @patch("asyncio.create_task")
+    def test_dispatch_deprovision_creates_task_when_session_is_none(self, mock_create_task):
+        from database.models import Server
+        from services.white_internet_service import _dispatch_deprovision
+
+        server = Server(
+            id=1,
+            api_url="http://node.test:8080",
+            api_key="secret",
+            protocol="xray",
+        )
+        _dispatch_deprovision(
+            server,
+            client_uuid="uuid-123",
+            version=2,
+            session=None,
+            context="test_no_session",
+        )
+
+        mock_create_task.assert_called_once()
+
+    @patch("asyncio.create_task")
+    def test_dispatch_deprovision_skips_non_xray_server(self, mock_create_task):
+        from database.models import Server
+        from services.white_internet_service import _dispatch_deprovision
+
+        server = Server(
+            id=1,
+            api_url="http://node.test:8080",
+            api_key="secret",
+            protocol="awg",
+        )
+        session = MagicMock()
+        session.info = {}
+
+        _dispatch_deprovision(
+            server,
+            client_uuid="uuid-123",
+            version=2,
+            session=session,
+            context="test_wrong_protocol",
+        )
+
+        self.assertNotIn("post_commit_tasks", session.info)
+        mock_create_task.assert_not_called()

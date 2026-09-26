@@ -64,6 +64,9 @@ logger = logging.getLogger(__name__)
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
+_effective_device_limit = white_internet_repo._effective_device_limit
+
+
 def get_white_internet_tier_price(device_limit: int, base_price: Decimal | None = None) -> Decimal:
     """Calculate White Internet monthly renewal/subscription price based on device slots.
 
@@ -97,6 +100,7 @@ def _dispatch_deprovision(
     client_uuid: str,
     version: int,
     *,
+    session: AsyncSession | None = None,
     context: str = "",
 ) -> None:
     if not server or not server.api_url or not server.api_key:
@@ -108,15 +112,23 @@ def _dispatch_deprovision(
             getattr(server, "id", "?"),
         )
         return
-    try:
-        task = asyncio.create_task(
-            _deprovision_old_node_safe(
-                server.api_url,
-                server.api_key,
-                client_uuid=client_uuid,
-                version=version,
-            )
+
+    async def _runner() -> None:
+        await _deprovision_old_node_safe(
+            server.api_url,
+            server.api_key,
+            client_uuid=client_uuid,
+            version=version,
         )
+
+    if session is not None and hasattr(session, "info") and isinstance(session.info, dict):
+        from database.connection import queue_post_commit_task
+
+        queue_post_commit_task(session, _runner)
+        return
+
+    try:
+        task = asyncio.create_task(_runner())
         _BACKGROUND_TASKS.add(task)
         task.add_done_callback(_BACKGROUND_TASKS.discard)
     except Exception as exc:
@@ -488,6 +500,7 @@ class WhiteInternetService:
                 client_uuid=sub_locked.uuid,
                 version=sub_locked.desired_version,
                 context=f"trial_convert migration sub {sub_locked.id}",
+                session=session,
             )
 
         logger.info(
@@ -650,7 +663,9 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"renew sub {sub.id}",
+                session=session,
             )
+
 
         logger.info(
             "White Internet subscription renewed: user_id=%s, sub_id=%s, days=%s, node_id=%s",
@@ -691,16 +706,13 @@ class WhiteInternetService:
         if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
             return False, texts.WL_SUB_EXPIRED, None
 
-        current_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+        current_limit = _effective_device_limit(sub)
         if current_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
             return False, texts.WL_DEVICE_LIMIT_MAX_REACHED, None
 
-        total_accumulated = (
-            (sub.base_traffic_bytes or 0)
-            + (sub.extra_traffic_bytes or 0)
-            + WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES
-        )
-        if total_accumulated > WHITE_INTERNET_MAX_QUOTA_BYTES:
+        new_device_limit = current_limit + 1
+        max_extra_allowed = new_device_limit * WHITE_INTERNET_MAX_QUOTA_BYTES
+        if (sub.extra_traffic_bytes or 0) + WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES > max_extra_allowed:
             current_available = await white_internet_repo.get_available_quota_bytes(
                 session, sub.id, now
             )
@@ -810,7 +822,9 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"add_device_slot sub {sub.id}",
+                session=session,
             )
+
 
         logger.info(
             "White Internet device slot purchased: user_id=%s, sub_id=%s, new_limit=%s",
@@ -877,10 +891,9 @@ class WhiteInternetService:
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         pack_bytes = pack_gb * 1024 * 1024 * 1024
-        total_accumulated = (
-            (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0) + pack_bytes
-        )
-        if total_accumulated > WHITE_INTERNET_MAX_QUOTA_BYTES:
+        effective_devices = _effective_device_limit(sub)
+        max_extra_allowed = effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES
+        if (sub.extra_traffic_bytes or 0) + pack_bytes > max_extra_allowed:
             current_available = await white_internet_repo.get_available_quota_bytes(
                 session, sub.id, now
             )
@@ -970,7 +983,9 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"topup sub {sub.id}",
+                session=session,
             )
+
 
         logger.info(
             "White Internet traffic topped up: user_id=%s, sub_id=%s, pack_gb=%s",
@@ -1087,7 +1102,12 @@ class WhiteInternetService:
         """
         expected_inbound_tags: set[str] = set()
         for relay in (origin_node.extra_data or {}).get("relays", []) or []:
-            code = (relay or {}).get("code")
+            if isinstance(relay, dict):
+                code = relay.get("code")
+            elif isinstance(relay, str):
+                code = relay
+            else:
+                code = None
             if code:
                 expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
         if not expected_inbound_tags:
@@ -1156,10 +1176,6 @@ class WhiteInternetService:
                         sub.id,
                     )
         except Exception as exc:
-            try:
-                await session.rollback()
-            except Exception:
-                pass
             logger.warning(
                 "Synchronous activation fallback to background worker: %s", exc
             )
@@ -1202,6 +1218,7 @@ class WhiteInternetService:
                     client_uuid=sub.uuid,
                     version=sub.desired_version,
                     context=f"deactivate sub {sub.id}",
+                    session=session,
                 )
 
         logger.info(
@@ -1270,6 +1287,7 @@ class WhiteInternetService:
                     client_uuid=sub.uuid,
                     version=sub.desired_version,
                     context=f"reset sub {sub.id}",
+                    session=session,
                 )
 
         logger.info(

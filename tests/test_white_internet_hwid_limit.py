@@ -186,9 +186,10 @@ class TestWhiteInternetHwidRepo(unittest.IsolatedAsyncioTestCase):
         """Adding extra traffic that exceeds 150 GiB cap must raise WhiteInternetQuotaCapExceededError."""
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
+        sub.device_limit = 1
         sub.status = WhiteInternetStatus.ACTIVE
         sub.base_traffic_bytes = 100 * 1024**3
-        sub.extra_traffic_bytes = 0
+        sub.extra_traffic_bytes = 120 * 1024**3
 
         mock_session = AsyncMock()
 
@@ -202,6 +203,7 @@ class TestWhiteInternetHwidRepo(unittest.IsolatedAsyncioTestCase):
         """Setting base traffic quota that exceeds 150 GiB cap must raise WhiteInternetQuotaCapExceededError."""
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
+        sub.device_limit = 1
         sub.status = WhiteInternetStatus.ACTIVE
         sub.base_traffic_bytes = 50 * 1024**3
         sub.extra_traffic_bytes = 25 * 1024**3
@@ -211,7 +213,7 @@ class TestWhiteInternetHwidRepo(unittest.IsolatedAsyncioTestCase):
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
             with self.assertRaises(white_internet_repo.WhiteInternetQuotaCapExceededError):
                 await white_internet_repo.set_base_traffic_quota_atomic(
-                    mock_session, subscription_id=1, base_bytes=130 * 1024**3
+                    mock_session, subscription_id=1, base_bytes=160 * 1024**3
                 )
 
 

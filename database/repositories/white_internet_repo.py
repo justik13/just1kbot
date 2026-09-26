@@ -59,6 +59,15 @@ class WhiteInternetRenewalHorizonExceededError(WhiteInternetError):
     """Raised when renewal would push expiration beyond 60 days maximum horizon."""
 
 
+def _effective_device_limit(sub: WhiteInternetSubscription | None) -> int:
+    if sub is None:
+        return 1
+    val = getattr(sub, "device_limit", 1)
+    if isinstance(val, int):
+        return max(1, val)
+    return 1
+
+
 class WhiteInternetSubscriptionNotFoundError(WhiteInternetError):
     """Raised when a subscription is not found."""
 
@@ -273,7 +282,7 @@ async def renew_subscription_atomic(
             f"Renewal exceeds maximum horizon of {max_expiry_days} days"
         )
 
-    effective_devices = max(1, getattr(sub, "device_limit", 1) or 1)
+    effective_devices = _effective_device_limit(sub)
     new_base_bytes = (
         base_bytes
         if base_bytes is not None
@@ -292,7 +301,7 @@ async def renew_subscription_atomic(
         new_extra = 0
     else:
         is_grace_valid = (now <= (sub_expires_at + timedelta(days=7))) if sub_expires_at else True
-        max_extra_allowed = max(0, WHITE_INTERNET_MAX_QUOTA_BYTES - new_base_bytes)
+        max_extra_allowed = max(0, effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES)
         new_extra = min(extra_rollover, max_extra_allowed) if is_grace_valid else 0
 
     sub.is_trial = False
@@ -340,19 +349,20 @@ async def add_device_slot_atomic(
     if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
         raise WhiteInternetInactiveSubscriptionError("Cannot upgrade an expired subscription")
 
-    current_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+    current_limit = _effective_device_limit(sub)
     if current_limit >= max_devices:
         raise WhiteInternetDeviceLimitExceededError(
             f"Cannot exceed maximum limit of {max_devices} devices."
         )
 
-    total_accumulated = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0) + extra_bytes
-    if total_accumulated > max_quota_bytes:
+    new_device_limit = current_limit + 1
+    max_extra_allowed = new_device_limit * max_quota_bytes
+    if (sub.extra_traffic_bytes or 0) + extra_bytes > max_extra_allowed:
         raise WhiteInternetQuotaCapExceededError(
-            f"Adding device slot would exceed maximum quota cap of {max_quota_bytes} bytes."
+            f"Adding device slot would exceed maximum quota cap of {max_extra_allowed} bytes."
         )
 
-    sub.device_limit = current_limit + 1
+    sub.device_limit = new_device_limit
     sub.extra_traffic_bytes = (sub.extra_traffic_bytes or 0) + extra_bytes
 
     if sub.status == WhiteInternetStatus.EXHAUSTED:
@@ -386,10 +396,12 @@ async def topup_quota_atomic(
         raise WhiteInternetInactiveSubscriptionError("Cannot top up an expired subscription")
 
     pack_bytes = pack_gb * 1024 * 1024 * 1024
-    total_accumulated = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0) + pack_bytes
-    if total_accumulated > WHITE_INTERNET_MAX_QUOTA_BYTES:
+    effective_devices = _effective_device_limit(sub)
+    max_extra_allowed = effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES
+    if (sub.extra_traffic_bytes or 0) + pack_bytes > max_extra_allowed:
+        max_extra_gb = effective_devices * (WHITE_INTERNET_MAX_QUOTA_BYTES // (1024**3))
         raise WhiteInternetQuotaCapExceededError(
-            f"Adding {pack_gb} GiB would exceed the 150 GiB maximum accumulation cap."
+            f"Adding {pack_gb} GiB would exceed the maximum extra traffic cap of {max_extra_gb} GiB."
         )
 
     sub.extra_traffic_bytes = (sub.extra_traffic_bytes or 0) + pack_bytes
@@ -814,11 +826,13 @@ async def add_extra_traffic_atomic(
         )
 
     sub.extra_traffic_bytes = (sub.extra_traffic_bytes or 0) + extra_bytes
-    total_quota = (sub.base_traffic_bytes or 0) + sub.extra_traffic_bytes
-    if total_quota > WHITE_INTERNET_MAX_QUOTA_BYTES:
+    effective_devices = _effective_device_limit(sub)
+    max_extra_allowed = effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES
+    if sub.extra_traffic_bytes > max_extra_allowed:
         raise WhiteInternetQuotaCapExceededError(
-            f"Total quota ({total_quota} bytes) exceeds maximum allowed limit ({WHITE_INTERNET_MAX_QUOTA_BYTES} bytes)"
+            f"Extra traffic ({sub.extra_traffic_bytes} bytes) exceeds maximum allowed limit ({max_extra_allowed} bytes)"
         )
+    total_quota = (sub.base_traffic_bytes or 0) + sub.extra_traffic_bytes
     used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
 
     if sub.status == WhiteInternetStatus.EXHAUSTED and total_quota > used:
@@ -856,11 +870,14 @@ async def set_base_traffic_quota_atomic(
             f"Cannot change quota for subscription in {sub.status} state"
         )
 
-    total_quota = base_bytes + (sub.extra_traffic_bytes or 0)
-    if total_quota > WHITE_INTERNET_MAX_QUOTA_BYTES:
+    effective_devices = _effective_device_limit(sub)
+    max_base_allowed = effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES
+    if base_bytes > max_base_allowed:
         raise WhiteInternetQuotaCapExceededError(
-            f"Total quota ({total_quota} bytes) exceeds maximum allowed limit ({WHITE_INTERNET_MAX_QUOTA_BYTES} bytes)"
+            f"Base quota ({base_bytes} bytes) exceeds maximum allowed limit ({max_base_allowed} bytes)"
         )
+
+    total_quota = base_bytes + (sub.extra_traffic_bytes or 0)
 
     sub.base_traffic_bytes = base_bytes
     used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
@@ -899,6 +916,9 @@ async def set_device_limit_atomic(
         raise WhiteInternetTrialSubscriptionError("Cannot change device limit for trial subscription")
 
     sub.device_limit = limit
+    max_extra_allowed = limit * WHITE_INTERNET_MAX_QUOTA_BYTES
+    if (sub.extra_traffic_bytes or 0) > max_extra_allowed:
+        sub.extra_traffic_bytes = max_extra_allowed
     current_hwids: dict[str, str] = dict(sub.active_hwids or {})
     if len(current_hwids) > limit:
         sorted_hwids = sorted(current_hwids.items(), key=lambda item: item[1], reverse=True)

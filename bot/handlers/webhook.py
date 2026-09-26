@@ -113,23 +113,24 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         return web.Response(status=400, text="Invalid webhook")
     try:
         async with session_scope() as session:
+            from config.enums import WebhookInboxStatus
+            from services.order_service import OrderService
+
             existing_event = await session.scalar(
                 select(WebhookInbox).where(
                     WebhookInbox.provider == "yookassa",
                     WebhookInbox.event_key == event_key,
                 )
             )
-            if existing_event:
+            if existing_event and existing_event.status != WebhookInboxStatus.PENDING.value:
                 logger.info(
-                    "[%s] YooKassa webhook event %s already processed (inbox_id=%s), skipping",
+                    "[%s] YooKassa webhook event %s already processed (inbox_id=%s, status=%s), skipping",
                     request_id,
                     event_key,
                     existing_event.id,
+                    existing_event.status,
                 )
                 return web.Response(status=200, text="OK")
-
-            from config.enums import WebhookInboxStatus
-            from services.order_service import OrderService
 
             order = await OrderService.process_webhook_event(session, payload)
             inbox_status = (
@@ -138,7 +139,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 else WebhookInboxStatus.PENDING.value
             )
 
-            if order and order.status == "paid" and getattr(order, "_newly_paid", True):
+            if order and order.status == "paid" and getattr(order, "_newly_paid", False):
                 bot = request.app.get("bot")
                 if bot:
                     try:
@@ -217,25 +218,32 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                             "Could not notify user of order fulfillment: %s", exc
                         )
 
-            await session.execute(
-                insert(WebhookInbox)
-                .values(
-                    provider="yookassa",
-                    event_key=event_key,
-                    event_type=event,
-                    provider_object_id=str(provider_object_id),
-                    payment_external_id=str(payment_external_id),
-                    public_order_id=public_order_id,
-                    payload=payload,
-                    status=inbox_status,
+            if existing_event:
+                existing_event.status = inbox_status
+                if public_order_id:
+                    existing_event.public_order_id = public_order_id
+            else:
+                await session.execute(
+                    insert(WebhookInbox)
+                    .values(
+                        provider="yookassa",
+                        event_key=event_key,
+                        event_type=event,
+                        provider_object_id=str(provider_object_id),
+                        payment_external_id=str(payment_external_id),
+                        public_order_id=public_order_id,
+                        payload=payload,
+                        status=inbox_status,
+                    )
+                    .on_conflict_do_nothing(
+                        constraint="uq_webhook_inbox_provider_event_key"
+                    )
                 )
-                .on_conflict_do_nothing(
-                    constraint="uq_webhook_inbox_provider_event_key"
-                )
-            )
     except Exception:
         logger.exception("[%s] webhook inbox commit failed", request_id)
         return web.Response(status=500, text="Database unavailable")
+    if not order:
+        return web.Response(status=503, text="order_pending_retry")
     return web.Response(status=200, text="OK")
 
 

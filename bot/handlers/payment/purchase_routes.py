@@ -233,7 +233,7 @@ async def handle_order_check(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    order = await session.get(Order, order_id)
+    order = await session.get(Order, order_id, with_for_update=True)
     if not order or order.user_id != db_user.id:
         await callback.answer(texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
         return
@@ -346,7 +346,7 @@ async def handle_order_check(
             )
             return
         elif status_res.is_canceled:
-            order.status = "canceled"
+            OrderService.mark_order_canceled(order, reason="gateway_canceled")
             await session.flush()
             await callback.answer(
                 texts.PAYMENT_ORDER_PAYMENT_CANCELLED, show_alert=True
@@ -368,9 +368,9 @@ async def handle_order_cancel(
     order_id = _uuid_from_callback(callback.data)
     order = None
     if order_id and db_user:
-        order = await session.get(Order, order_id)
+        order = await session.get(Order, order_id, with_for_update=True)
         if order and order.user_id == db_user.id and order.status == "pending":
-            order.status = "canceled"
+            OrderService.mark_order_canceled(order, reason="user_canceled")
             await session.flush()
 
     await callback.answer(show_alert=False)
