@@ -119,6 +119,9 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error http://localhost:8081/health
+          test "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/sub/wl/ping)" = "200"
+          test "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/random-probe-unknown)" = "404"
+          test "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)" = "404"
 
       - name: Seed Backup Probe Data
         shell: bash

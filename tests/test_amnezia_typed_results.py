@@ -34,10 +34,22 @@ class FakeResponse:
         return self.payload
 
 
+class FakeChunkedStreamReader:
+    def __init__(self, raw_body: bytes):
+        self._raw_body = raw_body
+        self.chunks_read = 0
+
+    async def iter_chunked(self, chunk_size):
+        for i in range(0, len(self._raw_body), chunk_size):
+            self.chunks_read += 1
+            yield self._raw_body[i : i + chunk_size]
+
+
 class FakeStreamResponse:
     def __init__(self, status, raw_body: bytes):
         self.status = status
         self._raw_body = raw_body
+        self.content = FakeChunkedStreamReader(raw_body)
 
     async def __aenter__(self):
         return self
@@ -340,12 +352,20 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         content_error = aiohttp.ContentTypeError(
             MagicMock(), (), message="unexpected content type"
         )
-        self.use_session(FakeResponse(200, json_error=content_error))
+        attempts = module.API_RETRY_COUNT + 1
+        session = self.use_session(
+            *(
+                FakeResponse(200, json_error=content_error)
+                for _ in range(attempts)
+            )
+        )
         result = await self.client._request_result(
             "GET", "/server", semantics=RequestSemantics.READ
         )
+        self.assertEqual(session.request.call_count, attempts)
         self.assertEqual(result.error_kind, AmneziaErrorKind.INVALID_RESPONSE)
         self.assertFalse(result.ambiguous)
+        self.assertTrue(result.retryable)
 
     async def test_idempotent_write_body_client_error_retries(self):
         attempts = module.API_RETRY_COUNT + 1
@@ -445,10 +465,44 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_malformed_json_with_read_returns_invalid_response(self):
         truncated_json = b'{"clients": [{"id": 1}, {"id": 2'
-        self.use_session(FakeStreamResponse(200, truncated_json))
-        result = await self.client._request_result("GET", "/clients", semantics=RequestSemantics.READ)
+        attempts = module.API_RETRY_COUNT + 1
+        session = self.use_session(
+            *(FakeStreamResponse(200, truncated_json) for _ in range(attempts))
+        )
+        result = await self.client._request_result(
+            "GET", "/clients", semantics=RequestSemantics.READ
+        )
+        self.assertEqual(session.request.call_count, attempts)
         self.assertFalse(result.ok)
         self.assertEqual(result.error_kind, AmneziaErrorKind.INVALID_RESPONSE)
+        self.assertFalse(result.ambiguous)
+        self.assertTrue(result.retryable)
+
+    async def test_malformed_json_read_retry_succeeds_on_second_attempt(self):
+        truncated_json = b'{"clients": [{"id": 1}, {"id": 2'
+        valid_json = b'{"clients": [{"id": 1}, {"id": 2}]}'
+        session = self.use_session(
+            FakeStreamResponse(200, truncated_json),
+            FakeStreamResponse(200, valid_json),
+        )
+        result = await self.client._request_result(
+            "GET", "/clients", semantics=RequestSemantics.READ
+        )
+        self.assertEqual(session.request.call_count, 2)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.value, {"clients": [{"id": 1}, {"id": 2}]})
+
+    async def test_oversized_payload_early_termination(self):
+        large_body = b"X" * (30 * 1024 * 1024)
+        stream_response = FakeStreamResponse(200, large_body)
+        self.use_session(stream_response)
+        result = await self.client._request_result(
+            "GET", "/clients", semantics=RequestSemantics.READ
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_kind, AmneziaErrorKind.INVALID_RESPONSE)
+        self.assertFalse(result.retryable)
+        self.assertEqual(stream_response.content.chunks_read, 161)
 
 
 if __name__ == "__main__":

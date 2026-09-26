@@ -1288,7 +1288,8 @@ run_doctor
         self.assertIn("location ^~ /sub/wl", content)
         self.assertIn("resolver ", content)
         self.assertIn("77.88.8.8", content)
-        self.assertIn("1.1.1.1", content)
+        self.assertNotIn("1.1.1.1", content)
+        self.assertNotIn("8.8.8.8", content)
         self.assertIn("resolver_timeout 3s;", content)
         self.assertIn("proxy_connect_timeout 5s;", content)
         self.assertIn('set $bot_upstream "https://just1k.best";', content)
@@ -1846,6 +1847,25 @@ remove_traffic_watchdog_timer
         self.assertIn("apply_amnezia_abuse_protection", content)
         self.assertIn("--dport 25 -j REJECT --reject-with tcp-reset", content)
         self.assertIn('--string "BitTorrent protocol" --algo bm', content)
+
+    def test_amnezia_migration_and_rollback_invariants(self):
+        """Verify Amnezia node migration path, legacy env discovery, and rollback handling."""
+        amnezia_sh = REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh"
+        content = amnezia_sh.read_text(encoding="utf-8")
+        # Legacy environment discovery
+        self.assertIn('for candidate_env in "$AMNEZIA_API_ETC/config.env"', content)
+        self.assertIn("/opt/amnezia-api/.env", content)
+        self.assertIn("FASTIFY_API_KEY", content)
+        self.assertIn("AMNEZIA_API_KEY", content)
+        self.assertIn("SERVER_MAX_PEERS", content)
+        # Rollback logic for legacy containers & PM2
+        self.assertIn("rollback_legacy_if_needed()", content)
+        self.assertIn("docker start amnezia-api", content)
+        self.assertIn("pm2 restart all", content)
+        # Nginx proxy generation
+        self.assertIn("/etc/nginx/sites-available/just1k-amnezia.conf", content)
+        self.assertIn("proxy_pass http://127.0.0.1:${AMNEZIA_LOCAL_PORT};", content)
+        self.assertIn("client_max_body_size 10M;", content)
 
 
 if __name__ == "__main__":

@@ -508,52 +508,97 @@ class AmneziaClient:
                                 status_code=response.status,
                                 ambiguous=False,
                             )
-                        if hasattr(response, "read"):
-                            raw_body = await response.read()
-                            if len(raw_body) > MAX_AMNEZIA_RESPONSE_BYTES:
-                                logger.error(
-                                    "API %s%s response body exceeded %s bytes limit",
-                                    self._log_target,
-                                    path,
-                                    MAX_AMNEZIA_RESPONSE_BYTES,
+                        try:
+                            if hasattr(response, "content") and hasattr(
+                                response.content, "iter_chunked"
+                            ):
+                                body_buf = bytearray()
+                                async for chunk in response.content.iter_chunked(64 * 1024):
+                                    body_buf.extend(chunk)
+                                    if len(body_buf) > MAX_AMNEZIA_RESPONSE_BYTES:
+                                        break
+                                if len(body_buf) > MAX_AMNEZIA_RESPONSE_BYTES:
+                                    logger.error(
+                                        "API %s%s response body exceeded %s bytes limit",
+                                        self._log_target,
+                                        path,
+                                        MAX_AMNEZIA_RESPONSE_BYTES,
+                                    )
+                                    return self._failure(
+                                        AmneziaErrorKind.INVALID_RESPONSE,
+                                        semantics,
+                                        status_code=response.status,
+                                        retryable=False,
+                                        ambiguous=False,
+                                    )
+                                raw_body = bytes(body_buf)
+                                value = (
+                                    json.loads(raw_body.decode("utf-8"))
+                                    if raw_body
+                                    else {}
                                 )
-                                return self._failure(
-                                    AmneziaErrorKind.INVALID_RESPONSE,
-                                    semantics,
-                                    status_code=response.status,
-                                    ambiguous=False,
+                            elif hasattr(response, "read"):
+                                raw_body = await response.read()
+                                if len(raw_body) > MAX_AMNEZIA_RESPONSE_BYTES:
+                                    logger.error(
+                                        "API %s%s response body exceeded %s bytes limit",
+                                        self._log_target,
+                                        path,
+                                        MAX_AMNEZIA_RESPONSE_BYTES,
+                                    )
+                                    return self._failure(
+                                        AmneziaErrorKind.INVALID_RESPONSE,
+                                        semantics,
+                                        status_code=response.status,
+                                        retryable=False,
+                                        ambiguous=False,
+                                    )
+                                value = (
+                                    json.loads(raw_body.decode("utf-8"))
+                                    if raw_body
+                                    else {}
                                 )
-                            try:
-                                value = json.loads(raw_body.decode("utf-8")) if raw_body else {}
-                            except (json.JSONDecodeError, UnicodeDecodeError) as decode_err:
-                                logger.error(
-                                    "API %s%s returned malformed JSON: %s",
-                                    self._log_target,
-                                    path,
-                                    decode_err,
-                                )
-                                return self._failure(
-                                    AmneziaErrorKind.INVALID_RESPONSE,
-                                    semantics,
-                                    status_code=response.status,
-                                    ambiguous=False,
-                                )
-                        else:
-                            try:
+                            else:
                                 value = await response.json()
-                            except (json.JSONDecodeError, aiohttp.ContentTypeError) as decode_err:
-                                logger.error(
-                                    "API %s%s returned malformed JSON: %s",
+                        except (
+                            json.JSONDecodeError,
+                            UnicodeDecodeError,
+                            aiohttp.ContentTypeError,
+                        ) as decode_err:
+                            if (
+                                attempt + 1 < max_attempts
+                                and semantics is RequestSemantics.READ
+                            ):
+                                backoff = 2 ** attempt
+                                logger.warning(
+                                    "API %s%s returned malformed JSON (%s), "
+                                    "retrying in %ss (attempt %s/%s)...",
                                     self._log_target,
                                     path,
                                     decode_err,
+                                    backoff,
+                                    attempt + 1,
+                                    max_attempts,
                                 )
-                                return self._failure(
-                                    AmneziaErrorKind.INVALID_RESPONSE,
-                                    semantics,
-                                    status_code=response.status,
-                                    ambiguous=False,
-                                )
+                                await asyncio.sleep(backoff)
+                                continue
+                            logger.error(
+                                "API %s%s returned malformed JSON: %s",
+                                self._log_target,
+                                path,
+                                decode_err,
+                            )
+                            return self._failure(
+                                AmneziaErrorKind.INVALID_RESPONSE,
+                                semantics,
+                                status_code=response.status,
+                                retryable=(semantics is RequestSemantics.READ),
+                                ambiguous=(
+                                    semantics is not RequestSemantics.READ
+                                    if request_started
+                                    else False
+                                ),
+                            )
                         await cb.record_success()
                         return self._success(value, response.status)
                     elif 300 <= response.status < 400:
