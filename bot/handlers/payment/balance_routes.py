@@ -100,7 +100,7 @@ def _history_lines(entries: list) -> str:
 async def _get_pending_topup_order(
     session: AsyncSession, user_id: int
 ) -> Order | None:
-    cutoff = now_utc() - timedelta(minutes=30)
+    cutoff = now_utc() - timedelta(minutes=15)
     return await session.scalar(
         select(Order)
         .where(

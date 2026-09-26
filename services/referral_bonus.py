@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.enums import AdminAuditAction
-from database.models import AccountLedgerAllocation, AccountLedgerEntry, User
+from database.models import AccountLedgerEntry, User
 from database.repositories.account_ledger_repo import (
     _credit_capacity,  # noqa: F401
     get_account_balance,
@@ -474,93 +474,18 @@ async def get_referral_bonus_balance(
     *,
     user_id: int,
 ) -> Decimal:
-    """Return the remaining, attributable referral credit balance."""
-    credits = (
-        await session.scalars(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.user_id == user_id,
-                AccountLedgerEntry.entry_type == "admin_adjustment",
-                AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.metadata_["source_type"].astext
-                == REFERRAL_BONUS_SOURCE,
-            )
-        )
-    ).all()
-    if not credits:
-        return Decimal(0)
+    """Return available referral bonus balance capped by user's available bonus funds."""
+    from sqlalchemy import func
 
-    credit_ids = [credit.id for credit in credits]
-    reversal_rows = (
-        await session.scalars(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.user_id == user_id,
-                AccountLedgerEntry.entry_type == "admin_adjustment",
-                AccountLedgerEntry.amount < 0,
-                AccountLedgerEntry.metadata_["source_type"].astext
-                == REFERRAL_BONUS_SOURCE,
-                AccountLedgerEntry.metadata_["reason"].astext
-                == "topup_refund_reversal",
-            )
+    net_referral = await session.scalar(
+        select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
+            AccountLedgerEntry.user_id == user_id,
+            AccountLedgerEntry.entry_type == "admin_adjustment",
+            AccountLedgerEntry.metadata_["source_type"].astext == REFERRAL_BONUS_SOURCE,
         )
-    ).all()
-    reversals_by_credit: dict[int, Decimal] = {}
-    for reversal in reversal_rows:
-        original_credit_id = (reversal.metadata_ or {}).get("original_credit_id")
-        if original_credit_id is not None:
-            try:
-                cid = int(original_credit_id)
-                if cid in credit_ids:
-                    reversals_by_credit[cid] = reversals_by_credit.get(cid, Decimal(0)) + abs(
-                        Decimal(str(reversal.amount))
-                    )
-            except (ValueError, TypeError):
-                pass
-
-    allocations = (
-        await session.execute(
-            select(
-                AccountLedgerAllocation.credit_entry_id,
-                AccountLedgerAllocation.debit_entry_id,
-                AccountLedgerAllocation.amount,
-            ).where(AccountLedgerAllocation.credit_entry_id.in_(credit_ids))
-        )
-    ).all()
-
-    debit_ids = {row.debit_entry_id for row in allocations}
-    reversed_debits: set[int] = set()
-    if debit_ids:
-        reversed_debits = set(
-            (
-                await session.scalars(
-                    select(AccountLedgerEntry.reversal_of_id).where(
-                        AccountLedgerEntry.entry_type == "purchase_reversal",
-                        AccountLedgerEntry.reversal_of_id.in_(debit_ids),
-                    )
-                )
-            ).all()
-        )
-
-    used_by_credit: dict[int, Decimal] = {}
-    for row in allocations:
-        if row.debit_entry_id in reversed_debits:
-            continue
-        used_by_credit[row.credit_entry_id] = (
-            used_by_credit.get(row.credit_entry_id, Decimal(0))
-            + Decimal(row.amount)
-        )
-
-    remaining = sum(
-        max(
-            Decimal(0),
-            Decimal(credit.amount)
-            - reversals_by_credit.get(credit.id, Decimal(0))
-            - used_by_credit.get(credit.id, Decimal(0)),
-        )
-        for credit in credits
     )
-
     balance = await get_account_balance(session, user_id=user_id)
+    remaining = max(Decimal(0), Decimal(str(net_referral or 0)))
     if balance.debt > 0:
         remaining = max(Decimal(0), remaining - balance.debt)
-
     return min(remaining, balance.bonus_available)

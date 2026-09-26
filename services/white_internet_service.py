@@ -64,13 +64,7 @@ logger = logging.getLogger(__name__)
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
-def _effective_device_limit(sub: WhiteInternetSubscription | None) -> int:
-    if sub is None:
-        return 1
-    val = getattr(sub, "device_limit", 1)
-    if isinstance(val, int):
-        return max(1, val)
-    return 1
+_effective_device_limit = white_internet_repo._effective_device_limit
 
 
 def get_white_internet_tier_price(device_limit: int, base_price: Decimal | None = None) -> Decimal:

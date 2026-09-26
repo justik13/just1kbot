@@ -163,6 +163,9 @@ class OrderService:
                     Order.user_id == user_id,
                     Order.service_type == service_type,
                     Order.tariff_id == tariff_id,
+                    Order.duration_days == final_duration,
+                    Order.traffic_bytes == traffic_bytes,
+                    Order.device_limit == device_limit,
                     Order.payment_method == payment_method,
                     Order.amount_rub == final_amount,
                     Order.status == "pending",
@@ -451,12 +454,28 @@ class OrderService:
             return None
 
         if result.is_paid:
-            return await OrderService.mark_order_paid(
+            paid_order = await OrderService.mark_order_paid(
                 session,
                 order.id,
                 external_id=result.external_id,
                 paid_amount_rub=result.amount_rub,
             )
+            if paid_order is None:
+                cancellation_reason = (order.metadata_ or {}).get("cancellation_reason")
+                if cancellation_reason == "gateway_canceled":
+                    logger.warning(
+                        "Ignoring payment.succeeded webhook for gateway_canceled order %s (ext_id=%s)",
+                        order.id,
+                        result.external_id,
+                    )
+                    order_meta = dict(order.metadata_ or {})
+                    order_meta["late_payment_attempt_rejected"] = str(result.external_id)
+                    order.metadata_ = order_meta
+                    order._newly_paid = False
+                    await session.flush()
+                    return order
+                return None
+            return paid_order
 
         if result.is_canceled:
             if order.status == "pending":

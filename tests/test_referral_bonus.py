@@ -599,23 +599,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
 
         session = AsyncMock(spec=AsyncSession)
-        # 1. credits
-        mock_credits = MagicMock()
-        credit1 = MagicMock()
-        credit1.id = 1
-        credit1.amount = Decimal(100)
-        mock_credits.all.return_value = [credit1]
-
-        # 2. fully reversed
-        mock_rev = MagicMock()
-        mock_rev.all.return_value = []
-
-        # 3. allocations
-        mock_allocs = MagicMock()
-        mock_allocs.all.return_value = []
-
-        session.scalars.side_effect = [mock_credits, mock_rev]
-        session.execute = AsyncMock(return_value=mock_allocs)
+        session.scalar = AsyncMock(return_value=Decimal("100"))
 
         # balance has bonus_available = 40 (less than 100)
         balance_snap = AccountBalanceSnapshot(
@@ -733,6 +717,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         from services.referral_bonus import grant_referral_bonus_for_topup
 
         session = AsyncMock()
+        session.add = MagicMock()
         mock_purchaser = MagicMock(spec=User, id=10, telegram_id=200, referred_by=100)
         mock_referrer = MagicMock(spec=User, id=20, is_banned=False)
         session.scalar.side_effect = [mock_purchaser, mock_referrer, None, 0, None]
@@ -818,25 +803,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         from services.referral_bonus import get_referral_bonus_balance
 
         session = AsyncMock()
-        credit = MagicMock()
-        credit.id = 888
-        credit.user_id = 10
-        credit.amount = Decimal("40.00")
-
-        credits_mock = MagicMock()
-        credits_mock.all.return_value = [credit]
-
-        # Partial reversal of 16 RUB
-        reversal = MagicMock()
-        reversal.amount = Decimal("-16.00")
-        reversal.metadata_ = {"original_credit_id": 888}
-        rev_mock = MagicMock()
-        rev_mock.all.return_value = [reversal]
-
-        session.scalars.side_effect = [credits_mock, rev_mock, MagicMock(all=MagicMock(return_value=[]))]
-        alloc_mock = MagicMock()
-        alloc_mock.all.return_value = []
-        session.execute = AsyncMock(return_value=alloc_mock)
+        session.scalar = AsyncMock(return_value=Decimal("24.00"))
 
         balance_snap = AccountBalanceSnapshot(
             accounting_position=Decimal("100.00"),
@@ -849,6 +816,3 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
             bonus = asyncio.run(get_referral_bonus_balance(session, user_id=10))
             # 40 - 16 = 24 RUB
             self.assertEqual(bonus, Decimal("24.00"))
-
-
-

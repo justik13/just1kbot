@@ -2574,6 +2574,132 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 200)
             mock_render_balance.assert_not_called()
 
+    @patch("services.order_service.get_payment_gateway")
+    async def test_create_order_deduplication_different_service_attributes_creates_new_order(
+        self, mock_gw_factory
+    ):
+        """Verify deduplication does not conflate different service requests (e.g. traffic pack vs device slot) at same price."""
+        from services.order_service import OrderService
 
+        session = AsyncMock(spec=AsyncSession)
+        mock_gw = AsyncMock()
+        mock_gw.create_payment_url.return_value = MagicMock(
+            external_id="ext-invoice-new", payment_url="https://pay.example.com/new"
+        )
+        mock_gw_factory.return_value = mock_gw
 
+        session.get.return_value = User(id=42, telegram_id=123)
+
+        captured_queries = []
+
+        async def mock_scalar(query):
+            captured_queries.append(query)
+            return None
+
+        session.scalar = mock_scalar
+
+        new_order = await OrderService.create_order(
+            session,
+            user_id=42,
+            service_type="white_internet",
+            amount_rub=Decimal("200.00"),
+            device_limit=2,
+            traffic_bytes=0,
+            duration_days=0,
+            payment_method="yookassa",
+        )
+
+        self.assertIsNotNone(new_order)
+        self.assertEqual(new_order.device_limit, 2)
+        self.assertEqual(new_order.traffic_bytes, 0)
+        session.add.assert_called()
+
+        # Verify the deduplication query contains the service attributes
+        self.assertEqual(len(captured_queries), 1)
+        sql_str = str(captured_queries[0])
+        self.assertIn("traffic_bytes", sql_str)
+        self.assertIn("device_limit", sql_str)
+        self.assertIn("duration_days", sql_str)
+
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_payment_succeeded_on_gateway_canceled_order_acknowledges_without_503(
+        self, mock_gw_factory
+    ):
+        """Verify payment.succeeded on gateway_canceled order records rejection and returns 200 OK (no 503 loop)."""
+        from bot.handlers.webhook import yookassa_webhook_handler
+        from config.enums import WebhookInboxStatus
+        from database.models import WebhookInbox
+        from services.order_service import OrderService
+
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=True,
+            is_refunded=False,
+            is_canceled=False,
+            external_id="late-pay-999",
+            amount_rub=Decimal("200.00"),
+        )
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="canceled",
+            metadata_={"cancellation_reason": "gateway_canceled"},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        # Test OrderService layer: returns order with rejected metadata and _newly_paid=False
+        res = await OrderService.process_webhook_event(session, {"some": "payload"})
+        self.assertIsNotNone(res)
+        self.assertEqual(res.status, "canceled")
+        self.assertFalse(getattr(res, "_newly_paid", True))
+        self.assertEqual(res.metadata_["late_payment_attempt_rejected"], "late-pay-999")
+
+        # Test Webhook Handler layer: responds 200 OK (not 503)
+        with patch("bot.handlers.webhook.session_scope") as mock_scope, \
+             patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1"), \
+             patch("bot.handlers.webhook._is_yookassa_ip", return_value=True), \
+             patch("services.order_service.OrderService.process_webhook_event", return_value=res):
+
+            inbox = WebhookInbox(id=1, provider="yookassa", status=WebhookInboxStatus.PENDING.value)
+            session.scalar.return_value = inbox
+            mock_scope.return_value.__aenter__.return_value = session
+
+            request = AsyncMock()
+            request.content_length = 200
+            request.app = {"bot": AsyncMock()}
+            request.json.return_value = {
+                "type": "notification",
+                "event": "payment.succeeded",
+                "object": {"id": "late-pay-999", "status": "succeeded"},
+            }
+
+            response = await yookassa_webhook_handler(request)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(inbox.status, WebhookInboxStatus.SUCCEEDED.value)
+
+    async def test_handle_order_check_locks_order_with_for_update(self):
+        """Verify handle_order_check locks order with with_for_update=True."""
+        from bot.handlers.payment.purchase_routes import handle_order_check
+
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        user = User(id=42, telegram_id=999)
+        order = Order(id=order_uuid, user_id=42, status="pending", external_id=None)
+
+        session.get.return_value = order
+
+        callback = AsyncMock()
+        callback.data = f"order_check:{order_uuid}"
+
+        await handle_order_check(callback, session, db_user=user)
+
+        session.get.assert_called_with(Order, order_uuid, with_for_update=True)
 
