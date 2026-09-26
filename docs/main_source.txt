@@ -3,7 +3,6 @@
 
 ## Репозитории и клиенты
 https://github.com/justik13/just1kbot
-https://github.com/kyoresuas/amnezia-api
 https://github.com/amnezia-vpn/amnezia-client
 https://github.com/amnezia-vpn/DefaultVPN
 https://amnezia.org/

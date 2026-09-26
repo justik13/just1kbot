@@ -202,17 +202,15 @@ install_amnezia_node() {
 
     log "✔ Контейнер ${target_container} активен, конфигурация ${conf_in_container} найдена."
 
-    # 2b. Проверка наличия существующей установки kyoresuas/amnezia-api (для бесшовной миграции)
+    # 2b. Определение существующей конфигурации или публичного IP узла
     local existing_legacy_env=""
     local legacy_api_key=""
     local legacy_host=""
-    local legacy_max_peers=""
-    for candidate_env in /root/amnezia-api/.env ~/amnezia-api/.env /opt/amnezia-api/.env; do
+    for candidate_env in "$AMNEZIA_API_ETC/config.env" /root/amnezia-api/.env ~/amnezia-api/.env /opt/amnezia-api/.env; do
         if [[ -f "$candidate_env" ]]; then
             existing_legacy_env="$candidate_env"
-            legacy_api_key="$(grep -E "^(FASTIFY_API_KEY|AMNEZIA_API_KEY)=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+            legacy_api_key="$(grep -E "^(AMNEZIA_API_KEY|FASTIFY_API_KEY)=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
             legacy_host="$(grep -E "^(SERVER_PUBLIC_HOST|SERVER_HOST_NAME)=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
-            legacy_max_peers="$(grep -E "^SERVER_MAX_PEERS=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
             break
         fi
     done
@@ -222,35 +220,10 @@ install_amnezia_node() {
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
     [[ -z "$my_ip" ]] && my_ip="127.0.0.1"
 
-    local chosen_api_key=""
-    local api_domain=""
-    local migration_selected=0
-
-    if [[ -n "$existing_legacy_env" && -n "$legacy_api_key" ]]; then
-        log "✔ Обнаружена существующая конфигурация kyoresuas/amnezia-api (${existing_legacy_env})."
-        if [[ -t 0 && -z "$arg_domain" ]]; then
-            echo ""
-            echo -e "${BOLD}${CYAN}Обнаружена существующая конфигурация kyoresuas/amnezia-api:${NC}"
-            echo -e "  • Файл:      ${YELLOW}${existing_legacy_env}${NC}"
-            echo -e "  • Хост:      ${YELLOW}${legacy_host:-$my_ip}${NC}"
-            echo -e "  • API-ключ:  ${YELLOW}${legacy_api_key:0:8}...${legacy_api_key: -4}${NC}"
-            echo ""
-            echo -e "${BOLD}Выберите режим настройки:${NC}"
-            echo -e "  ${GREEN}[1]${NC} Бесшовная миграция (сохранить хост и API-ключ) ${GREEN}[Рекомендуется]${NC}"
-            echo -e "  ${CYAN}[2]${NC} Новая настройка (задать домен и ключ вручную)"
-            echo ""
-            read -rp "Ваш выбор [по умолчанию: 1]: " mode_choice || true
-            mode_choice="${mode_choice:-1}"
-            if [[ "$mode_choice" == "1" ]]; then
-                migration_selected=1
-                chosen_api_key="$legacy_api_key"
-                api_domain="${legacy_host:-$my_ip}"
-                log "✔ Выбран режим бесшовной миграции. Параметры сохранены."
-            fi
-        else
-            chosen_api_key="$legacy_api_key"
-            api_domain="${arg_domain:-${legacy_host:-$my_ip}}"
-        fi
+    local chosen_api_key="${legacy_api_key:-}"
+    local api_domain="${arg_domain:-${legacy_host:-}}"
+    if [[ -n "$chosen_api_key" ]]; then
+        log "✔ Обнаружена сохранённая конфигурация API-ключа (${existing_legacy_env})."
     fi
 
     local legacy_docker_stopped=0
@@ -262,14 +235,14 @@ install_amnezia_node() {
         fi
         if [[ $legacy_pm2_stopped -eq 1 ]]; then
             warn "Восстановление и перезапуск процессов PM2..."
-            systemctl start pm2-root.service >/dev/null 2>&1 || pm2 start all >/dev/null 2>&1 || true
+            pm2 restart all >/dev/null 2>&1 || pm2 start all >/dev/null 2>&1 || systemctl restart pm2-root.service >/dev/null 2>&1 || true
         fi
     }
 
     # Остановка контейнера amnezia-api если он запущен в Docker (для освобождения портов 4001 / 8443)
     if command -v docker >/dev/null 2>&1; then
         if docker ps --filter "name=^/amnezia-api$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-api$"; then
-            log "Обнаружен работающий Docker-контейнер amnezia-api (kyoresuas). Выполняется безопасная остановка для переключения на нативный сервис..."
+            log "Обнаружен работающий Docker-контейнер amnezia-api. Выполняется безопасная остановка для переключения на нативный сервис..."
             if docker stop amnezia-api >/dev/null 2>&1; then
                 legacy_docker_stopped=1
             fi
@@ -302,7 +275,7 @@ install_amnezia_node() {
             read -rp "Ваш выбор [по умолчанию: 1]: " conn_type || true
             conn_type="${conn_type:-1}"
             if [[ "$conn_type" == "1" ]]; then
-                read -rp "Введите доменное имя (например: vpn.example.com): " domain_in || true
+                read -rp "Введите доменное имя (например: node.example.com): " domain_in || true
                 domain_in="$(echo "$domain_in" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's|^https\?://||' -e 's|/.*$||')"
                 api_domain="${domain_in:-$my_ip}"
             else
@@ -315,13 +288,13 @@ install_amnezia_node() {
 
     local default_port="${arg_port:-$AMNEZIA_PUBLIC_PORT}"
     local public_port="$default_port"
-    if [[ -z "$arg_port" && -t 0 && $migration_selected -eq 0 ]]; then
+    if [[ -z "$arg_port" && -t 0 ]]; then
         read -rp "Публичный HTTPS порт для API [по умолчанию: ${default_port}]: " port_in || true
         public_port="${port_in:-$default_port}"
     fi
 
     local enable_abuse="Y"
-    if [[ -t 0 && $migration_selected -eq 0 ]]; then
+    if [[ -t 0 ]]; then
         read -rp "Активировать защиту от спама и торрентов (SMTP:25 + BitTorrent L7)? [Y/n]: " abuse_in || true
         abuse_in="${abuse_in:-Y}"
         if [[ "$abuse_in" =~ ^[Nn] ]]; then
