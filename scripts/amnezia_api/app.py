@@ -457,12 +457,22 @@ async def get_server_psk_async() -> str:
     return new_psk
 
 
-def allocate_next_ip(interface_addr: str, existing_peers: list[dict[str, str]]) -> str:
+def allocate_next_ip(
+    interface_addr: str,
+    existing_peers: list[dict[str, str]],
+    clients_table: list[dict[str, Any]] | None = None,
+) -> str:
     """Dynamically allocate the next available client IP from the interface subnet."""
     if not interface_addr:
         interface_addr = "10.8.1.1/24"
 
-    iface = ipaddress.ip_interface(interface_addr)
+    # Safely handle multiple addresses or IPv6 (e.g. "10.8.1.1/24, fd00::1/64")
+    clean_addr = interface_addr.split(",")[0].strip()
+    try:
+        iface = ipaddress.ip_interface(clean_addr)
+    except ValueError:
+        iface = ipaddress.ip_interface("10.8.1.1/24")
+
     network = iface.network
     server_ip = iface.ip
 
@@ -471,10 +481,20 @@ def allocate_next_ip(interface_addr: str, existing_peers: list[dict[str, str]]) 
         cip = p.get("AllowedIPs") or p.get("clientIp") or p.get("ip")
         if cip:
             try:
-                clean_ip = cip.split("/")[0].strip()
+                clean_ip = str(cip).split("/")[0].strip()
                 used_ips.add(ipaddress.ip_address(clean_ip))
             except ValueError:
                 pass
+
+    if clients_table:
+        for c in clients_table:
+            cip = c.get("clientIp") or c.get("ip") or c.get("AllowedIPs")
+            if cip:
+                try:
+                    clean_ip = str(cip).split("/")[0].strip()
+                    used_ips.add(ipaddress.ip_address(clean_ip))
+                except ValueError:
+                    pass
 
     for host in network.hosts():
         if host not in used_ips:
@@ -615,18 +635,22 @@ async def sync_kernel_peer_add(pubkey: str, ip: str, psk: str, container: str) -
     iface = get_interface_name(container)
     binary = get_tool_binary(container)
 
-    safe_psk = re.sub(r"[^A-Za-z0-9+/=]", "", psk)
+    safe_psk = re.sub(r"[^A-Za-z0-9+/=]", "", psk or "")
     safe_pub = re.sub(r"[^A-Za-z0-9+/=]", "", pubkey)
     safe_ip = re.sub(r"[^0-9.]", "", ip.split("/")[0])
     tmp_token = secrets.token_hex(8)
 
-    # Securely feed PSK using trap to clean up temporary file immediately upon exit
-    sh_cmd = (
-        f"TMP_PSK='/tmp/awg_psk_{tmp_token}.tmp'; "
-        f"trap 'rm -f \"$TMP_PSK\"' EXIT; "
-        f"echo '{safe_psk}' > \"$TMP_PSK\" && "
-        f"{binary} set {iface} peer '{safe_pub}' allowed-ips '{safe_ip}/32' preshared-key \"$TMP_PSK\""
-    )
+    if safe_psk:
+        # Securely feed PSK using trap to clean up temporary file immediately upon exit
+        sh_cmd = (
+            f"TMP_PSK='/tmp/awg_psk_{tmp_token}.tmp'; "
+            f"trap 'rm -f \"$TMP_PSK\"' EXIT; "
+            f"echo '{safe_psk}' > \"$TMP_PSK\" && "
+            f"{binary} set {iface} peer '{safe_pub}' allowed-ips '{safe_ip}/32' preshared-key \"$TMP_PSK\""
+        )
+    else:
+        sh_cmd = f"{binary} set {iface} peer '{safe_pub}' allowed-ips '{safe_ip}/32'"
+
     rc, _, stderr = await run_docker_exec_async(["sh", "-c", sh_cmd])
     if rc == 0:
         return True
@@ -799,7 +823,8 @@ async def get_server():
 
     addr = iface.get("Address", "10.8.1.1/24")
     try:
-        network = ipaddress.ip_interface(addr).network
+        clean_addr = addr.split(",")[0].strip()
+        network = ipaddress.ip_interface(clean_addr).network
         # Subnet, server (.1), and broadcast are reserved
         max_peers = max(1, network.num_addresses - 3)
     except Exception:
@@ -813,6 +838,13 @@ async def get_server():
     port = int(port_str) if port_str.isdigit() else 44321
 
     peers = parsed.get("peers", [])
+    clients_table = await load_clients_table_async()
+    all_peer_keys = {p.get("PublicKey") for p in peers if p.get("PublicKey")}
+    for c in clients_table:
+        pk = c.get("clientPubKey") or c.get("clientId") or c.get("id")
+        if pk:
+            all_peer_keys.add(pk)
+    total_peers = len(all_peer_keys) if all_peer_keys else max(len(peers), len(clients_table))
 
     has_awg3 = is_awg3_detected(iface)
     protocols = ["amneziawg2", "amneziawg3"] if has_awg3 else ["amneziawg2"]
@@ -826,7 +858,7 @@ async def get_server():
         "maxPeers": max_peers,
         "serverMaxPeers": max_peers,
         "SERVER_MAX_PEERS": max_peers,
-        "totalPeers": len(peers),
+        "totalPeers": total_peers,
         "port": port,
         "publicKey": server_pub,
         "dns1": SERVER_DNS1,
@@ -842,6 +874,13 @@ async def get_server_load():
     conf_content = await read_container_file_async(conf_path)
     parsed = parse_awg_conf(conf_content)
     peers = parsed.get("peers", [])
+    clients_table = await load_clients_table_async()
+    all_peer_keys = {p.get("PublicKey") for p in peers if p.get("PublicKey")}
+    for c in clients_table:
+        pk = c.get("clientPubKey") or c.get("clientId") or c.get("id")
+        if pk:
+            all_peer_keys.add(pk)
+    total_peers = len(all_peer_keys) if all_peer_keys else max(len(peers), len(clients_table))
 
     uptime = 0
     try:
@@ -881,7 +920,7 @@ async def get_server_load():
         "ram_percent": mem.percent,
         "disk_percent": disk.percent,
         "uptime_seconds": uptime,
-        "total_peers": len(peers),
+        "total_peers": total_peers,
         "active_peers": len(peers),
     }
 
@@ -1046,10 +1085,12 @@ async def get_clients(skip: int = 0, limit: int | None = None):
 
     result = []
     now_ts = time.time()
+    seen_pubs = set()
     for p in peers:
         pub = p.get("PublicKey", "")
         if not pub:
             continue
+        seen_pubs.add(pub)
 
         c_meta = clients_map.get(pub, {})
         user_data = c_meta.get("userData", {}) if isinstance(c_meta.get("userData"), dict) else {}
@@ -1124,6 +1165,83 @@ async def get_clients(skip: int = 0, limit: int | None = None):
         }
         result.append(item)
 
+    # Also include disabled/stored clients that are in clientsTable but not in awg0.conf
+    for c in clients_table:
+        pub = c.get("clientPubKey") or c.get("clientId") or c.get("id")
+        if not pub or pub in seen_pubs:
+            continue
+        seen_pubs.add(pub)
+
+        user_data = c.get("userData", {}) if isinstance(c.get("userData"), dict) else {}
+        name = (
+            user_data.get("clientName")
+            or c.get("clientName")
+            or c.get("name")
+            or f"Peer {pub[:8]}"
+        )
+        status_val = c.get("status", "disabled")
+        raw_ip = c.get("clientIp") or c.get("ip") or ""
+        client_ip = str(raw_ip).split("/")[0]
+
+        peer_stats = stats.get(pub, {})
+        rx = peer_stats.get("rx", 0)
+        tx = peer_stats.get("tx", 0)
+        handshake = peer_stats.get("lastHandshake")
+        is_online = bool(handshake and (now_ts - handshake < 180))
+
+        peer_entry = {
+            "id": pub,
+            "clientId": pub,
+            "name": name,
+            "status": status_val,
+            "allowedIps": [f"{client_ip}/32"] if client_ip else [],
+            "lastHandshake": handshake,
+            "lastSeen": handshake,
+            "traffic": {
+                "received": rx,
+                "sent": tx,
+            },
+            "traffics": {
+                "received": rx,
+                "sent": tx,
+                "totalDownload": rx,
+                "totalUpload": tx,
+            },
+            "endpoint": "",
+            "online": is_online,
+            "expiresAt": c.get("expiresAt"),
+            "protocol": proto,
+        }
+
+        item = {
+            "username": name,
+            "peers": [peer_entry],
+            "id": pub,
+            "clientId": pub,
+            "clientPubKey": pub,
+            "name": name,
+            "peer_name": name,
+            "clientName": name,
+            "status": status_val,
+            "clientIp": client_ip,
+            "traffic": {
+                "received": rx,
+                "sent": tx,
+            },
+            "traffics": {
+                "received": rx,
+                "sent": tx,
+                "totalDownload": rx,
+                "totalUpload": tx,
+            },
+            "lastHandshake": handshake,
+            "lastSeen": handshake,
+            "updatedAt": c.get("updatedAt", c.get("createdAt")),
+            "expiresAt": c.get("expiresAt"),
+            "protocol": proto,
+        }
+        result.append(item)
+
     total_count = len(result)
     paged_items = result
     if skip > 0:
@@ -1155,7 +1273,12 @@ async def create_client(req: ClientCreateRequest):
                 detail="Server public key is not configured or could not be derived",
             )
 
-        client_ip = allocate_next_ip(iface.get("Address", "10.8.1.1/24"), existing_peers)
+        clients_table = await load_clients_table_async()
+        client_ip = allocate_next_ip(
+            iface.get("Address", "10.8.1.1/24"),
+            existing_peers,
+            clients_table,
+        )
         client_priv, client_pub = generate_keypair()
         psk = await get_server_psk_async()
 
@@ -1393,14 +1516,14 @@ async def _do_patch_client(client_id: str, req: ClientPatchRequest):
                         if p.get("PublicKey") == target_pub:
                             peer_ip = peer_ip or p.get("AllowedIPs", "").split("/")[0]
                             peer_psk = peer_psk or p.get("PresharedKey", "")
-                if not peer_psk:
-                    peer_psk = await get_server_psk_async()
+                if peer_psk and not target.get("psk"):
                     target["psk"] = peer_psk
 
                 if not peer_ip:
                     peer_ip = allocate_next_ip(
                         parsed.get("interface", {}).get("Address", "10.8.1.1/24"),
                         parsed["peers"],
+                        clients_table,
                     )
                     target["clientIp"] = peer_ip
 

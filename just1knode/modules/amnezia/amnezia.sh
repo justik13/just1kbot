@@ -312,10 +312,12 @@ install_amnezia_node() {
 
     if [[ -d "$source_api_dir" ]]; then
         cp -a "$source_api_dir/." "$AMNEZIA_API_DIR/"
-    else
+    elif [[ ! -f "$AMNEZIA_API_DIR/app.py" ]]; then
         log "Загрузка скриптов amnezia_api из репозитория..."
         local tmp_dl="/tmp/amnezia_api_$$.tar.gz"
-        local archive_url="https://github.com/justik13/just1kbot/archive/refs/heads/main.tar.gz"
+        local repo_url="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
+        local repo_ref="${JUST1KBOT_REF:-main}"
+        local archive_url="${repo_url%.git}/archive/refs/heads/${repo_ref}.tar.gz"
         curl -fsSL "$archive_url" -o "$tmp_dl" 2>/dev/null || wget -qO "$tmp_dl" "$archive_url" 2>/dev/null || true
         if [[ -f "$tmp_dl" ]]; then
             tar -xzf "$tmp_dl" --strip-components=2 -C "$AMNEZIA_API_DIR" "*/scripts/amnezia_api" 2>/dev/null || true

@@ -694,3 +694,94 @@ def test_import_backup_fail_closed_on_syncconf_error(mock_awg_env, monkeypatch):
     assert "sync" in resp.json()["detail"].lower()
 
 
+def test_allocate_next_ip_prevents_collision_with_disabled_clients():
+    """Verify allocate_next_ip considers both active conf peers and disabled clients_table peers."""
+    active_peers = [{"AllowedIPs": "10.8.1.2/32"}]
+    disabled_clients = [{"clientIp": "10.8.1.3", "status": "disabled"}]
+
+    next_ip = amnezia_app.allocate_next_ip(
+        "10.8.1.1/24",
+        existing_peers=active_peers,
+        clients_table=disabled_clients,
+    )
+    assert next_ip == "10.8.1.4"
+
+
+def test_allocate_next_ip_comma_separated_interface_addr():
+    """Verify allocate_next_ip correctly parses multi-address interface strings (e.g. IPv4 + IPv6)."""
+    next_ip = amnezia_app.allocate_next_ip(
+        "10.8.1.1/24, fd00:abcd::1/64",
+        existing_peers=[],
+    )
+    assert next_ip == "10.8.1.2"
+
+
+def test_get_clients_includes_disabled_clients_from_table(mock_awg_env):
+    """Verify GET /clients returns disabled clients stored in clientsTable even if removed from conf."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+    peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
+
+    # 1. Disable the peer (removes from conf, marks status=disabled in clientsTable)
+    patch_resp = client.patch(
+        f"/clients/{peer_pub}",
+        json={"clientId": peer_pub, "status": "disabled"},
+        headers=headers,
+    )
+    assert patch_resp.status_code == 200
+
+    # 2. Query /clients
+    get_resp = client.get("/clients", headers=headers)
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert data["total"] == 1
+    item = data["items"][0]
+    assert item["clientId"] == peer_pub
+    assert item["status"] == "disabled"
+    assert item["traffic"]["received"] == 0
+
+
+def test_get_server_total_peers_includes_disabled_clients(mock_awg_env):
+    """Verify GET /server calculates totalPeers from unique union of conf peers and clientsTable."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+    peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
+
+    # Disable peer (removes from awg0.conf)
+    client.patch(
+        f"/clients/{peer_pub}",
+        json={"clientId": peer_pub, "status": "disabled"},
+        headers=headers,
+    )
+
+    # Server should still report totalPeers == 1
+    resp = client.get("/server", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["totalPeers"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_kernel_peer_add_without_psk(monkeypatch):
+    """Verify sync_kernel_peer_add does not pass preshared-key when psk is empty."""
+    captured_commands = []
+
+    async def fake_docker_exec(cmd):
+        captured_commands.append(cmd)
+        return 0, "", ""
+
+    monkeypatch.setattr(amnezia_app, "run_docker_exec_async", fake_docker_exec)
+
+    success = await amnezia_app.sync_kernel_peer_add(
+        pubkey="testpubkey123=",
+        ip="10.8.1.5",
+        psk="",
+        container="amnezia-awg",
+    )
+    assert success is True
+    assert len(captured_commands) == 1
+    sh_cmd = captured_commands[0][2]
+    assert "preshared-key" not in sh_cmd
+    assert "allowed-ips '10.8.1.5/32'" in sh_cmd
+
+
+
