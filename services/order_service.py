@@ -443,6 +443,14 @@ class OrderService:
             )
 
         if result.is_refunded:
+            if order.status not in ("paid", "refunded"):
+                logger.warning(
+                    "Refund received for non-paid order %s (status=%s), deferring to retry",
+                    order.id,
+                    order.status,
+                )
+                return None
+
             refund_amount = (
                 result.amount_rub
                 if result.amount_rub is not None

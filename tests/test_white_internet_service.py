@@ -714,3 +714,75 @@ class TestWhiteInternetQuotaAndDeviceAuditFixes(unittest.IsolatedAsyncioTestCase
                 session, subscription_id=1, quote_id=1, pack_gb=60, price_rub=Decimal("200")
             )
         self.assertIn(f"maximum extra traffic cap of {expected_cap_gb} GiB", str(cm.exception))
+
+    def test_dispatch_deprovision_queues_post_commit_when_session_provided(self):
+        from database.models import Server
+        from services.white_internet_service import _dispatch_deprovision
+
+        server = Server(
+            id=1,
+            api_url="http://node.test:8080",
+            api_key="secret",
+            protocol="xray",
+        )
+        session = MagicMock()
+        session.info = {}
+
+        _dispatch_deprovision(
+            server,
+            client_uuid="uuid-123",
+            version=2,
+            session=session,
+            context="test_post_commit",
+        )
+
+        self.assertIn("post_commit_tasks", session.info)
+        self.assertEqual(len(session.info["post_commit_tasks"]), 1)
+        task_callable = session.info["post_commit_tasks"][0]
+        self.assertTrue(callable(task_callable))
+
+    @patch("asyncio.create_task")
+    def test_dispatch_deprovision_creates_task_when_session_is_none(self, mock_create_task):
+        from database.models import Server
+        from services.white_internet_service import _dispatch_deprovision
+
+        server = Server(
+            id=1,
+            api_url="http://node.test:8080",
+            api_key="secret",
+            protocol="xray",
+        )
+        _dispatch_deprovision(
+            server,
+            client_uuid="uuid-123",
+            version=2,
+            session=None,
+            context="test_no_session",
+        )
+
+        mock_create_task.assert_called_once()
+
+    @patch("asyncio.create_task")
+    def test_dispatch_deprovision_skips_non_xray_server(self, mock_create_task):
+        from database.models import Server
+        from services.white_internet_service import _dispatch_deprovision
+
+        server = Server(
+            id=1,
+            api_url="http://node.test:8080",
+            api_key="secret",
+            protocol="awg",
+        )
+        session = MagicMock()
+        session.info = {}
+
+        _dispatch_deprovision(
+            server,
+            client_uuid="uuid-123",
+            version=2,
+            session=session,
+            context="test_wrong_protocol",
+        )
+
+        self.assertNotIn("post_commit_tasks", session.info)
+        mock_create_task.assert_not_called()

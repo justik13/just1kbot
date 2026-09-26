@@ -69,6 +69,7 @@ class TestBanServiceWhiteInternet(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.session = AsyncMock(spec=AsyncSession)
+        self.session.info = {}
         self.admin_id = 99999
         self.user = User(
             id=42,
@@ -167,6 +168,9 @@ class TestBanServiceWhiteInternet(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.PENDING_DELETE)
             self.assertEqual(sub.desired_version, 2)
             self.session.flush.assert_awaited_once()
+            tasks = self.session.info.pop("post_commit_tasks", [])
+            for task in tasks:
+                await task()
             mock_deprovision.assert_called_once()
 
 

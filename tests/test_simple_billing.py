@@ -406,6 +406,40 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         mock_revoke.assert_called_once_with(session, order)
         session.flush.assert_called()
 
+    @patch("services.fulfillment_service.FulfillmentService.revoke_order")
+    @patch("services.order_service.create_order_refund_debit")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_process_webhook_event_refund_defers_when_order_pending(
+        self, mock_gw_factory, mock_refund_debit, mock_revoke
+    ):
+        mock_gw = AsyncMock()
+        order_uuid = uuid.uuid4()
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            external_id="ext-pay-pending",
+        )
+        mock_gw_factory.return_value = mock_gw
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="pending",
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        result = await OrderService.process_webhook_event(session, {"some": "payload"})
+
+        self.assertIsNone(result)
+        self.assertEqual(order.status, "pending")
+        mock_revoke.assert_not_called()
+        mock_refund_debit.assert_not_called()
+
 
 class TestOrderKeyboards(unittest.TestCase):
     def test_get_order_checkout_keyboard_can_pay_wallet(self):

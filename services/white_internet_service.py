@@ -106,6 +106,7 @@ def _dispatch_deprovision(
     client_uuid: str,
     version: int,
     *,
+    session: AsyncSession | None = None,
     context: str = "",
 ) -> None:
     if not server or not server.api_url or not server.api_key:
@@ -117,15 +118,23 @@ def _dispatch_deprovision(
             getattr(server, "id", "?"),
         )
         return
-    try:
-        task = asyncio.create_task(
-            _deprovision_old_node_safe(
-                server.api_url,
-                server.api_key,
-                client_uuid=client_uuid,
-                version=version,
-            )
+
+    async def _runner() -> None:
+        await _deprovision_old_node_safe(
+            server.api_url,
+            server.api_key,
+            client_uuid=client_uuid,
+            version=version,
         )
+
+    if session is not None and hasattr(session, "info") and isinstance(session.info, dict):
+        from database.connection import queue_post_commit_task
+
+        queue_post_commit_task(session, _runner)
+        return
+
+    try:
+        task = asyncio.create_task(_runner())
         _BACKGROUND_TASKS.add(task)
         task.add_done_callback(_BACKGROUND_TASKS.discard)
     except Exception as exc:
@@ -497,6 +506,7 @@ class WhiteInternetService:
                 client_uuid=sub_locked.uuid,
                 version=sub_locked.desired_version,
                 context=f"trial_convert migration sub {sub_locked.id}",
+                session=session,
             )
 
         logger.info(
@@ -659,6 +669,7 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"renew sub {sub.id}",
+                session=session,
             )
 
 
@@ -817,6 +828,7 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"add_device_slot sub {sub.id}",
+                session=session,
             )
 
 
@@ -977,6 +989,7 @@ class WhiteInternetService:
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"topup sub {sub.id}",
+                session=session,
             )
 
 
@@ -1211,6 +1224,7 @@ class WhiteInternetService:
                     client_uuid=sub.uuid,
                     version=sub.desired_version,
                     context=f"deactivate sub {sub.id}",
+                    session=session,
                 )
 
         logger.info(
@@ -1279,6 +1293,7 @@ class WhiteInternetService:
                     client_uuid=sub.uuid,
                     version=sub.desired_version,
                     context=f"reset sub {sub.id}",
+                    session=session,
                 )
 
         logger.info(
