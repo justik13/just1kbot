@@ -63,22 +63,22 @@ def get_target_container() -> str:
 
 
 def get_interface_name(container: str | None = None) -> str:
-    """Return kernel interface name (awg0 for Awg2, wg0 for legacy)."""
+    """Return kernel interface name (awg0 for Awg2/Awg3, wg0 for legacy)."""
     c = container or get_target_container()
-    return "awg0" if "awg2" in c else "wg0"
+    return "awg0" if ("awg2" in c or "awg3" in c) else "wg0"
 
 
 def get_tool_binary(container: str | None = None) -> str:
-    """Return CLI tool name (awg for Awg2, wg for legacy)."""
+    """Return CLI tool name (awg for Awg2/Awg3, wg for legacy)."""
     c = container or get_target_container()
-    return "awg" if "awg2" in c else "wg"
+    return "awg" if ("awg2" in c or "awg3" in c) else "wg"
 
 
 def get_config_path(container: str | None = None) -> str:
     if AWG_CONF_PATH:
         return AWG_CONF_PATH
     c = container or get_target_container()
-    conf_name = "awg0.conf" if "awg2" in c else "wg0.conf"
+    conf_name = "awg0.conf" if ("awg2" in c or "awg3" in c) else "wg0.conf"
     return os.path.join(AWG_DIR, conf_name)
 
 
@@ -533,6 +533,7 @@ def build_client_configs(
         "client_ip": client_ip,
         "client_priv_key": client_priv,
         "client_pub_key": client_pub,
+        "config": raw_conf,
         "hostName": host_name,
         "port": port_int,
         "psk_key": psk,
@@ -755,12 +756,23 @@ async def get_server():
 
     peers = parsed.get("peers", [])
 
+    has_awg3 = any(
+        k in iface
+        for k in (
+            "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime",
+            "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout",
+            "MaxHandshakeAttempts", "RandomTrailers", "DisableCookies",
+            "I1", "I2", "I3", "I4", "I5",
+        )
+    )
+    protocols = ["amneziawg2", "amneziawg3"] if has_awg3 else ["amneziawg2"]
+
     return {
         "id": os.getenv("SERVER_ID", container),
         "name": os.getenv("SERVER_NAME", container),
         "region": os.getenv("SERVER_REGION", ""),
         "weight": int(os.getenv("SERVER_WEIGHT", "0")),
-        "protocols": ["amneziawg2"],
+        "protocols": protocols,
         "maxPeers": max_peers,
         "serverMaxPeers": max_peers,
         "SERVER_MAX_PEERS": max_peers,

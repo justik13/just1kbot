@@ -368,7 +368,7 @@ async def process_add_server(
 
         protocols = server_info.protocols
 
-        if AMNEZIA_PROTOCOL not in protocols:
+        if AMNEZIA_PROTOCOL not in protocols and "amneziawg3" not in protocols:
             await render_hub(
                 message.bot,
                 message.chat.id,
