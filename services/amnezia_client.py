@@ -508,8 +508,8 @@ class AmneziaClient:
                                 status_code=response.status,
                                 ambiguous=False,
                             )
-                        if hasattr(response, "content") and hasattr(response.content, "read"):
-                            raw_body = await response.content.read(MAX_AMNEZIA_RESPONSE_BYTES + 1)
+                        if hasattr(response, "read"):
+                            raw_body = await response.read()
                             if len(raw_body) > MAX_AMNEZIA_RESPONSE_BYTES:
                                 logger.error(
                                     "API %s%s response body exceeded %s bytes limit",
@@ -523,9 +523,37 @@ class AmneziaClient:
                                     status_code=response.status,
                                     ambiguous=False,
                                 )
-                            value = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                            try:
+                                value = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                            except (json.JSONDecodeError, UnicodeDecodeError) as decode_err:
+                                logger.error(
+                                    "API %s%s returned malformed JSON: %s",
+                                    self._log_target,
+                                    path,
+                                    decode_err,
+                                )
+                                return self._failure(
+                                    AmneziaErrorKind.INVALID_RESPONSE,
+                                    semantics,
+                                    status_code=response.status,
+                                    ambiguous=False,
+                                )
                         else:
-                            value = await response.json()
+                            try:
+                                value = await response.json()
+                            except (json.JSONDecodeError, aiohttp.ContentTypeError) as decode_err:
+                                logger.error(
+                                    "API %s%s returned malformed JSON: %s",
+                                    self._log_target,
+                                    path,
+                                    decode_err,
+                                )
+                                return self._failure(
+                                    AmneziaErrorKind.INVALID_RESPONSE,
+                                    semantics,
+                                    status_code=response.status,
+                                    ambiguous=False,
+                                )
                         await cb.record_success()
                         return self._success(value, response.status)
                     elif 300 <= response.status < 400:

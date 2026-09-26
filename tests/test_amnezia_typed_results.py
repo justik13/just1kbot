@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,6 +32,21 @@ class FakeResponse:
         if self.json_error:
             raise self.json_error
         return self.payload
+
+
+class FakeStreamResponse:
+    def __init__(self, status, raw_body: bytes):
+        self.status = status
+        self._raw_body = raw_body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def read(self):
+        return self._raw_body
 
 
 class FakeRequestContext:
@@ -406,6 +422,34 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         self.use_session(FakeResponse(200, {"status": "ok", "message": "Rebooting"}))
         reboot_ok = await self.client.reboot_server()
         self.assertTrue(reboot_ok)
+
+    async def test_large_response_body_over_16kb_reads_completely(self):
+        # 500 clients produce ~50 KB of JSON, which would be truncated by chunked socket read
+        clients_payload = [
+            {"clientId": f"client-{i}", "userData": f"user-{i}@example.com", "status": "active"}
+            for i in range(500)
+        ]
+        raw_json = json.dumps(clients_payload).encode("utf-8")
+        self.assertGreater(len(raw_json), 16384, "Payload must be >16KB to reproduce chunking issue")
+        self.use_session(FakeStreamResponse(200, raw_json))
+        result = await self.client._request_result("GET", "/clients", semantics=RequestSemantics.READ)
+        self.assertTrue(result.ok)
+        self.assertEqual(len(result.value), 500)
+
+    async def test_response_body_exceeding_max_limit_fails(self):
+        oversized = b" " * (module.MAX_AMNEZIA_RESPONSE_BYTES + 100)
+        self.use_session(FakeStreamResponse(200, oversized))
+        result = await self.client._request_result("GET", "/clients", semantics=RequestSemantics.READ)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_kind, AmneziaErrorKind.INVALID_RESPONSE)
+
+    async def test_malformed_json_with_read_returns_invalid_response(self):
+        truncated_json = b'{"clients": [{"id": 1}, {"id": 2'
+        self.use_session(FakeStreamResponse(200, truncated_json))
+        result = await self.client._request_result("GET", "/clients", semantics=RequestSemantics.READ)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_kind, AmneziaErrorKind.INVALID_RESPONSE)
+
 
 if __name__ == "__main__":
     unittest.main()

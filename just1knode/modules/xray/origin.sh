@@ -82,11 +82,26 @@ deploy_subscription_proxy_conf() {
 
     set_state_val "sub_path_prefix" "$sub_prefix" 2>/dev/null || true
 
+    # Резолверы DNS: Anycast DNS Яндекса и MSK-IX для РФ, системные резолверы хоста, зарубежные как fallback
+    local domestic_resolvers="77.88.8.8 77.88.8.1 195.208.4.1"
+    local system_resolvers=""
+    if [[ -f /etc/resolv.conf ]]; then
+        system_resolvers="$(awk '/^nameserver/ {if ($2 !~ /^127\./) printf "%s ", $2}' /etc/resolv.conf 2>/dev/null || true)"
+    fi
+    local resolved_servers="${domestic_resolvers}"
+    for r in $system_resolvers; do
+        if [[ ! " $resolved_servers " =~ " $r " ]]; then
+            resolved_servers="$resolved_servers $r"
+        fi
+    done
+    resolved_servers="$resolved_servers 1.1.1.1 8.8.8.8"
+
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
     location ^~ ${sub_prefix} {
-        resolver 1.1.1.1 1.0.0.1 8.8.8.8 9.9.9.9 valid=30s ipv6=off;
+        resolver ${resolved_servers} valid=30s ipv6=off;
+        resolver_timeout 3s;
         set \$bot_upstream "https://${target_host}";
         proxy_pass \$bot_upstream;
         proxy_ssl_server_name on;
@@ -99,6 +114,7 @@ deploy_subscription_proxy_conf() {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_buffering off;
+        proxy_connect_timeout 5s;
         proxy_read_timeout 30s;
         proxy_send_timeout 30s;
     }
