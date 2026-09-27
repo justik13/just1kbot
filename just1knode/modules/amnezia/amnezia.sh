@@ -203,54 +203,30 @@ install_amnezia_node() {
     log "✔ Контейнер ${target_container} активен, конфигурация ${conf_in_container} найдена."
 
     # 2b. Определение существующей конфигурации или публичного IP узла
-    local existing_legacy_env=""
-    local legacy_api_key=""
-    local legacy_host=""
-    local legacy_max_peers=""
-    local cand_key=""
-    for candidate_env in "$AMNEZIA_API_ETC/config.env" /root/amnezia-api/.env ~/amnezia-api/.env /opt/amnezia-api/.env; do
-        if [[ -f "$candidate_env" ]]; then
-            cand_key="$(grep -E "^(AMNEZIA_API_KEY|FASTIFY_API_KEY)=" "$candidate_env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
-            if [[ -n "$cand_key" ]]; then
-                existing_legacy_env="$candidate_env"
-                legacy_api_key="$cand_key"
-                legacy_host="$(grep -E "^(SERVER_PUBLIC_HOST|SERVER_HOST_NAME)=" "$candidate_env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
-                legacy_max_peers="$(grep -E "^SERVER_MAX_PEERS=" "$candidate_env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
-                break
-            fi
-        fi
-    done
+    local saved_api_key=""
+    local saved_host=""
+    local saved_max_peers=""
+    if [[ -f "$AMNEZIA_API_ETC/config.env" ]]; then
+        saved_api_key="$(grep -E "^(AMNEZIA_API_KEY|FASTIFY_API_KEY)=" "$AMNEZIA_API_ETC/config.env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+        saved_host="$(grep -E "^(SERVER_PUBLIC_HOST|SERVER_HOST_NAME)=" "$AMNEZIA_API_ETC/config.env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+        saved_max_peers="$(grep -E "^SERVER_MAX_PEERS=" "$AMNEZIA_API_ETC/config.env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+    fi
 
     # Определение публичного IP узла
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
     [[ -z "$my_ip" ]] && my_ip="127.0.0.1"
 
-    local chosen_api_key="${legacy_api_key:-}"
-    local api_domain="${arg_domain:-${legacy_host:-}}"
+    local chosen_api_key="${saved_api_key:-}"
+    local api_domain="${arg_domain:-${saved_host:-}}"
     if [[ -n "$chosen_api_key" ]]; then
-        log "✔ Обнаружена сохранённая конфигурация API-ключа (${existing_legacy_env})."
+        log "✔ Обнаружена сохранённая конфигурация API-ключа ($AMNEZIA_API_ETC/config.env)."
     fi
 
-    local legacy_docker_stopped=0
-    rollback_legacy_if_needed() {
+    rollback_amnezia_if_needed() {
         systemctl stop amnezia-api.service >/dev/null 2>&1 || true
         systemctl disable amnezia-api.service >/dev/null 2>&1 || true
-        if [[ $legacy_docker_stopped -eq 1 ]]; then
-            warn "Восстановление и перезапуск исходного Docker-контейнера amnezia-api..."
-            docker start amnezia-api >/dev/null 2>&1 || true
-        fi
     }
-
-    # Остановка контейнера amnezia-api если он запущен в Docker (для освобождения портов 4001 / 8443)
-    if command -v docker >/dev/null 2>&1; then
-        if docker ps --filter "name=^/amnezia-api$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-api$"; then
-            log "Обнаружен работающий Docker-контейнер amnezia-api. Выполняется безопасная остановка для переключения на нативный сервис..."
-            if docker stop amnezia-api >/dev/null 2>&1; then
-                legacy_docker_stopped=1
-            fi
-        fi
-    fi
 
     # 3. Домен и порт API (интерактивный опросник или дефолт)
     if [[ -z "$api_domain" ]]; then
@@ -297,7 +273,7 @@ install_amnezia_node() {
         local conflict_proc
         conflict_proc=$(ss -tlnp 2>/dev/null | grep ":${public_port} " || true)
         if ! echo "$conflict_proc" | grep -qE "nginx|amnezia"; then
-            rollback_legacy_if_needed
+            rollback_amnezia_if_needed
             error "Порт ${public_port}/tcp уже занят другим процессом на хосте:\n$conflict_proc"
             return 1
         fi
@@ -308,7 +284,7 @@ install_amnezia_node() {
         local local_conflict
         local_conflict=$(ss -tlnp 2>/dev/null | grep ":${AMNEZIA_LOCAL_PORT} " || true)
         if ! echo "$local_conflict" | grep -qE "amnezia|uvicorn|python"; then
-            rollback_legacy_if_needed
+            rollback_amnezia_if_needed
             error "Локальный порт ${AMNEZIA_LOCAL_PORT}/tcp уже занят другим процессом на хосте:\n$local_conflict"
             return 1
         fi
@@ -409,7 +385,7 @@ install_amnezia_node() {
     fi
 
     if ! is_amnezia_api_valid "$AMNEZIA_API_DIR"; then
-        rollback_legacy_if_needed
+        rollback_amnezia_if_needed
         error "Не удалось развернуть компоненты amnezia-api в $AMNEZIA_API_DIR (файлы app.py, requirements.txt или amnezia-api.service отсутствуют). Проверьте доступ к сети или репозиторию."
         return 1
     fi
@@ -420,19 +396,15 @@ install_amnezia_node() {
         python3 -m venv "$AMNEZIA_API_DIR/venv"
     fi
     if ! "$AMNEZIA_API_DIR/venv/bin/pip" install --no-cache-dir -r "$AMNEZIA_API_DIR/requirements.txt" --quiet; then
-        rollback_legacy_if_needed
+        rollback_amnezia_if_needed
         error "Не удалось установить зависимости Python для amnezia-api."
         return 1
     fi
 
-    # 7. Определение API-ключа (приоритет: chosen_api_key -> existing config.env -> legacy amnezia-api .env -> генерация нового)
+    # 7. Определение API-ключа (приоритет: chosen_api_key -> existing config.env -> генерация нового)
     local api_key="$chosen_api_key"
     if [[ -z "$api_key" && -f "$AMNEZIA_API_ETC/config.env" ]]; then
         api_key="$(grep -E "^(AMNEZIA_API_KEY|FASTIFY_API_KEY)=" "$AMNEZIA_API_ETC/config.env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
-    fi
-    if [[ -z "$api_key" && -n "$legacy_api_key" ]]; then
-        api_key="$legacy_api_key"
-        log "✔ Импортирован существующий API-ключ из ${existing_legacy_env}"
     fi
     if [[ -z "$api_key" ]]; then
         api_key="$(openssl rand -hex 24)"
@@ -450,8 +422,8 @@ SERVER_PUBLIC_HOST=${api_domain}
 SERVER_DNS1=1.1.1.1
 SERVER_DNS2=1.0.0.1
 EOF
-    if [[ -n "${legacy_max_peers:-}" ]]; then
-        echo "SERVER_MAX_PEERS=${legacy_max_peers}" >> "$AMNEZIA_API_ETC/config.env"
+    if [[ -n "${saved_max_peers:-}" ]]; then
+        echo "SERVER_MAX_PEERS=${saved_max_peers}" >> "$AMNEZIA_API_ETC/config.env"
     fi
     chmod 600 "$AMNEZIA_API_ETC/config.env"
 
@@ -474,7 +446,7 @@ EOF
     done
 
     if [[ $started -ne 1 ]]; then
-        rollback_legacy_if_needed
+        rollback_amnezia_if_needed
         error "Сервис amnezia-api не запустился или контейнер недоступен на 127.0.0.1:${AMNEZIA_LOCAL_PORT}. Проверьте: journalctl -u amnezia-api -n 30"
         return 1
     fi
@@ -603,7 +575,7 @@ EOF
         deploy_amnezia_certbot_renewal_hook
     else
         rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf "$nginx_conf" 2>/dev/null || true
-        rollback_legacy_if_needed
+        rollback_amnezia_if_needed
         error "Ошибка проверки конфигурации Nginx (nginx -t). Установка прервана."
         return 1
     fi
@@ -635,9 +607,6 @@ EOF
     set_state_val "awg_domain" "$api_domain"
     set_state_val "awg_port" "$public_port"
     set_state_val "awg_installed" "true"
-
-    # 13. Зачистка устаревших каталогов Node.js API если они остались на диске
-    rm -rf /root/amnezia-api ~/amnezia-api 2>/dev/null || true
 
     # Вывод карточки подключения
     show_amnezia_bot_credentials

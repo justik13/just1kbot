@@ -1902,16 +1902,16 @@ remove_traffic_watchdog_timer
         """Verify Amnezia node migration path, legacy env discovery, and rollback handling."""
         amnezia_sh = REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh"
         content = amnezia_sh.read_text(encoding="utf-8")
-        # Legacy environment discovery
-        self.assertIn('for candidate_env in "$AMNEZIA_API_ETC/config.env"', content)
-        self.assertIn("/opt/amnezia-api/.env", content)
-        self.assertIn("FASTIFY_API_KEY", content)
+        # Configuration discovery (native only, zero legacy artifacts)
+        self.assertIn('$AMNEZIA_API_ETC/config.env', content)
+        self.assertNotIn('/opt/amnezia-api/.env', content)
+        self.assertNotIn('/root/amnezia-api', content)
         self.assertIn("AMNEZIA_API_KEY", content)
         self.assertIn("SERVER_MAX_PEERS", content)
-        # Rollback logic for native service & container
-        self.assertIn("rollback_legacy_if_needed()", content)
+        # Rollback logic for native service
+        self.assertIn("rollback_amnezia_if_needed()", content)
         self.assertIn("systemctl stop amnezia-api.service", content)
-        self.assertIn("docker start amnezia-api", content)
+        self.assertNotIn("docker start amnezia-api", content)
         self.assertNotIn("pm2", content)
         # Nginx proxy generation, rate limiting and security headers
         self.assertIn("/etc/nginx/sites-available/just1k-amnezia.conf", content)
