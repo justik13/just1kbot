@@ -8,6 +8,8 @@ from utils.vpn_parser import (
     VPNConfigParseError,
     _decompress_amnezia_format,
     decode_vpn_uri_to_json,
+    is_valid_awg_key,
+    is_valid_wg_key,
 )
 
 
@@ -570,6 +572,15 @@ class VPNParserTests(unittest.TestCase):
         profile.raw_config = bad_key
         with self.assertRaises(InvalidAmneziaConfigError):
             build_display_vpn_uri(profile)
+
+    def test_is_valid_awg_key(self):
+        valid = "v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q="
+        self.assertTrue(is_valid_awg_key(valid))
+        self.assertTrue(is_valid_wg_key(valid))
+        self.assertFalse(is_valid_awg_key("too_short=="))
+        self.assertFalse(is_valid_awg_key("not-base64???"))
+        self.assertFalse(is_valid_awg_key(""))
+        self.assertFalse(is_valid_awg_key(None))
 
 
 if __name__ == "__main__":

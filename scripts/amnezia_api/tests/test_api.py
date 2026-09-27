@@ -1220,6 +1220,40 @@ def test_patch_client_reallocate_ip_on_collision(mock_awg_env):
     assert new_ip.startswith("10.8.1.")
 
 
+def test_amnezia_tool_resolution_and_key_validation():
+    """Verify awg0, awg binary and awg0.conf are resolved for all AmneziaWG containers."""
+    # 1. Key validation
+    valid_key = "v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q="
+    assert amnezia_app.is_valid_awg_key(valid_key) is True
+    assert amnezia_app.is_valid_wg_key(valid_key) is True
+    assert amnezia_app._is_valid_wg_key(valid_key) is True
+
+    assert amnezia_app.is_valid_awg_key("short_key==") is False
+    assert amnezia_app.is_valid_awg_key("not-valid-base64???") is False
+    assert amnezia_app.is_valid_awg_key("") is False
+    assert amnezia_app.is_valid_awg_key(None) is False
+
+    # 2. Tool and interface resolution
+    # Standard AmneziaVPN self-hosted container (AWG 2.0 and AWG 3.x)
+    assert amnezia_app.get_interface_name("amnezia-awg2") == "awg0"
+    assert amnezia_app.get_tool_binary("amnezia-awg2") == "awg"
+    assert amnezia_app.get_config_path("amnezia-awg2").endswith("awg0.conf")
+
+    # Legacy or custom AWG containers
+    assert amnezia_app.get_interface_name("amnezia-awg") == "awg0"
+    assert amnezia_app.get_tool_binary("amnezia-awg") == "awg"
+    assert amnezia_app.get_config_path("amnezia-awg").endswith("awg0.conf")
+
+    assert amnezia_app.get_interface_name("custom-awg-node") == "awg0"
+    assert amnezia_app.get_tool_binary("custom-awg-node") == "awg"
+    assert amnezia_app.get_config_path("custom-awg-node").endswith("awg0.conf")
+
+    # Non-AWG fallback
+    assert amnezia_app.get_interface_name("plain-wireguard") == "wg0"
+    assert amnezia_app.get_tool_binary("plain-wireguard") == "wg"
+    assert amnezia_app.get_config_path("plain-wireguard").endswith("wg0.conf")
+
+
 
 
 

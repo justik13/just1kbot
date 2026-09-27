@@ -62,8 +62,8 @@ ALL_AWG_KEYS = (
 )
 
 
-def is_valid_wg_key(key: str) -> bool:
-    """Validate 32-byte base64-encoded WireGuard / AmneziaWG key (X25519 or HeaderProtectionKey)."""
+def is_valid_awg_key(key: str) -> bool:
+    """Validate 32-byte base64-encoded key (X25519 key, AmneziaWG HeaderProtectionKey, or PSK)."""
     if not key or not isinstance(key, str):
         return False
     key_str = key.strip()
@@ -76,7 +76,10 @@ def is_valid_wg_key(key: str) -> bool:
         return False
 
 
-_is_valid_wg_key = is_valid_wg_key
+# Backward-compatible aliases
+is_valid_wg_key = is_valid_awg_key
+_is_valid_wg_key = is_valid_awg_key
+_is_valid_awg_key = is_valid_awg_key
 
 
 def detect_awg_version(params: dict[str, Any]) -> str:
@@ -381,7 +384,8 @@ def is_valid_vpn_uri(uri: str) -> bool:
 
     Invariants enforced:
     1. Valid JSON payload with non-empty 'containers'.
-    2. Container is strictly 'amnezia-awg2' (or legacy 'amnezia-awg').
+    2. Container is strictly 'amnezia-awg2' (upstream canonical container for both AWG 2.0 and AWG 3.x)
+       or legacy 'amnezia-awg'.
     3. defaultContainer (if present) is 'amnezia-awg2' (or 'amnezia-awg').
     4. Valid protocol_version ('2', '2.0', '3', '3.0', '3.1').
     5. Valid last_config JSON with client_priv_key, server_pub_key, client_ip, hostName, port.

@@ -145,22 +145,22 @@ def get_target_container() -> str:
 
 
 def get_interface_name(container: str | None = None) -> str:
-    """Return kernel interface name (awg0 for Awg2/Awg3, wg0 for legacy)."""
-    c = container or get_target_container()
-    return "awg0" if ("awg2" in c or "awg3" in c) else "wg0"
+    """Return kernel interface name (awg0 for all AmneziaWG containers, wg0 only for legacy/fallback)."""
+    c = (container or get_target_container()).lower()
+    return "awg0" if "awg" in c else "wg0"
 
 
 def get_tool_binary(container: str | None = None) -> str:
-    """Return CLI tool name (awg for Awg2/Awg3, wg for legacy)."""
-    c = container or get_target_container()
-    return "awg" if ("awg2" in c or "awg3" in c) else "wg"
+    """Return CLI tool name (awg for all AmneziaWG containers, wg only for legacy/fallback)."""
+    c = (container or get_target_container()).lower()
+    return "awg" if "awg" in c else "wg"
 
 
 def get_config_path(container: str | None = None) -> str:
     if AWG_CONF_PATH:
         return AWG_CONF_PATH
-    c = container or get_target_container()
-    conf_name = "awg0.conf" if ("awg2" in c or "awg3" in c) else "wg0.conf"
+    c = (container or get_target_container()).lower()
+    conf_name = "awg0.conf" if "awg" in c else "wg0.conf"
     return os.path.join(AWG_DIR, conf_name)
 
 
@@ -629,8 +629,8 @@ def encode_vpn_uri(data: dict[str, Any]) -> str:
     return f"vpn://{b64_url}"
 
 
-def _is_valid_wg_key(key: str) -> bool:
-    """Validate 32-byte base64-encoded WireGuard / AmneziaWG key."""
+def is_valid_awg_key(key: str) -> bool:
+    """Validate 32-byte base64-encoded key (X25519, HeaderProtectionKey, or PSK)."""
     if not key or not isinstance(key, str):
         return False
     key_str = key.strip()
@@ -641,6 +641,11 @@ def _is_valid_wg_key(key: str) -> bool:
         return len(raw) == 32
     except Exception:
         return False
+
+
+_is_valid_awg_key = is_valid_awg_key
+_is_valid_wg_key = is_valid_awg_key
+is_valid_wg_key = is_valid_awg_key
 
 
 def build_client_configs(
@@ -715,7 +720,7 @@ def build_client_configs(
             logger.error("Server interface has AWG 3.x parameters but is missing a valid 32-byte HeaderProtectionKey")
             raise HTTPException(
                 status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
-                detail="Server interface HeaderProtectionKey must be a valid 32-byte base64 WireGuard key for AWG 3.x",
+                detail="Server interface HeaderProtectionKey must be a valid 32-byte base64 key for AWG 3.x",
             )
 
         # ── CRITICAL CRYPTOGRAPHIC INVARIANT: S-padding floor under Header Protection ──
