@@ -207,13 +207,17 @@ install_amnezia_node() {
     local legacy_api_key=""
     local legacy_host=""
     local legacy_max_peers=""
+    local cand_key=""
     for candidate_env in "$AMNEZIA_API_ETC/config.env" /root/amnezia-api/.env ~/amnezia-api/.env /opt/amnezia-api/.env; do
         if [[ -f "$candidate_env" ]]; then
-            existing_legacy_env="$candidate_env"
-            legacy_api_key="$(grep -E "^(AMNEZIA_API_KEY|FASTIFY_API_KEY)=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
-            legacy_host="$(grep -E "^(SERVER_PUBLIC_HOST|SERVER_HOST_NAME)=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
-            legacy_max_peers="$(grep -E "^SERVER_MAX_PEERS=" "$candidate_env" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
-            break
+            cand_key="$(grep -E "^(AMNEZIA_API_KEY|FASTIFY_API_KEY)=" "$candidate_env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+            if [[ -n "$cand_key" ]]; then
+                existing_legacy_env="$candidate_env"
+                legacy_api_key="$cand_key"
+                legacy_host="$(grep -E "^(SERVER_PUBLIC_HOST|SERVER_HOST_NAME)=" "$candidate_env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+                legacy_max_peers="$(grep -E "^SERVER_MAX_PEERS=" "$candidate_env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
+                break
+            fi
         fi
     done
 

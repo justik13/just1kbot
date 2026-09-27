@@ -1070,7 +1070,8 @@ run_doctor
         self.assertIn("location = /cdn-check", nginx_text)
         self.assertIn("return 204;", nginx_text)
         self.assertIn("location / {", nginx_text)
-        self.assertIn("try_files $uri $uri/ =404;", nginx_text)
+        self.assertIn("default_type text/plain;", nginx_text)
+        self.assertIn('return 404 "Not Found\\n";', nginx_text)
 
         # 3. Verify Nginx xhttp-map.conf
         map_conf = self.nginx_conf_dir / "conf.d" / "xhttp-map.conf"
@@ -1172,14 +1173,22 @@ run_doctor
     def test_functional_zero_signature_and_certbot_deploy_hook(self):
         self._prepare_base_env()
         index_file = self.www_html_dir / "index.html"
-        index_file.write_text("legacy camouflage", encoding="utf-8")
+        index_file.write_text("<h1>SimpleCalc</h1>", encoding="utf-8")
         self.assertTrue(index_file.exists())
 
         res = self._run_shell_snippet("deploy_camouflage_site; deploy_certbot_renewal_hook")
         self.assertEqual(res.returncode, 0)
 
-        # 1. Zero-Signature: legacy index.html must be purged
+        # 1. Zero-Signature: legacy camouflage index.html must be purged
         self.assertFalse(index_file.exists())
+
+        # 2. Zero-Collateral: custom user index.html must NOT be purged
+        custom_index = self.www_html_dir / "index.html"
+        custom_index.write_text("<h1>Custom User Site</h1>", encoding="utf-8")
+        res2 = self._run_shell_snippet("deploy_camouflage_site")
+        self.assertEqual(res2.returncode, 0)
+        self.assertTrue(custom_index.exists())
+        self.assertEqual(custom_index.read_text(encoding="utf-8"), "<h1>Custom User Site</h1>")
 
         # 2. Certbot renewal hook
         hook_file = self.letsencrypt_dir / "renewal-hooks" / "deploy" / "restart-xray-nginx.sh"

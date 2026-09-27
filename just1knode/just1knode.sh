@@ -830,7 +830,7 @@ uninstall_node() {
 
     info "7/11. Удаление веб-файлов и хуков Let's Encrypt..."
     local www_index="${WWW_HTML_DIR:-/var/www/html}/index.html"
-    if [[ -f "$www_index" ]]; then
+    if [[ -f "$www_index" ]] && (grep -q "Cloud Ingress Network Node" "$www_index" 2>/dev/null || grep -q "SimpleCalc" "$www_index" 2>/dev/null); then
         rm -f "$www_index" 2>/dev/null || true
     fi
     local certbot_dir="${CERTBOT_DIR:-/var/www/certbot}"
