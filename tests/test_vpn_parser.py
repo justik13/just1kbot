@@ -172,6 +172,162 @@ class VPNParserTests(unittest.TestCase):
         res = build_conf_file(raw_key)
         self.assertIsNone(res)
 
+    def test_detect_awg_version_all_generations(self):
+        from utils.vpn_parser import detect_awg_version
+
+        # AWG 3.1
+        self.assertEqual(detect_awg_version({"RandomTrailers": "1"}), "3.1")
+        self.assertEqual(detect_awg_version({"DisableCookies": "1"}), "3.1")
+
+        # AWG 3.0
+        self.assertEqual(detect_awg_version({"HeaderProtectionKey": "secret="}), "3.0")
+        self.assertEqual(detect_awg_version({"ContentPaddingAddition": "10-20"}), "3.0")
+        self.assertEqual(detect_awg_version({"RekeyAfterTime": "120"}), "3.0")
+
+        # AWG 2.0 (S3/S4 present)
+        self.assertEqual(detect_awg_version({"S3": "49", "S4": "1"}), "2.0")
+        # AWG 2.0 (Ranged H1..H4)
+        self.assertEqual(detect_awg_version({"H1": "100-200", "Jc": "4"}), "2.0")
+        # AWG 2.0 (protocol_version == "2")
+        self.assertEqual(detect_awg_version({"protocol_version": "2"}), "2.0")
+
+        # AWG 1.5 (I1..I5 without S3/S4 or ranged H)
+        self.assertEqual(detect_awg_version({"I1": "sig1", "H1": "123"}), "1.5")
+
+        # AWG 1.0
+        self.assertEqual(detect_awg_version({"Jc": "4", "S1": "15", "H1": "123"}), "1.0")
+
+    def test_is_valid_vpn_uri_awg2_and_awg3(self):
+        from utils.vpn_parser import encode_json_to_vpn_uri, is_valid_vpn_uri
+
+        # AWG 2.0 URI
+        awg2_data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {"protocol_version": "2", "last_config": "{}"},
+            }]
+        }
+        awg2_uri = encode_json_to_vpn_uri(awg2_data)
+        self.assertTrue(is_valid_vpn_uri(awg2_uri))
+
+        # AWG 3.0 URI
+        awg3_data = {
+            "containers": [{
+                "container": "amnezia-awg3",
+                "awg": {"protocol_version": "3.0", "last_config": "{}"},
+            }]
+        }
+        awg3_uri = encode_json_to_vpn_uri(awg3_data)
+        self.assertTrue(is_valid_vpn_uri(awg3_uri))
+
+        # AWG 3.1 URI
+        awg31_data = {
+            "containers": [{
+                "container": "amnezia-awg3",
+                "awg": {"protocol_version": "3.1", "last_config": "{}"},
+            }]
+        }
+        awg31_uri = encode_json_to_vpn_uri(awg31_data)
+        self.assertTrue(is_valid_vpn_uri(awg31_uri))
+
+    def test_k1_reference_decoding_and_customization(self):
+        """Verify real-world working AmneziaWG 2.0 reference key decodes and customizes correctly."""
+        from utils.vpn_parser import (
+            build_conf_file,
+            customize_vpn_uri,
+            decode_vpn_uri_to_json,
+        )
+
+        k1 = (
+            "vpn://AAAI6HictVbdbts2FH4VQ7tM4pAiJUtBU8BInNhJ7blz0jaOCkOR6ESNLKsSFTsOAvS-z7B32EUHDBj2"
+            "Du4b7RySdpvNu8iAWjD4nfOdH4qHh9SDFU0zGSaZKEprr3b5YIWzawAP1kkEg8Wt7Zp1MkkyFCjRUjhHyVHSgCL"
+            "2GgrbiF2qMFPuvsJceSNsK3PqMeZymzlsxyaUUo_btorQVhFs0vBd4vm0sWNTQjhzbNtRtApqU06J4zseAZozgD"
+            "ZRedrc0ODsOI6iG5xzr6Hojsr9oqjZL19c1cjcgwjwo-avf67ru8yN3HHDcTlhgMduTNZ2ESHR9z4wkRAGzmPHY"
+            "w3WeKkSqbdQiK0RXyNnhfJiKqfRNB3dweonU7XGNhJpWMoRFGacYC2shwCqEQAKLB4AH6iKaAUlK0041xrHaAZU"
+            "y17DyLaWXWpkZkL6RuYmohbbxn1jrYyJibixXsbEJNlYM2PC1yb_rps26Zi5_ODamWTmrYzEnkj8ieR8L4VpOp2J"
+            "eJTkJaovA4vU1bNrCrK3h-g9wihNRCY7sfYfHudifNh5O8t_Kd2tORdvBqzyF9nrakKbi61jFg5a-cI9e5U293U"
+            "o7Q-pVpug7tVpfbXohs2L5G50K-61DTkivl0l92-O79_1Jwf5kX9-ezBrpR_brYW_-Lnfe51eDN9NovZt9DRJXl"
+            "19i_I_pqq2sfa-7GRSFOMwEu-DIDvsDWr7Na-unm0FeJ0D0T07B4LaHgGhGceFKEtUrN5yl9lA9OH1QilOxT1wz"
+            "3q7IDuJwAdTYSOp0AqHc8AO4gHFqTUQ2YCgZwAxdPIRcfQB0EazzR0CJHpu7g0gMdjmrgCSa3JDPwRZB3P-6E6A"
+            "NDh7HJkZuRkdPV72hSiwjP3qKk0iXYZha-idXTeHsdy9ceezathcdJ0uP-mOC9F25am8kmNytiDePd9XJRTlTVi"
+            "IWHvfvT350D78OEwPeq-2LmYt_6h7VhTp4OLm1DufnVfluWRxT3RLdo3eTd1wnT5ujnWvbddUnwVZK4vzaZJJIL"
+            "O0_qEqJb2tX4lS7jHq-7iSfTx2Swmb_FSIPEyTO4HrjuXRe_dmWspeOBF69z6Noi0msjItiLtVqfJ1VGgbkY9UX"
+            "HPEmQbNp4VEjZqIUpS333rsWcug4pWigCvkH536nFJYj-o-gmnhfaOmhQpZhFmJ2pG6qpCr4tx6BGr92YDKcJKJ"
+            "RRLuwLeDbT3CCWfFYhxWqTz4TytlU0ZFkktz8y1_Xf6x_LL8_eun5Z_L35Z_Lb98_Vz7Sd37cVbqzwx9VhiVvVL"
+            "BqYGqVbVQ_bRW1uPfGcBsxw"
+        )
+        decoded = decode_vpn_uri_to_json(k1)
+        self.assertIsNotNone(decoded)
+        self.assertEqual(decoded["defaultContainer"], "amnezia-awg2")
+        awg = decoded["containers"][0]["awg"]
+        self.assertEqual(str(awg["protocol_version"]), "2")
+        last_cfg = json.loads(awg["last_config"])
+        self.assertEqual(last_cfg["client_ip"], "10.8.1.25")
+        self.assertIn("H1", last_cfg)
+        self.assertIn("I1", last_cfg)
+
+        conf = build_conf_file(k1)
+        self.assertIn("[Interface]", conf)
+        self.assertIn("Address = 10.8.1.25/32", conf)
+        self.assertIn("Jc = 4", conf)
+
+        customized = customize_vpn_uri(k1, description="Netherlands #1", dns1="1.1.1.1", dns2="1.0.0.1")
+        custom_decoded = decode_vpn_uri_to_json(customized)
+        self.assertEqual(custom_decoded["description"], "Netherlands #1")
+        self.assertEqual(custom_decoded["dns1"], "1.1.1.1")
+
+    def test_build_display_vpn_uri_awg2_and_awg3(self):
+        from unittest.mock import MagicMock
+        from utils.vpn_helpers import build_display_vpn_uri, InvalidAmneziaConfigError
+        from utils.vpn_parser import encode_json_to_vpn_uri
+
+        profile = MagicMock()
+        profile.server = MagicMock()
+        profile.server.protocol = "amneziawg"
+        profile.server.name = "Frankfurt"
+        profile.device_name = "Frankfurt #3"
+
+        # AWG2 profile
+        awg2_key = encode_json_to_vpn_uri({
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {
+                    "protocol_version": "2",
+                    "last_config": json.dumps({"config": "[Interface]\nDNS = 1.1.1.1\nMTU = 1376\n[Peer]"}),
+                },
+            }],
+            "description": "old",
+        })
+        profile.raw_config = awg2_key
+        display_key = build_display_vpn_uri(profile)
+        self.assertTrue(display_key.startswith("vpn://"))
+
+        # AWG3 profile
+        awg3_key = encode_json_to_vpn_uri({
+            "containers": [{
+                "container": "amnezia-awg3",
+                "awg": {
+                    "protocol_version": "3.1",
+                    "last_config": json.dumps({"config": "[Interface]\nDNS = 1.1.1.1\nMTU = 1376\n[Peer]"}),
+                },
+            }],
+            "description": "old",
+        })
+        profile.raw_config = awg3_key
+        display_key_3 = build_display_vpn_uri(profile)
+        self.assertTrue(display_key_3.startswith("vpn://"))
+
+        # Unsupported protocol version (e.g. unknown "99")
+        bad_key = encode_json_to_vpn_uri({
+            "containers": [{
+                "container": "amnezia-awg",
+                "awg": {"protocol_version": "99"},
+            }],
+        })
+        profile.raw_config = bad_key
+        with self.assertRaises(InvalidAmneziaConfigError):
+            build_display_vpn_uri(profile)
+
 
 if __name__ == "__main__":
     unittest.main()

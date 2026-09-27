@@ -224,14 +224,112 @@ def test_remove_peer_from_conf_text():
 # =============================================================================
 # Unit Tests: Amnezia vpn:// and .conf Config Builder (AWG 3.1)
 # =============================================================================
-def test_build_client_configs_and_vpn_uri():
+def test_build_client_configs_and_vpn_uri_awg2():
+    """Verify AWG 2.0 key generation strictly mirrors all 28 parameters matching k1 reference."""
+    client = {
+        "clientIp": "10.8.1.25",
+        "clientPrivKey": "privkey25=",
+        "clientPubKey": "pubkey25=",
+        "psk": "psk25=",
+    }
+    interface_params = {
+        "ListenPort": "31999",
+        "MTU": "1280",
+        "Jc": "4",
+        "Jmin": "10",
+        "Jmax": "50",
+        "S1": "87",
+        "S2": "61",
+        "S3": "49",
+        "S4": "1",
+        "H1": "1833642353-2011184227",
+        "H2": "2079608917-2100435225",
+        "H3": "2141059580-2143059209",
+        "H4": "2146085550-2147444879",
+        "I1": "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>",
+    }
+    raw_conf, vpn_uri = amnezia_app.build_client_configs(
+        client,
+        interface_params,
+        server_pubkey="srvpub=",
+        host_name="nl.just1k.best",
+        dns1="8.8.8.8",
+        dns2="8.8.4.4",
+        container_name="amnezia-awg2",
+    )
+
+    # Check raw .conf
+    assert "[Interface]" in raw_conf
+    assert "DNS = 8.8.8.8, 8.8.4.4" in raw_conf
+    assert "MTU = 1280" in raw_conf
+    assert "Address = 10.8.1.25/32" in raw_conf
+    assert "PrivateKey = privkey25=" in raw_conf
+    assert "Jc = 4" in raw_conf
+    assert "S3 = 49" in raw_conf
+    assert "H1 = 1833642353-2011184227" in raw_conf
+    assert "I1 = <r 2><b 0x85800001" in raw_conf
+    # Empty I2..I5 must not be emitted as broken empty lines in .conf
+    assert "I2 =" not in raw_conf
+    assert "[Peer]" in raw_conf
+    assert "PublicKey = srvpub=" in raw_conf
+    assert "PresharedKey = psk25=" in raw_conf
+    assert "AllowedIPs = 0.0.0.0/0, ::/0" in raw_conf
+    assert "Endpoint = nl.just1k.best:31999" in raw_conf
+    assert "PersistentKeepalive = 25" in raw_conf
+
+    # Check vpn:// URI
+    assert vpn_uri.startswith("vpn://")
+    decoded = decode_vpn_uri(vpn_uri)
+    assert decoded["defaultContainer"] == "amnezia-awg2"
+    assert decoded["hostName"] == "nl.just1k.best"
+    assert decoded["dns1"] == "8.8.8.8"
+    assert decoded["dns2"] == "8.8.4.4"
+
+    awg = decoded["containers"][0]["awg"]
+    assert awg["protocol_version"] == "2"
+    assert awg["port"] == "31999"
+    assert awg["transport_proto"] == "udp"
+    assert awg["Jc"] == "4"
+    assert awg["S3"] == "49"
+    assert awg["I1"].startswith("<r 2><b")
+    # I2..I5 must be present as empty strings in awg dict
+    assert awg["I2"] == ""
+    assert awg["I3"] == ""
+    assert awg["I4"] == ""
+    assert awg["I5"] == ""
+
+    # Check last_config has all 28 mirrored fields
+    last_cfg = json.loads(awg["last_config"])
+    expected_fields = [
+        "H1", "H2", "H3", "H4",
+        "I1", "I2", "I3", "I4", "I5",
+        "Jc", "Jmax", "Jmin",
+        "S1", "S2", "S3", "S4",
+        "allowed_ips", "clientId", "client_ip", "client_priv_key", "client_pub_key",
+        "config", "hostName", "mtu", "persistent_keep_alive", "port", "psk_key", "server_pub_key",
+    ]
+    for field in expected_fields:
+        assert field in last_cfg, f"Field {field} missing from last_config"
+    assert last_cfg["client_ip"] == "10.8.1.25"
+    assert last_cfg["client_pub_key"] == "pubkey25="
+    assert last_cfg["clientId"] == "pubkey25="
+    assert last_cfg["allowed_ips"] == ["0.0.0.0/0", "::/0"]
+    assert last_cfg["mtu"] == 1280
+    assert last_cfg["persistent_keep_alive"] == 25
+    assert last_cfg["port"] == 31999
+    assert last_cfg["I2"] == ""
+
+
+def test_build_client_configs_and_vpn_uri_awg3():
+    """Verify AWG 3.x key generation upgrades container to amnezia-awg3 and detects 3.0 vs 3.1."""
     client = {
         "clientIp": "10.8.1.5",
         "clientPrivKey": "privkey5=",
         "clientPubKey": "pubkey5=",
         "psk": "psk5=",
     }
-    interface_params = {
+    # AWG 3.0 (with HeaderProtectionKey)
+    interface_params_30 = {
         "ListenPort": "44321",
         "Jc": "4",
         "Jmin": "10",
@@ -249,7 +347,7 @@ def test_build_client_configs_and_vpn_uri():
     }
     raw_conf, vpn_uri = amnezia_app.build_client_configs(
         client,
-        interface_params,
+        interface_params_30,
         server_pubkey="srvpub=",
         host_name="vpn.example.com",
         dns1="1.1.1.1",
@@ -257,30 +355,34 @@ def test_build_client_configs_and_vpn_uri():
         container_name="amnezia-awg2",
     )
 
-    # Check raw .conf
     assert "[Interface]" in raw_conf
-    assert "Address = 10.8.1.5/32" in raw_conf
-    assert "PrivateKey = privkey5=" in raw_conf
-    assert "Jc = 4" in raw_conf
-    assert "H1 = 100-200" in raw_conf
-    assert "I1 = 9999" in raw_conf
     assert "HeaderProtectionKey = hpk_test=" in raw_conf
-    assert "[Peer]" in raw_conf
-    assert "PublicKey = srvpub=" in raw_conf
-    assert "Endpoint = vpn.example.com:44321" in raw_conf
-
-    # Check vpn:// URI
     assert vpn_uri.startswith("vpn://")
     decoded = decode_vpn_uri(vpn_uri)
-    assert decoded["defaultContainer"] == "amnezia-awg2"
-    assert decoded["hostName"] == "vpn.example.com"
+    assert decoded["defaultContainer"] == "amnezia-awg3"
     awg = decoded["containers"][0]["awg"]
-    assert awg["protocol_version"] == "3.1"
-    assert awg["port"] == "44321"
+    assert awg["protocol_version"] == "3.0"
     assert awg["HeaderProtectionKey"] == "hpk_test="
     last_cfg = json.loads(awg["last_config"])
-    assert last_cfg["client_ip"] == "10.8.1.5"
-    assert last_cfg["client_pub_key"] == "pubkey5="
+    assert last_cfg["HeaderProtectionKey"] == "hpk_test="
+    assert last_cfg["Jc"] == 4
+
+    # AWG 3.1 (with RandomTrailers)
+    interface_params_31 = dict(interface_params_30)
+    interface_params_31["RandomTrailers"] = "1"
+    _, vpn_uri_31 = amnezia_app.build_client_configs(
+        client,
+        interface_params_31,
+        server_pubkey="srvpub=",
+        host_name="vpn.example.com",
+        dns1="1.1.1.1",
+        dns2="1.0.0.1",
+        container_name="amnezia-awg2",
+    )
+    decoded_31 = decode_vpn_uri(vpn_uri_31)
+    assert decoded_31["defaultContainer"] == "amnezia-awg3"
+    assert decoded_31["containers"][0]["awg"]["protocol_version"] == "3.1"
+    assert decoded_31["containers"][0]["awg"]["RandomTrailers"] == "1"
 
 
 # =============================================================================

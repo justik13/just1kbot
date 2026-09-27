@@ -24,6 +24,57 @@ def _decode_base64url(payload: str) -> bytes | None:
 
 MAX_DECOMPRESSED_CONFIG_BYTES = 1024 * 1024  # 1 MiB
 
+AWG3_1_EXCLUSIVE_KEYS = (
+    "RandomTrailers",
+    "DisableCookies",
+)
+
+AWG3_0_EXCLUSIVE_KEYS = (
+    "HeaderProtectionKey",
+    "ContentPaddingAddition",
+    "RekeyAfterTime",
+    "RekeyTimeout",
+    "RejectAfterTime",
+    "KeepaliveTimeout",
+    "MaxHandshakeAttempts",
+)
+
+AWG3_EXCLUSIVE_KEYS = AWG3_1_EXCLUSIVE_KEYS + AWG3_0_EXCLUSIVE_KEYS
+
+
+def detect_awg_version(params: dict[str, Any]) -> str:
+    """Detect AWG protocol version ('3.1', '3.0', '2.0', '1.5', '1.0') adhering to Any-Tech-ARCHITECT specifications."""
+    if not isinstance(params, dict):
+        return "2.0"
+
+    def has(k: str) -> bool:
+        v = params.get(k)
+        if v is None or v == "":
+            v = params.get(k.upper())
+        return v is not None and v != ""
+
+    if any(has(k) for k in AWG3_1_EXCLUSIVE_KEYS):
+        return "3.1"
+    if any(has(k) for k in AWG3_0_EXCLUSIVE_KEYS):
+        return "3.0"
+
+    if has("S3") or has("S4"):
+        return "2.0"
+    for h in ("H1", "H2", "H3", "H4"):
+        val = str(params.get(h) or params.get(h.upper()) or "")
+        if "-" in val:
+            return "2.0"
+    if str(params.get("protocol_version", "")) in ("2", "2.0"):
+        return "2.0"
+
+    if any(has(f"I{i}") for i in range(1, 6)):
+        return "1.5"
+
+    if has("Jc") or has("H1") or has("S1"):
+        return "1.0"
+
+    return "2.0"
+
 
 def _decompress_amnezia_format(data: bytes) -> str | None:
     if len(data) < 4:
@@ -141,7 +192,15 @@ def _build_conf_fallback(data: dict, last_config: dict, awg: dict | None = None)
             return awg.get(k)
         return None
 
-    awg_required_keys = ["Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4"]
+    ver = detect_awg_version(last_config) if last_config else "2.0"
+    if awg and ver == "2.0" and not (last_config.get("S3") or last_config.get("S4")):
+        ver = detect_awg_version(awg)
+
+    if ver == "1.0":
+        awg_required_keys = ["Jc", "Jmin", "Jmax", "S1", "S2", "H1", "H2", "H3", "H4"]
+    else:
+        awg_required_keys = ["Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4"]
+
     for key in awg_required_keys:
         if get_param(key) is None:
             return None
@@ -156,8 +215,12 @@ def _build_conf_fallback(data: dict, last_config: dict, awg: dict | None = None)
         f"Jmax = {get_param('Jmax')}",
         f"S1 = {get_param('S1')}",
         f"S2 = {get_param('S2')}",
-        f"S3 = {get_param('S3')}",
-        f"S4 = {get_param('S4')}",
+    ])
+    if get_param("S3") is not None:
+        lines.append(f"S3 = {get_param('S3')}")
+    if get_param("S4") is not None:
+        lines.append(f"S4 = {get_param('S4')}")
+    lines.extend([
         f"H1 = {get_param('H1')}",
         f"H2 = {get_param('H2')}",
         f"H3 = {get_param('H3')}",
@@ -252,8 +315,8 @@ def is_valid_vpn_uri(uri: str) -> bool:
         awg = _get_first_awg_container(data)
         if not awg:
             return False
-        protocol_version = awg.get("protocol_version")
-        if str(protocol_version) in ("2", "3.1", "3"):
+        protocol_version = str(awg.get("protocol_version", ""))
+        if protocol_version in ("2", "2.0", "3", "3.0", "3.1"):
             return True
         last_config = _parse_last_config(awg)
         if not last_config:

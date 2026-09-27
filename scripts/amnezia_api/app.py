@@ -34,7 +34,12 @@ from fastapi import Depends, FastAPI, HTTPException, Header, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-AWG3_EXCLUSIVE_KEYS = (
+AWG3_1_EXCLUSIVE_KEYS = (
+    "RandomTrailers",
+    "DisableCookies",
+)
+
+AWG3_0_EXCLUSIVE_KEYS = (
     "HeaderProtectionKey",
     "ContentPaddingAddition",
     "RekeyAfterTime",
@@ -42,14 +47,51 @@ AWG3_EXCLUSIVE_KEYS = (
     "RejectAfterTime",
     "KeepaliveTimeout",
     "MaxHandshakeAttempts",
-    "RandomTrailers",
-    "DisableCookies",
 )
+
+AWG3_EXCLUSIVE_KEYS = AWG3_1_EXCLUSIVE_KEYS + AWG3_0_EXCLUSIVE_KEYS
+
+
+def detect_awg_version(params: dict[str, Any]) -> str:
+    """Detect AWG protocol version ('3.1', '3.0', '2.0', '1.5', '1.0') adhering to Any-Tech-ARCHITECT specifications."""
+    if not isinstance(params, dict):
+        return "2.0"
+
+    def has(k: str) -> bool:
+        v = params.get(k)
+        if v is None or v == "":
+            v = params.get(k.upper())
+        return v is not None and v != ""
+
+    if any(has(k) for k in AWG3_1_EXCLUSIVE_KEYS):
+        return "3.1"
+    if any(has(k) for k in AWG3_0_EXCLUSIVE_KEYS):
+        return "3.0"
+
+    # Check AWG 2.0: S3/S4 present, ranged headers (e.g. "lo-hi"), or protocol_version == "2"
+    if has("S3") or has("S4"):
+        return "2.0"
+    for h in ("H1", "H2", "H3", "H4"):
+        val = str(params.get(h) or params.get(h.upper()) or "")
+        if "-" in val:
+            return "2.0"
+    if str(params.get("protocol_version", "")) in ("2", "2.0"):
+        return "2.0"
+
+    # Check AWG 1.5: I1..I5 present
+    if any(has(f"I{i}") for i in range(1, 6)):
+        return "1.5"
+
+    # Check AWG 1.0: basic parameters
+    if has("Jc") or has("H1") or has("S1"):
+        return "1.0"
+
+    return "2.0"
 
 
 def is_awg3_detected(params: dict[str, Any]) -> bool:
-    """Detect if AWG 3.x exclusive parameters are present (I1..I5 belong to AWG 2.0)."""
-    return any(k in params or k.upper() in params for k in AWG3_EXCLUSIVE_KEYS)
+    """Detect if AWG 3.x exclusive parameters are present (backward compatible helper)."""
+    return detect_awg_version(params).startswith("3")
 
 
 @contextlib.contextmanager
@@ -615,19 +657,46 @@ def build_client_configs(
     detected_awg: dict[str, str] = {}
     for k in awg_keys:
         if k in iface:
-            detected_awg[k] = iface[k]
+            detected_awg[k] = str(iface[k])
         elif k.upper() in iface:
-            detected_awg[k] = iface[k.upper()]
+            detected_awg[k] = str(iface[k.upper()])
+
+    awg_ver = detect_awg_version(detected_awg if detected_awg else iface)
+    has_awg3 = awg_ver.startswith("3")
+    protocol_version = awg_ver if has_awg3 else "2"
+
+    effective_container = container_name
+    if has_awg3 and container_name == "amnezia-awg2":
+        effective_container = "amnezia-awg3"
+    elif not has_awg3 and container_name == "amnezia-awg3":
+        effective_container = "amnezia-awg2"
+
+    # For AWG 2.0 and AWG 3.x, ensure I1..I5 exist in mapping (empty string if not explicitly defined)
+    if "S3" in detected_awg or "S4" in detected_awg or has_awg3 or any(f"I{i}" in detected_awg for i in range(1, 6)):
+        for i in range(1, 6):
+            ik = f"I{i}"
+            if ik not in detected_awg:
+                detected_awg[ik] = ""
+
+    mtu_val = iface.get("MTU", "1280")
+    if not mtu_val or not str(mtu_val).strip():
+        mtu_val = "1280"
 
     # Construct raw .conf
+    clean_ip = f"{client_ip}/32" if "/" not in client_ip else client_ip
     conf_lines = [
         "[Interface]",
-        f"Address = {client_ip}/32",
         f"DNS = {dns1}, {dns2}",
+        f"MTU = {mtu_val}",
+        f"Address = {clean_ip}",
         f"PrivateKey = {client_priv}",
     ]
-    for k, v in detected_awg.items():
-        conf_lines.append(f"{k} = {v}")
+    for k in awg_keys:
+        if k in detected_awg:
+            val = detected_awg[k]
+            # Include in .conf only if non-empty, avoiding invalid empty lines like "I2 = "
+            if val and str(val).strip():
+                conf_lines.append(f"{k} = {val}")
 
     conf_lines.extend([
         "",
@@ -643,22 +712,45 @@ def build_client_configs(
     ])
     raw_conf = "\n".join(conf_lines) + "\n"
 
-    # Determine protocol version for vpn:// (I1..I5 belong to AWG 2.0)
-    has_awg3 = is_awg3_detected(detected_awg)
-    protocol_version = "3.1" if has_awg3 else "2"
-
-    last_config_data = {
+    # Construct last_config preserving all 28 parameters strictly mirroring the container
+    clean_client_ip = client_ip.split("/")[0] if client_ip else ""
+    mtu_int = int(mtu_val) if str(mtu_val).isdigit() else 1280
+    last_config_data: dict[str, Any] = {
         "clientId": client_pub,
-        "client_ip": client_ip,
+        "client_ip": clean_client_ip,
         "client_priv_key": client_priv,
         "client_pub_key": client_pub,
-        "config": raw_conf,
+        "server_pub_key": server_pubkey,
+        "psk_key": psk,
         "hostName": host_name,
         "port": port_int,
-        "psk_key": psk,
-        "server_pub_key": server_pubkey,
+        "mtu": mtu_int,
+        "allowed_ips": ["0.0.0.0/0", "::/0"],
+        "persistent_keep_alive": 25,
+        "config": raw_conf,
     }
 
+    # Mirror AWG parameters into last_config (int for numeric jitter/sizes like Jc, S1..S4, str for ranges/signatures)
+    for k in ("Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4"):
+        if k in detected_awg:
+            v = detected_awg[k]
+            last_config_data[k] = int(v) if str(v).isdigit() else v
+
+    for k in ("H1", "H2", "H3", "H4"):
+        if k in detected_awg:
+            last_config_data[k] = str(detected_awg[k])
+
+    for i in range(1, 6):
+        ik = f"I{i}"
+        if ik in detected_awg:
+            last_config_data[ik] = str(detected_awg[ik])
+
+    for k in AWG3_EXCLUSIVE_KEYS:
+        if k in detected_awg:
+            v = detected_awg[k]
+            last_config_data[k] = int(v) if str(v).isdigit() else str(v)
+
+    # Top-level awg dict mirroring
     awg_container_dict: dict[str, Any] = {
         "protocol_version": protocol_version,
         "port": str(port_int),
@@ -671,11 +763,11 @@ def build_client_configs(
     vpn_data = {
         "containers": [
             {
-                "container": container_name,
+                "container": effective_container,
                 "awg": awg_container_dict,
             }
         ],
-        "defaultContainer": container_name,
+        "defaultContainer": effective_container,
         "description": host_name,
         "dns1": dns1,
         "dns2": dns2,
