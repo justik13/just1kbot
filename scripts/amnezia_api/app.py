@@ -247,7 +247,7 @@ class ClientPatchRequest(BaseModel):
     protocol: str = "amneziawg2"
 
 
-SUPPORTED_PROTOCOLS = {"amneziawg2", "amneziawg3", "awg", "amneziawg"}
+SUPPORTED_PROTOCOLS = {"amneziawg2", "amneziawg3", "amneziawg3.1", "awg", "amneziawg"}
 
 
 class ServerBackupImportRequest(BaseModel):
@@ -1444,7 +1444,7 @@ async def create_client(req: ClientCreateRequest):
     if req.protocol and req.protocol.strip().lower() not in SUPPORTED_PROTOCOLS:
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3",
+            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3, amneziawg3.1",
         )
 
     async with state_lock:
@@ -1659,7 +1659,7 @@ async def _do_patch_client(client_id: str, req: ClientPatchRequest):
     if req.protocol and req.protocol.strip().lower() not in SUPPORTED_PROTOCOLS:
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3",
+            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3, amneziawg3.1",
         )
 
     async with state_lock:

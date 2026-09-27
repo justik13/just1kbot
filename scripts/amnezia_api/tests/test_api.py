@@ -1048,6 +1048,14 @@ def test_create_and_patch_client_unsupported_protocol_rejects_422(mock_awg_env):
     assert resp2.status_code == 422
     assert "unsupported protocol" in resp2.json()["detail"].lower()
 
+    # 3. amneziawg3.1 is explicitly supported and not rejected with 422
+    resp3 = client.post(
+        "/clients",
+        json={"clientName": "awg31_user", "protocol": "amneziawg3.1"},
+        headers=headers,
+    )
+    assert resp3.status_code != 422
+
 
 def test_delete_client_fails_closed_and_rolls_back_on_kernel_sync_failure(mock_awg_env, monkeypatch):
     """Verify DELETE /clients rolls back awg0.conf and clientsTable if kernel sync fails."""
