@@ -78,3 +78,39 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("vm.overcommit_memory=1", setup_sh)
         self.assertIn("vm.overcommit_memory", cli_sh)
 
+    def test_caddy_stealth_sni_and_direct_ip_abort(self):
+        root = Path(__file__).parents[1]
+        caddyfile = (root / "Caddyfile").read_text(encoding="utf-8")
+        self.assertIn("strict_sni_host", caddyfile)
+        self.assertIn("http:// {", caddyfile)
+        self.assertIn("abort", caddyfile)
+
+    def test_just1knode_origin_bot_ip_cli_support(self):
+        root = Path(__file__).parents[1]
+        just1knode_sh = (root / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        origin_sh = (root / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        common_sh = (root / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+
+        # 1. CLI registration
+        self.assertIn("set-bot-ip|bot-ip)", just1knode_sh)
+
+        # 2. Lock synchronization and fail-closed security
+        self.assertIn("acquire_just1knode_lock", origin_sh)
+        self.assertIn("release_just1knode_lock", origin_sh)
+        self.assertIn("release_just1knode_lock", common_sh)
+        self.assertIn("validate_ipv4", common_sh)
+        self.assertIn("validate_ipv4 \"$new_bot_ip\"", origin_sh)
+        self.assertIn("Status: active", origin_sh)
+
+        # 3. Transactional ordering: add new rule before deleting old
+        new_allow_pos = origin_sh.find('ufw allow from "$new_bot_ip"')
+        verify_pos = origin_sh.find('Верификация не пройдена', new_allow_pos)
+        del_old_pos = origin_sh.find('ufw delete allow from "$old_bot_ip"', verify_pos)
+        self.assertGreater(new_allow_pos, 0)
+        self.assertGreater(verify_pos, new_allow_pos)
+        self.assertGreater(del_old_pos, verify_pos)
+
+        # 4. Heal desired-state removes broad rules
+        self.assertIn('8444(/tcp)?\\s+ALLOW\\s+(Anywhere|0\\.0\\.0\\.0/0|::/0)', origin_sh)
+        self.assertIn('ufw delete allow 8444/tcp', origin_sh)
+

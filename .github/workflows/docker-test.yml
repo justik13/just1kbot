@@ -54,6 +54,14 @@ jobs:
           set -euo pipefail
           docker compose -f docker-compose.yml -f docker-compose.ci.yml config --quiet
 
+      - name: Validate Production and CI Caddy Configurations
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" -e SSL_EMAIL=ci@example.test -e DOMAIN=bot.example.test caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm -v "$PWD/Caddyfile.ci:/etc/caddy/Caddyfile:ro" caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 caddy validate --config /etc/caddy/Caddyfile
+
+
       - name: Build and Start Services
         shell: bash
         run: |

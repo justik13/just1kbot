@@ -35,3 +35,12 @@ https://github.com/amnezia-vpn/amneziawg-windows-client
 https://github.com/amnezia-vpn/amneziawg-android
 https://github.com/amnezia-vpn/amneziawg-apple
 https://www.reddit.com/r/AmneziaVPN/
+
+## Исследования ТСПУ / DPI и сетевая безопасность
+https://ntc.party/
+https://github.com/net4people/bbs
+https://github.com/bol-van/zapret
+https://github.com/bol-van/zapret2
+https://github.com/kort0881/russia-whitelist
+https://github.com/CraftStick/node-installer-cdn
+https://github.com/XTLS/Xray-core

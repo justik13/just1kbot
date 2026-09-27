@@ -682,6 +682,98 @@ EOF
     echo -e "  🩺 Проверка CDN:      curl -X OPTIONS https://${cdn_domain}/cdn-check\n"
 }
 
+set_origin_bot_ip() {
+    title "ОБНОВЛЕНИЕ IP-АДРЕСА TELEGRAM-БОТА (BOT_IP ДЛЯ ПОРТА 8444)"
+    check_root
+    init_state_dir
+    acquire_just1knode_lock
+
+    local role
+    role="$(get_state_val "role")"
+    if [[ "$role" != "origin" ]]; then
+        release_just1knode_lock
+        error "Функция доступна только на Origin-узле (текущая роль: ${role:-не установлена})."
+        return 1
+    fi
+
+    local new_bot_ip="${1:-}"
+    if [[ -z "$new_bot_ip" ]]; then
+        read -rp "Введите новый IP-адрес Telegram-бота: " new_bot_ip || true
+    fi
+
+    new_bot_ip="$(echo "$new_bot_ip" | tr -d '[:space:]')"
+    if [[ -z "$new_bot_ip" ]]; then
+        release_just1knode_lock
+        error "IP-адрес не может быть пустым."
+        return 1
+    fi
+
+    # Строгая валидация формата IPv4 (0..255 октеты, без any и wildcard)
+    if ! validate_ipv4 "$new_bot_ip"; then
+        release_just1knode_lock
+        error "Недопустимый формат IP-адреса: '$new_bot_ip' (ожидается валидный IPv4 адрес)."
+        return 1
+    fi
+
+    # Проверка активности UFW (Fail-Closed)
+    if ! command -v ufw >/dev/null 2>&1; then
+        release_just1knode_lock
+        error "Утилита UFW не найдена в системе. Настройка фаервола невозможна."
+        return 1
+    fi
+    if ! ufw status 2>/dev/null | grep -qi "Status: active"; then
+        release_just1knode_lock
+        error "Фаервол UFW не активен (Status: inactive). Для безопасного обновления порта 8444 UFW должен быть включен."
+        return 1
+    fi
+
+    local old_bot_ip
+    old_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+
+    # Проверка no-op (если IP совпадает и правило уже активно)
+    if [[ "$new_bot_ip" == "$old_bot_ip" ]] && ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "8444"; then
+        ufw delete allow 8444/tcp 2>/dev/null || true
+        ufw delete allow 8444 2>/dev/null || true
+        log "BOT_IP ($new_bot_ip) уже установлен и подтвержден в UFW. Изменений не требуется."
+        release_just1knode_lock
+        return 0
+    fi
+
+    log "Применение нового правила фаервола UFW для порта 8444 ($new_bot_ip)..."
+    # Шаг 1: Добавляем новое правило ПЕРВЫМ (не ломая старый доступ)
+    if ! ufw allow from "$new_bot_ip" to any port 8444 proto tcp; then
+        release_just1knode_lock
+        error "Сбой выполнения команды 'ufw allow' для IP $new_bot_ip. Предыдущие правила сохранены."
+        return 1
+    fi
+
+    # Шаг 2: Верифицируем, что правило реально появилось в UFW
+    if ! ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "8444"; then
+        ufw delete allow from "$new_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+        release_just1knode_lock
+        error "Верификация не пройдена: правило для $new_bot_ip на порт 8444 отсутствует в UFW. Изменение откатано."
+        return 1
+    fi
+
+    # Шаг 3: Атомарно фиксируем новый IP в state.json перед удалением старых правил
+    if ! set_state_val "bot_ip" "$new_bot_ip"; then
+        ufw delete allow from "$new_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+        release_just1knode_lock
+        error "Сбой сохранения bot_ip в state.json. Новое правило для $new_bot_ip откатано, старый доступ сохранен."
+        return 1
+    fi
+
+    # Шаг 4: Только после успешной фиксации состояния удаляем старое и широкие правила
+    if [[ -n "$old_bot_ip" && "$old_bot_ip" != "$new_bot_ip" && "$old_bot_ip" != "any" && "$old_bot_ip" != "-" ]]; then
+        ufw delete allow from "$old_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+    fi
+    ufw delete allow 8444/tcp 2>/dev/null || true
+    ufw delete allow 8444 2>/dev/null || true
+
+    log "BOT_IP успешно обновлен и зафиксирован в state.json: ${old_bot_ip:-не был задан} -> ${new_bot_ip}"
+    release_just1knode_lock
+}
+
 heal_and_update_origin_config() {
     title "АВТОМАТИЧЕСКАЯ ОПТИМИЗАЦИЯ И ВОССТАНОВЛЕНИЕ КОНФИГУРАЦИИ ORIGIN"
     check_root
@@ -1071,6 +1163,26 @@ net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
         sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+    fi
+
+    # Фаервол: принудительное приведение порта 8444 к desired state
+    local heal_bot_ip
+    heal_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
+        # 1. Удаление глобальных уязвимых правил (ALLOW Anywhere на 8444)
+        if ufw status 2>/dev/null | grep -E "8444(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+            ufw delete allow 8444/tcp 2>/dev/null || true
+            ufw delete allow 8444 2>/dev/null || true
+            warn "Фаервол UFW: устранена уязвимость — удалено глобальное правило на порт 8444."
+        fi
+        # 2. Обеспечение точного правила для текущего BOT_IP
+        if [[ -n "$heal_bot_ip" && "$heal_bot_ip" != "any" && "$heal_bot_ip" != "-" ]] && validate_ipv4 "$heal_bot_ip"; then
+            if ! ufw status 2>/dev/null | grep -F "$heal_bot_ip" | grep -q "8444"; then
+                if ufw allow from "$heal_bot_ip" to any port 8444 proto tcp 2>/dev/null; then
+                    log "Фаервол UFW: подтвержден доступ к порту 8444 для BOT_IP ($heal_bot_ip)"
+                fi
+            fi
+        fi
     fi
 
     # Валидация Xray и Nginx
