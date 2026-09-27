@@ -13,4 +13,6 @@ https://github.com/kuzzrus/3x-ui-awg
 https://github.com/MHSanaei/3x-ui
 https://github.com/BoriskaGlebov/vpn_bot
 https://github.com/CraftStick/node-installer-cdn
+https://github.com/hyperion-cs/dpi-checkers
 https://github.com/justik13?tab=stars
+
