@@ -248,16 +248,12 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         )
         self.assertIsNotNone(doh_rule)
 
-    def test_nginx_camouflage_site_and_buffers(self) -> None:
-        """Nginx must serve camouflage site on / and define zero request buffering for streaming."""
+    def test_nginx_zero_signature_and_buffers(self) -> None:
+        """Nginx must serve zero-signature 404 on / and define zero request buffering for streaming."""
         sh_content = _read_just1knode_content()
 
-        # Camouflage site landing page created
-        self.assertIn("mkdir -p \"${WWW_HTML_DIR}\"", sh_content)
-        self.assertIn("<!DOCTYPE html>", sh_content)
-        self.assertIn("try_files \\$uri \\$uri/ =404;", sh_content)
-        # return 404 on location / must not exist
-        self.assertNotIn("location / {\n        return 404;\n    }", sh_content)
+        # Zero-signature standard: 404 on location / without camouflage leaks
+        self.assertIn("location / {\n        default_type text/plain;\n        return 404 \"Not Found\\n\";\n    }", sh_content)
 
         # /cdn-check endpoint returning 204
         self.assertIn("location = /cdn-check", sh_content)

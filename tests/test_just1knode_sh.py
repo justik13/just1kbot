@@ -1167,20 +1167,19 @@ run_doctor
         self.assertIn("ТОЛЬКО на Origin-сервере", res_empty.stderr + res_empty.stdout)
 
     # -------------------------------------------------------------------------
-    # Functional Validation: Camouflage Landing & Certbot Deploy Hook
+    # Functional Validation: Zero-Signature Purge & Certbot Deploy Hook
     # -------------------------------------------------------------------------
-    def test_functional_camouflage_and_certbot_deploy_hook(self):
+    def test_functional_zero_signature_and_certbot_deploy_hook(self):
         self._prepare_base_env()
+        index_file = self.www_html_dir / "index.html"
+        index_file.write_text("legacy camouflage", encoding="utf-8")
+        self.assertTrue(index_file.exists())
+
         res = self._run_shell_snippet("deploy_camouflage_site; deploy_certbot_renewal_hook")
         self.assertEqual(res.returncode, 0)
 
-        # 1. Camouflage index.html
-        index_file = self.www_html_dir / "index.html"
-        self.assertTrue(index_file.exists())
-        html_content = index_file.read_text(encoding="utf-8")
-        self.assertIn("<!DOCTYPE html>", html_content)
-        self.assertIn("<html", html_content)
-        self.assertIn("SimpleCalc", html_content)
+        # 1. Zero-Signature: legacy index.html must be purged
+        self.assertFalse(index_file.exists())
 
         # 2. Certbot renewal hook
         hook_file = self.letsencrypt_dir / "renewal-hooks" / "deploy" / "restart-xray-nginx.sh"

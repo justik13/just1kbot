@@ -620,9 +620,8 @@ server {
     include ${NGINX_RELAYS_DIR}/*.conf;
 
     location / {
-        root ${WWW_HTML_DIR};
-        index index.html index.htm;
-        try_files \$uri \$uri/ =404;
+        default_type text/plain;
+        return 404 "Not Found\n";
     }
 }
 
