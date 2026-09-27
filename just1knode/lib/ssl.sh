@@ -32,8 +32,11 @@ LETSENCRYPT_DIR="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
 deploy_camouflage_site() {
     # Zero-Signature Standard: удаление устаревших веб-заглушек для исключения детекции сканерами
     local www_index="${WWW_HTML_DIR:-/var/www/html}/index.html"
-    if [[ -f "$www_index" ]] && (grep -q "Cloud Ingress Network Node" "$www_index" 2>/dev/null || grep -q "SimpleCalc" "$www_index" 2>/dev/null); then
-        rm -f "$www_index" 2>/dev/null || true
+    if [[ -f "$www_index" ]]; then
+        if grep -q "Cloud Ingress Network Node" "$www_index" 2>/dev/null || \
+           (grep -q "SimpleCalc" "$www_index" 2>/dev/null && grep -q "All calculations done client-side" "$www_index" 2>/dev/null); then
+            rm -f "$www_index" 2>/dev/null || true
+        fi
     fi
 }
 

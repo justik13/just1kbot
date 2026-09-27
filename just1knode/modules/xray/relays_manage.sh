@@ -376,7 +376,7 @@ dns_conf['servers'] = [
         'skipFallback': True
     },
     '195.208.4.1',
-    'localhost'
+    '77.88.8.1'
 ]
 dns_conf['queryStrategy'] = 'UseIPv4'
 cfg['dns'] = dns_conf

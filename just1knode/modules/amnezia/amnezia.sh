@@ -223,9 +223,20 @@ install_amnezia_node() {
         log "✔ Обнаружена сохранённая конфигурация API-ключа ($AMNEZIA_API_ETC/config.env)."
     fi
 
+    local was_service_active=0
+    if systemctl is-active --quiet amnezia-api.service 2>/dev/null; then
+        was_service_active=1
+    fi
+
     rollback_amnezia_if_needed() {
-        systemctl stop amnezia-api.service >/dev/null 2>&1 || true
-        systemctl disable amnezia-api.service >/dev/null 2>&1 || true
+        if [[ "$was_service_active" -eq 1 ]]; then
+            warn "Откат установки: восстанавливаем ранее активную службу amnezia-api.service..."
+            systemctl enable amnezia-api.service >/dev/null 2>&1 || true
+            systemctl start amnezia-api.service >/dev/null 2>&1 || true
+        else
+            systemctl stop amnezia-api.service >/dev/null 2>&1 || true
+            systemctl disable amnezia-api.service >/dev/null 2>&1 || true
+        fi
     }
 
     # 3. Домен и порт API (интерактивный опросник или дефолт)
@@ -846,7 +857,7 @@ uninstall_amnezia_component() {
     systemctl daemon-reload 2>/dev/null || true
 
     rm -rf "$AMNEZIA_API_DIR" "$AMNEZIA_API_ETC" /etc/ssl/just1k_amnezia 2>/dev/null || true
-    rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf 2>/dev/null || true
+    rm -f /etc/nginx/conf.d/amnezia-ratelimit.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf 2>/dev/null || true
     rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" 2>/dev/null || true
     if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
         systemctl reload nginx 2>/dev/null || true

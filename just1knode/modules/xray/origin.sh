@@ -432,7 +432,7 @@ dns_conf['servers'] = [
         'skipFallback': True
     },
     '195.208.4.1',
-    'localhost'
+    '77.88.8.1'
 ]
 dns_conf['queryStrategy'] = 'UseIPv4'
 final_config['dns'] = dns_conf
@@ -832,7 +832,7 @@ cfg['dns'] = {
             'skipFallback': True
         },
         '195.208.4.1',
-        'localhost'
+        '77.88.8.1'
     ],
     'queryStrategy': 'UseIPv4'
 }
@@ -1031,6 +1031,35 @@ except Exception:
         else
             warn "BOT_DOMAIN не настроен или не является валидным FQDN, пропуск авто-восстановления Nginx-проксирования подписок."
         fi
+    fi
+
+    # Удаление устаревших веб-заглушек и обновление корневого локейшна Nginx до Zero-Signature 404
+    deploy_camouflage_site
+    local origin_vhost="${NGINX_CONF_DIR}/sites-available/just1k-origin.conf"
+    if [[ -f "$origin_vhost" ]]; then
+        manifest_track_file "$origin_vhost"
+        python3 -c "
+import sys, re
+conf_path = sys.argv[1]
+try:
+    with open(conf_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    new_loc = '''location / {
+        default_type text/plain;
+        return 404 \"Not Found\\\\n\";
+    }'''
+    updated, count = re.subn(
+        r'location\s+/\s*\{[^}]*try_files[^}]*\}',
+        lambda m: new_loc,
+        content
+    )
+    if count > 0:
+        with open(conf_path, 'w', encoding='utf-8') as f:
+            f.write(updated)
+        print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found')
+except Exception:
+    pass
+" "$origin_vhost" 2>/dev/null || true
     fi
 
     # Системное отключение IPv6

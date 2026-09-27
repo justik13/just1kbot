@@ -409,6 +409,8 @@ exit 0
         self.assertTrue(ru_server.get("skipFallback"))
         self.assertNotIn("1.1.1.1", updated["dns"]["servers"])
         self.assertIn("195.208.4.1", updated["dns"]["servers"])
+        self.assertIn("77.88.8.1", updated["dns"]["servers"])
+        self.assertNotIn("localhost", updated["dns"]["servers"])
 
         # 3b. Verify ip_rule (geoip:ru) excludes relay inbounds to prevent DNS resolution on Origin
         ip_rule = next(
@@ -1169,6 +1171,8 @@ run_doctor
         # Verify DNS on Origin has no foreign resolvers
         self.assertNotIn("1.1.1.1", xray_conf["dns"]["servers"])
         self.assertIn("195.208.4.1", xray_conf["dns"]["servers"])
+        self.assertIn("77.88.8.1", xray_conf["dns"]["servers"])
+        self.assertNotIn("localhost", xray_conf["dns"]["servers"])
 
         # Verify relay inbound is NOT in ip_rule (geoip:ru) to prevent foreign DNS leaks on Origin
         ip_rule = next(
@@ -1270,6 +1274,8 @@ run_doctor
         # Invariant: Origin DNS servers must not contain foreign resolvers
         self.assertNotIn("1.1.1.1", cfg["dns"]["servers"])
         self.assertIn("195.208.4.1", cfg["dns"]["servers"])
+        self.assertIn("77.88.8.1", cfg["dns"]["servers"])
+        self.assertNotIn("localhost", cfg["dns"]["servers"])
 
     def test_auto_heal_relays_registry_when_corrupted(self):
         self._prepare_base_env()
@@ -1417,6 +1423,53 @@ run_doctor
         with open(self.state_dir / "state.json", "r", encoding="utf-8") as f:
             st = json.load(f)
         self.assertEqual(st.get("bot_domain"), "new.example.com")
+
+    def test_heal_and_update_origin_config_upgrades_nginx_to_404_and_purges_camouflage(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "origin", "domain": "origin.example.com"}, f)
+
+        # Place legacy index.html with template signature
+        calc_html = self.www_html_dir / "index.html"
+        calc_html.write_text("<html>SimpleCalc - All calculations done client-side</html>", encoding="utf-8")
+
+        # Place legacy just1k-origin.conf with try_files
+        sites_avail = self.nginx_conf_dir / "sites-available"
+        sites_avail.mkdir(parents=True, exist_ok=True)
+        origin_conf = sites_avail / "just1k-origin.conf"
+        origin_conf.write_text(
+            """server {
+    listen 443 ssl http2;
+    server_name origin.example.com;
+    location / {
+        root /var/www/html;
+        index index.html;
+        try_files $uri $uri/ =404;
+    }
+}
+""",
+            encoding="utf-8",
+        )
+
+        res = self._run_shell_snippet("heal_and_update_origin_config")
+        self.assertEqual(res.returncode, 0)
+
+        # Camouflage file should be deleted
+        self.assertFalse(calc_html.exists(), "Legacy camouflage index.html must be purged")
+
+        # Nginx config must be upgraded to return 404
+        content = origin_conf.read_text(encoding="utf-8")
+        self.assertNotIn("try_files", content)
+        self.assertIn('return 404 "Not Found\\n";', content)
+
+    def test_deploy_camouflage_site_preserves_unrelated_index_html(self):
+        self._prepare_base_env()
+        custom_html = self.www_html_dir / "index.html"
+        custom_html.write_text("<html><h1>My Personal Blog</h1></html>", encoding="utf-8")
+
+        res = self._run_shell_snippet("deploy_camouflage_site")
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(custom_html.exists(), "Custom user index.html must NOT be deleted")
 
     def test_normalize_domain_strips_protocols_and_slashes(self):
         self._prepare_base_env()
