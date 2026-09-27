@@ -363,12 +363,86 @@ class VPNParserTests(unittest.TestCase):
                 "container": "amnezia-awg2",
                 "awg": {
                     "protocol_version": "2",
+                    "port": "51820",
                     "Jc": "99",  # Mismatch!
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
                     "last_config": json.dumps(base_last_cfg),
                 },
             }]
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(mismatched_data)))
+
+        # 9. Reject when awg dict is missing mandatory base keys (even if last_config has them)
+        missing_awg_keys_data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {
+                    "protocol_version": "2",
+                    "port": "51820",
+                    # Missing Jc..H4 in top-level awg dict
+                    "last_config": json.dumps(base_last_cfg),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(missing_awg_keys_data)))
+
+        # 10. Reject legacy AWG 1.0 protocol_version
+        legacy_awg1_data = {
+            "containers": [{
+                "container": "amnezia-awg",
+                "awg": {
+                    "protocol_version": "1.0",
+                    "port": "51820",
+                    "Jc": "4",
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
+                    "last_config": json.dumps(base_last_cfg),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(legacy_awg1_data)))
+
+        # 11. Reject AWG 3.x if HeaderProtectionKey is missing in awg dict
+        awg3_missing_hpk_awg = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {
+                    "protocol_version": "3.0",
+                    "port": "51820",
+                    "Jc": "4",
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
+                    # HeaderProtectionKey missing in awg dict
+                    "last_config": json.dumps(awg3_last_cfg),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(awg3_missing_hpk_awg)))
 
     def test_k1_reference_decoding_and_customization(self):
         """Verify real-world working AmneziaWG 2.0 reference key decodes and customizes correctly."""

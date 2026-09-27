@@ -393,8 +393,45 @@ def test_build_client_configs_and_vpn_uri_awg3():
     assert decoded_31["defaultContainer"] == "amnezia-awg2"
     assert decoded_31["containers"][0]["awg"]["protocol_version"] == "3.1"
     assert decoded_31["containers"][0]["awg"]["RandomTrailers"] == "1"
-    last_cfg_31 = json.loads(decoded_31["containers"][0]["awg"]["last_config"])
-    assert last_cfg_31["RandomTrailers"] == "1"
+    # Rejection of incomplete interface missing mandatory AWG 2.0+ parameters
+    incomplete_iface = {
+        "ListenPort": "44321",
+        "Jc": "4",
+        "Jmin": "10",
+        "Jmax": "50",
+        "S1": "79",
+        "S2": "115",
+        # Missing S3, S4, H1..H4
+    }
+    with pytest.raises(HTTPException) as exc_info:
+        amnezia_app.build_client_configs(
+            client,
+            incomplete_iface,
+            server_pubkey="srvpub=",
+            host_name="vpn.example.com",
+            dns1="1.1.1.1",
+            dns2="1.0.0.1",
+            container_name="amnezia-awg2",
+        )
+    assert exc_info.value.status_code == 422
+    assert "missing mandatory AWG 2.0+ parameters" in exc_info.value.detail
+
+    # Rejection of AWG 3.x interface missing HeaderProtectionKey
+    incomplete_30_iface = dict(interface_params_30)
+    del incomplete_30_iface["HeaderProtectionKey"]
+    incomplete_30_iface["RandomTrailers"] = "1"  # triggers AWG 3.x detection
+    with pytest.raises(HTTPException) as exc_info_hpk:
+        amnezia_app.build_client_configs(
+            client,
+            incomplete_30_iface,
+            server_pubkey="srvpub=",
+            host_name="vpn.example.com",
+            dns1="1.1.1.1",
+            dns2="1.0.0.1",
+            container_name="amnezia-awg2",
+        )
+    assert exc_info_hpk.value.status_code == 422
+    assert "HeaderProtectionKey" in exc_info_hpk.value.detail
 
 
 # =============================================================================

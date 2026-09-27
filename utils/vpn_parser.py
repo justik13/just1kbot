@@ -367,7 +367,7 @@ def is_valid_vpn_uri(uri: str) -> bool:
             if proto_ver not in ("2", "2.0", "3", "3.0", "3.1"):
                 return False
         elif c_name == "amnezia-awg":
-            if proto_ver not in ("", "1", "1.0", "2", "2.0"):
+            if proto_ver not in ("2", "2.0"):
                 return False
         else:
             return False
@@ -398,23 +398,32 @@ def is_valid_vpn_uri(uri: str) -> bool:
             if v is None or str(v).strip() == "":
                 return False
 
-        # Check AWG 3.x specific key
+        # Check AWG 3.x specific key in last_config
         ver = detect_awg_version(last_config)
         if ver.startswith("3"):
-            hpk = last_config.get("HeaderProtectionKey") or awg.get("HeaderProtectionKey")
+            hpk = last_config.get("HeaderProtectionKey")
             if not hpk or str(hpk).strip() == "":
                 return False
 
-        # 3-way consistency check between awg dict and last_config
+        # 3-way consistency check between awg dict and last_config:
+        # All mandatory base keys and port must be present in awg dict and match last_config exactly
         for k in AWG_MANDATORY_BASE_KEYS:
-            if k in awg:
-                if str(awg[k]).strip() != str(last_config[k]).strip():
-                    return False
-        if "port" in awg:
-            try:
-                if int(awg["port"]) != port_int:
-                    return False
-            except (ValueError, TypeError):
+            if k not in awg or str(awg[k]).strip() == "":
+                return False
+            if str(awg[k]).strip() != str(last_config[k]).strip():
+                return False
+
+        if "port" not in awg:
+            return False
+        try:
+            if int(awg["port"]) != port_int:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+        if ver.startswith("3"):
+            hpk_awg = awg.get("HeaderProtectionKey")
+            if not hpk_awg or str(hpk_awg).strip() != str(last_config.get("HeaderProtectionKey", "")).strip():
                 return False
 
         # Check config text or fallback

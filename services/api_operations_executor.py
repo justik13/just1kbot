@@ -39,13 +39,10 @@ def _is_usable_created_config(config: str | None) -> bool:
     conf = config.strip()
     if not conf or conf.lower() == "invalid":
         return False
-    from utils.vpn_parser import is_valid_vpn_uri
+    from utils.vpn_parser import _looks_like_awg_conf, is_valid_vpn_uri
     if is_valid_vpn_uri(conf):
         return True
-    if "[Interface]" in conf and "[Peer]" in conf:
-        if "PrivateKey" in conf and "PublicKey" in conf and "Address" in conf and "Endpoint" in conf:
-            return True
-    return False
+    return _looks_like_awg_conf(conf)
 
 
 class _ServerEndpointChanged(RuntimeError):

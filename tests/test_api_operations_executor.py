@@ -638,3 +638,38 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
         with patch("services.api_operations_executor._client", return_value=fake):
             await execute_claimed_api_operation(await self.claim_one())
         fake.delete_user_result.assert_not_awaited()
+
+
+class TestIsUsableCreatedConfig(unittest.TestCase):
+    def test_usable_config_validation(self):
+        from services.api_operations_executor import _is_usable_created_config
+
+        # 1. Rejects None, empty, invalid
+        self.assertFalse(_is_usable_created_config(None))
+        self.assertFalse(_is_usable_created_config(""))
+        self.assertFalse(_is_usable_created_config("invalid"))
+        self.assertFalse(_is_usable_created_config("   "))
+
+        # 2. Rejects raw WireGuard without mandatory AWG 2.0+ parameters
+        raw_wg = (
+            "[Interface]\n"
+            "PrivateKey = privkey=\n"
+            "Address = 10.8.1.2/32\n"
+            "[Peer]\n"
+            "PublicKey = pubkey=\n"
+            "Endpoint = vpn.example.com:51820\n"
+        )
+        self.assertFalse(_is_usable_created_config(raw_wg))
+
+        # 3. Accepts raw AWG 2.0 config with all mandatory parameters
+        raw_awg = (
+            "[Interface]\n"
+            "PrivateKey = privkey=\n"
+            "Address = 10.8.1.2/32\n"
+            "Jc = 4\nJmin = 10\nJmax = 50\nS1 = 87\nS2 = 61\nS3 = 49\nS4 = 1\n"
+            "H1 = 100-200\nH2 = 300-400\nH3 = 500-600\nH4 = 700-800\n\n"
+            "[Peer]\n"
+            "PublicKey = pubkey=\n"
+            "Endpoint = vpn.example.com:51820\n"
+        )
+        self.assertTrue(_is_usable_created_config(raw_awg))

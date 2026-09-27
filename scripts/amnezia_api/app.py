@@ -41,6 +41,7 @@ AWG3_1_EXCLUSIVE_KEYS = (
 
 try:
     from utils.vpn_parser import (
+        AWG_MANDATORY_BASE_KEYS,
         AWG3_0_EXCLUSIVE_KEYS,
         AWG3_1_EXCLUSIVE_KEYS,
         AWG3_EXCLUSIVE_KEYS,
@@ -48,6 +49,9 @@ try:
     )
 except ImportError:
     # Standalone mode on isolated node VPS
+    AWG_MANDATORY_BASE_KEYS = (
+        "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4",
+    )
     AWG3_1_EXCLUSIVE_KEYS = (
         "RandomTrailers",
         "DisableCookies",
@@ -660,8 +664,26 @@ def build_client_configs(
         elif k.upper() in iface:
             detected_awg[k] = str(iface[k.upper()])
 
-    awg_ver = detect_awg_version(detected_awg if detected_awg else iface)
+    # Reject incomplete server configurations missing mandatory AWG 2.0+ parameters
+    missing_base_keys = [k for k in AWG_MANDATORY_BASE_KEYS if not detected_awg.get(k) or str(detected_awg.get(k)).strip() == ""]
+    if missing_base_keys:
+        logger.error("Server interface missing mandatory AWG 2.0+ parameters: %s", missing_base_keys)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Server interface missing mandatory AWG 2.0+ parameters: {', '.join(missing_base_keys)}",
+        )
+
+    awg_ver = detect_awg_version(detected_awg)
     has_awg3 = awg_ver.startswith("3")
+    if has_awg3:
+        hpk = detected_awg.get("HeaderProtectionKey")
+        if not hpk or str(hpk).strip() == "":
+            logger.error("Server interface has AWG 3.x parameters but is missing mandatory HeaderProtectionKey")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Server interface is missing mandatory HeaderProtectionKey for AWG 3.x",
+            )
+
     protocol_version = awg_ver if has_awg3 else "2"
 
     effective_container = container_name or "amnezia-awg2"
