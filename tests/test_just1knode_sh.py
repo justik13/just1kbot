@@ -1908,11 +1908,11 @@ remove_traffic_watchdog_timer
         self.assertIn("FASTIFY_API_KEY", content)
         self.assertIn("AMNEZIA_API_KEY", content)
         self.assertIn("SERVER_MAX_PEERS", content)
-        # Rollback logic for legacy containers & PM2
+        # Rollback logic for native service & container
         self.assertIn("rollback_legacy_if_needed()", content)
         self.assertIn("systemctl stop amnezia-api.service", content)
         self.assertIn("docker start amnezia-api", content)
-        self.assertIn("pm2 restart all", content)
+        self.assertNotIn("pm2", content)
         # Nginx proxy generation, rate limiting and security headers
         self.assertIn("/etc/nginx/sites-available/just1k-amnezia.conf", content)
         self.assertIn("limit_req_zone $binary_remote_addr zone=just1k_amnezia_api:10m rate=30r/s;", content)

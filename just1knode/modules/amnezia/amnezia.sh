@@ -233,17 +233,12 @@ install_amnezia_node() {
     fi
 
     local legacy_docker_stopped=0
-    local legacy_pm2_stopped=0
     rollback_legacy_if_needed() {
         systemctl stop amnezia-api.service >/dev/null 2>&1 || true
         systemctl disable amnezia-api.service >/dev/null 2>&1 || true
         if [[ $legacy_docker_stopped -eq 1 ]]; then
             warn "Восстановление и перезапуск исходного Docker-контейнера amnezia-api..."
             docker start amnezia-api >/dev/null 2>&1 || true
-        fi
-        if [[ $legacy_pm2_stopped -eq 1 ]]; then
-            warn "Восстановление и перезапуск процессов PM2..."
-            pm2 restart all >/dev/null 2>&1 || pm2 start all >/dev/null 2>&1 || systemctl restart pm2-root.service >/dev/null 2>&1 || true
         fi
     }
 
@@ -254,19 +249,6 @@ install_amnezia_node() {
             if docker stop amnezia-api >/dev/null 2>&1; then
                 legacy_docker_stopped=1
             fi
-        fi
-    fi
-
-    # Остановка процессов Node.js / Fastify в PM2 (для освобождения локального порта 4001)
-    if command -v pm2 >/dev/null 2>&1 && pm2 list 2>/dev/null | grep -qiE "amnezia|main"; then
-        log "Обнаружен работающий процесс amnezia-api в PM2. Выполняется безопасная остановка для переключения на нативный сервис..."
-        if pm2 stop all >/dev/null 2>&1; then
-            legacy_pm2_stopped=1
-        fi
-    elif systemctl is-active --quiet pm2-root.service 2>/dev/null; then
-        log "Обнаружена активная служба pm2-root. Выполняется безопасная остановка для переключения на нативный сервис..."
-        if systemctl stop pm2-root.service >/dev/null 2>&1; then
-            legacy_pm2_stopped=1
         fi
     fi
 
@@ -654,20 +636,8 @@ EOF
     set_state_val "awg_port" "$public_port"
     set_state_val "awg_installed" "true"
 
-    # 13. Зачистка и отключение старых служб (PM2 / Node.js) при миграции
-    if [[ $legacy_pm2_stopped -eq 1 ]]; then
-        if command -v pm2 >/dev/null 2>&1; then
-            pm2 delete amnezia-api >/dev/null 2>&1 || pm2 delete main >/dev/null 2>&1 || true
-            pm2 save --force >/dev/null 2>&1 || true
-            if pm2 list 2>/dev/null | grep -q '\[\]'; then
-                systemctl disable pm2-root.service >/dev/null 2>&1 || true
-                rm -f /etc/systemd/system/pm2-root.service 2>/dev/null || true
-                systemctl daemon-reload 2>/dev/null || true
-            fi
-        fi
-        rm -rf /root/amnezia-api ~/amnezia-api 2>/dev/null || true
-        log "✔ Устаревший процесс amnezia-api в PM2 удалён, старые файлы Node.js API (/root/amnezia-api) очищены"
-    fi
+    # 13. Зачистка устаревших каталогов Node.js API если они остались на диске
+    rm -rf /root/amnezia-api ~/amnezia-api 2>/dev/null || true
 
     # Вывод карточки подключения
     show_amnezia_bot_credentials
