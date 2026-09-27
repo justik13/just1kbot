@@ -22,20 +22,12 @@ detect_amnezia_container() {
             echo "amnezia-awg2"
             return 0
         fi
-        if docker ps --filter "name=^/amnezia-awg3$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg3$"; then
-            echo "amnezia-awg3"
-            return 0
-        fi
         if docker ps --filter "name=^/amnezia-awg$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg$"; then
             echo "amnezia-awg"
             return 0
         fi
         if docker ps -a --filter "name=^/amnezia-awg2$" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg2$"; then
             echo "amnezia-awg2"
-            return 0
-        fi
-        if docker ps -a --filter "name=^/amnezia-awg3$" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg3$"; then
-            echo "amnezia-awg3"
             return 0
         fi
         if docker ps -a --filter "name=^/amnezia-awg$" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg$"; then
