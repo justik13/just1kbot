@@ -415,8 +415,8 @@ exit 0
             (r for r in updated["routing"]["rules"] if r.get("outboundTag") == "just1k-wl-direct" and "ip" in r),
             None,
         )
-        if ip_rule:
-            self.assertNotIn("just1k-wl-inbound-de", ip_rule.get("inboundTag", []))
+        self.assertIsNotNone(ip_rule, "ip_rule with geoip:ru for direct routing must exist")
+        self.assertNotIn("just1k-wl-inbound-de", ip_rule.get("inboundTag", []))
 
         # 4. Check sniffing routeOnly == False and quic on client inbounds
         for ib in updated["inbounds"]:
@@ -1174,8 +1174,8 @@ run_doctor
         ip_rule = next(
             (r for r in rules if r.get("outboundTag") == "just1k-wl-direct" and "ip" in r), None
         )
-        if ip_rule:
-            self.assertNotIn("just1k-wl-inbound-de", ip_rule.get("inboundTag", []))
+        self.assertIsNotNone(ip_rule, "ip_rule with geoip:ru for direct routing must exist")
+        self.assertNotIn("just1k-wl-inbound-de", ip_rule.get("inboundTag", []))
 
     # -------------------------------------------------------------------------
     # Functional Validation: Role Guard in manage_relays_menu
@@ -1910,12 +1910,30 @@ remove_traffic_watchdog_timer
         self.assertIn("SERVER_MAX_PEERS", content)
         # Rollback logic for legacy containers & PM2
         self.assertIn("rollback_legacy_if_needed()", content)
+        self.assertIn("systemctl stop amnezia-api.service", content)
         self.assertIn("docker start amnezia-api", content)
         self.assertIn("pm2 restart all", content)
-        # Nginx proxy generation
+        # Nginx proxy generation, rate limiting and security headers
         self.assertIn("/etc/nginx/sites-available/just1k-amnezia.conf", content)
+        self.assertIn("limit_req_zone $binary_remote_addr zone=just1k_amnezia_api:10m rate=30r/s;", content)
+        self.assertIn("limit_req zone=just1k_amnezia_api burst=50 nodelay;", content)
+        self.assertIn('add_header X-Content-Type-Options "nosniff" always;', content)
+        self.assertIn('add_header X-Frame-Options "DENY" always;', content)
+        self.assertIn("location ~ ^/(docs|redoc|openapi.json|metrics)", content)
         self.assertIn("proxy_pass http://127.0.0.1:${AMNEZIA_LOCAL_PORT};", content)
         self.assertIn("client_max_body_size 10M;", content)
+
+        # Microservice Swagger/OpenAPI disabling in app.py
+        app_py = REPO_ROOT / "scripts" / "amnezia_api" / "app.py"
+        app_content = app_py.read_text(encoding="utf-8")
+        self.assertIn("docs_url=None", app_content)
+        self.assertIn("redoc_url=None", app_content)
+        self.assertIn("openapi_url=None", app_content)
+
+        # Origin subscription proxy domestic resolvers
+        origin_sh = REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh"
+        origin_content = origin_sh.read_text(encoding="utf-8")
+        self.assertIn('local resolved_servers="77.88.8.8 77.88.8.1 195.208.4.1"', origin_content)
 
 
 if __name__ == "__main__":

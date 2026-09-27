@@ -82,21 +82,11 @@ deploy_subscription_proxy_conf() {
 
     set_state_val "sub_path_prefix" "$sub_prefix" 2>/dev/null || true
 
-    # Резолверы DNS: Anycast DNS Яндекса и MSK-IX/НСДИ для РФ, а также системные резолверы хоста (/etc/resolv.conf).
+    # Резолверы DNS: Anycast DNS Яндекса и MSK-IX/НСДИ для РФ.
     # Согласно docs/WL/WHITELIST_MASTER_GUIDE.md (п. 5.3 и 5.3.1), на Origin в РФ категорически запрещено
     # указывать зарубежные публичные DNS (1.1.1.1, 8.8.8.8): Nginx опрашивает резолверы round-robin,
     # а в условиях фильтрации ТСПУ зарубежный UDP:53 блокируется, вызывая 3-секундные задержки proxy_pass.
-    local domestic_resolvers="77.88.8.8 77.88.8.1 195.208.4.1"
-    local system_resolvers=""
-    if [[ -f /etc/resolv.conf ]]; then
-        system_resolvers="$(awk '/^nameserver/ {if ($2 !~ /^127\./) printf "%s ", $2}' /etc/resolv.conf 2>/dev/null || true)"
-    fi
-    local resolved_servers="${domestic_resolvers}"
-    for r in $system_resolvers; do
-        if [[ ! " $resolved_servers " =~ " $r " ]]; then
-            resolved_servers="$resolved_servers $r"
-        fi
-    done
+    local resolved_servers="77.88.8.8 77.88.8.1 195.208.4.1"
 
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"

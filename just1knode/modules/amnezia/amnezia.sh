@@ -235,6 +235,8 @@ install_amnezia_node() {
     local legacy_docker_stopped=0
     local legacy_pm2_stopped=0
     rollback_legacy_if_needed() {
+        systemctl stop amnezia-api.service >/dev/null 2>&1 || true
+        systemctl disable amnezia-api.service >/dev/null 2>&1 || true
         if [[ $legacy_docker_stopped -eq 1 ]]; then
             warn "Восстановление и перезапуск исходного Docker-контейнера amnezia-api..."
             docker start amnezia-api >/dev/null 2>&1 || true
@@ -516,13 +518,32 @@ EOF
     elif [[ $is_ip -eq 0 && -n "$api_domain" ]]; then
         log "Попытка получения Let's Encrypt SSL сертификата для ${api_domain}..."
         if command -v certbot >/dev/null 2>&1; then
-            systemctl stop nginx 2>/dev/null || true
-            if certbot certonly --standalone -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
+            mkdir -p "${CERTBOT_DIR:-/var/www/certbot}"
+            local cert_ok=0
+            if nginx -t >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
+                if certbot certonly --nginx -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
+                    cert_ok=1
+                fi
+            fi
+            if [[ $cert_ok -eq 0 && -d "${CERTBOT_DIR:-/var/www/certbot}" ]]; then
+                if certbot certonly --webroot -w "${CERTBOT_DIR:-/var/www/certbot}" -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
+                    cert_ok=1
+                fi
+            fi
+            if [[ $cert_ok -eq 0 ]]; then
+                local was_active=0
+                systemctl is-active --quiet nginx 2>/dev/null && was_active=1
+                [[ $was_active -eq 1 ]] && systemctl stop nginx 2>/dev/null || true
+                if certbot certonly --standalone -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
+                    cert_ok=1
+                fi
+                [[ $was_active -eq 1 ]] && systemctl start nginx 2>/dev/null || true
+            fi
+            if [[ $cert_ok -eq 1 && -f "/etc/letsencrypt/live/${api_domain}/fullchain.pem" ]]; then
                 cert_file="/etc/letsencrypt/live/${api_domain}/fullchain.pem"
                 key_file="/etc/letsencrypt/live/${api_domain}/privkey.pem"
                 log "✔ SSL сертификат Let's Encrypt успешно получен для ${api_domain}"
             fi
-            systemctl start nginx 2>/dev/null || true
         fi
     fi
 
@@ -540,13 +561,20 @@ EOF
         fi
     fi
 
+    # Настройка зоны rate-limiting в Nginx conf.d
+    mkdir -p /etc/nginx/conf.d
+    cat > "/etc/nginx/conf.d/amnezia-ratelimit.conf" <<'EOF'
+# JUST1KNODE: AmneziaWG API Rate Limiting Zone
+limit_req_zone $binary_remote_addr zone=just1k_amnezia_api:10m rate=30r/s;
+EOF
+
     # Генерация Nginx конфигурации
     local nginx_conf="/etc/nginx/sites-available/just1k-amnezia.conf"
     cat > "$nginx_conf" <<EOF
 # JUST1KNODE: AmneziaWG API Reverse Proxy
 server {
     listen ${public_port} ssl;
-    server_name ${api_domain} _;
+    server_name ${api_domain};
 
     ssl_certificate ${cert_file};
     ssl_certificate_key ${key_file};
@@ -554,9 +582,22 @@ server {
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;
 
+    # Защитные заголовки
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+
     client_max_body_size 10M;
 
+    # Блокировка публичной документации и метрик
+    location ~ ^/(docs|redoc|openapi.json|metrics) {
+        default_type text/plain;
+        return 404 "Not Found\n";
+    }
+
     location / {
+        limit_req zone=just1k_amnezia_api burst=50 nodelay;
+        limit_req_status 429;
+
         proxy_pass http://127.0.0.1:${AMNEZIA_LOCAL_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -615,13 +656,17 @@ EOF
 
     # 13. Зачистка и отключение старых служб (PM2 / Node.js) при миграции
     if [[ $legacy_pm2_stopped -eq 1 ]]; then
-        command -v pm2 >/dev/null 2>&1 && pm2 delete all >/dev/null 2>&1 || true
-        command -v pm2 >/dev/null 2>&1 && pm2 save --force >/dev/null 2>&1 || true
-        systemctl disable pm2-root.service >/dev/null 2>&1 || true
-        rm -f /etc/systemd/system/pm2-root.service 2>/dev/null || true
-        systemctl daemon-reload 2>/dev/null || true
+        if command -v pm2 >/dev/null 2>&1; then
+            pm2 delete amnezia-api >/dev/null 2>&1 || pm2 delete main >/dev/null 2>&1 || true
+            pm2 save --force >/dev/null 2>&1 || true
+            if pm2 list 2>/dev/null | grep -q '\[\]'; then
+                systemctl disable pm2-root.service >/dev/null 2>&1 || true
+                rm -f /etc/systemd/system/pm2-root.service 2>/dev/null || true
+                systemctl daemon-reload 2>/dev/null || true
+            fi
+        fi
         rm -rf /root/amnezia-api ~/amnezia-api 2>/dev/null || true
-        log "✔ Служба PM2 отключена, старые файлы Node.js API (/root/amnezia-api) удалены"
+        log "✔ Устаревший процесс amnezia-api в PM2 удалён, старые файлы Node.js API (/root/amnezia-api) очищены"
     fi
 
     # Вывод карточки подключения
