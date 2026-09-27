@@ -119,6 +119,13 @@ async def _client(op):
                     raise _ServerEndpointChanged
                 server_protocol = server.protocol
 
+    if server_protocol is None and isinstance(getattr(op, "payload", None), dict):
+        proto_candidate = op.payload.get("protocol")
+        from config.constants import AMNEZIA_PROTOCOLS
+
+        if proto_candidate in AMNEZIA_PROTOCOLS:
+            server_protocol = proto_candidate
+
     # A deleted Server row does not erase the encrypted operation snapshot.
     return AmneziaClient(url, key, protocol=server_protocol)
 

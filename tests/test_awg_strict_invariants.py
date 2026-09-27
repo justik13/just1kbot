@@ -149,6 +149,28 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(client)
         self.assertEqual(client.protocol, "amneziawg3")
 
+    async def test_api_operations_executor_fallback_to_payload_protocol_when_server_deleted(self):
+        from types import SimpleNamespace
+        from services.api_operations_executor import _client
+
+        op = SimpleNamespace(
+            server_id=99,
+            api_url_snapshot="http://node.local:8080",
+            api_key_snapshot="testkey",
+            payload={"protocol": "amneziawg3.1"},
+        )
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = None  # Server deleted from DB
+
+        with patch("services.api_operations_executor.session_scope") as mock_scope:
+            mock_scope.return_value.__aenter__.return_value = mock_session
+            client = await _client(op)
+
+        self.assertIsNotNone(client)
+        self.assertEqual(client.protocol, "amneziawg3.1")
+
 
 if __name__ == "__main__":
     unittest.main()
+

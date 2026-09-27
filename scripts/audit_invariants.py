@@ -375,7 +375,7 @@ async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
         13,
         "VPN Server Protocol (AWG/Xray)",
         True,
-        "All servers strictly use AmneziaWG (awg) or Xray (xray)",
+        "All servers strictly use AmneziaWG (amneziawg2/3/3.1) or Xray (xray)",
     )
 
 

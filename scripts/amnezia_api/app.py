@@ -123,7 +123,7 @@ logging.basicConfig(
 # Configuration
 # ---------------------------------------------------------------------------
 API_KEY = os.getenv("AMNEZIA_API_KEY") or os.getenv("FASTIFY_API_KEY", "")
-AWG_CONTAINER_NAME = os.getenv("AWG_CONTAINER_NAME", "amnezia-awg2")
+AWG_CONTAINER_NAME = "amnezia-awg2"
 AWG_DIR = os.getenv("AWG_DIR", "/opt/amnezia/awg")
 AWG_CONF_PATH = os.getenv("AWG_CONF_PATH", "")
 CLIENTS_TABLE_PATH = os.getenv("CLIENTS_TABLE_PATH", "")
@@ -139,7 +139,7 @@ state_lock = asyncio.Lock()
 
 def get_target_container() -> str:
     """Return effective container name (strictly amnezia-awg2 for AmneziaWG)."""
-    return AWG_CONTAINER_NAME or "amnezia-awg2"
+    return "amnezia-awg2"
 
 
 def get_interface_name(container: str | None = None) -> str:
@@ -1077,8 +1077,13 @@ async def get_server():
             all_peer_keys.add(pk)
     total_peers = len(all_peer_keys) if all_peer_keys else max(len(peers), len(clients_table))
 
-    has_awg3 = is_awg3_detected(iface)
-    protocols = ["amneziawg2", "amneziawg3"] if has_awg3 else ["amneziawg2"]
+    detected_ver = detect_awg_version(iface)
+    if detected_ver == "3.1":
+        protocols = ["amneziawg2", "amneziawg3", "amneziawg3.1"]
+    elif detected_ver == "3.0":
+        protocols = ["amneziawg2", "amneziawg3"]
+    else:
+        protocols = ["amneziawg2"]
 
     return {
         "id": os.getenv("SERVER_ID", container),
@@ -1167,11 +1172,13 @@ async def get_server_backup():
         psk = await get_server_psk_async(create_if_missing=False)
 
         parsed = parse_awg_conf(conf_content)
-        protocols = (
-            ["amneziawg2", "amneziawg3"]
-            if is_awg3_detected(parsed.get("interface", {}))
-            else ["amneziawg2"]
-        )
+        detected_ver = detect_awg_version(parsed.get("interface", {}))
+        if detected_ver == "3.1":
+            protocols = ["amneziawg2", "amneziawg3", "amneziawg3.1"]
+        elif detected_ver == "3.0":
+            protocols = ["amneziawg2", "amneziawg3"]
+        else:
+            protocols = ["amneziawg2"]
         server_pub = await get_server_public_key_async(container, parsed.get("interface", {}))
 
         upstream_block = {
@@ -1321,8 +1328,8 @@ async def get_clients(skip: int = 0, limit: int | None = None):
     parsed = parse_awg_conf(conf_content)
     iface = parsed.get("interface", {})
     peers = parsed.get("peers", [])
-    has_awg3 = is_awg3_detected(iface)
-    proto = "amneziawg3" if has_awg3 else "amneziawg2"
+    detected_ver = detect_awg_version(iface)
+    proto = "amneziawg3.1" if detected_ver == "3.1" else ("amneziawg3" if detected_ver == "3.0" else "amneziawg2")
 
     clients_table = await load_clients_table_async()
     clients_map: dict[str, dict[str, Any]] = {}
@@ -1612,8 +1619,8 @@ async def create_client(req: ClientCreateRequest):
                 detail="Failed to register peer in kernel runtime",
             )
 
-        has_awg3 = is_awg3_detected(iface)
-        proto = "amneziawg3" if has_awg3 else "amneziawg2"
+        detected_ver = detect_awg_version(iface)
+        proto = "amneziawg3.1" if detected_ver == "3.1" else ("amneziawg3" if detected_ver == "3.0" else "amneziawg2")
 
         logger.info("Created client %s (%s, IP: %s, Proto: %s)", client_pub, req.clientName, client_ip, proto)
 
@@ -1914,8 +1921,8 @@ async def get_client_by_id(client_id: str):
                     target["psk"] = p.get("PresharedKey", "")
                 break
 
-    has_awg3 = is_awg3_detected(iface)
-    proto = "amneziawg3" if has_awg3 else "amneziawg2"
+    detected_ver = detect_awg_version(iface)
+    proto = "amneziawg3.1" if detected_ver == "3.1" else ("amneziawg3" if detected_ver == "3.0" else "amneziawg2")
 
     raw_conf: str | None = None
     vpn_uri: str | None = None

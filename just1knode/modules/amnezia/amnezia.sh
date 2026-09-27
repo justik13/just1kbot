@@ -7,16 +7,11 @@
 AMNEZIA_API_DIR="${AMNEZIA_API_DIR:-/opt/amnezia-api}"
 AMNEZIA_API_ETC="${AMNEZIA_API_ETC:-/etc/amnezia-api}"
 AMNEZIA_AWG_DIR="${AMNEZIA_AWG_DIR:-/opt/amnezia/awg}"
-AMNEZIA_CONTAINER_OVERRIDE="${AMNEZIA_CONTAINER:-}"
 AMNEZIA_PUBLIC_PORT="${AMNEZIA_PUBLIC_PORT:-8443}"
 AMNEZIA_LOCAL_PORT="${AMNEZIA_LOCAL_PORT:-4001}"
 
 # Определение актуального имени контейнера: строго amnezia-awg2 (AWG 2.0 / 3.x)
 detect_amnezia_container() {
-    if [[ -n "$AMNEZIA_CONTAINER_OVERRIDE" ]]; then
-        echo "$AMNEZIA_CONTAINER_OVERRIDE"
-        return 0
-    fi
     echo "amnezia-awg2"
 }
 

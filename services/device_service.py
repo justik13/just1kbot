@@ -269,7 +269,7 @@ class DeviceService:
             server_name_snapshot=server.name,
             api_url_snapshot=server.api_url,
             api_key_snapshot=server.api_key,
-            payload={"desired_version": 1},
+            payload={"desired_version": 1, "protocol": server.protocol},
         )
         if not is_admin(user.telegram_id):
             user.device_creations_today += 1
@@ -520,6 +520,7 @@ class DeviceService:
             payload={
                 "desired_version": 1,
                 "migrating_from_id": old_profile.id,
+                "protocol": target_server.protocol,
             },
         )
 

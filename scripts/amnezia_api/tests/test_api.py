@@ -532,6 +532,18 @@ def test_server_endpoint(mock_awg_env):
     assert info.get_effective_max_peers() == data["maxPeers"]
 
 
+def test_server_endpoint_awg3_1_detection(mock_awg_env):
+    conf_file = mock_awg_env["conf_file"]
+    # Insert AWG 3.1 exclusive key in [Interface] section
+    content = SAMPLE_AWG0_CONF.replace("[Interface]\n", "[Interface]\nRandomTrailers = 1\n")
+    conf_file.write_text(content, encoding="utf-8")
+    client = TestClient(amnezia_app.app)
+    resp = client.get("/server", headers={"x-api-key": "secret-test-api-key"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["protocols"] == ["amneziawg2", "amneziawg3", "amneziawg3.1"]
+
+
 def test_server_load_endpoint(mock_awg_env):
     client = TestClient(amnezia_app.app)
     resp = client.get("/server/load", headers={"x-api-key": "secret-test-api-key"})
@@ -976,7 +988,7 @@ async def test_sync_kernel_peer_add_without_psk(monkeypatch):
         pubkey="testpubkey123=",
         ip="10.8.1.5",
         psk="",
-        container="amnezia-awg",
+        container="amnezia-awg2",
     )
     assert success is True
     assert len(captured_commands) == 1
