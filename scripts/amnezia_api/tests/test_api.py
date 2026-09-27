@@ -314,14 +314,22 @@ def test_build_client_configs_and_vpn_uri_awg2():
     assert last_cfg["client_pub_key"] == "pubkey25="
     assert last_cfg["clientId"] == "pubkey25="
     assert last_cfg["allowed_ips"] == ["0.0.0.0/0", "::/0"]
-    assert last_cfg["mtu"] == 1280
-    assert last_cfg["persistent_keep_alive"] == 25
+    assert last_cfg["mtu"] == "1280"
+    assert last_cfg["persistent_keep_alive"] == "25"
     assert last_cfg["port"] == 31999
+    assert last_cfg["Jc"] == "4"
+    assert last_cfg["S3"] == "49"
     assert last_cfg["I2"] == ""
+
+    # 3-way consistency check across raw conf, awg dict, and last_config
+    for k in ("Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4"):
+        assert awg[k] == str(interface_params[k])
+        assert last_cfg[k] == str(interface_params[k])
+        assert f"{k} = {interface_params[k]}" in raw_conf
 
 
 def test_build_client_configs_and_vpn_uri_awg3():
-    """Verify AWG 3.x key generation upgrades container to amnezia-awg3 and detects 3.0 vs 3.1."""
+    """Verify AWG 3.x key generation preserves container amnezia-awg2 and detects 3.0 vs 3.1."""
     client = {
         "clientIp": "10.8.1.5",
         "clientPrivKey": "privkey5=",
@@ -359,13 +367,15 @@ def test_build_client_configs_and_vpn_uri_awg3():
     assert "HeaderProtectionKey = hpk_test=" in raw_conf
     assert vpn_uri.startswith("vpn://")
     decoded = decode_vpn_uri(vpn_uri)
-    assert decoded["defaultContainer"] == "amnezia-awg3"
+    # Container MUST remain amnezia-awg2 for native Amnezia client compatibility
+    assert decoded["defaultContainer"] == "amnezia-awg2"
     awg = decoded["containers"][0]["awg"]
     assert awg["protocol_version"] == "3.0"
     assert awg["HeaderProtectionKey"] == "hpk_test="
     last_cfg = json.loads(awg["last_config"])
     assert last_cfg["HeaderProtectionKey"] == "hpk_test="
-    assert last_cfg["Jc"] == 4
+    assert last_cfg["Jc"] == "4"
+    assert last_cfg["port"] == 44321
 
     # AWG 3.1 (with RandomTrailers)
     interface_params_31 = dict(interface_params_30)
@@ -380,9 +390,11 @@ def test_build_client_configs_and_vpn_uri_awg3():
         container_name="amnezia-awg2",
     )
     decoded_31 = decode_vpn_uri(vpn_uri_31)
-    assert decoded_31["defaultContainer"] == "amnezia-awg3"
+    assert decoded_31["defaultContainer"] == "amnezia-awg2"
     assert decoded_31["containers"][0]["awg"]["protocol_version"] == "3.1"
     assert decoded_31["containers"][0]["awg"]["RandomTrailers"] == "1"
+    last_cfg_31 = json.loads(decoded_31["containers"][0]["awg"]["last_config"])
+    assert last_cfg_31["RandomTrailers"] == "1"
 
 
 # =============================================================================

@@ -51,11 +51,17 @@ def detect_awg_version(params: dict[str, Any]) -> str:
         v = params.get(k)
         if v is None or v == "":
             v = params.get(k.upper())
-        return v is not None and v != ""
+        if v is None:
+            return False
+        # For toggle/integer keys (RandomTrailers, DisableCookies), "0" means disabled
+        if k in ("RandomTrailers", "DisableCookies") and str(v).strip() in ("0", "false", "False", ""):
+            return False
+        return str(v).strip() != ""
 
-    if any(has(k) for k in AWG3_1_EXCLUSIVE_KEYS):
+    pv = str(params.get("protocol_version", "")).strip()
+    if any(has(k) for k in AWG3_1_EXCLUSIVE_KEYS) or pv == "3.1":
         return "3.1"
-    if any(has(k) for k in AWG3_0_EXCLUSIVE_KEYS):
+    if any(has(k) for k in AWG3_0_EXCLUSIVE_KEYS) or pv in ("3", "3.0"):
         return "3.0"
 
     if has("S3") or has("S4"):
@@ -64,7 +70,7 @@ def detect_awg_version(params: dict[str, Any]) -> str:
         val = str(params.get(h) or params.get(h.upper()) or "")
         if "-" in val:
             return "2.0"
-    if str(params.get("protocol_version", "")) in ("2", "2.0"):
+    if pv in ("2", "2.0"):
         return "2.0"
 
     if any(has(f"I{i}") for i in range(1, 6)):
@@ -196,7 +202,7 @@ def _build_conf_fallback(data: dict, last_config: dict, awg: dict | None = None)
     if awg and ver == "2.0" and not (last_config.get("S3") or last_config.get("S4")):
         ver = detect_awg_version(awg)
 
-    if ver == "1.0":
+    if ver in ("1.0", "1.5"):
         awg_required_keys = ["Jc", "Jmin", "Jmax", "S1", "S2", "H1", "H2", "H3", "H4"]
     else:
         awg_required_keys = ["Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4"]
@@ -315,12 +321,12 @@ def is_valid_vpn_uri(uri: str) -> bool:
         awg = _get_first_awg_container(data)
         if not awg:
             return False
-        protocol_version = str(awg.get("protocol_version", ""))
-        if protocol_version in ("2", "2.0", "3", "3.0", "3.1"):
-            return True
         last_config = _parse_last_config(awg)
         if not last_config:
             return False
+        config_str = last_config.get("config")
+        if _looks_like_awg_conf(config_str):
+            return True
         fallback_conf = _build_conf_fallback(data, last_config, awg)
         if fallback_conf and _looks_like_awg_conf(fallback_conf):
             return True

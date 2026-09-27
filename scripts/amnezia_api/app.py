@@ -61,11 +61,17 @@ def detect_awg_version(params: dict[str, Any]) -> str:
         v = params.get(k)
         if v is None or v == "":
             v = params.get(k.upper())
-        return v is not None and v != ""
+        if v is None:
+            return False
+        # For toggle/integer keys (RandomTrailers, DisableCookies), "0" means disabled
+        if k in ("RandomTrailers", "DisableCookies") and str(v).strip() in ("0", "false", "False", ""):
+            return False
+        return str(v).strip() != ""
 
-    if any(has(k) for k in AWG3_1_EXCLUSIVE_KEYS):
+    pv = str(params.get("protocol_version", "")).strip()
+    if any(has(k) for k in AWG3_1_EXCLUSIVE_KEYS) or pv == "3.1":
         return "3.1"
-    if any(has(k) for k in AWG3_0_EXCLUSIVE_KEYS):
+    if any(has(k) for k in AWG3_0_EXCLUSIVE_KEYS) or pv in ("3", "3.0"):
         return "3.0"
 
     # Check AWG 2.0: S3/S4 present, ranged headers (e.g. "lo-hi"), or protocol_version == "2"
@@ -75,7 +81,7 @@ def detect_awg_version(params: dict[str, Any]) -> str:
         val = str(params.get(h) or params.get(h.upper()) or "")
         if "-" in val:
             return "2.0"
-    if str(params.get("protocol_version", "")) in ("2", "2.0"):
+    if pv in ("2", "2.0"):
         return "2.0"
 
     # Check AWG 1.5: I1..I5 present
@@ -665,11 +671,7 @@ def build_client_configs(
     has_awg3 = awg_ver.startswith("3")
     protocol_version = awg_ver if has_awg3 else "2"
 
-    effective_container = container_name
-    if has_awg3 and container_name == "amnezia-awg2":
-        effective_container = "amnezia-awg3"
-    elif not has_awg3 and container_name == "amnezia-awg3":
-        effective_container = "amnezia-awg2"
+    effective_container = container_name or "amnezia-awg2"
 
     # For AWG 2.0 and AWG 3.x, ensure I1..I5 exist in mapping (empty string if not explicitly defined)
     if "S3" in detected_awg or "S4" in detected_awg or has_awg3 or any(f"I{i}" in detected_awg for i in range(1, 6)):
@@ -712,9 +714,8 @@ def build_client_configs(
     ])
     raw_conf = "\n".join(conf_lines) + "\n"
 
-    # Construct last_config preserving all 28 parameters strictly mirroring the container
+    # Construct last_config strictly matching amnezia-client string contract and k1 reference
     clean_client_ip = client_ip.split("/")[0] if client_ip else ""
-    mtu_int = int(mtu_val) if str(mtu_val).isdigit() else 1280
     last_config_data: dict[str, Any] = {
         "clientId": client_pub,
         "client_ip": clean_client_ip,
@@ -724,31 +725,16 @@ def build_client_configs(
         "psk_key": psk,
         "hostName": host_name,
         "port": port_int,
-        "mtu": mtu_int,
+        "mtu": str(mtu_val),
         "allowed_ips": ["0.0.0.0/0", "::/0"],
-        "persistent_keep_alive": 25,
+        "persistent_keep_alive": "25",
         "config": raw_conf,
     }
 
-    # Mirror AWG parameters into last_config (int for numeric jitter/sizes like Jc, S1..S4, str for ranges/signatures)
-    for k in ("Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4"):
-        if k in detected_awg:
-            v = detected_awg[k]
-            last_config_data[k] = int(v) if str(v).isdigit() else v
-
-    for k in ("H1", "H2", "H3", "H4"):
+    # All AWG parameters in last_config are STRINGS, strictly matching amnezia-client QJsonValue::toString() and reference k1
+    for k in awg_keys:
         if k in detected_awg:
             last_config_data[k] = str(detected_awg[k])
-
-    for i in range(1, 6):
-        ik = f"I{i}"
-        if ik in detected_awg:
-            last_config_data[ik] = str(detected_awg[ik])
-
-    for k in AWG3_EXCLUSIVE_KEYS:
-        if k in detected_awg:
-            v = detected_awg[k]
-            last_config_data[k] = int(v) if str(v).isdigit() else str(v)
 
     # Top-level awg dict mirroring
     awg_container_dict: dict[str, Any] = {

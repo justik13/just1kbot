@@ -197,38 +197,95 @@ class VPNParserTests(unittest.TestCase):
         # AWG 1.0
         self.assertEqual(detect_awg_version({"Jc": "4", "S1": "15", "H1": "123"}), "1.0")
 
+        # Toggle semantics: 0 or false means disabled
+        self.assertEqual(detect_awg_version({"RandomTrailers": "0"}), "2.0")
+        self.assertEqual(detect_awg_version({"DisableCookies": "0"}), "2.0")
+        self.assertEqual(detect_awg_version({"RandomTrailers": "false"}), "2.0")
+        self.assertEqual(detect_awg_version({"RandomTrailers": ""}), "2.0")
+
+        # Explicit protocol_version
+        self.assertEqual(detect_awg_version({"protocol_version": "3.1"}), "3.1")
+        self.assertEqual(detect_awg_version({"protocol_version": "3.0"}), "3.0")
+        self.assertEqual(detect_awg_version({"protocol_version": "3"}), "3.0")
+
     def test_is_valid_vpn_uri_awg2_and_awg3(self):
         from utils.vpn_parser import encode_json_to_vpn_uri, is_valid_vpn_uri
 
-        # AWG 2.0 URI
+        valid_raw_conf = "[Interface]\nPrivateKey = priv=\nAddress = 10.8.1.2/32\n[Peer]\nPublicKey = pub=\nEndpoint = 1.2.3.4:51820\n"
+
+        # Valid AWG 2.0 URI with valid config in last_config
         awg2_data = {
             "containers": [{
                 "container": "amnezia-awg2",
-                "awg": {"protocol_version": "2", "last_config": "{}"},
+                "awg": {"protocol_version": "2", "last_config": json.dumps({"config": valid_raw_conf})},
             }]
         }
         awg2_uri = encode_json_to_vpn_uri(awg2_data)
         self.assertTrue(is_valid_vpn_uri(awg2_uri))
 
-        # AWG 3.0 URI
+        # Valid AWG 3.0 URI
         awg3_data = {
             "containers": [{
-                "container": "amnezia-awg3",
-                "awg": {"protocol_version": "3.0", "last_config": "{}"},
+                "container": "amnezia-awg2",
+                "awg": {"protocol_version": "3.0", "last_config": json.dumps({"config": valid_raw_conf})},
             }]
         }
         awg3_uri = encode_json_to_vpn_uri(awg3_data)
         self.assertTrue(is_valid_vpn_uri(awg3_uri))
 
-        # AWG 3.1 URI
+        # Valid AWG 3.1 URI
         awg31_data = {
             "containers": [{
-                "container": "amnezia-awg3",
-                "awg": {"protocol_version": "3.1", "last_config": "{}"},
+                "container": "amnezia-awg2",
+                "awg": {"protocol_version": "3.1", "last_config": json.dumps({"config": valid_raw_conf})},
             }]
         }
         awg31_uri = encode_json_to_vpn_uri(awg31_data)
         self.assertTrue(is_valid_vpn_uri(awg31_uri))
+
+        # Empty last_config must be rejected
+        empty_data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {"protocol_version": "2", "last_config": "{}"},
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(empty_data)))
+
+        # Invalid JSON in last_config must be rejected
+        broken_json_data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {"protocol_version": "2", "last_config": "not_json"},
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(broken_json_data)))
+
+    def test_build_conf_fallback_awg1_5_without_s3_s4(self):
+        from utils.vpn_parser import _build_conf_fallback
+        data = {"dns1": "1.1.1.1", "dns2": "1.0.0.1"}
+        last_config = {
+            "client_priv_key": "c_priv",
+            "server_pub_key": "s_pub",
+            "hostName": "vpn.example.com",
+            "port": 51820,
+            "client_ip": "10.8.0.2/32",
+            "Jc": "4",
+            "Jmin": "10",
+            "Jmax": "50",
+            "S1": "15",
+            "S2": "20",
+            "H1": "100",
+            "H2": "200",
+            "H3": "300",
+            "H4": "400",
+            "I1": "sig1",
+        }
+        conf = _build_conf_fallback(data, last_config)
+        self.assertIsNotNone(conf)
+        self.assertIn("[Interface]", conf)
+        self.assertIn("I1 = sig1", conf)
+        self.assertNotIn("S3 =", conf)
 
     def test_k1_reference_decoding_and_customization(self):
         """Verify real-world working AmneziaWG 2.0 reference key decodes and customizes correctly."""
