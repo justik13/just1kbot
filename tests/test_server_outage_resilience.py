@@ -345,6 +345,15 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(is_server_allocatable(s_xray_origin, AMNEZIA_PROTOCOL))
 
+        # Valid AWG3 server allocatable under AMNEZIA_PROTOCOL
+        s_awg3 = Server(
+            id=6, name="DE", protocol="amneziawg3", is_active=True,
+            health_state=ServerHealthState.ONLINE, lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=[]
+        )
+        self.assertTrue(is_server_allocatable(s_awg3, AMNEZIA_PROTOCOL))
+        self.assertTrue(is_server_allocatable(s_awg3, "amneziawg3"))
+
     async def test_ping_server_checks_circuit_breaker_availability(self):
         """Admin ping_server respects circuit breaker availability."""
         from bot import texts

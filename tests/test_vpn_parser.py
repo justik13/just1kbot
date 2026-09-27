@@ -334,10 +334,10 @@ class VPNParserTests(unittest.TestCase):
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(empty_data)))
 
-        # 6. Reject amnezia-awg3 container
+        # 6. Reject unsupported container (e.g. unknown-container) and accept amnezia-awg3
         bad_container_data = {
             "containers": [{
-                "container": "amnezia-awg3",
+                "container": "unknown-container",
                 "awg": {
                     "protocol_version": "3.1",
                     "last_config": json.dumps(awg31_last_cfg),
@@ -345,6 +345,15 @@ class VPNParserTests(unittest.TestCase):
             }]
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(bad_container_data)))
+
+        # 6b. Accept valid amnezia-awg3 container
+        awg3_container_data = {
+            "containers": [{
+                "container": "amnezia-awg3",
+                "awg": dict(awg31_data["containers"][0]["awg"]),
+            }]
+        }
+        self.assertTrue(is_valid_vpn_uri(encode_json_to_vpn_uri(awg3_container_data)))
 
         # 7. Reject missing S3/S4 for AWG 2.0
         missing_s3_cfg = dict(base_last_cfg)
@@ -531,10 +540,10 @@ class VPNParserTests(unittest.TestCase):
         display_key_3 = build_display_vpn_uri(profile)
         self.assertTrue(display_key_3.startswith("vpn://"))
 
-        # Unsupported container name (e.g. invalid "amnezia-awg3")
+        # Unsupported container name (e.g. invalid "unknown-container")
         bad_container_key = encode_json_to_vpn_uri({
             "containers": [{
-                "container": "amnezia-awg3",
+                "container": "unknown-container",
                 "awg": {"protocol_version": "3.1"},
             }],
         })

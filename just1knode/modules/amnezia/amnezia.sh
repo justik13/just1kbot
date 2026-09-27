@@ -806,9 +806,9 @@ psk = data.get('server_psk')
 if not conf or '[Interface]' not in conf:
     sys.exit(1)
 
-conf_name = 'wg0.conf' if ('awg2' not in c and 'awg3' not in c) else 'awg0.conf'
-iface = 'wg0' if ('awg2' not in c and 'awg3' not in c) else 'awg0'
-tool = 'wg' if ('awg2' not in c and 'awg3' not in c) else 'awg'
+conf_name = 'wg0.conf' if 'awg2' not in c else 'awg0.conf'
+iface = 'wg0' if 'awg2' not in c else 'awg0'
+tool = 'wg' if 'awg2' not in c else 'awg'
 conf_path = f'/opt/amnezia/awg/{conf_name}'
 
 p = subprocess.Popen(['docker', 'exec', '-i', c, 'sh', '-c', f'cat > {conf_path}'], stdin=subprocess.PIPE)

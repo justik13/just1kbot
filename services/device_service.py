@@ -8,7 +8,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT, AdminAuditAction
+from config.constants import (
+    AMNEZIA_PROTOCOL,
+    AMNEZIA_PROTOCOLS,
+    DEVICE_DAILY_LIMIT,
+    AdminAuditAction,
+)
 from database.models import APIOperation, Server, User, VPNProfile
 from database.repositories.profiles_repo import (
     ALLOWED_DELETE_STATES,
@@ -109,7 +114,7 @@ class DeviceService:
         server = (
             await session.execute(
                 select(Server)
-                .where(Server.id == server_id, Server.protocol == AMNEZIA_PROTOCOL)
+                .where(Server.id == server_id, Server.protocol.in_(AMNEZIA_PROTOCOLS))
                 .with_for_update()
             )
         ).scalar_one_or_none()
@@ -384,7 +389,7 @@ class DeviceService:
         target_server = (
             await session.execute(
                 select(Server)
-                .where(Server.id == target_server_id, Server.protocol == AMNEZIA_PROTOCOL)
+                .where(Server.id == target_server_id, Server.protocol.in_(AMNEZIA_PROTOCOLS))
                 .with_for_update()
             )
         ).scalar_one_or_none()

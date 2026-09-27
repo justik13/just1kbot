@@ -617,7 +617,7 @@ def encode_vpn_uri(data: dict[str, Any]) -> str:
     """Encode connection profile into Amnezia vpn:// URI."""
     json_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
     orig_len = len(json_bytes)
-    compressed = zlib.compress(json_bytes)
+    compressed = zlib.compress(json_bytes, level=8)
     payload = struct.pack(">I", orig_len) + compressed
     b64_url = (
         base64.urlsafe_b64encode(payload)
@@ -669,7 +669,7 @@ def build_client_configs(
     if missing_base_keys:
         logger.error("Server interface missing mandatory AWG 2.0+ parameters: %s", missing_base_keys)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
             detail=f"Server interface missing mandatory AWG 2.0+ parameters: {', '.join(missing_base_keys)}",
         )
 
@@ -680,7 +680,7 @@ def build_client_configs(
         if not hpk or str(hpk).strip() == "":
             logger.error("Server interface has AWG 3.x parameters but is missing mandatory HeaderProtectionKey")
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
                 detail="Server interface is missing mandatory HeaderProtectionKey for AWG 3.x",
             )
 
@@ -858,7 +858,14 @@ async def syncconf_container(container: str, conf_path: str) -> bool:
     return rc == 0
 
 
+_cached_public_ip: str | None = None
+
+
 async def _fetch_public_ip_async() -> str:
+    global _cached_public_ip
+    if _cached_public_ip:
+        return _cached_public_ip
+
     for url in ("https://ifconfig.me", "https://icanhazip.com", "https://api.ipify.org"):
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -869,6 +876,7 @@ async def _fetch_public_ip_async() -> str:
             stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
             ip = stdout_b.decode("utf-8", errors="ignore").strip()
             if ip and not ip.startswith("<") and len(ip.split(".")) == 4:
+                _cached_public_ip = ip
                 return ip
         except Exception:
             continue

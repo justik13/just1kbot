@@ -27,6 +27,7 @@ from bot.texts.runtime.alerts import (
 )
 from config.constants import (
     AMNEZIA_PROTOCOL,
+    AMNEZIA_PROTOCOLS,
     ServerHealthState,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     XRAY_PROTOCOL,
@@ -228,7 +229,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             server_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
 
         is_xray_node = server_proto == XRAY_PROTOCOL
-        is_amnezia_node = server_proto == AMNEZIA_PROTOCOL
+        is_amnezia_node = server_proto in AMNEZIA_PROTOCOLS
 
         if not is_xray_node and not is_amnezia_node:
             logger.warning(

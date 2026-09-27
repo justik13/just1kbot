@@ -10,7 +10,7 @@ from bot import texts
 from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from config.constants import AMNEZIA_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS
 from config.enums import WhiteInternetStatus
 from database.models import (
     APIOperation,
@@ -444,7 +444,7 @@ async def process_edit_server_url(
 
         return
 
-    if server.protocol == AMNEZIA_PROTOCOL:
+    if server.protocol in AMNEZIA_PROTOCOLS:
         client = AmneziaClient(new_url, server.api_key)
 
         if not await client.healthcheck():
@@ -745,7 +745,7 @@ async def process_edit_server_key(
         return
 
 
-    if server.protocol == AMNEZIA_PROTOCOL:
+    if server.protocol in AMNEZIA_PROTOCOLS:
         client = AmneziaClient(server.api_url, new_key)
 
         if not await client.healthcheck():

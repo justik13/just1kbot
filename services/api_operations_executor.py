@@ -101,12 +101,12 @@ async def _client(op):
     # The durable operation always executes against its immutable snapshot.
     # The current Server row is used only to detect identity changes when snapshot exists.
     if op.server_id:
-        from config.constants import AMNEZIA_PROTOCOL
+        from config.constants import AMNEZIA_PROTOCOLS
 
         async with session_scope() as session:
             server = await session.get(Server, op.server_id)
             if server is not None:
-                if server.protocol not in (AMNEZIA_PROTOCOL, "amneziawg3", "amneziawg"):
+                if server.protocol not in AMNEZIA_PROTOCOLS:
                     logger.error(
                         "Refusing to execute Amnezia ApiOperation on non-Amnezia server %s (%s, protocol=%s)",
                         server.id,

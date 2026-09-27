@@ -1,7 +1,7 @@
 import json
 import re
 
-from config.constants import AMNEZIA_PROTOCOL, MAX_RAW_CONFIG_BYTES
+from config.constants import AMNEZIA_PROTOCOLS, MAX_RAW_CONFIG_BYTES
 from database.models import VPNProfile
 from utils.vpn_parser import (
     customize_vpn_uri,
@@ -24,7 +24,11 @@ def _get_awg_block(data: dict) -> dict | None:
     containers = data.get("containers", [])
     if isinstance(containers, list):
         for container in containers:
-            if isinstance(container, dict) and container.get("container") in ("amnezia-awg2", "amnezia-awg"):
+            if isinstance(container, dict) and container.get("container") in (
+                "amnezia-awg2",
+                "amnezia-awg",
+                "amnezia-awg3",
+            ):
                 awg = container.get("awg")
                 if isinstance(awg, dict):
                     return awg
@@ -63,7 +67,7 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
     """
     if not profile or not profile.server:
         raise InvalidAmneziaProfileError("Profile server must be eagerly loaded")
-    if profile.server.protocol not in (AMNEZIA_PROTOCOL, "amneziawg3", "amneziawg"):
+    if profile.server.protocol not in AMNEZIA_PROTOCOLS:
         raise InvalidAmneziaProfileError(
             f"Unsupported protocol for Amnezia display URI: {profile.server.protocol}"
         )

@@ -15,7 +15,7 @@ from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_migration_targets_keyboard
 from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
 from bot.states import AdminStates
-from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOLS, XRAY_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, WhiteInternetSubscription
 from database.repositories.servers_repo import (
@@ -260,7 +260,7 @@ async def ping_server(
 
     start_t = time.monotonic()
     try:
-        if server.protocol == AMNEZIA_PROTOCOL:
+        if server.protocol in AMNEZIA_PROTOCOLS:
             from services.amnezia_client import AmneziaClient, is_server_circuit_available
 
             if not await is_server_circuit_available(server.api_url):

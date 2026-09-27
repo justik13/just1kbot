@@ -126,30 +126,54 @@ def _looks_like_awg_conf(conf: str | None, last_config: dict | None = None) -> b
         return False
     if "[Interface]" not in conf or "[Peer]" not in conf:
         return False
-    if "PrivateKey" not in conf or "Address" not in conf:
+
+    current_section = None
+    interface_params: dict[str, str] = {}
+    peer_params: dict[str, str] = {}
+
+    for raw_line in conf.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current_section = line[1:-1].strip()
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if current_section == "Interface":
+                interface_params[k] = v
+            elif current_section == "Peer":
+                peer_params[k] = v
+
+    if "PrivateKey" not in interface_params or "Address" not in interface_params:
         return False
-    if "PublicKey" not in conf or "Endpoint" not in conf:
+    if "PublicKey" not in peer_params or "Endpoint" not in peer_params:
         return False
 
     # All AWG 2.0+ mandatory obfuscation parameters must be present in [Interface]
     for k in AWG_MANDATORY_BASE_KEYS:
-        if f"{k} =" not in conf and f"{k}=" not in conf:
+        if not interface_params.get(k):
             return False
 
     # If last_config is provided, perform strict consistency check
     if last_config:
         priv = last_config.get("client_priv_key")
-        if priv and f"PrivateKey = {priv}" not in conf and f"PrivateKey={priv}" not in conf:
+        if priv and interface_params.get("PrivateKey") != priv:
             return False
         pub = last_config.get("server_pub_key")
-        if pub and f"PublicKey = {pub}" not in conf and f"PublicKey={pub}" not in conf:
+        if pub and peer_params.get("PublicKey") != pub:
             return False
         ip = str(last_config.get("client_ip", "")).split("/")[0].strip()
-        if ip and ip not in conf:
+        if ip and ip not in interface_params.get("Address", ""):
             return False
         for k in AWG_MANDATORY_BASE_KEYS:
             val = str(last_config.get(k, "")).strip()
-            if val and (f"{k} = {val}" not in conf and f"{k}={val}" not in conf):
+            if val and interface_params.get(k) != val:
+                return False
+        hpk = last_config.get("HeaderProtectionKey")
+        if hpk and str(hpk).strip():
+            if interface_params.get("HeaderProtectionKey") != str(hpk).strip():
                 return False
 
     return True
@@ -340,7 +364,7 @@ def is_valid_vpn_uri(uri: str) -> bool:
             return False
 
         def_container = data.get("defaultContainer")
-        if def_container and def_container not in ("amnezia-awg2", "amnezia-awg"):
+        if def_container and def_container not in ("amnezia-awg2", "amnezia-awg", "amnezia-awg3"):
             return False
 
         containers = data.get("containers")
@@ -352,7 +376,7 @@ def is_valid_vpn_uri(uri: str) -> bool:
             if not isinstance(c, dict):
                 continue
             c_name = c.get("container")
-            if c_name in ("amnezia-awg2", "amnezia-awg"):
+            if c_name in ("amnezia-awg2", "amnezia-awg", "amnezia-awg3"):
                 if isinstance(c.get("awg"), dict):
                     awg_container = c
                     break
@@ -363,7 +387,7 @@ def is_valid_vpn_uri(uri: str) -> bool:
         proto_ver = str(awg.get("protocol_version", "")).strip()
         c_name = awg_container.get("container")
 
-        if c_name == "amnezia-awg2":
+        if c_name in ("amnezia-awg2", "amnezia-awg3"):
             if proto_ver not in ("2", "2.0", "3", "3.0", "3.1"):
                 return False
         elif c_name == "amnezia-awg":
@@ -399,8 +423,12 @@ def is_valid_vpn_uri(uri: str) -> bool:
                 return False
 
         # Check AWG 3.x specific key in last_config
-        ver = detect_awg_version(last_config)
-        if ver.startswith("3"):
+        is_awg3 = (
+            proto_ver in ("3", "3.0", "3.1")
+            or detect_awg_version(awg).startswith("3")
+            or detect_awg_version(last_config).startswith("3")
+        )
+        if is_awg3:
             hpk = last_config.get("HeaderProtectionKey")
             if not hpk or str(hpk).strip() == "":
                 return False
@@ -421,7 +449,7 @@ def is_valid_vpn_uri(uri: str) -> bool:
         except (ValueError, TypeError):
             return False
 
-        if ver.startswith("3"):
+        if is_awg3:
             hpk_awg = awg.get("HeaderProtectionKey")
             if not hpk_awg or str(hpk_awg).strip() != str(last_config.get("HeaderProtectionKey", "")).strip():
                 return False
