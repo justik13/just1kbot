@@ -56,6 +56,13 @@ acquire_just1knode_lock() {
     fi
 }
 
+release_just1knode_lock() {
+    if command -v flock >/dev/null 2>&1; then
+        flock -u "$JUST1KNODE_LOCK_FD" 2>/dev/null || true
+    fi
+    eval "exec ${JUST1KNODE_LOCK_FD}>&-" 2>/dev/null || true
+}
+
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         error "Скрипт должен быть запущен с правами root (используйте: sudo just1knode)"

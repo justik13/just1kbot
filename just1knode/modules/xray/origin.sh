@@ -740,7 +740,7 @@ set_origin_bot_ip() {
     fi
 
     log "Применение нового правила фаервола UFW для порта 8444 ($new_bot_ip)..."
-    # Шаг 1: Добавляем новое правило ПЕРВЫМ
+    # Шаг 1: Добавляем новое правило ПЕРВЫМ (не ломая старый доступ)
     if ! ufw allow from "$new_bot_ip" to any port 8444 proto tcp; then
         release_just1knode_lock
         error "Сбой выполнения команды 'ufw allow' для IP $new_bot_ip. Предыдущие правила сохранены."
@@ -749,20 +749,27 @@ set_origin_bot_ip() {
 
     # Шаг 2: Верифицируем, что правило реально появилось в UFW
     if ! ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "8444"; then
+        ufw delete allow from "$new_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
         release_just1knode_lock
-        error "Верификация не пройдена: правило для $new_bot_ip на порт 8444 отсутствует в UFW."
+        error "Верификация не пройдена: правило для $new_bot_ip на порт 8444 отсутствует в UFW. Изменение откатано."
         return 1
     fi
 
-    # Шаг 3: Только после успешной верификации удаляем старое и широкие правила
+    # Шаг 3: Атомарно фиксируем новый IP в state.json перед удалением старых правил
+    if ! set_state_val "bot_ip" "$new_bot_ip"; then
+        ufw delete allow from "$new_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+        release_just1knode_lock
+        error "Сбой сохранения bot_ip в state.json. Новое правило для $new_bot_ip откатано, старый доступ сохранен."
+        return 1
+    fi
+
+    # Шаг 4: Только после успешной фиксации состояния удаляем старое и широкие правила
     if [[ -n "$old_bot_ip" && "$old_bot_ip" != "$new_bot_ip" && "$old_bot_ip" != "any" && "$old_bot_ip" != "-" ]]; then
         ufw delete allow from "$old_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
     fi
     ufw delete allow 8444/tcp 2>/dev/null || true
     ufw delete allow 8444 2>/dev/null || true
 
-    # Шаг 4: Атомарно фиксируем новый IP в state.json
-    set_state_val "bot_ip" "$new_bot_ip"
     log "BOT_IP успешно обновлен и зафиксирован в state.json: ${old_bot_ip:-не был задан} -> ${new_bot_ip}"
     release_just1knode_lock
 }

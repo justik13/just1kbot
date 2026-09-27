@@ -97,6 +97,7 @@ class DockerComposeSecurityTests(unittest.TestCase):
         # 2. Lock synchronization and fail-closed security
         self.assertIn("acquire_just1knode_lock", origin_sh)
         self.assertIn("release_just1knode_lock", origin_sh)
+        self.assertIn("release_just1knode_lock", common_sh)
         self.assertIn("validate_ipv4", common_sh)
         self.assertIn("validate_ipv4 \"$new_bot_ip\"", origin_sh)
         self.assertIn("Status: active", origin_sh)
