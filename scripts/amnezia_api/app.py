@@ -138,10 +138,8 @@ state_lock = asyncio.Lock()
 
 
 def get_target_container() -> str:
-    """Return effective container name, defaulting to amnezia-awg2."""
-    if AWG_CONTAINER_NAME:
-        return AWG_CONTAINER_NAME
-    return "amnezia-awg2"
+    """Return effective container name (strictly amnezia-awg2 for AmneziaWG)."""
+    return AWG_CONTAINER_NAME or "amnezia-awg2"
 
 
 def get_interface_name(container: str | None = None) -> str:
@@ -243,7 +241,7 @@ class ClientPatchRequest(BaseModel):
     protocol: str = "amneziawg2"
 
 
-SUPPORTED_PROTOCOLS = {"amneziawg2", "amneziawg3", "amneziawg3.1", "awg", "amneziawg"}
+SUPPORTED_PROTOCOLS = {"amneziawg2", "amneziawg3", "amneziawg3.1"}
 
 
 class ServerBackupImportRequest(BaseModel):

@@ -36,13 +36,17 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
     def tearDownClass(cls):
         cls.env_patcher.stop()
 
-    def test_amnezia_protocols_set_contains_all_generations(self):
-        """Invariant: AMNEZIA_PROTOCOLS contains all AWG generation identifiers."""
-        self.assertIn(AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS)
-        self.assertIn("awg", AMNEZIA_PROTOCOLS)
-        self.assertIn("amneziawg", AMNEZIA_PROTOCOLS)
-        self.assertIn("amneziawg2", AMNEZIA_PROTOCOLS)
-        self.assertIn("amneziawg3", AMNEZIA_PROTOCOLS)
+    def test_amnezia_protocols_set_strict_awg2_plus(self):
+        """Invariant: AMNEZIA_PROTOCOLS strictly contains modern AWG 2.0+ (no legacy awg/amneziawg/wg)."""
+        from config.constants import AMNEZIA_DOCKER_CONTAINER
+
+        self.assertEqual(AMNEZIA_DOCKER_CONTAINER, "amnezia-awg2")
+        self.assertEqual(AMNEZIA_PROTOCOL, "amneziawg2")
+        self.assertEqual(set(AMNEZIA_PROTOCOLS), {"amneziawg2", "amneziawg3", "amneziawg3.1"})
+        self.assertNotIn("awg", AMNEZIA_PROTOCOLS)
+        self.assertNotIn("amneziawg", AMNEZIA_PROTOCOLS)
+        self.assertNotIn("wg", AMNEZIA_PROTOCOLS)
+        self.assertNotIn("wireguard", AMNEZIA_PROTOCOLS)
 
     def test_servers_repo_can_fulfill_protocol_strict_awg(self):
         """Invariant: Any protocol in AMNEZIA_PROTOCOLS is rejected on xray_origin servers."""
@@ -102,9 +106,9 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call_kwargs["json"]["protocol"], "amneziawg3")
 
             # 2. create_user_result overrides with explicit protocol
-            await client.create_user_result("user_1", protocol="awg")
+            await client.create_user_result("user_1", protocol="amneziawg3.1")
             call_kwargs = mock_req.call_args.kwargs
-            self.assertEqual(call_kwargs["json"]["protocol"], "awg")
+            self.assertEqual(call_kwargs["json"]["protocol"], "amneziawg3.1")
 
             # 3. delete_user_result uses client.protocol
             await client.delete_user_result("peer-1")

@@ -527,12 +527,16 @@ class VPNParserTests(unittest.TestCase):
 
     def test_build_display_vpn_uri_awg2_and_awg3(self):
         from unittest.mock import MagicMock
-        from utils.vpn_helpers import build_display_vpn_uri, InvalidAmneziaConfigError
+        from utils.vpn_helpers import (
+            InvalidAmneziaConfigError,
+            InvalidAmneziaProfileError,
+            build_display_vpn_uri,
+        )
         from utils.vpn_parser import encode_json_to_vpn_uri
 
         profile = MagicMock()
         profile.server = MagicMock()
-        profile.server.protocol = "amneziawg"
+        profile.server.protocol = "amneziawg2"
         profile.server.name = "Frankfurt"
         profile.device_name = "Frankfurt #3"
 
@@ -595,6 +599,16 @@ class VPNParserTests(unittest.TestCase):
         })
         profile.raw_config = bad_key
         with self.assertRaises(InvalidAmneziaConfigError):
+            build_display_vpn_uri(profile)
+
+        # Legacy protocols (awg, amneziawg) are strictly rejected
+        profile.server.protocol = "amneziawg"
+        profile.raw_config = awg2_key
+        with self.assertRaises(InvalidAmneziaProfileError):
+            build_display_vpn_uri(profile)
+
+        profile.server.protocol = "awg"
+        with self.assertRaises(InvalidAmneziaProfileError):
             build_display_vpn_uri(profile)
 
     def test_is_valid_awg_key(self):

@@ -1088,6 +1088,15 @@ def test_create_and_patch_client_unsupported_protocol_rejects_422(mock_awg_env):
     assert resp1.status_code == 422
     assert "unsupported protocol" in resp1.json()["detail"].lower()
 
+    # 1b. create_client with legacy 'awg' protocol alias is rejected with 422
+    resp_legacy = client.post(
+        "/clients",
+        json={"clientName": "legacy_awg", "protocol": "awg"},
+        headers=headers,
+    )
+    assert resp_legacy.status_code == 422
+    assert "unsupported protocol" in resp_legacy.json()["detail"].lower()
+
     # 2. patch_client with unsupported protocol
     peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
     resp2 = client.patch(

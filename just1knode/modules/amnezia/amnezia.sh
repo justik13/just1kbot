@@ -11,29 +11,11 @@ AMNEZIA_CONTAINER_OVERRIDE="${AMNEZIA_CONTAINER:-}"
 AMNEZIA_PUBLIC_PORT="${AMNEZIA_PUBLIC_PORT:-8443}"
 AMNEZIA_LOCAL_PORT="${AMNEZIA_LOCAL_PORT:-4001}"
 
-# Определение актуального имени контейнера: в приоритете amnezia-awg2 (AWG 2.0 / 3.x), затем amnezia-awg
+# Определение актуального имени контейнера: строго amnezia-awg2 (AWG 2.0 / 3.x)
 detect_amnezia_container() {
     if [[ -n "$AMNEZIA_CONTAINER_OVERRIDE" ]]; then
         echo "$AMNEZIA_CONTAINER_OVERRIDE"
         return 0
-    fi
-    if command -v docker >/dev/null 2>&1; then
-        if docker ps --filter "name=^/amnezia-awg2$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg2$"; then
-            echo "amnezia-awg2"
-            return 0
-        fi
-        if docker ps --filter "name=^/amnezia-awg$" --filter "status=running" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg$"; then
-            echo "amnezia-awg"
-            return 0
-        fi
-        if docker ps -a --filter "name=^/amnezia-awg2$" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg2$"; then
-            echo "amnezia-awg2"
-            return 0
-        fi
-        if docker ps -a --filter "name=^/amnezia-awg$" --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-awg$"; then
-            echo "amnezia-awg"
-            return 0
-        fi
     fi
     echo "amnezia-awg2"
 }
@@ -176,14 +158,11 @@ install_amnezia_node() {
 
     # 2. Проверка конфигурационного файла внутри контейнера (или на хосте)
     local conf_in_container="/opt/amnezia/awg/awg0.conf"
-    if [[ "$target_container" == "amnezia-awg" ]]; then
-        conf_in_container="/opt/amnezia/awg/wg0.conf"
-    fi
 
     local conf_found=0
     if docker exec "$target_container" test -f "$conf_in_container" 2>/dev/null; then
         conf_found=1
-    elif [[ -f "/opt/amnezia/awg/awg0.conf" || -f "/opt/amnezia/awg/wg0.conf" ]]; then
+    elif [[ -f "/opt/amnezia/awg/awg0.conf" ]]; then
         conf_found=1
     fi
 
@@ -719,11 +698,8 @@ backup_amnezia_node() {
         c="$(detect_amnezia_container)"
         if is_amnezia_container_running; then
             local conf_file="/opt/amnezia/awg/awg0.conf"
-            if [[ "$c" == "amnezia-awg" ]]; then
-                conf_file="/opt/amnezia/awg/wg0.conf"
-            fi
             local conf_txt
-            conf_txt="$(docker exec "$c" cat "$conf_file" 2>/dev/null || docker exec "$c" cat /opt/amnezia/awg/awg0.conf 2>/dev/null || docker exec "$c" cat /opt/amnezia/awg/wg0.conf 2>/dev/null || true)"
+            conf_txt="$(docker exec "$c" cat "$conf_file" 2>/dev/null || true)"
             local table_txt
             table_txt="$(docker exec "$c" cat /opt/amnezia/awg/clientsTable 2>/dev/null || echo "[]")"
             local psk_txt

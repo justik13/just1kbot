@@ -49,9 +49,8 @@ AMNEZIA_PROTOCOLS: tuple[str, ...] = (
     AMNEZIA_PROTOCOL,
     "amneziawg3",
     "amneziawg3.1",
-    "amneziawg",
-    "awg",
 )
+AMNEZIA_DOCKER_CONTAINER = "amnezia-awg2"
 XRAY_PROTOCOL = "xray"
 
 # Default AmneziaWG Client Network Settings
@@ -226,6 +225,7 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
 
 
 __all__ = [
+    "AMNEZIA_DOCKER_CONTAINER",
     "AMNEZIA_PROTOCOL",
     "AMNEZIA_PROTOCOLS",
     "API_CONCURRENCY_LIMIT",

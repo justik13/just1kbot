@@ -491,7 +491,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         """When cached_used is None, server card peers button must not show DB count as peer count."""
         from bot.handlers.admin.servers import common
 
-        server = SimpleNamespace(id=9, name="Norway", country_flag="🇳🇴", is_active=True, max_clients=240, protocol="awg", api_url="https://no.example")
+        server = SimpleNamespace(id=9, name="Norway", country_flag="🇳🇴", is_active=True, max_clients=240, protocol="amneziawg2", api_url="https://no.example")
         session = AsyncMock()
         callback = SimpleNamespace(
             from_user=SimpleNamespace(id=1),

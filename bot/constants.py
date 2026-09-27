@@ -4,6 +4,7 @@ All canonical system and operational constants are defined in config.constants (
 """
 
 from config.constants import (
+    AMNEZIA_DOCKER_CONTAINER,
     AMNEZIA_PROTOCOL,
     AMNEZIA_PROTOCOLS,
     API_CONCURRENCY_LIMIT,
@@ -64,6 +65,7 @@ from config.constants import (
 
 
 __all__ = [
+    "AMNEZIA_DOCKER_CONTAINER",
     "AMNEZIA_PROTOCOL",
     "AMNEZIA_PROTOCOLS",
     "API_CONCURRENCY_LIMIT",
