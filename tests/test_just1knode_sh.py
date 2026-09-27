@@ -57,7 +57,7 @@ class TestJust1kNodeScript(unittest.TestCase):
 
     def _create_mock_script(self, name: str, content: str) -> Path:
         script_path = self.bin_dir / name
-        with open(script_path, "w", encoding="utf-8") as f:
+        with open(script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(content)
         script_path.chmod(0o755)
         return script_path
@@ -157,30 +157,38 @@ exit 0
         backup_dir_val = extra_env.get("BACKUP_DIR", str(self.backup_dir)) if extra_env else str(self.backup_dir)
         state_dir_val = extra_env.get("STATE_DIR", str(self.state_dir)) if extra_env else str(self.state_dir)
 
+        def _bp(p: Path | str) -> str:
+            p_str = str(p).replace("\\", "/")
+            if os.name == "nt" and re.match(r"^[a-zA-Z]:", p_str):
+                drive = p_str[0].lower()
+                return f"/mnt/{drive}{p_str[2:]}"
+            return p_str
+
         # Source just1knode.sh functions and run snippet with root bypass for testing
         full_script = f"""
-export STATE_DIR='{state_dir_val}'
-export STATE_FILE='{self.state_dir / "state.json"}'
-export CLIENTS_FILE='{self.state_dir / "clients.json"}'
-export RELAYS_FILE='{self.state_dir / "relays.json"}'
-export XRAY_CONFIG_DIR='{self.xray_config_dir}'
-export XRAY_CONFIG='{self.xray_config_dir / "config.json"}'
-export XRAY_SHARE_DIR='{self.xray_share_dir}'
-export XRAY_BIN='{self.bin_dir / "xray"}'
-export BACKUP_DIR='{backup_dir_val}'
-export NGINX_CONF_DIR='{self.nginx_conf_dir}'
-export NGINX_RELAYS_DIR='{self.nginx_relays_d}'
-export XRAY_API_DIR='{self.xray_api_dir}'
-export XRAY_API_LIB='{self.xray_api_lib}'
-export XRAY_API_ETC='{self.xray_api_etc}'
-export XRAY_API_CONFIG_ENV='{self.xray_api_etc / "config.env"}'
-export SYSTEMD_SYSTEM_DIR='{self.systemd_dir}'
-export CERTBOT_DIR='{self.certbot_dir}'
-export LETSENCRYPT_DIR='{self.letsencrypt_dir}'
-export WWW_HTML_DIR='{self.www_html_dir}'
-export INSTALL_DIR='{self.install_dir}'
+export PATH='{_bp(self.bin_dir)}':"$PATH"
+export STATE_DIR='{_bp(state_dir_val)}'
+export STATE_FILE='{_bp(self.state_dir / "state.json")}'
+export CLIENTS_FILE='{_bp(self.state_dir / "clients.json")}'
+export RELAYS_FILE='{_bp(self.state_dir / "relays.json")}'
+export XRAY_CONFIG_DIR='{_bp(self.xray_config_dir)}'
+export XRAY_CONFIG='{_bp(self.xray_config_dir / "config.json")}'
+export XRAY_SHARE_DIR='{_bp(self.xray_share_dir)}'
+export XRAY_BIN='{_bp(self.bin_dir / "xray")}'
+export BACKUP_DIR='{_bp(backup_dir_val)}'
+export NGINX_CONF_DIR='{_bp(self.nginx_conf_dir)}'
+export NGINX_RELAYS_DIR='{_bp(self.nginx_relays_d)}'
+export XRAY_API_DIR='{_bp(self.xray_api_dir)}'
+export XRAY_API_LIB='{_bp(self.xray_api_lib)}'
+export XRAY_API_ETC='{_bp(self.xray_api_etc)}'
+export XRAY_API_CONFIG_ENV='{_bp(self.xray_api_etc / "config.env")}'
+export SYSTEMD_SYSTEM_DIR='{_bp(self.systemd_dir)}'
+export CERTBOT_DIR='{_bp(self.certbot_dir)}'
+export LETSENCRYPT_DIR='{_bp(self.letsencrypt_dir)}'
+export WWW_HTML_DIR='{_bp(self.www_html_dir)}'
+export INSTALL_DIR='{_bp(self.install_dir)}'
 
-source '{JUST1KNODE_SH}'
+source '{_bp(JUST1KNODE_SH)}'
 
 check_root() {{ return 0; }}
 install_base_deps() {{ return 0; }}
@@ -197,6 +205,8 @@ ensure_xrayapi_user() {{ return 0; }}
             input=input_text if input_text is not None else "",
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
             check=False,
         )
@@ -391,12 +401,22 @@ exit 0
         self.assertIn("domain:2ip.ru", direct_rule["domain"])
         self.assertIn("just1k-wl-inbound-de", direct_rule["inboundTag"])
 
-        # 3. Check Split-DNS and skipFallback
+        # 3. Check Split-DNS and skipFallback (domestic resolvers only, no foreign 1.1.1.1)
         self.assertEqual(updated["dns"]["queryStrategy"], "UseIPv4")
         ru_server = updated["dns"]["servers"][0]
         self.assertEqual(ru_server["address"], "77.88.8.8")
         self.assertIn("domain:2ip.ru", ru_server["domains"])
         self.assertTrue(ru_server.get("skipFallback"))
+        self.assertNotIn("1.1.1.1", updated["dns"]["servers"])
+        self.assertIn("195.208.4.1", updated["dns"]["servers"])
+
+        # 3b. Verify ip_rule (geoip:ru) excludes relay inbounds to prevent DNS resolution on Origin
+        ip_rule = next(
+            (r for r in updated["routing"]["rules"] if r.get("outboundTag") == "just1k-wl-direct" and "ip" in r),
+            None,
+        )
+        if ip_rule:
+            self.assertNotIn("just1k-wl-inbound-de", ip_rule.get("inboundTag", []))
 
         # 4. Check sniffing routeOnly == False and quic on client inbounds
         for ib in updated["inbounds"]:
@@ -1146,6 +1166,17 @@ run_doctor
         self.assertIsNotNone(default_rule)
         self.assertEqual(default_rule["outboundTag"], "just1k-wl-direct")
 
+        # Verify DNS on Origin has no foreign resolvers
+        self.assertNotIn("1.1.1.1", xray_conf["dns"]["servers"])
+        self.assertIn("195.208.4.1", xray_conf["dns"]["servers"])
+
+        # Verify relay inbound is NOT in ip_rule (geoip:ru) to prevent foreign DNS leaks on Origin
+        ip_rule = next(
+            (r for r in rules if r.get("outboundTag") == "just1k-wl-direct" and "ip" in r), None
+        )
+        if ip_rule:
+            self.assertNotIn("just1k-wl-inbound-de", ip_rule.get("inboundTag", []))
+
     # -------------------------------------------------------------------------
     # Functional Validation: Role Guard in manage_relays_menu
     # -------------------------------------------------------------------------
@@ -1228,6 +1259,17 @@ run_doctor
         rule_outbounds = [r.get("outboundTag") for r in rules]
         self.assertIn("just1k-wl-outbound-de", rule_outbounds)
         self.assertIn("just1k-wl-outbound-ee", rule_outbounds)
+
+        # Invariant: Relay routing rules must precede any IP-based rules to ensure foreign domains
+        # are forwarded by FQDN to Europe without triggering DNS resolution on the Origin node
+        de_idx = next(i for i, r in enumerate(rules) if r.get("outboundTag") == "just1k-wl-outbound-de")
+        ip_rules = [i for i, r in enumerate(rules) if r.get("outboundTag") == "just1k-wl-direct" and "ip" in r]
+        for ip_idx in ip_rules:
+            self.assertLess(de_idx, ip_idx, "Relay outbound rule must precede IP matching rules")
+
+        # Invariant: Origin DNS servers must not contain foreign resolvers
+        self.assertNotIn("1.1.1.1", cfg["dns"]["servers"])
+        self.assertIn("195.208.4.1", cfg["dns"]["servers"])
 
     def test_auto_heal_relays_registry_when_corrupted(self):
         self._prepare_base_env()

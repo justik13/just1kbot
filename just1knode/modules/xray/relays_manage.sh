@@ -303,11 +303,18 @@ rules = [r for r in rules if r.get('outboundTag') != out_tag]
 
 for r in rules:
     if r.get('outboundTag') == 'just1k-wl-direct':
-        existing_ib = r.get('inboundTag', [])
-        if isinstance(existing_ib, list) and in_tag not in existing_ib:
-            r['inboundTag'] = existing_ib + [in_tag]
-        if 'domain' in r and 'domain:2ip.ru' not in r['domain']:
-            r['domain'].append('domain:2ip.ru')
+        # Relay inbounds MUST ONLY be in domain-based direct rules (ru_domains), NEVER in ip-based rules!
+        if 'domain' in r:
+            existing_ib = r.get('inboundTag', [])
+            if isinstance(existing_ib, list) and in_tag not in existing_ib:
+                r['inboundTag'] = existing_ib + [in_tag]
+            if 'domain:2ip.ru' not in r['domain']:
+                r['domain'].append('domain:2ip.ru')
+        elif 'ip' in r:
+            # Exclude relay inbounds from geoip:ru to prevent Origin from resolving foreign domains
+            existing_ib = r.get('inboundTag', [])
+            if isinstance(existing_ib, list) and in_tag in existing_ib:
+                r['inboundTag'] = [t for t in existing_ib if t != in_tag]
 
 # Запрет BitTorrent (P2P трафик)
 if not any(r.get('protocol') == ['bittorrent'] for r in rules):
@@ -317,9 +324,14 @@ if not any(r.get('protocol') == ['bittorrent'] for r in rules):
         'outboundTag': 'just1k-wl-block'
     })
 
-# Вставляем правило выхода на Relay СТРОГО ПОСЛЕ правил прямого выхода в Рунет
-direct_indices = [i for i, r in enumerate(rules) if r.get('outboundTag') == 'just1k-wl-direct']
-insert_idx = (max(direct_indices) + 1) if direct_indices else 0
+# Вставляем правило выхода на Relay СТРОГО ПОСЛЕ правил прямого выхода для доменов РФ (dom_rule),
+# но ДО любых IP-based правил, чтобы исключить DNS-резолвинг на Origin
+dom_rule = next((r for r in rules if r.get('outboundTag') == 'just1k-wl-direct' and 'domain' in r), None)
+if dom_rule:
+    insert_idx = rules.index(dom_rule) + 1
+else:
+    direct_indices = [i for i, r in enumerate(rules) if r.get('outboundTag') == 'just1k-wl-direct']
+    insert_idx = (min(direct_indices) + 1) if direct_indices else 0
 
 rules.insert(insert_idx, {
     'type': 'field',
@@ -363,7 +375,7 @@ dns_conf['servers'] = [
         ],
         'skipFallback': True
     },
-    '1.1.1.1',
+    '195.208.4.1',
     'localhost'
 ]
 dns_conf['queryStrategy'] = 'UseIPv4'

@@ -211,8 +211,8 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertIn("'geosite:category-ru'", sh_content)
         self.assertIn("'geosite:tld-ru'", sh_content)
         self.assertIn("'outboundTag': 'just1k-wl-direct'", sh_content)
-        # Verify relay outbound rule is inserted after direct rules
-        self.assertIn("insert_idx = (max(direct_indices) + 1) if direct_indices else 0", sh_content)
+        # Verify relay outbound rule is inserted after dom_rule (direct Russian domains) and before IP rules to prevent foreign DNS leaks
+        self.assertIn("insert_idx = rules.index(dom_rule) + 1", sh_content)
 
     def test_client_dns_fakedns_and_routing_architecture(self) -> None:
         """Client routing and DNS must use FakeDNS, DoH via proxy, and no Yandex DNS leaks."""

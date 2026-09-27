@@ -441,7 +441,7 @@ dns_conf['servers'] = [
         ],
         'skipFallback': True
     },
-    '1.1.1.1',
+    '195.208.4.1',
     'localhost'
 ]
 dns_conf['queryStrategy'] = 'UseIPv4'
@@ -825,7 +825,7 @@ for ib in inbounds:
             'routeOnly': False
         }
 
-# 3. DNS: Split-DNS с UseIPv4 и skipFallback для доменов РФ
+# 3. DNS: Split-DNS с UseIPv4 и skipFallback для доменов РФ (строго отечественные резолверы)
 cfg['dns'] = {
     'servers': [
         {
@@ -841,7 +841,7 @@ cfg['dns'] = {
             ],
             'skipFallback': True
         },
-        '1.1.1.1',
+        '195.208.4.1',
         'localhost'
     ],
     'queryStrategy': 'UseIPv4'
@@ -891,30 +891,53 @@ if not dom_rule:
         'domain': ru_domains,
         'outboundTag': 'just1k-wl-direct'
     }
-    rules.insert(3, dom_rule)
+    rules.insert(2, dom_rule)
 else:
     dom_rule['domain'] = list(dict.fromkeys(dom_rule.get('domain', []) + ru_domains))
     curr_ib = dom_rule.get('inboundTag', [])
     dom_rule['inboundTag'] = list(dict.fromkeys((curr_ib if isinstance(curr_ib, list) else [curr_ib]) + known_client_inbounds))
 
-# 4.3. Правило Direct для IP РФ (geoip:ru)
+# 4.3. Правила маршрутизации для каждого индивидуального релея (делегирование зарубежного трафика и DNS в Европу)
+# Правила релея располагаются СТРОГО сразу после dom_rule и ДО любых ip-правил,
+# чтобы зарубежные запросы клиентов с тегом just1k-wl-inbound-* направлялись на Relay по FQDN без DNS-резолвинга на Origin в РФ
+dom_idx = rules.index(dom_rule)
+relay_offset = 1
+for r in relays:
+    if not isinstance(r, dict): continue
+    code = r.get('code')
+    if not code: continue
+    in_tag = 'just1k-wl-inbound-' + str(code)
+    out_tag = 'just1k-wl-outbound-' + str(code)
+    rules = [rl for rl in rules if not (rl.get('inboundTag') == [in_tag] and rl.get('outboundTag') == out_tag)]
+    dom_idx = rules.index(dom_rule)
+    rules.insert(dom_idx + relay_offset, {
+        'type': 'field',
+        'inboundTag': [in_tag],
+        'outboundTag': out_tag
+    })
+    relay_offset += 1
+
+# 4.4. Правило Direct для IP РФ (geoip:ru) — строго для прямого трафика РФ (just1k-wl-default)
 ip_rule = next((r for r in rules if r.get('outboundTag') == 'just1k-wl-direct' and 'ip' in r), None)
 if not ip_rule:
     ip_rule = {
         'type': 'field',
-        'inboundTag': list(known_client_inbounds),
+        'inboundTag': ['just1k-wl-default'],
         'ip': ['geoip:ru'],
         'outboundTag': 'just1k-wl-direct'
     }
-    dom_idx = rules.index(dom_rule)
-    rules.insert(dom_idx + 1, ip_rule)
+    rules.append(ip_rule)
 else:
     if 'geoip:ru' not in ip_rule.get('ip', []):
         ip_rule.setdefault('ip', []).append('geoip:ru')
+    # Исключаем relay inbounds из ip_rule во избежание DNS-резолвинга зарубежных доменов на Origin в РФ
     curr_ib = ip_rule.get('inboundTag', [])
-    ip_rule['inboundTag'] = list(dict.fromkeys((curr_ib if isinstance(curr_ib, list) else [curr_ib]) + known_client_inbounds))
+    clean_ib = [t for t in (curr_ib if isinstance(curr_ib, list) else [curr_ib]) if not str(t).startswith('just1k-wl-inbound-')]
+    if 'just1k-wl-default' not in clean_ib:
+        clean_ib.append('just1k-wl-default')
+    ip_rule['inboundTag'] = clean_ib
 
-# 4.4. Дефолтное правило для just1k-wl-default (Россия — прямой выход с московского IP)
+# 4.5. Дефолтное правило для just1k-wl-default (Россия — прямой выход с московского IP)
 def_rule = next((r for r in rules if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r), None)
 if not def_rule:
     rules.append({
@@ -925,19 +948,7 @@ if not def_rule:
 else:
     def_rule['outboundTag'] = 'just1k-wl-direct'
 
-# 4.5. Правила маршрутизации для каждого индивидуального релея
-for r in relays:
-    if not isinstance(r, dict): continue
-    code = r.get('code')
-    if not code: continue
-    in_tag = 'just1k-wl-inbound-' + str(code)
-    out_tag = 'just1k-wl-outbound-' + str(code)
-    if not any(rl.get('inboundTag') == [in_tag] and rl.get('outboundTag') == out_tag for rl in rules):
-        rules.append({
-            'type': 'field',
-            'inboundTag': [in_tag],
-            'outboundTag': out_tag
-        })
+cfg['routing']['rules'] = rules
 
 # Атомарное сохранение конфигурации Xray
 d = os.path.dirname(os.path.abspath(cfg_file))
