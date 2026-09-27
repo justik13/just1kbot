@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 def _is_usable_created_config(config: str | None) -> bool:
     """
     Валидация созданной конфигурации AmneziaWG:
-    - Валидный vpn:// URI с AWG контейнером (is_valid_vpn_uri).
-    - Сырой WireGuard/AmneziaWG INI файл ([Interface] и [Peer]).
+    - Валидный vpn:// URI с AWG2+ контейнером (is_valid_vpn_uri).
+    - Сырой WireGuard/AmneziaWG INI файл с обязательными секциями, ключами и AWG-параметрами.
     """
     if not config or not isinstance(config, str):
         return False
@@ -43,7 +43,8 @@ def _is_usable_created_config(config: str | None) -> bool:
     if is_valid_vpn_uri(conf):
         return True
     if "[Interface]" in conf and "[Peer]" in conf:
-        return True
+        if "PrivateKey" in conf and "PublicKey" in conf and "Address" in conf and "Endpoint" in conf:
+            return True
     return False
 
 
@@ -108,7 +109,7 @@ async def _client(op):
         async with session_scope() as session:
             server = await session.get(Server, op.server_id)
             if server is not None:
-                if server.protocol != AMNEZIA_PROTOCOL:
+                if server.protocol not in (AMNEZIA_PROTOCOL, "amneziawg3", "amneziawg"):
                     logger.error(
                         "Refusing to execute Amnezia ApiOperation on non-Amnezia server %s (%s, protocol=%s)",
                         server.id,

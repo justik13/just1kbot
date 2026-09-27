@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -25,11 +26,61 @@ from utils.vpn_parser import encode_json_to_vpn_uri
 
 
 def _make_valid_vpn_uri() -> str:
+    last_cfg = {
+        "client_priv_key": "c_priv_key=",
+        "client_pub_key": "c_pub_key=",
+        "server_pub_key": "s_pub_key=",
+        "client_ip": "10.8.1.25",
+        "hostName": "vpn.node.com",
+        "port": 51820,
+        "mtu": "1280",
+        "persistent_keep_alive": "25",
+        "Jc": "4",
+        "Jmin": "10",
+        "Jmax": "50",
+        "S1": "87",
+        "S2": "61",
+        "S3": "49",
+        "S4": "1",
+        "H1": "100-200",
+        "H2": "300-400",
+        "H3": "500-600",
+        "H4": "700-800",
+    }
+    conf = (
+        "[Interface]\n"
+        "PrivateKey = c_priv_key=\n"
+        "Address = 10.8.1.25/32\n"
+        "DNS = 8.8.8.8, 8.8.4.4\n"
+        "MTU = 1280\n"
+        "Jc = 4\nJmin = 10\nJmax = 50\nS1 = 87\nS2 = 61\nS3 = 49\nS4 = 1\n"
+        "H1 = 100-200\nH2 = 300-400\nH3 = 500-600\nH4 = 700-800\n\n"
+        "[Peer]\n"
+        "PublicKey = s_pub_key=\n"
+        "AllowedIPs = 0.0.0.0/0, ::/0\n"
+        "Endpoint = vpn.node.com:51820\n"
+        "PersistentKeepalive = 25\n"
+    )
+    last_cfg["config"] = conf
     return encode_json_to_vpn_uri({
+        "defaultContainer": "amnezia-awg2",
         "containers": [{
+            "container": "amnezia-awg2",
             "awg": {
-                "protocol_version": 2,
-                "last_config": "{\"config\": \"[Interface]\\nPrivateKey = test\\n[Peer]\\nPublicKey = test\\n\"}"
+                "protocol_version": "2",
+                "port": "51820",
+                "Jc": "4",
+                "Jmin": "10",
+                "Jmax": "50",
+                "S1": "87",
+                "S2": "61",
+                "S3": "49",
+                "S4": "1",
+                "H1": "100-200",
+                "H2": "300-400",
+                "H3": "500-600",
+                "H4": "700-800",
+                "last_config": json.dumps(last_cfg),
             }
         }]
     })

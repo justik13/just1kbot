@@ -24,7 +24,7 @@ def _get_awg_block(data: dict) -> dict | None:
     containers = data.get("containers", [])
     if isinstance(containers, list):
         for container in containers:
-            if isinstance(container, dict):
+            if isinstance(container, dict) and container.get("container") in ("amnezia-awg2", "amnezia-awg"):
                 awg = container.get("awg")
                 if isinstance(awg, dict):
                     return awg
@@ -63,7 +63,7 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
     """
     if not profile or not profile.server:
         raise InvalidAmneziaProfileError("Profile server must be eagerly loaded")
-    if profile.server.protocol != AMNEZIA_PROTOCOL:
+    if profile.server.protocol not in (AMNEZIA_PROTOCOL, "amneziawg3", "amneziawg"):
         raise InvalidAmneziaProfileError(
             f"Unsupported protocol for Amnezia display URI: {profile.server.protocol}"
         )
@@ -81,8 +81,11 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
         raise InvalidAmneziaConfigError("raw_config failed JSON decode")
 
     awg = _get_awg_block(data)
-    if not awg or str(awg.get("protocol_version")) != "2":
-        raise InvalidAmneziaConfigError("raw_config is not an AWG2 container (protocol_version != 2)")
+    proto_ver = str(awg.get("protocol_version")) if awg else ""
+    if not awg or proto_ver not in ("2", "2.0", "3", "3.0", "3.1"):
+        raise InvalidAmneziaConfigError(
+            f"raw_config is not a supported AWG container (protocol_version={proto_ver})"
+        )
 
     # Preserve exact legacy naming semantics (no .strip() on server.name)
     server_name = profile.server.name if profile.server.name else "server"
@@ -107,8 +110,11 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
         raise InvalidAmneziaConfigError("customized display_key failed JSON decode")
 
     customized_awg = _get_awg_block(customized_data)
-    if not customized_awg or str(customized_awg.get("protocol_version")) != "2":
-        raise InvalidAmneziaConfigError("customized display_key is not valid AWG2")
+    customized_proto_ver = str(customized_awg.get("protocol_version")) if customized_awg else ""
+    if not customized_awg or customized_proto_ver not in ("2", "2.0", "3", "3.0", "3.1"):
+        raise InvalidAmneziaConfigError(
+            f"customized display_key is not valid AWG (protocol_version={customized_proto_ver})"
+        )
 
     if customized_data.get("description") != client_description:
         raise InvalidAmneziaConfigError("customized display_key description mismatch")

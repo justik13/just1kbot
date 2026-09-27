@@ -34,22 +34,63 @@ from fastapi import Depends, FastAPI, HTTPException, Header, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-AWG3_EXCLUSIVE_KEYS = (
-    "HeaderProtectionKey",
-    "ContentPaddingAddition",
-    "RekeyAfterTime",
-    "RekeyTimeout",
-    "RejectAfterTime",
-    "KeepaliveTimeout",
-    "MaxHandshakeAttempts",
+AWG3_1_EXCLUSIVE_KEYS = (
     "RandomTrailers",
     "DisableCookies",
 )
 
+try:
+    from utils.vpn_parser import (
+        AWG3_0_EXCLUSIVE_KEYS,
+        AWG3_1_EXCLUSIVE_KEYS,
+        AWG3_EXCLUSIVE_KEYS,
+        detect_awg_version,
+    )
+except ImportError:
+    # Standalone mode on isolated node VPS
+    AWG3_1_EXCLUSIVE_KEYS = (
+        "RandomTrailers",
+        "DisableCookies",
+    )
+    AWG3_0_EXCLUSIVE_KEYS = (
+        "HeaderProtectionKey",
+        "ContentPaddingAddition",
+        "RekeyAfterTime",
+        "RekeyTimeout",
+        "RejectAfterTime",
+        "KeepaliveTimeout",
+        "MaxHandshakeAttempts",
+    )
+    AWG3_EXCLUSIVE_KEYS = AWG3_1_EXCLUSIVE_KEYS + AWG3_0_EXCLUSIVE_KEYS
+
+    def detect_awg_version(params: dict[str, Any]) -> str:
+        """Detect AWG protocol version ('3.1', '3.0', '2.0') adhering to Any-Tech-ARCHITECT specifications."""
+        if not isinstance(params, dict):
+            return "2.0"
+
+        def has(k: str) -> bool:
+            v = params.get(k)
+            if v is None or v == "":
+                v = params.get(k.upper())
+            if v is None:
+                return False
+            # For toggle/integer keys (RandomTrailers, DisableCookies), "0" means disabled
+            if k in ("RandomTrailers", "DisableCookies") and str(v).strip() in ("0", "false", "False", ""):
+                return False
+            return str(v).strip() != ""
+
+        pv = str(params.get("protocol_version", "")).strip()
+        if any(has(k) for k in AWG3_1_EXCLUSIVE_KEYS) or pv == "3.1":
+            return "3.1"
+        if any(has(k) for k in AWG3_0_EXCLUSIVE_KEYS) or pv in ("3", "3.0"):
+            return "3.0"
+
+        return "2.0"
+
 
 def is_awg3_detected(params: dict[str, Any]) -> bool:
-    """Detect if AWG 3.x exclusive parameters are present (I1..I5 belong to AWG 2.0)."""
-    return any(k in params or k.upper() in params for k in AWG3_EXCLUSIVE_KEYS)
+    """Detect if AWG 3.x exclusive parameters are present (backward compatible helper)."""
+    return detect_awg_version(params).startswith("3")
 
 
 @contextlib.contextmanager
@@ -615,19 +656,42 @@ def build_client_configs(
     detected_awg: dict[str, str] = {}
     for k in awg_keys:
         if k in iface:
-            detected_awg[k] = iface[k]
+            detected_awg[k] = str(iface[k])
         elif k.upper() in iface:
-            detected_awg[k] = iface[k.upper()]
+            detected_awg[k] = str(iface[k.upper()])
+
+    awg_ver = detect_awg_version(detected_awg if detected_awg else iface)
+    has_awg3 = awg_ver.startswith("3")
+    protocol_version = awg_ver if has_awg3 else "2"
+
+    effective_container = container_name or "amnezia-awg2"
+
+    # For AWG 2.0 and AWG 3.x, ensure I1..I5 exist in mapping (empty string if not explicitly defined)
+    if "S3" in detected_awg or "S4" in detected_awg or has_awg3 or any(f"I{i}" in detected_awg for i in range(1, 6)):
+        for i in range(1, 6):
+            ik = f"I{i}"
+            if ik not in detected_awg:
+                detected_awg[ik] = ""
+
+    mtu_val = iface.get("MTU", "1280")
+    if not mtu_val or not str(mtu_val).strip():
+        mtu_val = "1280"
 
     # Construct raw .conf
+    clean_ip = f"{client_ip}/32" if "/" not in client_ip else client_ip
     conf_lines = [
         "[Interface]",
-        f"Address = {client_ip}/32",
         f"DNS = {dns1}, {dns2}",
+        f"MTU = {mtu_val}",
+        f"Address = {clean_ip}",
         f"PrivateKey = {client_priv}",
     ]
-    for k, v in detected_awg.items():
-        conf_lines.append(f"{k} = {v}")
+    for k in awg_keys:
+        if k in detected_awg:
+            val = detected_awg[k]
+            # Include in .conf only if non-empty, avoiding invalid empty lines like "I2 = "
+            if val and str(val).strip():
+                conf_lines.append(f"{k} = {val}")
 
     conf_lines.extend([
         "",
@@ -643,22 +707,29 @@ def build_client_configs(
     ])
     raw_conf = "\n".join(conf_lines) + "\n"
 
-    # Determine protocol version for vpn:// (I1..I5 belong to AWG 2.0)
-    has_awg3 = is_awg3_detected(detected_awg)
-    protocol_version = "3.1" if has_awg3 else "2"
-
-    last_config_data = {
+    # Construct last_config strictly matching amnezia-client string contract and k1 reference
+    clean_client_ip = client_ip.split("/")[0] if client_ip else ""
+    last_config_data: dict[str, Any] = {
         "clientId": client_pub,
-        "client_ip": client_ip,
+        "client_ip": clean_client_ip,
         "client_priv_key": client_priv,
         "client_pub_key": client_pub,
-        "config": raw_conf,
+        "server_pub_key": server_pubkey,
+        "psk_key": psk,
         "hostName": host_name,
         "port": port_int,
-        "psk_key": psk,
-        "server_pub_key": server_pubkey,
+        "mtu": str(mtu_val),
+        "allowed_ips": ["0.0.0.0/0", "::/0"],
+        "persistent_keep_alive": "25",
+        "config": raw_conf,
     }
 
+    # All AWG parameters in last_config are STRINGS, strictly matching amnezia-client QJsonValue::toString() and reference k1
+    for k in awg_keys:
+        if k in detected_awg:
+            last_config_data[k] = str(detected_awg[k])
+
+    # Top-level awg dict mirroring
     awg_container_dict: dict[str, Any] = {
         "protocol_version": protocol_version,
         "port": str(port_int),
@@ -671,11 +742,11 @@ def build_client_configs(
     vpn_data = {
         "containers": [
             {
-                "container": container_name,
+                "container": effective_container,
                 "awg": awg_container_dict,
             }
         ],
-        "defaultContainer": container_name,
+        "defaultContainer": effective_container,
         "description": host_name,
         "dns1": dns1,
         "dns2": dns2,
