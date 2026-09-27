@@ -52,6 +52,32 @@ AWG_MANDATORY_BASE_KEYS = (
     "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4",
 )
 
+ALL_AWG_KEYS = (
+    "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4",
+    "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5",
+    "HeaderProtectionKey", "ContentPaddingAddition",
+    "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime",
+    "KeepaliveTimeout", "MaxHandshakeAttempts",
+    "RandomTrailers", "DisableCookies",
+)
+
+
+def is_valid_wg_key(key: str) -> bool:
+    """Validate 32-byte base64-encoded WireGuard / AmneziaWG key (X25519 or HeaderProtectionKey)."""
+    if not key or not isinstance(key, str):
+        return False
+    key_str = key.strip()
+    if len(key_str) != 44 or not key_str.endswith("="):
+        return False
+    try:
+        raw = base64.b64decode(key_str, validate=True)
+        return len(raw) == 32
+    except Exception:
+        return False
+
+
+_is_valid_wg_key = is_valid_wg_key
+
 
 def detect_awg_version(params: dict[str, Any]) -> str:
     """Detect AWG protocol version ('3.1', '3.0', '2.0') adhering to Any-Tech-ARCHITECT specifications."""

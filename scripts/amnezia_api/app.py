@@ -629,6 +629,20 @@ def encode_vpn_uri(data: dict[str, Any]) -> str:
     return f"vpn://{b64_url}"
 
 
+def _is_valid_wg_key(key: str) -> bool:
+    """Validate 32-byte base64-encoded WireGuard / AmneziaWG key."""
+    if not key or not isinstance(key, str):
+        return False
+    key_str = key.strip()
+    if len(key_str) != 44 or not key_str.endswith("="):
+        return False
+    try:
+        raw = base64.b64decode(key_str, validate=True)
+        return len(raw) == 32
+    except Exception:
+        return False
+
+
 def build_client_configs(
     client: dict[str, Any],
     iface: dict[str, str],
@@ -673,16 +687,61 @@ def build_client_configs(
             detail=f"Server interface missing mandatory AWG 2.0+ parameters: {', '.join(missing_base_keys)}",
         )
 
+    # Semantic range validation for AWG base parameters
+    # References: Any-Tech-ARCHITECT (awgValidate.ts) and upstream amneziawg-go / tools
+    try:
+        jc_val = int(detected_awg.get("Jc", 0))
+        if not (1 <= jc_val <= 128):
+            raise ValueError(f"Jc must be between 1 and 128 (got {jc_val})")
+        jmin_val = int(detected_awg.get("Jmin", 0))
+        jmax_val = int(detected_awg.get("Jmax", 0))
+        if not (0 <= jmin_val <= jmax_val <= 1280):
+            raise ValueError(f"Jmin/Jmax must satisfy 0 <= Jmin <= Jmax <= 1280 (got Jmin={jmin_val}, Jmax={jmax_val})")
+        for sk in ("S1", "S2"):
+            if int(detected_awg.get(sk, 0)) < 0:
+                raise ValueError(f"{sk} must be non-negative")
+    except (ValueError, TypeError) as exc:
+        logger.error("Server interface AWG base parameters range error: %s", exc)
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail=f"Invalid AWG base parameters: {exc}",
+        ) from exc
+
     awg_ver = detect_awg_version(detected_awg)
     has_awg3 = awg_ver.startswith("3")
     if has_awg3:
         hpk = detected_awg.get("HeaderProtectionKey")
-        if not hpk or str(hpk).strip() == "":
-            logger.error("Server interface has AWG 3.x parameters but is missing mandatory HeaderProtectionKey")
+        if not hpk or not _is_valid_wg_key(str(hpk)):
+            logger.error("Server interface has AWG 3.x parameters but is missing a valid 32-byte HeaderProtectionKey")
             raise HTTPException(
                 status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
-                detail="Server interface is missing mandatory HeaderProtectionKey for AWG 3.x",
+                detail="Server interface HeaderProtectionKey must be a valid 32-byte base64 WireGuard key for AWG 3.x",
             )
+
+        # ── CRITICAL CRYPTOGRAPHIC INVARIANT: S-padding floor under Header Protection ──
+        # References:
+        #   - amneziawg-go v3.0.1 (device/send.go & device/uapi.go)
+        #   - amneziawg-linux-kernel-module (src/netlink.c)
+        #   - Any-Tech-ARCHITECT (src/engines/awg/generator/awg3.ts:58-75)
+        #
+        # In AWG 3.0+, device/send.go constructs `crypt := buf[:padding]` and uses
+        # `crypt[:HeaderCipherNonceSize]` (12 bytes) as the ChaCha20 nonce for encrypting
+        # packet headers with HeaderProtectionKey.
+        # If any S1, S2, S3, S4 is less than 12 bytes, the nonce overlaps body payload,
+        # and both amneziawg-go UAPI and kernel netlink explicitly reject the configuration
+        # with `-EINVAL` / "S%d must be more then %d to use headerProtection".
+        # Therefore, when HeaderProtectionKey is set, all S parameters MUST be >= 12.
+        for sk in ("S1", "S2", "S3", "S4"):
+            s_val = detected_awg.get(sk)
+            try:
+                if s_val is None or int(s_val) < 12:
+                    raise ValueError(f"{sk} must be >= 12 when HeaderProtectionKey is set (got {s_val})")
+            except (ValueError, TypeError) as exc:
+                logger.error("AWG 3.x semantic constraint violation: %s", exc)
+                raise HTTPException(
+                    status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+                    detail=f"AWG 3.x constraint violation: {exc}",
+                ) from exc
 
     protocol_version = awg_ver if has_awg3 else "2"
 
@@ -858,12 +917,18 @@ async def syncconf_container(container: str, conf_path: str) -> bool:
     return rc == 0
 
 
+# Cache public IP for 5 minutes (300 seconds).
+# Rationale: Prevents expensive 3-4s external curl latency during peer creation bursts,
+# while allowing dynamic recovery if a VPS floating/public IP changes.
 _cached_public_ip: str | None = None
+_cached_public_ip_time: float = 0.0
+_PUBLIC_IP_CACHE_TTL_SEC: float = 300.0
 
 
 async def _fetch_public_ip_async() -> str:
-    global _cached_public_ip
-    if _cached_public_ip:
+    global _cached_public_ip, _cached_public_ip_time
+    now = time.monotonic()
+    if _cached_public_ip and (now - _cached_public_ip_time < _PUBLIC_IP_CACHE_TTL_SEC):
         return _cached_public_ip
 
     for url in ("https://ifconfig.me", "https://icanhazip.com", "https://api.ipify.org"):
@@ -877,6 +942,7 @@ async def _fetch_public_ip_async() -> str:
             ip = stdout_b.decode("utf-8", errors="ignore").strip()
             if ip and not ip.startswith("<") and len(ip.split(".")) == 4:
                 _cached_public_ip = ip
+                _cached_public_ip_time = now
                 return ip
         except Exception:
             continue
@@ -892,6 +958,8 @@ async def _fetch_public_ip_async() -> str:
         candidates = stdout_b.decode("utf-8", errors="ignore").strip().split()
         for cand in candidates:
             if cand and not cand.startswith("127.") and not cand.startswith("::") and len(cand.split(".")) == 4:
+                _cached_public_ip = cand
+                _cached_public_ip_time = now
                 return cand
     except Exception:
         pass

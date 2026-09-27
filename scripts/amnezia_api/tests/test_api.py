@@ -56,14 +56,14 @@ Jmin = 10
 Jmax = 50
 S1 = 79
 S2 = 115
-S3 = 5
-S4 = 1
+S3 = 45
+S4 = 30
 H1 = 169154911-1234371153
 H2 = 2057051984-2121122945
 H3 = 2132872968-2133668229
 H4 = 2136455412-2141801388
 # I1 = 1234
-HeaderProtectionKey = hpk_secret_key_123=
+HeaderProtectionKey = v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q=
 ContentPaddingAddition = 10-100
 
 [Peer]
@@ -154,10 +154,10 @@ def test_parse_awg_conf():
     assert iface["Jmin"] == "10"
     assert iface["Jmax"] == "50"
     assert iface["S1"] == "79"
-    assert iface["S4"] == "1"
+    assert iface["S4"] == "30"
     assert iface["H1"] == "169154911-1234371153"
     assert iface["I1"] == "1234"
-    assert iface["HeaderProtectionKey"] == "hpk_secret_key_123="
+    assert iface["HeaderProtectionKey"] == "v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q="
     assert iface["ContentPaddingAddition"] == "10-100"
 
     assert len(peers) == 1
@@ -337,6 +337,7 @@ def test_build_client_configs_and_vpn_uri_awg3():
         "psk": "psk5=",
     }
     # AWG 3.0 (with HeaderProtectionKey)
+    hpk_valid = "v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q="
     interface_params_30 = {
         "ListenPort": "44321",
         "Jc": "4",
@@ -344,14 +345,14 @@ def test_build_client_configs_and_vpn_uri_awg3():
         "Jmax": "50",
         "S1": "79",
         "S2": "115",
-        "S3": "5",
-        "S4": "1",
+        "S3": "45",
+        "S4": "30",
         "H1": "100-200",
         "H2": "300-400",
         "H3": "500-600",
         "H4": "700-800",
         "I1": "9999",
-        "HeaderProtectionKey": "hpk_test=",
+        "HeaderProtectionKey": hpk_valid,
     }
     raw_conf, vpn_uri = amnezia_app.build_client_configs(
         client,
@@ -364,16 +365,16 @@ def test_build_client_configs_and_vpn_uri_awg3():
     )
 
     assert "[Interface]" in raw_conf
-    assert "HeaderProtectionKey = hpk_test=" in raw_conf
+    assert f"HeaderProtectionKey = {hpk_valid}" in raw_conf
     assert vpn_uri.startswith("vpn://")
     decoded = decode_vpn_uri(vpn_uri)
     # Container MUST remain amnezia-awg2 for native Amnezia client compatibility
     assert decoded["defaultContainer"] == "amnezia-awg2"
     awg = decoded["containers"][0]["awg"]
     assert awg["protocol_version"] == "3.0"
-    assert awg["HeaderProtectionKey"] == "hpk_test="
+    assert awg["HeaderProtectionKey"] == hpk_valid
     last_cfg = json.loads(awg["last_config"])
-    assert last_cfg["HeaderProtectionKey"] == "hpk_test="
+    assert last_cfg["HeaderProtectionKey"] == hpk_valid
     assert last_cfg["Jc"] == "4"
     assert last_cfg["port"] == 44321
 
@@ -393,6 +394,7 @@ def test_build_client_configs_and_vpn_uri_awg3():
     assert decoded_31["defaultContainer"] == "amnezia-awg2"
     assert decoded_31["containers"][0]["awg"]["protocol_version"] == "3.1"
     assert decoded_31["containers"][0]["awg"]["RandomTrailers"] == "1"
+
     # Rejection of incomplete interface missing mandatory AWG 2.0+ parameters
     incomplete_iface = {
         "ListenPort": "44321",
@@ -432,6 +434,54 @@ def test_build_client_configs_and_vpn_uri_awg3():
         )
     assert exc_info_hpk.value.status_code == 422
     assert "HeaderProtectionKey" in exc_info_hpk.value.detail
+
+    # Rejection of invalid HeaderProtectionKey (not 32-byte base64)
+    invalid_hpk_iface = dict(interface_params_30)
+    invalid_hpk_iface["HeaderProtectionKey"] = "hpk_test="
+    with pytest.raises(HTTPException) as exc_invalid_hpk:
+        amnezia_app.build_client_configs(
+            client,
+            invalid_hpk_iface,
+            server_pubkey="srvpub=",
+            host_name="vpn.example.com",
+            dns1="1.1.1.1",
+            dns2="1.0.0.1",
+            container_name="amnezia-awg2",
+        )
+    assert exc_invalid_hpk.value.status_code == 422
+    assert "HeaderProtectionKey" in exc_invalid_hpk.value.detail
+
+    # Rejection of S3 < 12 under Header Protection
+    invalid_s3_iface = dict(interface_params_30)
+    invalid_s3_iface["S3"] = "5"
+    with pytest.raises(HTTPException) as exc_invalid_s3:
+        amnezia_app.build_client_configs(
+            client,
+            invalid_s3_iface,
+            server_pubkey="srvpub=",
+            host_name="vpn.example.com",
+            dns1="1.1.1.1",
+            dns2="1.0.0.1",
+            container_name="amnezia-awg2",
+        )
+    assert exc_invalid_s3.value.status_code == 422
+    assert "S3" in exc_invalid_s3.value.detail
+
+    # Rejection of Jc out of range
+    invalid_jc_iface = dict(interface_params_30)
+    invalid_jc_iface["Jc"] = "200"
+    with pytest.raises(HTTPException) as exc_invalid_jc:
+        amnezia_app.build_client_configs(
+            client,
+            invalid_jc_iface,
+            server_pubkey="srvpub=",
+            host_name="vpn.example.com",
+            dns1="1.1.1.1",
+            dns2="1.0.0.1",
+            container_name="amnezia-awg2",
+        )
+    assert exc_invalid_jc.value.status_code == 422
+    assert "Jc" in exc_invalid_jc.value.detail
 
 
 # =============================================================================
