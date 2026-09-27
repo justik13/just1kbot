@@ -54,6 +54,11 @@ AMNEZIA_PROTOCOLS: tuple[str, ...] = (
 )
 XRAY_PROTOCOL = "xray"
 
+# Default AmneziaWG Client Network Settings
+DEFAULT_AWG_DNS1 = "8.8.8.8"
+DEFAULT_AWG_DNS2 = "8.8.4.4"
+DEFAULT_AWG_MTU = "1280"
+
 # VPN Configuration transport limits
 MAX_RAW_CONFIG_BYTES = 65536  # 64 KiB max raw config payload
 
@@ -233,6 +238,9 @@ __all__ = [
     "ApiOperationStatus",
     "CANONICAL_XHTTP_PROFILE",
     "ApiOperationType",
+    "DEFAULT_AWG_DNS1",
+    "DEFAULT_AWG_DNS2",
+    "DEFAULT_AWG_MTU",
     "DEFAULT_PINNED_XRAY_VERSION",
     "DEFAULT_WHITE_INTERNET_CHANNEL_URL",
     "DEFAULT_WHITE_INTERNET_PROFILE_DESCRIPTION",

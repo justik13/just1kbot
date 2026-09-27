@@ -422,8 +422,8 @@ AWG_CONF_PATH=${conf_in_container}
 AWG_CONTAINER_NAME=${target_container}
 SERVER_HOST_NAME=${api_domain}
 SERVER_PUBLIC_HOST=${api_domain}
-SERVER_DNS1=1.1.1.1
-SERVER_DNS2=1.0.0.1
+SERVER_DNS1=8.8.8.8
+SERVER_DNS2=8.8.4.4
 EOF
     if [[ -n "${saved_max_peers:-}" ]]; then
         echo "SERVER_MAX_PEERS=${saved_max_peers}" >> "$AMNEZIA_API_ETC/config.env"

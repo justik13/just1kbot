@@ -16,6 +16,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import (
+    DEFAULT_AWG_DNS1,
+    DEFAULT_AWG_DNS2,
+    DEFAULT_AWG_MTU,
+)
 from bot.keyboards import (
     get_alt_connection_keyboard,
     get_back_button,
@@ -119,9 +124,9 @@ def build_display_vpn_key(raw_config: str | None, profile, server) -> str | None
         return customize_vpn_uri(
             raw_config,
             description=_client_description(profile, server),
-            dns1="8.8.8.8",
-            dns2="8.8.4.4",
-            mtu="1280",
+            dns1=DEFAULT_AWG_DNS1,
+            dns2=DEFAULT_AWG_DNS2,
+            mtu=DEFAULT_AWG_MTU,
         )
     except Exception as exc:
         logger.warning("Failed to format vpn uri for profile %s: %s", getattr(profile, "id", None), exc)
@@ -375,9 +380,9 @@ async def alt_connection(
         customized_data = customize_vpn_config_dict(
             decoded,
             description=client_description,
-            dns1="8.8.8.8",
-            dns2="8.8.4.4",
-            mtu="1280",
+            dns1=DEFAULT_AWG_DNS1,
+            dns2=DEFAULT_AWG_DNS2,
+            mtu=DEFAULT_AWG_MTU,
         )
 
         vpn_content = build_vpn_file_from_dict(customized_data)

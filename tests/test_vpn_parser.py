@@ -524,6 +524,15 @@ class VPNParserTests(unittest.TestCase):
         profile.raw_config = awg2_key
         display_key = build_display_vpn_uri(profile)
         self.assertTrue(display_key.startswith("vpn://"))
+        decoded_default = decode_vpn_uri_to_json(display_key)
+        self.assertEqual(decoded_default.get("dns1"), "8.8.8.8")
+        self.assertEqual(decoded_default.get("dns2"), "8.8.4.4")
+
+        # Test custom DNS and MTU parameters
+        custom_key = build_display_vpn_uri(profile, dns1="1.1.1.1", dns2="1.0.0.1", mtu="1360")
+        decoded_custom = decode_vpn_uri_to_json(custom_key)
+        self.assertEqual(decoded_custom.get("dns1"), "1.1.1.1")
+        self.assertEqual(decoded_custom.get("dns2"), "1.0.0.1")
 
         # AWG3 profile (container is amnezia-awg2 with protocol_version 3.1)
         awg3_key = encode_json_to_vpn_uri({

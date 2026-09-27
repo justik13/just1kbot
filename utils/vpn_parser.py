@@ -22,6 +22,13 @@ def _decode_base64url(payload: str) -> bytes | None:
         raise VPNConfigParseError(f"Base64 decode failed: {e}") from e
 
 
+try:
+    from config.constants import DEFAULT_AWG_DNS1, DEFAULT_AWG_DNS2, DEFAULT_AWG_MTU
+except ImportError:
+    DEFAULT_AWG_DNS1 = "8.8.8.8"
+    DEFAULT_AWG_DNS2 = "8.8.4.4"
+    DEFAULT_AWG_MTU = "1280"
+
 MAX_DECOMPRESSED_CONFIG_BYTES = 1024 * 1024  # 1 MiB
 
 AWG3_1_EXCLUSIVE_KEYS = (
@@ -220,9 +227,9 @@ def _build_conf_fallback(data: dict, last_config: dict, awg: dict | None = None)
     if "/" not in str(client_ip):
         client_ip = f"{client_ip}/32"
 
-    dns1 = data.get("dns1") or "8.8.8.8"
-    dns2 = data.get("dns2") or "8.8.4.4"
-    mtu = last_config.get("mtu") or "1280"
+    dns1 = data.get("dns1") or DEFAULT_AWG_DNS1
+    dns2 = data.get("dns2") or DEFAULT_AWG_DNS2
+    mtu = last_config.get("mtu") or DEFAULT_AWG_MTU
     persistent_keep_alive = last_config.get("persistent_keep_alive") or 25
     psk_key = last_config.get("psk_key")
 
@@ -472,9 +479,9 @@ def is_valid_vpn_uri(uri: str) -> bool:
 def customize_vpn_config_dict(
     data: dict,
     description: str | None = None,
-    dns1: str = "8.8.8.8",
-    dns2: str = "8.8.4.4",
-    mtu: str = "1280",
+    dns1: str = DEFAULT_AWG_DNS1,
+    dns2: str = DEFAULT_AWG_DNS2,
+    mtu: str = DEFAULT_AWG_MTU,
 ) -> dict:
     if not isinstance(data, dict):
         return data
@@ -539,9 +546,9 @@ def encode_json_to_vpn_uri(data: dict) -> str:
 def customize_vpn_uri(
     uri: str,
     description: str | None = None,
-    dns1: str = "8.8.8.8",
-    dns2: str = "8.8.4.4",
-    mtu: str = "1280",
+    dns1: str = DEFAULT_AWG_DNS1,
+    dns2: str = DEFAULT_AWG_DNS2,
+    mtu: str = DEFAULT_AWG_MTU,
 ) -> str:
     if not uri or not isinstance(uri, str):
         return uri or ""
