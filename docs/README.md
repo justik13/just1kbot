@@ -16,6 +16,9 @@
 ### 3. [White Internet («Белый Интернет») Architecture & Operations](white_internet.md)
 * **Назначение:** Архитектура XHTTP (SplitHTTP) over CDN, Nginx OPTIONS->POST трансляция, VLESS Vision туннели, биллинг грантов и руководство по установке узлов через `just1knode`.
 
+### 4. [Сетевая безопасность, ТСПУ и модель угроз](NETWORK_SECURITY_AND_TSPU.md)
+* **Назначение:** Модель угроз ТСПУ/РКН, механизмы пассивной и активной сетевой фильтрации (Active Probing / DPI Spiders), архитектура Zero-Signature (строгое закрытие портов, сброс прямых IP-проб), защита управляющих портов через UFW и реестр исследовательских ресурсов (NTC Party, Net4People, Zapret).
+
 ---
 
 ## 🛠 Быстрые команды для разработки

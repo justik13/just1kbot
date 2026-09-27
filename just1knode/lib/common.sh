@@ -162,3 +162,19 @@ detect_existing_nginx_sites() {
     return 1
 }
 
+validate_ipv4() {
+    local ip="${1:-}"
+    [[ -z "$ip" ]] && return 1
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import ipaddress, sys; ip = sys.argv[1]; addr = ipaddress.IPv4Address(ip); sys.exit(0 if not addr.is_multicast and not addr.is_unspecified and not addr.is_reserved else 1)" "$ip" 2>/dev/null
+    else
+        [[ "$ip" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+        for oct in "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"; do
+            (( oct < 0 || oct > 255 )) && return 1
+            [[ ${#oct} -gt 1 && "$oct" =~ ^0 ]] && return 1
+        done
+        [[ "$ip" == "0.0.0.0" || "$ip" == "255.255.255.255" ]] && return 1
+        return 0
+    fi
+}
+
