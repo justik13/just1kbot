@@ -690,8 +690,8 @@ def build_client_configs(
     # References: Any-Tech-ARCHITECT (awgValidate.ts) and upstream amneziawg-go / tools
     try:
         jc_val = int(detected_awg.get("Jc", 0))
-        if not (1 <= jc_val <= 128):
-            raise ValueError(f"Jc must be between 1 and 128 (got {jc_val})")
+        if not (0 <= jc_val <= 128):
+            raise ValueError(f"Jc must be between 0 and 128 (got {jc_val})")
         jmin_val = int(detected_awg.get("Jmin", 0))
         jmax_val = int(detected_awg.get("Jmax", 0))
         if not (0 <= jmin_val <= jmax_val <= 1280):
@@ -708,13 +708,13 @@ def build_client_configs(
 
     awg_ver = detect_awg_version(detected_awg)
     has_awg3 = awg_ver.startswith("3")
-    if has_awg3:
-        hpk = detected_awg.get("HeaderProtectionKey")
-        if not hpk or not _is_valid_wg_key(str(hpk)):
-            logger.error("Server interface has AWG 3.x parameters but is missing a valid 32-byte HeaderProtectionKey")
+    hpk = detected_awg.get("HeaderProtectionKey")
+    if hpk:
+        if not _is_valid_wg_key(str(hpk)):
+            logger.error("Server interface has invalid HeaderProtectionKey")
             raise HTTPException(
                 status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
-                detail="Server interface HeaderProtectionKey must be a valid 32-byte base64 key for AWG 3.x",
+                detail="Server interface HeaderProtectionKey must be a valid 32-byte base64 key",
             )
 
         # ── CRITICAL CRYPTOGRAPHIC INVARIANT: S-padding floor under Header Protection ──
@@ -1079,10 +1079,13 @@ async def get_server():
 
     detected_ver = detect_awg_version(iface)
     if detected_ver == "3.1":
+        primary_proto = "amneziawg3.1"
         protocols = ["amneziawg2", "amneziawg3", "amneziawg3.1"]
     elif detected_ver == "3.0":
+        primary_proto = "amneziawg3"
         protocols = ["amneziawg2", "amneziawg3"]
     else:
+        primary_proto = "amneziawg2"
         protocols = ["amneziawg2"]
 
     return {
@@ -1090,6 +1093,7 @@ async def get_server():
         "name": os.getenv("SERVER_NAME", container),
         "region": os.getenv("SERVER_REGION", ""),
         "weight": int(os.getenv("SERVER_WEIGHT", "0")),
+        "protocol": primary_proto,
         "protocols": protocols,
         "maxPeers": max_peers,
         "serverMaxPeers": max_peers,
@@ -1218,6 +1222,14 @@ async def import_server_backup(req: ServerBackupImportRequest):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid backup: missing valid WireGuard/AmneziaWG [Interface] configuration",
+            )
+
+        parsed_backup = parse_awg_conf(conf_content)
+        backup_iface = parsed_backup.get("interface", {})
+        if not backup_iface.get("PrivateKey") or not backup_iface.get("Address"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid backup: [Interface] must contain valid PrivateKey and Address",
             )
 
         # Snapshot existing state before mutations for rollback guarantee

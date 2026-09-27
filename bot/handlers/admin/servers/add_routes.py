@@ -420,13 +420,15 @@ async def process_add_server(
 
             return
 
+        server_protocol = server_info.get_protocol()
+
         server = await create_server(
             session,
             name=api_server_name,
             country_flag=all_data["country_flag"],
             api_url=all_data["api_url"],
             api_key=api_key,
-            protocol=AMNEZIA_PROTOCOL,
+            protocol=server_protocol,
             max_clients=api_max_peers,
         )
 
@@ -445,7 +447,7 @@ async def process_add_server(
             texts.ADMIN_SERVER_ADDED.format(
                 flag=all_data["country_flag"],
                 name=safe(api_server_name),
-                protocol=AMNEZIA_PROTOCOL,
+                protocol=server_protocol,
                 max_clients=api_max_peers,
                 api_url=safe(all_data["api_url"]),
             ),

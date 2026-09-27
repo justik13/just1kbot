@@ -464,7 +464,10 @@ async def _cleanup_stuck_profiles():
                             api_url_snapshot=api_url,
                             api_key_snapshot=api_key,
                             client_name=profile.client_name,
-                            payload={"desired_version": profile.desired_version},
+                            payload={
+                                "desired_version": profile.desired_version,
+                                "protocol": server.protocol if server else None,
+                            },
                         )
                         logger.info(
                             "Recreated missing CREATE reconciliation op for profile %s",

@@ -361,7 +361,6 @@ run_doctor() {
             failed=$((failed + 1))
         fi
         local conf_name="awg0.conf"
-        [[ "$c_doc" == "amnezia-awg" ]] && conf_name="wg0.conf"
         local conf_found=false
         if docker exec "$c_doc" test -f "/opt/amnezia/awg/$conf_name" 2>/dev/null; then
             conf_found=true

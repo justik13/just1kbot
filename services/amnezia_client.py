@@ -262,6 +262,7 @@ class AmneziaClientListItem(BaseModel):
 
 class AmneziaServerInfo(BaseModel):
     name: str = ""
+    protocol: str = ""
     protocols: list[str] = Field(default_factory=list)
     maxPeers: int = 0
     serverMaxPeers: int = 0
@@ -273,6 +274,13 @@ class AmneziaServerInfo(BaseModel):
             or self.serverMaxPeers
             or self.SERVER_MAX_PEERS
         )
+
+    def get_protocol(self) -> str:
+        if self.protocol:
+            return self.protocol
+        if self.protocols:
+            return self.protocols[-1]
+        return AMNEZIA_PROTOCOL
 
 
 async def get_http_session() -> aiohttp.ClientSession:

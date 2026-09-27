@@ -170,7 +170,58 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(client)
         self.assertEqual(client.protocol, "amneziawg3.1")
 
+    def test_amnezia_server_info_protocol_resolution(self):
+        """Invariant: AmneziaServerInfo resolves protocol priority correctly."""
+        from services.amnezia_client import AmneziaServerInfo
+
+        # 1. Direct protocol field has highest priority
+        info1 = AmneziaServerInfo(protocol="amneziawg3.1", protocols=["amneziawg2", "amneziawg3"])
+        self.assertEqual(info1.get_protocol(), "amneziawg3.1")
+
+        # 2. Protocols list newest fallback
+        info2 = AmneziaServerInfo(protocols=["amneziawg2", "amneziawg3"])
+        self.assertEqual(info2.get_protocol(), "amneziawg3")
+
+        # 3. Default fallback
+        info3 = AmneziaServerInfo()
+        self.assertEqual(info3.get_protocol(), "amneziawg2")
+
+    async def test_ensure_delete_operation_propagates_server_protocol(self):
+        """Invariant: ensure_delete_operation automatically populates protocol from Server row."""
+        from services.api_operations_queue import ensure_delete_operation
+
+        fake_server = Server(
+            id=55,
+            name="awg3-node",
+            api_url="http://node.local:8080",
+            api_key="testkey",
+            protocol="amneziawg3.1",
+            is_active=True,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = fake_server
+        mock_result = unittest.mock.MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        with patch("services.api_operations_queue.enqueue_api_operation") as mock_enqueue:
+            await ensure_delete_operation(
+                mock_session,
+                idempotency_key="del:1",
+                server_id=55,
+                profile_id=1,
+                server_name_snapshot="awg3-node",
+                api_url_snapshot="http://node.local:8080",
+                api_key_snapshot="testkey",
+                peer_id="peer1",
+            )
+            mock_enqueue.assert_called_once()
+            call_kwargs = mock_enqueue.call_args.kwargs
+            self.assertEqual(call_kwargs["payload"]["protocol"], "amneziawg3.1")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

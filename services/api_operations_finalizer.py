@@ -178,6 +178,7 @@ async def _schedule_migration_grace_deletion(session, operation, profile) -> Non
                 api_key_snapshot=s_key,
                 peer_id=old_profile.peer_id,
                 client_name=old_profile.client_name,
+                protocol=old_profile.server.protocol if old_profile.server else None,
                 audit_reason="device_migration_grace_expired",
                 next_attempt_at=now_utc() + timedelta(minutes=15),
             )
@@ -423,6 +424,7 @@ async def _ensure_current_update(
             "status": "active" if active else "disabled",
             "expires_at": expires,
             "clear_expires_at": active and expires is None,
+            "protocol": server.protocol if server else None,
         },
     )
 
