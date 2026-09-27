@@ -39,60 +39,53 @@ AWG3_1_EXCLUSIVE_KEYS = (
     "DisableCookies",
 )
 
-AWG3_0_EXCLUSIVE_KEYS = (
-    "HeaderProtectionKey",
-    "ContentPaddingAddition",
-    "RekeyAfterTime",
-    "RekeyTimeout",
-    "RejectAfterTime",
-    "KeepaliveTimeout",
-    "MaxHandshakeAttempts",
-)
+try:
+    from utils.vpn_parser import (
+        AWG3_0_EXCLUSIVE_KEYS,
+        AWG3_1_EXCLUSIVE_KEYS,
+        AWG3_EXCLUSIVE_KEYS,
+        detect_awg_version,
+    )
+except ImportError:
+    # Standalone mode on isolated node VPS
+    AWG3_1_EXCLUSIVE_KEYS = (
+        "RandomTrailers",
+        "DisableCookies",
+    )
+    AWG3_0_EXCLUSIVE_KEYS = (
+        "HeaderProtectionKey",
+        "ContentPaddingAddition",
+        "RekeyAfterTime",
+        "RekeyTimeout",
+        "RejectAfterTime",
+        "KeepaliveTimeout",
+        "MaxHandshakeAttempts",
+    )
+    AWG3_EXCLUSIVE_KEYS = AWG3_1_EXCLUSIVE_KEYS + AWG3_0_EXCLUSIVE_KEYS
 
-AWG3_EXCLUSIVE_KEYS = AWG3_1_EXCLUSIVE_KEYS + AWG3_0_EXCLUSIVE_KEYS
-
-
-def detect_awg_version(params: dict[str, Any]) -> str:
-    """Detect AWG protocol version ('3.1', '3.0', '2.0', '1.5', '1.0') adhering to Any-Tech-ARCHITECT specifications."""
-    if not isinstance(params, dict):
-        return "2.0"
-
-    def has(k: str) -> bool:
-        v = params.get(k)
-        if v is None or v == "":
-            v = params.get(k.upper())
-        if v is None:
-            return False
-        # For toggle/integer keys (RandomTrailers, DisableCookies), "0" means disabled
-        if k in ("RandomTrailers", "DisableCookies") and str(v).strip() in ("0", "false", "False", ""):
-            return False
-        return str(v).strip() != ""
-
-    pv = str(params.get("protocol_version", "")).strip()
-    if any(has(k) for k in AWG3_1_EXCLUSIVE_KEYS) or pv == "3.1":
-        return "3.1"
-    if any(has(k) for k in AWG3_0_EXCLUSIVE_KEYS) or pv in ("3", "3.0"):
-        return "3.0"
-
-    # Check AWG 2.0: S3/S4 present, ranged headers (e.g. "lo-hi"), or protocol_version == "2"
-    if has("S3") or has("S4"):
-        return "2.0"
-    for h in ("H1", "H2", "H3", "H4"):
-        val = str(params.get(h) or params.get(h.upper()) or "")
-        if "-" in val:
+    def detect_awg_version(params: dict[str, Any]) -> str:
+        """Detect AWG protocol version ('3.1', '3.0', '2.0') adhering to Any-Tech-ARCHITECT specifications."""
+        if not isinstance(params, dict):
             return "2.0"
-    if pv in ("2", "2.0"):
+
+        def has(k: str) -> bool:
+            v = params.get(k)
+            if v is None or v == "":
+                v = params.get(k.upper())
+            if v is None:
+                return False
+            # For toggle/integer keys (RandomTrailers, DisableCookies), "0" means disabled
+            if k in ("RandomTrailers", "DisableCookies") and str(v).strip() in ("0", "false", "False", ""):
+                return False
+            return str(v).strip() != ""
+
+        pv = str(params.get("protocol_version", "")).strip()
+        if any(has(k) for k in AWG3_1_EXCLUSIVE_KEYS) or pv == "3.1":
+            return "3.1"
+        if any(has(k) for k in AWG3_0_EXCLUSIVE_KEYS) or pv in ("3", "3.0"):
+            return "3.0"
+
         return "2.0"
-
-    # Check AWG 1.5: I1..I5 present
-    if any(has(f"I{i}") for i in range(1, 6)):
-        return "1.5"
-
-    # Check AWG 1.0: basic parameters
-    if has("Jc") or has("H1") or has("S1"):
-        return "1.0"
-
-    return "2.0"
 
 
 def is_awg3_detected(params: dict[str, Any]) -> bool:

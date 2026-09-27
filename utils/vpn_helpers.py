@@ -24,7 +24,7 @@ def _get_awg_block(data: dict) -> dict | None:
     containers = data.get("containers", [])
     if isinstance(containers, list):
         for container in containers:
-            if isinstance(container, dict):
+            if isinstance(container, dict) and container.get("container") in ("amnezia-awg2", "amnezia-awg"):
                 awg = container.get("awg")
                 if isinstance(awg, dict):
                     return awg

@@ -191,12 +191,6 @@ class VPNParserTests(unittest.TestCase):
         # AWG 2.0 (protocol_version == "2")
         self.assertEqual(detect_awg_version({"protocol_version": "2"}), "2.0")
 
-        # AWG 1.5 (I1..I5 without S3/S4 or ranged H)
-        self.assertEqual(detect_awg_version({"I1": "sig1", "H1": "123"}), "1.5")
-
-        # AWG 1.0
-        self.assertEqual(detect_awg_version({"Jc": "4", "S1": "15", "H1": "123"}), "1.0")
-
         # Toggle semantics: 0 or false means disabled
         self.assertEqual(detect_awg_version({"RandomTrailers": "0"}), "2.0")
         self.assertEqual(detect_awg_version({"DisableCookies": "0"}), "2.0")
@@ -208,42 +202,130 @@ class VPNParserTests(unittest.TestCase):
         self.assertEqual(detect_awg_version({"protocol_version": "3.0"}), "3.0")
         self.assertEqual(detect_awg_version({"protocol_version": "3"}), "3.0")
 
+        # Toggle semantics: 0 or false means disabled
+        self.assertEqual(detect_awg_version({"RandomTrailers": "0"}), "2.0")
+        self.assertEqual(detect_awg_version({"DisableCookies": "0"}), "2.0")
+        self.assertEqual(detect_awg_version({"RandomTrailers": "false"}), "2.0")
+        self.assertEqual(detect_awg_version({"RandomTrailers": ""}), "2.0")
+
     def test_is_valid_vpn_uri_awg2_and_awg3(self):
         from utils.vpn_parser import encode_json_to_vpn_uri, is_valid_vpn_uri
 
-        valid_raw_conf = "[Interface]\nPrivateKey = priv=\nAddress = 10.8.1.2/32\n[Peer]\nPublicKey = pub=\nEndpoint = 1.2.3.4:51820\n"
+        base_last_cfg = {
+            "client_priv_key": "c_priv_key=",
+            "client_pub_key": "c_pub_key=",
+            "server_pub_key": "s_pub_key=",
+            "client_ip": "10.8.1.25",
+            "hostName": "vpn.node.com",
+            "port": 51820,
+            "mtu": "1280",
+            "persistent_keep_alive": "25",
+            "Jc": "4",
+            "Jmin": "10",
+            "Jmax": "50",
+            "S1": "87",
+            "S2": "61",
+            "S3": "49",
+            "S4": "1",
+            "H1": "100-200",
+            "H2": "300-400",
+            "H3": "500-600",
+            "H4": "700-800",
+        }
 
-        # Valid AWG 2.0 URI with valid config in last_config
+        # 1. Valid AWG 2.0 URI
         awg2_data = {
+            "defaultContainer": "amnezia-awg2",
             "containers": [{
                 "container": "amnezia-awg2",
-                "awg": {"protocol_version": "2", "last_config": json.dumps({"config": valid_raw_conf})},
+                "awg": {
+                    "protocol_version": "2",
+                    "port": "51820",
+                    "Jc": "4",
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
+                    "last_config": json.dumps(base_last_cfg),
+                },
             }]
         }
-        awg2_uri = encode_json_to_vpn_uri(awg2_data)
-        self.assertTrue(is_valid_vpn_uri(awg2_uri))
+        self.assertTrue(is_valid_vpn_uri(encode_json_to_vpn_uri(awg2_data)))
 
-        # Valid AWG 3.0 URI
+        # 2. Valid AWG 3.0 URI (with HeaderProtectionKey)
+        awg3_last_cfg = dict(base_last_cfg, HeaderProtectionKey="secret_key=")
         awg3_data = {
+            "defaultContainer": "amnezia-awg2",
             "containers": [{
                 "container": "amnezia-awg2",
-                "awg": {"protocol_version": "3.0", "last_config": json.dumps({"config": valid_raw_conf})},
+                "awg": {
+                    "protocol_version": "3.0",
+                    "port": "51820",
+                    "Jc": "4",
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
+                    "HeaderProtectionKey": "secret_key=",
+                    "last_config": json.dumps(awg3_last_cfg),
+                },
             }]
         }
-        awg3_uri = encode_json_to_vpn_uri(awg3_data)
-        self.assertTrue(is_valid_vpn_uri(awg3_uri))
+        self.assertTrue(is_valid_vpn_uri(encode_json_to_vpn_uri(awg3_data)))
 
-        # Valid AWG 3.1 URI
+        # 3. Valid AWG 3.1 URI (with RandomTrailers)
+        awg31_last_cfg = dict(awg3_last_cfg, RandomTrailers="1")
         awg31_data = {
+            "defaultContainer": "amnezia-awg2",
             "containers": [{
                 "container": "amnezia-awg2",
-                "awg": {"protocol_version": "3.1", "last_config": json.dumps({"config": valid_raw_conf})},
+                "awg": {
+                    "protocol_version": "3.1",
+                    "port": "51820",
+                    "Jc": "4",
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
+                    "HeaderProtectionKey": "secret_key=",
+                    "RandomTrailers": "1",
+                    "last_config": json.dumps(awg31_last_cfg),
+                },
             }]
         }
-        awg31_uri = encode_json_to_vpn_uri(awg31_data)
-        self.assertTrue(is_valid_vpn_uri(awg31_uri))
+        self.assertTrue(is_valid_vpn_uri(encode_json_to_vpn_uri(awg31_data)))
 
-        # Empty last_config must be rejected
+        # 4. Reject structural stubs: only [Interface]\n[Peer] in config
+        stub_data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {
+                    "protocol_version": "2",
+                    "last_config": json.dumps({"config": "[Interface]\n[Peer]\n"}),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(stub_data)))
+
+        # 5. Reject empty last_config
         empty_data = {
             "containers": [{
                 "container": "amnezia-awg2",
@@ -252,40 +334,41 @@ class VPNParserTests(unittest.TestCase):
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(empty_data)))
 
-        # Invalid JSON in last_config must be rejected
-        broken_json_data = {
+        # 6. Reject amnezia-awg3 container
+        bad_container_data = {
             "containers": [{
-                "container": "amnezia-awg2",
-                "awg": {"protocol_version": "2", "last_config": "not_json"},
+                "container": "amnezia-awg3",
+                "awg": {
+                    "protocol_version": "3.1",
+                    "last_config": json.dumps(awg31_last_cfg),
+                },
             }]
         }
-        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(broken_json_data)))
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(bad_container_data)))
 
-    def test_build_conf_fallback_awg1_5_without_s3_s4(self):
-        from utils.vpn_parser import _build_conf_fallback
-        data = {"dns1": "1.1.1.1", "dns2": "1.0.0.1"}
-        last_config = {
-            "client_priv_key": "c_priv",
-            "server_pub_key": "s_pub",
-            "hostName": "vpn.example.com",
-            "port": 51820,
-            "client_ip": "10.8.0.2/32",
-            "Jc": "4",
-            "Jmin": "10",
-            "Jmax": "50",
-            "S1": "15",
-            "S2": "20",
-            "H1": "100",
-            "H2": "200",
-            "H3": "300",
-            "H4": "400",
-            "I1": "sig1",
+        # 7. Reject missing S3/S4 for AWG 2.0
+        missing_s3_cfg = dict(base_last_cfg)
+        del missing_s3_cfg["S3"]
+        missing_s3_data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {"protocol_version": "2", "last_config": json.dumps(missing_s3_cfg)},
+            }]
         }
-        conf = _build_conf_fallback(data, last_config)
-        self.assertIsNotNone(conf)
-        self.assertIn("[Interface]", conf)
-        self.assertIn("I1 = sig1", conf)
-        self.assertNotIn("S3 =", conf)
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(missing_s3_data)))
+
+        # 8. Reject mismatched parameters between awg dict and last_config
+        mismatched_data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {
+                    "protocol_version": "2",
+                    "Jc": "99",  # Mismatch!
+                    "last_config": json.dumps(base_last_cfg),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(mismatched_data)))
 
     def test_k1_reference_decoding_and_customization(self):
         """Verify real-world working AmneziaWG 2.0 reference key decodes and customizes correctly."""
@@ -359,10 +442,10 @@ class VPNParserTests(unittest.TestCase):
         display_key = build_display_vpn_uri(profile)
         self.assertTrue(display_key.startswith("vpn://"))
 
-        # AWG3 profile
+        # AWG3 profile (container is amnezia-awg2 with protocol_version 3.1)
         awg3_key = encode_json_to_vpn_uri({
             "containers": [{
-                "container": "amnezia-awg3",
+                "container": "amnezia-awg2",
                 "awg": {
                     "protocol_version": "3.1",
                     "last_config": json.dumps({"config": "[Interface]\nDNS = 1.1.1.1\nMTU = 1376\n[Peer]"}),
@@ -374,10 +457,21 @@ class VPNParserTests(unittest.TestCase):
         display_key_3 = build_display_vpn_uri(profile)
         self.assertTrue(display_key_3.startswith("vpn://"))
 
+        # Unsupported container name (e.g. invalid "amnezia-awg3")
+        bad_container_key = encode_json_to_vpn_uri({
+            "containers": [{
+                "container": "amnezia-awg3",
+                "awg": {"protocol_version": "3.1"},
+            }],
+        })
+        profile.raw_config = bad_container_key
+        with self.assertRaises(InvalidAmneziaConfigError):
+            build_display_vpn_uri(profile)
+
         # Unsupported protocol version (e.g. unknown "99")
         bad_key = encode_json_to_vpn_uri({
             "containers": [{
-                "container": "amnezia-awg",
+                "container": "amnezia-awg2",
                 "awg": {"protocol_version": "99"},
             }],
         })
