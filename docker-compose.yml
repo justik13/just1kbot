@@ -154,7 +154,6 @@ services:
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./static/camouflage:/srv:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

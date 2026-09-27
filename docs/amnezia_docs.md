@@ -2,7 +2,7 @@
 
 ## 🚫 ТЕКУЩАЯ ПОЛИТИКА ПОДДЕРЖКИ ПРОТОКОЛОВ
 
-В текущей реализации проекта `just1kbot` поддерживается только **AmneziaWG 2.0 (`amneziawg2`)**, управляемый через серверный API `kyoresuas/amnezia-api`. Обычный WireGuard не используется.
+В текущей реализации проекта `just1kbot` поддерживается только **AmneziaWG 2.0 (`amneziawg2`)**, управляемый через нативный серверный микросервис `amnezia-api` (`scripts/amnezia_api/`). Обычный WireGuard не используется.
 
 | Протокол / Клиент | Статус в проекте | Пояснение |
 |---|:---:|---|
@@ -163,7 +163,7 @@ PersistentKeepalive = 25
 ### Спецификация параметров AWG 2.0:
 1. **`Jc`, `Jmin`, `Jmax` (Junk packets):** Количество и диапазон размеров мусорных пакетов перед хэндшейком.
 2. **`S1`, `S2`, `S3`, `S4` (Packet sizes):** Размеры пакетов инициализации, ответа, cookie и префикса данных.
-3. **`H1`, `H2`, `H3`, `H4` (Headers):** Заголовки пакетов. В протоколе `amneziawg-go` допускаются как одиночные значения (`H1 = 1234567890`), так и диапазоны (`H1 = 169154911-1234371153`). Серверный API `kyoresuas/amnezia-api` генерирует диапазоны. В коде всегда сохраняются строками без приведения к `int`.
+3. **`H1`, `H2`, `H3`, `H4` (Headers):** Заголовки пакетов. В протоколе `amneziawg-go` допускаются как одиночные значения (`H1 = 1234567890`), так и диапазоны (`H1 = 169154911-1234371153`). Серверный API генерирует диапазоны. В коде всегда сохраняются строками без приведения к `int`.
 4. **`I1`..`I5` (Custom Packet Sequences / CPS):** Пакеты инициализации протокола.
    - В коде проекта и официальных клиентах записываются как `I1`, `I2`, `I3`, `I4`, `I5`.
    - Парсеры официальных клиентов (`amneziawg-windows-client`, `amneziawg-android`, `amneziawg-go`) регистронезависимы.
@@ -217,6 +217,6 @@ def encode_vpn_uri(config_dict: dict) -> str:
 * [AmneziaWG Android](https://github.com/amnezia-vpn/amneziawg-android)
 * [AmneziaWG Apple (iOS / macOS)](https://github.com/amnezia-vpn/amneziawg-apple)
 
-### Сторонние и сопутствующие ресурсы:
-* [kyoresuas/amnezia-api (Fastify REST API для управления AmneziaWG)](https://github.com/kyoresuas/amnezia-api) — стороннее серверное API, используемое ботом.
+### Серверные и сопутствующие ресурсы:
+* [just1kbot amnezia_api](../scripts/amnezia_api/) — собственный нативный серверный микросервис на Python/FastAPI для управления AmneziaWG.
 * [AmneziaWG-Architect (Community Validator)](https://github.com/Vadim-Khristenko/AmneziaWG-Architect) — генератор и валидатор параметров AWG.

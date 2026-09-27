@@ -57,7 +57,7 @@ class TestJust1kNodeScript(unittest.TestCase):
 
     def _create_mock_script(self, name: str, content: str) -> Path:
         script_path = self.bin_dir / name
-        with open(script_path, "w", encoding="utf-8") as f:
+        with open(script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(content)
         script_path.chmod(0o755)
         return script_path
@@ -157,30 +157,38 @@ exit 0
         backup_dir_val = extra_env.get("BACKUP_DIR", str(self.backup_dir)) if extra_env else str(self.backup_dir)
         state_dir_val = extra_env.get("STATE_DIR", str(self.state_dir)) if extra_env else str(self.state_dir)
 
+        def _bp(p: Path | str) -> str:
+            p_str = str(p).replace("\\", "/")
+            if os.name == "nt" and re.match(r"^[a-zA-Z]:", p_str):
+                drive = p_str[0].lower()
+                return f"/mnt/{drive}{p_str[2:]}"
+            return p_str
+
         # Source just1knode.sh functions and run snippet with root bypass for testing
         full_script = f"""
-export STATE_DIR='{state_dir_val}'
-export STATE_FILE='{self.state_dir / "state.json"}'
-export CLIENTS_FILE='{self.state_dir / "clients.json"}'
-export RELAYS_FILE='{self.state_dir / "relays.json"}'
-export XRAY_CONFIG_DIR='{self.xray_config_dir}'
-export XRAY_CONFIG='{self.xray_config_dir / "config.json"}'
-export XRAY_SHARE_DIR='{self.xray_share_dir}'
-export XRAY_BIN='{self.bin_dir / "xray"}'
-export BACKUP_DIR='{backup_dir_val}'
-export NGINX_CONF_DIR='{self.nginx_conf_dir}'
-export NGINX_RELAYS_DIR='{self.nginx_relays_d}'
-export XRAY_API_DIR='{self.xray_api_dir}'
-export XRAY_API_LIB='{self.xray_api_lib}'
-export XRAY_API_ETC='{self.xray_api_etc}'
-export XRAY_API_CONFIG_ENV='{self.xray_api_etc / "config.env"}'
-export SYSTEMD_SYSTEM_DIR='{self.systemd_dir}'
-export CERTBOT_DIR='{self.certbot_dir}'
-export LETSENCRYPT_DIR='{self.letsencrypt_dir}'
-export WWW_HTML_DIR='{self.www_html_dir}'
-export INSTALL_DIR='{self.install_dir}'
+export PATH='{_bp(self.bin_dir)}':"$PATH"
+export STATE_DIR='{_bp(state_dir_val)}'
+export STATE_FILE='{_bp(self.state_dir / "state.json")}'
+export CLIENTS_FILE='{_bp(self.state_dir / "clients.json")}'
+export RELAYS_FILE='{_bp(self.state_dir / "relays.json")}'
+export XRAY_CONFIG_DIR='{_bp(self.xray_config_dir)}'
+export XRAY_CONFIG='{_bp(self.xray_config_dir / "config.json")}'
+export XRAY_SHARE_DIR='{_bp(self.xray_share_dir)}'
+export XRAY_BIN='{_bp(self.bin_dir / "xray")}'
+export BACKUP_DIR='{_bp(backup_dir_val)}'
+export NGINX_CONF_DIR='{_bp(self.nginx_conf_dir)}'
+export NGINX_RELAYS_DIR='{_bp(self.nginx_relays_d)}'
+export XRAY_API_DIR='{_bp(self.xray_api_dir)}'
+export XRAY_API_LIB='{_bp(self.xray_api_lib)}'
+export XRAY_API_ETC='{_bp(self.xray_api_etc)}'
+export XRAY_API_CONFIG_ENV='{_bp(self.xray_api_etc / "config.env")}'
+export SYSTEMD_SYSTEM_DIR='{_bp(self.systemd_dir)}'
+export CERTBOT_DIR='{_bp(self.certbot_dir)}'
+export LETSENCRYPT_DIR='{_bp(self.letsencrypt_dir)}'
+export WWW_HTML_DIR='{_bp(self.www_html_dir)}'
+export INSTALL_DIR='{_bp(self.install_dir)}'
 
-source '{JUST1KNODE_SH}'
+source '{_bp(JUST1KNODE_SH)}'
 
 check_root() {{ return 0; }}
 install_base_deps() {{ return 0; }}
@@ -197,6 +205,8 @@ ensure_xrayapi_user() {{ return 0; }}
             input=input_text if input_text is not None else "",
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
             check=False,
         )
@@ -391,12 +401,24 @@ exit 0
         self.assertIn("domain:2ip.ru", direct_rule["domain"])
         self.assertIn("just1k-wl-inbound-de", direct_rule["inboundTag"])
 
-        # 3. Check Split-DNS and skipFallback
+        # 3. Check Split-DNS and skipFallback (domestic resolvers only, no foreign 1.1.1.1)
         self.assertEqual(updated["dns"]["queryStrategy"], "UseIPv4")
         ru_server = updated["dns"]["servers"][0]
         self.assertEqual(ru_server["address"], "77.88.8.8")
         self.assertIn("domain:2ip.ru", ru_server["domains"])
         self.assertTrue(ru_server.get("skipFallback"))
+        self.assertNotIn("1.1.1.1", updated["dns"]["servers"])
+        self.assertIn("195.208.4.1", updated["dns"]["servers"])
+        self.assertIn("77.88.8.1", updated["dns"]["servers"])
+        self.assertNotIn("localhost", updated["dns"]["servers"])
+
+        # 3b. Verify ip_rule (geoip:ru) excludes relay inbounds to prevent DNS resolution on Origin
+        ip_rule = next(
+            (r for r in updated["routing"]["rules"] if r.get("outboundTag") == "just1k-wl-direct" and "ip" in r),
+            None,
+        )
+        self.assertIsNotNone(ip_rule, "ip_rule with geoip:ru for direct routing must exist")
+        self.assertNotIn("just1k-wl-inbound-de", ip_rule.get("inboundTag", []))
 
         # 4. Check sniffing routeOnly == False and quic on client inbounds
         for ib in updated["inbounds"]:
@@ -1070,7 +1092,8 @@ run_doctor
         self.assertIn("location = /cdn-check", nginx_text)
         self.assertIn("return 204;", nginx_text)
         self.assertIn("location / {", nginx_text)
-        self.assertIn("try_files $uri $uri/ =404;", nginx_text)
+        self.assertIn("default_type text/plain;", nginx_text)
+        self.assertIn('return 404 "Not Found\\n";', nginx_text)
 
         # 3. Verify Nginx xhttp-map.conf
         map_conf = self.nginx_conf_dir / "conf.d" / "xhttp-map.conf"
@@ -1145,6 +1168,19 @@ run_doctor
         self.assertIsNotNone(default_rule)
         self.assertEqual(default_rule["outboundTag"], "just1k-wl-direct")
 
+        # Verify DNS on Origin has no foreign resolvers
+        self.assertNotIn("1.1.1.1", xray_conf["dns"]["servers"])
+        self.assertIn("195.208.4.1", xray_conf["dns"]["servers"])
+        self.assertIn("77.88.8.1", xray_conf["dns"]["servers"])
+        self.assertNotIn("localhost", xray_conf["dns"]["servers"])
+
+        # Verify relay inbound is NOT in ip_rule (geoip:ru) to prevent foreign DNS leaks on Origin
+        ip_rule = next(
+            (r for r in rules if r.get("outboundTag") == "just1k-wl-direct" and "ip" in r), None
+        )
+        self.assertIsNotNone(ip_rule, "ip_rule with geoip:ru for direct routing must exist")
+        self.assertNotIn("just1k-wl-inbound-de", ip_rule.get("inboundTag", []))
+
     # -------------------------------------------------------------------------
     # Functional Validation: Role Guard in manage_relays_menu
     # -------------------------------------------------------------------------
@@ -1167,20 +1203,27 @@ run_doctor
         self.assertIn("ТОЛЬКО на Origin-сервере", res_empty.stderr + res_empty.stdout)
 
     # -------------------------------------------------------------------------
-    # Functional Validation: Camouflage Landing & Certbot Deploy Hook
+    # Functional Validation: Zero-Signature Purge & Certbot Deploy Hook
     # -------------------------------------------------------------------------
-    def test_functional_camouflage_and_certbot_deploy_hook(self):
+    def test_functional_zero_signature_and_certbot_deploy_hook(self):
         self._prepare_base_env()
+        index_file = self.www_html_dir / "index.html"
+        index_file.write_text("<h1>SimpleCalc</h1>", encoding="utf-8")
+        self.assertTrue(index_file.exists())
+
         res = self._run_shell_snippet("deploy_camouflage_site; deploy_certbot_renewal_hook")
         self.assertEqual(res.returncode, 0)
 
-        # 1. Camouflage index.html
-        index_file = self.www_html_dir / "index.html"
-        self.assertTrue(index_file.exists())
-        html_content = index_file.read_text(encoding="utf-8")
-        self.assertIn("<!DOCTYPE html>", html_content)
-        self.assertIn("<html", html_content)
-        self.assertIn("SimpleCalc", html_content)
+        # 1. Zero-Signature: legacy camouflage index.html must be purged
+        self.assertFalse(index_file.exists())
+
+        # 2. Zero-Collateral: custom user index.html must NOT be purged
+        custom_index = self.www_html_dir / "index.html"
+        custom_index.write_text("<h1>Custom User Site</h1>", encoding="utf-8")
+        res2 = self._run_shell_snippet("deploy_camouflage_site")
+        self.assertEqual(res2.returncode, 0)
+        self.assertTrue(custom_index.exists())
+        self.assertEqual(custom_index.read_text(encoding="utf-8"), "<h1>Custom User Site</h1>")
 
         # 2. Certbot renewal hook
         hook_file = self.letsencrypt_dir / "renewal-hooks" / "deploy" / "restart-xray-nginx.sh"
@@ -1220,6 +1263,19 @@ run_doctor
         rule_outbounds = [r.get("outboundTag") for r in rules]
         self.assertIn("just1k-wl-outbound-de", rule_outbounds)
         self.assertIn("just1k-wl-outbound-ee", rule_outbounds)
+
+        # Invariant: Relay routing rules must precede any IP-based rules to ensure foreign domains
+        # are forwarded by FQDN to Europe without triggering DNS resolution on the Origin node
+        de_idx = next(i for i, r in enumerate(rules) if r.get("outboundTag") == "just1k-wl-outbound-de")
+        ip_rules = [i for i, r in enumerate(rules) if r.get("outboundTag") == "just1k-wl-direct" and "ip" in r]
+        for ip_idx in ip_rules:
+            self.assertLess(de_idx, ip_idx, "Relay outbound rule must precede IP matching rules")
+
+        # Invariant: Origin DNS servers must not contain foreign resolvers
+        self.assertNotIn("1.1.1.1", cfg["dns"]["servers"])
+        self.assertIn("195.208.4.1", cfg["dns"]["servers"])
+        self.assertIn("77.88.8.1", cfg["dns"]["servers"])
+        self.assertNotIn("localhost", cfg["dns"]["servers"])
 
     def test_auto_heal_relays_registry_when_corrupted(self):
         self._prepare_base_env()
@@ -1286,7 +1342,12 @@ run_doctor
         self.assertTrue(sub_conf.exists(), "sub-wl.conf must be created in NGINX_RELAYS_DIR")
         content = sub_conf.read_text(encoding="utf-8")
         self.assertIn("location ^~ /sub/wl", content)
-        self.assertIn("resolver 1.1.1.1", content)
+        self.assertIn("resolver ", content)
+        self.assertIn("77.88.8.8", content)
+        self.assertNotIn("1.1.1.1", content)
+        self.assertNotIn("8.8.8.8", content)
+        self.assertIn("resolver_timeout 3s;", content)
+        self.assertIn("proxy_connect_timeout 5s;", content)
         self.assertIn('set $bot_upstream "https://just1k.best";', content)
         self.assertIn("proxy_pass $bot_upstream;", content)
         self.assertIn("proxy_ssl_server_name on;", content)
@@ -1362,6 +1423,53 @@ run_doctor
         with open(self.state_dir / "state.json", "r", encoding="utf-8") as f:
             st = json.load(f)
         self.assertEqual(st.get("bot_domain"), "new.example.com")
+
+    def test_heal_and_update_origin_config_upgrades_nginx_to_404_and_purges_camouflage(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "origin", "domain": "origin.example.com"}, f)
+
+        # Place legacy index.html with template signature
+        calc_html = self.www_html_dir / "index.html"
+        calc_html.write_text("<html>SimpleCalc - All calculations done client-side</html>", encoding="utf-8")
+
+        # Place legacy just1k-origin.conf with try_files
+        sites_avail = self.nginx_conf_dir / "sites-available"
+        sites_avail.mkdir(parents=True, exist_ok=True)
+        origin_conf = sites_avail / "just1k-origin.conf"
+        origin_conf.write_text(
+            """server {
+    listen 443 ssl http2;
+    server_name origin.example.com;
+    location / {
+        root /var/www/html;
+        index index.html;
+        try_files $uri $uri/ =404;
+    }
+}
+""",
+            encoding="utf-8",
+        )
+
+        res = self._run_shell_snippet("heal_and_update_origin_config")
+        self.assertEqual(res.returncode, 0)
+
+        # Camouflage file should be deleted
+        self.assertFalse(calc_html.exists(), "Legacy camouflage index.html must be purged")
+
+        # Nginx config must be upgraded to return 404
+        content = origin_conf.read_text(encoding="utf-8")
+        self.assertNotIn("try_files", content)
+        self.assertIn('return 404 "Not Found\\n";', content)
+
+    def test_deploy_camouflage_site_preserves_unrelated_index_html(self):
+        self._prepare_base_env()
+        custom_html = self.www_html_dir / "index.html"
+        custom_html.write_text("<html><h1>My Personal Blog</h1></html>", encoding="utf-8")
+
+        res = self._run_shell_snippet("deploy_camouflage_site")
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(custom_html.exists(), "Custom user index.html must NOT be deleted")
 
     def test_normalize_domain_strips_protocols_and_slashes(self):
         self._prepare_base_env()
@@ -1842,6 +1950,43 @@ remove_traffic_watchdog_timer
         self.assertIn("apply_amnezia_abuse_protection", content)
         self.assertIn("--dport 25 -j REJECT --reject-with tcp-reset", content)
         self.assertIn('--string "BitTorrent protocol" --algo bm', content)
+
+    def test_amnezia_migration_and_rollback_invariants(self):
+        """Verify Amnezia node migration path, legacy env discovery, and rollback handling."""
+        amnezia_sh = REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh"
+        content = amnezia_sh.read_text(encoding="utf-8")
+        # Configuration discovery (native only, zero legacy artifacts)
+        self.assertIn('$AMNEZIA_API_ETC/config.env', content)
+        self.assertNotIn('/opt/amnezia-api/.env', content)
+        self.assertNotIn('/root/amnezia-api', content)
+        self.assertIn("AMNEZIA_API_KEY", content)
+        self.assertIn("SERVER_MAX_PEERS", content)
+        # Rollback logic for native service
+        self.assertIn("rollback_amnezia_if_needed()", content)
+        self.assertIn("systemctl stop amnezia-api.service", content)
+        self.assertNotIn("docker start amnezia-api", content)
+        self.assertNotIn("pm2", content)
+        # Nginx proxy generation, rate limiting and security headers
+        self.assertIn("/etc/nginx/sites-available/just1k-amnezia.conf", content)
+        self.assertIn("limit_req_zone $binary_remote_addr zone=just1k_amnezia_api:10m rate=30r/s;", content)
+        self.assertIn("limit_req zone=just1k_amnezia_api burst=50 nodelay;", content)
+        self.assertIn('add_header X-Content-Type-Options "nosniff" always;', content)
+        self.assertIn('add_header X-Frame-Options "DENY" always;', content)
+        self.assertIn("location ~ ^/(docs|redoc|openapi.json|metrics)", content)
+        self.assertIn("proxy_pass http://127.0.0.1:${AMNEZIA_LOCAL_PORT};", content)
+        self.assertIn("client_max_body_size 10M;", content)
+
+        # Microservice Swagger/OpenAPI disabling in app.py
+        app_py = REPO_ROOT / "scripts" / "amnezia_api" / "app.py"
+        app_content = app_py.read_text(encoding="utf-8")
+        self.assertIn("docs_url=None", app_content)
+        self.assertIn("redoc_url=None", app_content)
+        self.assertIn("openapi_url=None", app_content)
+
+        # Origin subscription proxy domestic resolvers
+        origin_sh = REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh"
+        origin_content = origin_sh.read_text(encoding="utf-8")
+        self.assertIn('local resolved_servers="77.88.8.8 77.88.8.1 195.208.4.1"', origin_content)
 
 
 if __name__ == "__main__":

@@ -507,7 +507,7 @@ if os.path.exists(rf):
         local check_target="${domain:-localhost}"
         local sub_code
         local sub_err=0
-        sub_code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}${sub_prefix}/ping" 2>/dev/null)" || sub_err=$?
+        sub_code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}${sub_prefix}/ping" 2>/dev/null)" || sub_err=$?
         if [[ "$sub_code" == "200" && $sub_err -eq 0 ]]; then
             echo -e "  ${GREEN}✔${NC} Nginx прокси подписок (${sub_prefix}/ping) отвечает 200 OK (TLS валиден)"
         elif [[ $sub_err -eq 60 ]]; then
@@ -519,12 +519,23 @@ if os.path.exists(rf):
             echo -e "  ${RED}✗${NC} ОШИБКА 502 Bad Gateway: Nginx не может связаться с ботом (bot_domain: '$current_bot_domain')!"
             echo -e "      ${YELLOW}→${NC} Проверьте цепочку SSL (proxy_ssl_verify_depth), DNS и логи: tail -n 10 /var/log/nginx/error.log"
             failed=$((failed + 1))
+        elif [[ "$sub_code" == "504" ]]; then
+            local current_bot_domain
+            current_bot_domain="$(get_state_val "bot_domain" "<не задан>")"
+            echo -e "  ${RED}✗${NC} ОШИБКА 504 Gateway Timeout: Nginx не дождался ответа от бота (bot_domain: '$current_bot_domain')!"
+            echo -e "      ${YELLOW}→${NC} Возможные причины: IP бота блокируется ТСПУ (TCP SYN drop), бот перегружен/не отвечает или сбой DNS."
+            echo -e "      ${YELLOW}→${NC} Проверьте логи: tail -n 10 /var/log/nginx/error.log и убедитесь, что домен бота проксируется через CDN/Cloudflare."
+            failed=$((failed + 1))
         elif [[ "$sub_code" == "404" ]]; then
             echo -e "  ${RED}✗${NC} ОШИБКА 404 Not Found: Nginx прокси отвечает 404 (эндпоинт ${sub_prefix}/ping не найден на боте)!"
             failed=$((failed + 1))
+        elif [[ $sub_err -eq 28 ]]; then
+            echo -e "  ${RED}✗${NC} ТАЙМАУТ ПОДКЛЮЧЕНИЯ (curl error 28): Запрос к https://${check_target}${sub_prefix}/ping превысил лимит времени!"
+            echo -e "      ${YELLOW}→${NC} Nginx или вышестоящий бот зависли при обработке. Проверьте: tail -n 10 /var/log/nginx/error.log"
+            failed=$((failed + 1))
         elif [[ "$sub_code" == "000" || $sub_err -ne 0 ]]; then
             local insecure_code
-            insecure_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}${sub_prefix}/ping" 2>/dev/null || echo "000")"
+            insecure_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 10 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}${sub_prefix}/ping" 2>/dev/null || echo "000")"
             if [[ "$insecure_code" == "200" ]]; then
                 echo -e "  ${RED}✗${NC} TLS ОШИБКА: Nginx отвечает 200 OK только без проверки сертификата (curl -k). Проверьте Let's Encrypt / CA!"
                 failed=$((failed + 1))
@@ -543,7 +554,7 @@ if os.path.exists(rf):
             log "9. Проверка доступности CDN подписок (${cdn_domain})..."
             local cdn_code
             local cdn_err=0
-            cdn_code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "https://${cdn_domain}${sub_prefix}/ping" 2>/dev/null)" || cdn_err=$?
+            cdn_code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "https://${cdn_domain}${sub_prefix}/ping" 2>/dev/null)" || cdn_err=$?
             if [[ "$cdn_code" == "200" && $cdn_err -eq 0 ]]; then
                 echo -e "  ${GREEN}✔${NC} Публичный CDN прокси (${sub_prefix}/ping) отвечает 200 OK (TLS валиден)"
             elif [[ $cdn_err -eq 60 ]]; then
@@ -552,12 +563,20 @@ if os.path.exists(rf):
             elif [[ "$cdn_code" == "502" ]]; then
                 echo -e "  ${RED}✗${NC} CDN вернул 502 Bad Gateway (проверьте Origin и CDN кэш)!"
                 failed=$((failed + 1))
+            elif [[ "$cdn_code" == "504" ]]; then
+                echo -e "  ${RED}✗${NC} CDN вернул 504 Gateway Timeout: Origin или вышестоящий бот не ответили вовремя!"
+                echo -e "      ${YELLOW}→${NC} Проверьте доступность Origin и домена бота, а также логи /var/log/nginx/error.log на Origin."
+                failed=$((failed + 1))
             elif [[ "$cdn_code" == "404" ]]; then
                 echo -e "  ${RED}✗${NC} CDN вернул 404 Not Found (эндпоинт ${sub_prefix}/ping не найден на CDN/Origin)!"
                 failed=$((failed + 1))
+            elif [[ $cdn_err -eq 28 ]]; then
+                echo -e "  ${RED}✗${NC} ТАЙМАУТ CDN (curl error 28): https://${cdn_domain}${sub_prefix}/ping не ответил вовремя!"
+                echo -e "      ${YELLOW}→${NC} Проверьте статус сети CDN и доступность домена из РФ."
+                failed=$((failed + 1))
             elif [[ "$cdn_code" == "000" || $cdn_err -ne 0 ]]; then
                 local cdn_insecure
-                cdn_insecure="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 5 "https://${cdn_domain}${sub_prefix}/ping" 2>/dev/null || echo "000")"
+                cdn_insecure="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 10 "https://${cdn_domain}${sub_prefix}/ping" 2>/dev/null || echo "000")"
                 if [[ "$cdn_insecure" == "200" ]]; then
                     echo -e "  ${RED}✗${NC} TLS ОШИБКА CDN: ${cdn_domain} отвечает 200 OK только без проверки SSL (curl -k)!"
                     failed=$((failed + 1))
@@ -809,9 +828,9 @@ uninstall_node() {
         fi
     fi
 
-    info "7/11. Удаление камуфляжного сайта и хуков Let's Encrypt..."
+    info "7/11. Удаление веб-файлов и хуков Let's Encrypt..."
     local www_index="${WWW_HTML_DIR:-/var/www/html}/index.html"
-    if [[ -f "$www_index" ]] && grep -q "Cloud Ingress Network Node" "$www_index" 2>/dev/null; then
+    if [[ -f "$www_index" ]] && (grep -q "Cloud Ingress Network Node" "$www_index" 2>/dev/null || grep -q "SimpleCalc" "$www_index" 2>/dev/null); then
         rm -f "$www_index" 2>/dev/null || true
     fi
     local certbot_dir="${CERTBOT_DIR:-/var/www/certbot}"

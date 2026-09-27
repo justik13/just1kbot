@@ -82,11 +82,18 @@ deploy_subscription_proxy_conf() {
 
     set_state_val "sub_path_prefix" "$sub_prefix" 2>/dev/null || true
 
+    # Резолверы DNS: Anycast DNS Яндекса и MSK-IX/НСДИ для РФ.
+    # Согласно docs/WL/WHITELIST_MASTER_GUIDE.md (п. 5.3 и 5.3.1), на Origin в РФ категорически запрещено
+    # указывать зарубежные публичные DNS (1.1.1.1, 8.8.8.8): Nginx опрашивает резолверы round-robin,
+    # а в условиях фильтрации ТСПУ зарубежный UDP:53 блокируется, вызывая 3-секундные задержки proxy_pass.
+    local resolved_servers="77.88.8.8 77.88.8.1 195.208.4.1"
+
     mkdir -p "$NGINX_RELAYS_DIR"
     create_backup "${NGINX_RELAYS_DIR}/sub-wl.conf"
     cat > "${NGINX_RELAYS_DIR}/sub-wl.conf" <<EOF
     location ^~ ${sub_prefix} {
-        resolver 1.1.1.1 1.0.0.1 8.8.8.8 9.9.9.9 valid=30s ipv6=off;
+        resolver ${resolved_servers} valid=30s ipv6=off;
+        resolver_timeout 3s;
         set \$bot_upstream "https://${target_host}";
         proxy_pass \$bot_upstream;
         proxy_ssl_server_name on;
@@ -99,6 +106,7 @@ deploy_subscription_proxy_conf() {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_buffering off;
+        proxy_connect_timeout 5s;
         proxy_read_timeout 30s;
         proxy_send_timeout 30s;
     }
@@ -423,8 +431,8 @@ dns_conf['servers'] = [
         ],
         'skipFallback': True
     },
-    '1.1.1.1',
-    'localhost'
+    '195.208.4.1',
+    '77.88.8.1'
 ]
 dns_conf['queryStrategy'] = 'UseIPv4'
 final_config['dns'] = dns_conf
@@ -602,9 +610,8 @@ server {
     include ${NGINX_RELAYS_DIR}/*.conf;
 
     location / {
-        root ${WWW_HTML_DIR};
-        index index.html index.htm;
-        try_files \$uri \$uri/ =404;
+        default_type text/plain;
+        return 404 "Not Found\n";
     }
 }
 
@@ -808,7 +815,7 @@ for ib in inbounds:
             'routeOnly': False
         }
 
-# 3. DNS: Split-DNS с UseIPv4 и skipFallback для доменов РФ
+# 3. DNS: Split-DNS с UseIPv4 и skipFallback для доменов РФ (строго отечественные резолверы)
 cfg['dns'] = {
     'servers': [
         {
@@ -824,8 +831,8 @@ cfg['dns'] = {
             ],
             'skipFallback': True
         },
-        '1.1.1.1',
-        'localhost'
+        '195.208.4.1',
+        '77.88.8.1'
     ],
     'queryStrategy': 'UseIPv4'
 }
@@ -874,30 +881,53 @@ if not dom_rule:
         'domain': ru_domains,
         'outboundTag': 'just1k-wl-direct'
     }
-    rules.insert(3, dom_rule)
+    rules.insert(2, dom_rule)
 else:
     dom_rule['domain'] = list(dict.fromkeys(dom_rule.get('domain', []) + ru_domains))
     curr_ib = dom_rule.get('inboundTag', [])
     dom_rule['inboundTag'] = list(dict.fromkeys((curr_ib if isinstance(curr_ib, list) else [curr_ib]) + known_client_inbounds))
 
-# 4.3. Правило Direct для IP РФ (geoip:ru)
+# 4.3. Правила маршрутизации для каждого индивидуального релея (делегирование зарубежного трафика и DNS в Европу)
+# Правила релея располагаются СТРОГО сразу после dom_rule и ДО любых ip-правил,
+# чтобы зарубежные запросы клиентов с тегом just1k-wl-inbound-* направлялись на Relay по FQDN без DNS-резолвинга на Origin в РФ
+dom_idx = rules.index(dom_rule)
+relay_offset = 1
+for r in relays:
+    if not isinstance(r, dict): continue
+    code = r.get('code')
+    if not code: continue
+    in_tag = 'just1k-wl-inbound-' + str(code)
+    out_tag = 'just1k-wl-outbound-' + str(code)
+    rules = [rl for rl in rules if not (rl.get('inboundTag') == [in_tag] and rl.get('outboundTag') == out_tag)]
+    dom_idx = rules.index(dom_rule)
+    rules.insert(dom_idx + relay_offset, {
+        'type': 'field',
+        'inboundTag': [in_tag],
+        'outboundTag': out_tag
+    })
+    relay_offset += 1
+
+# 4.4. Правило Direct для IP РФ (geoip:ru) — строго для прямого трафика РФ (just1k-wl-default)
 ip_rule = next((r for r in rules if r.get('outboundTag') == 'just1k-wl-direct' and 'ip' in r), None)
 if not ip_rule:
     ip_rule = {
         'type': 'field',
-        'inboundTag': list(known_client_inbounds),
+        'inboundTag': ['just1k-wl-default'],
         'ip': ['geoip:ru'],
         'outboundTag': 'just1k-wl-direct'
     }
-    dom_idx = rules.index(dom_rule)
-    rules.insert(dom_idx + 1, ip_rule)
+    rules.append(ip_rule)
 else:
     if 'geoip:ru' not in ip_rule.get('ip', []):
         ip_rule.setdefault('ip', []).append('geoip:ru')
+    # Исключаем relay inbounds из ip_rule во избежание DNS-резолвинга зарубежных доменов на Origin в РФ
     curr_ib = ip_rule.get('inboundTag', [])
-    ip_rule['inboundTag'] = list(dict.fromkeys((curr_ib if isinstance(curr_ib, list) else [curr_ib]) + known_client_inbounds))
+    clean_ib = [t for t in (curr_ib if isinstance(curr_ib, list) else [curr_ib]) if not str(t).startswith('just1k-wl-inbound-')]
+    if 'just1k-wl-default' not in clean_ib:
+        clean_ib.append('just1k-wl-default')
+    ip_rule['inboundTag'] = clean_ib
 
-# 4.4. Дефолтное правило для just1k-wl-default (Россия — прямой выход с московского IP)
+# 4.5. Дефолтное правило для just1k-wl-default (Россия — прямой выход с московского IP)
 def_rule = next((r for r in rules if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r), None)
 if not def_rule:
     rules.append({
@@ -908,19 +938,7 @@ if not def_rule:
 else:
     def_rule['outboundTag'] = 'just1k-wl-direct'
 
-# 4.5. Правила маршрутизации для каждого индивидуального релея
-for r in relays:
-    if not isinstance(r, dict): continue
-    code = r.get('code')
-    if not code: continue
-    in_tag = 'just1k-wl-inbound-' + str(code)
-    out_tag = 'just1k-wl-outbound-' + str(code)
-    if not any(rl.get('inboundTag') == [in_tag] and rl.get('outboundTag') == out_tag for rl in rules):
-        rules.append({
-            'type': 'field',
-            'inboundTag': [in_tag],
-            'outboundTag': out_tag
-        })
+cfg['routing']['rules'] = rules
 
 # Атомарное сохранение конфигурации Xray
 d = os.path.dirname(os.path.abspath(cfg_file))
@@ -1013,6 +1031,35 @@ except Exception:
         else
             warn "BOT_DOMAIN не настроен или не является валидным FQDN, пропуск авто-восстановления Nginx-проксирования подписок."
         fi
+    fi
+
+    # Удаление устаревших веб-заглушек и обновление корневого локейшна Nginx до Zero-Signature 404
+    deploy_camouflage_site
+    local origin_vhost="${NGINX_CONF_DIR}/sites-available/just1k-origin.conf"
+    if [[ -f "$origin_vhost" ]]; then
+        manifest_track_file "$origin_vhost"
+        python3 -c "
+import sys, re
+conf_path = sys.argv[1]
+try:
+    with open(conf_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    new_loc = '''location / {
+        default_type text/plain;
+        return 404 \"Not Found\\\\n\";
+    }'''
+    updated, count = re.subn(
+        r'location\s+/\s*\{[^}]*try_files[^}]*\}',
+        lambda m: new_loc,
+        content
+    )
+    if count > 0:
+        with open(conf_path, 'w', encoding='utf-8') as f:
+            f.write(updated)
+        print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found')
+except Exception:
+    pass
+" "$origin_vhost" 2>/dev/null || true
     fi
 
     # Системное отключение IPv6
