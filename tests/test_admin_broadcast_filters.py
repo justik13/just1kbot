@@ -102,7 +102,9 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
             # AmneziaWG branch invariants
             self.assertIn("SELECT servers.protocol", compiled)
-            self.assertIn("WHERE servers.id = 42) = 'amneziawg2'", compiled)
+            self.assertIn("WHERE servers.id = 42) IN (", compiled)
+            self.assertIn("'amneziawg2'", compiled)
+            self.assertIn("'amneziawg3'", compiled)
             self.assertIn("vpn_profiles.server_id = 42", compiled)
             self.assertIn("vpn_profiles.is_active IS true", compiled)
             self.assertIn("vpn_profiles.desired_is_active IS true", compiled)
