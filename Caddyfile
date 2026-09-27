@@ -2,7 +2,14 @@
 	email {$SSL_EMAIL}
 	servers {
 		max_header_size 8KB
+		strict_sni_host
 	}
+}
+
+http:// {
+	@domain host {$DOMAIN}
+	redir @domain https://{host}{uri} permanent
+	abort
 }
 
 {$DOMAIN} {

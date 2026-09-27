@@ -78,3 +78,19 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("vm.overcommit_memory=1", setup_sh)
         self.assertIn("vm.overcommit_memory", cli_sh)
 
+    def test_caddy_stealth_sni_and_direct_ip_abort(self):
+        root = Path(__file__).parents[1]
+        caddyfile = (root / "Caddyfile").read_text(encoding="utf-8")
+        self.assertIn("strict_sni_host", caddyfile)
+        self.assertIn("http:// {", caddyfile)
+        self.assertIn("abort", caddyfile)
+
+    def test_just1knode_origin_bot_ip_cli_support(self):
+        root = Path(__file__).parents[1]
+        just1knode_sh = (root / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        origin_sh = (root / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("set-bot-ip|bot-ip)", just1knode_sh)
+        self.assertIn("set_origin_bot_ip", origin_sh)
+        self.assertIn("ufw allow from", origin_sh)
+        self.assertIn("port 8444", origin_sh)
+

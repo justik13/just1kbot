@@ -682,6 +682,59 @@ EOF
     echo -e "  🩺 Проверка CDN:      curl -X OPTIONS https://${cdn_domain}/cdn-check\n"
 }
 
+set_origin_bot_ip() {
+    title "ОБНОВЛЕНИЕ IP-АДРЕСА TELEGRAM-БОТА (BOT_IP ДЛЯ ПОРТА 8444)"
+    check_root
+    init_state_dir
+
+    local role
+    role="$(get_state_val "role")"
+    if [[ "$role" != "origin" ]]; then
+        error "Функция доступна только на Origin-узле (текущая роль: ${role:-не установлена})."
+        return 1
+    fi
+
+    local new_bot_ip="${1:-}"
+    if [[ -z "$new_bot_ip" ]]; then
+        read -rp "Введите новый IP-адрес Telegram-бота: " new_bot_ip || true
+    fi
+
+    new_bot_ip="$(echo "$new_bot_ip" | tr -d '[:space:]')"
+    if [[ -z "$new_bot_ip" ]]; then
+        error "IP-адрес не может быть пустым."
+        return 1
+    fi
+
+    # Валидация формата IPv4
+    if [[ ! "$new_bot_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$new_bot_ip" != "any" && "$new_bot_ip" != "0.0.0.0/0" ]]; then
+        error "Недопустимый формат IP-адреса: '$new_bot_ip' (ожидается валидный IPv4 или 'any')."
+        return 1
+    fi
+
+    local old_bot_ip
+    old_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+
+    log "Обновление правил фаервола UFW для порта 8444..."
+    if command -v ufw >/dev/null 2>&1; then
+        if [[ -n "$old_bot_ip" && "$old_bot_ip" != "any" && "$old_bot_ip" != "-" ]]; then
+            ufw delete allow from "$old_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+        fi
+        ufw delete allow 8444/tcp 2>/dev/null || true
+        ufw delete allow 8444 2>/dev/null || true
+
+        if [[ "$new_bot_ip" == "any" || "$new_bot_ip" == "0.0.0.0/0" ]]; then
+            ufw allow 8444/tcp || true
+            warn "Порт 8444 открыт для всех входящих IP адресов (any)."
+        else
+            ufw allow from "$new_bot_ip" to any port 8444 proto tcp || true
+            log "Порт 8444/tcp успешно открыт строго для ${new_bot_ip}."
+        fi
+    fi
+
+    set_state_val "bot_ip" "$new_bot_ip"
+    log "BOT_IP успешно обновлен в state.json: ${old_bot_ip:-не был задан} -> ${new_bot_ip}"
+}
+
 heal_and_update_origin_config() {
     title "АВТОМАТИЧЕСКАЯ ОПТИМИЗАЦИЯ И ВОССТАНОВЛЕНИЕ КОНФИГУРАЦИИ ORIGIN"
     check_root
@@ -1071,6 +1124,16 @@ net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
         sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+    fi
+
+    # Фаервол: принудительное восстановление разрешающего правила для bot_ip (порт 8444)
+    local heal_bot_ip
+    heal_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+    if command -v ufw >/dev/null 2>&1 && [[ -n "$heal_bot_ip" && "$heal_bot_ip" != "any" && "$heal_bot_ip" != "-" ]]; then
+        if ! ufw status 2>/dev/null | grep -F "$heal_bot_ip" | grep -q "8444"; then
+            ufw allow from "$heal_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+            log "Фаервол UFW: подтвержден доступ к порту 8444 для BOT_IP ($heal_bot_ip)"
+        fi
     fi
 
     # Валидация Xray и Nginx

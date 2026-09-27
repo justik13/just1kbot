@@ -1018,25 +1018,27 @@ main_menu() {
             echo -e "  ${BOLD}[2]${NC} 📊 Статус узла и подключенные клиенты"
             echo -e "  ${BOLD}[3]${NC} 🩺 Комплексная самодиагностика (Doctor)"
             echo -e "  ${BOLD}[4]${NC} 🔑 Показать данные для Telegram-бота (/admin)"
-            echo -e "  ${BOLD}[5]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
-            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[7]${NC} ⚡ Обновить ядро Xray-core"
-            echo -e "  ${BOLD}[8]${NC} ⚠️ Сбросить / переустановить узел"
-            echo -e "  ${BOLD}[9]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[5]${NC} 🤖 Изменить IP Telegram-бота (BOT_IP фаервола 8444)"
+            echo -e "  ${BOLD}[6]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[7]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[8]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[9]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[10]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-9]: " choice
+            read -rp "Выберите действие [0-10]: " choice
 
             case "$choice" in
                 1) manage_relays_menu; read -rp "Нажмите Enter для продолжения...";;
                 2) show_status; read -rp "Нажмите Enter для продолжения...";;
                 3) run_doctor; read -rp "Нажмите Enter для продолжения...";;
                 4) show_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
-                5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
-                6) update_node; read -rp "Нажмите Enter для продолжения...";;
-                7) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
-                8) reset_node; read -rp "Нажмите Enter для продолжения...";;
-                9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                5) set_origin_bot_ip; read -rp "Нажмите Enter для продолжения...";;
+                6) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                7) update_node; read -rp "Нажмите Enter для продолжения...";;
+                8) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                9) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                10) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -1203,6 +1205,9 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 ;;
             status) show_status ;;
             doctor|test) run_doctor ;;
+            set-bot-ip|bot-ip)
+                set_origin_bot_ip "${2:-}"
+                ;;
             update)
                 case "${2:-}" in
                     core|xray) update_xray_core ;;
