@@ -307,9 +307,11 @@ class AmneziaClient:
         api_url: str,
         api_key: str,
         ssl_verify: bool | None = None,
+        protocol: str | None = None,
     ):
         self.api_url = (api_url or "").rstrip("/")
         self.api_key = api_key or ""
+        self.protocol = protocol
         self._log_target = _safe_api_target(self.api_url)
         self._headers = {
             "x-api-key": self.api_key,
@@ -836,7 +838,7 @@ class AmneziaClient:
         
         data = {
             "clientName": client_name,
-            "protocol": protocol or AMNEZIA_PROTOCOL,
+            "protocol": protocol or self.protocol or AMNEZIA_PROTOCOL,
             "expiresAt": expires_at,
         }
         result = await self._request_result(
@@ -889,7 +891,7 @@ class AmneziaClient:
     ) -> AmneziaAPIResult[None]:
         data = {
             "clientId": client_id,
-            "protocol": protocol or AMNEZIA_PROTOCOL,
+            "protocol": protocol or self.protocol or AMNEZIA_PROTOCOL,
         }
         result = await self._request_result(
             "DELETE",
@@ -915,7 +917,7 @@ class AmneziaClient:
     ) -> AmneziaAPIResult[None]:
         data = {
             "clientId": client_id,
-            "protocol": protocol or AMNEZIA_PROTOCOL,
+            "protocol": protocol or self.protocol or AMNEZIA_PROTOCOL,
         }
         if expires_at is not None and status is None:
             status = "active"
@@ -942,12 +944,14 @@ class AmneziaClient:
         status: str | None = None,
         expires_at: int | None = None,
         clear_expires_at: bool = False,
+        protocol: str | None = None,
     ) -> bool:
         result = await self.update_client_result(
             client_id,
             status,
             expires_at,
             clear_expires_at,
+            protocol=protocol,
         )
         return result.ok
 

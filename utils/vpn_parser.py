@@ -222,9 +222,10 @@ def _get_first_awg_container(data: dict) -> dict | None:
     for container in containers:
         if not isinstance(container, dict):
             continue
-        awg = container.get("awg")
-        if awg and isinstance(awg, dict):
-            return awg
+        if container.get("container") == "amnezia-awg2":
+            awg = container.get("awg")
+            if awg and isinstance(awg, dict):
+                return awg
     return None
 
 
@@ -384,9 +385,8 @@ def is_valid_vpn_uri(uri: str) -> bool:
 
     Invariants enforced:
     1. Valid JSON payload with non-empty 'containers'.
-    2. Container is strictly 'amnezia-awg2' (upstream canonical container for both AWG 2.0 and AWG 3.x)
-       or legacy 'amnezia-awg'.
-    3. defaultContainer (if present) is 'amnezia-awg2' (or 'amnezia-awg').
+    2. Container is strictly 'amnezia-awg2' (upstream canonical container for both AWG 2.0 and AWG 3.x).
+    3. defaultContainer (if present) is strictly 'amnezia-awg2'.
     4. Valid protocol_version ('2', '2.0', '3', '3.0', '3.1').
     5. Valid last_config JSON with client_priv_key, server_pub_key, client_ip, hostName, port.
     6. All mandatory AWG 2.0+ obfuscation keys present (Jc, Jmin, Jmax, S1, S2, S3, S4, H1..H4).
@@ -401,7 +401,7 @@ def is_valid_vpn_uri(uri: str) -> bool:
             return False
 
         def_container = data.get("defaultContainer")
-        if def_container and def_container not in ("amnezia-awg2", "amnezia-awg", "amnezia-awg3"):
+        if def_container and def_container != "amnezia-awg2":
             return False
 
         containers = data.get("containers")
@@ -412,25 +412,16 @@ def is_valid_vpn_uri(uri: str) -> bool:
         for c in containers:
             if not isinstance(c, dict):
                 continue
-            c_name = c.get("container")
-            if c_name in ("amnezia-awg2", "amnezia-awg", "amnezia-awg3"):
-                if isinstance(c.get("awg"), dict):
-                    awg_container = c
-                    break
+            if c.get("container") == "amnezia-awg2" and isinstance(c.get("awg"), dict):
+                awg_container = c
+                break
         if not awg_container:
             return False
 
         awg = awg_container.get("awg", {})
         proto_ver = str(awg.get("protocol_version", "")).strip()
-        c_name = awg_container.get("container")
 
-        if c_name in ("amnezia-awg2", "amnezia-awg3"):
-            if proto_ver not in ("2", "2.0", "3", "3.0", "3.1"):
-                return False
-        elif c_name == "amnezia-awg":
-            if proto_ver not in ("2", "2.0"):
-                return False
-        else:
+        if proto_ver not in ("2", "2.0", "3", "3.0", "3.1"):
             return False
 
         last_config = _parse_last_config(awg)

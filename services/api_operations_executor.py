@@ -100,6 +100,7 @@ async def _client(op):
 
     # The durable operation always executes against its immutable snapshot.
     # The current Server row is used only to detect identity changes when snapshot exists.
+    server_protocol = None
     if op.server_id:
         from config.constants import AMNEZIA_PROTOCOLS
 
@@ -116,9 +117,10 @@ async def _client(op):
                     return None
                 if server.api_url != url or server.api_key != key:
                     raise _ServerEndpointChanged
+                server_protocol = server.protocol
 
     # A deleted Server row does not erase the encrypted operation snapshot.
-    return AmneziaClient(url, key)
+    return AmneziaClient(url, key, protocol=server_protocol)
 
 
 async def _execute_create(op, client):

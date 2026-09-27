@@ -9,7 +9,7 @@ from bot import texts
 from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from config.constants import AMNEZIA_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS
 from database.repositories.servers_repo import (
     create_server,
     get_server_by_api_url,
@@ -368,7 +368,7 @@ async def process_add_server(
 
         protocols = server_info.protocols
 
-        if AMNEZIA_PROTOCOL not in protocols and "amneziawg3" not in protocols:
+        if not any(p in AMNEZIA_PROTOCOLS for p in protocols):
             await render_hub(
                 message.bot,
                 message.chat.id,

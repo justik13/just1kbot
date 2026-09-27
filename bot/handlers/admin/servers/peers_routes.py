@@ -14,6 +14,7 @@ from sqlalchemy.orm import load_only, selectinload
 from bot import texts
 from bot.formatters import format_admin_breadcrumbs
 from bot.keyboards.admin.servers import get_admin_server_peers_keyboard
+from config.constants import AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS
 from database.models import Server, User, VPNProfile
 from services.amnezia_client import AmneziaClient
 from utils.admin import is_admin
@@ -59,8 +60,8 @@ async def show_server_peers(
         await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
         return
 
-    server_proto = getattr(server, "protocol", None) or "amneziawg2"
-    if server_proto not in ("amneziawg2", "awg", "amneziawg3"):
+    server_proto = getattr(server, "protocol", None) or AMNEZIA_PROTOCOL
+    if server_proto not in AMNEZIA_PROTOCOLS:
         await callback.answer(
             texts.ADMIN_SERVER_PEERS_AWG_ONLY,
             show_alert=True,

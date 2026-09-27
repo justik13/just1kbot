@@ -145,23 +145,19 @@ def get_target_container() -> str:
 
 
 def get_interface_name(container: str | None = None) -> str:
-    """Return kernel interface name (awg0 for all AmneziaWG containers, wg0 only for legacy/fallback)."""
-    c = (container or get_target_container()).lower()
-    return "awg0" if "awg" in c else "wg0"
+    """Return kernel interface name (strictly awg0 for all AmneziaWG containers)."""
+    return "awg0"
 
 
 def get_tool_binary(container: str | None = None) -> str:
-    """Return CLI tool name (awg for all AmneziaWG containers, wg only for legacy/fallback)."""
-    c = (container or get_target_container()).lower()
-    return "awg" if "awg" in c else "wg"
+    """Return CLI tool name (strictly awg for all AmneziaWG containers)."""
+    return "awg"
 
 
 def get_config_path(container: str | None = None) -> str:
     if AWG_CONF_PATH:
         return AWG_CONF_PATH
-    c = (container or get_target_container()).lower()
-    conf_name = "awg0.conf" if "awg" in c else "wg0.conf"
-    return os.path.join(AWG_DIR, conf_name)
+    return os.path.join(AWG_DIR, "awg0.conf")
 
 
 def get_clients_table_path() -> str:
@@ -702,8 +698,8 @@ def build_client_configs(
         jmax_val = int(detected_awg.get("Jmax", 0))
         if not (0 <= jmin_val <= jmax_val <= 1280):
             raise ValueError(f"Jmin/Jmax must satisfy 0 <= Jmin <= Jmax <= 1280 (got Jmin={jmin_val}, Jmax={jmax_val})")
-        for sk in ("S1", "S2"):
-            if int(detected_awg.get(sk, 0)) < 0:
+        for sk in ("S1", "S2", "S3", "S4"):
+            if sk in detected_awg and int(detected_awg.get(sk, 0)) < 0:
                 raise ValueError(f"{sk} must be non-negative")
     except (ValueError, TypeError) as exc:
         logger.error("Server interface AWG base parameters range error: %s", exc)

@@ -163,7 +163,7 @@ def is_server_allocatable(server: Server | None, protocol: str = AMNEZIA_PROTOCO
     ):
         return False
     caps = getattr(server, "capabilities", None) or []
-    if (protocol in AMNEZIA_PROTOCOLS or protocol == AMNEZIA_PROTOCOL) and "xray_origin" in caps:
+    if protocol in AMNEZIA_PROTOCOLS and "xray_origin" in caps:
         return False
     return True
 

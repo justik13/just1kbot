@@ -10,7 +10,7 @@ from bot import texts
 from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from config.constants import AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS
+from config.constants import AMNEZIA_PROTOCOLS
 from config.enums import WhiteInternetStatus
 from database.models import (
     APIOperation,
@@ -471,7 +471,7 @@ async def process_edit_server_url(
             await state.clear()
             return
 
-        if AMNEZIA_PROTOCOL not in server_info.protocols and "amneziawg3" not in server_info.protocols:
+        if not any(p in AMNEZIA_PROTOCOLS for p in server_info.protocols):
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -772,7 +772,7 @@ async def process_edit_server_key(
             await state.clear()
             return
 
-        if AMNEZIA_PROTOCOL not in server_info.protocols and "amneziawg3" not in server_info.protocols:
+        if not any(p in AMNEZIA_PROTOCOLS for p in server_info.protocols):
             await render_hub(
                 message.bot,
                 message.chat.id,

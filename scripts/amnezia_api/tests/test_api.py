@@ -1234,24 +1234,14 @@ def test_amnezia_tool_resolution_and_key_validation():
     assert amnezia_app.is_valid_awg_key(None) is False
 
     # 2. Tool and interface resolution
-    # Standard AmneziaVPN self-hosted container (AWG 2.0 and AWG 3.x)
+    # Standard AmneziaVPN self-hosted container (AWG 2.0 and AWG 3.x strictly uses awg0/awg/awg0.conf)
     assert amnezia_app.get_interface_name("amnezia-awg2") == "awg0"
     assert amnezia_app.get_tool_binary("amnezia-awg2") == "awg"
     assert amnezia_app.get_config_path("amnezia-awg2").endswith("awg0.conf")
 
-    # Legacy or custom AWG containers
-    assert amnezia_app.get_interface_name("amnezia-awg") == "awg0"
-    assert amnezia_app.get_tool_binary("amnezia-awg") == "awg"
-    assert amnezia_app.get_config_path("amnezia-awg").endswith("awg0.conf")
-
-    assert amnezia_app.get_interface_name("custom-awg-node") == "awg0"
-    assert amnezia_app.get_tool_binary("custom-awg-node") == "awg"
-    assert amnezia_app.get_config_path("custom-awg-node").endswith("awg0.conf")
-
-    # Non-AWG fallback
-    assert amnezia_app.get_interface_name("plain-wireguard") == "wg0"
-    assert amnezia_app.get_tool_binary("plain-wireguard") == "wg"
-    assert amnezia_app.get_config_path("plain-wireguard").endswith("wg0.conf")
+    assert amnezia_app.get_interface_name() == "awg0"
+    assert amnezia_app.get_tool_binary() == "awg"
+    assert amnezia_app.get_config_path().endswith("awg0.conf")
 
 
 

@@ -76,7 +76,7 @@ class VPNParserTests(unittest.TestCase):
         config = {
             "containers": [
                 {
-                    "container": "amnesia-awg2",
+                    "container": "amnezia-awg2",
                     "awg": {
                         "protocol_version": "2",
                         "last_config": json.dumps(
@@ -336,7 +336,7 @@ class VPNParserTests(unittest.TestCase):
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(empty_data)))
 
-        # 6. Reject unsupported container (e.g. unknown-container) and accept amnezia-awg3
+        # 6. Reject unsupported container (e.g. unknown-container)
         bad_container_data = {
             "containers": [{
                 "container": "unknown-container",
@@ -348,14 +348,14 @@ class VPNParserTests(unittest.TestCase):
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(bad_container_data)))
 
-        # 6b. Accept valid amnezia-awg3 container
+        # 6b. Reject fictitious amnezia-awg3 container (canonical container is strictly amnezia-awg2)
         awg3_container_data = {
             "containers": [{
                 "container": "amnezia-awg3",
                 "awg": dict(awg31_data["containers"][0]["awg"]),
             }]
         }
-        self.assertTrue(is_valid_vpn_uri(encode_json_to_vpn_uri(awg3_container_data)))
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(awg3_container_data)))
 
         # 7. Reject missing S3/S4 for AWG 2.0
         missing_s3_cfg = dict(base_last_cfg)
@@ -429,6 +429,30 @@ class VPNParserTests(unittest.TestCase):
             }]
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(legacy_awg1_data)))
+
+        # 10b. Reject legacy amnezia-awg container even with protocol_version 2 (strictly amnezia-awg2 required)
+        legacy_awg2_data = {
+            "containers": [{
+                "container": "amnezia-awg",
+                "awg": {
+                    "protocol_version": "2",
+                    "port": "51820",
+                    "Jc": "4",
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
+                    "last_config": json.dumps(base_last_cfg),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(legacy_awg2_data)))
 
         # 11. Reject AWG 3.x if HeaderProtectionKey is missing in awg dict
         awg3_missing_hpk_awg = {
