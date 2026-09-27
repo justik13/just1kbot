@@ -215,6 +215,7 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
                 api_url_snapshot="http://node.local:8080",
                 api_key_snapshot="testkey",
                 peer_id="peer1",
+                protocol="amneziawg3.1",
             )
             mock_enqueue.assert_called_once()
             call_kwargs = mock_enqueue.call_args.kwargs

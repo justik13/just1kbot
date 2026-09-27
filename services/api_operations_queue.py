@@ -230,11 +230,6 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
         audit_reason: str | None = None,
         next_attempt_at: datetime | None = None) -> APIOperation:
     """Ensure a stable delete command; audit reason is deliberately not identity."""
-    if protocol is None and server_id:
-        server = await session.get(Server, server_id)
-        if server:
-            protocol = server.protocol
-
     operation = (await session.execute(select(APIOperation).where(
         APIOperation.idempotency_key == idempotency_key).with_for_update())).scalar_one_or_none()
     if operation is None:
