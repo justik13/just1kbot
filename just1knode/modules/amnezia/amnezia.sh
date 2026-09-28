@@ -26,9 +26,53 @@ detect_awg_protocol_version() {
         conf_str="$(docker exec "$c" cat "/opt/amnezia/awg/awg0.conf" 2>/dev/null || true)"
     fi
 
+    if [[ -z "$conf_str" ]]; then
+        echo "amneziawg2"
+        return 0
+    fi
+
+    # 1. Если python3 доступен, используем канонический алгоритм парсинга
+    if command -v python3 >/dev/null 2>&1; then
+        local py_ver
+        py_ver="$(python3 -c '
+import sys, re
+
+conf = sys.stdin.read()
+params = {}
+for line in conf.splitlines():
+    line = re.sub(r"[#;].*", "", line).strip()
+    if "=" in line:
+        k, v = line.split("=", 1)
+        params[k.strip()] = v.strip()
+
+def has(k):
+    v = params.get(k)
+    if v is None or v == "":
+        v = params.get(k.upper())
+    if v is None:
+        return False
+    if k in ("RandomTrailers", "DisableCookies") and str(v).strip().lower() in ("0", "false", "off", "no", "disabled", ""):
+        return False
+    return str(v).strip() != ""
+
+pv = str(params.get("protocol_version", "")).strip()
+if any(has(k) for k in ("RandomTrailers", "DisableCookies")) or pv == "3.1":
+    print("amneziawg3.1")
+elif any(has(k) for k in ("HeaderProtectionKey", "Hpk", "ContentPaddingAddition", "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout", "MaxHandshakeAttempts")) or pv in ("3", "3.0"):
+    print("amneziawg3")
+else:
+    print("amneziawg2")
+' <<< "$conf_str" 2>/dev/null || true)"
+        if [[ -n "$py_ver" ]]; then
+            echo "$py_ver"
+            return 0
+        fi
+    fi
+
+    # 2. Fallback на bash regex (с поддержкой HeaderProtectionKey, начинающегося с 0)
     if echo "$conf_str" | grep -qiE '^[[:space:]]*(RandomTrailers|DisableCookies)[[:space:]]*=[[:space:]]*(on|yes|true|1)' || echo "$conf_str" | grep -qiE '^[[:space:]]*protocol_version[[:space:]]*=[[:space:]]*3\.1'; then
         echo "amneziawg3.1"
-    elif echo "$conf_str" | grep -qiE '^[[:space:]]*(HeaderProtectionKey|Hpk|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[[:space:]]*=[[:space:]]*[^[:space:]#;0]' || echo "$conf_str" | grep -qiE '^[[:space:]]*protocol_version[[:space:]]*=[[:space:]]*3(\.0)?'; then
+    elif echo "$conf_str" | grep -qiE '^[[:space:]]*(HeaderProtectionKey|Hpk)[[:space:]]*=[[:space:]]*[^[:space:]#;]' || echo "$conf_str" | grep -qiE '^[[:space:]]*(ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[[:space:]]*=[[:space:]]*[^[:space:]#;0]' || echo "$conf_str" | grep -qiE '^[[:space:]]*protocol_version[[:space:]]*=[[:space:]]*3(\.0)?'; then
         echo "amneziawg3"
     else
         echo "amneziawg2"
@@ -124,13 +168,36 @@ remove_amnezia_abuse_protection() {
     fi
 }
 
-# Точное обнаружение Docker-контейнера, слушающего хостовый порт 80 (IPv4/IPv6)
+# Точное обнаружение Docker-контейнера, слушающего хостовый TCP порт 80 (IPv4/IPv6, bridge и host network)
 detect_host_port80_container() {
     command -v docker >/dev/null 2>&1 || return 0
+
+    # 1. Проверка bridge контейнеров с опубликованным TCP-портом 80 (0.0.0.0:80->.../tcp, :::80->.../tcp)
     local matched
-    matched="$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -E '(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->' | head -n 1 || true)"
+    matched="$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -E '(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp' | head -n 1 || true)"
     if [[ -n "$matched" ]]; then
         echo "$matched" | awk -F'\t' '{print $1}'
+        return 0
+    fi
+
+    # 2. Проверка контейнеров в режиме host network (--net=host), слушающих хостовый порт 80/tcp
+    if command -v ss >/dev/null 2>&1; then
+        local pids
+        pids="$(ss -tlnp 2>/dev/null | grep -E ':(80)[[:space:]]' | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true)"
+        for pid in $pids; do
+            if [[ -r "/proc/$pid/cgroup" ]]; then
+                local cid
+                cid="$(grep -oE '[0-9a-f]{64}' "/proc/$pid/cgroup" 2>/dev/null | head -n 1 || true)"
+                if [[ -n "$cid" ]]; then
+                    local cname
+                    cname="$(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||' || true)"
+                    if [[ -n "$cname" ]]; then
+                        echo "$cname"
+                        return 0
+                    fi
+                fi
+            fi
+        done
     fi
 }
 
@@ -144,24 +211,40 @@ nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
 EOF
     chmod +x "${base_hook_dir}/deploy/restart-amnezia-nginx.sh"
 
-    # Если для получения сертификата потребовалось останавливать контейнер на порту 80,
-    # настраиваем pre/post renewal хуки, чтобы плановый `certbot renew` не падал
-    if [[ -n "$target_container" ]]; then
-        mkdir -p "${base_hook_dir}/pre" "${base_hook_dir}/post"
-        cat > "${base_hook_dir}/pre/01-stop-port80-docker.sh" <<EOF
+    # Pre/post renewal хуки для standalone выпуска:
+    # Динамически освобождают хостовый TCP порт 80 перед проверкой Certbot и возобновляют контейнер после
+    mkdir -p "${base_hook_dir}/pre" "${base_hook_dir}/post"
+    cat > "${base_hook_dir}/pre/01-stop-port80-docker.sh" <<'EOF'
 #!/bin/bash
 # Кратковременная приостановка Docker-контейнера на время проверки certbot renew
 if command -v docker >/dev/null 2>&1; then
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${target_container}"; then
-        docker stop "${target_container}" >/dev/null 2>&1 || true
-        mkdir -p /run/just1knode
-        echo "${target_container}" > /run/just1knode/certbot_stopped_container
+    c_name=""
+    matched="$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -E '(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp' | head -n 1 || true)"
+    if [[ -n "$matched" ]]; then
+        c_name="$(echo "$matched" | awk -F'\t' '{print $1}')"
+    elif command -v ss >/dev/null 2>&1; then
+        for pid in $(ss -tlnp 2>/dev/null | grep -E ':(80)[[:space:]]' | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true); do
+            if [[ -r "/proc/$pid/cgroup" ]]; then
+                cid="$(grep -oE '[0-9a-f]{64}' "/proc/$pid/cgroup" 2>/dev/null | head -n 1 || true)"
+                if [[ -n "$cid" ]]; then
+                    c_name="$(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||' || true)"
+                    [[ -n "$c_name" ]] && break
+                fi
+            fi
+        done
+    fi
+
+    if [[ -n "$c_name" ]]; then
+        if docker stop "$c_name" >/dev/null 2>&1; then
+            mkdir -p /run/just1knode
+            echo "$c_name" > /run/just1knode/certbot_stopped_container
+        fi
     fi
 fi
 EOF
-        chmod +x "${base_hook_dir}/pre/01-stop-port80-docker.sh"
+    chmod +x "${base_hook_dir}/pre/01-stop-port80-docker.sh"
 
-        cat > "${base_hook_dir}/post/01-start-port80-docker.sh" <<'EOF'
+    cat > "${base_hook_dir}/post/01-start-port80-docker.sh" <<'EOF'
 #!/bin/bash
 # Возобновление работы контейнера после проверки certbot renew
 if [[ -f /run/just1knode/certbot_stopped_container ]]; then
@@ -172,8 +255,7 @@ if [[ -f /run/just1knode/certbot_stopped_container ]]; then
     fi
 fi
 EOF
-        chmod +x "${base_hook_dir}/post/01-start-port80-docker.sh"
-    fi
+    chmod +x "${base_hook_dir}/post/01-start-port80-docker.sh"
 }
 
 # =============================================================================

@@ -2052,7 +2052,7 @@ remove_traffic_watchdog_timer
         self.assertIn('ufw allow from "$bot_ip" to any port "$public_port" proto tcp comment "just1knode amnezia api"', content)
 
     def test_detect_host_port80_container_filtering_behaviour(self):
-        """Verify detect_host_port80_container correctly matches host :80 bindings and ignores container-only :80."""
+        """Verify detect_host_port80_container correctly matches host TCP :80 bindings and ignores container-only :80 or UDP :80."""
         # Simulated docker ps outputs
         test_cases = [
             ("other-app\t0.0.0.0:8080->80/tcp", None),
@@ -2060,10 +2060,11 @@ remove_traffic_watchdog_timer
             ("custom-app\t0.0.0.0:80->8080/tcp", "custom-app"),
             ("ipv6-proxy\t:::80->80/tcp", "ipv6-proxy"),
             ("dual-proxy\t0.0.0.0:80->80/tcp, :::80->80/tcp", "dual-proxy"),
+            ("udp-service\t0.0.0.0:80->80/udp", None),
             ("unrelated\t127.0.0.1:51820->51820/udp", None),
         ]
         import re
-        pattern = re.compile(r'(^|[ \t,])([0-9\.:]+|\[::\]|:::):80->')
+        pattern = re.compile(r'(^|[ \t,])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp')
         for ports_str, expected in test_cases:
             parts = ports_str.split("\t")
             name, ports = parts[0], parts[1]
@@ -2071,11 +2072,32 @@ remove_traffic_watchdog_timer
             result = name if match else None
             self.assertEqual(result, expected, f"Failed for mapping: {ports}")
 
+    def test_detect_host_port80_container_host_network_behaviour(self):
+        """Verify 64-hex container ID extraction from /proc/$pid/cgroup for host-network containers."""
+        import re
+        cgroup_pattern = re.compile(r'[0-9a-f]{64}')
+
+        # 1. cgroup v2 format with systemd slice
+        cgroup_v2 = "0::/system.slice/docker-a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90.scope"
+        m2 = cgroup_pattern.search(cgroup_v2)
+        self.assertIsNotNone(m2)
+        self.assertEqual(m2.group(0), "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90")
+
+        # 2. cgroup v1 format
+        cgroup_v1 = "12:devices:/docker/11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff"
+        m1 = cgroup_pattern.search(cgroup_v1)
+        self.assertIsNotNone(m1)
+        self.assertEqual(m1.group(0), "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff")
+
+        # 3. Host non-docker service (e.g. systemd nginx)
+        cgroup_host = "0::/system.slice/nginx.service"
+        self.assertIsNone(cgroup_pattern.search(cgroup_host))
+
     def test_detect_awg_protocol_version_behaviour(self):
         """Verify detect_awg_protocol_version properly parses active vs disabled toggle flags and protocol_version."""
         import re
         re_3_1 = re.compile(r'^[ \t]*(RandomTrailers|DisableCookies)[ \t]*=[ \t]*(on|yes|true|1)|^[ \t]*protocol_version[ \t]*=[ \t]*3\.1', re.IGNORECASE | re.MULTILINE)
-        re_3_0 = re.compile(r'^[ \t]*(HeaderProtectionKey|Hpk|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[ \t]*=[ \t]*[^ \t#;0]|^[ \t]*protocol_version[ \t]*=[ \t]*3(\.0)?', re.IGNORECASE | re.MULTILINE)
+        re_3_0 = re.compile(r'^[ \t]*(HeaderProtectionKey|Hpk)[ \t]*=[ \t]*[^ \t#;]|^[ \t]*(ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[ \t]*=[ \t]*[^ \t#;0]|^[ \t]*protocol_version[ \t]*=[ \t]*3(\.0)?', re.IGNORECASE | re.MULTILINE)
 
         def mock_detect(conf: str) -> str:
             if re_3_1.search(conf):
@@ -2095,6 +2117,10 @@ remove_traffic_watchdog_timer
         # 3. AWG 3.0 with HeaderProtectionKey and disabled RandomTrailers
         conf_3_0 = "[Interface]\nPrivateKey = aaaa\nHeaderProtectionKey = 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=\nRandomTrailers = off\n"
         self.assertEqual(mock_detect(conf_3_0), "amneziawg3")
+
+        # 3b. AWG 3.0 with HeaderProtectionKey starting with '0' (valid base64 char)
+        conf_3_0_zero = "[Interface]\nPrivateKey = aaaa\nHeaderProtectionKey = 0VzSecretKeyCurve25519String=\n"
+        self.assertEqual(mock_detect(conf_3_0_zero), "amneziawg3")
 
         # 4. AWG 3.1 with active flags
         conf_3_1_on = "[Interface]\nPrivateKey = aaaa\nRandomTrailers = on\nDisableCookies = on\n"
