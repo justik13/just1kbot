@@ -8,7 +8,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from bot.handlers.webhook import _get_real_ip
-from bot.middlewares.action_lock import LOCKED_ACTION_PREFIXES, STALE_ACTION_PREFIXES
+from bot.middlewares.action_lock import LOCKED_ACTION_PREFIXES, STALE_ACTION_PREFIXES, _is_stale_action
 from database.models import (
     PAYMENT_FULFILLMENT_STATUSES,
     PAYMENT_PROVIDER_STATUSES,
