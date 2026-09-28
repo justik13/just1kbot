@@ -1989,7 +1989,7 @@ remove_traffic_watchdog_timer
         self.assertIn('local resolved_servers="77.88.8.8 77.88.8.1 195.208.4.1"', origin_content)
 
     def test_amnezia_dual_mode_nginx_and_certbot_coexistence(self):
-        """Verify Amnezia module properly handles port 80 coexistence, default site removal, and renewal hooks."""
+        """Verify Amnezia module properly handles port 80 coexistence, protocol detection, and clean renewal hooks."""
         amnezia_sh = REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh"
         content = amnezia_sh.read_text(encoding="utf-8")
 
@@ -2000,9 +2000,11 @@ remove_traffic_watchdog_timer
         # 2. UFW port 80 opening before Certbot challenge
         self.assertIn('ufw allow 80/tcp comment "just1knode certbot verification"', content)
 
-        # 3. Temporary pausing and restoring amnezia-tproxy container
-        self.assertIn('docker stop amnezia-tproxy', content)
-        self.assertIn('docker start amnezia-tproxy', content)
+        # 3. Dynamic container detection on port 80 with user prompt (no hardcoded container stoppage)
+        self.assertIn('docker ps --filter "publish=80"', content)
+        self.assertIn('read -rp', content)
+        self.assertIn('docker stop "$port80_container"', content)
+        self.assertIn('docker start "$stopped_container"', content)
 
         # 4. Strict Nginx lifecycle check (no silenced failures)
         self.assertIn('systemctl restart nginx', content)
@@ -2011,9 +2013,7 @@ remove_traffic_watchdog_timer
         # 5. Wildcard and IP in server_name
         self.assertIn('server_name ${api_domain} ${my_ip} _;', content)
 
-        # 6. Certbot pre/post/deploy renewal hooks
-        self.assertIn('pre/stop-port80-docker.sh', content)
-        self.assertIn('post/start-port80-docker.sh', content)
+        # 6. Streamlined Certbot deploy renewal hook (no overengineered pre/post hacks)
         self.assertIn('deploy/restart-amnezia-nginx.sh', content)
 
         # 7. Common lib installer purges default site immediately after apt install with user backup
@@ -2021,6 +2021,16 @@ remove_traffic_watchdog_timer
         common_content = common_sh.read_text(encoding="utf-8")
         self.assertIn('rm -f "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default"', common_content)
         self.assertIn('default.user.bak', common_content)
+
+        # 8. Protocol version detection and display (differentiating awg2 from awg3.1)
+        self.assertIn("detect_awg_protocol_version()", content)
+        self.assertIn("amneziawg3.1", content)
+        self.assertIn("amneziawg2", content)
+        self.assertIn("Протокол для бота:", content)
+
+        # 9. Doctor check 3b displays protocol version
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn("Версия протокола:", just1knode_sh)
 
 
 if __name__ == "__main__":

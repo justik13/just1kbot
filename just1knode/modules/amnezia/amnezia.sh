@@ -15,6 +15,26 @@ detect_amnezia_container() {
     echo "amnezia-awg2"
 }
 
+# Определение фактической версии протокола по содержимому awg0.conf
+detect_awg_protocol_version() {
+    local conf_str=""
+    if [[ -f "/opt/amnezia/awg/awg0.conf" ]]; then
+        conf_str="$(cat "/opt/amnezia/awg/awg0.conf" 2>/dev/null || true)"
+    elif command -v docker >/dev/null 2>&1; then
+        local c
+        c="$(detect_amnezia_container 2>/dev/null || echo "amnezia-awg2")"
+        conf_str="$(docker exec "$c" cat "/opt/amnezia/awg/awg0.conf" 2>/dev/null || true)"
+    fi
+
+    if echo "$conf_str" | grep -qiE "RandomTrailers|DisableCookies"; then
+        echo "amneziawg3.1"
+    elif echo "$conf_str" | grep -qiE "HeaderProtectionKey|Hpk"; then
+        echo "amneziawg3"
+    else
+        echo "amneziawg2"
+    fi
+}
+
 # Проверка наличия и активности Docker-контейнера AmneziaWG
 is_amnezia_container_running() {
     if ! command -v docker >/dev/null 2>&1; then
@@ -105,39 +125,14 @@ remove_amnezia_abuse_protection() {
 }
 
 deploy_amnezia_certbot_renewal_hook() {
-    local base_hook_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks"
-    mkdir -p "${base_hook_dir}/pre" "${base_hook_dir}/post" "${base_hook_dir}/deploy"
-
-    # Pre-hook: кратковременная приостановка amnezia-tproxy перед получением/продлением сертификата
-    cat > "${base_hook_dir}/pre/stop-port80-docker.sh" <<'EOF'
-#!/bin/bash
-if command -v docker >/dev/null 2>&1; then
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-tproxy$"; then
-        docker stop amnezia-tproxy >/dev/null 2>&1 || true
-        touch /run/amnezia_tproxy_was_stopped
-    fi
-fi
-EOF
-    chmod +x "${base_hook_dir}/pre/stop-port80-docker.sh"
-
-    # Post-hook: возобновление работы amnezia-tproxy и перезапуск Nginx
-    cat > "${base_hook_dir}/post/start-port80-docker.sh" <<'EOF'
-#!/bin/bash
-if [[ -f /run/amnezia_tproxy_was_stopped ]]; then
-    docker start amnezia-tproxy >/dev/null 2>&1 || true
-    rm -f /run/amnezia_tproxy_was_stopped
-fi
-systemctl restart nginx 2>/dev/null || true
-EOF
-    chmod +x "${base_hook_dir}/post/start-port80-docker.sh"
-
-    # Deploy-hook: применение новых сертификатов Nginx и API
-    cat > "${base_hook_dir}/deploy/restart-amnezia-nginx.sh" <<'EOF'
+    local hook_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy"
+    mkdir -p "$hook_dir"
+    cat > "${hook_dir}/restart-amnezia-nginx.sh" <<'EOF'
 #!/bin/bash
 systemctl restart nginx 2>/dev/null || true
 systemctl restart amnezia-api 2>/dev/null || true
 EOF
-    chmod +x "${base_hook_dir}/deploy/restart-amnezia-nginx.sh"
+    chmod +x "${hook_dir}/restart-amnezia-nginx.sh"
 }
 
 # =============================================================================
@@ -482,44 +477,60 @@ EOF
                 fi
             fi
 
-            # Если на порту 80 запущен контейнер amnezia-tproxy (или другой proxy), временно приостанавливаем его
-            local stopped_tproxy=0
+            # Проверка доступности порта 80: обнаружение Docker-контейнеров на порту 80
+            local port80_container=""
+            local stopped_container=""
             if command -v docker >/dev/null 2>&1; then
-                if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-tproxy$"; then
-                    log "Временная приостановка контейнера amnezia-tproxy для выпуска сертификата на порту 80..."
-                    docker stop amnezia-tproxy >/dev/null 2>&1 || true
-                    stopped_tproxy=1
+                port80_container="$(docker ps --filter "publish=80" --format '{{.Names}}' 2>/dev/null | head -n1 || true)"
+            fi
+
+            if [[ -n "$port80_container" ]]; then
+                warn "Порт 80/tcp занят Docker-контейнером '${port80_container}'."
+                local pause_ans="Y"
+                if [[ -t 0 ]]; then
+                    read -rp "Временно приостановить контейнер '${port80_container}' на 10 сек для выпуска SSL? [Y/n]: " pause_ans || true
+                    pause_ans="${pause_ans:-Y}"
+                fi
+                if [[ "$pause_ans" =~ ^[Yy] ]]; then
+                    log "Временная приостановка контейнера '${port80_container}'..."
+                    docker stop "$port80_container" >/dev/null 2>&1 || true
+                    stopped_container="$port80_container"
+                else
+                    warn "Выпуск Let's Encrypt через порт 80 пропущен по выбору пользователя (будет использован самоподписанный SSL)."
                 fi
             fi
 
             local cert_ok=0
-            # Если Nginx активен и уже слушает порт 80 для существующих сайтов, используем плагин nginx/webroot
-            if ss -tlnp 2>/dev/null | grep -qE ":(80)[[:space:]].*nginx" && systemctl is-active --quiet nginx 2>/dev/null; then
-                if certbot certonly --nginx -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
-                    cert_ok=1
-                fi
-                if [[ $cert_ok -eq 0 && -d "${CERTBOT_DIR:-/var/www/certbot}" ]]; then
-                    if certbot certonly --webroot -w "${CERTBOT_DIR:-/var/www/certbot}" -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
+            # Если контейнер не блокировал выпуск или был временно приостановлен
+            if [[ -z "$port80_container" || -n "$stopped_container" ]]; then
+                # Если Nginx активен и уже слушает порт 80 для существующих сайтов, используем плагин nginx/webroot
+                if ss -tlnp 2>/dev/null | grep -qE ":(80)[[:space:]].*nginx" && systemctl is-active --quiet nginx 2>/dev/null; then
+                    if certbot certonly --nginx -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
                         cert_ok=1
                     fi
+                    if [[ $cert_ok -eq 0 && -d "${CERTBOT_DIR:-/var/www/certbot}" ]]; then
+                        if certbot certonly --webroot -w "${CERTBOT_DIR:-/var/www/certbot}" -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
+                            cert_ok=1
+                        fi
+                    fi
+                fi
+
+                # Если порт 80 свободен (или освобожден после временной приостановки контейнера), используем standalone режим
+                if [[ $cert_ok -eq 0 ]]; then
+                    local was_active=0
+                    systemctl is-active --quiet nginx 2>/dev/null && was_active=1
+                    [[ $was_active -eq 1 ]] && systemctl stop nginx 2>/dev/null || true
+                    if certbot certonly --standalone -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
+                        cert_ok=1
+                    fi
+                    [[ $was_active -eq 1 ]] && systemctl start nginx 2>/dev/null || true
                 fi
             fi
 
-            # Если порт 80 свободен (или освобожден после остановки tproxy), используем standalone режим
-            if [[ $cert_ok -eq 0 ]]; then
-                local was_active=0
-                systemctl is-active --quiet nginx 2>/dev/null && was_active=1
-                [[ $was_active -eq 1 ]] && systemctl stop nginx 2>/dev/null || true
-                if certbot certonly --standalone -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
-                    cert_ok=1
-                fi
-                [[ $was_active -eq 1 ]] && systemctl start nginx 2>/dev/null || true
-            fi
-
-            # Возобновляем работу контейнера amnezia-tproxy сразу после попыток Certbot
-            if [[ $stopped_tproxy -eq 1 ]]; then
-                log "Возобновление работы контейнера amnezia-tproxy..."
-                docker start amnezia-tproxy >/dev/null 2>&1 || true
+            # Гарантированное возобновление работы контейнера сразу после попыток Certbot
+            if [[ -n "$stopped_container" ]]; then
+                log "Возобновление работы контейнера '${stopped_container}'..."
+                docker start "$stopped_container" >/dev/null 2>&1 || true
             fi
 
             if [[ $cert_ok -eq 1 && -f "/etc/letsencrypt/live/${api_domain}/fullchain.pem" ]]; then
@@ -669,10 +680,10 @@ show_amnezia_bot_credentials() {
         api_url="https://${my_ip}:${AMNEZIA_PUBLIC_PORT}"
     fi
 
-    local container_name
-    container_name="$(detect_amnezia_container)"
+    local proto_name
+    proto_name="$(detect_awg_protocol_version)"
 
-    echo -e "  🌐 Протокол:           ${BOLD}${GREEN}AmneziaWG (${container_name})${NC}"
+    echo -e "  🌐 Протокол для бота:  ${BOLD}${GREEN}${proto_name}${NC}"
     echo -e "  🔗 API URL бота:       ${CYAN}${api_url}${NC}"
     echo -e "  🔑 API Ключ:           ${YELLOW}${api_key}${NC}"
     echo -e "  🩺 Проверка API:       curl -k -H \"x-api-key: ${api_key}\" ${api_url}/healthz\n"

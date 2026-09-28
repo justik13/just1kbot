@@ -369,6 +369,9 @@ run_doctor() {
         fi
         if [[ "$conf_found" == "true" ]]; then
             echo -e "  ${GREEN}✔${NC} Конфигурационный файл ${conf_name} найден"
+            local proto_ver
+            proto_ver="$(detect_awg_protocol_version 2>/dev/null || echo "amneziawg2")"
+            echo -e "  ${GREEN}✔${NC} Версия протокола: ${proto_ver}"
             if docker exec "$c_doc" awg show awg0 >/dev/null 2>&1; then
                 echo -e "  ${GREEN}✔${NC} Интерфейс awg0 активен в ядре"
             fi
