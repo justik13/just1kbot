@@ -28,7 +28,7 @@ detect_awg_protocol_version() {
 
     if echo "$conf_str" | grep -qiE '^[[:space:]]*(RandomTrailers|DisableCookies)[[:space:]]*=[[:space:]]*(on|yes|true|1)' || echo "$conf_str" | grep -qiE '^[[:space:]]*protocol_version[[:space:]]*=[[:space:]]*3\.1'; then
         echo "amneziawg3.1"
-    elif echo "$conf_str" | grep -qiE '^[[:space:]]*(HeaderProtectionKey|Hpk)[[:space:]]*=[[:space:]]*[^[:space:]#;]' || echo "$conf_str" | grep -qiE '^[[:space:]]*(ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[[:space:]]*=[[:space:]]*[^[:space:]#;0]' || echo "$conf_str" | grep -qiE '^[[:space:]]*protocol_version[[:space:]]*=[[:space:]]*3(\.0)?'; then
+    elif echo "$conf_str" | grep -qiE '^[[:space:]]*(HeaderProtectionKey|Hpk)[[:space:]]*=[[:space:]]*[^[:space:]#;]' || echo "$conf_str" | grep -qiE '^[[:space:]]*(ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[[:space:]]*=[[:space:]]*[^[:space:]#;]' || echo "$conf_str" | grep -qiE '^[[:space:]]*protocol_version[[:space:]]*=[[:space:]]*3(\.0)?'; then
         echo "amneziawg3"
     else
         echo "amneziawg2"
@@ -495,6 +495,7 @@ EOF
         cert_file="/etc/letsencrypt/live/${api_domain}/fullchain.pem"
         key_file="/etc/letsencrypt/live/${api_domain}/privkey.pem"
         log "✔ Используется существующий Let's Encrypt SSL сертификат для ${api_domain}"
+        deploy_amnezia_certbot_renewal_hook
     elif [[ $is_ip -eq 0 && -n "$api_domain" ]]; then
         log "Попытка получения Let's Encrypt SSL сертификата для ${api_domain}..."
         if command -v certbot >/dev/null 2>&1; then
@@ -771,7 +772,7 @@ EOF
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
         ufw delete allow "${public_port}/tcp" >/dev/null 2>&1 || true
         ufw delete allow "${public_port}" >/dev/null 2>&1 || true
-        if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]] && validate_ipv4 "$bot_ip"; then
+        if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]] && validate_ip "$bot_ip"; then
             ufw allow from "$bot_ip" to any port "$public_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1 || true
             log "Фаервол UFW: доступ к API AmneziaWG (порт ${public_port}) открыт строго для BOT_IP (${bot_ip})"
         else
@@ -1071,11 +1072,10 @@ uninstall_amnezia_component() {
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/stop-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/start-port80-docker.sh" 2>/dev/null || true
     if [[ ! -f /etc/nginx/sites-enabled/just1k-origin.conf && ! -e /etc/nginx/sites-enabled/default ]]; then
-        if [[ -f /etc/nginx/sites-available/default ]]; then
-            ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
-        elif [[ -f /etc/nginx/sites-available/default.user.bak ]]; then
+        if [[ -f /etc/nginx/sites-available/default.user.bak ]]; then
             cp -a /etc/nginx/sites-available/default.user.bak /etc/nginx/sites-available/default 2>/dev/null || true
             ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+            rm -f /etc/nginx/sites-available/default.user.bak 2>/dev/null || true
         fi
     fi
     if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
@@ -1083,10 +1083,17 @@ uninstall_amnezia_component() {
     fi
 
     # Закрытие порта в UFW
-    local pub_port
+    local pub_port bot_ip
     pub_port="$(get_state_val "awg_port" "${AMNEZIA_PUBLIC_PORT}")"
-    if command -v ufw >/dev/null 2>&1 && [[ -n "$pub_port" && "$pub_port" != "-" ]]; then
-        ufw delete allow "${pub_port}/tcp" >/dev/null 2>&1 || true
+    bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+    if command -v ufw >/dev/null 2>&1; then
+        if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" && -n "$pub_port" && "$pub_port" != "-" ]]; then
+            ufw delete allow from "$bot_ip" to any port "$pub_port" proto tcp >/dev/null 2>&1 || true
+        fi
+        if [[ -n "$pub_port" && "$pub_port" != "-" ]]; then
+            ufw delete allow "${pub_port}/tcp" >/dev/null 2>&1 || true
+            ufw delete allow "${pub_port}" >/dev/null 2>&1 || true
+        fi
     fi
 
     remove_amnezia_abuse_protection

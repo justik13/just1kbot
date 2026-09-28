@@ -2097,7 +2097,7 @@ remove_traffic_watchdog_timer
         """Verify detect_awg_protocol_version properly parses active vs disabled toggle flags and protocol_version."""
         import re
         re_3_1 = re.compile(r'^[ \t]*(RandomTrailers|DisableCookies)[ \t]*=[ \t]*(on|yes|true|1)|^[ \t]*protocol_version[ \t]*=[ \t]*3\.1', re.IGNORECASE | re.MULTILINE)
-        re_3_0 = re.compile(r'^[ \t]*(HeaderProtectionKey|Hpk)[ \t]*=[ \t]*[^ \t#;]|^[ \t]*(ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[ \t]*=[ \t]*[^ \t#;0]|^[ \t]*protocol_version[ \t]*=[ \t]*3(\.0)?', re.IGNORECASE | re.MULTILINE)
+        re_3_0 = re.compile(r'^[ \t]*(HeaderProtectionKey|Hpk)[ \t]*=[ \t]*[^ \t#;]|^[ \t]*(ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[ \t]*=[ \t]*[^ \t#;]|^[ \t]*protocol_version[ \t]*=[ \t]*3(\.0)?', re.IGNORECASE | re.MULTILINE)
 
         def mock_detect(conf: str) -> str:
             if re_3_1.search(conf):
@@ -2121,6 +2121,10 @@ remove_traffic_watchdog_timer
         # 3b. AWG 3.0 with HeaderProtectionKey starting with '0' (valid base64 char)
         conf_3_0_zero = "[Interface]\nPrivateKey = aaaa\nHeaderProtectionKey = 0VzSecretKeyCurve25519String=\n"
         self.assertEqual(mock_detect(conf_3_0_zero), "amneziawg3")
+
+        # 3c. AWG 3.0 with timing parameters set to '0' (must detect as 3.0 matching vpn_parser.py)
+        conf_3_0_timing_zero = "[Interface]\nPrivateKey = aaaa\nContentPaddingAddition = 0\n"
+        self.assertEqual(mock_detect(conf_3_0_timing_zero), "amneziawg3")
 
         # 4. AWG 3.1 with active flags
         conf_3_1_on = "[Interface]\nPrivateKey = aaaa\nRandomTrailers = on\nDisableCookies = on\n"
@@ -2200,6 +2204,53 @@ remove_traffic_watchdog_timer
         self.assertIn('awg_p="$(get_state_val "awg_port" "8443")"', just1knode_sh)
         self.assertIn("Порт API AmneziaWG $awg_p открыт для всех", just1knode_sh)
         self.assertIn("Порт API AmneziaWG $awg_p защищен и доступен только с BOT_IP", just1knode_sh)
+
+
+    def test_validate_ip_ipv4_and_ipv6_behaviour(self):
+        """Verify validate_ip logic handles both IPv4 and IPv6 properly."""
+        import ipaddress
+
+        def mock_validate_ip(ip_str: str) -> bool:
+            if not ip_str or not isinstance(ip_str, str):
+                return False
+            try:
+                addr = ipaddress.ip_address(ip_str.strip())
+                return not addr.is_multicast and not addr.is_unspecified and not addr.is_reserved
+            except ValueError:
+                return False
+
+        # Valid IPv4
+        self.assertTrue(mock_validate_ip("192.168.1.1"))
+        self.assertTrue(mock_validate_ip("1.1.1.1"))
+        self.assertTrue(mock_validate_ip("185.220.101.5"))
+
+        # Valid IPv6
+        self.assertTrue(mock_validate_ip("2001:db8::1"))
+        self.assertTrue(mock_validate_ip("2a00:1450:4010:c08::71"))
+
+        # Invalid IP addresses
+        self.assertFalse(mock_validate_ip("256.1.1.1"))
+        self.assertFalse(mock_validate_ip("0.0.0.0"))
+        self.assertFalse(mock_validate_ip("255.255.255.255"))
+        self.assertFalse(mock_validate_ip("::"))
+        self.assertFalse(mock_validate_ip("not-an-ip"))
+
+    def test_uninstall_and_cleanup_cleans_awg_port_in_ufw(self):
+        """Verify uninstall_node and uninstall_amnezia_component remove awg_port and bot_ip from UFW."""
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('st_awg_port="$(get_state_val "awg_port" 2>/dev/null || true)"', just1knode_sh)
+        self.assertIn('ufw delete allow from "$st_bot_ip" to any port "$st_awg_port" proto tcp', just1knode_sh)
+        self.assertIn('ufw delete allow "${st_awg_port}/tcp"', just1knode_sh)
+
+        amnezia_sh = (REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
+        self.assertIn('ufw delete allow from "$bot_ip" to any port "$pub_port" proto tcp', amnezia_sh)
+
+    def test_origin_catchall_dummy_fallback_on_old_nginx(self):
+        """Verify origin fallback generates dummy cert instead of leaking domain cert on Nginx < 1.19.4."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("dummy_dir=", origin_sh)
+        self.assertIn("CN=invalid", origin_sh)
+        self.assertIn("ssl_certificate ${dummy_dir}/dummy.crt;", origin_sh)
 
 
 if __name__ == "__main__":

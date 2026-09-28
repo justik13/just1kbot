@@ -258,7 +258,7 @@ EOF
         default_was_linked=1
         if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
             warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak в sites-available."
-            cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
+            cp -L "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
         fi
         rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
@@ -531,7 +531,7 @@ EOF
         default_was_linked_origin=1
         if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
             warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak в sites-available."
-            cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
+            cp -L "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
         fi
         rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
@@ -560,13 +560,20 @@ except Exception:
     ssl_reject_handshake on;
 }"
     else
+        local dummy_dir="/etc/ssl/just1k_fallback"
+        mkdir -p "$dummy_dir"
+        if [[ ! -f "${dummy_dir}/dummy.crt" ]]; then
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                -keyout "${dummy_dir}/dummy.key" -out "${dummy_dir}/dummy.crt" \
+                -subj "/CN=invalid" 2>/dev/null || true
+        fi
         catchall_ssl_block="server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
     server_name _;
     server_tokens off;
-    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+    ssl_certificate ${dummy_dir}/dummy.crt;
+    ssl_certificate_key ${dummy_dir}/dummy.key;
     return 444;
 }"
     fi
@@ -731,10 +738,10 @@ set_origin_bot_ip() {
         return 1
     fi
 
-    # Строгая валидация формата IPv4 (0..255 октеты, без any и wildcard)
-    if ! validate_ipv4 "$new_bot_ip"; then
+    # Строгая валидация формата IP (IPv4 или IPv6, без any и wildcard)
+    if ! validate_ip "$new_bot_ip"; then
         release_just1knode_lock
-        error "Недопустимый формат IP-адреса: '$new_bot_ip' (ожидается валидный IPv4 адрес)."
+        error "Недопустимый формат IP-адреса: '$new_bot_ip' (ожидается валидный IP-адрес)."
         return 1
     fi
 

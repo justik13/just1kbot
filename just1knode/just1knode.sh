@@ -458,6 +458,7 @@ run_doctor() {
                 echo -e "  ${GREEN}✔${NC} Порт API AmneziaWG $awg_p защищен и доступен только с BOT_IP ($bot_ip)"
             elif [[ -n "$bot_ip" ]]; then
                 echo -e "  ${YELLOW}!${NC} Правило для BOT_IP ($bot_ip) на порт $awg_p не найдено в UFW"
+                failed=$((failed + 1))
             fi
 
             if [[ "$role" == "dual" ]]; then
@@ -668,11 +669,10 @@ reset_node() {
     rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh /etc/letsencrypt/renewal-hooks/pre/01-stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/01-start-port80-docker.sh /etc/letsencrypt/renewal-hooks/pre/stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/start-port80-docker.sh 2>/dev/null || true
     rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api /etc/amnezia-api /opt/amnezia-api /etc/ssl/just1k_amnezia 2>/dev/null || true
     if [[ ! -e /etc/nginx/sites-enabled/default ]]; then
-        if [[ -f /etc/nginx/sites-available/default ]]; then
-            ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
-        elif [[ -f /etc/nginx/sites-available/default.user.bak ]]; then
+        if [[ -f /etc/nginx/sites-available/default.user.bak ]]; then
             cp -a /etc/nginx/sites-available/default.user.bak /etc/nginx/sites-available/default 2>/dev/null || true
             ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+            rm -f /etc/nginx/sites-available/default.user.bak 2>/dev/null || true
         fi
     fi
     systemctl reload nginx 2>/dev/null || true
@@ -904,10 +904,12 @@ uninstall_node() {
 
     info "9/11. Очистка правил фаервола (UFW)..."
     if command -v ufw >/dev/null 2>&1; then
-        local st_relay_port st_origin_ip st_bot_ip
+        local st_relay_port st_origin_ip st_bot_ip st_awg_port
         st_relay_port="$(get_state_val "relay_port" 2>/dev/null || true)"
         st_origin_ip="$(get_state_val "origin_ip" 2>/dev/null || true)"
         st_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+        st_awg_port="$(get_state_val "awg_port" 2>/dev/null || true)"
+        [[ -z "$st_awg_port" && (-f /etc/nginx/sites-available/just1k-amnezia.conf || -f /etc/systemd/system/amnezia-api.service) ]] && st_awg_port="8443"
 
         if [[ -n "$st_relay_port" ]]; then
             if [[ -n "$st_origin_ip" ]]; then
@@ -918,9 +920,16 @@ uninstall_node() {
         fi
         if [[ -n "$st_bot_ip" ]]; then
             ufw delete allow from "$st_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+            if [[ -n "$st_awg_port" ]]; then
+                ufw delete allow from "$st_bot_ip" to any port "$st_awg_port" proto tcp 2>/dev/null || true
+            fi
         fi
         ufw delete allow 8444/tcp 2>/dev/null || true
         ufw delete allow 8444 2>/dev/null || true
+        if [[ -n "$st_awg_port" ]]; then
+            ufw delete allow "${st_awg_port}/tcp" 2>/dev/null || true
+            ufw delete allow "${st_awg_port}" 2>/dev/null || true
+        fi
     fi
 
     info "10/11. Удаление состояния, бэкапов и блокировок..."

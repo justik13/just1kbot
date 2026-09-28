@@ -191,3 +191,13 @@ validate_ipv4() {
     fi
 }
 
+validate_ip() {
+    local ip="${1:-}"
+    [[ -z "$ip" ]] && return 1
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import ipaddress, sys; ip = sys.argv[1]; addr = ipaddress.ip_address(ip); sys.exit(0 if not addr.is_multicast and not addr.is_unspecified and not addr.is_reserved else 1)" "$ip" 2>/dev/null
+    else
+        validate_ipv4 "$ip"
+    fi
+}
+
