@@ -29,6 +29,7 @@ from bot.handlers.admin.users.subscription_menu_routes import (
     admin_subscription_menu,
     admin_wi_apply_extend,
     admin_wi_confirm_extend,
+    admin_wi_copy_link,
     admin_wi_devices_view,
     admin_wi_devlimit_menu,
     admin_wi_devlimit_set,
@@ -39,6 +40,8 @@ from bot.handlers.admin.users.subscription_menu_routes import (
     admin_wi_quota_menu,
     admin_wi_quota_set,
     admin_wi_subscription_menu,
+    admin_wi_token_reset_apply,
+    admin_wi_token_reset_confirm,
     admin_wi_traffic_add,
     admin_wi_traffic_add_menu,
     admin_wi_traffic_reset_apply,
@@ -49,6 +52,7 @@ from bot.handlers.admin.users.subscription_menu_routes import (
 )
 from bot.keyboards.admin.users import (
     get_admin_wi_device_limit_keyboard,
+    get_admin_wi_devices_keyboard,
     get_admin_wi_subscription_keyboard,
 )
 from config.constants import WHITE_INTERNET_MAX_DEVICE_LIMIT, XRAY_PROTOCOL
@@ -1553,6 +1557,142 @@ class TestWhiteInternetUserFilters(unittest.IsolatedAsyncioTestCase):
             mock_warn.assert_called()
             warning_messages = [call.args[0] for call in mock_warn.call_args_list]
             self.assertTrue(any("Failed to batch fetch White Internet subscriptions" in msg for msg in warning_messages))
+
+    def test_admin_wi_keyboards_render_token_reset_and_copy_link_buttons(self):
+        """Admin WI subscription and devices keyboards must include reset token and copy link buttons."""
+        # 1. Main WI subscription keyboard without sub_url
+        kb_no_url = get_admin_wi_subscription_keyboard(telegram_id=123, has_wi_sub=True)
+        callbacks = [btn.callback_data for row in kb_no_url.inline_keyboard for btn in row if btn.callback_data]
+        self.assertIn("admin_wi_token_reset_confirm:123", callbacks)
+        self.assertIn("admin_wi_copy_link:123", callbacks)
+
+        # 2. Main WI subscription keyboard with sub_url (uses CopyTextButton)
+        kb_url = get_admin_wi_subscription_keyboard(
+            telegram_id=123, has_wi_sub=True, sub_url="https://domain.com/sub/wl/token123"
+        )
+        copy_buttons = [btn for row in kb_url.inline_keyboard for btn in row if getattr(btn, "copy_text", None)]
+        self.assertTrue(len(copy_buttons) >= 1)
+        self.assertEqual(copy_buttons[0].copy_text.text, "https://domain.com/sub/wl/token123")
+
+        # 3. Devices keyboard
+        kb_dev = get_admin_wi_devices_keyboard(telegram_id=123, has_hwids=True)
+        dev_callbacks = [btn.callback_data for row in kb_dev.inline_keyboard for btn in row if btn.callback_data]
+        self.assertIn("admin_wi_token_reset_confirm:123", dev_callbacks)
+        self.assertIn("admin_wi_hwid_reset_confirm:123", dev_callbacks)
+
+    async def test_admin_wi_reset_subscription_token_atomic(self):
+        """reset_subscription_token_atomic generates fresh 64-char token and wipes active HWIDs under lock."""
+        sub = WhiteInternetSubscription(
+            id=100,
+            user_id=1,
+            token="old_token_12345678901234567890123456789012",
+            active_hwids={"hwid-1": "2026-09-28T12:00:00+00:00"},
+            last_device_reset_at=None,
+        )
+        session = AsyncMock()
+        session.get.return_value = sub
+        session.flush = AsyncMock()
+
+        new_token = await white_internet_repo.reset_subscription_token_atomic(
+            session, sub.id, reset_hwids=True
+        )
+
+        self.assertNotEqual(new_token, "old_token_12345678901234567890123456789012")
+        self.assertEqual(len(new_token), 64)
+        self.assertEqual(sub.token, new_token)
+        self.assertEqual(sub.active_hwids, {})
+        self.assertIsNotNone(sub.last_device_reset_at)
+        session.flush.assert_called_once()
+
+    async def test_admin_wi_token_reset_confirm_callback(self):
+        """admin_wi_token_reset_confirm renders confirmation screen with confirm and cancel buttons."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.data = "admin_wi_token_reset_confirm:12345"
+        callback.from_user = TgUser(id=999999, is_bot=False, first_name="Admin")
+        callback.message = MagicMock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock()
+
+        session = AsyncMock(spec=AsyncSession)
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True):
+            await admin_wi_token_reset_confirm(callback, session)
+
+            callback.message.edit_text.assert_called_once()
+            args, kwargs = callback.message.edit_text.call_args
+            self.assertIn("Сброс ссылки подписки", args[0])
+            self.assertIn("12345", args[0])
+            kb = kwargs["reply_markup"]
+            btn_callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+            self.assertIn("admin_wi_token_reset_apply:12345", btn_callbacks)
+            self.assertIn("admin_sub_wi_menu:12345", btn_callbacks)
+
+    async def test_admin_wi_token_reset_apply_callback(self):
+        """admin_wi_token_reset_apply rotates token, logs audit, and shows success alert."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.data = "admin_wi_token_reset_apply:12345"
+        callback.from_user = TgUser(id=999999, is_bot=False, first_name="Admin")
+        callback.message = MagicMock(spec=Message)
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock()
+
+        user = User(id=1, telegram_id=12345, username="testuser")
+        sub = WhiteInternetSubscription(
+            id=42,
+            user_id=1,
+            token="initial_token_123456789012345678901234567890",
+            active_hwids={"hwid-x": "2026-09-28T12:00:00+00:00"},
+        )
+
+        session = AsyncMock(spec=AsyncSession)
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=user)), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
+             patch("database.repositories.white_internet_repo.reset_subscription_token_atomic", new=AsyncMock(return_value="new_fresh_token_hex")) as mock_reset, \
+             patch("services.audit_service.AuditService.log_action", new=AsyncMock()) as mock_audit, \
+             patch("bot.handlers.admin.users.subscription_menu_routes.admin_wi_subscription_menu", new=AsyncMock()) as mock_menu:
+
+            await admin_wi_token_reset_apply(callback, session)
+
+            mock_reset.assert_called_once_with(session, sub.id, reset_hwids=True)
+            mock_audit.assert_called_once()
+            audit_kwargs = mock_audit.call_args[1]
+            self.assertEqual(audit_kwargs["action"], AdminAuditAction.WHITE_INTERNET_TOKEN_RESET)
+            self.assertEqual(audit_kwargs["target_id"], user.id)
+            callback.answer.assert_called_once_with(texts.ADMIN_WI_TOKEN_RESET_SUCCESS, show_alert=True)
+            mock_menu.assert_called_once()
+
+    async def test_admin_wi_copy_link_callback(self):
+        """admin_wi_copy_link answers with copyable subscription URL message."""
+        callback = MagicMock(spec=CallbackQuery)
+        callback.data = "admin_wi_copy_link:12345"
+        callback.from_user = TgUser(id=999999, is_bot=False, first_name="Admin")
+        callback.message = MagicMock(spec=Message)
+        callback.message.answer = AsyncMock()
+        callback.answer = AsyncMock()
+
+        user = User(id=1, telegram_id=12345, username="testuser")
+        sub = WhiteInternetSubscription(
+            id=42,
+            user_id=1,
+            token="test_token_abcdef123456",
+        )
+
+        session = AsyncMock(spec=AsyncSession)
+
+        with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=user)), \
+             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
+             patch("bot.handlers.white_internet._resolve_subscription_target", new=AsyncMock(return_value=("origin.just1k.pro", "/sub/wl"))):
+
+            await admin_wi_copy_link(callback, session)
+
+            callback.message.answer.assert_called_once()
+            args, kwargs = callback.message.answer.call_args
+            self.assertIn("https://origin.just1k.pro/sub/wl/test_token_abcdef123456", args[0])
+            self.assertIn("12345", args[0])
+            callback.answer.assert_called_once()
 
 
 if __name__ == "__main__":

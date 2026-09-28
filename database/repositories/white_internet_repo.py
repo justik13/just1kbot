@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import secrets
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -764,6 +765,35 @@ async def reset_active_hwids_atomic(
     sub.last_device_reset_at = now
     await session.flush()
     return True
+
+
+async def reset_subscription_token_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+    *,
+    new_token: str | None = None,
+    reset_hwids: bool = True,
+    now: datetime | None = None,
+) -> str:
+    """Atomically regenerates the subscription token and clears active HWIDs under row-level lock.
+
+    Returns the new token string.
+    """
+    sub = await session.get(
+        WhiteInternetSubscription,
+        subscription_id,
+        with_for_update=True,
+    )
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+
+    token = new_token or secrets.token_hex(32)
+    sub.token = token
+    if reset_hwids:
+        sub.active_hwids = {}
+        sub.last_device_reset_at = now or now_utc()
+    await session.flush()
+    return token
 
 
 async def reset_traffic_used_atomic(

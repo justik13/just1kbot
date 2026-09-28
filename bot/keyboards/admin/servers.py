@@ -25,6 +25,10 @@ def get_admin_server_card_keyboard(
         )
     else:
         builder.button(
+            text=texts.ADMIN_SERVER_BTN_INCY,
+            callback_data=f"admin_server_incy:{server_id}",
+        )
+        builder.button(
             text=texts.ADMIN_SERVER_BTN_RELAYS,
             callback_data=f"admin_server_relays:{server_id}",
         )
@@ -84,7 +88,7 @@ def get_admin_server_card_keyboard(
     )
 
     if is_xray:
-        builder.adjust(2, 2, 2, 2, 2, 2, 1)
+        builder.adjust(1, 2, 2, 2, 2, 2, 2, 1)
     else:
         builder.adjust(2, 2, 2, 2, 1, 2, 1)
     return builder.as_markup()

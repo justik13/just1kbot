@@ -1,4 +1,4 @@
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import CopyTextButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
@@ -171,10 +171,25 @@ def get_admin_wi_subscription_keyboard(
     has_wi_sub: bool = False,
     wi_is_active: bool = False,
     is_trial: bool = False,
+    sub_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     if has_wi_sub:
+        if sub_url:
+            builder.button(
+                text=texts.ADMIN_WI_BTN_COPY_LINK,
+                copy_text=CopyTextButton(text=sub_url),
+            )
+        else:
+            builder.button(
+                text=texts.ADMIN_WI_BTN_COPY_LINK,
+                callback_data=f"admin_wi_copy_link:{telegram_id}",
+            )
+        builder.button(
+            text=texts.ADMIN_WI_BTN_TOKEN_RESET,
+            callback_data=f"admin_wi_token_reset_confirm:{telegram_id}",
+        )
         if not is_trial:
             builder.button(
                 text=texts.ADMIN_BTN_EXTEND_SUBSCRIPTION,
@@ -258,14 +273,29 @@ def get_admin_wi_extend_days_keyboard(
 def get_admin_wi_devices_keyboard(
     telegram_id: int,
     has_hwids: bool = False,
+    sub_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    if sub_url:
+        builder.button(
+            text=texts.ADMIN_WI_BTN_COPY_LINK,
+            copy_text=CopyTextButton(text=sub_url),
+        )
+    else:
+        builder.button(
+            text=texts.ADMIN_WI_BTN_COPY_LINK,
+            callback_data=f"admin_wi_copy_link:{telegram_id}",
+        )
     if has_hwids:
         builder.button(
             text=texts.ADMIN_WI_BTN_HWID_RESET,
             callback_data=f"admin_wi_hwid_reset_confirm:{telegram_id}",
         )
+    builder.button(
+        text=texts.ADMIN_WI_BTN_TOKEN_RESET,
+        callback_data=f"admin_wi_token_reset_confirm:{telegram_id}",
+    )
 
     builder.button(
         text=texts.BTN_BACK,

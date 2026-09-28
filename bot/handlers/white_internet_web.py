@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import os
+import re
 
 from aiohttp import web
 
@@ -38,6 +39,19 @@ logger = logging.getLogger(__name__)
 # token bucket prevents single subscription thrashing across rotating IPs.
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
+
+
+def _safe_format_device_template(template: str, *, devices: int, active: int) -> str:
+    """Safely format {devices}, {device_limit}, {limit}, {active}, {active_devices} placeholders."""
+    mapping = {
+        "devices": str(devices),
+        "device_limit": str(devices),
+        "limit": str(devices),
+        "active": str(active),
+        "active_devices": str(active),
+    }
+    pattern = re.compile(r"\{(" + "|".join(re.escape(k) for k in mapping.keys()) + r")\}")
+    return pattern.sub(lambda m: mapping.get(m.group(1), m.group(0)), template)
 
 
 async def white_internet_subscription_feed_handler(request: web.Request) -> web.Response:
@@ -340,7 +354,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
 
         announce = extra.get("announce")
         if announce and str(announce).strip():
-            clean_announce = str(announce).strip()[:200]
+            clean_announce = str(announce).strip()
+            clean_announce = _safe_format_device_template(
+                clean_announce, devices=max_devs, active=active_count
+            )[:200]
             announce_b64 = base64.b64encode(clean_announce.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{announce_b64}"
             announce_url = extra.get("announce_url")
@@ -352,7 +369,11 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             profile_desc = WHITE_INTERNET_PROFILE_DESCRIPTION
 
         if profile_desc and str(profile_desc).strip():
-            profile_desc_b64 = base64.b64encode(str(profile_desc).strip().encode("utf-8")).decode("ascii")
+            desc_text = str(profile_desc).strip()
+            desc_text = _safe_format_device_template(
+                desc_text, devices=max_devs, active=active_count
+            )[:100]
+            profile_desc_b64 = base64.b64encode(desc_text.encode("utf-8")).decode("ascii")
             response_headers["Profile-Description"] = f"base64:{profile_desc_b64}"
 
         return web.Response(status=200, text=b64_payload, headers=response_headers)

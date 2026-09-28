@@ -457,6 +457,8 @@ ADMIN_WI_BTN_TRAFFIC_RESET = "🔄 Сбросить расход в 0"
 ADMIN_WI_BTN_QUOTA = "📊 Квота трафика"
 ADMIN_WI_BTN_DEVLIMIT = "👥 Лимит устройств"
 ADMIN_WI_BTN_HWID_RESET = "🔄 Сбросить HWID"
+ADMIN_WI_BTN_TOKEN_RESET = "🔗 Сбросить ссылку"
+ADMIN_WI_BTN_COPY_LINK = "📋 Ссылка подписки"
 
 ADMIN_WI_BTN_GB_PACK = "+{gb} GB"
 ADMIN_WI_BTN_GB_QUOTA = "{gb} GB"
@@ -495,8 +497,21 @@ ADMIN_WI_HWID_RESET_CONFIRM_TITLE = """🔄 <b>Сброс привязанных
 <i>Пользователь сможет подключиться с новых устройств без ожидания кулдауна.</i>"""
 ADMIN_WI_HWID_RESET_SUCCESS = "✅ Все привязанные HWID пользователя сброшены"
 
+ADMIN_WI_TOKEN_RESET_CONFIRM_TITLE = """🔗 <b>Сброс ссылки подписки (Белый Интернет)</b>
+
+Вы уверены, что хотите сбросить ссылку подписки пользователя <code>{telegram_id}</code>?
+
+⚠️ <i>Старая ссылка перестанет работать немедленно. Привязка всех устройств (HWID) будет очищена. Пользователю потребуется заново вставить ссылку в приложении.</i>"""
+ADMIN_WI_TOKEN_RESET_SUCCESS = "✅ Ссылка подписки успешно сброшена! Сгенерирован новый токен, привязки устройств сброшены."
+ADMIN_WI_LINK_INFO = """📋 <b>Ссылка подписки (Белый Интернет)</b>
+
+Пользователь: <code>{telegram_id}</code>
+
+<code>{link}</code>"""
+
 ADMIN_WI_MENU_TITLE = "🛠 Админка › 👥 Пользователи › 🌐 <b>Белый Интернет</b> (ID: <code>{telegram_id}</code>)"
 ADMIN_WI_MENU_NO_SUB = "<i>У пользователя нет подписки Белый Интернет.</i>"
+ADMIN_USER_CARD_WL_LINK = "• <b>Ссылка подписки:</b> <code>{link}</code>"
 ADMIN_USER_CARD_WL_DEVICES = "• <b>Устройства:</b> {active} / {limit}"
 ADMIN_USER_CARD_WL_LAST_SEEN = "• <b>Активность:</b> {last_seen}"
 ADMIN_USER_CARD_WL_NODE_STATUS = "• <b>Узел:</b> <code>{status}</code>"

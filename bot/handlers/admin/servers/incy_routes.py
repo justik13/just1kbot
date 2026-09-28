@@ -250,7 +250,7 @@ async def process_server_incy_param_input(
             elif param in ("origin_name", "origin_badge"):
                 val = val[:30]
             elif param == "desc":
-                val = val[:50]
+                val = val[:100]
             elif param == "announce":
                 val = val[:200]
             elif param == "announce_url":
