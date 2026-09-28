@@ -1165,9 +1165,27 @@ except Exception:
     local origin_vhost="${NGINX_CONF_DIR}/sites-available/just1k-origin.conf"
     if [[ -f "$origin_vhost" ]]; then
         manifest_track_file "$origin_vhost"
+        local ssl_reject_supported=0
+        local nginx_ver
+        nginx_ver="$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "0.0.0")"
+        if [[ -n "$nginx_ver" ]] && python3 -c "
+import sys
+try:
+    v = tuple(map(int, '$nginx_ver'.split('.')))
+    sys.exit(0 if v >= (1, 19, 4) else 1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+            ssl_reject_supported=1
+        fi
+        local heal_origin_domain
+        heal_origin_domain="$(get_state_val "domain" 2>/dev/null || true)"
+
         python3 -c "
-import sys, re
+import sys, re, os
 conf_path = sys.argv[1]
+ssl_rej = (sys.argv[2] == '1')
+domain = sys.argv[3] if len(sys.argv) > 3 else ''
 try:
     with open(conf_path, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -1180,30 +1198,46 @@ try:
         lambda m: new_loc,
         content
     )
-    if 'listen 80 default_server' not in content:
-        catchall = '''# 0. Catch-All Default Server: сброс прямых сканирований по IP и неизвестным SNI
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-    server_tokens off;
-    return 444;
-}
 
-server {
+    if ssl_rej:
+        catchall_ssl = '''server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
     server_name _;
     server_tokens off;
     ssl_reject_handshake on;
-}
+}'''
+    elif domain and os.path.isfile(f'/etc/letsencrypt/live/{domain}/fullchain.pem'):
+        catchall_ssl = f'''server {{
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;
+    return 444;
+}}'''
+    else:
+        catchall_ssl = ''
+
+    if 'listen 80 default_server' not in content:
+        catchall = f'''# 0. Catch-All Default Server: сброс прямых сканирований по IP и неизвестным SNI
+server {{
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    server_tokens off;
+    return 444;
+}}
+
+{catchall_ssl}
 
 '''
         content = catchall + content
     else:
         def fix_catchall(m):
             b = m.group(0)
-            if 'ssl_reject_handshake on;' in b:
+            if ssl_rej:
                 return '''server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
@@ -1221,7 +1255,7 @@ server {
     print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found, Catch-All защищен')
 except Exception:
     pass
-" "$origin_vhost" 2>/dev/null || true
+" "$origin_vhost" "$ssl_reject_supported" "$heal_origin_domain" 2>/dev/null || true
     fi
 
     # Удаление дефолтного сайта, если он был случайно восстановлен
