@@ -799,6 +799,10 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertFalse(hasattr(texts, "BTN_PAYMENT_TOPUP_PRESET_AMOUNT"))
         self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE"))
         self.assertFalse(hasattr(texts, "PAYMENT_TARIFF_CHANGE"))
+        self.assertFalse(hasattr(texts, "BUTTON_CHECK_TOPUP"))
+        self.assertFalse(hasattr(texts, "BUTTON_CLOSE_TOPUP"))
+        self.assertFalse(hasattr(texts, "BUTTON_OPEN_PAYMENT"))
+        self.assertFalse(hasattr(texts, "TOPUP_LINK_CARD"))
 
 
 if __name__ == "__main__":

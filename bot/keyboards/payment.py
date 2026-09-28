@@ -263,25 +263,6 @@ def get_balance_amounts_keyboard(amounts: list[int]) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_topup_payment_keyboard(
-    payment_url: str, payment_id: int
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BUTTON_OPEN_PAYMENT, url=payment_url, style="success")
-    builder.button(
-        text=texts.BUTTON_CHECK_TOPUP,
-        callback_data=f"balance_check:{payment_id}",
-        style="primary",
-    )
-    builder.button(
-        text=texts.BUTTON_CLOSE_TOPUP,
-        callback_data=f"balance_cancel:{payment_id}",
-        style="danger",
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(

@@ -151,15 +151,9 @@ BTN_WHITE_INTERNET = "⚪️ Белый Интернет"
 
 BTN_ZHURNAL_POKUPOK = "🛒 Журнал покупок"
 
-BUTTON_CHECK_TOPUP = "🔄 Проверить статус"
-
-BUTTON_CLOSE_TOPUP = "🗂 Закрыть эту ссылку"
-
 BUTTON_COPY_REFERRAL = "📋 Скопировать"
 
 BUTTON_CUSTOM_AMOUNT = "Другая сумма"
-
-BUTTON_OPEN_PAYMENT = "💳 Перейти к оплате"
 
 BUTTON_REFERRAL_LIST_COUNT = "👥 Мои рефералы ({count})"
 

@@ -6,7 +6,6 @@ from bot.handlers.payment.balance_routes import topup_presets
 from bot.keyboards.payment import (
     get_balance_amounts_keyboard,
     get_balance_keyboard,
-    get_topup_payment_keyboard,
 )
 from bot.texts import get_text
 from database.models import Payment
@@ -92,14 +91,6 @@ class BalanceTelegramUXTests(unittest.TestCase):
                 "menu_balance",
             ],
         )
-
-    def test_topup_controls_match_hidden_payment_semantics(self):
-        ready = callbacks(get_topup_payment_keyboard("https://example.com", 42))
-        expected = [
-            "balance_check:42",
-            "balance_cancel:42",
-        ]
-        self.assertEqual(ready, expected)
 
     def test_main_hub_template_requires_visible_balance(self):
         text = get_text("HUB_HEADER")
