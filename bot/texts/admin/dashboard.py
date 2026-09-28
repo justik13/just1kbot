@@ -4,7 +4,7 @@ from __future__ import annotations
 ADMIN_DASHBOARD_REVENUE_24H_LINE = """• Выручка за 24ч: <b>{fin_stats__rev_24h} ₽</b> ({fin_stats__count_24h} продаж)
 """
 
-ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES = "💰 Финансы и Очереди{fin_badge}"
+ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES = "💰 Финансы{fin_badge}"
 
 ADMIN_DASHBOARD_SECTION_USERS_BROADCAST = """{header}👥 <b>Управление пользователями и рассылками:</b>
 
@@ -155,9 +155,9 @@ DASHBOARD_DISPUTY_COUNT = "⚠️ Диспуты ({disputes_count})"
 DASHBOARD_FINANCIAL_METRICS = """💰 <b>Финансовые показатели:</b>
 """
 
-DASHBOARD_FINANSY_I_OCHEREDI = "💰 Финансы и Очереди"
+DASHBOARD_FINANSY_I_OCHEREDI = "💰 Финансы"
 
-DASHBOARD_FINANSY_OCHEREDI_I_PLATEZHNYE = """{header}💰 <b>Финансы, Очереди и Платежные споры:</b>
+DASHBOARD_FINANSY_OCHEREDI_I_PLATEZHNYE = """{header}💰 <b>Финансы:</b>
 
 Выберите нужный раздел:"""
 

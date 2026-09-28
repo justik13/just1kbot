@@ -729,6 +729,15 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertFalse(hasattr(texts, "ADMIN_BROADCAST_TITLE_BROADCAST"))
         self.assertFalse(hasattr(texts, "ADMIN_SERVER_SLOTS_DB_NOTE"))
         self.assertFalse(hasattr(texts, "TOPUP_SAVED_NOTICE"))
+        self.assertFalse(hasattr(texts, "ADMIN_DISPUTES_HEADER"))
+        self.assertFalse(hasattr(texts, "DISPUTE_CARD_TEMPLATE"))
+        self.assertFalse(hasattr(texts, "ADMIN_QUEUES_HEADER"))
+        self.assertFalse(hasattr(texts, "QUEUE_CARD_ATTEMPTS"))
+        self.assertFalse(hasattr(texts, "PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS"))
+        self.assertFalse(hasattr(texts, "PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE"))
+        self.assertFalse(hasattr(texts, "PAYMENT_QUOTE_NOT_FOUND_NOTICE"))
+        self.assertFalse(hasattr(texts, "TOPUP_WELCOME_BONUS_LINE"))
+        self.assertFalse(hasattr(texts, "PAYMENT_LINK_READY"))
 
 
 if __name__ == "__main__":
