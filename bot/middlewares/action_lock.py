@@ -77,6 +77,8 @@ LOCKED_ACTION_PREFIXES = (
 )
 
 STALE_ACTION_PREFIXES = (
+    # Compatibility-only callback still emitted by historical topup contexts.
+    "balance_resume_purchase:",
     "confirm_delete_device:",
     "admin_delete_device_apply:",
     "admin_sub_apply_tariff:",
