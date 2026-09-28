@@ -1,9 +1,9 @@
 from datetime import timedelta
 import inspect
 
-from sqlalchemy import and_, false, func, or_, select, update
+from sqlalchemy import and_, false, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -12,7 +12,7 @@ from config.constants import (
     XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Payment, Server, Tariff, User, VPNProfile, WhiteInternetSubscription
+from database.models import Order, Payment, Server, Tariff, User, VPNProfile, WhiteInternetSubscription
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from utils.datetime_helpers import now_utc
 
@@ -202,6 +202,127 @@ async def get_user_referrals_paginated(
     )
     result = await session.execute(stmt)
     return result.scalars().all(), count, page
+
+
+async def get_user_active_referrals_count(
+    session: AsyncSession, telegram_id: int
+) -> int:
+    """Return count of referred users who have at least one paid order."""
+    if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:
+        return 0
+    stmt = (
+        select(func.count(func.distinct(User.id)))
+        .join(Order, Order.user_id == User.id)
+        .where(
+            User.referred_by == telegram_id,
+            User.is_deleted.is_(False),
+            Order.status == "paid",
+        )
+    )
+    result = await session.scalar(stmt)
+    return int(result or 0)
+
+
+async def get_referral_leaderboard(
+    session: AsyncSession, limit: int = 10
+) -> list[tuple[int, int]]:
+    """Return top referrers by count of active referred users [(telegram_id, active_count), ...]."""
+    limit = max(1, min(limit, 100))
+    referrer = aliased(User)
+    referral = aliased(User)
+
+    stmt = (
+        select(referrer.telegram_id, func.count(func.distinct(referral.id)).label("active_count"))
+        .join(referral, referral.referred_by == referrer.telegram_id)
+        .join(Order, Order.user_id == referral.id)
+        .where(
+            referrer.is_deleted.is_(False),
+            referral.is_deleted.is_(False),
+            Order.status == "paid",
+        )
+        .group_by(referrer.telegram_id)
+        .order_by(text("active_count DESC"), referrer.telegram_id.asc())
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [(int(row[0]), int(row[1])) for row in rows]
+
+
+async def get_user_referral_rank(
+    session: AsyncSession, telegram_id: int
+) -> tuple[int | None, int]:
+    """Return (rank, active_count) for the user. Rank is 1-indexed, or None if active_count == 0."""
+    active_count = await get_user_active_referrals_count(session, telegram_id)
+    if active_count == 0:
+        return None, 0
+
+    referrer = aliased(User)
+    referral = aliased(User)
+
+    subq = (
+        select(
+            referrer.telegram_id.label("tid"),
+            func.count(func.distinct(referral.id)).label("cnt"),
+        )
+        .join(referral, referral.referred_by == referrer.telegram_id)
+        .join(Order, Order.user_id == referral.id)
+        .where(
+            referrer.is_deleted.is_(False),
+            referral.is_deleted.is_(False),
+            Order.status == "paid",
+        )
+        .group_by(referrer.telegram_id)
+        .subquery()
+    )
+
+    rank_stmt = select(func.count(subq.c.tid)).where(
+        or_(
+            subq.c.cnt > active_count,
+            and_(subq.c.cnt == active_count, subq.c.tid < telegram_id),
+        )
+    )
+    higher_count = (await session.scalar(rank_stmt)) or 0
+    return int(higher_count + 1), active_count
+
+
+async def is_eligible_for_referral_first_discount(
+    session: AsyncSession, user_id: int
+) -> bool:
+    """Check if user was referred by someone and hasn't made any paid orders yet."""
+    user = await session.get(User, user_id)
+    if (
+        not user
+        or not hasattr(user, "referred_by")
+        or user.referred_by is None
+        or user.referred_by == getattr(user, "telegram_id", None)
+    ):
+        return False
+
+    paid_orders = await session.scalar(
+        select(func.count(Order.id)).where(
+            Order.user_id == user_id,
+            Order.status == "paid",
+        )
+    )
+    if not isinstance(paid_orders, (int, float)):
+        if paid_orders is not None:
+            return False
+        paid_orders = 0
+    if int(paid_orders) > 0:
+        return False
+
+    paid_payments = await session.scalar(
+        select(func.count(Payment.id)).where(
+            Payment.user_id == user_id,
+            Payment.credited_at.is_not(None),
+            Payment.fulfillment_status == "succeeded",
+        )
+    )
+    if not isinstance(paid_payments, (int, float)):
+        if paid_payments is not None:
+            return False
+        paid_payments = 0
+    return int(paid_payments) == 0
 
 
 async def mark_user_bot_blocked(session: AsyncSession, telegram_id: int) -> None:

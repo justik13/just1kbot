@@ -1,3 +1,4 @@
+from decimal import Decimal, ROUND_DOWN
 import logging
 
 from aiogram import F, Router
@@ -15,12 +16,14 @@ from bot.keyboards import (
     get_same_tariff_keyboard,
     get_tariff_duration_keyboard,
 )
+from config.constants import REFERRAL_WELCOME_DISCOUNT_PERCENT
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import (
     get_active_tariffs,
     get_tariff_by_id,
 )
+from database.repositories.users_repo import is_eligible_for_referral_first_discount
 from services.maintenance_service import MaintenanceService
 from services.order_service import OrderService
 from utils.callbacks import parse_callback_id, parse_callback_parts
@@ -272,7 +275,21 @@ async def select_tariff(
         return
 
     tariff_name = get_tariff_display_name(device_limit)
-    price = int(tariff.price_rub)
+    base_price = int(tariff.price_rub)
+    if source != "change" and await is_eligible_for_referral_first_discount(
+        session, db_user.id
+    ):
+        discount = int(
+            (Decimal(tariff.price_rub) * REFERRAL_WELCOME_DISCOUNT_PERCENT).quantize(
+                Decimal(1), rounding=ROUND_DOWN
+            )
+        )
+        price = max(1, base_price - discount)
+        discount_badge = texts.REFERRAL_DISCOUNT_BADGE.format(discount=discount)
+    else:
+        price = base_price
+        discount_badge = ""
+
     balance_before = int(balance_snapshot.available)
     balance_after = max(0, balance_before - price)
     shortage = max(0, price - balance_before)
@@ -287,6 +304,7 @@ async def select_tariff(
             days=tariff.duration_days,
             device_limit=device_limit,
             price=price,
+            discount_badge=discount_badge,
             balance_before=balance_before,
             balance_after=balance_after,
             shortage_line=shortage_line,

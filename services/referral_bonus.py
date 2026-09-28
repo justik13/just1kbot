@@ -11,6 +11,7 @@ from decimal import ROUND_DOWN, Decimal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.constants import REFERRAL_DEFAULT_RATE, REFERRAL_TIERS
 from config.enums import AdminAuditAction
 from database.models import AccountLedgerEntry, User
 from database.repositories.account_ledger_repo import (
@@ -20,8 +21,51 @@ from database.repositories.account_ledger_repo import (
 
 _logger = logging.getLogger(__name__)
 
-REFERRAL_BONUS_RATE = Decimal("0.20")
+REFERRAL_BONUS_RATE = REFERRAL_DEFAULT_RATE
 REFERRAL_BONUS_SOURCE = "referral_bonus"
+
+
+@dataclass(frozen=True)
+class ReferralTierInfo:
+    rate: Decimal
+    name: str
+    needed_for_next: int | None = None
+    next_tier_name: str | None = None
+    next_rate: Decimal | None = None
+
+
+def get_referral_tier(active_count: int) -> ReferralTierInfo:
+    """Determine referral tier, rate, and progress to next tier based on active referrals count."""
+    count = max(0, int(active_count))
+    tiers = sorted(REFERRAL_TIERS, key=lambda t: t[0])
+    current_tier = tiers[0]
+    next_tier = None
+
+    for i, tier in enumerate(tiers):
+        threshold, _rate, _name = tier
+        if count >= threshold:
+            current_tier = tier
+            next_tier = tiers[i + 1] if i + 1 < len(tiers) else None
+        else:
+            break
+
+    _threshold, rate, name = current_tier
+    if next_tier is not None:
+        next_threshold, next_rate, next_name = next_tier
+        return ReferralTierInfo(
+            rate=rate,
+            name=name,
+            needed_for_next=next_threshold - count,
+            next_tier_name=next_name,
+            next_rate=next_rate,
+        )
+    return ReferralTierInfo(
+        rate=rate,
+        name=name,
+        needed_for_next=None,
+        next_tier_name=None,
+        next_rate=None,
+    )
 
 
 @dataclass(frozen=True)
@@ -65,12 +109,15 @@ class ReferralBonusGrantResult:
         return other + self.referrer_bonus
 
 
-def calculate_referral_bonus(purchase_amount: object) -> Decimal:
-    """Return 20% of a purchase, rounded down to whole rubles."""
+def calculate_referral_bonus(
+    purchase_amount: object, rate: Decimal | None = None
+) -> Decimal:
+    """Return referral bonus of a purchase, rounded down to whole rubles."""
     amount = Decimal(str(purchase_amount))
     if not amount.is_finite() or amount <= 0:
         return Decimal(0)
-    return (amount * REFERRAL_BONUS_RATE).quantize(
+    actual_rate = rate if rate is not None else REFERRAL_DEFAULT_RATE
+    return (amount * actual_rate).quantize(
         Decimal(1), rounding=ROUND_DOWN
     )
 
@@ -87,9 +134,13 @@ async def is_first_topup_eligible(
             User.is_deleted.is_(False),
         )
     )
-    if purchaser is None or purchaser.referred_by is None:
+    if (
+        purchaser is None
+        or not hasattr(purchaser, "referred_by")
+        or purchaser.referred_by is None
+    ):
         return False
-    if purchaser.referred_by == purchaser.telegram_id:
+    if purchaser.referred_by == getattr(purchaser, "telegram_id", None):
         return False
 
     from sqlalchemy import func
@@ -121,14 +172,6 @@ async def grant_referral_bonus_for_topup(
     order_id: str | None = None,
     topup_amount: object,
 ) -> ReferralBonusGrantResult:
-    """Credit the referrer with 20% of a top-up, and credit the purchaser with 20% if it is their first top-up."""
-    bonus = calculate_referral_bonus(topup_amount)
-    if bonus <= 0:
-        return ReferralBonusGrantResult(
-            referrer_bonus=Decimal(0),
-            purchaser_welcome_bonus=Decimal(0),
-        )
-
     purchaser = await session.scalar(
         select(User)
         .where(
@@ -137,13 +180,17 @@ async def grant_referral_bonus_for_topup(
         )
         .with_for_update()
     )
-    if purchaser is None or purchaser.referred_by is None:
+    if (
+        purchaser is None
+        or not hasattr(purchaser, "referred_by")
+        or purchaser.referred_by is None
+    ):
         return ReferralBonusGrantResult(
             referrer_bonus=Decimal(0),
             purchaser_welcome_bonus=Decimal(0),
         )
 
-    if purchaser.referred_by == purchaser.telegram_id:
+    if purchaser.referred_by == getattr(purchaser, "telegram_id", None):
         return ReferralBonusGrantResult(
             referrer_bonus=Decimal(0),
             purchaser_welcome_bonus=Decimal(0),
@@ -156,19 +203,35 @@ async def grant_referral_bonus_for_topup(
             User.is_deleted.is_(False),
         )
     )
-    if referrer is None or referrer.is_banned:
+    if (
+        referrer is None
+        or not hasattr(referrer, "is_banned")
+        or referrer.is_banned
+        or not hasattr(referrer, "id")
+    ):
         return ReferralBonusGrantResult(
             referrer_bonus=Decimal(0),
             purchaser_welcome_bonus=Decimal(0),
         )
 
-    if purchaser.id == referrer.id:
+    if getattr(purchaser, "id", None) == getattr(referrer, "id", None):
         return ReferralBonusGrantResult(
             referrer_bonus=Decimal(0),
             purchaser_welcome_bonus=Decimal(0),
         )
 
-    # 1. Grant 20% bonus to referrer for every top-up
+    from database.repositories.users_repo import get_user_active_referrals_count
+
+    active_count = await get_user_active_referrals_count(session, referrer.telegram_id)
+    tier_info = get_referral_tier(active_count)
+    bonus = calculate_referral_bonus(topup_amount, rate=tier_info.rate)
+    if bonus <= 0:
+        return ReferralBonusGrantResult(
+            referrer_bonus=Decimal(0),
+            purchaser_welcome_bonus=Decimal(0),
+        )
+
+    # 1. Grant tiered bonus (15%..30%) to referrer
     referrer_bonus_granted = Decimal(0)
     op_id = order_id or str(payment_id or "unknown")
     idempotency_key = f"referral-bonus:topup:{op_id}:{referrer.id}"
@@ -195,7 +258,9 @@ async def grant_referral_bonus_for_topup(
                     "referred_telegram_id": purchaser.telegram_id,
                     "topup_payment_id": payment_id,
                     "topup_order_id": str(order_id) if order_id is not None else None,
-                    "bonus_rate": str(REFERRAL_BONUS_RATE),
+                    "bonus_rate": str(tier_info.rate),
+                    "tier_name": tier_info.name,
+                    "active_referrals_count": active_count,
                 },
             )
         )
@@ -212,97 +277,16 @@ async def grant_referral_bonus_for_topup(
                 "from_user_id": purchaser.id,
                 "payment_id": payment_id,
                 "order_id": order_id,
+                "bonus_rate": str(tier_info.rate),
+                "tier_name": tier_info.name,
+                "active_referrals_count": active_count,
             },
         )
     else:
         referrer_bonus_granted = Decimal(0)
 
-    # 2. Check if this is the purchaser's first successful top-up. If so, grant purchaser +20% bonus as well.
+    # 2. Purchaser welcome bonus is granted as a 25% checkout discount on first order
     purchaser_welcome_granted = Decimal(0)
-    from sqlalchemy import func
-
-    from database.models import Order, Payment
-
-    order_uuid = None
-    if order_id:
-        try:
-            order_uuid = uuid.UUID(str(order_id))
-        except (ValueError, TypeError):
-            pass
-
-    payment_subq = (
-        select(func.count(Payment.id))
-        .where(
-            Payment.user_id == purchaser.id,
-            Payment.credited_at.is_not(None),
-            Payment.fulfillment_status == "succeeded",
-            *((Payment.id < payment_id,) if payment_id is not None else ()),
-        )
-        .scalar_subquery()
-    )
-
-    order_subq = (
-        select(func.count(Order.id))
-        .where(
-            Order.user_id == purchaser.id,
-            Order.service_type == "topup",
-            Order.status == "paid",
-            *((Order.id != order_uuid,) if order_uuid else ()),
-        )
-        .scalar_subquery()
-    )
-
-    prev_credited = (
-        await session.scalar(
-            select(func.coalesce(payment_subq, 0) + func.coalesce(order_subq, 0))
-        )
-    ) or 0
-    if (prev_credited or 0) == 0:
-        purchaser_key = f"referral-bonus:first-topup-welcome:{purchaser.id}"
-        existing_purchaser = await session.scalar(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.idempotency_key == purchaser_key
-            )
-        )
-        if existing_purchaser is None:
-            session.add(
-                AccountLedgerEntry(
-                    user_id=purchaser.id,
-                    entry_type="admin_adjustment",
-                    amount=bonus,
-                    currency="RUB",
-                    payment_id=None,
-                    quote_id=None,
-                    reversal_of_id=None,
-                    idempotency_key=purchaser_key,
-                    metadata_={
-                        "source_type": REFERRAL_BONUS_SOURCE,
-                        "reason": "first_topup_welcome",
-                        "purchaser_user_id": purchaser.id,
-                        "referrer_telegram_id": purchaser.referred_by,
-                        "topup_payment_id": payment_id,
-                        "topup_order_id": str(order_id) if order_id is not None else None,
-                        "bonus_rate": str(REFERRAL_BONUS_RATE),
-                    },
-                )
-            )
-            purchaser_welcome_granted = bonus
-            from services.audit_service import AuditService
-            await AuditService.log_action(
-                session,
-                admin_id=0,
-                action=AdminAuditAction.WELCOME_BONUS_GRANTED,
-                target_type="user",
-                target_id=purchaser.id,
-                details={
-                    "amount": int(bonus),
-                    "referrer_telegram_id": purchaser.referred_by,
-                    "payment_id": payment_id,
-                },
-            )
-        else:
-            purchaser_welcome_granted = Decimal(0)
-
     await session.flush()
     return ReferralBonusGrantResult(
         referrer_bonus=referrer_bonus_granted,
@@ -425,7 +409,13 @@ async def reverse_referral_bonus_for_topup(
             target_cumulative = (Decimal(credit.amount) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
             reversal_val = min(max_can_reverse, max(Decimal(0), target_cumulative - already_reversed))
         elif refund_amount is not None:
-            reversal_val = min(max_can_reverse, calculate_referral_bonus(refund_amount))
+            credit_rate = None
+            if getattr(credit, "metadata_", None) and "bonus_rate" in credit.metadata_:
+                try:
+                    credit_rate = Decimal(str(credit.metadata_["bonus_rate"]))
+                except Exception:
+                    credit_rate = None
+            reversal_val = min(max_can_reverse, calculate_referral_bonus(refund_amount, rate=credit_rate))
         else:
             reversal_val = max_can_reverse
 

@@ -61,6 +61,7 @@ from .payment import (
 from .user import (
     get_history_keyboard,
     get_referral_keyboard,
+    get_referral_leaderboard_keyboard,
     get_referrals_list_keyboard,
 )
 
@@ -71,6 +72,7 @@ __all__ = [
     # user
     "get_history_keyboard",
     "get_referral_keyboard",
+    "get_referral_leaderboard_keyboard",
     "get_referrals_list_keyboard",
     # device
     "get_device_keyboard",

@@ -10,15 +10,19 @@ from bot.formatters import format_plural
 from bot.keyboards import (
     get_history_keyboard,
     get_referral_keyboard,
+    get_referral_leaderboard_keyboard,
     get_referrals_list_keyboard,
 )
 from database.models import User
 from database.repositories.payments_repo import get_user_payments
 from database.repositories.users_repo import (
+    get_referral_leaderboard,
+    get_user_active_referrals_count,
+    get_user_referral_rank,
     get_user_referrals_count,
     get_user_referrals_paginated,
 )
-from services.referral_bonus import get_referral_bonus_balance
+from services.referral_bonus import get_referral_bonus_balance, get_referral_tier
 from utils.formatters import format_datetime
 from utils.telegram import render_hub, safe
 
@@ -124,8 +128,26 @@ async def show_referral(
             pass
         return
 
+    active_count = await get_user_active_referrals_count(session, db_user.telegram_id)
     invited_count = await get_user_referrals_count(session, db_user.telegram_id)
     bonus_balance = await get_referral_bonus_balance(session, user_id=db_user.id)
+    tier_info = get_referral_tier(active_count)
+
+    rate_pct = int(tier_info.rate * 100)
+    if (
+        tier_info.needed_for_next is not None
+        and tier_info.next_tier_name
+        and tier_info.next_rate
+    ):
+        next_rate_pct = int(tier_info.next_rate * 100)
+        needed_count = format_plural(tier_info.needed_for_next, texts.NOUN_USERS)
+        tier_progress_line = texts.REFERRAL_TIER_PROGRESS_NEXT.format(
+            next_tier_name=tier_info.next_tier_name,
+            next_rate_pct=next_rate_pct,
+            needed_count=needed_count,
+        )
+    else:
+        tier_progress_line = texts.REFERRAL_TIER_PROGRESS_MAX
 
     bot_info = await callback.bot.get_me()
     referral_link = f"https://t.me/{bot_info.username}?start=ref_{db_user.telegram_id}"
@@ -140,12 +162,82 @@ async def show_referral(
         callback.bot,
         callback.message.chat.id,
         texts.REFERRAL_TEXT_BALANCE.format(
-            referral_link=referral_link,
-            invited_count=invited_count,
             bonus_balance=int(bonus_balance),
+            tier_name=tier_info.name,
+            rate_pct=rate_pct,
+            active_count=active_count,
+            invited_count=invited_count,
+            tier_progress_line=tier_progress_line,
+            referral_link=referral_link,
             inviter_line=inviter_line,
         ),
         get_referral_keyboard(referral_link, count=invited_count),
+        trigger_message_id=callback.message.message_id if callback.message else None,
+    )
+
+
+@router.callback_query(F.data == "referral_leaderboard")
+async def show_referral_leaderboard(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    await callback.answer(show_alert=False)
+    await state.clear()
+
+    if not db_user:
+        try:
+            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    top_leaders = await get_referral_leaderboard(session, limit=10)
+    user_rank, user_active_count = await get_user_referral_rank(
+        session, db_user.telegram_id
+    )
+
+    from bot.texts.user.referral import mask_telegram_id
+
+    if not top_leaders:
+        rendered = texts.REFERRAL_LEADERBOARD_TITLE + "\n" + texts.REFERRAL_LEADERBOARD_EMPTY
+    else:
+        rendered = texts.REFERRAL_LEADERBOARD_TITLE + "\n"
+        for pos, (leader_tg_id, count) in enumerate(top_leaders, start=1):
+            medal = texts.REFERRAL_LEADERBOARD_MEDALS.get(pos, "")
+            is_me = leader_tg_id == db_user.telegram_id
+            masked = mask_telegram_id(leader_tg_id)
+            user_label = (
+                texts.REFERRAL_LEADERBOARD_USER_YOU.format(masked=masked)
+                if is_me
+                else texts.REFERRAL_LEADERBOARD_USER_OTHER.format(masked=masked)
+            )
+            noun = format_plural(count, texts.NOUN_USERS)
+            line = texts.REFERRAL_LEADERBOARD_ITEM.format(
+                pos=pos,
+                medal=medal,
+                user=user_label,
+                count=count,
+                noun=noun,
+            )
+            rendered += f"{line}\n"
+
+    if user_rank is not None and user_active_count > 0:
+        noun = format_plural(user_active_count, texts.NOUN_USERS)
+        rendered += texts.REFERRAL_LEADERBOARD_YOUR_RANK.format(
+            rank=user_rank,
+            count=user_active_count,
+            noun=noun,
+        )
+    else:
+        rendered += texts.REFERRAL_LEADERBOARD_NOT_RANKED
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        rendered,
+        get_referral_leaderboard_keyboard(),
         trigger_message_id=callback.message.message_id if callback.message else None,
     )
 

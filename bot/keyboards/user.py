@@ -47,15 +47,33 @@ def get_referral_keyboard(
         callback_data="referrals_list",
     )
     builder.button(
+        text=texts.BTN_REFERRAL_LEADERBOARD,
+        callback_data="referral_leaderboard",
+    )
+    builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
 
     if has_copy:
-        builder.adjust(2, 1, 1)
+        builder.adjust(2, 2, 1)
     else:
-        builder.adjust(1, 1, 1)
+        builder.adjust(1, 2, 1)
 
+    return builder.as_markup()
+
+
+def get_referral_leaderboard_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="referral",
+    )
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 1)
     return builder.as_markup()
 
 

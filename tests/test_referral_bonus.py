@@ -8,46 +8,90 @@ from services.referral_bonus import calculate_referral_bonus
 
 
 class TestReferralBonusCalculation(unittest.TestCase):
-    def test_referral_bonus_is_twenty_percent_for_every_purchase_amount(self):
+    def test_referral_bonus_default_rate_is_fifteen_percent(self):
         assert calculate_referral_bonus(1) == Decimal(0)
-        assert calculate_referral_bonus(10) == Decimal(2)
-        assert calculate_referral_bonus(30) == Decimal(6)
-        assert calculate_referral_bonus(99) == Decimal(19)
-        assert calculate_referral_bonus(100) == Decimal(20)
-        assert calculate_referral_bonus(999) == Decimal(199)
-        assert calculate_referral_bonus(1000) == Decimal(200)
+        assert calculate_referral_bonus(10) == Decimal(1)
+        assert calculate_referral_bonus(30) == Decimal(4)
+        assert calculate_referral_bonus(99) == Decimal(14)
+        assert calculate_referral_bonus(100) == Decimal(15)
+        assert calculate_referral_bonus(999) == Decimal(149)
+        assert calculate_referral_bonus(1000) == Decimal(150)
 
-
-    def test_referral_bonus_has_no_duration_or_first_purchase_gate(self):
-        # The calculation depends only on the successfully spent amount.
-        for purchase_amount in (10, 50, 123, 500, 999):
-            assert calculate_referral_bonus(purchase_amount) == (
-                Decimal(str(purchase_amount)) * Decimal("0.20")
-            ).quantize(Decimal(1), rounding="ROUND_DOWN")
-
+    def test_referral_bonus_supports_explicit_tier_rates(self):
+        for rate, expected_100, expected_1000 in (
+            (Decimal("0.15"), Decimal(15), Decimal(150)),
+            (Decimal("0.20"), Decimal(20), Decimal(200)),
+            (Decimal("0.25"), Decimal(25), Decimal(250)),
+            (Decimal("0.30"), Decimal(30), Decimal(300)),
+        ):
+            assert calculate_referral_bonus(100, rate=rate) == expected_100
+            assert calculate_referral_bonus(1000, rate=rate) == expected_1000
 
     def test_referral_bonus_rejects_non_positive_amounts(self):
         assert calculate_referral_bonus(0) == Decimal(0)
         assert calculate_referral_bonus(-100) == Decimal(0)
 
 
+class TestReferralTiers(unittest.TestCase):
+    def test_referral_tier_progression(self):
+        from services.referral_bonus import get_referral_tier
+
+        # Tier 1: 0..4 -> 15% (Старт)
+        for cnt in (0, 1, 2, 3, 4):
+            t = get_referral_tier(cnt)
+            assert t.rate == Decimal("0.15")
+            assert t.name == "Старт"
+            assert t.needed_for_next == (5 - cnt)
+            assert t.next_tier_name == "Активист"
+            assert t.next_rate == Decimal("0.20")
+
+        # Tier 2: 5..9 -> 20% (Активист)
+        for cnt in (5, 6, 7, 8, 9):
+            t = get_referral_tier(cnt)
+            assert t.rate == Decimal("0.20")
+            assert t.name == "Активист"
+            assert t.needed_for_next == (10 - cnt)
+            assert t.next_tier_name == "Мастер"
+            assert t.next_rate == Decimal("0.25")
+
+        # Tier 3: 10..14 -> 25% (Мастер)
+        for cnt in (10, 11, 12, 13, 14):
+            t = get_referral_tier(cnt)
+            assert t.rate == Decimal("0.25")
+            assert t.name == "Мастер"
+            assert t.needed_for_next == (15 - cnt)
+            assert t.next_tier_name == "Амбассадор"
+            assert t.next_rate == Decimal("0.30")
+
+        # Tier 4: 15+ -> 30% (Амбассадор)
+        for cnt in (15, 20, 50, 100):
+            t = get_referral_tier(cnt)
+            assert t.rate == Decimal("0.30")
+            assert t.name == "Амбассадор"
+            assert t.needed_for_next is None
+            assert t.next_tier_name is None
+            assert t.next_rate is None
+
+
+class TestMaskTelegramId(unittest.TestCase):
+    def test_masking_standard_ids(self):
+        from bot.texts.user.referral import mask_telegram_id
+
+        assert mask_telegram_id(8141287721) == "814***21"
+        assert mask_telegram_id("8141287721") == "814***21"
+        assert mask_telegram_id(123456789) == "123***89"
+        assert mask_telegram_id(12345) == "123***45"
+
+    def test_masking_short_ids(self):
+        from bot.texts.user.referral import mask_telegram_id
+
+        assert mask_telegram_id(1234) == "1***4"
+        assert mask_telegram_id(12) == "1***2"
+        assert mask_telegram_id(1) == "***"
+
+
 class TestReferralBonusLedgerEntryShape(unittest.TestCase):
-    """
-    Regression test for production bug:
-    CheckViolationError on ck_account_ledger_entry_shape.
-
-    The DB constraint requires:
-        entry_type = 'admin_adjustment' AND payment_id IS NULL
-
-    Previously the code set payment_id=payment_id which violated this constraint
-    and caused all referral bonuses to silently fail.
-    """
-
     def test_ledger_entry_created_with_payment_id_none(self):
-        """
-        Verify that grant_referral_bonus_for_topup creates an AccountLedgerEntry
-        with payment_id=None, not with the topup payment_id.
-        """
         import asyncio
 
         from database.models import AccountLedgerEntry
@@ -55,7 +99,6 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
 
         captured_entry = {}
 
-        # Build fake referrer and purchaser
         referrer = MagicMock()
         referrer.id = 1
         referrer.telegram_id = 111
@@ -64,7 +107,7 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         purchaser = MagicMock()
         purchaser.id = 4
         purchaser.telegram_id = 222
-        purchaser.referred_by = 111  # referred by referrer
+        purchaser.referred_by = 111
 
         def fake_add(entry):
             if isinstance(entry, AccountLedgerEntry):
@@ -75,7 +118,8 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
         session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
-        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 0, None])
+        # 1. purchaser, 2. referrer, 3. active_referrals_count (0), 4. existing check (None)
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, 0, None])
         session.add = fake_add
         session.flush = AsyncMock()
 
@@ -90,14 +134,12 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
 
         entry = captured_entry.get("obj")
         assert entry is not None, "AccountLedgerEntry was never added to session"
-        assert entry.payment_id is None, (
-            "payment_id must be None for admin_adjustment entries — "
-            "ck_account_ledger_entry_shape constraint forbids non-NULL payment_id here"
-        )
+        assert entry.payment_id is None
         assert entry.entry_type == "admin_adjustment"
-        assert entry.amount == Decimal(6)
-        assert entry.metadata_["topup_payment_id"] == 42, \
-            "topup_payment_id should be preserved in metadata for traceability"
+        assert entry.amount == Decimal(4)  # 15% of 30
+        assert entry.metadata_["topup_payment_id"] == 42
+        assert entry.metadata_["bonus_rate"] == "0.15"
+        assert entry.metadata_["tier_name"] == "Старт"
 
     def test_reverse_referral_bonus_for_topup(self):
         import asyncio
@@ -363,7 +405,7 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
 
 
 class TestGrantReferralBonusForTopup(unittest.TestCase):
-    def test_first_topup_bonus_credits_both_purchaser_and_referrer(self):
+    def test_first_topup_bonus_credits_referrer_and_not_balance_welcome_bonus(self):
         import asyncio
 
         from database.models import AccountLedgerEntry
@@ -390,12 +432,12 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
         session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
-        # 1. purchaser, 2. referrer, 3. existing referrer bonus check (None), 4. prev_credited (0), 5. existing purchaser bonus check (None)
-        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 0, None])
+        # 1. purchaser, 2. referrer, 3. active_referrals_count (0 -> 15% rate), 4. existing check (None)
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, 0, None])
         session.add = fake_add
         session.flush = AsyncMock()
 
-        asyncio.run(
+        res = asyncio.run(
             grant_referral_bonus_for_topup(
                 session,
                 purchaser_user_id=20,
@@ -404,16 +446,17 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
             )
         )
 
-        assert len(added_entries) == 2
+        assert len(added_entries) == 1
         referrer_entry = added_entries[0]
-        purchaser_entry = added_entries[1]
 
         assert referrer_entry.user_id == 10
-        assert referrer_entry.amount == Decimal(100)
+        assert referrer_entry.amount == Decimal(75)  # 15% of 500
+        assert referrer_entry.metadata_["bonus_rate"] == "0.15"
+        assert referrer_entry.metadata_["tier_name"] == "Старт"
 
-        assert purchaser_entry.user_id == 20
-        assert purchaser_entry.amount == Decimal(100)
-        assert purchaser_entry.metadata_["reason"] == "first_topup_welcome"
+        # Purchaser gets discount at checkout rather than bonus credit on balance
+        assert res.purchaser_welcome_bonus == Decimal(0)
+        assert res.referrer_bonus == Decimal(75)
 
 
     def test_second_topup_credits_only_referrer(self):
@@ -443,8 +486,8 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
         session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
-        # 1. purchaser, 2. referrer, 3. existing referrer bonus check (None), 4. prev_credited (1 = previous topup exists)
-        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 1])
+        # 1. purchaser, 2. referrer, 3. active_referrals_count (5 -> 20% rate "Активист"), 4. existing check (None)
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, 5, None])
         session.add = fake_add
         session.flush = AsyncMock()
 
@@ -460,7 +503,9 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         assert len(added_entries) == 1
         referrer_entry = added_entries[0]
         assert referrer_entry.user_id == 10
-        assert referrer_entry.amount == Decimal(200)
+        assert referrer_entry.amount == Decimal(200)  # 20% of 1000
+        assert referrer_entry.metadata_["bonus_rate"] == "0.20"
+        assert referrer_entry.metadata_["tier_name"] == "Активист"
 
 
     def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus(self):
@@ -558,39 +603,36 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
 
 
 
-    def test_grant_referral_bonus_for_topup_uses_strict_chronological_ordering(self):
+    def test_grant_referral_bonus_for_topup_tiered_rates(self):
         import asyncio
 
-        # Simulate P1 (id=1) and P2 (id=2) where P1 recovery runs AFTER P2 is processed.
         from unittest.mock import AsyncMock, MagicMock
 
         from sqlalchemy.ext.asyncio import AsyncSession
 
         from database.models import User
         from services.referral_bonus import grant_referral_bonus_for_topup
-    
+
         session = AsyncMock(spec=AsyncSession)
-    
+
         mock_purchaser = MagicMock(spec=User)
         mock_purchaser.id = 10
         mock_purchaser.telegram_id = 200
         mock_purchaser.referred_by = 100
-    
+
         mock_referrer = MagicMock(spec=User)
         mock_referrer.id = 20
+        mock_referrer.telegram_id = 100
         mock_referrer.is_banned = False
-    
-        # 1. purchaser -> mock_purchaser
-        # 2. referrer -> mock_referrer
-        # 3. existing -> None
-        # 4. prev_credited -> 0
-        # 5. existing_purchaser -> None
-        session.scalar.side_effect = [mock_purchaser, mock_referrer, None, 0, None]
-    
+
+        # 1. purchaser, 2. referrer, 3. active_count=10 (tier 3: 25% "Мастер"), 4. existing check (None)
+        session.scalar.side_effect = [mock_purchaser, mock_referrer, 10, None]
+
         res = asyncio.run(grant_referral_bonus_for_topup(session, purchaser_user_id=10, payment_id=1, topup_amount=Decimal(100)))
-    
-        # Welcome bonus MUST be granted (20% of 100 = 20)
-        assert res.purchaser_welcome_bonus == Decimal(20)
+
+        # Tier 3 (Мастер) -> 25% of 100 = 25
+        assert res.referrer_bonus == Decimal(25)
+        assert res.purchaser_welcome_bonus == Decimal(0)
 
     def test_get_referral_bonus_balance_clamped_to_bonus_available(self):
         import asyncio
@@ -630,6 +672,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         credit.metadata_ = {
             "topup_order_id": str(order_uuid),
             "source_type": "referral_bonus",
+            "bonus_rate": "0.20",
         }
 
         # 1. First partial refund: 100 RUB of 1000 RUB top-up (10%)
@@ -816,3 +859,226 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
             bonus = asyncio.run(get_referral_bonus_balance(session, user_id=10))
             # 40 - 16 = 24 RUB
             self.assertEqual(bonus, Decimal("24.00"))
+
+
+class TestReferralFirstOrderDiscount(unittest.TestCase):
+    def test_create_order_applies_25_pct_discount_for_referred_user(self):
+        import asyncio
+        from integrations.payment_gateways.base import PaymentInvoice
+        from services.order_service import OrderService
+
+        user = MagicMock()
+        user.id = 10
+        user.telegram_id = 1000
+        user.referred_by = 999
+        user.current_tariff_id = None
+        user.subscription_end = None
+
+        tariff = MagicMock()
+        tariff.id = 1
+        tariff.name = "Standard"
+        tariff.price_rub = Decimal("100.00")
+        tariff.duration_days = 30
+        tariff.device_limit = 2
+
+        session = AsyncMock()
+
+        async def fake_get(model, pk, **kwargs):
+            from database.models import Tariff, User
+            if model is User:
+                return user
+            if model is Tariff:
+                return tariff
+            return None
+
+        session.get = fake_get
+        session.scalar = AsyncMock(return_value=None)  # no existing pending order
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        mock_gw = AsyncMock()
+        mock_gw.create_payment_url.return_value = PaymentInvoice(
+            external_id="ext_1",
+            payment_url="https://pay.yookassa.ru/test",
+        )
+
+        with patch("services.order_service.get_payment_gateway", return_value=mock_gw), \
+             patch("database.repositories.users_repo.is_eligible_for_referral_first_discount", return_value=True):
+            order = asyncio.run(
+                OrderService.create_order(
+                    session,
+                    user_id=10,
+                    tariff_id=1,
+                    payment_method="yookassa",
+                )
+            )
+
+        self.assertEqual(order.amount_rub, Decimal("75.00"))
+        self.assertTrue(order.metadata_.get("is_referral_discount"))
+        self.assertEqual(order.metadata_.get("discount_rub"), 25)
+        self.assertEqual(order.metadata_.get("original_price_rub"), 100)
+
+    def test_create_order_no_discount_for_ineligible_user(self):
+        import asyncio
+        from integrations.payment_gateways.base import PaymentInvoice
+        from services.order_service import OrderService
+
+        user = MagicMock(id=11, telegram_id=1001, referred_by=None, current_tariff_id=None, subscription_end=None)
+        tariff = MagicMock(id=1, name="Standard", price_rub=Decimal("100.00"), duration_days=30, device_limit=2)
+
+        async def fake_get(model, pk, **kwargs):
+            from database.models import Tariff, User
+            if model is User:
+                return user
+            if model is Tariff:
+                return tariff
+            return None
+
+        session = AsyncMock()
+        session.get = fake_get
+        session.scalar = AsyncMock(return_value=None)
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        mock_gw = AsyncMock()
+        mock_gw.create_payment_url.return_value = PaymentInvoice(
+            external_id="ext_2",
+            payment_url="https://pay.yookassa.ru/test2",
+        )
+
+        with patch("services.order_service.get_payment_gateway", return_value=mock_gw), \
+             patch("database.repositories.users_repo.is_eligible_for_referral_first_discount", return_value=False):
+            order = asyncio.run(
+                OrderService.create_order(
+                    session,
+                    user_id=11,
+                    tariff_id=1,
+                    payment_method="yookassa",
+                )
+            )
+
+        self.assertEqual(order.amount_rub, Decimal("100.00"))
+        self.assertNotIn("is_referral_discount", order.metadata_)
+
+    def test_pay_from_wallet_applies_25_pct_discount_for_referred_user(self):
+        import asyncio
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.order_service import OrderService
+
+        user = MagicMock(id=12, telegram_id=1002, referred_by=888, financial_hold=False, current_tariff_id=None, subscription_end=None)
+        tariff = MagicMock(id=1, name="Standard", price_rub=Decimal("200.00"), duration_days=30, device_limit=2)
+
+        async def fake_get(model, pk, **kwargs):
+            from database.models import Tariff, User
+            if model is User:
+                return user
+            if model is Tariff:
+                return tariff
+            return None
+
+        session = AsyncMock()
+        session.get = fake_get
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        balance_snap = AccountBalanceSnapshot(
+            accounting_position=Decimal("300.00"),
+            available=Decimal("300.00"),
+            reserved=Decimal("0.00"),
+            debt=Decimal("0.00"),
+            real_available=Decimal("300.00"),
+            bonus_available=Decimal("0.00"),
+        )
+
+        with patch("services.order_service.get_account_balance", return_value=balance_snap), \
+             patch("services.order_service.create_order_debit") as mock_debit, \
+             patch("services.fulfillment_service.FulfillmentService.fulfill_order", new_callable=AsyncMock), \
+             patch("database.repositories.users_repo.is_eligible_for_referral_first_discount", return_value=True):
+            order = asyncio.run(
+                OrderService.pay_from_wallet(
+                    session,
+                    user_id=12,
+                    tariff_id=1,
+                )
+            )
+
+        # 200 - 25% = 150
+        self.assertEqual(order.amount_rub, Decimal("150.00"))
+        self.assertTrue(order.metadata_.get("is_referral_discount"))
+        self.assertEqual(order.metadata_.get("discount_rub"), 50)
+        self.assertEqual(order.metadata_.get("original_price_rub"), 200)
+        mock_debit.assert_awaited_once_with(
+            session,
+            user_id=12,
+            amount_rub=Decimal("150.00"),
+            order_id=order.id,
+            metadata={"description": order.description},
+        )
+
+
+class TestReferralEligibilityAndRanks(unittest.TestCase):
+    def test_is_eligible_for_referral_first_discount_no_inviter(self):
+        import asyncio
+        from database.repositories.users_repo import is_eligible_for_referral_first_discount
+
+        session = AsyncMock()
+        user_no_inviter = MagicMock(id=1, telegram_id=100, referred_by=None)
+        session.get = AsyncMock(return_value=user_no_inviter)
+
+        self.assertFalse(asyncio.run(is_eligible_for_referral_first_discount(session, 1)))
+
+    def test_is_eligible_for_referral_first_discount_self_referral(self):
+        import asyncio
+        from database.repositories.users_repo import is_eligible_for_referral_first_discount
+
+        session = AsyncMock()
+        user_self = MagicMock(id=1, telegram_id=100, referred_by=100)
+        session.get = AsyncMock(return_value=user_self)
+
+        self.assertFalse(asyncio.run(is_eligible_for_referral_first_discount(session, 1)))
+
+    def test_is_eligible_for_referral_first_discount_new_user_eligible(self):
+        import asyncio
+        from database.repositories.users_repo import is_eligible_for_referral_first_discount
+
+        session = AsyncMock()
+        user_invited = MagicMock(id=2, telegram_id=200, referred_by=100)
+        session.get = AsyncMock(return_value=user_invited)
+        # 1. paid_orders count -> 0, 2. paid_payments count -> 0
+        session.scalar = AsyncMock(side_effect=[0, 0])
+
+        self.assertTrue(asyncio.run(is_eligible_for_referral_first_discount(session, 2)))
+
+    def test_is_eligible_for_referral_first_discount_has_paid_order(self):
+        import asyncio
+        from database.repositories.users_repo import is_eligible_for_referral_first_discount
+
+        session = AsyncMock()
+        user_invited = MagicMock(id=3, telegram_id=300, referred_by=100)
+        session.get = AsyncMock(return_value=user_invited)
+        # paid_orders count -> 1
+        session.scalar = AsyncMock(return_value=1)
+
+        self.assertFalse(asyncio.run(is_eligible_for_referral_first_discount(session, 3)))
+
+    def test_get_user_referral_rank_unranked_for_zero_active(self):
+        import asyncio
+        from database.repositories.users_repo import get_user_referral_rank
+
+        session = AsyncMock()
+        with patch("database.repositories.users_repo.get_user_active_referrals_count", return_value=0):
+            rank, count = asyncio.run(get_user_referral_rank(session, telegram_id=555))
+            self.assertIsNone(rank)
+            self.assertEqual(count, 0)
+
+    def test_get_user_referral_rank_for_ranked_user(self):
+        import asyncio
+        from database.repositories.users_repo import get_user_referral_rank
+
+        session = AsyncMock()
+        # active_count = 5, higher_count = 2 (so rank is 3)
+        with patch("database.repositories.users_repo.get_user_active_referrals_count", return_value=5):
+            session.scalar = AsyncMock(return_value=2)
+            rank, count = asyncio.run(get_user_referral_rank(session, telegram_id=777))
+            self.assertEqual(rank, 3)
+            self.assertEqual(count, 5)
