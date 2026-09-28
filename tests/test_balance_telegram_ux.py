@@ -1,5 +1,4 @@
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 
 from bot.handlers.payment.balance_routes import topup_presets
