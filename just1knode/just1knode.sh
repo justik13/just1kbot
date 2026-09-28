@@ -648,10 +648,6 @@ if os.path.exists(rf):
     fi
 }
 
-doctor_self_check() {
-    run_doctor "$@"
-}
-
 reset_node() {
     title "СБРОС И ПЕРЕУСТАНОВКА УЗЛА"
     check_root

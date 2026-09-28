@@ -212,42 +212,6 @@ async def users_filter_pagination(
         logger.debug(f"users_filter_pagination edit_text failed: {e}")
 
 
-@router.callback_query(F.data.startswith("admin_users_page:"))
-async def users_pagination(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-
-    page = parse_callback_id(callback.data, 1) or 1
-    await callback.answer(show_alert=False)
-    await state.clear()
-
-    total_users = await get_filtered_users_count(session, filter_type="all")
-    total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
-    page = min(max(1, page), total_pages)
-
-    users = await get_filtered_users_paginated(
-        session, filter_type="all", page=page, per_page=USERS_PER_PAGE
-    )
-
-    rendered, kb = await _build_users_list_text_and_kb(
-        users, page, total_pages, total_users, filter_type="all", filter_param="none", session=session
-    )
-
-    try:
-        await callback.message.edit_text(
-            rendered,
-            reply_markup=kb.as_markup(),
-            parse_mode="HTML",
-        )
-    except TelegramBadRequest as e:
-        logger.debug(f"users_pagination edit_text failed: {e}")
-
-
 @router.callback_query(F.data == "admin_users_search")
 async def start_search_user(
     callback: CallbackQuery,

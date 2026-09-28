@@ -15,7 +15,6 @@ from utils.telegram import (
     EFFECT_CONFETTI,
     EFFECT_FIRE,
     EFFECT_LIKE,
-    EFFECT_LIGHTNING,
     _send_with_resilience,
     render_hub,
 )
@@ -145,7 +144,6 @@ class TestEffectsWiring(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(EFFECT_CONFETTI, "5046509860389126442")
         self.assertEqual(EFFECT_LIKE, "5107584321108051014")
         self.assertEqual(EFFECT_FIRE, "5104841245755180586")
-        self.assertEqual(EFFECT_LIGHTNING, EFFECT_FIRE)
 
     async def test_render_device_screen_effect_passthrough(self):
         """T-04: creation card renders as a NEW message carrying the FIRE effect."""
@@ -295,24 +293,6 @@ class TestStoreFailureCleanup(unittest.IsolatedAsyncioTestCase):
 
         bot.delete_message.assert_awaited_with(chat_id=4, message_id=77)
 
-    async def test_photo_store_failure_self_cleans(self):
-        from utils.telegram import send_hub_photo
-
-        bot = MagicMock()
-        msg = MagicMock(message_id=88)
-        bot.send_photo = AsyncMock(return_value=msg)
-        bot.delete_message = AsyncMock()
-
-        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])), \
-             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))):
-            with self.assertRaises(RuntimeError):
-                await asyncio.wait_for(
-                    send_hub_photo(bot, chat_id=4, photo=MagicMock()),
-                    timeout=2,
-                )
-
-        bot.delete_message.assert_awaited_with(chat_id=4, message_id=88)
-
     async def test_multi_part_store_failure_cleans_current_part_too(self):
         bot = MagicMock()
         responses = [MagicMock(message_id=11), MagicMock(message_id=12)]
@@ -427,50 +407,6 @@ class TestStoreFailureCleanup(unittest.IsolatedAsyncioTestCase):
 
         self.assertLessEqual(active["max"], 1)  # strict serialization: no overlap
         self.assertEqual(len(tg._hub_cache[12]["ids"]), 1)
-
-
-class TestDocumentOrdering(unittest.IsolatedAsyncioTestCase):
-    """P1: send -> durable store -> THEN delete old hub (never leave chat without a hub)."""
-
-    async def test_document_preserves_old_hub_when_store_fails(self):
-        from utils.telegram import send_hub_document
-
-        bot = MagicMock()
-        msg = MagicMock(message_id=200)
-        bot.send_document = AsyncMock(return_value=msg)
-        bot.delete_message = AsyncMock()
-
-        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[100])), \
-             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))):
-            with self.assertRaises(RuntimeError):
-                await asyncio.wait_for(
-                    send_hub_document(bot, chat_id=4, document=MagicMock()),
-                    timeout=2,
-                )
-
-        deleted = [c.kwargs.get("message_id") for c in bot.delete_message.await_args_list]
-        self.assertIn(200, deleted)        # NEW message cleaned up
-        self.assertNotIn(100, deleted)     # OLD hub left intact
-
-    async def test_photo_preserves_old_hub_when_store_fails(self):
-        from utils.telegram import send_hub_photo
-
-        bot = MagicMock()
-        msg = MagicMock(message_id=210)
-        bot.send_photo = AsyncMock(return_value=msg)
-        bot.delete_message = AsyncMock()
-
-        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[100])), \
-             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))):
-            with self.assertRaises(RuntimeError):
-                await asyncio.wait_for(
-                    send_hub_photo(bot, chat_id=4, photo=MagicMock()),
-                    timeout=2,
-                )
-
-        deleted = [c.kwargs.get("message_id") for c in bot.delete_message.await_args_list]
-        self.assertIn(210, deleted)
-        self.assertNotIn(100, deleted)
 
 
 class TestEffectDurability(unittest.IsolatedAsyncioTestCase):

@@ -823,10 +823,6 @@ async def process_topup_execute(query: CallbackQuery, session: AsyncSession):
     await show_white_internet_menu(query, session)
 
 
-# Backward-compatibility alias
-process_topup_pack = process_topup_execute
-
-
 @router.callback_query(F.data.startswith("wl_topup_shortage:"))
 async def process_wl_topup_shortage(query: CallbackQuery, session: AsyncSession):
     parts = query.data.split(":")

@@ -145,29 +145,6 @@ get_node_status() {
     esac
 }
 
-has_role() {
-    local check_role="$1"
-    local current_role
-    current_role="$(get_node_status)"
-    case "$check_role" in
-        origin)
-            [[ "$current_role" == "origin" ]]
-            ;;
-        relay)
-            [[ "$current_role" == "relay" || "$current_role" == "dual" ]]
-            ;;
-        awg)
-            [[ "$current_role" == "awg" || "$current_role" == "dual" ]]
-            ;;
-        dual)
-            [[ "$current_role" == "dual" ]]
-            ;;
-        *)
-            false
-            ;;
-    esac
-}
-
 # Транзакционный манифест
 manifest_begin() {
     local extra_targets=("$@")

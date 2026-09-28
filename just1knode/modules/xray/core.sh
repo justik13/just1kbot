@@ -134,10 +134,6 @@ update_xray_core() {
     rm -rf "$tmp_zip" /tmp/xray_new
 }
 
-update_xray() {
-    update_xray_core "$@"
-}
-
 update_node() {
     title "КОМПЛЕКСНОЕ ОБНОВЛЕНИЕ УТИЛИТЫ И КОНФИГУРАЦИИ УЗЛА"
     check_root

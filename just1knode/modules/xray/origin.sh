@@ -812,10 +812,6 @@ set_origin_bot_ip() {
     release_just1knode_lock
 }
 
-set_node_bot_ip() {
-    set_origin_bot_ip "$@"
-}
-
 heal_and_update_origin_config() {
     title "АВТОМАТИЧЕСКАЯ ОПТИМИЗАЦИЯ И ВОССТАНОВЛЕНИЕ КОНФИГУРАЦИИ ORIGIN"
     check_root
