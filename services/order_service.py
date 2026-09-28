@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 import logging
 import math
 import uuid
@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from config.constants import REFERRAL_WELCOME_DISCOUNT_PERCENT
 from database.models import Order, Tariff, User
 from database.repositories.account_ledger_repo import (
     create_order_credit,
@@ -142,7 +143,23 @@ class OrderService:
                         duration_days = resulting_days
                 else:
                     if amount_rub is None:
-                        amount_rub = Decimal(tariff.price_rub)
+                        base_cost = Decimal(tariff.price_rub)
+                        from database.repositories.users_repo import (
+                            is_eligible_for_referral_first_discount,
+                        )
+
+                        if await is_eligible_for_referral_first_discount(
+                            session, user_id
+                        ):
+                            discount = (
+                                base_cost * REFERRAL_WELCOME_DISCOUNT_PERCENT
+                            ).quantize(Decimal(1), rounding=ROUND_DOWN)
+                            amount_rub = max(Decimal(1), base_cost - discount)
+                            order_meta["is_referral_discount"] = True
+                            order_meta["discount_rub"] = int(discount)
+                            order_meta["original_price_rub"] = int(base_cost)
+                        else:
+                            amount_rub = base_cost
                     if duration_days is None:
                         duration_days = tariff.duration_days
                 if device_limit is None:
@@ -262,7 +279,23 @@ class OrderService:
                         duration_days = resulting_days
                 else:
                     if amount_rub is None:
-                        amount_rub = Decimal(tariff.price_rub)
+                        base_cost = Decimal(tariff.price_rub)
+                        from database.repositories.users_repo import (
+                            is_eligible_for_referral_first_discount,
+                        )
+
+                        if await is_eligible_for_referral_first_discount(
+                            session, user_id
+                        ):
+                            discount = (
+                                base_cost * REFERRAL_WELCOME_DISCOUNT_PERCENT
+                            ).quantize(Decimal(1), rounding=ROUND_DOWN)
+                            amount_rub = max(Decimal(1), base_cost - discount)
+                            order_meta["is_referral_discount"] = True
+                            order_meta["discount_rub"] = int(discount)
+                            order_meta["original_price_rub"] = int(base_cost)
+                        else:
+                            amount_rub = base_cost
                     if duration_days is None:
                         duration_days = tariff.duration_days
                 if device_limit is None:
@@ -399,6 +432,9 @@ class OrderService:
                 order_id=order.id,
                 metadata=credit_meta,
             )
+
+        # Grant referral bonus for topups and external payments (cards/gateways)
+        if order.service_type == "topup" or order.payment_method != "wallet":
             from services.referral_bonus import grant_referral_bonus_for_topup
 
             await grant_referral_bonus_for_topup(

@@ -120,7 +120,7 @@ PAYMENT_SHOWCASE_ORDER_CARD = """💳 <b>Оформление заказа</b>
 📦 Тариф: <b>{tariff_label}</b>
 ⏱ Срок: {days} дней
 🔌 Устройства: до {device_limit}
-💰 Цена: <b>{price} ₽</b>
+💰 Цена: <b>{price} ₽</b>{discount_badge}
 
 Баланс: <b>{balance_before} ₽</b>
 После покупки: <b>{balance_after} ₽</b>{shortage_line}

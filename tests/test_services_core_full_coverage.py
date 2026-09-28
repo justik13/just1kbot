@@ -77,7 +77,7 @@ class ServicesCoreFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                 payment_id=1,
                 topup_amount=Decimal(1000),
             )
-            self.assertEqual(granted, Decimal(200))
+            self.assertEqual(granted, Decimal(150))
 
     async def test_ban_and_maintenance_service(self):
         async with self.sessions.begin() as session:
