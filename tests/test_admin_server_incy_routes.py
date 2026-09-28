@@ -157,6 +157,37 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                         extra_data={"profile_description": ""},
                     )
 
+    async def test_process_server_incy_param_input_desc_100_chars(self):
+        await self.state.set_state(AdminStates.editing_server_incy_param)
+        await self.state.update_data(server_id=1, incy_param="desc")
+
+        long_desc = "Лимит устройств: {devices} (активно: {active}) — стабильное подключение"
+        self.assertGreater(len(long_desc), 50)
+        self.assertLessEqual(len(long_desc), 100)
+
+        msg = MagicMock(spec=Message)
+        msg.from_user = self.admin_user
+        msg.text = long_desc
+        msg.answer = AsyncMock()
+
+        server = Server(
+            id=1,
+            name="Origin-RU",
+            protocol=XRAY_PROTOCOL,
+            is_active=True,
+            extra_data={},
+        )
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
+                    await process_server_incy_param_input(msg, self.state, self.mock_session)
+                    mock_update.assert_awaited_once_with(
+                        self.mock_session,
+                        server,
+                        extra_data={"profile_description": long_desc},
+                    )
+
     async def test_show_server_incy_relays(self):
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = self.admin_user
