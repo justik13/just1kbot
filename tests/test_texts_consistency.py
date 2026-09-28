@@ -701,88 +701,94 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertFalse(hasattr(texts, "GIB_SUFFIX"))
 
     def test_dead_legacy_texts_removed(self):
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_DELETE_OTOZVAT_KEY_I_OSVOBO"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_OTKROYTE_PRILOZHENIE_NAZHMITE"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_RENAME_IZMENIT_NAZVANIE"))
-        self.assertFalse(hasattr(texts, "DEVICE_SHOW_KEY"))
-        self.assertFalse(hasattr(texts, "DEVICE_KEY_TOO_LONG_CAPTION"))
-        self.assertFalse(hasattr(texts, "BUTTON_REFERRAL_LIST"))
-        self.assertFalse(hasattr(texts, "BTN_ADMIN_USER_ADD_BALANCE"))
-        self.assertFalse(hasattr(texts, "BTN_ADMIN_USER_DEDUCT_BALANCE"))
-        self.assertFalse(hasattr(texts, "BTN_BACK_TO_SUPPORT"))
-        self.assertFalse(hasattr(texts, "FALLBACK_SECTION_IN_DEVELOPMENT"))
-        self.assertFalse(hasattr(texts, "NOUN_DAYS"))
-        self.assertFalse(hasattr(texts, "ADMIN_BAN_CONFIRM"))
-        self.assertFalse(hasattr(texts, "ADMIN_BTN_SUBSCRIPTION"))
-        self.assertFalse(hasattr(texts, "ADMIN_USERS_DEVICE_ROW_HEADER"))
-        self.assertFalse(hasattr(texts, "ADMIN_USER_PAREN_ID_FORMAT"))
-        self.assertFalse(hasattr(texts, "ADMIN_BROADCAST"))
-        self.assertFalse(hasattr(texts, "BROADCAST_ACTIVE_LABEL"))
-        self.assertFalse(hasattr(texts, "ADMIN_BROADCAST_TITLE_BROADCAST"))
-        self.assertFalse(hasattr(texts, "ADMIN_SERVER_SLOTS_DB_NOTE"))
-        self.assertFalse(hasattr(texts, "TOPUP_SAVED_NOTICE"))
-        self.assertFalse(hasattr(texts, "ADMIN_DISPUTES_HEADER"))
-        self.assertFalse(hasattr(texts, "DISPUTE_CARD_TEMPLATE"))
-        self.assertFalse(hasattr(texts, "ADMIN_QUEUES_HEADER"))
-        self.assertFalse(hasattr(texts, "QUEUE_CARD_ATTEMPTS"))
-        self.assertFalse(hasattr(texts, "PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS"))
-        self.assertFalse(hasattr(texts, "PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_QUOTE_NOT_FOUND_NOTICE"))
-        self.assertFalse(hasattr(texts, "TOPUP_WELCOME_BONUS_LINE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_LINK_READY"))
-        self.assertFalse(hasattr(texts, "ADMIN_REFUND_ALERT_HEADER"))
-        self.assertFalse(hasattr(texts, "ADMIN_REFUND_ALERT_USER_CARD"))
-        self.assertFalse(hasattr(texts, "ADMIN_SERVER_RELAYS_ORIGIN_RTT"))
-        self.assertFalse(hasattr(texts, "BTN_INSTRUKTSIYA_I_POMOSCH"))
-        self.assertFalse(hasattr(texts, "STATUS_NOT_SPECIFIED"))
-        self.assertFalse(hasattr(texts, "DEVICE_CONFIG_UNAVAILABLE"))
-        self.assertFalse(hasattr(texts, "BALANCE_TOPUP_CREATING_LINK_CARD"))
-        self.assertFalse(hasattr(texts, "CHECKOUT_DESCRIPTION_RENEW"))
-        self.assertFalse(hasattr(texts, "CHECKOUT_DESCRIPTION_TARIFF_CHANGE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_ACTIVE_CHECKOUT_EXISTS"))
-        self.assertFalse(hasattr(texts, "PAYMENT_CHANGE_TARIFF_IN_PROGRESS_NOTICE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_CURRENT_TARIFF_UNKNOWN"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_CONFIRMATION_CARD"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_EXPIRED_RETRY"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_OPERATION_RENEW_TITLE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_PRICE_CHANGED_NOTICE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_PRICE_EXPIRED_RETRY"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_PRICE_STALE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_RENEW_COMPLETED"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_STATE_CHANGED_RETRY"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SHOWCASE_CALC_FAILED"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SHOWCASE_PREPARE_CHANGE_FAILED"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SHOWCASE_PREPARE_FAILED"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SHOWCASE_USE_CHANGE_SECTION"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SUBSCRIPTION_INACTIVE"))
-        self.assertFalse(hasattr(texts, "WORD_PURCHASE"))
-        self.assertFalse(hasattr(texts, "ALERT_QUEUE_UNHEALTHY"))
-        self.assertFalse(hasattr(texts, "ALERT_QUEUE_RECOVERED"))
-        self.assertFalse(hasattr(texts, "QUEUE_HEALTH_DEAD_PROBLEM"))
-        self.assertFalse(hasattr(texts, "QUEUE_HEALTH_OVERDUE_PROBLEM"))
-        self.assertFalse(hasattr(texts, "QUEUE_HEALTH_STALE_PROBLEM"))
-        self.assertFalse(hasattr(texts, "ALERT_STALE_BTN_DISMISS"))
-        self.assertFalse(hasattr(texts, "ALERT_STALE_PAYMENTS_HEADER"))
-        self.assertFalse(hasattr(texts, "ALERT_INGRESS_ERR_NETWORK"))
-        self.assertFalse(hasattr(texts, "REFERRAL_TOPUP_NOTIFY_TEMPLATE"))
-        self.assertFalse(hasattr(texts, "WL_PROFILE_DESCRIPTION"))
-        self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_BUY_SUCCESS"))
-        self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_RENEW_SUCCESS"))
-        self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_ADD_DEVICE_SUCCESS"))
-        self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_PACK_SUCCESS_TEMPLATE"))
-        self.assertFalse(hasattr(texts, "BALANCE_PURCHASE_SUCCESS_NOTIFICATION"))
-        self.assertFalse(hasattr(texts, "TITLE_SUBSCRIPTION_EXTENDED"))
-        self.assertFalse(hasattr(texts, "TITLE_TARIFF_CHANGED"))
-        self.assertFalse(hasattr(texts, "ADMIN_DASHBOARD_FINANCE_BADGE"))
-        self.assertFalse(hasattr(texts, "DASHBOARD_ATTENTION_ATTENTION"))
-        self.assertFalse(hasattr(texts, "DASHBOARD_STALE_TASKS_V_OCHEREDYAK"))
-        self.assertFalse(hasattr(texts, "DASHBOARD_OPEN_PLATEZHNYKH_DISPUTES"))
-        self.assertFalse(hasattr(texts, "ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES"))
+        removed_names = (
+            "CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS",
+            "CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT",
+            "CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI",
+            "CONNECTION_CONFIG_DEVICE_VIEW_DELETE_OTOZVAT_KEY_I_OSVOBO",
+            "CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO",
+            "CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET",
+            "CONNECTION_CONFIG_DEVICE_VIEW_OTKROYTE_PRILOZHENIE_NAZHMITE",
+            "CONNECTION_CONFIG_DEVICE_VIEW_RENAME_IZMENIT_NAZVANIE",
+            "DEVICE_SHOW_KEY",
+            "DEVICE_KEY_TOO_LONG_CAPTION",
+            "BUTTON_REFERRAL_LIST",
+            "BTN_ADMIN_USER_ADD_BALANCE",
+            "BTN_ADMIN_USER_DEDUCT_BALANCE",
+            "BTN_BACK_TO_SUPPORT",
+            "FALLBACK_SECTION_IN_DEVELOPMENT",
+            "NOUN_DAYS",
+            "ADMIN_BAN_CONFIRM",
+            "ADMIN_BTN_SUBSCRIPTION",
+            "ADMIN_USERS_DEVICE_ROW_HEADER",
+            "ADMIN_USER_PAREN_ID_FORMAT",
+            "ADMIN_BROADCAST",
+            "BROADCAST_ACTIVE_LABEL",
+            "ADMIN_BROADCAST_TITLE_BROADCAST",
+            "ADMIN_SERVER_SLOTS_DB_NOTE",
+            "TOPUP_SAVED_NOTICE",
+            "ADMIN_DISPUTES_HEADER",
+            "DISPUTE_CARD_TEMPLATE",
+            "ADMIN_QUEUES_HEADER",
+            "QUEUE_CARD_ATTEMPTS",
+            "PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS",
+            "PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE",
+            "PAYMENT_QUOTE_NOT_FOUND_NOTICE",
+            "TOPUP_WELCOME_BONUS_LINE",
+            "PAYMENT_LINK_READY",
+            "ADMIN_REFUND_ALERT_HEADER",
+            "ADMIN_REFUND_ALERT_USER_CARD",
+            "ADMIN_SERVER_RELAYS_ORIGIN_RTT",
+            "BTN_INSTRUKTSIYA_I_POMOSCH",
+            "STATUS_NOT_SPECIFIED",
+            "DEVICE_CONFIG_UNAVAILABLE",
+            "BALANCE_TOPUP_CREATING_LINK_CARD",
+            "CHECKOUT_DESCRIPTION_RENEW",
+            "CHECKOUT_DESCRIPTION_TARIFF_CHANGE",
+            "PAYMENT_ACTIVE_CHECKOUT_EXISTS",
+            "PAYMENT_CHANGE_TARIFF_IN_PROGRESS_NOTICE",
+            "PAYMENT_CURRENT_TARIFF_UNKNOWN",
+            "PAYMENT_PURCHASE_CONFIRMATION_CARD",
+            "PAYMENT_PURCHASE_EXPIRED_RETRY",
+            "PAYMENT_PURCHASE_OPERATION_RENEW_TITLE",
+            "PAYMENT_PURCHASE_PRICE_CHANGED_NOTICE",
+            "PAYMENT_PURCHASE_PRICE_EXPIRED_RETRY",
+            "PAYMENT_PURCHASE_PRICE_STALE",
+            "PAYMENT_PURCHASE_RENEW_COMPLETED",
+            "PAYMENT_PURCHASE_STATE_CHANGED_RETRY",
+            "PAYMENT_SHOWCASE_CALC_FAILED",
+            "PAYMENT_SHOWCASE_PREPARE_CHANGE_FAILED",
+            "PAYMENT_SHOWCASE_PREPARE_FAILED",
+            "PAYMENT_SHOWCASE_USE_CHANGE_SECTION",
+            "PAYMENT_SUBSCRIPTION_INACTIVE",
+            "WORD_PURCHASE",
+            "ALERT_QUEUE_UNHEALTHY",
+            "ALERT_QUEUE_RECOVERED",
+            "QUEUE_HEALTH_DEAD_PROBLEM",
+            "QUEUE_HEALTH_OVERDUE_PROBLEM",
+            "QUEUE_HEALTH_STALE_PROBLEM",
+            "ALERT_STALE_BTN_DISMISS",
+            "ALERT_STALE_PAYMENTS_HEADER",
+            "ALERT_INGRESS_ERR_NETWORK",
+            "REFERRAL_TOPUP_NOTIFY_TEMPLATE",
+            "WL_PROFILE_DESCRIPTION",
+            "WL_TOPUP_AUTO_BUY_SUCCESS",
+            "WL_TOPUP_AUTO_RENEW_SUCCESS",
+            "WL_TOPUP_AUTO_ADD_DEVICE_SUCCESS",
+            "WL_TOPUP_AUTO_PACK_SUCCESS_TEMPLATE",
+            "BALANCE_PURCHASE_SUCCESS_NOTIFICATION",
+            "TITLE_SUBSCRIPTION_EXTENDED",
+            "TITLE_TARIFF_CHANGED",
+            "ADMIN_DASHBOARD_FINANCE_BADGE",
+            "DASHBOARD_ATTENTION_ATTENTION",
+            "DASHBOARD_STALE_TASKS_V_OCHEREDYAK",
+            "DASHBOARD_OPEN_PLATEZHNYKH_DISPUTES",
+            "ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES",
+        )
+        for name in removed_names:
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(texts, name))
+
 
 
 if __name__ == "__main__":
