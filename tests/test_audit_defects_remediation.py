@@ -49,18 +49,10 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         self.assertIn("confirm_mass_bonus_apply", LOCKED_ACTION_PREFIXES)
         self.assertIn("confirm_mass_bonus_apply", STALE_ACTION_PREFIXES)
 
-        for dead_prefix in (
-            "admin_payment_refund_confirm:",
-            "admin_dispute_apply:",
-            "balance_resume_purchase:",
-            "balance_purchase_confirm:",
-            "balance_change_confirm:",
-            "bal_short_exact:",
-            "bal_chg_short_exact:",
-            "aq:x:",
-        ):
-            self.assertNotIn(dead_prefix, LOCKED_ACTION_PREFIXES)
-            self.assertNotIn(dead_prefix, STALE_ACTION_PREFIXES)
+        # Historical topup callbacks remain stale-protected because old
+        # Order.metadata.context rows can still produce them.
+        self.assertNotIn("balance_resume_purchase:", LOCKED_ACTION_PREFIXES)
+        self.assertIn("balance_resume_purchase:", STALE_ACTION_PREFIXES)
 
         for prefix in (
             "admin_wi_traffic_add:",
@@ -87,6 +79,13 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
             "admin_wi_devlimit_set_apply:",
             "admin_wi_reset_trial_apply:",
             "admin_wi_grant_trial_apply:",
+            "balance_purchase_confirm:",
+            "balance_change_confirm:",
+            "bal_short_exact:",
+            "bal_chg_short_exact:",
+            "aq:x:",
+            "admin_payment_refund_confirm:",
+            "admin_dispute_apply:",
         ):
             self.assertNotIn(wrong_prefix, LOCKED_ACTION_PREFIXES)
             self.assertNotIn(wrong_prefix, STALE_ACTION_PREFIXES)
