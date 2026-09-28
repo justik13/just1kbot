@@ -262,6 +262,7 @@ class AmneziaClientListItem(BaseModel):
 
 class AmneziaServerInfo(BaseModel):
     name: str = ""
+    protocol: str = ""
     protocols: list[str] = Field(default_factory=list)
     maxPeers: int = 0
     serverMaxPeers: int = 0
@@ -273,6 +274,13 @@ class AmneziaServerInfo(BaseModel):
             or self.serverMaxPeers
             or self.SERVER_MAX_PEERS
         )
+
+    def get_protocol(self) -> str:
+        if self.protocol:
+            return self.protocol
+        if self.protocols:
+            return self.protocols[-1]
+        return AMNEZIA_PROTOCOL
 
 
 async def get_http_session() -> aiohttp.ClientSession:
@@ -307,9 +315,11 @@ class AmneziaClient:
         api_url: str,
         api_key: str,
         ssl_verify: bool | None = None,
+        protocol: str | None = None,
     ):
         self.api_url = (api_url or "").rstrip("/")
         self.api_key = api_key or ""
+        self.protocol = protocol
         self._log_target = _safe_api_target(self.api_url)
         self._headers = {
             "x-api-key": self.api_key,
@@ -829,13 +839,14 @@ class AmneziaClient:
         self,
         client_name: str,
         expires_at: int | None = None,
+        protocol: str | None = None,
     ) -> AmneziaAPIResult[AmneziaClientCreateResponse]:
         # Проверка емкости сервера удалена - она должна выполняться на уровне бизнес-логики (DeviceService)
         # чтобы избежать лишних HTTP-запросов и TOCTOU race conditions
         
         data = {
             "clientName": client_name,
-            "protocol": AMNEZIA_PROTOCOL,
+            "protocol": protocol or self.protocol or AMNEZIA_PROTOCOL,
             "expiresAt": expires_at,
         }
         result = await self._request_result(
@@ -876,17 +887,19 @@ class AmneziaClient:
         self,
         client_name: str,
         expires_at: int | None = None,
+        protocol: str | None = None,
     ) -> AmneziaClientCreateResponse | None:
-        result = await self.create_user_result(client_name, expires_at)
+        result = await self.create_user_result(client_name, expires_at, protocol=protocol)
         return result.value if result.ok else None
 
     async def delete_user_result(
         self,
         client_id: str,
+        protocol: str | None = None,
     ) -> AmneziaAPIResult[None]:
         data = {
             "clientId": client_id,
-            "protocol": AMNEZIA_PROTOCOL,
+            "protocol": protocol or self.protocol or AMNEZIA_PROTOCOL,
         }
         result = await self._request_result(
             "DELETE",
@@ -899,8 +912,8 @@ class AmneziaClient:
             return self._success(status_code=result.status_code)
         return result
 
-    async def delete_user(self, client_id: str) -> bool:
-        return (await self.delete_user_result(client_id)).ok
+    async def delete_user(self, client_id: str, protocol: str | None = None) -> bool:
+        return (await self.delete_user_result(client_id, protocol=protocol)).ok
 
     async def update_client_result(
         self,
@@ -908,10 +921,11 @@ class AmneziaClient:
         status: str | None = None,
         expires_at: int | None = None,
         clear_expires_at: bool = False,
+        protocol: str | None = None,
     ) -> AmneziaAPIResult[None]:
         data = {
             "clientId": client_id,
-            "protocol": AMNEZIA_PROTOCOL,
+            "protocol": protocol or self.protocol or AMNEZIA_PROTOCOL,
         }
         if expires_at is not None and status is None:
             status = "active"
@@ -938,12 +952,14 @@ class AmneziaClient:
         status: str | None = None,
         expires_at: int | None = None,
         clear_expires_at: bool = False,
+        protocol: str | None = None,
     ) -> bool:
         result = await self.update_client_result(
             client_id,
             status,
             expires_at,
             clear_expires_at,
+            protocol=protocol,
         )
         return result.ok
 

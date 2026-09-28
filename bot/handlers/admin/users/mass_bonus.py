@@ -214,13 +214,13 @@ async def process_mass_bonus_amount(
 
 def _build_server_audience_condition(server_id: int):
     """Build unified SQL filter for users with active profiles or subscriptions on server_id."""
-    from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+    from config.constants import AMNEZIA_PROTOCOLS, XRAY_PROTOCOL
     from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
     from database.models import Server, VPNProfile, WhiteInternetSubscription
 
     server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
     awg_cond = (
-        (server_proto_subq == AMNEZIA_PROTOCOL)
+        (server_proto_subq.in_(AMNEZIA_PROTOCOLS))
         & User.profiles.any(
             (VPNProfile.server_id == server_id)
             & (VPNProfile.is_active.is_(True))

@@ -771,7 +771,7 @@ class TestWhiteInternetQuotaAndDeviceAuditFixes(unittest.IsolatedAsyncioTestCase
             id=1,
             api_url="http://node.test:8080",
             api_key="secret",
-            protocol="awg",
+            protocol="amneziawg2",
         )
         session = MagicMock()
         session.info = {}

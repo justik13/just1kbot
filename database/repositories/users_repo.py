@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from config.constants import (
-    AMNEZIA_PROTOCOL,
+    AMNEZIA_PROTOCOLS,
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
     XRAY_PROTOCOL,
@@ -445,7 +445,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(
             or_(
                 and_(
-                    server_proto_subq == AMNEZIA_PROTOCOL,
+                    server_proto_subq.in_(AMNEZIA_PROTOCOLS),
                     User.profiles.any(
                         (VPNProfile.server_id == target_server_id)
                         & (VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES))

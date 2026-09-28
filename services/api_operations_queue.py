@@ -226,17 +226,21 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
         server_id: int | None, profile_id: int | None,
         server_name_snapshot: str | None, api_url_snapshot: str | None,
         api_key_snapshot: str | None, peer_id: str, client_name: str | None = None,
+        protocol: str | None = None,
         audit_reason: str | None = None,
         next_attempt_at: datetime | None = None) -> APIOperation:
     """Ensure a stable delete command; audit reason is deliberately not identity."""
     operation = (await session.execute(select(APIOperation).where(
         APIOperation.idempotency_key == idempotency_key).with_for_update())).scalar_one_or_none()
     if operation is None:
+        payload = {"managed_workflow": True}
+        if protocol:
+            payload["protocol"] = protocol
         return await enqueue_api_operation(session, operation_type="delete_peer",
             idempotency_key=idempotency_key, server_id=server_id, profile_id=profile_id,
             server_name_snapshot=server_name_snapshot, api_url_snapshot=api_url_snapshot,
             api_key_snapshot=api_key_snapshot, peer_id=peer_id, client_name=client_name,
-            payload={"managed_workflow": True},
+            payload=payload,
             next_attempt_at=next_attempt_at)
     if operation.status in {"dead", "cancelled"}:
         operation.status = "retry"
@@ -252,6 +256,11 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
         operation.completed_at = None
         operation.next_attempt_at = next_attempt_at or func.now()
         operation.last_error_code = "delete_profile_discrepancy"
+
+    if protocol and isinstance(operation.payload, dict) and "protocol" not in operation.payload:
+        new_payload = dict(operation.payload)
+        new_payload["protocol"] = protocol
+        operation.payload = new_payload
     return operation
 
 

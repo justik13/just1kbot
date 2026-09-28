@@ -39,13 +39,10 @@ def _is_usable_created_config(config: str | None) -> bool:
     conf = config.strip()
     if not conf or conf.lower() == "invalid":
         return False
-    from utils.vpn_parser import is_valid_vpn_uri
+    from utils.vpn_parser import _looks_like_awg_conf, is_valid_vpn_uri
     if is_valid_vpn_uri(conf):
         return True
-    if "[Interface]" in conf and "[Peer]" in conf:
-        if "PrivateKey" in conf and "PublicKey" in conf and "Address" in conf and "Endpoint" in conf:
-            return True
-    return False
+    return _looks_like_awg_conf(conf)
 
 
 class _ServerEndpointChanged(RuntimeError):
@@ -103,13 +100,14 @@ async def _client(op):
 
     # The durable operation always executes against its immutable snapshot.
     # The current Server row is used only to detect identity changes when snapshot exists.
+    server_protocol = None
     if op.server_id:
-        from config.constants import AMNEZIA_PROTOCOL
+        from config.constants import AMNEZIA_PROTOCOLS
 
         async with session_scope() as session:
             server = await session.get(Server, op.server_id)
             if server is not None:
-                if server.protocol not in (AMNEZIA_PROTOCOL, "amneziawg3", "amneziawg"):
+                if server.protocol not in AMNEZIA_PROTOCOLS:
                     logger.error(
                         "Refusing to execute Amnezia ApiOperation on non-Amnezia server %s (%s, protocol=%s)",
                         server.id,
@@ -119,9 +117,17 @@ async def _client(op):
                     return None
                 if server.api_url != url or server.api_key != key:
                     raise _ServerEndpointChanged
+                server_protocol = server.protocol
+
+    if server_protocol is None and isinstance(getattr(op, "payload", None), dict):
+        proto_candidate = op.payload.get("protocol")
+        from config.constants import AMNEZIA_PROTOCOLS
+
+        if proto_candidate in AMNEZIA_PROTOCOLS:
+            server_protocol = proto_candidate
 
     # A deleted Server row does not erase the encrypted operation snapshot.
-    return AmneziaClient(url, key)
+    return AmneziaClient(url, key, protocol=server_protocol)
 
 
 async def _execute_create(op, client):

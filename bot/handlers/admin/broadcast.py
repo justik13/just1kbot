@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.constants import AdminAuditAction, TELEGRAM_MESSAGE_LIMIT
-from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOLS, XRAY_PROTOCOL
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from bot.keyboards import get_back_button
@@ -389,7 +389,7 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
         # Target users with active subscription and active profile on this AWG node.
         # Strict Fail-Closed: excludes profiles in hidden/deleting states and inactive profiles.
         awg_user_condition = and_(
-            server_proto_subq == AMNEZIA_PROTOCOL,
+            server_proto_subq.in_(AMNEZIA_PROTOCOLS),
             User.subscription_end > current_time,
             User.profiles.any(
                 (VPNProfile.server_id == target_server_id)

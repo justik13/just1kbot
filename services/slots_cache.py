@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from cachetools import TTLCache
 
-from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS, XRAY_PROTOCOL
 from database.models import Server
 from services.amnezia_client import AmneziaClient
 
@@ -37,7 +37,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
                 frozenset(),
                 datetime.now(timezone.utc),
             )
-        elif server_proto == AMNEZIA_PROTOCOL:
+        elif server_proto in AMNEZIA_PROTOCOLS:
             from services.amnezia_client import is_server_circuit_available
 
             if not await is_server_circuit_available(server.api_url):
@@ -181,7 +181,7 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             )
             return count
 
-        elif server_proto == AMNEZIA_PROTOCOL:
+        elif server_proto in AMNEZIA_PROTOCOLS:
             client = AmneziaClient(server.api_url, server.api_key)
             try:
                 clients = await client.get_all_clients()

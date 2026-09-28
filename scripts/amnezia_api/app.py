@@ -41,6 +41,7 @@ AWG3_1_EXCLUSIVE_KEYS = (
 
 try:
     from utils.vpn_parser import (
+        AWG_MANDATORY_BASE_KEYS,
         AWG3_0_EXCLUSIVE_KEYS,
         AWG3_1_EXCLUSIVE_KEYS,
         AWG3_EXCLUSIVE_KEYS,
@@ -48,6 +49,9 @@ try:
     )
 except ImportError:
     # Standalone mode on isolated node VPS
+    AWG_MANDATORY_BASE_KEYS = (
+        "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4",
+    )
     AWG3_1_EXCLUSIVE_KEYS = (
         "RandomTrailers",
         "DisableCookies",
@@ -74,8 +78,15 @@ except ImportError:
                 v = params.get(k.upper())
             if v is None:
                 return False
-            # For toggle/integer keys (RandomTrailers, DisableCookies), "0" means disabled
-            if k in ("RandomTrailers", "DisableCookies") and str(v).strip() in ("0", "false", "False", ""):
+            # For toggle/integer keys (RandomTrailers, DisableCookies), "0", "false", "off", "no", "disabled" mean disabled
+            if k in ("RandomTrailers", "DisableCookies") and str(v).strip().lower() in (
+                "0",
+                "false",
+                "off",
+                "no",
+                "disabled",
+                "",
+            ):
                 return False
             return str(v).strip() != ""
 
@@ -119,45 +130,39 @@ logging.basicConfig(
 # Configuration
 # ---------------------------------------------------------------------------
 API_KEY = os.getenv("AMNEZIA_API_KEY") or os.getenv("FASTIFY_API_KEY", "")
-AWG_CONTAINER_NAME = os.getenv("AWG_CONTAINER_NAME", "amnezia-awg2")
+AWG_CONTAINER_NAME = "amnezia-awg2"
 AWG_DIR = os.getenv("AWG_DIR", "/opt/amnezia/awg")
 AWG_CONF_PATH = os.getenv("AWG_CONF_PATH", "")
 CLIENTS_TABLE_PATH = os.getenv("CLIENTS_TABLE_PATH", "")
 SERVER_PUBKEY_PATH = os.getenv("SERVER_PUBKEY_PATH", "")
 SERVER_PSK_PATH = os.getenv("SERVER_PSK_PATH", "")
 SERVER_HOST_NAME = os.getenv("SERVER_HOST_NAME") or os.getenv("SERVER_PUBLIC_HOST", "")
-SERVER_DNS1 = os.getenv("SERVER_DNS1", "1.1.1.1")
-SERVER_DNS2 = os.getenv("SERVER_DNS2", "1.0.0.1")
+SERVER_DNS1 = os.getenv("SERVER_DNS1", "8.8.8.8")
+SERVER_DNS2 = os.getenv("SERVER_DNS2", "8.8.4.4")
 SERVER_ID = os.getenv("SERVER_ID", "")
 
 state_lock = asyncio.Lock()
 
 
 def get_target_container() -> str:
-    """Return effective container name, defaulting to amnezia-awg2."""
-    if AWG_CONTAINER_NAME:
-        return AWG_CONTAINER_NAME
+    """Return effective container name (strictly amnezia-awg2 for AmneziaWG)."""
     return "amnezia-awg2"
 
 
 def get_interface_name(container: str | None = None) -> str:
-    """Return kernel interface name (awg0 for Awg2/Awg3, wg0 for legacy)."""
-    c = container or get_target_container()
-    return "awg0" if ("awg2" in c or "awg3" in c) else "wg0"
+    """Return kernel interface name (strictly awg0 for all AmneziaWG containers)."""
+    return "awg0"
 
 
 def get_tool_binary(container: str | None = None) -> str:
-    """Return CLI tool name (awg for Awg2/Awg3, wg for legacy)."""
-    c = container or get_target_container()
-    return "awg" if ("awg2" in c or "awg3" in c) else "wg"
+    """Return CLI tool name (strictly awg for all AmneziaWG containers)."""
+    return "awg"
 
 
 def get_config_path(container: str | None = None) -> str:
     if AWG_CONF_PATH:
         return AWG_CONF_PATH
-    c = container or get_target_container()
-    conf_name = "awg0.conf" if ("awg2" in c or "awg3" in c) else "wg0.conf"
-    return os.path.join(AWG_DIR, conf_name)
+    return os.path.join(AWG_DIR, "awg0.conf")
 
 
 def get_clients_table_path() -> str:
@@ -243,7 +248,7 @@ class ClientPatchRequest(BaseModel):
     protocol: str = "amneziawg2"
 
 
-SUPPORTED_PROTOCOLS = {"amneziawg2", "amneziawg3", "awg", "amneziawg"}
+SUPPORTED_PROTOCOLS = {"amneziawg2", "amneziawg3", "amneziawg3.1"}
 
 
 class ServerBackupImportRequest(BaseModel):
@@ -613,7 +618,7 @@ def encode_vpn_uri(data: dict[str, Any]) -> str:
     """Encode connection profile into Amnezia vpn:// URI."""
     json_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
     orig_len = len(json_bytes)
-    compressed = zlib.compress(json_bytes)
+    compressed = zlib.compress(json_bytes, level=8)
     payload = struct.pack(">I", orig_len) + compressed
     b64_url = (
         base64.urlsafe_b64encode(payload)
@@ -623,6 +628,25 @@ def encode_vpn_uri(data: dict[str, Any]) -> str:
         .replace("/", "_")
     )
     return f"vpn://{b64_url}"
+
+
+def is_valid_awg_key(key: str) -> bool:
+    """Validate 32-byte base64-encoded key (X25519, HeaderProtectionKey, or PSK)."""
+    if not key or not isinstance(key, str):
+        return False
+    key_str = key.strip()
+    if len(key_str) != 44 or not key_str.endswith("="):
+        return False
+    try:
+        raw = base64.b64decode(key_str, validate=True)
+        return len(raw) == 32
+    except Exception:
+        return False
+
+
+_is_valid_awg_key = is_valid_awg_key
+_is_valid_wg_key = is_valid_awg_key
+is_valid_wg_key = is_valid_awg_key
 
 
 def build_client_configs(
@@ -660,8 +684,72 @@ def build_client_configs(
         elif k.upper() in iface:
             detected_awg[k] = str(iface[k.upper()])
 
-    awg_ver = detect_awg_version(detected_awg if detected_awg else iface)
+    # Reject incomplete server configurations missing mandatory AWG 2.0+ parameters
+    missing_base_keys = [k for k in AWG_MANDATORY_BASE_KEYS if not detected_awg.get(k) or str(detected_awg.get(k)).strip() == ""]
+    if missing_base_keys:
+        logger.error("Server interface missing mandatory AWG 2.0+ parameters: %s", missing_base_keys)
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail=f"Server interface missing mandatory AWG 2.0+ parameters: {', '.join(missing_base_keys)}",
+        )
+
+    # Semantic range validation for AWG base parameters
+    # References: Any-Tech-ARCHITECT (awgValidate.ts) and upstream amneziawg-go / tools
+    try:
+        jc_val = int(detected_awg.get("Jc", 0))
+        if not (0 <= jc_val <= 128):
+            raise ValueError(f"Jc must be between 0 and 128 (got {jc_val})")
+        jmin_val = int(detected_awg.get("Jmin", 0))
+        jmax_val = int(detected_awg.get("Jmax", 0))
+        if not (0 <= jmin_val <= jmax_val <= 1280):
+            raise ValueError(f"Jmin/Jmax must satisfy 0 <= Jmin <= Jmax <= 1280 (got Jmin={jmin_val}, Jmax={jmax_val})")
+        for sk in ("S1", "S2", "S3", "S4"):
+            if sk in detected_awg and int(detected_awg.get(sk, 0)) < 0:
+                raise ValueError(f"{sk} must be non-negative")
+    except (ValueError, TypeError) as exc:
+        logger.error("Server interface AWG base parameters range error: %s", exc)
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail=f"Invalid AWG base parameters: {exc}",
+        ) from exc
+
+    awg_ver = detect_awg_version(detected_awg)
     has_awg3 = awg_ver.startswith("3")
+    hpk = detected_awg.get("HeaderProtectionKey")
+    if hpk:
+        if not _is_valid_wg_key(str(hpk)):
+            logger.error("Server interface has invalid HeaderProtectionKey")
+            raise HTTPException(
+                status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+                detail="Server interface HeaderProtectionKey must be a valid 32-byte base64 key",
+            )
+
+    if hpk:
+        # ── CRITICAL CRYPTOGRAPHIC INVARIANT: S-padding floor under Header Protection ──
+        # References:
+        #   - amneziawg-go v3.0.1 (device/send.go & device/uapi.go)
+        #   - amneziawg-linux-kernel-module (src/netlink.c)
+        #   - Any-Tech-ARCHITECT (src/engines/awg/generator/awg3.ts:58-75)
+        #
+        # In AWG 3.0+, device/send.go constructs `crypt := buf[:padding]` and uses
+        # `crypt[:HeaderCipherNonceSize]` (12 bytes) as the ChaCha20 nonce for encrypting
+        # packet headers with HeaderProtectionKey.
+        # If any S1, S2, S3, S4 is less than 12 bytes, the nonce overlaps body payload,
+        # and both amneziawg-go UAPI and kernel netlink explicitly reject the configuration
+        # with `-EINVAL` / "S%d must be more then %d to use headerProtection".
+        # Therefore, when HeaderProtectionKey is set, all S parameters MUST be >= 12.
+        for sk in ("S1", "S2", "S3", "S4"):
+            s_val = detected_awg.get(sk)
+            try:
+                if s_val is None or int(s_val) < 12:
+                    raise ValueError(f"{sk} must be >= 12 when HeaderProtectionKey is set (got {s_val})")
+            except (ValueError, TypeError) as exc:
+                logger.error("AWG 3.x semantic constraint violation: %s", exc)
+                raise HTTPException(
+                    status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+                    detail=f"AWG 3.x constraint violation: {exc}",
+                ) from exc
+
     protocol_version = awg_ver if has_awg3 else "2"
 
     effective_container = container_name or "amnezia-awg2"
@@ -836,7 +924,20 @@ async def syncconf_container(container: str, conf_path: str) -> bool:
     return rc == 0
 
 
+# Cache public IP for 5 minutes (300 seconds).
+# Rationale: Prevents expensive 3-4s external curl latency during peer creation bursts,
+# while allowing dynamic recovery if a VPS floating/public IP changes.
+_cached_public_ip: str | None = None
+_cached_public_ip_time: float = 0.0
+_PUBLIC_IP_CACHE_TTL_SEC: float = 300.0
+
+
 async def _fetch_public_ip_async() -> str:
+    global _cached_public_ip, _cached_public_ip_time
+    now = time.monotonic()
+    if _cached_public_ip and (now - _cached_public_ip_time < _PUBLIC_IP_CACHE_TTL_SEC):
+        return _cached_public_ip
+
     for url in ("https://ifconfig.me", "https://icanhazip.com", "https://api.ipify.org"):
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -847,6 +948,8 @@ async def _fetch_public_ip_async() -> str:
             stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
             ip = stdout_b.decode("utf-8", errors="ignore").strip()
             if ip and not ip.startswith("<") and len(ip.split(".")) == 4:
+                _cached_public_ip = ip
+                _cached_public_ip_time = now
                 return ip
         except Exception:
             continue
@@ -862,6 +965,8 @@ async def _fetch_public_ip_async() -> str:
         candidates = stdout_b.decode("utf-8", errors="ignore").strip().split()
         for cand in candidates:
             if cand and not cand.startswith("127.") and not cand.startswith("::") and len(cand.split(".")) == 4:
+                _cached_public_ip = cand
+                _cached_public_ip_time = now
                 return cand
     except Exception:
         pass
@@ -980,14 +1085,23 @@ async def get_server():
             all_peer_keys.add(pk)
     total_peers = len(all_peer_keys) if all_peer_keys else max(len(peers), len(clients_table))
 
-    has_awg3 = is_awg3_detected(iface)
-    protocols = ["amneziawg2", "amneziawg3"] if has_awg3 else ["amneziawg2"]
+    detected_ver = detect_awg_version(iface)
+    if detected_ver == "3.1":
+        primary_proto = "amneziawg3.1"
+        protocols = ["amneziawg2", "amneziawg3", "amneziawg3.1"]
+    elif detected_ver == "3.0":
+        primary_proto = "amneziawg3"
+        protocols = ["amneziawg2", "amneziawg3"]
+    else:
+        primary_proto = "amneziawg2"
+        protocols = ["amneziawg2"]
 
     return {
         "id": os.getenv("SERVER_ID", container),
         "name": os.getenv("SERVER_NAME", container),
         "region": os.getenv("SERVER_REGION", ""),
         "weight": int(os.getenv("SERVER_WEIGHT", "0")),
+        "protocol": primary_proto,
         "protocols": protocols,
         "maxPeers": max_peers,
         "serverMaxPeers": max_peers,
@@ -1060,6 +1174,8 @@ async def get_server_load():
 
 
 @app.get("/server/backup", dependencies=[Depends(verify_api_key)])
+@app.get("/export", dependencies=[Depends(verify_api_key)])
+@app.get("/server/export", dependencies=[Depends(verify_api_key)])
 async def get_server_backup():
     """Export complete server state (config, clientsTable, PSK)."""
     async with state_lock:
@@ -1070,11 +1186,13 @@ async def get_server_backup():
         psk = await get_server_psk_async(create_if_missing=False)
 
         parsed = parse_awg_conf(conf_content)
-        protocols = (
-            ["amneziawg2", "amneziawg3"]
-            if is_awg3_detected(parsed.get("interface", {}))
-            else ["amneziawg2"]
-        )
+        detected_ver = detect_awg_version(parsed.get("interface", {}))
+        if detected_ver == "3.1":
+            protocols = ["amneziawg2", "amneziawg3", "amneziawg3.1"]
+        elif detected_ver == "3.0":
+            protocols = ["amneziawg2", "amneziawg3"]
+        else:
+            protocols = ["amneziawg2"]
         server_pub = await get_server_public_key_async(container, parsed.get("interface", {}))
 
         upstream_block = {
@@ -1114,6 +1232,14 @@ async def import_server_backup(req: ServerBackupImportRequest):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid backup: missing valid WireGuard/AmneziaWG [Interface] configuration",
+            )
+
+        parsed_backup = parse_awg_conf(conf_content)
+        backup_iface = parsed_backup.get("interface", {})
+        if not backup_iface.get("PrivateKey") or not backup_iface.get("Address"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid backup: [Interface] must contain valid PrivateKey and Address",
             )
 
         # Snapshot existing state before mutations for rollback guarantee
@@ -1224,8 +1350,8 @@ async def get_clients(skip: int = 0, limit: int | None = None):
     parsed = parse_awg_conf(conf_content)
     iface = parsed.get("interface", {})
     peers = parsed.get("peers", [])
-    has_awg3 = is_awg3_detected(iface)
-    proto = "amneziawg3" if has_awg3 else "amneziawg2"
+    detected_ver = detect_awg_version(iface)
+    proto = "amneziawg3.1" if detected_ver == "3.1" else ("amneziawg3" if detected_ver == "3.0" else "amneziawg2")
 
     clients_table = await load_clients_table_async()
     clients_map: dict[str, dict[str, Any]] = {}
@@ -1414,7 +1540,7 @@ async def create_client(req: ClientCreateRequest):
     if req.protocol and req.protocol.strip().lower() not in SUPPORTED_PROTOCOLS:
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3",
+            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3, amneziawg3.1",
         )
 
     async with state_lock:
@@ -1515,8 +1641,8 @@ async def create_client(req: ClientCreateRequest):
                 detail="Failed to register peer in kernel runtime",
             )
 
-        has_awg3 = is_awg3_detected(iface)
-        proto = "amneziawg3" if has_awg3 else "amneziawg2"
+        detected_ver = detect_awg_version(iface)
+        proto = "amneziawg3.1" if detected_ver == "3.1" else ("amneziawg3" if detected_ver == "3.0" else "amneziawg2")
 
         logger.info("Created client %s (%s, IP: %s, Proto: %s)", client_pub, req.clientName, client_ip, proto)
 
@@ -1629,7 +1755,7 @@ async def _do_patch_client(client_id: str, req: ClientPatchRequest):
     if req.protocol and req.protocol.strip().lower() not in SUPPORTED_PROTOCOLS:
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3",
+            detail=f"Unsupported protocol '{req.protocol}'. Supported: amneziawg2, amneziawg3, amneziawg3.1",
         )
 
     async with state_lock:
@@ -1817,8 +1943,8 @@ async def get_client_by_id(client_id: str):
                     target["psk"] = p.get("PresharedKey", "")
                 break
 
-    has_awg3 = is_awg3_detected(iface)
-    proto = "amneziawg3" if has_awg3 else "amneziawg2"
+    detected_ver = detect_awg_version(iface)
+    proto = "amneziawg3.1" if detected_ver == "3.1" else ("amneziawg3" if detected_ver == "3.0" else "amneziawg2")
 
     raw_conf: str | None = None
     vpn_uri: str | None = None

@@ -217,7 +217,7 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
     async def test_compatibility_wrappers(self):
         success = AmneziaAPIResult(
             True,
-            AmneziaClientCreateResponse(id="1", config="vpn", protocol="awg"),
+            AmneziaClientCreateResponse(id="1", config="vpn", protocol="amneziawg2"),
             None,
             200,
             False,

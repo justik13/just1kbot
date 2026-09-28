@@ -38,7 +38,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import AMNEZIA_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOLS
 from config.enums import (
     AccountLedgerEntryType,
     ServerHealthState,
@@ -360,7 +360,7 @@ async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
     """Inv 13: All VPN servers use AWG or Xray protocol (pure WireGuard 'wg' is strictly rejected)."""
     violations = await session.scalars(
         select(Server).where(
-            Server.protocol.notin_([AMNEZIA_PROTOCOL, "xray"]) | (Server.protocol == "wg")
+            Server.protocol.notin_(list(AMNEZIA_PROTOCOLS) + ["xray"]) | (Server.protocol == "wg")
         )
     )
     v_list = violations.all()
@@ -375,7 +375,7 @@ async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
         13,
         "VPN Server Protocol (AWG/Xray)",
         True,
-        "All servers strictly use AmneziaWG (awg) or Xray (xray)",
+        "All servers strictly use AmneziaWG (amneziawg2/3/3.1) or Xray (xray)",
     )
 
 

@@ -361,7 +361,6 @@ run_doctor() {
             failed=$((failed + 1))
         fi
         local conf_name="awg0.conf"
-        [[ "$c_doc" == "amnezia-awg" ]] && conf_name="wg0.conf"
         local conf_found=false
         if docker exec "$c_doc" test -f "/opt/amnezia/awg/$conf_name" 2>/dev/null; then
             conf_found=true
@@ -370,6 +369,9 @@ run_doctor() {
         fi
         if [[ "$conf_found" == "true" ]]; then
             echo -e "  ${GREEN}✔${NC} Конфигурационный файл ${conf_name} найден"
+            if docker exec "$c_doc" awg show awg0 >/dev/null 2>&1; then
+                echo -e "  ${GREEN}✔${NC} Интерфейс awg0 активен в ядре"
+            fi
         else
             echo -e "  ${RED}✗${NC} Конфигурационный файл ${conf_name} отсутствует"
             failed=$((failed + 1))

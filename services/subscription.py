@@ -524,6 +524,7 @@ class SubscriptionService:
                     "status": "active" if target_active else "disabled",
                     "expires_at": expires_at,
                     "clear_expires_at": target_active and expires_at is None,
+                    "protocol": server.protocol if server else None,
                 },
             )
         await session.flush()

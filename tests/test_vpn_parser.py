@@ -8,6 +8,11 @@ from utils.vpn_parser import (
     VPNConfigParseError,
     _decompress_amnezia_format,
     decode_vpn_uri_to_json,
+    detect_awg_version,
+    encode_json_to_vpn_uri,
+    is_valid_awg_key,
+    is_valid_vpn_uri,
+    is_valid_wg_key,
 )
 
 
@@ -74,7 +79,7 @@ class VPNParserTests(unittest.TestCase):
         config = {
             "containers": [
                 {
-                    "container": "amnesia-awg2",
+                    "container": "amnezia-awg2",
                     "awg": {
                         "protocol_version": "2",
                         "last_config": json.dumps(
@@ -334,10 +339,10 @@ class VPNParserTests(unittest.TestCase):
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(empty_data)))
 
-        # 6. Reject amnezia-awg3 container
+        # 6. Reject unsupported container (e.g. unknown-container)
         bad_container_data = {
             "containers": [{
-                "container": "amnezia-awg3",
+                "container": "unknown-container",
                 "awg": {
                     "protocol_version": "3.1",
                     "last_config": json.dumps(awg31_last_cfg),
@@ -345,6 +350,15 @@ class VPNParserTests(unittest.TestCase):
             }]
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(bad_container_data)))
+
+        # 6b. Reject fictitious amnezia-awg3 container (canonical container is strictly amnezia-awg2)
+        awg3_container_data = {
+            "containers": [{
+                "container": "amnezia-awg3",
+                "awg": dict(awg31_data["containers"][0]["awg"]),
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(awg3_container_data)))
 
         # 7. Reject missing S3/S4 for AWG 2.0
         missing_s3_cfg = dict(base_last_cfg)
@@ -363,12 +377,110 @@ class VPNParserTests(unittest.TestCase):
                 "container": "amnezia-awg2",
                 "awg": {
                     "protocol_version": "2",
+                    "port": "51820",
                     "Jc": "99",  # Mismatch!
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
                     "last_config": json.dumps(base_last_cfg),
                 },
             }]
         }
         self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(mismatched_data)))
+
+        # 9. Reject when awg dict is missing mandatory base keys (even if last_config has them)
+        missing_awg_keys_data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {
+                    "protocol_version": "2",
+                    "port": "51820",
+                    # Missing Jc..H4 in top-level awg dict
+                    "last_config": json.dumps(base_last_cfg),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(missing_awg_keys_data)))
+
+        # 10. Reject legacy AWG 1.0 protocol_version
+        legacy_awg1_data = {
+            "containers": [{
+                "container": "amnezia-awg",
+                "awg": {
+                    "protocol_version": "1.0",
+                    "port": "51820",
+                    "Jc": "4",
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
+                    "last_config": json.dumps(base_last_cfg),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(legacy_awg1_data)))
+
+        # 10b. Reject legacy amnezia-awg container even with protocol_version 2 (strictly amnezia-awg2 required)
+        legacy_awg2_data = {
+            "containers": [{
+                "container": "amnezia-awg",
+                "awg": {
+                    "protocol_version": "2",
+                    "port": "51820",
+                    "Jc": "4",
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
+                    "last_config": json.dumps(base_last_cfg),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(legacy_awg2_data)))
+
+        # 11. Reject AWG 3.x if HeaderProtectionKey is missing in awg dict
+        awg3_missing_hpk_awg = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {
+                    "protocol_version": "3.0",
+                    "port": "51820",
+                    "Jc": "4",
+                    "Jmin": "10",
+                    "Jmax": "50",
+                    "S1": "87",
+                    "S2": "61",
+                    "S3": "49",
+                    "S4": "1",
+                    "H1": "100-200",
+                    "H2": "300-400",
+                    "H3": "500-600",
+                    "H4": "700-800",
+                    # HeaderProtectionKey missing in awg dict
+                    "last_config": json.dumps(awg3_last_cfg),
+                },
+            }]
+        }
+        self.assertFalse(is_valid_vpn_uri(encode_json_to_vpn_uri(awg3_missing_hpk_awg)))
 
     def test_k1_reference_decoding_and_customization(self):
         """Verify real-world working AmneziaWG 2.0 reference key decodes and customizes correctly."""
@@ -418,12 +530,16 @@ class VPNParserTests(unittest.TestCase):
 
     def test_build_display_vpn_uri_awg2_and_awg3(self):
         from unittest.mock import MagicMock
-        from utils.vpn_helpers import build_display_vpn_uri, InvalidAmneziaConfigError
+        from utils.vpn_helpers import (
+            InvalidAmneziaConfigError,
+            InvalidAmneziaProfileError,
+            build_display_vpn_uri,
+        )
         from utils.vpn_parser import encode_json_to_vpn_uri
 
         profile = MagicMock()
         profile.server = MagicMock()
-        profile.server.protocol = "amneziawg"
+        profile.server.protocol = "amneziawg2"
         profile.server.name = "Frankfurt"
         profile.device_name = "Frankfurt #3"
 
@@ -441,6 +557,15 @@ class VPNParserTests(unittest.TestCase):
         profile.raw_config = awg2_key
         display_key = build_display_vpn_uri(profile)
         self.assertTrue(display_key.startswith("vpn://"))
+        decoded_default = decode_vpn_uri_to_json(display_key)
+        self.assertEqual(decoded_default.get("dns1"), "8.8.8.8")
+        self.assertEqual(decoded_default.get("dns2"), "8.8.4.4")
+
+        # Test custom DNS and MTU parameters
+        custom_key = build_display_vpn_uri(profile, dns1="1.1.1.1", dns2="1.0.0.1", mtu="1360")
+        decoded_custom = decode_vpn_uri_to_json(custom_key)
+        self.assertEqual(decoded_custom.get("dns1"), "1.1.1.1")
+        self.assertEqual(decoded_custom.get("dns2"), "1.0.0.1")
 
         # AWG3 profile (container is amnezia-awg2 with protocol_version 3.1)
         awg3_key = encode_json_to_vpn_uri({
@@ -457,10 +582,10 @@ class VPNParserTests(unittest.TestCase):
         display_key_3 = build_display_vpn_uri(profile)
         self.assertTrue(display_key_3.startswith("vpn://"))
 
-        # Unsupported container name (e.g. invalid "amnezia-awg3")
+        # Unsupported container name (e.g. invalid "unknown-container")
         bad_container_key = encode_json_to_vpn_uri({
             "containers": [{
-                "container": "amnezia-awg3",
+                "container": "unknown-container",
                 "awg": {"protocol_version": "3.1"},
             }],
         })
@@ -479,6 +604,75 @@ class VPNParserTests(unittest.TestCase):
         with self.assertRaises(InvalidAmneziaConfigError):
             build_display_vpn_uri(profile)
 
+        # Legacy protocols (awg, amneziawg) are strictly rejected
+        profile.server.protocol = "amneziawg"
+        profile.raw_config = awg2_key
+        with self.assertRaises(InvalidAmneziaProfileError):
+            build_display_vpn_uri(profile)
+
+        profile.server.protocol = "awg"
+        with self.assertRaises(InvalidAmneziaProfileError):
+            build_display_vpn_uri(profile)
+
+    def test_is_valid_awg_key(self):
+        valid = "v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q="
+        self.assertTrue(is_valid_awg_key(valid))
+        self.assertTrue(is_valid_wg_key(valid))
+        self.assertFalse(is_valid_awg_key("too_short=="))
+        self.assertFalse(is_valid_awg_key("not-base64???"))
+        self.assertFalse(is_valid_awg_key(""))
+        self.assertFalse(is_valid_awg_key(None))
+
+    def test_detect_awg_version_disabled_flags(self):
+        base_iface = {
+            "Jc": "4", "Jmin": "10", "Jmax": "50",
+            "S1": "15", "S2": "20", "S3": "25", "S4": "30",
+            "H1": "100", "H2": "200", "H3": "300", "H4": "400",
+        }
+        self.assertEqual(detect_awg_version(base_iface), "2.0")
+
+        # Disabled boolean values
+        for disabled_val in ("off", "no", "disabled", "0", "false", "False", ""):
+            cfg = dict(base_iface)
+            cfg["RandomTrailers"] = disabled_val
+            cfg["DisableCookies"] = disabled_val
+            self.assertEqual(detect_awg_version(cfg), "2.0")
+
+        # Enabled boolean values
+        for enabled_val in ("on", "yes", "true", "True", "1", "10"):
+            cfg = dict(base_iface)
+            cfg["RandomTrailers"] = enabled_val
+            self.assertEqual(detect_awg_version(cfg), "3.1")
+
+    def test_awg3_without_hpk_valid_in_vpn_uri(self):
+        # AWG 3.1 configuration with RandomTrailers but without HeaderProtectionKey
+        last_cfg = {
+            "client_priv_key": "a" * 43 + "=",
+            "server_pub_key": "b" * 43 + "=",
+            "client_ip": "10.8.1.2/32",
+            "hostName": "vpn.example.com",
+            "port": 51820,
+            "Jc": "4", "Jmin": "10", "Jmax": "50",
+            "S1": "15", "S2": "20", "S3": "25", "S4": "30",
+            "H1": "100-200", "H2": "300-400", "H3": "500-600", "H4": "700-800",
+            "RandomTrailers": "on",
+        }
+        data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {
+                    "protocol_version": "3.1",
+                    "port": "51820",
+                    "Jc": "4", "Jmin": "10", "Jmax": "50",
+                    "S1": "15", "S2": "20", "S3": "25", "S4": "30",
+                    "H1": "100-200", "H2": "300-400", "H3": "500-600", "H4": "700-800",
+                    "RandomTrailers": "on",
+                    "last_config": json.dumps(last_cfg),
+                },
+            }]
+        }
+        self.assertTrue(is_valid_vpn_uri(encode_json_to_vpn_uri(data)))
 
 if __name__ == "__main__":
     unittest.main()
+

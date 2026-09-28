@@ -1,7 +1,14 @@
 import json
 import re
 
-from config.constants import AMNEZIA_PROTOCOL, MAX_RAW_CONFIG_BYTES
+from config.constants import (
+    AMNEZIA_PROTOCOL,
+    AMNEZIA_PROTOCOLS,
+    DEFAULT_AWG_DNS1,
+    DEFAULT_AWG_DNS2,
+    DEFAULT_AWG_MTU,
+    MAX_RAW_CONFIG_BYTES,
+)
 from database.models import VPNProfile
 from utils.vpn_parser import (
     customize_vpn_uri,
@@ -24,7 +31,7 @@ def _get_awg_block(data: dict) -> dict | None:
     containers = data.get("containers", [])
     if isinstance(containers, list):
         for container in containers:
-            if isinstance(container, dict) and container.get("container") in ("amnezia-awg2", "amnezia-awg"):
+            if isinstance(container, dict) and container.get("container") == "amnezia-awg2":
                 awg = container.get("awg")
                 if isinstance(awg, dict):
                     return awg
@@ -54,7 +61,12 @@ def _get_effective_mtu(awg: dict) -> str | None:
     return None
 
 
-def build_display_vpn_uri(profile: VPNProfile) -> str:
+def build_display_vpn_uri(
+    profile: VPNProfile,
+    dns1: str = DEFAULT_AWG_DNS1,
+    dns2: str = DEFAULT_AWG_DNS2,
+    mtu: str = DEFAULT_AWG_MTU,
+) -> str:
     """Build and customize a display vpn:// URI for an AmneziaWG 2.0 profile.
 
     Authoritative single-pass builder ensuring protocol consistency and
@@ -63,7 +75,7 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
     """
     if not profile or not profile.server:
         raise InvalidAmneziaProfileError("Profile server must be eagerly loaded")
-    if profile.server.protocol not in (AMNEZIA_PROTOCOL, "amneziawg3", "amneziawg"):
+    if profile.server.protocol not in AMNEZIA_PROTOCOLS:
         raise InvalidAmneziaProfileError(
             f"Unsupported protocol for Amnezia display URI: {profile.server.protocol}"
         )
@@ -96,9 +108,9 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
     display_key = customize_vpn_uri(
         raw_config,
         description=client_description,
-        dns1="8.8.8.8",
-        dns2="8.8.4.4",
-        mtu="1280",
+        dns1=dns1,
+        dns2=dns2,
+        mtu=mtu,
     )
 
     if not display_key or not display_key.startswith("vpn://"):
@@ -118,9 +130,22 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
 
     if customized_data.get("description") != client_description:
         raise InvalidAmneziaConfigError("customized display_key description mismatch")
-    if customized_data.get("dns1") != "8.8.8.8" or customized_data.get("dns2") != "8.8.4.4":
+    if customized_data.get("dns1") != dns1 or customized_data.get("dns2") != dns2:
         raise InvalidAmneziaConfigError("customized display_key DNS mismatch")
-    if _get_effective_mtu(customized_awg) != "1280":
+    if _get_effective_mtu(customized_awg) != mtu:
         raise InvalidAmneziaConfigError("customized display_key MTU mismatch")
 
     return display_key
+
+
+__all__ = [
+    "AMNEZIA_PROTOCOL",
+    "AMNEZIA_PROTOCOLS",
+    "DEFAULT_AWG_DNS1",
+    "DEFAULT_AWG_DNS2",
+    "DEFAULT_AWG_MTU",
+    "MAX_RAW_CONFIG_BYTES",
+    "InvalidAmneziaConfigError",
+    "InvalidAmneziaProfileError",
+    "build_display_vpn_uri",
+]

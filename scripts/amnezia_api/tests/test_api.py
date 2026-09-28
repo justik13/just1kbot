@@ -56,14 +56,14 @@ Jmin = 10
 Jmax = 50
 S1 = 79
 S2 = 115
-S3 = 5
-S4 = 1
+S3 = 45
+S4 = 30
 H1 = 169154911-1234371153
 H2 = 2057051984-2121122945
 H3 = 2132872968-2133668229
 H4 = 2136455412-2141801388
 # I1 = 1234
-HeaderProtectionKey = hpk_secret_key_123=
+HeaderProtectionKey = v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q=
 ContentPaddingAddition = 10-100
 
 [Peer]
@@ -154,10 +154,10 @@ def test_parse_awg_conf():
     assert iface["Jmin"] == "10"
     assert iface["Jmax"] == "50"
     assert iface["S1"] == "79"
-    assert iface["S4"] == "1"
+    assert iface["S4"] == "30"
     assert iface["H1"] == "169154911-1234371153"
     assert iface["I1"] == "1234"
-    assert iface["HeaderProtectionKey"] == "hpk_secret_key_123="
+    assert iface["HeaderProtectionKey"] == "v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q="
     assert iface["ContentPaddingAddition"] == "10-100"
 
     assert len(peers) == 1
@@ -337,6 +337,7 @@ def test_build_client_configs_and_vpn_uri_awg3():
         "psk": "psk5=",
     }
     # AWG 3.0 (with HeaderProtectionKey)
+    hpk_valid = "v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q="
     interface_params_30 = {
         "ListenPort": "44321",
         "Jc": "4",
@@ -344,14 +345,14 @@ def test_build_client_configs_and_vpn_uri_awg3():
         "Jmax": "50",
         "S1": "79",
         "S2": "115",
-        "S3": "5",
-        "S4": "1",
+        "S3": "45",
+        "S4": "30",
         "H1": "100-200",
         "H2": "300-400",
         "H3": "500-600",
         "H4": "700-800",
         "I1": "9999",
-        "HeaderProtectionKey": "hpk_test=",
+        "HeaderProtectionKey": hpk_valid,
     }
     raw_conf, vpn_uri = amnezia_app.build_client_configs(
         client,
@@ -364,16 +365,16 @@ def test_build_client_configs_and_vpn_uri_awg3():
     )
 
     assert "[Interface]" in raw_conf
-    assert "HeaderProtectionKey = hpk_test=" in raw_conf
+    assert f"HeaderProtectionKey = {hpk_valid}" in raw_conf
     assert vpn_uri.startswith("vpn://")
     decoded = decode_vpn_uri(vpn_uri)
     # Container MUST remain amnezia-awg2 for native Amnezia client compatibility
     assert decoded["defaultContainer"] == "amnezia-awg2"
     awg = decoded["containers"][0]["awg"]
     assert awg["protocol_version"] == "3.0"
-    assert awg["HeaderProtectionKey"] == "hpk_test="
+    assert awg["HeaderProtectionKey"] == hpk_valid
     last_cfg = json.loads(awg["last_config"])
-    assert last_cfg["HeaderProtectionKey"] == "hpk_test="
+    assert last_cfg["HeaderProtectionKey"] == hpk_valid
     assert last_cfg["Jc"] == "4"
     assert last_cfg["port"] == 44321
 
@@ -393,8 +394,93 @@ def test_build_client_configs_and_vpn_uri_awg3():
     assert decoded_31["defaultContainer"] == "amnezia-awg2"
     assert decoded_31["containers"][0]["awg"]["protocol_version"] == "3.1"
     assert decoded_31["containers"][0]["awg"]["RandomTrailers"] == "1"
-    last_cfg_31 = json.loads(decoded_31["containers"][0]["awg"]["last_config"])
-    assert last_cfg_31["RandomTrailers"] == "1"
+
+    # Rejection of incomplete interface missing mandatory AWG 2.0+ parameters
+    incomplete_iface = {
+        "ListenPort": "44321",
+        "Jc": "4",
+        "Jmin": "10",
+        "Jmax": "50",
+        "S1": "79",
+        "S2": "115",
+        # Missing S3, S4, H1..H4
+    }
+    with pytest.raises(HTTPException) as exc_info:
+        amnezia_app.build_client_configs(
+            client,
+            incomplete_iface,
+            server_pubkey="srvpub=",
+            host_name="vpn.example.com",
+            dns1="1.1.1.1",
+            dns2="1.0.0.1",
+            container_name="amnezia-awg2",
+        )
+    assert exc_info.value.status_code == 422
+    assert "missing mandatory AWG 2.0+ parameters" in exc_info.value.detail
+
+    # AWG 3.x interface without HeaderProtectionKey is valid (HPK is optional in upstream)
+    incomplete_30_iface = dict(interface_params_30)
+    del incomplete_30_iface["HeaderProtectionKey"]
+    incomplete_30_iface["RandomTrailers"] = "1"  # triggers AWG 3.x detection
+    conf_no_hpk, vpn_no_hpk = amnezia_app.build_client_configs(
+        client,
+        incomplete_30_iface,
+        server_pubkey="srvpub=",
+        host_name="vpn.example.com",
+        dns1="1.1.1.1",
+        dns2="1.0.0.1",
+        container_name="amnezia-awg2",
+    )
+    assert "vpn://" in vpn_no_hpk
+    assert "HeaderProtectionKey" not in conf_no_hpk
+
+    # Rejection of invalid HeaderProtectionKey (not 32-byte base64)
+    invalid_hpk_iface = dict(interface_params_30)
+    invalid_hpk_iface["HeaderProtectionKey"] = "hpk_test="
+    with pytest.raises(HTTPException) as exc_invalid_hpk:
+        amnezia_app.build_client_configs(
+            client,
+            invalid_hpk_iface,
+            server_pubkey="srvpub=",
+            host_name="vpn.example.com",
+            dns1="1.1.1.1",
+            dns2="1.0.0.1",
+            container_name="amnezia-awg2",
+        )
+    assert exc_invalid_hpk.value.status_code == 422
+    assert "HeaderProtectionKey" in exc_invalid_hpk.value.detail
+
+    # Rejection of S3 < 12 under Header Protection
+    invalid_s3_iface = dict(interface_params_30)
+    invalid_s3_iface["S3"] = "5"
+    with pytest.raises(HTTPException) as exc_invalid_s3:
+        amnezia_app.build_client_configs(
+            client,
+            invalid_s3_iface,
+            server_pubkey="srvpub=",
+            host_name="vpn.example.com",
+            dns1="1.1.1.1",
+            dns2="1.0.0.1",
+            container_name="amnezia-awg2",
+        )
+    assert exc_invalid_s3.value.status_code == 422
+    assert "S3" in exc_invalid_s3.value.detail
+
+    # Rejection of Jc out of range
+    invalid_jc_iface = dict(interface_params_30)
+    invalid_jc_iface["Jc"] = "200"
+    with pytest.raises(HTTPException) as exc_invalid_jc:
+        amnezia_app.build_client_configs(
+            client,
+            invalid_jc_iface,
+            server_pubkey="srvpub=",
+            host_name="vpn.example.com",
+            dns1="1.1.1.1",
+            dns2="1.0.0.1",
+            container_name="amnezia-awg2",
+        )
+    assert exc_invalid_jc.value.status_code == 422
+    assert "Jc" in exc_invalid_jc.value.detail
 
 
 # =============================================================================
@@ -443,6 +529,18 @@ def test_server_endpoint(mock_awg_env):
     # Contract check: services.amnezia_client.AmneziaServerInfo must parse it
     info = AmneziaServerInfo(**data)
     assert info.get_effective_max_peers() == data["maxPeers"]
+
+
+def test_server_endpoint_awg3_1_detection(mock_awg_env):
+    conf_file = mock_awg_env["conf_file"]
+    # Insert AWG 3.1 exclusive key in [Interface] section
+    content = SAMPLE_AWG0_CONF.replace("[Interface]\n", "[Interface]\nRandomTrailers = 1\n")
+    conf_file.write_text(content, encoding="utf-8")
+    client = TestClient(amnezia_app.app)
+    resp = client.get("/server", headers={"x-api-key": "secret-test-api-key"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["protocols"] == ["amneziawg2", "amneziawg3", "amneziawg3.1"]
 
 
 def test_server_load_endpoint(mock_awg_env):
@@ -889,7 +987,7 @@ async def test_sync_kernel_peer_add_without_psk(monkeypatch):
         pubkey="testpubkey123=",
         ip="10.8.1.5",
         psk="",
-        container="amnezia-awg",
+        container="amnezia-awg2",
     )
     assert success is True
     assert len(captured_commands) == 1
@@ -1001,6 +1099,15 @@ def test_create_and_patch_client_unsupported_protocol_rejects_422(mock_awg_env):
     assert resp1.status_code == 422
     assert "unsupported protocol" in resp1.json()["detail"].lower()
 
+    # 1b. create_client with legacy 'awg' protocol alias is rejected with 422
+    resp_legacy = client.post(
+        "/clients",
+        json={"clientName": "legacy_awg", "protocol": "awg"},
+        headers=headers,
+    )
+    assert resp_legacy.status_code == 422
+    assert "unsupported protocol" in resp_legacy.json()["detail"].lower()
+
     # 2. patch_client with unsupported protocol
     peer_pub = "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
     resp2 = client.patch(
@@ -1010,6 +1117,14 @@ def test_create_and_patch_client_unsupported_protocol_rejects_422(mock_awg_env):
     )
     assert resp2.status_code == 422
     assert "unsupported protocol" in resp2.json()["detail"].lower()
+
+    # 3. amneziawg3.1 is explicitly supported and not rejected with 422
+    resp3 = client.post(
+        "/clients",
+        json={"clientName": "awg31_user", "protocol": "amneziawg3.1"},
+        headers=headers,
+    )
+    assert resp3.status_code == 200
 
 
 def test_delete_client_fails_closed_and_rolls_back_on_kernel_sync_failure(mock_awg_env, monkeypatch):
@@ -1123,6 +1238,110 @@ def test_patch_client_reallocate_ip_on_collision(mock_awg_env):
     new_ip = data["client"]["clientIp"]
     assert new_ip != "10.8.1.2"
     assert new_ip.startswith("10.8.1.")
+
+
+def test_amnezia_tool_resolution_and_key_validation():
+    """Verify awg0, awg binary and awg0.conf are resolved for all AmneziaWG containers."""
+    # 1. Key validation
+    valid_key = "v1c2X3y4Z5a6B7c8D9e0F1g2H3i4J5k6L7m8N9o0P1Q="
+    assert amnezia_app.is_valid_awg_key(valid_key) is True
+    assert amnezia_app.is_valid_wg_key(valid_key) is True
+    assert amnezia_app._is_valid_wg_key(valid_key) is True
+
+    assert amnezia_app.is_valid_awg_key("short_key==") is False
+    assert amnezia_app.is_valid_awg_key("not-valid-base64???") is False
+    assert amnezia_app.is_valid_awg_key("") is False
+    assert amnezia_app.is_valid_awg_key(None) is False
+
+    # 2. Tool and interface resolution
+    # Standard AmneziaVPN self-hosted container (AWG 2.0 and AWG 3.x strictly uses awg0/awg/awg0.conf)
+    assert amnezia_app.get_interface_name("amnezia-awg2") == "awg0"
+    assert amnezia_app.get_tool_binary("amnezia-awg2") == "awg"
+    assert amnezia_app.get_config_path("amnezia-awg2").endswith("awg0.conf")
+
+    assert amnezia_app.get_interface_name() == "awg0"
+    assert amnezia_app.get_tool_binary() == "awg"
+    assert amnezia_app.get_config_path().endswith("awg0.conf")
+
+
+def test_detect_awg_version_boolean_disabled_values():
+    """Verify that disabled boolean values ('off', 'no', 'disabled', '0', 'false') are not detected as AWG 3.1."""
+    # 1. Base AWG 2.0 interface
+    base_iface = {
+        "Jc": "4", "Jmin": "10", "Jmax": "50",
+        "S1": "15", "S2": "20", "S3": "25", "S4": "30",
+        "H1": "100", "H2": "200", "H3": "300", "H4": "400",
+    }
+    assert amnezia_app.detect_awg_version(base_iface) == "2.0"
+
+    # 2. RandomTrailers and DisableCookies explicitly disabled
+    for disabled_val in ("off", "no", "disabled", "0", "false", "False", ""):
+        disabled_iface = dict(base_iface)
+        disabled_iface["RandomTrailers"] = disabled_val
+        disabled_iface["DisableCookies"] = disabled_val
+        assert amnezia_app.detect_awg_version(disabled_iface) == "2.0", f"Failed for {disabled_val}"
+
+    # 3. Enabled values trigger AWG 3.1
+    for enabled_val in ("on", "yes", "true", "True", "1", "10"):
+        enabled_iface = dict(base_iface)
+        enabled_iface["RandomTrailers"] = enabled_val
+        assert amnezia_app.detect_awg_version(enabled_iface) == "3.1", f"Failed for {enabled_val}"
+
+
+def test_server_export_aliases(mock_awg_env):
+    """Verify /export and /server/export return identical backup state as /server/backup."""
+    client = TestClient(amnezia_app.app)
+    headers = {"x-api-key": "secret-test-api-key"}
+
+    r_canonical = client.get("/server/backup", headers=headers)
+    assert r_canonical.status_code == 200
+
+    r_export = client.get("/export", headers=headers)
+    assert r_export.status_code == 200
+
+    r_server_export = client.get("/server/export", headers=headers)
+    assert r_server_export.status_code == 200
+
+    d_canonical = r_canonical.json()
+    d_export = r_export.json()
+    d_server_export = r_server_export.json()
+
+    d_canonical.pop("generatedAt", None)
+    d_export.pop("generatedAt", None)
+    d_server_export.pop("generatedAt", None)
+
+    assert d_export == d_canonical
+    assert d_server_export == d_canonical
+
+
+def test_build_client_configs_awg3_without_hpk(mock_awg_env):
+    """Verify AWG 3.1 interface with RandomTrailers but without HeaderProtectionKey builds client configs."""
+    parsed = amnezia_app.parse_awg_conf(mock_awg_env["conf_file"].read_text())
+    iface = parsed["interface"]
+    iface["RandomTrailers"] = "on"
+    if "HeaderProtectionKey" in iface:
+        del iface["HeaderProtectionKey"]
+
+    client_data = {
+        "clientIp": "10.8.1.50/32",
+        "clientPrivKey": "a" * 43 + "=",
+        "clientPubKey": "b" * 43 + "=",
+        "clientName": "user_no_hpk",
+    }
+    raw_conf, vpn_uri = amnezia_app.build_client_configs(
+        client_data,
+        iface,
+        server_pubkey="srvpub=",
+        host_name="vpn.example.com",
+        dns1="8.8.8.8",
+        dns2="8.8.4.4",
+        container_name="amnezia-awg2",
+    )
+    assert raw_conf is not None
+    assert vpn_uri.startswith("vpn://")
+    decoded = decode_vpn_uri(vpn_uri)
+    assert decoded["containers"][0]["awg"]["protocol_version"] == "3.1"
+
 
 
 

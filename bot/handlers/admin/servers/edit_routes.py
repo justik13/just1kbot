@@ -10,7 +10,7 @@ from bot import texts
 from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from config.constants import AMNEZIA_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOLS
 from config.enums import WhiteInternetStatus
 from database.models import (
     APIOperation,
@@ -444,7 +444,7 @@ async def process_edit_server_url(
 
         return
 
-    if server.protocol == AMNEZIA_PROTOCOL:
+    if server.protocol in AMNEZIA_PROTOCOLS:
         client = AmneziaClient(new_url, server.api_key)
 
         if not await client.healthcheck():
@@ -471,7 +471,7 @@ async def process_edit_server_url(
             await state.clear()
             return
 
-        if AMNEZIA_PROTOCOL not in server_info.protocols and "amneziawg3" not in server_info.protocols:
+        if not any(p in AMNEZIA_PROTOCOLS for p in server_info.protocols):
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -609,7 +609,13 @@ async def process_edit_server_url(
 
     old_url = server.api_url
 
-    await update_server(session, server, api_url=new_url)
+    update_kwargs = {"api_url": new_url}
+    if server.protocol in AMNEZIA_PROTOCOLS and server_info:
+        detected_proto = server_info.get_protocol()
+        if detected_proto and detected_proto != server.protocol:
+            update_kwargs["protocol"] = detected_proto
+
+    await update_server(session, server, **update_kwargs)
 
     from services.slots_cache import invalidate_server_cache
     invalidate_server_cache(server_id)
@@ -745,7 +751,7 @@ async def process_edit_server_key(
         return
 
 
-    if server.protocol == AMNEZIA_PROTOCOL:
+    if server.protocol in AMNEZIA_PROTOCOLS:
         client = AmneziaClient(server.api_url, new_key)
 
         if not await client.healthcheck():
@@ -772,7 +778,7 @@ async def process_edit_server_key(
             await state.clear()
             return
 
-        if AMNEZIA_PROTOCOL not in server_info.protocols and "amneziawg3" not in server_info.protocols:
+        if not any(p in AMNEZIA_PROTOCOLS for p in server_info.protocols):
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -894,7 +900,13 @@ async def process_edit_server_key(
             await state.clear()
             return
 
-    await update_server(session, server, api_key=new_key)
+    update_kwargs = {"api_key": new_key}
+    if server.protocol in AMNEZIA_PROTOCOLS and server_info:
+        detected_proto = server_info.get_protocol()
+        if detected_proto and detected_proto != server.protocol:
+            update_kwargs["protocol"] = detected_proto
+
+    await update_server(session, server, **update_kwargs)
 
     from services.slots_cache import invalidate_server_cache
     invalidate_server_cache(server_id)

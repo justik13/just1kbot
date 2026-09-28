@@ -11,7 +11,7 @@ from cachetools import TTLCache
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
-    AMNEZIA_PROTOCOL,
+    AMNEZIA_PROTOCOLS,
     AdminAuditAction,
     GRACE_PERIOD_HOURS,
     PAYMENT_EXPIRATION_HOURS,
@@ -464,7 +464,10 @@ async def _cleanup_stuck_profiles():
                             api_url_snapshot=api_url,
                             api_key_snapshot=api_key,
                             client_name=profile.client_name,
-                            payload={"desired_version": profile.desired_version},
+                            payload={
+                                "desired_version": profile.desired_version,
+                                "protocol": server.protocol if server else None,
+                            },
                         )
                         logger.info(
                             "Recreated missing CREATE reconciliation op for profile %s",
@@ -501,7 +504,7 @@ async def _cleanup_dangling_peers():
         servers_result = await session.execute(
             select(Server).where(
                 Server.is_active.is_(True),
-                Server.protocol == AMNEZIA_PROTOCOL,
+                Server.protocol.in_(AMNEZIA_PROTOCOLS),
             )
         )
         servers = servers_result.scalars().all()

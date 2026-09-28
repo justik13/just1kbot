@@ -45,7 +45,18 @@ from config.enums import (
 
 # Protocol
 AMNEZIA_PROTOCOL = "amneziawg2"
+AMNEZIA_PROTOCOLS: tuple[str, ...] = (
+    AMNEZIA_PROTOCOL,
+    "amneziawg3",
+    "amneziawg3.1",
+)
+AMNEZIA_DOCKER_CONTAINER = "amnezia-awg2"
 XRAY_PROTOCOL = "xray"
+
+# Default AmneziaWG Client Network Settings
+DEFAULT_AWG_DNS1 = "8.8.8.8"
+DEFAULT_AWG_DNS2 = "8.8.4.4"
+DEFAULT_AWG_MTU = "1280"
 
 # VPN Configuration transport limits
 MAX_RAW_CONFIG_BYTES = 65536  # 64 KiB max raw config payload
@@ -214,7 +225,9 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
 
 
 __all__ = [
+    "AMNEZIA_DOCKER_CONTAINER",
     "AMNEZIA_PROTOCOL",
+    "AMNEZIA_PROTOCOLS",
     "API_CONCURRENCY_LIMIT",
     "API_RETRY_COUNT",
     "API_TIMEOUT",
@@ -225,6 +238,9 @@ __all__ = [
     "ApiOperationStatus",
     "CANONICAL_XHTTP_PROFILE",
     "ApiOperationType",
+    "DEFAULT_AWG_DNS1",
+    "DEFAULT_AWG_DNS2",
+    "DEFAULT_AWG_MTU",
     "DEFAULT_PINNED_XRAY_VERSION",
     "DEFAULT_WHITE_INTERNET_CHANNEL_URL",
     "DEFAULT_WHITE_INTERNET_PROFILE_DESCRIPTION",

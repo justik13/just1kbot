@@ -4,7 +4,7 @@ from typing import TypedDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS, XRAY_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
@@ -140,8 +140,12 @@ def is_server_allocatable(server: Server | None, protocol: str = AMNEZIA_PROTOCO
     if not server:
         return False
     server_proto = getattr(server, "protocol", None)
-    if server_proto is not None and server_proto != protocol:
-        return False
+    if server_proto is not None:
+        if protocol in AMNEZIA_PROTOCOLS:
+            if server_proto not in AMNEZIA_PROTOCOLS:
+                return False
+        elif server_proto != protocol:
+            return False
     if getattr(server, "is_active", True) is False:
         return False
     health = getattr(server, "health_state", None)
@@ -159,7 +163,7 @@ def is_server_allocatable(server: Server | None, protocol: str = AMNEZIA_PROTOCO
     ):
         return False
     caps = getattr(server, "capabilities", None) or []
-    if protocol == AMNEZIA_PROTOCOL and "xray_origin" in caps:
+    if protocol in AMNEZIA_PROTOCOLS and "xray_origin" in caps:
         return False
     return True
 
@@ -392,7 +396,7 @@ async def get_total_free_ips(session: AsyncSession) -> int:
 
     awg_servers = [
         s for s in active_servers
-        if s.protocol == AMNEZIA_PROTOCOL and "xray_origin" not in (s.capabilities or [])
+        if s.protocol in AMNEZIA_PROTOCOLS and "xray_origin" not in (s.capabilities or [])
     ]
     if not awg_servers:
         return 0

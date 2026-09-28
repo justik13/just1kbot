@@ -57,11 +57,13 @@ class AmneziaWGValidationTests(unittest.TestCase):
             self.assertTrue(_is_usable_created_config("vpn://awg_valid_sample_config_string"))
 
     def test_valid_wireguard_ini_accepted(self):
-        """A raw WireGuard/AWG .conf containing [Interface] and [Peer] must be accepted."""
+        """A raw AWG 2.0+ .conf containing [Interface], [Peer] and mandatory parameters must be accepted."""
         conf = (
             "[Interface]\n"
             "PrivateKey = aaaa=\n"
             "Address = 10.0.0.2/32\n"
+            "Jc = 4\nJmin = 10\nJmax = 50\nS1 = 87\nS2 = 61\nS3 = 49\nS4 = 1\n"
+            "H1 = 100-200\nH2 = 300-400\nH3 = 500-600\nH4 = 700-800\n"
             "[Peer]\n"
             "PublicKey = bbbb=\n"
             "Endpoint = 1.2.3.4:51820\n"

@@ -71,6 +71,17 @@ class CircularImportRegressionTests(unittest.TestCase):
         self.assertEqual(bot.constants.AMNEZIA_PROTOCOL, config.constants.AMNEZIA_PROTOCOL)
         self.assertEqual(utils.vpn_helpers.AMNEZIA_PROTOCOL, config.constants.AMNEZIA_PROTOCOL)
 
+        # AWG DNS and MTU defaults
+        self.assertEqual(config.constants.DEFAULT_AWG_DNS1, "8.8.8.8")
+        self.assertEqual(config.constants.DEFAULT_AWG_DNS2, "8.8.4.4")
+        self.assertEqual(config.constants.DEFAULT_AWG_MTU, "1280")
+        self.assertEqual(bot.constants.DEFAULT_AWG_DNS1, "8.8.8.8")
+        self.assertEqual(bot.constants.DEFAULT_AWG_DNS2, "8.8.4.4")
+        self.assertEqual(bot.constants.DEFAULT_AWG_MTU, "1280")
+        self.assertEqual(utils.vpn_helpers.DEFAULT_AWG_DNS1, "8.8.8.8")
+        self.assertEqual(utils.vpn_helpers.DEFAULT_AWG_DNS2, "8.8.4.4")
+        self.assertEqual(utils.vpn_helpers.DEFAULT_AWG_MTU, "1280")
+
         # Config Size limit
         self.assertEqual(config.constants.MAX_RAW_CONFIG_BYTES, 65536)
         self.assertEqual(bot.constants.MAX_RAW_CONFIG_BYTES, config.constants.MAX_RAW_CONFIG_BYTES)

@@ -22,6 +22,13 @@ def _decode_base64url(payload: str) -> bytes | None:
         raise VPNConfigParseError(f"Base64 decode failed: {e}") from e
 
 
+try:
+    from config.constants import DEFAULT_AWG_DNS1, DEFAULT_AWG_DNS2, DEFAULT_AWG_MTU
+except ImportError:
+    DEFAULT_AWG_DNS1 = "8.8.8.8"
+    DEFAULT_AWG_DNS2 = "8.8.4.4"
+    DEFAULT_AWG_MTU = "1280"
+
 MAX_DECOMPRESSED_CONFIG_BYTES = 1024 * 1024  # 1 MiB
 
 AWG3_1_EXCLUSIVE_KEYS = (
@@ -45,6 +52,35 @@ AWG_MANDATORY_BASE_KEYS = (
     "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4",
 )
 
+ALL_AWG_KEYS = (
+    "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4",
+    "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5",
+    "HeaderProtectionKey", "ContentPaddingAddition",
+    "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime",
+    "KeepaliveTimeout", "MaxHandshakeAttempts",
+    "RandomTrailers", "DisableCookies",
+)
+
+
+def is_valid_awg_key(key: str) -> bool:
+    """Validate 32-byte base64-encoded key (X25519 key, AmneziaWG HeaderProtectionKey, or PSK)."""
+    if not key or not isinstance(key, str):
+        return False
+    key_str = key.strip()
+    if len(key_str) != 44 or not key_str.endswith("="):
+        return False
+    try:
+        raw = base64.b64decode(key_str, validate=True)
+        return len(raw) == 32
+    except Exception:
+        return False
+
+
+# Backward-compatible aliases
+is_valid_wg_key = is_valid_awg_key
+_is_valid_wg_key = is_valid_awg_key
+_is_valid_awg_key = is_valid_awg_key
+
 
 def detect_awg_version(params: dict[str, Any]) -> str:
     """Detect AWG protocol version ('3.1', '3.0', '2.0') adhering to Any-Tech-ARCHITECT specifications."""
@@ -57,8 +93,15 @@ def detect_awg_version(params: dict[str, Any]) -> str:
             v = params.get(k.upper())
         if v is None:
             return False
-        # For toggle/integer keys (RandomTrailers, DisableCookies), "0" means disabled
-        if k in ("RandomTrailers", "DisableCookies") and str(v).strip() in ("0", "false", "False", ""):
+        # For toggle/integer keys (RandomTrailers, DisableCookies), "0", "false", "off", "no", "disabled" mean disabled
+        if k in ("RandomTrailers", "DisableCookies") and str(v).strip().lower() in (
+            "0",
+            "false",
+            "off",
+            "no",
+            "disabled",
+            "",
+        ):
             return False
         return str(v).strip() != ""
 
@@ -126,30 +169,54 @@ def _looks_like_awg_conf(conf: str | None, last_config: dict | None = None) -> b
         return False
     if "[Interface]" not in conf or "[Peer]" not in conf:
         return False
-    if "PrivateKey" not in conf or "Address" not in conf:
+
+    current_section = None
+    interface_params: dict[str, str] = {}
+    peer_params: dict[str, str] = {}
+
+    for raw_line in conf.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current_section = line[1:-1].strip()
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if current_section == "Interface":
+                interface_params[k] = v
+            elif current_section == "Peer":
+                peer_params[k] = v
+
+    if "PrivateKey" not in interface_params or "Address" not in interface_params:
         return False
-    if "PublicKey" not in conf or "Endpoint" not in conf:
+    if "PublicKey" not in peer_params or "Endpoint" not in peer_params:
         return False
 
     # All AWG 2.0+ mandatory obfuscation parameters must be present in [Interface]
     for k in AWG_MANDATORY_BASE_KEYS:
-        if f"{k} =" not in conf and f"{k}=" not in conf:
+        if not interface_params.get(k):
             return False
 
     # If last_config is provided, perform strict consistency check
     if last_config:
         priv = last_config.get("client_priv_key")
-        if priv and f"PrivateKey = {priv}" not in conf and f"PrivateKey={priv}" not in conf:
+        if priv and interface_params.get("PrivateKey") != priv:
             return False
         pub = last_config.get("server_pub_key")
-        if pub and f"PublicKey = {pub}" not in conf and f"PublicKey={pub}" not in conf:
+        if pub and peer_params.get("PublicKey") != pub:
             return False
         ip = str(last_config.get("client_ip", "")).split("/")[0].strip()
-        if ip and ip not in conf:
+        if ip and ip not in interface_params.get("Address", ""):
             return False
         for k in AWG_MANDATORY_BASE_KEYS:
             val = str(last_config.get(k, "")).strip()
-            if val and (f"{k} = {val}" not in conf and f"{k}={val}" not in conf):
+            if val and interface_params.get(k) != val:
+                return False
+        hpk = last_config.get("HeaderProtectionKey")
+        if hpk and str(hpk).strip():
+            if interface_params.get("HeaderProtectionKey") != str(hpk).strip():
                 return False
 
     return True
@@ -162,9 +229,10 @@ def _get_first_awg_container(data: dict) -> dict | None:
     for container in containers:
         if not isinstance(container, dict):
             continue
-        awg = container.get("awg")
-        if awg and isinstance(awg, dict):
-            return awg
+        if container.get("container") == "amnezia-awg2":
+            awg = container.get("awg")
+            if awg and isinstance(awg, dict):
+                return awg
     return None
 
 
@@ -196,9 +264,9 @@ def _build_conf_fallback(data: dict, last_config: dict, awg: dict | None = None)
     if "/" not in str(client_ip):
         client_ip = f"{client_ip}/32"
 
-    dns1 = data.get("dns1") or "8.8.8.8"
-    dns2 = data.get("dns2") or "8.8.4.4"
-    mtu = last_config.get("mtu") or "1280"
+    dns1 = data.get("dns1") or DEFAULT_AWG_DNS1
+    dns2 = data.get("dns2") or DEFAULT_AWG_DNS2
+    mtu = last_config.get("mtu") or DEFAULT_AWG_MTU
     persistent_keep_alive = last_config.get("persistent_keep_alive") or 25
     psk_key = last_config.get("psk_key")
 
@@ -324,8 +392,8 @@ def is_valid_vpn_uri(uri: str) -> bool:
 
     Invariants enforced:
     1. Valid JSON payload with non-empty 'containers'.
-    2. Container is strictly 'amnezia-awg2' (or legacy 'amnezia-awg').
-    3. defaultContainer (if present) is 'amnezia-awg2' (or 'amnezia-awg').
+    2. Container is strictly 'amnezia-awg2' (upstream canonical container for both AWG 2.0 and AWG 3.x).
+    3. defaultContainer (if present) is strictly 'amnezia-awg2'.
     4. Valid protocol_version ('2', '2.0', '3', '3.0', '3.1').
     5. Valid last_config JSON with client_priv_key, server_pub_key, client_ip, hostName, port.
     6. All mandatory AWG 2.0+ obfuscation keys present (Jc, Jmin, Jmax, S1, S2, S3, S4, H1..H4).
@@ -340,7 +408,7 @@ def is_valid_vpn_uri(uri: str) -> bool:
             return False
 
         def_container = data.get("defaultContainer")
-        if def_container and def_container not in ("amnezia-awg2", "amnezia-awg"):
+        if def_container and def_container != "amnezia-awg2":
             return False
 
         containers = data.get("containers")
@@ -351,25 +419,16 @@ def is_valid_vpn_uri(uri: str) -> bool:
         for c in containers:
             if not isinstance(c, dict):
                 continue
-            c_name = c.get("container")
-            if c_name in ("amnezia-awg2", "amnezia-awg"):
-                if isinstance(c.get("awg"), dict):
-                    awg_container = c
-                    break
+            if c.get("container") == "amnezia-awg2" and isinstance(c.get("awg"), dict):
+                awg_container = c
+                break
         if not awg_container:
             return False
 
         awg = awg_container.get("awg", {})
         proto_ver = str(awg.get("protocol_version", "")).strip()
-        c_name = awg_container.get("container")
 
-        if c_name == "amnezia-awg2":
-            if proto_ver not in ("2", "2.0", "3", "3.0", "3.1"):
-                return False
-        elif c_name == "amnezia-awg":
-            if proto_ver not in ("", "1", "1.0", "2", "2.0"):
-                return False
-        else:
+        if proto_ver not in ("2", "2.0", "3", "3.0", "3.1"):
             return False
 
         last_config = _parse_last_config(awg)
@@ -398,24 +457,30 @@ def is_valid_vpn_uri(uri: str) -> bool:
             if v is None or str(v).strip() == "":
                 return False
 
-        # Check AWG 3.x specific key
-        ver = detect_awg_version(last_config)
-        if ver.startswith("3"):
-            hpk = last_config.get("HeaderProtectionKey") or awg.get("HeaderProtectionKey")
-            if not hpk or str(hpk).strip() == "":
+        # Check HeaderProtectionKey consistency if present
+        hpk_last = last_config.get("HeaderProtectionKey")
+        hpk_awg = awg.get("HeaderProtectionKey")
+        if hpk_last or hpk_awg:
+            if not hpk_last or not hpk_awg:
+                return False
+            if str(hpk_last).strip() != str(hpk_awg).strip():
                 return False
 
-        # 3-way consistency check between awg dict and last_config
+        # 3-way consistency check between awg dict and last_config:
+        # All mandatory base keys and port must be present in awg dict and match last_config exactly
         for k in AWG_MANDATORY_BASE_KEYS:
-            if k in awg:
-                if str(awg[k]).strip() != str(last_config[k]).strip():
-                    return False
-        if "port" in awg:
-            try:
-                if int(awg["port"]) != port_int:
-                    return False
-            except (ValueError, TypeError):
+            if k not in awg or str(awg[k]).strip() == "":
                 return False
+            if str(awg[k]).strip() != str(last_config[k]).strip():
+                return False
+
+        if "port" not in awg:
+            return False
+        try:
+            if int(awg["port"]) != port_int:
+                return False
+        except (ValueError, TypeError):
+            return False
 
         # Check config text or fallback
         config_str = last_config.get("config")
@@ -435,9 +500,9 @@ def is_valid_vpn_uri(uri: str) -> bool:
 def customize_vpn_config_dict(
     data: dict,
     description: str | None = None,
-    dns1: str = "8.8.8.8",
-    dns2: str = "8.8.4.4",
-    mtu: str = "1280",
+    dns1: str = DEFAULT_AWG_DNS1,
+    dns2: str = DEFAULT_AWG_DNS2,
+    mtu: str = DEFAULT_AWG_MTU,
 ) -> dict:
     if not isinstance(data, dict):
         return data
@@ -502,9 +567,9 @@ def encode_json_to_vpn_uri(data: dict) -> str:
 def customize_vpn_uri(
     uri: str,
     description: str | None = None,
-    dns1: str = "8.8.8.8",
-    dns2: str = "8.8.4.4",
-    mtu: str = "1280",
+    dns1: str = DEFAULT_AWG_DNS1,
+    dns2: str = DEFAULT_AWG_DNS2,
+    mtu: str = DEFAULT_AWG_MTU,
 ) -> str:
     if not uri or not isinstance(uri, str):
         return uri or ""
