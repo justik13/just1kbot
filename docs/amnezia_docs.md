@@ -147,15 +147,15 @@
 
 ## 📄 4. ЭТАЛОННЫЕ ПРИМЕРЫ КОНФИГУРАЦИЙ
 
-### 4.1. Эталонный `.conf` для AWG 3.1 (реальный сервер `just1knode`)
+### 4.1. Эталонный `.conf` для AWG 3.1
 
 ```ini
 [Interface]
 Address = 10.8.1.5/32
 DNS = 1.1.1.1, 1.0.0.1
 MTU = 1280
-PrivateKey = aHtwGE7ajuHsJCIzjyagdbXPnoPk8PpJ4kGAs2vv0G0=
-ListenPort = 40336
+PrivateKey = aAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEE=
+ListenPort = 51820
 
 Jc = 4
 Jmin = 10
@@ -168,7 +168,7 @@ H1 = 1
 H2 = 2
 H3 = 3
 H4 = 4
-HeaderProtectionKey = w4tUyn8Wn/npv1yb9DinRhjtlC2JF+dIvIglBBBlTzU=
+HeaderProtectionKey = 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
 RekeyAfterTime = 100-120
 RekeyTimeout = 3-7
 RejectAfterTime = 150-180
@@ -178,10 +178,10 @@ RandomTrailers = on
 DisableCookies = on
 
 [Peer]
-PublicKey = YC9bNJlf48m4jx4iDyDey6O02kYdHvwTEziT3IzvqC8=
-PresharedKey = 0jEf5SzdQzBaldFifpSwaLyeWZZqzAWhHi9FbIGJ6wM=
+PublicKey = xTIBA5rRboqnulUnAnAn6O0W2EPQuio5aSTUmuW95zk=
+PresharedKey = F1k8vN9vX/1kZ2v3v4v5v6v7v8v9v0v1v2v3v4v5v6s=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = 168.222.254.191:40336
+Endpoint = 198.51.100.1:51820
 PersistentKeepalive = 25
 ```
 
@@ -196,7 +196,7 @@ PersistentKeepalive = 25
       "container": "amnezia-awg2",
       "awg": {
         "protocol_version": "3.1",
-        "port": 40336,
+        "port": 51820,
         "transport_proto": "udp",
         "Jc": "4",
         "Jmin": "10",
@@ -209,7 +209,7 @@ PersistentKeepalive = 25
         "H2": "2",
         "H3": "3",
         "H4": "4",
-        "HeaderProtectionKey": "w4tUyn8Wn/npv1yb9DinRhjtlC2JF+dIvIglBBBlTzU=",
+        "HeaderProtectionKey": "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
         "RandomTrailers": "on",
         "DisableCookies": "on",
         "RekeyAfterTime": "100-120",
@@ -217,7 +217,7 @@ PersistentKeepalive = 25
         "RejectAfterTime": "150-180",
         "KeepaliveTimeout": "5-15",
         "MaxHandshakeAttempts": "15-20",
-        "last_config": "{\"H1\":\"1\",\"H2\":\"2\",\"H3\":\"3\",\"H4\":\"4\",\"HeaderProtectionKey\":\"w4tUyn8Wn/npv1yb9DinRhjtlC2JF+dIvIglBBBlTzU=\",\"Jc\":\"4\",\"Jmin\":\"10\",\"Jmax\":\"50\",\"RandomTrailers\":\"on\",\"DisableCookies\":\"on\",\"S1\":\"12\",\"S2\":\"12\",\"S3\":\"12\",\"S4\":\"12\",\"allowed_ips\":[\"0.0.0.0/0\",\"::/0\"],\"client_ip\":\"10.8.1.5\",\"client_priv_key\":\"...\",\"client_pub_key\":\"...\",\"config\":\"[Interface]\\nAddress = 10.8.1.5/32\\n...\",\"hostName\":\"168.222.254.191\",\"mtu\":\"1280\",\"port\":40336,\"psk_key\":\"...\",\"server_pub_key\":\"YC9bNJlf48m4jx4iDyDey6O02kYdHvwTEziT3IzvqC8=\"}"
+        "last_config": "{\"H1\":\"1\",\"H2\":\"2\",\"H3\":\"3\",\"H4\":\"4\",\"HeaderProtectionKey\":\"47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=\",\"Jc\":\"4\",\"Jmin\":\"10\",\"Jmax\":\"50\",\"RandomTrailers\":\"on\",\"DisableCookies\":\"on\",\"S1\":\"12\",\"S2\":\"12\",\"S3\":\"12\",\"S4\":\"12\",\"allowed_ips\":[\"0.0.0.0/0\",\"::/0\"],\"client_ip\":\"10.8.1.5\",\"client_priv_key\":\"...\",\"client_pub_key\":\"...\",\"config\":\"[Interface]\\nAddress = 10.8.1.5/32\\n...\",\"hostName\":\"198.51.100.1\",\"mtu\":\"1280\",\"port\":51820,\"psk_key\":\"...\",\"server_pub_key\":\"xTIBA5rRboqnulUnAnAn6O0W2EPQuio5aSTUmuW95zk=\"}"
       }
     }
   ],
@@ -225,7 +225,7 @@ PersistentKeepalive = 25
   "description": "AmneziaWG Server",
   "dns1": "1.1.1.1",
   "dns2": "1.0.0.1",
-  "hostName": "168.222.254.191"
+  "hostName": "198.51.100.1"
 }
 ```
 
