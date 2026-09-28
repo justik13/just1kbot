@@ -381,7 +381,6 @@ async def _cleanup_stuck_profiles():
                         api_url,
                         api_key,
                     ) = await resolve_profile_endpoint_snapshot(session, profile)
-                    server_proto = profile.server.protocol if getattr(profile, "server", None) else None
                     await ensure_delete_operation(
                         session,
                         idempotency_key=f"delete-peer:{profile.id}:{peer_id}",
@@ -392,7 +391,6 @@ async def _cleanup_stuck_profiles():
                         api_key_snapshot=api_key,
                         peer_id=peer_id,
                         client_name=profile.client_name,
-                        protocol=server_proto,
                         audit_reason="stuck_cleanup_worker",
                     )
                     profile.provisioning_status = "deleting"

@@ -165,7 +165,6 @@ class ProfileDeletionService:
             if server_id:
                 affected_server_ids.add(server_id)
             profile.provisioning_status = "deleting"
-            server_proto = profile.server.protocol if getattr(profile, "server", None) else None
             await ensure_delete_operation(
                 session,
                 idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
@@ -176,7 +175,6 @@ class ProfileDeletionService:
                 api_key_snapshot=api_key,
                 peer_id=profile.peer_id,
                 client_name=profile.client_name,
-                protocol=server_proto,
                 audit_reason=reason,
             )
             count += 1

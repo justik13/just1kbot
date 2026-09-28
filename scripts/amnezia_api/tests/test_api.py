@@ -1298,11 +1298,20 @@ def test_server_export_aliases(mock_awg_env):
 
     r_export = client.get("/export", headers=headers)
     assert r_export.status_code == 200
-    assert r_export.json() == r_canonical.json()
 
     r_server_export = client.get("/server/export", headers=headers)
     assert r_server_export.status_code == 200
-    assert r_server_export.json() == r_canonical.json()
+
+    d_canonical = r_canonical.json()
+    d_export = r_export.json()
+    d_server_export = r_server_export.json()
+
+    d_canonical.pop("generatedAt", None)
+    d_export.pop("generatedAt", None)
+    d_server_export.pop("generatedAt", None)
+
+    assert d_export == d_canonical
+    assert d_server_export == d_canonical
 
 
 def test_build_client_configs_awg3_without_hpk(mock_awg_env):
