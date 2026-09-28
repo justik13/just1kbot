@@ -31,7 +31,7 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
         # Verify link structure
         self.assertTrue(link_wl.startswith(f"vless://{sub.uuid}@{cdn_domain}:443"))
         self.assertIn("type=xhttp", link_wl)
-        self.assertIn("path=%2Fstream%2Fv1%2Fdefault", link_wl)
+        self.assertIn("path=%2Fassets%2Fv1%2Fdefault", link_wl)
         self.assertIn("mode=packet-up", link_wl)
         self.assertIn("security=tls", link_wl)
         self.assertIn("fp=firefox", link_wl)

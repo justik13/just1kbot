@@ -259,7 +259,7 @@ def get_secret_base_path() -> str:
         except Exception:
             pass
 
-    return os.getenv("WHITE_INTERNET_PATH", "/stream/v1")
+    return os.getenv("WHITE_INTERNET_PATH", "/assets/v1")
 
 
 def get_cdn_domain() -> Optional[str]:

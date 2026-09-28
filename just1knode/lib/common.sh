@@ -91,8 +91,14 @@ install_nginx_if_missing() {
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
         apt-get install -y -qq nginx certbot python3-certbot-nginx ca-certificates
+        # Отключаем дефолтный сайт сразу после установки пакета для предотвращения конфликта портов
+        local def_site="${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default"
+        if [[ -f "$def_site" || -L "$def_site" ]]; then
+            cp -L "$def_site" "${NGINX_CONF_DIR:-/etc/nginx}/sites-available/default.user.bak" 2>/dev/null || true
+            rm -f "$def_site" 2>/dev/null || true
+        fi
         systemctl enable nginx 2>/dev/null || true
-        systemctl start nginx 2>/dev/null || true
+        systemctl restart nginx 2>/dev/null || true
     fi
 }
 
@@ -182,6 +188,16 @@ validate_ipv4() {
         done
         [[ "$ip" == "0.0.0.0" || "$ip" == "255.255.255.255" ]] && return 1
         return 0
+    fi
+}
+
+validate_ip() {
+    local ip="${1:-}"
+    [[ -z "$ip" ]] && return 1
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import ipaddress, sys; ip = sys.argv[1]; addr = ipaddress.ip_address(ip); sys.exit(0 if not addr.is_multicast and not addr.is_unspecified and not addr.is_reserved else 1)" "$ip" 2>/dev/null
+    else
+        validate_ipv4 "$ip"
     fi
 }
 
