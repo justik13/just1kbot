@@ -560,7 +560,7 @@ except Exception:
     ssl_reject_handshake on;
 }"
     else
-        local dummy_dir="/etc/ssl/just1k_fallback"
+        local dummy_dir="${DUMMY_CERT_DIR:-${NGINX_CONF_DIR}/fallback_ssl}"
         mkdir -p "$dummy_dir"
         if [[ ! -f "${dummy_dir}/dummy.crt" ]]; then
             openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
