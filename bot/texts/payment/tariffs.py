@@ -11,11 +11,6 @@ BTN_DURATION_YEAR_DISCOUNT = "💎 {days} дн. — {display_price} ₽ (-{disco
 
 BTN_PAYMENT_BUY_FROM_BALANCE = "💰 Купить с баланса"
 
-BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE = "💱 Сменить тариф с баланса"
-
-BTN_PAYMENT_CONFIRM_PURCHASE = "✅ Подтвердить покупку"
-
-BTN_PAYMENT_CONFIRM_TARIFF_CHANGE = "✅ Подтвердить смену тарифа"
 BTN_PAYMENT_CONFIRM_FREE_CHANGE = "✅ Сменить бесплатно"
 
 BTN_PAYMENT_CONNECT_DEVICE = "🔌 Подключить устройство"
@@ -28,11 +23,7 @@ BTN_PAYMENT_PAY_ORDER = "💳 Оплатить {price} ₽"
 
 BTN_PAYMENT_RENEW_SUBSCRIPTION = "🔄 Продлить подписку"
 
-BTN_PAYMENT_SPECIFY_OTHER_AMOUNT = "Указать другую сумму"
-
 BTN_PAYMENT_START_ONBOARDING = "🚀 Начать"
-
-BTN_PAYMENT_TOPUP_PRESET_AMOUNT = "Пополнить на {amount_rub} ₽"
 
 BTN_PAYMENT_TO_BALANCE = "💰 К балансу"
 
@@ -79,10 +70,6 @@ PAYMENT_ORDER_PAYMENT_CANCELLED = "Платеж был отменен."
 PAYMENT_ORDER_WAITING_PAYMENT = "Оплата еще не поступила. Если вы уже оплатили, подождите минуту."
 
 PAYMENT_PRICE_RUB_FORMAT = "{amount_rub} ₽"
-
-PAYMENT_PURCHASE = """
-
-Не хватает {shortage} ₽. Минимальное пополнение — {minimum} ₽; после покупки останется {remainder} ₽."""
 
 PAYMENT_PURCHASE_INVALID_OPERATION = "Некорректная покупка"
 

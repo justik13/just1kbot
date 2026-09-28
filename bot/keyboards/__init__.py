@@ -50,7 +50,6 @@ from .payment import (
     get_tariff_showcase_keyboard,
     get_topup_credit_keyboard,
     get_topup_payment_keyboard,
-    get_topup_waiting_keyboard,
 )
 from .user import (
     get_history_keyboard,
@@ -83,7 +82,6 @@ __all__ = [
     "get_balance_keyboard",
     "get_balance_history_keyboard",
     "get_balance_amounts_keyboard",
-    "get_topup_waiting_keyboard",
     "get_topup_payment_keyboard",
     "get_same_tariff_keyboard",
     "get_topup_credit_keyboard",

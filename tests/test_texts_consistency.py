@@ -785,6 +785,21 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertFalse(hasattr(texts, "ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES"))
         self.assertFalse(hasattr(texts, "BTN_PAYMENT_RETURN_TO_PURCHASE"))
 
+    def test_purged_orphaned_texts_stay_removed(self):
+        self.assertFalse(hasattr(texts, "BTN_HIDE"))
+        self.assertFalse(hasattr(texts, "BTN_MAIN_MENU"))
+        self.assertFalse(hasattr(texts, "BTN_PAYMENT_PAY"))
+        self.assertFalse(hasattr(texts, "BTN_ZAKRYT_NEZAVERSHYONNYE_SSYLKI"))
+        self.assertFalse(hasattr(texts, "DURATION_HOURS_SUFFIX"))
+        self.assertFalse(hasattr(texts, "ADMIN_BTN_BACK_TO_PAYMENT"))
+        self.assertFalse(hasattr(texts, "BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE"))
+        self.assertFalse(hasattr(texts, "BTN_PAYMENT_CONFIRM_PURCHASE"))
+        self.assertFalse(hasattr(texts, "BTN_PAYMENT_CONFIRM_TARIFF_CHANGE"))
+        self.assertFalse(hasattr(texts, "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT"))
+        self.assertFalse(hasattr(texts, "BTN_PAYMENT_TOPUP_PRESET_AMOUNT"))
+        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE"))
+        self.assertFalse(hasattr(texts, "PAYMENT_TARIFF_CHANGE"))
+
 
 if __name__ == "__main__":
     unittest.main()

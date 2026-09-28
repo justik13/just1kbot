@@ -139,7 +139,6 @@ from bot.texts.admin.dashboard import (
 )
 
 from bot.texts.admin.finances import (
-    ADMIN_BTN_BACK_TO_PAYMENT,
     ADMIN_BTN_BACK_TO_PAYMENTS,
     ADMIN_BTN_PAGINATION_NEXT,
     ADMIN_BTN_PAGINATION_PREV,
@@ -670,7 +669,6 @@ __all__ = [
     "PROTOCOL_XRAY_ORIGIN",
     "ADMIN_BTN_BACK_TO_ADMIN",
     "ADMIN_BTN_BACK_TO_CARD",
-    "ADMIN_BTN_BACK_TO_PAYMENT",
     "ADMIN_BTN_BACK_TO_PAYMENTS",
     "ADMIN_BTN_BACK_TO_SERVERS",
     "ADMIN_BTN_INPUT_MANUALLY",
