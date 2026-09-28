@@ -221,8 +221,16 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
             call_kwargs = mock_enqueue.call_args.kwargs
             self.assertEqual(call_kwargs["payload"]["protocol"], "amneziawg3.1")
 
+    def test_protocol_display_maps_all_amnezia_protocols(self):
+        """Invariant: _format_protocol displays 'AmneziaWG' for all supported AMNEZIA_PROTOCOLS."""
+        from bot.handlers.connection.common import _format_protocol
+
+        for proto in AMNEZIA_PROTOCOLS:
+            self.assertEqual(_format_protocol(proto), "AmneziaWG")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

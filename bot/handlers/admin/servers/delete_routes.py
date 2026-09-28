@@ -283,7 +283,9 @@ async def confirm_delete_server(
                 server_id=server.id, profile_id=None,
                 server_name_snapshot=server_name, api_url_snapshot=api_url,
                 api_key_snapshot=api_key, peer_id=profile.peer_id,
-                client_name=profile.client_name, audit_reason="server_delete")
+                client_name=profile.client_name,
+                protocol=server.protocol,
+                audit_reason="server_delete")
 
     for profile in profiles:
         await session.delete(profile)

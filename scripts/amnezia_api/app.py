@@ -78,8 +78,15 @@ except ImportError:
                 v = params.get(k.upper())
             if v is None:
                 return False
-            # For toggle/integer keys (RandomTrailers, DisableCookies), "0" means disabled
-            if k in ("RandomTrailers", "DisableCookies") and str(v).strip() in ("0", "false", "False", ""):
+            # For toggle/integer keys (RandomTrailers, DisableCookies), "0", "false", "off", "no", "disabled" mean disabled
+            if k in ("RandomTrailers", "DisableCookies") and str(v).strip().lower() in (
+                "0",
+                "false",
+                "off",
+                "no",
+                "disabled",
+                "",
+            ):
                 return False
             return str(v).strip() != ""
 
@@ -709,14 +716,7 @@ def build_client_configs(
     awg_ver = detect_awg_version(detected_awg)
     has_awg3 = awg_ver.startswith("3")
     hpk = detected_awg.get("HeaderProtectionKey")
-    if has_awg3:
-        if not hpk or not _is_valid_wg_key(str(hpk)):
-            logger.error("Server interface has AWG 3.x parameters but is missing a valid 32-byte HeaderProtectionKey")
-            raise HTTPException(
-                status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
-                detail="Server interface HeaderProtectionKey must be a valid 32-byte base64 key for AWG 3.x",
-            )
-    elif hpk:
+    if hpk:
         if not _is_valid_wg_key(str(hpk)):
             logger.error("Server interface has invalid HeaderProtectionKey")
             raise HTTPException(
@@ -1174,6 +1174,8 @@ async def get_server_load():
 
 
 @app.get("/server/backup", dependencies=[Depends(verify_api_key)])
+@app.get("/export", dependencies=[Depends(verify_api_key)])
+@app.get("/server/export", dependencies=[Depends(verify_api_key)])
 async def get_server_backup():
     """Export complete server state (config, clientsTable, PSK)."""
     async with state_lock:

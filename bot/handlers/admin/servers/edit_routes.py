@@ -609,7 +609,13 @@ async def process_edit_server_url(
 
     old_url = server.api_url
 
-    await update_server(session, server, api_url=new_url)
+    update_kwargs = {"api_url": new_url}
+    if server.protocol in AMNEZIA_PROTOCOLS and server_info:
+        detected_proto = server_info.get_protocol()
+        if detected_proto and detected_proto != server.protocol:
+            update_kwargs["protocol"] = detected_proto
+
+    await update_server(session, server, **update_kwargs)
 
     from services.slots_cache import invalidate_server_cache
     invalidate_server_cache(server_id)
@@ -894,7 +900,13 @@ async def process_edit_server_key(
             await state.clear()
             return
 
-    await update_server(session, server, api_key=new_key)
+    update_kwargs = {"api_key": new_key}
+    if server.protocol in AMNEZIA_PROTOCOLS and server_info:
+        detected_proto = server_info.get_protocol()
+        if detected_proto and detected_proto != server.protocol:
+            update_kwargs["protocol"] = detected_proto
+
+    await update_server(session, server, **update_kwargs)
 
     from services.slots_cache import invalidate_server_cache
     invalidate_server_cache(server_id)

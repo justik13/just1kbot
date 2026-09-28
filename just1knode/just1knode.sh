@@ -369,6 +369,9 @@ run_doctor() {
         fi
         if [[ "$conf_found" == "true" ]]; then
             echo -e "  ${GREEN}✔${NC} Конфигурационный файл ${conf_name} найден"
+            if docker exec "$c_doc" awg show awg0 >/dev/null 2>&1; then
+                echo -e "  ${GREEN}✔${NC} Интерфейс awg0 активен в ядре"
+            fi
         else
             echo -e "  ${RED}✗${NC} Конфигурационный файл ${conf_name} отсутствует"
             failed=$((failed + 1))

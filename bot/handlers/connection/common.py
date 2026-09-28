@@ -6,7 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AMNEZIA_PROTOCOL, GRACE_PERIOD_HOURS
+from bot.constants import AMNEZIA_PROTOCOLS, GRACE_PERIOD_HOURS
 from bot.keyboards import get_back_button
 from database.models import User
 from database.repositories.profiles_repo import (
@@ -22,9 +22,7 @@ logger = logging.getLogger(__name__)
 
 DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z\u0400-\u04FF0-9\s_#-]+$")
 
-_PROTOCOL_DISPLAY = {
-    AMNEZIA_PROTOCOL: "AmneziaWG",
-}
+_PROTOCOL_DISPLAY = {p: "AmneziaWG" for p in AMNEZIA_PROTOCOLS}
 
 
 def _format_protocol(raw_protocol: str | None) -> str:

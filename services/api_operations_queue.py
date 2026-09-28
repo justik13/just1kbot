@@ -250,20 +250,17 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
         operation.locked_at = operation.locked_by = None
         operation.last_error_code = "delete_requeued"
         operation.last_error = (audit_reason or "repeat delete")[:2000]
-        if protocol and isinstance(operation.payload, dict) and "protocol" not in operation.payload:
-            new_payload = dict(operation.payload)
-            new_payload["protocol"] = protocol
-            operation.payload = new_payload
     elif operation.status == "succeeded" and profile_id and await session.get(VPNProfile, profile_id):
         operation.status = "retry"
         operation.attempts = 0
         operation.completed_at = None
         operation.next_attempt_at = next_attempt_at or func.now()
         operation.last_error_code = "delete_profile_discrepancy"
-        if protocol and isinstance(operation.payload, dict) and "protocol" not in operation.payload:
-            new_payload = dict(operation.payload)
-            new_payload["protocol"] = protocol
-            operation.payload = new_payload
+
+    if protocol and isinstance(operation.payload, dict) and "protocol" not in operation.payload:
+        new_payload = dict(operation.payload)
+        new_payload["protocol"] = protocol
+        operation.payload = new_payload
     return operation
 
 

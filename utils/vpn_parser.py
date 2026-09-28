@@ -93,8 +93,15 @@ def detect_awg_version(params: dict[str, Any]) -> str:
             v = params.get(k.upper())
         if v is None:
             return False
-        # For toggle/integer keys (RandomTrailers, DisableCookies), "0" means disabled
-        if k in ("RandomTrailers", "DisableCookies") and str(v).strip() in ("0", "false", "False", ""):
+        # For toggle/integer keys (RandomTrailers, DisableCookies), "0", "false", "off", "no", "disabled" mean disabled
+        if k in ("RandomTrailers", "DisableCookies") and str(v).strip().lower() in (
+            "0",
+            "false",
+            "off",
+            "no",
+            "disabled",
+            "",
+        ):
             return False
         return str(v).strip() != ""
 
@@ -450,15 +457,13 @@ def is_valid_vpn_uri(uri: str) -> bool:
             if v is None or str(v).strip() == "":
                 return False
 
-        # Check AWG 3.x specific key in last_config
-        is_awg3 = (
-            proto_ver in ("3", "3.0", "3.1")
-            or detect_awg_version(awg).startswith("3")
-            or detect_awg_version(last_config).startswith("3")
-        )
-        if is_awg3:
-            hpk = last_config.get("HeaderProtectionKey")
-            if not hpk or str(hpk).strip() == "":
+        # Check HeaderProtectionKey consistency if present
+        hpk_last = last_config.get("HeaderProtectionKey")
+        hpk_awg = awg.get("HeaderProtectionKey")
+        if hpk_last or hpk_awg:
+            if not hpk_last or not hpk_awg:
+                return False
+            if str(hpk_last).strip() != str(hpk_awg).strip():
                 return False
 
         # 3-way consistency check between awg dict and last_config:
@@ -476,11 +481,6 @@ def is_valid_vpn_uri(uri: str) -> bool:
                 return False
         except (ValueError, TypeError):
             return False
-
-        if is_awg3:
-            hpk_awg = awg.get("HeaderProtectionKey")
-            if not hpk_awg or str(hpk_awg).strip() != str(last_config.get("HeaderProtectionKey", "")).strip():
-                return False
 
         # Check config text or fallback
         config_str = last_config.get("config")

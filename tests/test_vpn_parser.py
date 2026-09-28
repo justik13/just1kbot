@@ -8,7 +8,10 @@ from utils.vpn_parser import (
     VPNConfigParseError,
     _decompress_amnezia_format,
     decode_vpn_uri_to_json,
+    detect_awg_version,
+    encode_json_to_vpn_uri,
     is_valid_awg_key,
+    is_valid_vpn_uri,
     is_valid_wg_key,
 )
 
@@ -620,6 +623,56 @@ class VPNParserTests(unittest.TestCase):
         self.assertFalse(is_valid_awg_key(""))
         self.assertFalse(is_valid_awg_key(None))
 
+    def test_detect_awg_version_disabled_flags(self):
+        base_iface = {
+            "Jc": "4", "Jmin": "10", "Jmax": "50",
+            "S1": "15", "S2": "20", "S3": "25", "S4": "30",
+            "H1": "100", "H2": "200", "H3": "300", "H4": "400",
+        }
+        self.assertEqual(detect_awg_version(base_iface), "2.0")
+
+        # Disabled boolean values
+        for disabled_val in ("off", "no", "disabled", "0", "false", "False", ""):
+            cfg = dict(base_iface)
+            cfg["RandomTrailers"] = disabled_val
+            cfg["DisableCookies"] = disabled_val
+            self.assertEqual(detect_awg_version(cfg), "2.0")
+
+        # Enabled boolean values
+        for enabled_val in ("on", "yes", "true", "True", "1", "10"):
+            cfg = dict(base_iface)
+            cfg["RandomTrailers"] = enabled_val
+            self.assertEqual(detect_awg_version(cfg), "3.1")
+
+    def test_awg3_without_hpk_valid_in_vpn_uri(self):
+        # AWG 3.1 configuration with RandomTrailers but without HeaderProtectionKey
+        last_cfg = {
+            "client_priv_key": "a" * 43 + "=",
+            "server_pub_key": "b" * 43 + "=",
+            "client_ip": "10.8.1.2/32",
+            "hostName": "vpn.example.com",
+            "port": 51820,
+            "Jc": "4", "Jmin": "10", "Jmax": "50",
+            "S1": "15", "S2": "20", "S3": "25", "S4": "30",
+            "H1": "100-200", "H2": "300-400", "H3": "500-600", "H4": "700-800",
+            "RandomTrailers": "on",
+        }
+        data = {
+            "containers": [{
+                "container": "amnezia-awg2",
+                "awg": {
+                    "protocol_version": "3.1",
+                    "port": "51820",
+                    "Jc": "4", "Jmin": "10", "Jmax": "50",
+                    "S1": "15", "S2": "20", "S3": "25", "S4": "30",
+                    "H1": "100-200", "H2": "300-400", "H3": "500-600", "H4": "700-800",
+                    "RandomTrailers": "on",
+                    "last_config": json.dumps(last_cfg),
+                },
+            }]
+        }
+        self.assertTrue(is_valid_vpn_uri(encode_json_to_vpn_uri(data)))
 
 if __name__ == "__main__":
     unittest.main()
+

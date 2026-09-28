@@ -576,6 +576,11 @@ class DeviceService:
 
         # Capture server and device info for audit before deletion
         server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
+        server_proto = profile.server.protocol if getattr(profile, "server", None) else None
+        if server_proto is None and server_id:
+            srv = await session.get(Server, server_id)
+            if srv:
+                server_proto = srv.protocol
         device_name = profile.device_name
         profile_id = profile.id
         user_id = profile.user_id
@@ -627,6 +632,7 @@ class DeviceService:
                     api_key_snapshot=api_key,
                     peer_id=cleanup_peer_id,
                     client_name=profile.client_name,
+                    protocol=server_proto,
                     audit_reason="device_delete",
                 )
             else:
@@ -642,6 +648,7 @@ class DeviceService:
                     api_key_snapshot=api_key,
                     peer_id=cleanup_peer_id,
                     client_name=profile.client_name,
+                    protocol=server_proto,
                     audit_reason="device_delete_force",
                 )
                 await session.delete(profile)
