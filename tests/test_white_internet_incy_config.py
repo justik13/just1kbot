@@ -297,6 +297,75 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     self.assertIn("serverDescription=", decoded_body)
                     self.assertIn(base64.b64encode("⚡ Максимальная скорость".encode()).decode(), decoded_body)
 
+    async def test_feed_headers_dynamic_device_templates(self):
+        now = now_utc()
+        sub = WhiteInternetSubscription(
+            id=42,
+            user_id=10,
+            origin_node_id=2,
+            token="valid-token-template-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=1000,
+            traffic_uplink_bytes=500,
+            traffic_downlink_bytes=500,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+            device_limit=5,
+            active_hwids={"dev-existing": now.isoformat()},
+        )
+        server = Server(
+            id=2,
+            name="Origin-Custom",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={
+                "profile_description": "Лимит: {devices}, активно: {active}",
+                "announce": "Подключено: {active_devices} из {limit} устройств",
+            },
+        )
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch(
+                    "database.repositories.white_internet_repo.get_subscription_by_token",
+                    return_value=sub,
+                ):
+                    with patch(
+                        "database.repositories.white_internet_repo.register_hwid_atomic",
+                        return_value=(True, 2, 5),
+                    ):
+                        resp = await self.client.get(
+                            f"/sub/wl/{sub.token}",
+                            headers={"X-Hwid": "dev-2"},
+                        )
+                        self.assertEqual(resp.status, 200)
+
+                        desc_b64 = resp.headers.get("Profile-Description", "").split("base64:")[1]
+                        self.assertEqual(base64.b64decode(desc_b64).decode("utf-8"), "Лимит: 5, активно: 2")
+
+                        announce_b64 = resp.headers.get("Announce", "").split("base64:")[1]
+                        self.assertEqual(
+                            base64.b64decode(announce_b64).decode("utf-8"),
+                            "Подключено: 2 из 5 устройств",
+                        )
+
     async def test_web_feed_hidden_origin_and_relays(self):
         now = now_utc()
         sub = WhiteInternetSubscription(

@@ -1469,7 +1469,190 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
 
             # Must NOT raise UnboundLocalError when advisory lock is held by peer worker
             await check_node_resources_and_alerts(bot)
+    async def test_node_monitor_dual_probe_suppresses_false_alert_when_origin_is_healthy(self):
+        """When CDN edge returns 504 / timeout but Origin Nginx returns 200 OK:
+        Dual probe considers Ingress healthy and suppresses false alert!
+        """
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
+
+        server = Server(
+            id=18,
+            name="Origin Dual Probe Test",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={
+                "domain": "origin.just1k.best",
+                "cdn_domain": "cdn.just1k.best",
+            },
+        )
+
+        class MockProbeResponse:
+            def __init__(self, status):
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockDualProbeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            def get(self, url, **kwargs):
+                if "origin.just1k.best" in url:
+                    return MockProbeResponse(status=200)
+                # CDN returns 504 Gateway Timeout
+                return MockProbeResponse(status=504)
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession", lambda **kw: MockDualProbeSession()), \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            # Run 3 consecutive checks (normally triggers alert if unhealthy)
+            for _ in range(3):
+                await check_node_resources_and_alerts(bot)
+
+            # Since Origin is 200 OK, NO alert should be dispatched!
             bot.send_message.assert_not_called()
+            from services.workers.node_monitor import get_server_monitor_state
+            st = get_server_monitor_state(server.id)
+            self.assertFalse(st.ingress_problem)
+            self.assertEqual(st.consecutive_ingress_fails, 0)
+            self.assertGreaterEqual(st.consecutive_ingress_successes, 3)
+
+    async def test_node_monitor_dual_probe_alerts_when_origin_fails(self):
+        """When Origin Nginx fails (e.g. 502), Ingress failure is confirmed and alert is sent."""
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
+
+        server = Server(
+            id=19,
+            name="Origin Failure Test",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={
+                "domain": "origin.just1k.best",
+                "cdn_domain": "cdn.just1k.best",
+            },
+        )
+
+        class MockProbeResponse:
+            def __init__(self, status):
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockDualProbeFailingSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            def get(self, url, **kwargs):
+                return MockProbeResponse(status=502)
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession", lambda **kw: MockDualProbeFailingSession()), \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            # Ticks 1 and 2 debounced
+            await check_node_resources_and_alerts(bot)
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Tick 3 triggers alert
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_called_once()
+            call_text = bot.send_message.call_args[1]["text"]
+            self.assertIn("502", call_text)
+
+    def test_safe_format_device_template(self):
+        """_safe_format_device_template correctly replaces {devices}, {limit}, {active} and preserves unknown braces."""
+        from bot.handlers.white_internet_web import _safe_format_device_template
+
+        res1 = _safe_format_device_template("Лимит: {devices}", devices=3, active=1)
+        self.assertEqual(res1, "Лимит: 3")
+
+        res2 = _safe_format_device_template("{active} из {limit} устройств", devices=2, active=2)
+        self.assertEqual(res2, "2 из 2 устройств")
+
+        res3 = _safe_format_device_template("Неизвестный {placeholder} и {devices}", devices=1, active=0)
+        self.assertEqual(res3, "Неизвестный {placeholder} и 1")
 
 
 if __name__ == "__main__":

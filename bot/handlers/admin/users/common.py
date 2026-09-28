@@ -484,6 +484,15 @@ async def _get_white_internet_card_info(
         extra_lines.append(
             texts.ADMIN_USER_CARD_WL_ERROR.format(error=safe(str(last_err)[:100]))
         )
+    if sub and getattr(sub, "token", None):
+        try:
+            from bot.handlers.white_internet import _build_subscription_url, _resolve_subscription_target
+            sub_domain, sub_prefix = await _resolve_subscription_target(session, sub)
+            if sub_domain:
+                sub_url = _build_subscription_url(sub_domain, sub.token, sub_prefix=sub_prefix)
+                extra_lines.append(texts.ADMIN_USER_CARD_WL_LINK.format(link=sub_url))
+        except Exception as e:
+            logger.debug("Failed to resolve subscription target for user card: %s", e)
     return base + "\n" + "\n".join(extra_lines)
 
 

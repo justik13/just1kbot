@@ -196,6 +196,16 @@ async def admin_wi_subscription_menu(
 
     text = f"{header}\n\n{body}"
 
+    sub_url: str | None = None
+    if wi_sub and getattr(wi_sub, "token", None):
+        try:
+            from bot.handlers.white_internet import _build_subscription_url, _resolve_subscription_target
+            sub_domain, sub_prefix = await _resolve_subscription_target(session, wi_sub)
+            if sub_domain:
+                sub_url = _build_subscription_url(sub_domain, wi_sub.token, sub_prefix=sub_prefix)
+        except Exception as e:
+            logger.debug("admin_wi_subscription_menu resolve sub_url failed: %s", e)
+
     try:
         await callback.message.edit_text(
             text,
@@ -204,6 +214,7 @@ async def admin_wi_subscription_menu(
                 has_wi_sub=has_wi_sub,
                 wi_is_active=wi_is_active,
                 is_trial=is_trial,
+                sub_url=sub_url,
             ),
             parse_mode="HTML",
         )
@@ -707,6 +718,131 @@ async def admin_wi_hwid_reset_apply(
     )
 
     await callback.answer(texts.ADMIN_WI_HWID_RESET_SUCCESS, show_alert=True)
+    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
+    await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
+
+
+# ---------------------------------------------------------------------------
+# White Internet: Copy Link & Token Reset
+# ---------------------------------------------------------------------------
+
+
+@router.callback_query(F.data.startswith("admin_wi_copy_link:"))
+async def admin_wi_copy_link(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if not wi_sub or not getattr(wi_sub, "token", None):
+        await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+        return
+
+    from bot.handlers.white_internet import _build_subscription_url, _resolve_subscription_target
+    sub_domain, sub_prefix = await _resolve_subscription_target(session, wi_sub)
+    if not sub_domain:
+        await callback.answer(texts.WL_DOMAIN_UNCONFIGURED, show_alert=True)
+        return
+
+    sub_url = _build_subscription_url(sub_domain, wi_sub.token, sub_prefix=sub_prefix)
+    await callback.message.answer(
+        texts.ADMIN_WI_LINK_INFO.format(telegram_id=telegram_id, link=sub_url),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_wi_token_reset_confirm:"))
+async def admin_wi_token_reset_confirm(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    await callback.answer(show_alert=False)
+
+    text = texts.ADMIN_WI_TOKEN_RESET_CONFIRM_TITLE.format(telegram_id=telegram_id)
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_admin_confirm_action_keyboard(
+                confirm_callback=f"admin_wi_token_reset_apply:{telegram_id}",
+                cancel_callback=f"admin_sub_wi_menu:{telegram_id}",
+            ),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug("admin_wi_token_reset_confirm edit_text failed: %s", e)
+
+
+@router.callback_query(F.data.startswith("admin_wi_token_reset_apply:"))
+async def admin_wi_token_reset_apply(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if not wi_sub:
+        await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
+        return
+
+    try:
+        await white_internet_repo.reset_subscription_token_atomic(
+            session, wi_sub.id, reset_hwids=True
+        )
+    except white_internet_repo.WhiteInternetError as e:
+        await session.rollback()
+        await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=str(e)), show_alert=True)
+        return
+
+    await AuditService.log_action(
+        session,
+        admin_id=callback.from_user.id,
+        action=AdminAuditAction.WHITE_INTERNET_TOKEN_RESET,
+        target_type="user",
+        target_id=user.id,
+        details={
+            "telegram_id": telegram_id,
+            "subscription_id": wi_sub.id,
+            "token_rotated": True,
+        },
+    )
+
+    await callback.answer(texts.ADMIN_WI_TOKEN_RESET_SUCCESS, show_alert=True)
     callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
@@ -1289,12 +1425,23 @@ async def admin_wi_devices_view(
         devices_list=devices_list,
     )
 
+    sub_url: str | None = None
+    if wi_sub and getattr(wi_sub, "token", None):
+        try:
+            from bot.handlers.white_internet import _build_subscription_url, _resolve_subscription_target
+            sub_domain, sub_prefix = await _resolve_subscription_target(session, wi_sub)
+            if sub_domain:
+                sub_url = _build_subscription_url(sub_domain, wi_sub.token, sub_prefix=sub_prefix)
+        except Exception as e:
+            logger.debug("admin_wi_devices_view resolve sub_url failed: %s", e)
+
     try:
         await callback.message.edit_text(
             text,
             reply_markup=get_admin_wi_devices_keyboard(
                 telegram_id,
                 has_hwids=bool(raw_hwids),
+                sub_url=sub_url,
             ),
             parse_mode="HTML",
         )

@@ -178,6 +178,39 @@ async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
     return success
 
 
+async def _probe_single_ingress_endpoint(
+    session: aiohttp.ClientSession,
+    domain: str,
+    sub_prefix: str,
+) -> tuple[bool, str]:
+    """Synthetic HTTP probe for a single White Internet subscription endpoint."""
+    probe_url = f"https://{domain}{sub_prefix}/ping"
+    for attempt in range(3):
+        try:
+            async with session.get(
+                probe_url,
+                allow_redirects=False,
+            ) as probe_resp:
+                if probe_resp.status == 200:
+                    return (True, "200")
+                if attempt < 2 and probe_resp.status in (502, 503, 504):
+                    await asyncio.sleep(INGRESS_RETRY_DELAY * (attempt + 1))
+                    continue
+                return (False, str(probe_resp.status))
+        except Exception as probe_exc:
+            if attempt < 2:
+                await asyncio.sleep(INGRESS_RETRY_DELAY * (attempt + 1))
+                continue
+            err_msg = str(probe_exc).strip()
+            if not err_msg:
+                if isinstance(probe_exc, (asyncio.TimeoutError, TimeoutError)):
+                    err_msg = ALERT_INGRESS_ERR_TIMEOUT
+                else:
+                    err_msg = type(probe_exc).__name__
+            return (False, err_msg)
+    return (False, "UNKNOWN")
+
+
 async def check_node_resources_and_alerts(bot: Bot):
     async with session_scope() as session:
         servers = await get_all_servers(session)
@@ -270,71 +303,73 @@ async def check_node_resources_and_alerts(bot: Bot):
                     or bool((getattr(server, "extra_data", None) or {}).get("cdn_domain"))
                 )
                 if is_origin:
+                    origin_domain: str | None = None
+                    cdn_domain: str | None = None
                     if isinstance(getattr(server, "extra_data", None), dict):
-                        probe_domain = server.extra_data.get("cdn_domain") or server.extra_data.get("domain")
-                    if not probe_domain and server.api_url:
+                        origin_domain = server.extra_data.get("domain")
+                        cdn_domain = server.extra_data.get("cdn_domain")
+                    if not origin_domain and server.api_url:
                         from urllib.parse import urlsplit
                         parsed = urlsplit(server.api_url)
                         if parsed.hostname and not parsed.hostname.replace(".", "").isdigit() and parsed.hostname != "localhost":
-                            probe_domain = parsed.hostname
+                            origin_domain = parsed.hostname
 
-                    if probe_domain:
-                        probe_domain = str(probe_domain).strip()
-                        raw_sub_prefix = None
-                        if isinstance(getattr(server, "extra_data", None), dict):
-                            raw_sub_prefix = server.extra_data.get("sub_path_prefix")
-                        sub_prefix = (
-                            raw_sub_prefix if isinstance(raw_sub_prefix, str) and raw_sub_prefix.strip()
-                            else (os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX)
-                        ).strip().rstrip("/")
-                        if not sub_prefix.startswith("/"):
-                            sub_prefix = f"/{sub_prefix}"
-                        probe_url = f"https://{probe_domain}{sub_prefix}/ping"
-                        try:
-                            timeout = aiohttp.ClientTimeout(total=15.0, connect=10.0)
-                            connector = aiohttp.TCPConnector(family=socket.AF_INET)
-                            async with aiohttp.ClientSession(timeout=timeout, connector=connector) as probe_sess:
-                                for attempt in range(3):
-                                    try:
-                                        async with probe_sess.get(
-                                            probe_url,
-                                            allow_redirects=False,
-                                        ) as probe_resp:
-                                            if probe_resp.status == 200:
-                                                ingress_probe_result = (True, "200")
-                                                break
-                                            if attempt < 2 and probe_resp.status in (502, 503, 504):
-                                                await asyncio.sleep(INGRESS_RETRY_DELAY * (attempt + 1))
-                                                continue
-                                            logger.warning(
-                                                "Xray origin node %s (%s) subscription proxy returned HTTP %s on %s",
-                                                server.id, probe_domain, probe_resp.status, probe_url,
-                                            )
-                                            ingress_probe_result = (False, str(probe_resp.status))
-                                            break
-                                    except Exception as probe_exc:
-                                        if attempt < 2:
-                                            await asyncio.sleep(INGRESS_RETRY_DELAY * (attempt + 1))
-                                            continue
-                                        err_msg = str(probe_exc).strip()
-                                        if not err_msg:
-                                            if isinstance(probe_exc, (asyncio.TimeoutError, TimeoutError)):
-                                                err_msg = ALERT_INGRESS_ERR_TIMEOUT
-                                            else:
-                                                err_msg = type(probe_exc).__name__
-                                        logger.warning(
-                                            "Origin node %s (%s) subscription proxy ping failed on %s: %s",
-                                            server.id, probe_domain, probe_url, err_msg,
-                                        )
-                                        ingress_probe_result = (False, err_msg)
-                                        break
-                        except Exception as probe_outer_exc:
-                            err_msg = str(probe_outer_exc).strip() or type(probe_outer_exc).__name__
-                            logger.warning(
-                                "Origin node %s (%s) subscription proxy unexpected error on %s: %s",
-                                server.id, probe_domain, probe_url, err_msg,
+                    if origin_domain:
+                        origin_domain = str(origin_domain).strip()
+                    if cdn_domain:
+                        cdn_domain = str(cdn_domain).strip()
+
+                    raw_sub_prefix = None
+                    if isinstance(getattr(server, "extra_data", None), dict):
+                        raw_sub_prefix = server.extra_data.get("sub_path_prefix")
+                    sub_prefix = (
+                        raw_sub_prefix if isinstance(raw_sub_prefix, str) and raw_sub_prefix.strip()
+                        else (os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX)
+                    ).strip().rstrip("/")
+                    if not sub_prefix.startswith("/"):
+                        sub_prefix = f"/{sub_prefix}"
+
+                    timeout = aiohttp.ClientTimeout(total=15.0, connect=10.0)
+                    connector = aiohttp.TCPConnector(family=socket.AF_INET)
+                    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as probe_sess:
+                        if origin_domain and cdn_domain and origin_domain != cdn_domain:
+                            # Dual probe: probe both Origin and CDN in parallel
+                            res_origin, res_cdn = await asyncio.gather(
+                                _probe_single_ingress_endpoint(probe_sess, origin_domain, sub_prefix),
+                                _probe_single_ingress_endpoint(probe_sess, cdn_domain, sub_prefix),
                             )
-                            ingress_probe_result = (False, err_msg)
+                            origin_ok, origin_detail = res_origin
+                            cdn_ok, cdn_detail = res_cdn
+
+                            probe_domain = cdn_domain or origin_domain
+
+                            if origin_ok:
+                                # Origin Nginx is healthy (200 OK) -> zero false alerts
+                                ingress_probe_result = (True, "200")
+                                if not cdn_ok:
+                                    logger.info(
+                                        "Xray origin node %s Origin (%s) is healthy (200), but CDN (%s) returned %s. Suppressing false alert.",
+                                        server.id, origin_domain, cdn_domain, cdn_detail,
+                                    )
+                            else:
+                                # Origin itself failed: report genuine failure
+                                ingress_probe_result = (False, origin_detail)
+                                logger.warning(
+                                    "Xray origin node %s Origin (%s) probe failed: %s (CDN %s returned %s)",
+                                    server.id, origin_domain, origin_detail, cdn_domain, cdn_detail,
+                                )
+                        else:
+                            target_domain = cdn_domain or origin_domain
+                            if target_domain:
+                                probe_domain = target_domain
+                                ingress_probe_result = await _probe_single_ingress_endpoint(
+                                    probe_sess, target_domain, sub_prefix
+                                )
+                                if not ingress_probe_result[0]:
+                                    logger.warning(
+                                        "Xray node %s (%s) subscription proxy probe failed: %s",
+                                        server.id, target_domain, ingress_probe_result[1],
+                                    )
             except Exception as outer_probe_exc:
                 logger.warning(
                     "Unexpected error preparing ingress probe for server %s: %s",
