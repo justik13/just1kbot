@@ -35,7 +35,6 @@ from config.enums import (
 )
 from database.models import Server, User, WhiteInternetSubscription
 from services.white_internet_service import WhiteInternetService
-from services.workers.account_balance import process_balance_purchase_notifications
 from services.workers.node_monitor import (
     ServerMonitorState,
     check_node_resources_and_alerts,
@@ -82,41 +81,6 @@ class TestWhiteInternetProductionFixes(unittest.IsolatedAsyncioTestCase):
             query.message.answer.assert_not_called()
             # query.answer must be called with traffic up to date alert
             query.answer.assert_called_once_with(texts.WL_ALERT_TRAFFIC_UP_TO_DATE, show_alert=False)
-
-    async def test_account_balance_purchase_notification_ignores_white_internet_quotes(self):
-        """process_balance_purchase_notifications only processes AWG quotes, ignoring white_internet."""
-        bot = MagicMock()
-        bot.send_message = AsyncMock()
-
-        executed_statements = []
-
-        class MockResult:
-            def all(self):
-                return []
-
-        async def mock_execute(stmt):
-            compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
-            executed_statements.append(compiled)
-            return MockResult()
-
-        session_mock = AsyncMock()
-        session_mock.execute = mock_execute
-
-        class SessionContext:
-            async def __aenter__(self):
-                return session_mock
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-        with patch("services.workers.account_balance.session_scope", return_value=SessionContext()):
-            await process_balance_purchase_notifications(bot)
-
-            self.assertTrue(len(executed_statements) > 0)
-            query_sql = executed_statements[0]
-            # Ensure query explicitly checks tariff_quotes.service_type = 'awg'
-            self.assertIn("tariff_quotes.service_type =", query_sql)
-            self.assertIn("'awg'", query_sql)
 
     def test_white_internet_new_quote_sets_purchase_notified_at(self):
         """WhiteInternetService._new_quote stamps purchase_notified_at to prevent bogus balance alerts."""

@@ -775,6 +775,14 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_RENEW_SUCCESS"))
         self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_ADD_DEVICE_SUCCESS"))
         self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_PACK_SUCCESS_TEMPLATE"))
+        self.assertFalse(hasattr(texts, "BALANCE_PURCHASE_SUCCESS_NOTIFICATION"))
+        self.assertFalse(hasattr(texts, "TITLE_SUBSCRIPTION_EXTENDED"))
+        self.assertFalse(hasattr(texts, "TITLE_TARIFF_CHANGED"))
+        self.assertFalse(hasattr(texts, "ADMIN_DASHBOARD_FINANCE_BADGE"))
+        self.assertFalse(hasattr(texts, "DASHBOARD_ATTENTION_ATTENTION"))
+        self.assertFalse(hasattr(texts, "DASHBOARD_STALE_TASKS_V_OCHEREDYAK"))
+        self.assertFalse(hasattr(texts, "DASHBOARD_OPEN_PLATEZHNYKH_DISPUTES"))
+        self.assertFalse(hasattr(texts, "ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES"))
 
 
 if __name__ == "__main__":

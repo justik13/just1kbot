@@ -44,18 +44,23 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         self.assertEqual(rev_0005.down_revision, "0004_referral_entitlements")
 
     def test_action_lock_prefixes_updated(self):
-        self.assertIn("admin_payment_refund_confirm:", LOCKED_ACTION_PREFIXES)
-        self.assertIn("admin_payment_refund_confirm:", STALE_ACTION_PREFIXES)
         self.assertIn("confirm_admin_balance_apply", LOCKED_ACTION_PREFIXES)
         self.assertIn("confirm_admin_balance_apply", STALE_ACTION_PREFIXES)
         self.assertIn("confirm_mass_bonus_apply", LOCKED_ACTION_PREFIXES)
         self.assertIn("confirm_mass_bonus_apply", STALE_ACTION_PREFIXES)
-        self.assertIn("admin_dispute_apply:", LOCKED_ACTION_PREFIXES)
-        self.assertIn("admin_dispute_apply:", STALE_ACTION_PREFIXES)
-        self.assertIn("balance_resume_purchase:", LOCKED_ACTION_PREFIXES)
-        self.assertIn("balance_resume_purchase:", STALE_ACTION_PREFIXES)
-        self.assertIn("aq:x:", LOCKED_ACTION_PREFIXES)
-        self.assertIn("aq:x:", STALE_ACTION_PREFIXES)
+
+        for dead_prefix in (
+            "admin_payment_refund_confirm:",
+            "admin_dispute_apply:",
+            "balance_resume_purchase:",
+            "balance_purchase_confirm:",
+            "balance_change_confirm:",
+            "bal_short_exact:",
+            "bal_chg_short_exact:",
+            "aq:x:",
+        ):
+            self.assertNotIn(dead_prefix, LOCKED_ACTION_PREFIXES)
+            self.assertNotIn(dead_prefix, STALE_ACTION_PREFIXES)
 
         for prefix in (
             "admin_wi_traffic_add:",
