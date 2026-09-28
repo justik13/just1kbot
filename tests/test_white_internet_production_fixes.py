@@ -272,7 +272,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertEqual(call_args["chat_id"], 999999)
-            self.assertIn("cdn.just1k.best", call_args["text"])
+            self.assertIn("origin.just1k.best", call_args["text"])
             self.assertIn("502", call_args["text"])
 
         # Reset bot mock for Check 2
@@ -301,7 +301,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertEqual(call_args["chat_id"], 999999)
-            self.assertIn("cdn.just1k.best", call_args["text"])
+            self.assertIn("origin.just1k.best", call_args["text"])
             self.assertIn("восстановлено", call_args["text"])
 
     async def test_node_monitor_ingress_probe_flags_404_non_200_as_failure(self):
@@ -648,17 +648,19 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
-            extra_data={"ingress_problem": True, "cdn_domain": "cdn.just1k.best"},
+            extra_data={"ingress_problem": True, "cdn_problem": True, "cdn_domain": "cdn.just1k.best"},
         )
         state = ServerMonitorState(server_id=42)
         state.sync_from_db_server(server)
         self.assertTrue(state.ingress_problem)
+        self.assertTrue(state.cdn_problem)
 
         # And when False or missing, state is False
         server.extra_data = {"cdn_domain": "cdn.just1k.best"}
         state2 = ServerMonitorState(server_id=42)
         state2.sync_from_db_server(server)
         self.assertFalse(state2.ingress_problem)
+        self.assertFalse(state2.cdn_problem)
 
 
     async def test_node_monitor_ingress_alert_delivery_failure_allows_retry(self):
@@ -1640,6 +1642,197 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_text = bot.send_message.call_args[1]["text"]
             self.assertIn("502", call_text)
+
+    async def test_node_monitor_dual_probe_alerts_on_persistent_cdn_failure(self):
+        """When Origin is healthy (200 OK) but CDN persistently fails (>= 5 cycles):
+        1. Cycles 1..4: CDN failure is treated as transient noise; NO alert is sent.
+        2. Cycle 5: Persistent CDN failure threshold is reached; ALERT_CDN_INGRESS_PROBLEM is dispatched.
+        3. Core node and Origin ingress remain healthy (ingress_problem=False, cdn_problem=True).
+        """
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
+
+        server = Server(
+            id=20,
+            name="Origin CDN Outage Test",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={
+                "domain": "origin.just1k.best",
+                "cdn_domain": "cdn.just1k.best",
+            },
+        )
+
+        class MockProbeResponse:
+            def __init__(self, status):
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockDualProbeCdnFailingSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            def get(self, url, **kwargs):
+                if "origin.just1k.best" in url:
+                    return MockProbeResponse(status=200)
+                # CDN returns 504 Gateway Timeout
+                return MockProbeResponse(status=504)
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession", lambda **kw: MockDualProbeCdnFailingSession()), \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            # Cycles 1 to 4: suppressed, no alert
+            for _ in range(1, 5):
+                await check_node_resources_and_alerts(bot)
+                bot.send_message.assert_not_called()
+
+            # Cycle 5: threshold reached, alert dispatched!
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_called_once()
+            call_text = bot.send_message.call_args[1]["text"]
+            self.assertIn("cdn.just1k.best", call_text)
+            self.assertIn("origin.just1k.best", call_text)
+            self.assertIn("504", call_text)
+            self.assertIn("CDN", call_text)
+
+            from services.workers.node_monitor import get_server_monitor_state
+            st = get_server_monitor_state(server.id)
+            self.assertTrue(st.cdn_problem)
+            self.assertFalse(st.ingress_problem)
+            self.assertEqual(st.consecutive_cdn_fails, 5)
+
+    async def test_node_monitor_dual_probe_cdn_restoration(self):
+        """When CDN recovers after persistent failure:
+        1. Cycle 1 of 200 OK: debounced (needs 2 consecutive successes).
+        2. Cycle 2 of 200 OK: ALERT_CDN_INGRESS_RESTORED dispatched and cdn_problem cleared.
+        """
+        clear_monitor_states()
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=1))
+
+        server = Server(
+            id=21,
+            name="Origin CDN Restore Test",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://194.113.106.134:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["xray_origin"],
+            extra_data={
+                "domain": "origin.just1k.best",
+                "cdn_domain": "cdn.just1k.best",
+                "cdn_problem": True,
+                "consecutive_cdn_fails": 5,
+            },
+        )
+
+        class MockProbeResponse:
+            def __init__(self, status):
+                self.status = status
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockDualProbeRecoveredSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            def get(self, url, **kwargs):
+                return MockProbeResponse(status=200)
+
+        class MockXrayClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+            async def check_health(self, api_url, api_key):
+                return True, 1, {"status": "ok"}
+
+        session_mock = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.ADMIN_IDS = [999999]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.session_scope") as mock_scope, \
+             patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
+             patch("services.workers.node_monitor.aiohttp.ClientSession", lambda **kw: MockDualProbeRecoveredSession()), \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock, return_value=(True, server)), \
+             patch("services.workers.node_monitor.update_server_health_snapshot", new_callable=AsyncMock) as mock_snap, \
+             patch("services.workers.node_monitor.get_server_by_id", new_callable=AsyncMock, return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor.get_settings", return_value=mock_settings):
+
+            mock_scope.return_value.__aenter__.return_value = session_mock
+            mock_snap.return_value = (server, True)
+
+            # Cycle 1: single success debounced (threshold is 2)
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Cycle 2: 2nd consecutive success confirms recovery
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_called_once()
+            call_text = bot.send_message.call_args[1]["text"]
+            self.assertIn("cdn.just1k.best", call_text)
+            self.assertIn("восстановлена", call_text)
+
+            from services.workers.node_monitor import get_server_monitor_state
+            st = get_server_monitor_state(server.id)
+            self.assertFalse(st.cdn_problem)
 
     def test_safe_format_device_template(self):
         """_safe_format_device_template correctly replaces {devices}, {limit}, {active} and preserves unknown braces."""

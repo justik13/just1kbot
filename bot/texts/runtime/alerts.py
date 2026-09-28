@@ -113,5 +113,21 @@ ALERT_INGRESS_RESTORED = """✅ <b>Проксирование подписок �
 ALERT_INGRESS_ERR_TIMEOUT = "Timeout (таймаут соединения)"
 ALERT_INGRESS_ERR_NETWORK = "недоступен (ошибка сети)"
 
+ALERT_CDN_INGRESS_PROBLEM = """⚠️ <b>Проблема с доставкой подписок через CDN (Яндекс Облако)</b>
+
+🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
+🌐 CDN Домен: <code>{domain}</code> (Origin: <code>{origin_domain}</code>)
+Ошибка: Эндпоинт <code>{endpoint}</code> через CDN вернул статус {status_or_err}.
+
+ℹ️ <i>Origin Nginx доступен (200 OK), но CDN стабильно не доставляет запросы.</i>
+🔍 <b>Проверьте баланс Яндекс Облака, сертификат в Certificate Manager и статус CDN-ресурса.</b>"""
+
+ALERT_CDN_INGRESS_RESTORED = """✅ <b>Доставка подписок через CDN восстановлена</b>
+
+🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
+🌐 CDN Домен: <code>{domain}</code>
+Эндпоинт <code>{endpoint}</code> через CDN снова отвечает 200 OK."""
+
+
 
 

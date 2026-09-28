@@ -19,6 +19,8 @@ from bot.texts.runtime.alerts import (
     ALERT_INGRESS_ERR_TIMEOUT,
     ALERT_INGRESS_PROBLEM,
     ALERT_INGRESS_RESTORED,
+    ALERT_CDN_INGRESS_PROBLEM,
+    ALERT_CDN_INGRESS_RESTORED,
     ALERT_SERVER_AUTO_DISABLED,
     ALERT_SERVER_AUTO_DISABLED_RECOVERED,
     ALERT_SERVER_DISK_CRITICAL,
@@ -57,6 +59,7 @@ AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими п
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
 REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 45-60с) перед отправкой алерта
+REQUIRED_CDN_FAILS = 5  # Требуется 5 циклов сбоя подряд (~100-120с) для фильтрации трансграничного шума
 REQUIRED_INGRESS_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
 INGRESS_RETRY_DELAY = 1.5  # Базовая задержка перед повторным запросом зонда при ошибке/таймауте
 # A hung node can hold a healthcheck for tens of seconds; checking servers in
@@ -80,6 +83,9 @@ class ServerMonitorState:
         self.ingress_problem: bool = False
         self.consecutive_ingress_fails: int = 0
         self.consecutive_ingress_successes: int = 0
+        self.cdn_problem: bool = False
+        self.consecutive_cdn_fails: int = 0
+        self.consecutive_cdn_successes: int = 0
 
     def sync_from_db_server(self, db_server: Server):
         if db_server:
@@ -99,10 +105,16 @@ class ServerMonitorState:
                 self.ingress_problem = bool(db_server.extra_data.get("ingress_problem", False))
                 self.consecutive_ingress_fails = int(db_server.extra_data.get("consecutive_ingress_fails", 0) or 0)
                 self.consecutive_ingress_successes = int(db_server.extra_data.get("consecutive_ingress_successes", 0) or 0)
+                self.cdn_problem = bool(db_server.extra_data.get("cdn_problem", False))
+                self.consecutive_cdn_fails = int(db_server.extra_data.get("consecutive_cdn_fails", 0) or 0)
+                self.consecutive_cdn_successes = int(db_server.extra_data.get("consecutive_cdn_successes", 0) or 0)
             else:
                 self.ingress_problem = False
                 self.consecutive_ingress_fails = 0
                 self.consecutive_ingress_successes = 0
+                self.cdn_problem = False
+                self.consecutive_cdn_fails = 0
+                self.consecutive_cdn_successes = 0
 
             if db_server.problem_started_at:
                 now_m = time.monotonic()
@@ -149,6 +161,9 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.ingress_problem = False
     st.consecutive_ingress_fails = 0
     st.consecutive_ingress_successes = 0
+    st.cdn_problem = False
+    st.consecutive_cdn_fails = 0
+    st.consecutive_cdn_successes = 0
 
 
 def clear_monitor_states():
@@ -293,8 +308,20 @@ async def check_node_resources_and_alerts(bot: Bot):
         # 4b. Изолированная синтетическая проверка Ingress (публичный CDN / Nginx Origin)
         # Строгое расцепление (AGENTS.md §9.7): сбои на синтетическом эндпоинте не аффектят статус ядра
         # и выполняются независимо от того, успешен ли был core healthcheck.
-        ingress_probe_result: tuple[bool, str] | None = None
-        probe_domain: str | None = None
+        origin_probe_result: tuple[bool, str] | None = None
+        cdn_probe_result: tuple[bool, str] | None = None
+        origin_domain: str | None = None
+        cdn_domain: str | None = None
+        raw_sub_prefix = None
+        if isinstance(getattr(server, "extra_data", None), dict):
+            raw_sub_prefix = server.extra_data.get("sub_path_prefix")
+        sub_prefix = (
+            raw_sub_prefix if isinstance(raw_sub_prefix, str) and raw_sub_prefix.strip()
+            else (os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX)
+        ).strip().rstrip("/")
+        if not sub_prefix.startswith("/"):
+            sub_prefix = f"/{sub_prefix}"
+
         if is_xray_node:
             try:
                 is_origin = (
@@ -303,8 +330,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                     or bool((getattr(server, "extra_data", None) or {}).get("cdn_domain"))
                 )
                 if is_origin:
-                    origin_domain: str | None = None
-                    cdn_domain: str | None = None
                     if isinstance(getattr(server, "extra_data", None), dict):
                         origin_domain = server.extra_data.get("domain")
                         cdn_domain = server.extra_data.get("cdn_domain")
@@ -319,16 +344,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if cdn_domain:
                         cdn_domain = str(cdn_domain).strip()
 
-                    raw_sub_prefix = None
-                    if isinstance(getattr(server, "extra_data", None), dict):
-                        raw_sub_prefix = server.extra_data.get("sub_path_prefix")
-                    sub_prefix = (
-                        raw_sub_prefix if isinstance(raw_sub_prefix, str) and raw_sub_prefix.strip()
-                        else (os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX)
-                    ).strip().rstrip("/")
-                    if not sub_prefix.startswith("/"):
-                        sub_prefix = f"/{sub_prefix}"
-
                     timeout = aiohttp.ClientTimeout(total=15.0, connect=10.0)
                     connector = aiohttp.TCPConnector(family=socket.AF_INET)
                     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as probe_sess:
@@ -338,38 +353,15 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 _probe_single_ingress_endpoint(probe_sess, origin_domain, sub_prefix),
                                 _probe_single_ingress_endpoint(probe_sess, cdn_domain, sub_prefix),
                             )
-                            origin_ok, origin_detail = res_origin
-                            cdn_ok, cdn_detail = res_cdn
-
-                            probe_domain = cdn_domain or origin_domain
-
-                            if origin_ok:
-                                # Origin Nginx is healthy (200 OK) -> zero false alerts
-                                ingress_probe_result = (True, "200")
-                                if not cdn_ok:
-                                    logger.info(
-                                        "Xray origin node %s Origin (%s) is healthy (200), but CDN (%s) returned %s. Suppressing false alert.",
-                                        server.id, origin_domain, cdn_domain, cdn_detail,
-                                    )
-                            else:
-                                # Origin itself failed: report genuine failure
-                                ingress_probe_result = (False, origin_detail)
-                                logger.warning(
-                                    "Xray origin node %s Origin (%s) probe failed: %s (CDN %s returned %s)",
-                                    server.id, origin_domain, origin_detail, cdn_domain, cdn_detail,
-                                )
+                            origin_probe_result = res_origin
+                            cdn_probe_result = res_cdn
                         else:
                             target_domain = cdn_domain or origin_domain
                             if target_domain:
-                                probe_domain = target_domain
-                                ingress_probe_result = await _probe_single_ingress_endpoint(
+                                origin_probe_result = await _probe_single_ingress_endpoint(
                                     probe_sess, target_domain, sub_prefix
                                 )
-                                if not ingress_probe_result[0]:
-                                    logger.warning(
-                                        "Xray node %s (%s) subscription proxy probe failed: %s",
-                                        server.id, target_domain, ingress_probe_result[1],
-                                    )
+                                cdn_probe_result = None
             except Exception as outer_probe_exc:
                 logger.warning(
                     "Unexpected error preparing ingress probe for server %s: %s",
@@ -377,12 +369,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                 )
 
         alerts_to_send: list[dict] = []
+        ingress_alerts_to_send: list[tuple[str, str, object, bool]] = []
 
         # Decoupled ingress alert evaluation and delivery (independent of core server CAS / health state)
-        if ingress_probe_result is not None and probe_domain:
-            ingress_ok, ingress_detail = ingress_probe_result
+        if origin_probe_result is not None:
             lock_key = 8_000_000_000 + int(server.id)
-            alert_to_send: tuple[str, object, bool] | None = None
 
             async with session_scope() as session:
                 bind = getattr(session, "bind", None)
@@ -399,6 +390,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     fresh_server = await get_server_by_id(session, server.id)
                     db_extra = dict((fresh_server.extra_data if fresh_server else server.extra_data) or {})
                     db_ingress_problem = bool(db_extra.get("ingress_problem"))
+                    db_cdn_problem = bool(db_extra.get("cdn_problem"))
 
                     # Durable-by-Default: sync in-memory state with DB
                     if db_ingress_problem:
@@ -408,10 +400,22 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if "consecutive_ingress_successes" in db_extra:
                         st.consecutive_ingress_successes = int(db_extra.get("consecutive_ingress_successes") or 0)
 
-                    has_problem = db_ingress_problem or st.ingress_problem
+                    if db_cdn_problem:
+                        st.cdn_problem = True
+                    if "consecutive_cdn_fails" in db_extra:
+                        st.consecutive_cdn_fails = int(db_extra.get("consecutive_cdn_fails") or 0)
+                    if "consecutive_cdn_successes" in db_extra:
+                        st.consecutive_cdn_successes = int(db_extra.get("consecutive_cdn_successes") or 0)
+
+                    has_ingress_problem = db_ingress_problem or st.ingress_problem
+                    has_cdn_problem = db_cdn_problem or st.cdn_problem
                     extra_changed = False
 
-                    if not ingress_ok:
+                    origin_ok, origin_detail = origin_probe_result
+                    active_origin_domain = origin_domain or cdn_domain or server.name
+
+                    # 1. Evaluate Origin Ingress
+                    if not origin_ok:
                         st.consecutive_ingress_fails += 1
                         st.consecutive_ingress_successes = 0
                         if (
@@ -422,18 +426,19 @@ async def check_node_resources_and_alerts(bot: Bot):
                             db_extra["consecutive_ingress_successes"] = 0
                             extra_changed = True
 
-                        if not has_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
-                            alert_to_send = (
+                        if not has_ingress_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
+                            ingress_alerts_to_send.append((
+                                "ingress",
                                 ALERT_INGRESS_PROBLEM.format(
                                     server_name=safe(server.name),
                                     server_id=server.id,
-                                    domain=safe(probe_domain),
-                                    status_or_err=safe(ingress_detail),
+                                    domain=safe(active_origin_domain),
+                                    status_or_err=safe(origin_detail),
                                     endpoint=safe(f"{sub_prefix}/ping"),
                                 ),
                                 get_node_monitor_alert_keyboard(server.id).as_markup(),
                                 True,
-                            )
+                            ))
                     else:
                         st.consecutive_ingress_successes += 1
                         st.consecutive_ingress_fails = 0
@@ -445,24 +450,86 @@ async def check_node_resources_and_alerts(bot: Bot):
                             db_extra["consecutive_ingress_fails"] = 0
                             extra_changed = True
 
-                        if has_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
-                            alert_to_send = (
+                        if has_ingress_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
+                            ingress_alerts_to_send.append((
+                                "ingress",
                                 ALERT_INGRESS_RESTORED.format(
                                     server_name=safe(server.name),
                                     server_id=server.id,
-                                    domain=safe(probe_domain),
+                                    domain=safe(active_origin_domain),
                                     endpoint=safe(f"{sub_prefix}/ping"),
                                 ),
                                 get_node_monitor_alert_keyboard(server.id).as_markup(),
                                 False,
-                            )
+                            ))
+
+                    # 2. Evaluate CDN Delivery (only in dual probe mode when origin is healthy)
+                    if cdn_probe_result is not None and cdn_domain:
+                        cdn_ok, cdn_detail = cdn_probe_result
+                        if origin_ok:
+                            if cdn_ok:
+                                st.consecutive_cdn_successes += 1
+                                st.consecutive_cdn_fails = 0
+                                if (
+                                    db_extra.get("consecutive_cdn_successes") != st.consecutive_cdn_successes
+                                    or db_extra.get("consecutive_cdn_fails") != 0
+                                ):
+                                    db_extra["consecutive_cdn_successes"] = st.consecutive_cdn_successes
+                                    db_extra["consecutive_cdn_fails"] = 0
+                                    extra_changed = True
+
+                                if has_cdn_problem and st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                    ingress_alerts_to_send.append((
+                                        "cdn",
+                                        ALERT_CDN_INGRESS_RESTORED.format(
+                                            server_name=safe(server.name),
+                                            server_id=server.id,
+                                            domain=safe(cdn_domain),
+                                            endpoint=safe(f"{sub_prefix}/ping"),
+                                        ),
+                                        get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                        False,
+                                    ))
+                            else:
+                                st.consecutive_cdn_fails += 1
+                                st.consecutive_cdn_successes = 0
+                                if (
+                                    db_extra.get("consecutive_cdn_fails") != st.consecutive_cdn_fails
+                                    or db_extra.get("consecutive_cdn_successes") != 0
+                                ):
+                                    db_extra["consecutive_cdn_fails"] = st.consecutive_cdn_fails
+                                    db_extra["consecutive_cdn_successes"] = 0
+                                    extra_changed = True
+
+                                if st.consecutive_cdn_fails < REQUIRED_CDN_FAILS:
+                                    logger.info(
+                                        "Xray origin node %s Origin (%s) is healthy (200), but CDN (%s) returned %s (%d/%d fails). Suppressing transient alert.",
+                                        server.id, active_origin_domain, cdn_domain, cdn_detail, st.consecutive_cdn_fails, REQUIRED_CDN_FAILS,
+                                    )
+                                elif not has_cdn_problem:
+                                    logger.warning(
+                                        "Xray origin node %s CDN (%s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
+                                        server.id, cdn_domain, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
+                                    )
+                                    ingress_alerts_to_send.append((
+                                        "cdn",
+                                        ALERT_CDN_INGRESS_PROBLEM.format(
+                                            server_name=safe(server.name),
+                                            server_id=server.id,
+                                            domain=safe(cdn_domain),
+                                            origin_domain=safe(active_origin_domain),
+                                            status_or_err=safe(cdn_detail),
+                                            endpoint=safe(f"{sub_prefix}/ping"),
+                                        ),
+                                        get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                        True,
+                                    ))
 
                     if extra_changed and fresh_server:
                         await update_server(session, fresh_server, extra_data=db_extra)
 
             # Decoupled alert dispatch outside DB transaction and advisory lock
-            if alert_to_send is not None:
-                alert_text, alert_kb, is_problem = alert_to_send
+            for alert_kind, alert_text, alert_kb, is_problem in ingress_alerts_to_send:
                 sent_ok = False
                 try:
                     sent_ok = await _send_admin_alert_msg(
@@ -471,17 +538,18 @@ async def check_node_resources_and_alerts(bot: Bot):
                         reply_markup=alert_kb,
                     )
                 except Exception as e:
-                    logger.error("Failed to deliver ingress alert for server %d: %s", server.id, e)
+                    logger.error("Failed to deliver %s alert for server %d: %s", alert_kind, server.id, e)
                 if sent_ok:
-                    st.ingress_problem = is_problem
+                    state_prop = "cdn_problem" if alert_kind == "cdn" else "ingress_problem"
+                    setattr(st, state_prop, is_problem)
                     async with session_scope() as session:
                         fresh = await get_server_by_id(session, server.id)
                         if fresh:
                             cur_extra = dict(fresh.extra_data or {})
                             if is_problem:
-                                cur_extra["ingress_problem"] = True
+                                cur_extra[state_prop] = True
                             else:
-                                cur_extra.pop("ingress_problem", None)
+                                cur_extra.pop(state_prop, None)
                             await update_server(session, fresh, extra_data=cur_extra)
 
         if is_healthy:
