@@ -631,16 +631,38 @@ except Exception:
 
     # Генерация Nginx конфигурации
     local nginx_conf="/etc/nginx/sites-available/just1k-amnezia.conf"
-    if [[ $is_ip -eq 0 && -n "$ssl_reject_directive" ]]; then
-        cat > "$nginx_conf" <<EOF
-# 0. Catch-All: мгновенный сброс прямых сканирований по IP и неизвестным SNI
-server {
+    if [[ $is_ip -eq 0 ]]; then
+        local catchall_ssl_block=""
+        if [[ -n "$ssl_reject_directive" ]]; then
+            catchall_ssl_block="server {
     listen ${public_port} ssl default_server;
     listen [::]:${public_port} ssl default_server;
     server_name _;
     server_tokens off;
     ssl_reject_handshake on;
-}
+}"
+        else
+            local dummy_dir="${DUMMY_CERT_DIR:-${NGINX_CONF_DIR:-/etc/nginx}/fallback_ssl}"
+            mkdir -p "$dummy_dir"
+            if [[ ! -f "${dummy_dir}/dummy.crt" ]]; then
+                openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                    -keyout "${dummy_dir}/dummy.key" -out "${dummy_dir}/dummy.crt" \
+                    -subj "/CN=invalid" 2>/dev/null || true
+            fi
+            catchall_ssl_block="server {
+    listen ${public_port} ssl default_server;
+    listen [::]:${public_port} ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_certificate ${dummy_dir}/dummy.crt;
+    ssl_certificate_key ${dummy_dir}/dummy.key;
+    return 444;
+}"
+        fi
+
+        cat > "$nginx_conf" <<EOF
+# 0. Catch-All: мгновенный сброс прямых сканирований по IP и неизвестным SNI
+${catchall_ssl_block}
 
 # JUST1KNODE: AmneziaWG API Reverse Proxy
 server {

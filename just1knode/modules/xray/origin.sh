@@ -1187,12 +1187,20 @@ except Exception:
         fi
         local heal_origin_domain
         heal_origin_domain="$(get_state_val "domain" 2>/dev/null || true)"
+        local heal_dummy_dir="${DUMMY_CERT_DIR:-${NGINX_CONF_DIR}/fallback_ssl}"
+        mkdir -p "$heal_dummy_dir"
+        if [[ ! -f "${heal_dummy_dir}/dummy.crt" ]]; then
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                -keyout "${heal_dummy_dir}/dummy.key" -out "${heal_dummy_dir}/dummy.crt" \
+                -subj "/CN=invalid" 2>/dev/null || true
+        fi
 
         python3 -c "
 import sys, re, os
 conf_path = sys.argv[1]
 ssl_rej = (sys.argv[2] == '1')
 domain = sys.argv[3] if len(sys.argv) > 3 else ''
+dummy_dir = sys.argv[4] if len(sys.argv) > 4 else ''
 try:
     with open(conf_path, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -1214,14 +1222,14 @@ try:
     server_tokens off;
     ssl_reject_handshake on;
 }'''
-    elif domain and os.path.isfile(f'/etc/letsencrypt/live/{domain}/fullchain.pem'):
+    elif dummy_dir and os.path.isfile(f'{dummy_dir}/dummy.crt'):
         catchall_ssl = f'''server {{
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
     server_name _;
     server_tokens off;
-    ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;
+    ssl_certificate {dummy_dir}/dummy.crt;
+    ssl_certificate_key {dummy_dir}/dummy.key;
     return 444;
 }}'''
     else:
@@ -1252,6 +1260,16 @@ server {{
     server_tokens off;
     ssl_reject_handshake on;
 }'''
+            elif dummy_dir and os.path.isfile(f'{dummy_dir}/dummy.crt'):
+                return f'''server {{
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_certificate {dummy_dir}/dummy.crt;
+    ssl_certificate_key {dummy_dir}/dummy.key;
+    return 444;
+}}'''
             return b
         content = re.sub(r'server\s*\{[^}]*listen\s+443\s+ssl\s+default_server[^}]*\}', fix_catchall, content, flags=re.DOTALL)
 
@@ -1262,7 +1280,7 @@ server {{
     print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found, Catch-All защищен')
 except Exception:
     pass
-" "$origin_vhost" "$ssl_reject_supported" "$heal_origin_domain" 2>/dev/null || true
+" "$origin_vhost" "$ssl_reject_supported" "$heal_origin_domain" "$heal_dummy_dir" 2>/dev/null || true
     fi
 
     # Удаление дефолтного сайта, если он был случайно восстановлен

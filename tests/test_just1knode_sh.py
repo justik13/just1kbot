@@ -2251,7 +2251,18 @@ remove_traffic_watchdog_timer
         self.assertIn("dummy_dir=", origin_sh)
         self.assertIn("CN=invalid", origin_sh)
         self.assertIn("ssl_certificate ${dummy_dir}/dummy.crt;", origin_sh)
+        self.assertIn("ssl_certificate {dummy_dir}/dummy.crt;", origin_sh)
+        self.assertNotIn("ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;", origin_sh)
+
+    def test_amnezia_catchall_dummy_fallback_on_old_nginx(self):
+        """Verify amnezia fallback generates dummy cert instead of leaking domain cert on Nginx < 1.19.4."""
+        amnezia_sh = (REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
+        self.assertIn("dummy_dir=", amnezia_sh)
+        self.assertIn("CN=invalid", amnezia_sh)
+        self.assertIn("ssl_certificate ${dummy_dir}/dummy.crt;", amnezia_sh)
+        self.assertIn("listen ${public_port} ssl default_server;", amnezia_sh)
 
 
 if __name__ == "__main__":
     unittest.main()
+
