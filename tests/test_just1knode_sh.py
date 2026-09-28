@@ -1988,6 +1988,39 @@ remove_traffic_watchdog_timer
         origin_content = origin_sh.read_text(encoding="utf-8")
         self.assertIn('local resolved_servers="77.88.8.8 77.88.8.1 195.208.4.1"', origin_content)
 
+    def test_amnezia_dual_mode_nginx_and_certbot_coexistence(self):
+        """Verify Amnezia module properly handles port 80 coexistence, default site removal, and renewal hooks."""
+        amnezia_sh = REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh"
+        content = amnezia_sh.read_text(encoding="utf-8")
+
+        # 1. Removal of default site to prevent port 80 conflict with Docker proxies
+        self.assertIn('rm -f "/etc/nginx/sites-enabled/default"', content)
+        self.assertIn('default.user.bak', content)
+
+        # 2. UFW port 80 opening before Certbot challenge
+        self.assertIn('ufw allow 80/tcp comment "just1knode certbot verification"', content)
+
+        # 3. Temporary pausing and restoring amnezia-tproxy container
+        self.assertIn('docker stop amnezia-tproxy', content)
+        self.assertIn('docker start amnezia-tproxy', content)
+
+        # 4. Strict Nginx lifecycle check (no silenced failures)
+        self.assertIn('systemctl restart nginx', content)
+        self.assertIn('systemctl is-active --quiet nginx', content)
+
+        # 5. Wildcard and IP in server_name
+        self.assertIn('server_name ${api_domain} ${my_ip} _;', content)
+
+        # 6. Certbot pre/post/deploy renewal hooks
+        self.assertIn('pre/stop-port80-docker.sh', content)
+        self.assertIn('post/start-port80-docker.sh', content)
+        self.assertIn('deploy/restart-amnezia-nginx.sh', content)
+
+        # 7. Common lib installer purges default site immediately after apt install
+        common_sh = REPO_ROOT / "just1knode" / "lib" / "common.sh"
+        common_content = common_sh.read_text(encoding="utf-8")
+        self.assertIn('rm -f "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default"', common_content)
+
 
 if __name__ == "__main__":
     unittest.main()

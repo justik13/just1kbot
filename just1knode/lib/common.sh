@@ -91,8 +91,12 @@ install_nginx_if_missing() {
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
         apt-get install -y -qq nginx certbot python3-certbot-nginx ca-certificates
+        # Отключаем дефолтный сайт сразу после установки пакета для предотвращения конфликта портов
+        if [[ -f "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default" ]]; then
+            rm -f "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default" 2>/dev/null || true
+        fi
         systemctl enable nginx 2>/dev/null || true
-        systemctl start nginx 2>/dev/null || true
+        systemctl restart nginx 2>/dev/null || true
     fi
 }
 

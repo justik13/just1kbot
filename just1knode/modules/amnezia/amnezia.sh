@@ -105,14 +105,39 @@ remove_amnezia_abuse_protection() {
 }
 
 deploy_amnezia_certbot_renewal_hook() {
-    local hook_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy"
-    mkdir -p "$hook_dir"
-    cat > "${hook_dir}/restart-amnezia-nginx.sh" <<'EOF'
+    local base_hook_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks"
+    mkdir -p "${base_hook_dir}/pre" "${base_hook_dir}/post" "${base_hook_dir}/deploy"
+
+    # Pre-hook: кратковременная приостановка amnezia-tproxy перед получением/продлением сертификата
+    cat > "${base_hook_dir}/pre/stop-port80-docker.sh" <<'EOF'
 #!/bin/bash
-systemctl reload nginx 2>/dev/null || true
+if command -v docker >/dev/null 2>&1; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-tproxy$"; then
+        docker stop amnezia-tproxy >/dev/null 2>&1 || true
+        touch /run/amnezia_tproxy_was_stopped
+    fi
+fi
+EOF
+    chmod +x "${base_hook_dir}/pre/stop-port80-docker.sh"
+
+    # Post-hook: возобновление работы amnezia-tproxy и перезапуск Nginx
+    cat > "${base_hook_dir}/post/start-port80-docker.sh" <<'EOF'
+#!/bin/bash
+if [[ -f /run/amnezia_tproxy_was_stopped ]]; then
+    docker start amnezia-tproxy >/dev/null 2>&1 || true
+    rm -f /run/amnezia_tproxy_was_stopped
+fi
+systemctl restart nginx 2>/dev/null || true
+EOF
+    chmod +x "${base_hook_dir}/post/start-port80-docker.sh"
+
+    # Deploy-hook: применение новых сертификатов Nginx и API
+    cat > "${base_hook_dir}/deploy/restart-amnezia-nginx.sh" <<'EOF'
+#!/bin/bash
+systemctl restart nginx 2>/dev/null || true
 systemctl restart amnezia-api 2>/dev/null || true
 EOF
-    chmod +x "${hook_dir}/restart-amnezia-nginx.sh"
+    chmod +x "${base_hook_dir}/deploy/restart-amnezia-nginx.sh"
 }
 
 # =============================================================================
@@ -450,6 +475,25 @@ EOF
         log "Попытка получения Let's Encrypt SSL сертификата для ${api_domain}..."
         if command -v certbot >/dev/null 2>&1; then
             mkdir -p "${CERTBOT_DIR:-/var/www/certbot}"
+            # Временно открываем порт 80 в UFW для ACME-челленджа Let's Encrypt
+            local ufw_opened_port80=0
+            if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
+                if ! ufw status 2>/dev/null | grep -qE "(^|[[:space:]])80/tcp[[:space:]]+ALLOW"; then
+                    ufw allow 80/tcp comment "just1knode certbot verification" >/dev/null 2>&1 || true
+                    ufw_opened_port80=1
+                fi
+            fi
+
+            # Если на порту 80 запущен контейнер amnezia-tproxy (или другой proxy), временно приостанавливаем его
+            local stopped_tproxy=0
+            if command -v docker >/dev/null 2>&1; then
+                if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^amnezia-tproxy$"; then
+                    log "Временная приостановка контейнера amnezia-tproxy для выпуска сертификата на порту 80..."
+                    docker stop amnezia-tproxy >/dev/null 2>&1 || true
+                    stopped_tproxy=1
+                fi
+            fi
+
             local cert_ok=0
             if nginx -t >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
                 if certbot certonly --nginx -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
@@ -470,6 +514,13 @@ EOF
                 fi
                 [[ $was_active -eq 1 ]] && systemctl start nginx 2>/dev/null || true
             fi
+
+            # Возобновляем работу контейнера amnezia-tproxy сразу после попыток Certbot
+            if [[ $stopped_tproxy -eq 1 ]]; then
+                log "Возобновление работы контейнера amnezia-tproxy..."
+                docker start amnezia-tproxy >/dev/null 2>&1 || true
+            fi
+
             if [[ $cert_ok -eq 1 && -f "/etc/letsencrypt/live/${api_domain}/fullchain.pem" ]]; then
                 cert_file="/etc/letsencrypt/live/${api_domain}/fullchain.pem"
                 key_file="/etc/letsencrypt/live/${api_domain}/privkey.pem"
@@ -505,7 +556,7 @@ EOF
 # JUST1KNODE: AmneziaWG API Reverse Proxy
 server {
     listen ${public_port} ssl;
-    server_name ${api_domain};
+    server_name ${api_domain} ${my_ip} _;
 
     ssl_certificate ${cert_file};
     ssl_certificate_key ${key_file};
@@ -542,14 +593,27 @@ server {
 }
 EOF
 
-    # Удаление конфликтующих старых симлинков amnezia в sites-enabled
+    # Удаление конфликтующих старых симлинков amnezia и default сайта, претендующего на порт 80
     rm -f /etc/nginx/sites-enabled/amnezia-api* /etc/nginx/sites-enabled/just1kbot-amnezia* /etc/nginx/sites-enabled/amnezia* 2>/dev/null || true
+    if [[ -f "/etc/nginx/sites-enabled/default" ]]; then
+        if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "/etc/nginx/sites-enabled/default" 2>/dev/null; then
+            cp -a "/etc/nginx/sites-enabled/default" "/etc/nginx/sites-available/default.user.bak" 2>/dev/null || true
+        fi
+        rm -f "/etc/nginx/sites-enabled/default" 2>/dev/null || true
+    fi
     mkdir -p /etc/nginx/sites-enabled
     ln -sf "$nginx_conf" /etc/nginx/sites-enabled/just1k-amnezia.conf
     if nginx -t >/dev/null 2>&1; then
-        systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
-        log "✔ Nginx reverse proxy успешно настроен и перезагружен"
-        deploy_amnezia_certbot_renewal_hook
+        systemctl restart nginx 2>/dev/null || true
+        if systemctl is-active --quiet nginx 2>/dev/null; then
+            log "✔ Nginx reverse proxy успешно настроен и запущен"
+            deploy_amnezia_certbot_renewal_hook
+        else
+            rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf "$nginx_conf" 2>/dev/null || true
+            rollback_amnezia_if_needed
+            error "Nginx не смог запуститься после применения конфигурации. Проверьте: journalctl -u nginx -n 30"
+            return 1
+        fi
     else
         rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf "$nginx_conf" 2>/dev/null || true
         rollback_amnezia_if_needed
@@ -821,7 +885,9 @@ uninstall_amnezia_component() {
 
     rm -rf "$AMNEZIA_API_DIR" "$AMNEZIA_API_ETC" /etc/ssl/just1k_amnezia 2>/dev/null || true
     rm -f /etc/nginx/conf.d/amnezia-ratelimit.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf 2>/dev/null || true
-    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" 2>/dev/null || true
+    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/stop-port80-docker.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/start-port80-docker.sh" 2>/dev/null || true
     if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
         systemctl reload nginx 2>/dev/null || true
     fi
