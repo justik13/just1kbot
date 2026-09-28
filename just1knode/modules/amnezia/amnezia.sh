@@ -28,7 +28,7 @@ detect_awg_protocol_version() {
 
     if echo "$conf_str" | grep -qiE "RandomTrailers|DisableCookies"; then
         echo "amneziawg3.1"
-    elif echo "$conf_str" | grep -qiE "HeaderProtectionKey|Hpk"; then
+    elif echo "$conf_str" | grep -qiE "HeaderProtectionKey|Hpk|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts"; then
         echo "amneziawg3"
     else
         echo "amneziawg2"
@@ -680,11 +680,18 @@ show_amnezia_bot_credentials() {
         api_url="https://${my_ip}:${AMNEZIA_PUBLIC_PORT}"
     fi
 
-    local proto_name
-    proto_name="$(detect_awg_protocol_version)"
+    local container_name proto_id proto_display
+    container_name="$(detect_amnezia_container)"
+    proto_id="$(detect_awg_protocol_version)"
+    case "$proto_id" in
+        "amneziawg3.1") proto_display="AmneziaWG 3.1" ;;
+        "amneziawg3")   proto_display="AmneziaWG 3.0" ;;
+        *)              proto_display="AmneziaWG 2.0" ;;
+    esac
 
-    echo -e "  🌐 Протокол для бота:  ${BOLD}${GREEN}${proto_name}${NC}"
-    echo -e "  🔗 API URL бота:       ${CYAN}${api_url}${NC}"
+    echo -e "  🌐 Протокол:           ${BOLD}${GREEN}${proto_display} (${proto_id})${NC}"
+    echo -e "  📦 Docker контейнер:   ${CYAN}${container_name}${NC}"
+    echo -e "  🔗 API URL:            ${CYAN}${api_url}${NC}"
     echo -e "  🔑 API Ключ:           ${YELLOW}${api_key}${NC}"
     echo -e "  🩺 Проверка API:       curl -k -H \"x-api-key: ${api_key}\" ${api_url}/healthz\n"
 }
@@ -702,6 +709,15 @@ show_amnezia_status() {
     local container_name
     container_name="$(detect_amnezia_container)"
 
+    local proto_id proto_display
+    proto_id="$(detect_awg_protocol_version)"
+    case "$proto_id" in
+        "amneziawg3.1") proto_display="AmneziaWG 3.1" ;;
+        "amneziawg3")   proto_display="AmneziaWG 3.0" ;;
+        *)              proto_display="AmneziaWG 2.0" ;;
+    esac
+
+    echo -e "  Протокол:             ${BOLD}${GREEN}${proto_display} (${proto_id})${NC}"
     echo -e "  API URL:              ${CYAN}${api_url}${NC}"
 
     echo -e "\n  Службы:"

@@ -2022,15 +2022,18 @@ remove_traffic_watchdog_timer
         self.assertIn('rm -f "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default"', common_content)
         self.assertIn('default.user.bak', common_content)
 
-        # 8. Protocol version detection and display (differentiating awg2 from awg3.1)
+        # 8. Protocol version detection and display (differentiating awg2, awg3, awg3.1)
         self.assertIn("detect_awg_protocol_version()", content)
         self.assertIn("amneziawg3.1", content)
+        self.assertIn("amneziawg3", content)
         self.assertIn("amneziawg2", content)
-        self.assertIn("Протокол для бота:", content)
+        self.assertIn("🌐 Протокол:", content)
+        self.assertIn("📦 Docker контейнер:", content)
 
-        # 9. Doctor check 3b displays protocol version
+        # 9. Doctor check 3b displays protocol version and container status
         just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
-        self.assertIn("Версия протокола:", just1knode_sh)
+        self.assertIn("Docker контейнер:", just1knode_sh)
+        self.assertIn("Протокол:", just1knode_sh)
 
 
 if __name__ == "__main__":

@@ -355,9 +355,9 @@ run_doctor() {
         local c_doc
         c_doc="$(detect_amnezia_container 2>/dev/null || echo "amnezia-awg2")"
         if is_amnezia_container_running 2>/dev/null; then
-            echo -e "  ${GREEN}✔${NC} Docker контейнер ${c_doc} активен"
+            echo -e "  ${GREEN}✔${NC} Docker контейнер: ${c_doc} (активен)"
         else
-            echo -e "  ${RED}✗${NC} Docker контейнер ${c_doc} не запущен"
+            echo -e "  ${RED}✗${NC} Docker контейнер: ${c_doc} (не запущен)"
             failed=$((failed + 1))
         fi
         local conf_name="awg0.conf"
@@ -369,9 +369,14 @@ run_doctor() {
         fi
         if [[ "$conf_found" == "true" ]]; then
             echo -e "  ${GREEN}✔${NC} Конфигурационный файл ${conf_name} найден"
-            local proto_ver
-            proto_ver="$(detect_awg_protocol_version 2>/dev/null || echo "amneziawg2")"
-            echo -e "  ${GREEN}✔${NC} Версия протокола: ${proto_ver}"
+            local proto_id proto_display
+            proto_id="$(detect_awg_protocol_version 2>/dev/null || echo "amneziawg2")"
+            case "$proto_id" in
+                "amneziawg3.1") proto_display="AmneziaWG 3.1" ;;
+                "amneziawg3")   proto_display="AmneziaWG 3.0" ;;
+                *)              proto_display="AmneziaWG 2.0" ;;
+            esac
+            echo -e "  ${GREEN}✔${NC} Протокол: ${proto_display} (${proto_id})"
             if docker exec "$c_doc" awg show awg0 >/dev/null 2>&1; then
                 echo -e "  ${GREEN}✔${NC} Интерфейс awg0 активен в ядре"
             fi
