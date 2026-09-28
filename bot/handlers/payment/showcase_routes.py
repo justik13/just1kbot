@@ -285,7 +285,9 @@ async def select_tariff(
             )
         )
         price = max(1, base_price - discount)
-        discount_badge = texts.REFERRAL_DISCOUNT_BADGE.format(discount=discount)
+        discount_badge = texts.REFERRAL_DISCOUNT_BADGE.format(
+            discount=discount, original_price=base_price
+        )
     else:
         price = base_price
         discount_badge = ""

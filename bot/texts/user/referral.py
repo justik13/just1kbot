@@ -11,7 +11,7 @@ def mask_telegram_id(telegram_id: int | str) -> str:
 
 BTN_REFERRAL_LEADERBOARD = "🏆 Топ-5 лидеров"
 
-REFERRAL_DISCOUNT_BADGE = "\n🎁 Скидка 25% на первый заказ: <b>-{discount} ₽</b>"
+REFERRAL_DISCOUNT_BADGE = "\n🎁 Скидка 25% по приглашению друга: <b>-{discount} ₽</b> (вместо <s>{original_price} ₽</s>)\n<i>Скидка действует на первый заказ. Продление будет по обычной цене ({original_price} ₽).</i>"
 
 REFERRAL_LEADERBOARD_EMPTY = """<i>В топе пока пусто.
 
@@ -43,12 +43,16 @@ REFERRAL_LIST_HEADER = """👥 <b>Ваши рефералы</b>
 
 REFERRAL_LIST_ITEM_FORMAT = "\n{idx}. <b>{user}</b> ({date})"
 
+REFERRAL_MAIN_RANK_NOT_RANKED = "\n🏆 Место в рейтинге: <b>вне рейтинга</b>"
+
+REFERRAL_MAIN_RANK_RANKED = "\n🏆 Место в рейтинге: <b>#{rank}</b>"
+
 REFERRAL_SHARE_TEXT = "🎁 Приглашаю в just1kbot! Получи скидку 25% на первую покупку по моей ссылке:"
 
 REFERRAL_TEXT_BALANCE = """🤝 <b>Реферальная программа</b>
 
 💰 Бонусный баланс: <b>{bonus_balance} ₽</b>
-🎖 Ваш уровень: <b>{tier_name} ({rate_pct}%)</b>
+🎖 Ваш уровень: <b>{tier_name} ({rate_pct}%)</b>{rank_line}
 👥 Активных друзей: <b>{active_count}</b> (всего приглашено: {invited_count}){tier_progress_line}
 
 🎁 <b>Условия программы:</b>

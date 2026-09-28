@@ -131,6 +131,7 @@ async def show_referral(
     active_count = await get_user_active_referrals_count(session, db_user.telegram_id)
     invited_count = await get_user_referrals_count(session, db_user.telegram_id)
     bonus_balance = await get_referral_bonus_balance(session, user_id=db_user.id)
+    user_rank, _ = await get_user_referral_rank(session, db_user.telegram_id)
     tier_info = get_referral_tier(active_count)
 
     rate_pct = int(tier_info.rate * 100)
@@ -149,6 +150,11 @@ async def show_referral(
     else:
         tier_progress_line = texts.REFERRAL_TIER_PROGRESS_MAX
 
+    if user_rank is not None and active_count > 0:
+        rank_line = texts.REFERRAL_MAIN_RANK_RANKED.format(rank=user_rank)
+    else:
+        rank_line = texts.REFERRAL_MAIN_RANK_NOT_RANKED
+
     bot_info = await callback.bot.get_me()
     referral_link = f"https://t.me/{bot_info.username}?start=ref_{db_user.telegram_id}"
 
@@ -165,6 +171,7 @@ async def show_referral(
             bonus_balance=int(bonus_balance),
             tier_name=tier_info.name,
             rate_pct=rate_pct,
+            rank_line=rank_line,
             active_count=active_count,
             invited_count=invited_count,
             tier_progress_line=tier_progress_line,
