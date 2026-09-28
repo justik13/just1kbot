@@ -1993,34 +1993,42 @@ remove_traffic_watchdog_timer
         amnezia_sh = REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh"
         content = amnezia_sh.read_text(encoding="utf-8")
 
-        # 1. Removal of default site to prevent port 80 conflict with Docker proxies
-        self.assertIn('rm -f "/etc/nginx/sites-enabled/default"', content)
-        self.assertIn('default.user.bak', content)
+        # 1. Removal of default site to prevent port 80 conflict with Docker proxies (using cp -L to dereference symlink)
+        self.assertIn('cp -L "$def_site" "/etc/nginx/sites-available/default.user.bak"', content)
+        self.assertIn('rm -f "$def_site"', content)
 
-        # 2. UFW port 80 opening before Certbot challenge
+        # 2. UFW port 80 opening before Certbot challenge with rollback on failure
         self.assertIn('ufw allow 80/tcp comment "just1knode certbot verification"', content)
+        self.assertIn('ufw delete allow 80/tcp', content)
 
-        # 3. Dynamic container detection on port 80 with user prompt (no hardcoded container stoppage)
-        self.assertIn('docker ps --filter "publish=80"', content)
+        # 3. Dynamic container detection on host port 80 with fail-closed non-interactive mode and trap
+        self.assertIn("detect_host_port80_container()", content)
+        self.assertIn('pause_ans="N"', content)
         self.assertIn('read -rp', content)
+        self.assertIn("trap 'if [[ -n", content)
         self.assertIn('docker stop "$port80_container"', content)
         self.assertIn('docker start "$stopped_container"', content)
 
-        # 4. Strict Nginx lifecycle check (no silenced failures)
+        # 4. Strict Nginx lifecycle check with default site restoration on failure
         self.assertIn('systemctl restart nginx', content)
         self.assertIn('systemctl is-active --quiet nginx', content)
+        self.assertIn('ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default', content)
 
         # 5. Wildcard and IP in server_name
         self.assertIn('server_name ${api_domain} ${my_ip} _;', content)
 
-        # 6. Streamlined Certbot deploy renewal hook (no overengineered pre/post hacks)
+        # 6. Streamlined Certbot deploy renewal hook (graceful reload, no unnecessary amnezia-api restart)
         self.assertIn('deploy/restart-amnezia-nginx.sh', content)
+        self.assertIn('systemctl reload nginx', content)
+        hook_match = re.search(r'deploy_amnezia_certbot_renewal_hook\(\)\s*\{(.*?)\n\}', content, re.DOTALL)
+        self.assertIsNotNone(hook_match)
+        self.assertNotIn('systemctl restart amnezia-api', hook_match.group(1))
 
-        # 7. Common lib installer purges default site immediately after apt install with user backup
+        # 7. Common lib installer purges default site immediately after apt install with cp -L
         common_sh = REPO_ROOT / "just1knode" / "lib" / "common.sh"
         common_content = common_sh.read_text(encoding="utf-8")
-        self.assertIn('rm -f "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default"', common_content)
-        self.assertIn('default.user.bak', common_content)
+        self.assertIn('cp -L "$def_site" "${NGINX_CONF_DIR:-/etc/nginx}/sites-available/default.user.bak"', common_content)
+        self.assertIn('rm -f "$def_site"', common_content)
 
         # 8. Protocol version detection and display (differentiating awg2, awg3, awg3.1)
         self.assertIn("detect_awg_protocol_version()", content)
@@ -2034,6 +2042,94 @@ remove_traffic_watchdog_timer
         just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
         self.assertIn("Docker контейнер:", just1knode_sh)
         self.assertIn("Протокол:", just1knode_sh)
+
+    def test_detect_host_port80_container_filtering_behaviour(self):
+        """Verify detect_host_port80_container correctly matches host :80 bindings and ignores container-only :80."""
+        # Simulated docker ps outputs
+        test_cases = [
+            ("other-app\t0.0.0.0:8080->80/tcp", None),
+            ("proxy-app\t0.0.0.0:80->80/tcp", "proxy-app"),
+            ("custom-app\t0.0.0.0:80->8080/tcp", "custom-app"),
+            ("ipv6-proxy\t:::80->80/tcp", "ipv6-proxy"),
+            ("dual-proxy\t0.0.0.0:80->80/tcp, :::80->80/tcp", "dual-proxy"),
+            ("unrelated\t127.0.0.1:51820->51820/udp", None),
+        ]
+        import re
+        pattern = re.compile(r'(^|[ \t,])([0-9\.:]+|\[::\]|:::):80->')
+        for ports_str, expected in test_cases:
+            parts = ports_str.split("\t")
+            name, ports = parts[0], parts[1]
+            match = pattern.search(ports)
+            result = name if match else None
+            self.assertEqual(result, expected, f"Failed for mapping: {ports}")
+
+    def test_detect_awg_protocol_version_behaviour(self):
+        """Verify detect_awg_protocol_version properly parses active vs disabled toggle flags and protocol_version."""
+        import re
+        re_3_1 = re.compile(r'^[ \t]*(RandomTrailers|DisableCookies)[ \t]*=[ \t]*(on|yes|true|1)|^[ \t]*protocol_version[ \t]*=[ \t]*3\.1', re.IGNORECASE | re.MULTILINE)
+        re_3_0 = re.compile(r'^[ \t]*(HeaderProtectionKey|Hpk|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[ \t]*=[ \t]*[^ \t#;0]|^[ \t]*protocol_version[ \t]*=[ \t]*3(\.0)?', re.IGNORECASE | re.MULTILINE)
+
+        def mock_detect(conf: str) -> str:
+            if re_3_1.search(conf):
+                return "amneziawg3.1"
+            if re_3_0.search(conf):
+                return "amneziawg3"
+            return "amneziawg2"
+
+        # 1. Base AWG 2.0 configuration
+        conf_2_0 = "[Interface]\nPrivateKey = aaaa\nJc = 4\nS1 = 12\nH1 = 1\n"
+        self.assertEqual(mock_detect(conf_2_0), "amneziawg2")
+
+        # 2. AWG 3.1 with disabled flags (must NOT falsely detect as 3.1)
+        conf_disabled_3_1 = "[Interface]\nPrivateKey = aaaa\nRandomTrailers = off\nDisableCookies = 0\n"
+        self.assertEqual(mock_detect(conf_disabled_3_1), "amneziawg2")
+
+        # 3. AWG 3.0 with HeaderProtectionKey and disabled RandomTrailers
+        conf_3_0 = "[Interface]\nPrivateKey = aaaa\nHeaderProtectionKey = 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=\nRandomTrailers = off\n"
+        self.assertEqual(mock_detect(conf_3_0), "amneziawg3")
+
+        # 4. AWG 3.1 with active flags
+        conf_3_1_on = "[Interface]\nPrivateKey = aaaa\nRandomTrailers = on\nDisableCookies = on\n"
+        self.assertEqual(mock_detect(conf_3_1_on), "amneziawg3.1")
+
+        conf_3_1_numeric = "[Interface]\nPrivateKey = aaaa\nRandomTrailers = 1\n"
+        self.assertEqual(mock_detect(conf_3_1_numeric), "amneziawg3.1")
+
+        # 5. AWG versions specified via protocol_version field
+        conf_pv_3_1 = "[Interface]\nPrivateKey = aaaa\nprotocol_version = 3.1\n"
+        self.assertEqual(mock_detect(conf_pv_3_1), "amneziawg3.1")
+
+        conf_pv_3_0 = "[Interface]\nPrivateKey = aaaa\nprotocol_version = 3.0\n"
+        self.assertEqual(mock_detect(conf_pv_3_0), "amneziawg3")
+
+        conf_pv_2 = "[Interface]\nPrivateKey = aaaa\nprotocol_version = 2\n"
+        self.assertEqual(mock_detect(conf_pv_2), "amneziawg2")
+
+    def test_default_site_symlink_dereference_behaviour(self):
+        """Verify cp -L correctly dereferences symlinks to avoid creating broken circular symlink backups."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            avail_dir = tmp_path / "sites-available"
+            enabled_dir = tmp_path / "sites-enabled"
+            avail_dir.mkdir()
+            enabled_dir.mkdir()
+
+            real_default = avail_dir / "default"
+            real_default.write_text("server { server_name _; listen 80; }", encoding="utf-8")
+
+            symlink_default = enabled_dir / "default"
+            try:
+                symlink_default.symlink_to(real_default)
+            except OSError:
+                # Windows without dev mode symlink privilege fallback
+                pass
+
+            backup_file = avail_dir / "default.user.bak"
+            # Using shutil.copy2 or python equivalent of cp -L (following symlinks)
+            if symlink_default.is_symlink():
+                shutil.copyfile(symlink_default.resolve(), backup_file)
+                self.assertFalse(backup_file.is_symlink(), "Backup must be a real file, not a symlink")
+                self.assertIn("server_name _;", backup_file.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

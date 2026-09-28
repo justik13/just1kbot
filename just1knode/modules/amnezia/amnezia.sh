@@ -26,9 +26,9 @@ detect_awg_protocol_version() {
         conf_str="$(docker exec "$c" cat "/opt/amnezia/awg/awg0.conf" 2>/dev/null || true)"
     fi
 
-    if echo "$conf_str" | grep -qiE "RandomTrailers|DisableCookies"; then
+    if echo "$conf_str" | grep -qiE '^[[:space:]]*(RandomTrailers|DisableCookies)[[:space:]]*=[[:space:]]*(on|yes|true|1)' || echo "$conf_str" | grep -qiE '^[[:space:]]*protocol_version[[:space:]]*=[[:space:]]*3\.1'; then
         echo "amneziawg3.1"
-    elif echo "$conf_str" | grep -qiE "HeaderProtectionKey|Hpk|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts"; then
+    elif echo "$conf_str" | grep -qiE '^[[:space:]]*(HeaderProtectionKey|Hpk|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[[:space:]]*=[[:space:]]*[^[:space:]#;0]' || echo "$conf_str" | grep -qiE '^[[:space:]]*protocol_version[[:space:]]*=[[:space:]]*3(\.0)?'; then
         echo "amneziawg3"
     else
         echo "amneziawg2"
@@ -124,15 +124,56 @@ remove_amnezia_abuse_protection() {
     fi
 }
 
+# Точное обнаружение Docker-контейнера, слушающего хостовый порт 80 (IPv4/IPv6)
+detect_host_port80_container() {
+    command -v docker >/dev/null 2>&1 || return 0
+    local matched
+    matched="$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -E '(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->' | head -n 1 || true)"
+    if [[ -n "$matched" ]]; then
+        echo "$matched" | awk -F'\t' '{print $1}'
+    fi
+}
+
 deploy_amnezia_certbot_renewal_hook() {
-    local hook_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy"
-    mkdir -p "$hook_dir"
-    cat > "${hook_dir}/restart-amnezia-nginx.sh" <<'EOF'
+    local target_container="${1:-}"
+    local base_hook_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks"
+    mkdir -p "${base_hook_dir}/deploy"
+    cat > "${base_hook_dir}/deploy/restart-amnezia-nginx.sh" <<'EOF'
 #!/bin/bash
-systemctl restart nginx 2>/dev/null || true
-systemctl restart amnezia-api 2>/dev/null || true
+nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
 EOF
-    chmod +x "${hook_dir}/restart-amnezia-nginx.sh"
+    chmod +x "${base_hook_dir}/deploy/restart-amnezia-nginx.sh"
+
+    # Если для получения сертификата потребовалось останавливать контейнер на порту 80,
+    # настраиваем pre/post renewal хуки, чтобы плановый `certbot renew` не падал
+    if [[ -n "$target_container" ]]; then
+        mkdir -p "${base_hook_dir}/pre" "${base_hook_dir}/post"
+        cat > "${base_hook_dir}/pre/01-stop-port80-docker.sh" <<EOF
+#!/bin/bash
+# Кратковременная приостановка Docker-контейнера на время проверки certbot renew
+if command -v docker >/dev/null 2>&1; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${target_container}"; then
+        docker stop "${target_container}" >/dev/null 2>&1 || true
+        mkdir -p /run/just1knode
+        echo "${target_container}" > /run/just1knode/certbot_stopped_container
+    fi
+fi
+EOF
+        chmod +x "${base_hook_dir}/pre/01-stop-port80-docker.sh"
+
+        cat > "${base_hook_dir}/post/01-start-port80-docker.sh" <<'EOF'
+#!/bin/bash
+# Возобновление работы контейнера после проверки certbot renew
+if [[ -f /run/just1knode/certbot_stopped_container ]]; then
+    c_name="$(cat /run/just1knode/certbot_stopped_container 2>/dev/null || true)"
+    rm -f /run/just1knode/certbot_stopped_container 2>/dev/null || true
+    if [[ -n "$c_name" ]] && command -v docker >/dev/null 2>&1; then
+        docker start "$c_name" >/dev/null 2>&1 || true
+    fi
+fi
+EOF
+        chmod +x "${base_hook_dir}/post/01-start-port80-docker.sh"
+    fi
 }
 
 # =============================================================================
@@ -470,38 +511,45 @@ EOF
         log "Попытка получения Let's Encrypt SSL сертификата для ${api_domain}..."
         if command -v certbot >/dev/null 2>&1; then
             mkdir -p "${CERTBOT_DIR:-/var/www/certbot}"
-            # Временно открываем порт 80 в UFW для ACME-челленджа Let's Encrypt
+            # Проверяем и при необходимости открываем порт 80 в UFW для ACME-челленджа Let's Encrypt
+            local ufw_was_opened=0
             if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
                 if ! ufw status 2>/dev/null | grep -qE "(^|[[:space:]])80/tcp[[:space:]]+ALLOW"; then
                     ufw allow 80/tcp comment "just1knode certbot verification" >/dev/null 2>&1 || true
+                    ufw_was_opened=1
                 fi
             fi
 
-            # Проверка доступности порта 80: обнаружение Docker-контейнеров на порту 80
+            # Проверка доступности порта 80: точное обнаружение Docker-контейнеров на ХОСТОВОМ порту 80
             local port80_container=""
             local stopped_container=""
-            if command -v docker >/dev/null 2>&1; then
-                port80_container="$(docker ps --filter "publish=80" --format '{{.Names}}' 2>/dev/null | head -n1 || true)"
-            fi
+            port80_container="$(detect_host_port80_container || true)"
 
             if [[ -n "$port80_container" ]]; then
-                warn "Порт 80/tcp занят Docker-контейнером '${port80_container}'."
-                local pause_ans="Y"
+                warn "Хостовый порт 80/tcp занят Docker-контейнером '${port80_container}'."
+                local pause_ans="N"
                 if [[ -t 0 ]]; then
-                    read -rp "Временно приостановить контейнер '${port80_container}' на 10 сек для выпуска SSL? [Y/n]: " pause_ans || true
-                    pause_ans="${pause_ans:-Y}"
+                    read -rp "Временно приостановить контейнер '${port80_container}' на 10 сек для выпуска SSL? [y/N]: " pause_ans || true
+                else
+                    warn "Скрипт запущен в неинтерактивном режиме. Автоматическая остановка контейнеров запрещена."
+                    pause_ans="N"
                 fi
                 if [[ "$pause_ans" =~ ^[Yy] ]]; then
                     log "Временная приостановка контейнера '${port80_container}'..."
-                    docker stop "$port80_container" >/dev/null 2>&1 || true
-                    stopped_container="$port80_container"
+                    if docker stop "$port80_container" >/dev/null 2>&1; then
+                        stopped_container="$port80_container"
+                        # Транзакционный trap для гарантированного возобновления работы контейнера при сбое/прерывании
+                        trap 'if [[ -n "'"$stopped_container"'" ]]; then docker start "'"$stopped_container"'" >/dev/null 2>&1 || true; fi' EXIT INT TERM
+                    else
+                        warn "Не удалось остановить контейнер '${port80_container}'. Пропускаем standalone выпуск."
+                    fi
                 else
-                    warn "Выпуск Let's Encrypt через порт 80 пропущен по выбору пользователя (будет использован самоподписанный SSL)."
+                    warn "Выпуск Let's Encrypt через порт 80 пропущен по выбору администратора (будет использован самоподписанный SSL)."
                 fi
             fi
 
             local cert_ok=0
-            # Если контейнер не блокировал выпуск или был временно приостановлен
+            # Если контейнер не блокировал выпуск или был успешно временно приостановлен
             if [[ -z "$port80_container" || -n "$stopped_container" ]]; then
                 # Если Nginx активен и уже слушает порт 80 для существующих сайтов, используем плагин nginx/webroot
                 if ss -tlnp 2>/dev/null | grep -qE ":(80)[[:space:]].*nginx" && systemctl is-active --quiet nginx 2>/dev/null; then
@@ -530,13 +578,22 @@ EOF
             # Гарантированное возобновление работы контейнера сразу после попыток Certbot
             if [[ -n "$stopped_container" ]]; then
                 log "Возобновление работы контейнера '${stopped_container}'..."
-                docker start "$stopped_container" >/dev/null 2>&1 || true
+                trap - EXIT INT TERM
+                if ! docker start "$stopped_container" >/dev/null 2>&1; then
+                    error "КРИТИЧЕСКИЙ СБОЙ: Не удалось запустить Docker-контейнер '${stopped_container}'. Запустите его вручную: docker start ${stopped_container}"
+                    rollback_amnezia_if_needed
+                    return 1
+                fi
             fi
 
             if [[ $cert_ok -eq 1 && -f "/etc/letsencrypt/live/${api_domain}/fullchain.pem" ]]; then
                 cert_file="/etc/letsencrypt/live/${api_domain}/fullchain.pem"
                 key_file="/etc/letsencrypt/live/${api_domain}/privkey.pem"
                 log "✔ SSL сертификат Let's Encrypt успешно получен для ${api_domain}"
+                deploy_amnezia_certbot_renewal_hook "$stopped_container"
+            elif [[ $cert_ok -eq 0 && $ufw_was_opened -eq 1 ]]; then
+                # Откатываем временное открытие порта 80 в UFW, если выпуск не удался
+                ufw delete allow 80/tcp >/dev/null 2>&1 || true
             fi
         fi
     fi
@@ -607,11 +664,10 @@ EOF
 
     # Удаление конфликтующих старых симлинков amnezia и default сайта, претендующего на порт 80
     rm -f /etc/nginx/sites-enabled/amnezia-api* /etc/nginx/sites-enabled/just1kbot-amnezia* /etc/nginx/sites-enabled/amnezia* 2>/dev/null || true
-    if [[ -f "/etc/nginx/sites-enabled/default" ]]; then
-        if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "/etc/nginx/sites-enabled/default" 2>/dev/null; then
-            cp -a "/etc/nginx/sites-enabled/default" "/etc/nginx/sites-available/default.user.bak" 2>/dev/null || true
-        fi
-        rm -f "/etc/nginx/sites-enabled/default" 2>/dev/null || true
+    local def_site="/etc/nginx/sites-enabled/default"
+    if [[ -f "$def_site" || -L "$def_site" ]]; then
+        cp -L "$def_site" "/etc/nginx/sites-available/default.user.bak" 2>/dev/null || true
+        rm -f "$def_site" 2>/dev/null || true
     fi
     mkdir -p /etc/nginx/sites-enabled
     ln -sf "$nginx_conf" /etc/nginx/sites-enabled/just1k-amnezia.conf
@@ -619,15 +675,28 @@ EOF
         systemctl restart nginx 2>/dev/null || true
         if systemctl is-active --quiet nginx 2>/dev/null; then
             log "✔ Nginx reverse proxy успешно настроен и запущен"
-            deploy_amnezia_certbot_renewal_hook
         else
             rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf "$nginx_conf" 2>/dev/null || true
+            if [[ -f "/etc/nginx/sites-available/default.user.bak" && ! -e "/etc/nginx/sites-enabled/default" ]]; then
+                if [[ ! -f "/etc/nginx/sites-available/default" ]]; then
+                    cp -a /etc/nginx/sites-available/default.user.bak /etc/nginx/sites-available/default 2>/dev/null || true
+                fi
+                ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+                systemctl restart nginx 2>/dev/null || true
+            fi
             rollback_amnezia_if_needed
             error "Nginx не смог запуститься после применения конфигурации. Проверьте: journalctl -u nginx -n 30"
             return 1
         fi
     else
         rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf "$nginx_conf" 2>/dev/null || true
+        if [[ -f "/etc/nginx/sites-available/default.user.bak" && ! -e "/etc/nginx/sites-enabled/default" ]]; then
+            if [[ ! -f "/etc/nginx/sites-available/default" ]]; then
+                cp -a /etc/nginx/sites-available/default.user.bak /etc/nginx/sites-available/default 2>/dev/null || true
+            fi
+            ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+            systemctl restart nginx 2>/dev/null || true
+        fi
         rollback_amnezia_if_needed
         error "Ошибка проверки конфигурации Nginx (nginx -t). Установка прервана."
         return 1
@@ -914,8 +983,18 @@ uninstall_amnezia_component() {
     rm -rf "$AMNEZIA_API_DIR" "$AMNEZIA_API_ETC" /etc/ssl/just1k_amnezia 2>/dev/null || true
     rm -f /etc/nginx/conf.d/amnezia-ratelimit.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf 2>/dev/null || true
     rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/01-stop-port80-docker.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/01-start-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/stop-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/start-port80-docker.sh" 2>/dev/null || true
+    if [[ ! -f /etc/nginx/sites-enabled/just1k-origin.conf && ! -e /etc/nginx/sites-enabled/default ]]; then
+        if [[ -f /etc/nginx/sites-available/default ]]; then
+            ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+        elif [[ -f /etc/nginx/sites-available/default.user.bak ]]; then
+            cp -a /etc/nginx/sites-available/default.user.bak /etc/nginx/sites-available/default 2>/dev/null || true
+            ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+        fi
+    fi
     if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
         systemctl reload nginx 2>/dev/null || true
     fi
