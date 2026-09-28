@@ -2016,10 +2016,11 @@ remove_traffic_watchdog_timer
         self.assertIn('post/start-port80-docker.sh', content)
         self.assertIn('deploy/restart-amnezia-nginx.sh', content)
 
-        # 7. Common lib installer purges default site immediately after apt install
+        # 7. Common lib installer purges default site immediately after apt install with user backup
         common_sh = REPO_ROOT / "just1knode" / "lib" / "common.sh"
         common_content = common_sh.read_text(encoding="utf-8")
         self.assertIn('rm -f "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default"', common_content)
+        self.assertIn('default.user.bak', common_content)
 
 
 if __name__ == "__main__":

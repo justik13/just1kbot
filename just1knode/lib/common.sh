@@ -93,6 +93,9 @@ install_nginx_if_missing() {
         apt-get install -y -qq nginx certbot python3-certbot-nginx ca-certificates
         # Отключаем дефолтный сайт сразу после установки пакета для предотвращения конфликта портов
         if [[ -f "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default" ]]; then
+            if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default" 2>/dev/null; then
+                cp -a "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default" "${NGINX_CONF_DIR:-/etc/nginx}/sites-available/default.user.bak" 2>/dev/null || true
+            fi
             rm -f "${NGINX_CONF_DIR:-/etc/nginx}/sites-enabled/default" 2>/dev/null || true
         fi
         systemctl enable nginx 2>/dev/null || true

@@ -476,11 +476,9 @@ EOF
         if command -v certbot >/dev/null 2>&1; then
             mkdir -p "${CERTBOT_DIR:-/var/www/certbot}"
             # Временно открываем порт 80 в UFW для ACME-челленджа Let's Encrypt
-            local ufw_opened_port80=0
             if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
                 if ! ufw status 2>/dev/null | grep -qE "(^|[[:space:]])80/tcp[[:space:]]+ALLOW"; then
                     ufw allow 80/tcp comment "just1knode certbot verification" >/dev/null 2>&1 || true
-                    ufw_opened_port80=1
                 fi
             fi
 
@@ -495,16 +493,19 @@ EOF
             fi
 
             local cert_ok=0
-            if nginx -t >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
+            # Если Nginx активен и уже слушает порт 80 для существующих сайтов, используем плагин nginx/webroot
+            if ss -tlnp 2>/dev/null | grep -qE ":(80)[[:space:]].*nginx" && systemctl is-active --quiet nginx 2>/dev/null; then
                 if certbot certonly --nginx -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
                     cert_ok=1
                 fi
-            fi
-            if [[ $cert_ok -eq 0 && -d "${CERTBOT_DIR:-/var/www/certbot}" ]]; then
-                if certbot certonly --webroot -w "${CERTBOT_DIR:-/var/www/certbot}" -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
-                    cert_ok=1
+                if [[ $cert_ok -eq 0 && -d "${CERTBOT_DIR:-/var/www/certbot}" ]]; then
+                    if certbot certonly --webroot -w "${CERTBOT_DIR:-/var/www/certbot}" -d "$api_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>/dev/null; then
+                        cert_ok=1
+                    fi
                 fi
             fi
+
+            # Если порт 80 свободен (или освобожден после остановки tproxy), используем standalone режим
             if [[ $cert_ok -eq 0 ]]; then
                 local was_active=0
                 systemctl is-active --quiet nginx 2>/dev/null && was_active=1
