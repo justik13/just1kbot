@@ -485,7 +485,7 @@ update_node() {
         warn "Узел не настроен (роль не определена). Автоматическая оптимизация конфига пропущена."
     fi
 
-    if [[ "$target" == "all" ]]; then
+    if [[ "$target" == "all" && "$role" != "awg" ]]; then
         update_xray_core
     fi
 
