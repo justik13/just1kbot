@@ -783,6 +783,7 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertFalse(hasattr(texts, "DASHBOARD_STALE_TASKS_V_OCHEREDYAK"))
         self.assertFalse(hasattr(texts, "DASHBOARD_OPEN_PLATEZHNYKH_DISPUTES"))
         self.assertFalse(hasattr(texts, "ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES"))
+        self.assertFalse(hasattr(texts, "BTN_PAYMENT_RETURN_TO_PURCHASE"))
 
 
 if __name__ == "__main__":

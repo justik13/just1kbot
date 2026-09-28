@@ -28,8 +28,6 @@ BTN_PAYMENT_PAY_ORDER = "💳 Оплатить {price} ₽"
 
 BTN_PAYMENT_RENEW_SUBSCRIPTION = "🔄 Продлить подписку"
 
-BTN_PAYMENT_RETURN_TO_PURCHASE = "Вернуться к покупке"
-
 BTN_PAYMENT_SPECIFY_OTHER_AMOUNT = "Указать другую сумму"
 
 BTN_PAYMENT_START_ONBOARDING = "🚀 Начать"

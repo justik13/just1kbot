@@ -315,17 +315,11 @@ def get_topup_credit_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     context = context or {}
-    tariff_id = context.get("tariff_id")
     source = context.get("source")
     if source == "white_internet":
         builder.button(
             text=texts.BTN_WL_RETURN_TO_SERVICE,
             callback_data="white_internet",
-        )
-    elif tariff_id and source in {"showcase", "renew", "change"}:
-        builder.button(
-            text=texts.BTN_PAYMENT_RETURN_TO_PURCHASE,
-            callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
         )
     builder.button(text=texts.BTN_PAYMENT_TO_BALANCE, callback_data="menu_balance")
     builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")
