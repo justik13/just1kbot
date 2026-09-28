@@ -738,10 +738,10 @@ set_origin_bot_ip() {
         return 1
     fi
 
-    # Строгая валидация формата IP (IPv4 или IPv6, без any и wildcard)
-    if ! validate_ip "$new_bot_ip"; then
+    # Строгая валидация формата IPv4 (0..255 октеты, без any и wildcard)
+    if ! validate_ipv4 "$new_bot_ip"; then
         release_just1knode_lock
-        error "Недопустимый формат IP-адреса: '$new_bot_ip' (ожидается валидный IP-адрес)."
+        error "Недопустимый формат IP-адреса: '$new_bot_ip' (ожидается валидный IPv4 адрес)."
         return 1
     fi
 
