@@ -182,6 +182,7 @@ EOF
 install_amnezia_node() {
     local arg_domain="${1:-}"
     local arg_port="${2:-}"
+    local arg_bot_ip="${3:-}"
 
     title "НАСТРОЙКА И ИНТЕГРАЦИЯ УЗЛА AMNEZIAWG"
     check_root
@@ -295,6 +296,25 @@ install_amnezia_node() {
     if [[ -z "$arg_port" && -t 0 ]]; then
         read -rp "Публичный HTTPS порт для API [по умолчанию: ${default_port}]: " port_in || true
         public_port="${port_in:-$default_port}"
+    fi
+
+    local saved_bot_ip
+    saved_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+    local bot_ip="${arg_bot_ip:-${saved_bot_ip:-}}"
+    if [[ -z "$bot_ip" && -t 0 ]]; then
+        echo ""
+        echo -e "${BOLD}Защита API от блокировок РКН и сканеров (Zero-Signature):${NC}"
+        echo -e "Рекомендуется ограничить порт API (${public_port}) только для IP-адреса Telegram-бота."
+        read -rp "Введите IP-адрес Telegram-бота [Enter для публичного доступа]: " input_bot_ip || true
+        bot_ip="$(echo "$input_bot_ip" | tr -d '[:space:]')"
+    fi
+    if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]]; then
+        if ! validate_ipv4 "$bot_ip"; then
+            warn "Некорректный формат IP-адреса Telegram-бота: '$bot_ip'. Ограничение фаервола пропущено."
+            bot_ip=""
+        else
+            log "✔ Доступ к порту API (${public_port}) будет ограничен для BOT_IP: ${bot_ip}"
+        fi
     fi
 
     local enable_abuse="Y"
@@ -619,13 +639,40 @@ EOF
 limit_req_zone $binary_remote_addr zone=just1k_amnezia_api:10m rate=30r/s;
 EOF
 
+    # Определение поддержки ssl_reject_handshake для защиты от сканирования по IP (Nginx >= 1.19.4)
+    local ssl_reject_directive=""
+    local nginx_ver
+    nginx_ver="$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "0.0.0")"
+    if [[ -n "$nginx_ver" ]] && python3 -c "
+import sys
+try:
+    v = tuple(map(int, '$nginx_ver'.split('.')))
+    sys.exit(0 if v >= (1, 19, 4) else 1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+        ssl_reject_directive="ssl_reject_handshake on;"
+    fi
+
     # Генерация Nginx конфигурации
     local nginx_conf="/etc/nginx/sites-available/just1k-amnezia.conf"
-    cat > "$nginx_conf" <<EOF
+    if [[ $is_ip -eq 0 && -n "$ssl_reject_directive" ]]; then
+        cat > "$nginx_conf" <<EOF
+# 0. Catch-All: мгновенный сброс прямых сканирований по IP и неизвестным SNI
+server {
+    listen ${public_port} ssl default_server;
+    listen [::]:${public_port} ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_reject_handshake on;
+}
+
 # JUST1KNODE: AmneziaWG API Reverse Proxy
 server {
     listen ${public_port} ssl;
-    server_name ${api_domain} ${my_ip} _;
+    listen [::]:${public_port} ssl;
+    server_name ${api_domain};
+    server_tokens off;
 
     ssl_certificate ${cert_file};
     ssl_certificate_key ${key_file};
@@ -661,6 +708,50 @@ server {
     }
 }
 EOF
+    else
+        cat > "$nginx_conf" <<EOF
+# JUST1KNODE: AmneziaWG API Reverse Proxy
+server {
+    listen ${public_port} ssl;
+    listen [::]:${public_port} ssl;
+    server_name ${api_domain} ${my_ip} _;
+    server_tokens off;
+
+    ssl_certificate ${cert_file};
+    ssl_certificate_key ${key_file};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    # Защитные заголовки
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+
+    client_max_body_size 10M;
+
+    # Блокировка публичной документации и метрик
+    location ~ ^/(docs|redoc|openapi.json|metrics) {
+        default_type text/plain;
+        return 404 "Not Found\n";
+    }
+
+    location / {
+        limit_req zone=just1k_amnezia_api burst=50 nodelay;
+        limit_req_status 429;
+
+        proxy_pass http://127.0.0.1:${AMNEZIA_LOCAL_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+}
+EOF
+    fi
 
     # Удаление конфликтующих старых симлинков amnezia и default сайта, претендующего на порт 80
     rm -f /etc/nginx/sites-enabled/amnezia-api* /etc/nginx/sites-enabled/just1kbot-amnezia* /etc/nginx/sites-enabled/amnezia* 2>/dev/null || true
@@ -702,9 +793,17 @@ EOF
         return 1
     fi
 
-    # 10. Открытие порта в UFW если фаервол активен
+    # 10. Открытие порта в UFW если фаервол активен (с привязкой к BOT_IP при наличии)
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
-        ufw allow "${public_port}/tcp" comment "just1knode amnezia api" >/dev/null 2>&1 || true
+        ufw delete allow "${public_port}/tcp" >/dev/null 2>&1 || true
+        ufw delete allow "${public_port}" >/dev/null 2>&1 || true
+        if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]] && validate_ipv4 "$bot_ip"; then
+            ufw allow from "$bot_ip" to any port "$public_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1 || true
+            log "Фаервол UFW: доступ к API AmneziaWG (порт ${public_port}) открыт строго для BOT_IP (${bot_ip})"
+        else
+            ufw allow "${public_port}/tcp" comment "just1knode amnezia api" >/dev/null 2>&1 || true
+            warn "Фаервол UFW: BOT_IP не указан. Порт ${public_port}/tcp открыт для всех IP."
+        fi
     fi
 
     # 11. Активация защиты от абуза (SMTP 25 + BitTorrent)
@@ -729,6 +828,9 @@ EOF
     set_state_val "awg_domain" "$api_domain"
     set_state_val "awg_port" "$public_port"
     set_state_val "awg_installed" "true"
+    if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]] && validate_ipv4 "$bot_ip"; then
+        set_state_val "bot_ip" "$bot_ip"
+    fi
 
     # Вывод карточки подключения
     show_amnezia_bot_credentials
@@ -758,11 +860,18 @@ show_amnezia_bot_credentials() {
         *)              proto_display="AmneziaWG 2.0" ;;
     esac
 
+    local bot_ip
+    bot_ip="$(get_state_val "bot_ip" "-")"
+
     echo -e "  🌐 Протокол:           ${BOLD}${GREEN}${proto_display} (${proto_id})${NC}"
     echo -e "  📦 Docker контейнер:   ${CYAN}${container_name}${NC}"
     echo -e "  🔗 API URL:            ${CYAN}${api_url}${NC}"
+    echo -e "  🤖 BOT IP (защита):    ${CYAN}${bot_ip}${NC}"
     echo -e "  🔑 API Ключ:           ${YELLOW}${api_key}${NC}"
     echo -e "  🩺 Проверка API:       curl -k -H \"x-api-key: ${api_key}\" ${api_url}/healthz\n"
+    if [[ "$bot_ip" == "-" || "$bot_ip" == "any" ]]; then
+        echo -e "  ${YELLOW}💡 Рекомендация: ограничьте доступ к API только для IP бота: just1knode set-bot-ip <IP>${NC}\n"
+    fi
 }
 
 # =============================================================================

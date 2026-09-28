@@ -2043,6 +2043,14 @@ remove_traffic_watchdog_timer
         self.assertIn("Docker контейнер:", just1knode_sh)
         self.assertIn("Протокол:", just1knode_sh)
 
+        # 10. Amnezia Nginx Catch-All default_server with ssl_reject_handshake on domain mode
+        self.assertIn("listen ${public_port} ssl default_server;", content)
+        self.assertIn("ssl_reject_handshake on;", content)
+        self.assertIn("server_tokens off;", content)
+
+        # 11. Amnezia API UFW rule restricts to bot_ip
+        self.assertIn('ufw allow from "$bot_ip" to any port "$public_port" proto tcp comment "just1knode amnezia api"', content)
+
     def test_detect_host_port80_container_filtering_behaviour(self):
         """Verify detect_host_port80_container correctly matches host :80 bindings and ignores container-only :80."""
         # Simulated docker ps outputs
@@ -2130,6 +2138,42 @@ remove_traffic_watchdog_timer
                 shutil.copyfile(symlink_default.resolve(), backup_file)
                 self.assertFalse(backup_file.is_symlink(), "Backup must be a real file, not a symlink")
                 self.assertIn("server_name _;", backup_file.read_text(encoding="utf-8"))
+
+    def test_origin_nginx_catchall_zero_cert_leak(self):
+        """Verify Origin Nginx Catch-All default_server does not contain ssl_certificate when ssl_reject_handshake is supported."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("ssl_reject_handshake on;", origin_sh)
+        self.assertIn("listen 443 ssl default_server;", origin_sh)
+        self.assertIn("listen 80 default_server;", origin_sh)
+        self.assertIn("return 444;", origin_sh)
+
+        # Catchall block with ssl_reject_handshake must NOT have ssl_certificate
+        match = re.search(r'catchall_ssl_block="server\s*\{[^}]*ssl_reject_handshake on;[^}]*\}', origin_sh, re.DOTALL)
+        self.assertIsNotNone(match, "catchall_ssl_block with ssl_reject_handshake on; must be defined")
+        self.assertNotIn("ssl_certificate", match.group(0), "ssl_certificate must NOT be inside catchall when ssl_reject_handshake on is active")
+
+    def test_set_bot_ip_supports_origin_awg_and_dual_roles(self):
+        """Verify set_origin_bot_ip dynamically adapts target port based on role."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn('target_port="8444"', origin_sh)
+        self.assertIn('target_port="$(get_state_val "awg_port" "8443")"', origin_sh)
+        self.assertIn('ufw allow from "$new_bot_ip" to any port "$target_port" proto tcp', origin_sh)
+        self.assertIn('ufw delete allow 8443/tcp', origin_sh)
+
+    def test_heal_and_update_origin_config_cleans_8443_and_ensures_catchall(self):
+        """Verify heal_and_update_origin_config removes port 8443 and restores catchall without cert leak."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn('ufw delete allow 8443/tcp', origin_sh)
+        self.assertIn('listen 80 default_server', origin_sh)
+        self.assertIn('listen 443 ssl default_server', origin_sh)
+        self.assertIn("re.sub(r'server\\s*\\{[^}]*listen\\s+8443\\s+ssl[^}]*\\}\\n*', '', content, flags=re.DOTALL)", origin_sh)
+
+    def test_doctor_ufw_acl_validation_awg_and_dual(self):
+        """Verify run_doctor checks awg_port for awg and dual nodes."""
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('awg_p="$(get_state_val "awg_port" "8443")"', just1knode_sh)
+        self.assertIn("Порт API AmneziaWG $awg_p открыт для всех", just1knode_sh)
+        self.assertIn("Порт API AmneziaWG $awg_p защищен и доступен только с BOT_IP", just1knode_sh)
 
 
 if __name__ == "__main__":

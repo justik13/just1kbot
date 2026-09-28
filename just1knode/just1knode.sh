@@ -447,6 +447,31 @@ run_doctor() {
             else
                 echo -e "  ${YELLOW}!${NC} BOT_IP не настроен в state.json"
             fi
+        elif [[ "$role" == "awg" || "$role" == "dual" ]]; then
+            local awg_p bot_ip
+            awg_p="$(get_state_val "awg_port" "8443")"
+            bot_ip="$(get_state_val "bot_ip")"
+
+            if echo "$ufw_out" | grep -E "${awg_p}(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                echo -e "  ${YELLOW}!${NC} Порт API AmneziaWG $awg_p открыт для всех (рекомендуется ограничить: just1knode set-bot-ip <IP>)"
+            elif [[ -n "$bot_ip" ]] && echo "$ufw_out" | grep -F "$bot_ip" | grep -q "$awg_p"; then
+                echo -e "  ${GREEN}✔${NC} Порт API AmneziaWG $awg_p защищен и доступен только с BOT_IP ($bot_ip)"
+            elif [[ -n "$bot_ip" ]]; then
+                echo -e "  ${YELLOW}!${NC} Правило для BOT_IP ($bot_ip) на порт $awg_p не найдено в UFW"
+            fi
+
+            if [[ "$role" == "dual" ]]; then
+                local relay_port origin_ip
+                relay_port="$(get_state_val "relay_port" "10443")"
+                origin_ip="$(get_state_val "origin_ip")"
+
+                if echo "$ufw_out" | grep -E "${relay_port}(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                    echo -e "  ${RED}✗${NC} УЯЗВИМОСТЬ: Порт релея $relay_port открыт для всех (0.0.0.0/0)!"
+                    failed=$((failed + 1))
+                elif [[ -n "$origin_ip" ]] && echo "$ufw_out" | grep -F "$origin_ip" | grep -q "$relay_port"; then
+                    echo -e "  ${GREEN}✔${NC} Порт $relay_port защищен и доступен только с ORIGIN_IP ($origin_ip)"
+                fi
+            fi
         elif [[ "$role" == "relay" ]]; then
             local relay_port origin_ip
             relay_port="$(get_state_val "relay_port" "10443")"
@@ -1112,26 +1137,28 @@ main_menu() {
             echo -e "  API URL: ${CYAN}${a_url}${NC}\n"
 
             echo -e "  ${BOLD}[1]${NC} 🔑 Показать данные для Telegram-бота (/admin)"
-            echo -e "  ${BOLD}[2]${NC} 📊 Статус узла и активные клиенты"
-            echo -e "  ${BOLD}[3]${NC} 🛡️  Добавить Relay на этот сервер (Режим Dual)"
-            echo -e "  ${BOLD}[4]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
-            echo -e "  ${BOLD}[5]${NC} 🩺 Комплексная самодиагностика (Doctor)"
-            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[7]${NC} ⚠️ Сбросить / переустановить узел"
-            echo -e "  ${BOLD}[8]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[2]${NC} 🤖 Настроить / обновить IP Telegram-бота (BOT_IP)"
+            echo -e "  ${BOLD}[3]${NC} 📊 Статус узла и активные клиенты"
+            echo -e "  ${BOLD}[4]${NC} 🛡️  Добавить Relay на этот сервер (Режим Dual)"
+            echo -e "  ${BOLD}[5]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[6]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[7]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[8]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[9]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-8]: " choice
+            read -rp "Выберите действие [0-9]: " choice
 
             case "$choice" in
                 1) show_amnezia_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
-                2) show_status; read -rp "Нажмите Enter для продолжения...";;
-                3) install_xray_relay_node; read -rp "Нажмите Enter для продолжения...";;
-                4) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
-                5) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                6) update_node; read -rp "Нажмите Enter для продолжения...";;
-                7) reset_node; read -rp "Нажмите Enter для продолжения...";;
-                8) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                2) set_origin_bot_ip; read -rp "Нажмите Enter для продолжения...";;
+                3) show_status; read -rp "Нажмите Enter для продолжения...";;
+                4) install_xray_relay_node; read -rp "Нажмите Enter для продолжения...";;
+                5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                6) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                7) update_node; read -rp "Нажмите Enter для продолжения...";;
+                8) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -1146,27 +1173,29 @@ main_menu() {
 
             echo -e "  ${BOLD}[1]${NC} 📋 Показать данные подключения Relay (для Origin)"
             echo -e "  ${BOLD}[2]${NC} 🔑 Показать данные AmneziaWG для Telegram-бота (/admin)"
-            echo -e "  ${BOLD}[3]${NC} 📊 Статус всех служб и сетевой трафик"
-            echo -e "  ${BOLD}[4]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
-            echo -e "  ${BOLD}[5]${NC} 🩺 Комплексная самодиагностика (Doctor)"
-            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[7]${NC} ⚡ Обновить ядро Xray-core"
-            echo -e "  ${BOLD}[8]${NC} ⚠️ Сбросить / переустановить узел"
-            echo -e "  ${BOLD}[9]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[3]${NC} 🤖 Настроить / обновить IP Telegram-бота (BOT_IP)"
+            echo -e "  ${BOLD}[4]${NC} 📊 Статус всех служб и сетевой трафик"
+            echo -e "  ${BOLD}[5]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[6]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[7]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[8]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[9]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[10]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-9]: " choice
+            read -rp "Выберите действие [0-10]: " choice
 
             case "$choice" in
                 1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
                 2) show_amnezia_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
-                3) show_status; read -rp "Нажмите Enter для продолжения...";;
-                4) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
-                5) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                6) update_node; read -rp "Нажмите Enter для продолжения...";;
-                7) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
-                8) reset_node; read -rp "Нажмите Enter для продолжения...";;
-                9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                3) set_origin_bot_ip; read -rp "Нажмите Enter для продолжения...";;
+                4) show_status; read -rp "Нажмите Enter для продолжения...";;
+                5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                6) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                7) update_node; read -rp "Нажмите Enter для продолжения...";;
+                8) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                9) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                10) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -1184,7 +1213,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 case "${2:-}" in
                     origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}" "${9:-}" ;;
                     relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-www.google.com}" ;;
-                    amnezia|awg) install_amnezia_node "${3:-}" "${4:-}" ;;
+                    amnezia|awg) install_amnezia_node "${3:-}" "${4:-}" "${5:-}" ;;
                     *) error "Неизвестный тип установки: $2. Доступно: origin, relay, amnezia, awg" ;;
                 esac
                 ;;
@@ -1199,13 +1228,14 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 ;;
             amnezia|awg)
                 case "${2:-}" in
-                    install|setup) install_amnezia_node "${3:-}" "${4:-}" ;;
+                    install|setup) install_amnezia_node "${3:-}" "${4:-}" "${5:-}" ;;
                     status) show_amnezia_status ;;
                     creds|bot) show_amnezia_bot_credentials ;;
+                    bot-ip|set-bot-ip) set_origin_bot_ip "${3:-}" ;;
                     backup) backup_amnezia_node "${3:-}" ;;
                     restore) restore_amnezia_node "${3:-}" ;;
                     uninstall|remove) uninstall_amnezia_component ;;
-                    *) install_amnezia_node "${2:-}" "${3:-}" ;;
+                    *) install_amnezia_node "${2:-}" "${3:-}" "${4:-}" ;;
                 esac
                 ;;
             backup)

@@ -177,10 +177,23 @@ EOF
     local existing_awg_port
     existing_awg_port="$(get_state_val "awg_port" 2>/dev/null || true)"
     [[ -z "$existing_awg_port" ]] && existing_awg_port="8443"
+    local saved_bot_ip
+    saved_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+
     if [[ "$prev_role" == "awg" || "$prev_role" == "dual" || -f "/etc/nginx/sites-available/just1k-amnezia.conf" ]]; then
-        extra_ufw_ports+=("${existing_awg_port}/tcp")
+        if [[ -n "$saved_bot_ip" && "$saved_bot_ip" != "any" && "$saved_bot_ip" != "0.0.0.0/0" ]] && validate_ipv4 "$saved_bot_ip"; then
+            : # Не открываем awg_port глобально через configure_safe_ufw, добавим точечное правило для BOT_IP ниже
+        else
+            extra_ufw_ports+=("${existing_awg_port}/tcp")
+        fi
     fi
     configure_safe_ufw "${extra_ufw_ports[@]}"
+    if [[ "$prev_role" == "awg" || "$prev_role" == "dual" || -f "/etc/nginx/sites-available/just1k-amnezia.conf" ]]; then
+        if [[ -n "$saved_bot_ip" && "$saved_bot_ip" != "any" && "$saved_bot_ip" != "0.0.0.0/0" ]] && validate_ipv4 "$saved_bot_ip"; then
+            ufw allow from "$saved_bot_ip" to any port "$existing_awg_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1 || true
+            log "Фаервол UFW: подтвержден доступ к порту ${existing_awg_port} строго для BOT_IP (${saved_bot_ip})"
+        fi
+    fi
     ufw allow from "$origin_ip" to any port "$relay_port" proto tcp || true
     log "Порт туннеля ${relay_port}/tcp открыт строго для ${origin_ip}."
 
