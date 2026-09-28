@@ -43,6 +43,12 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         self.assertIsNotNone(rev_0005)
         self.assertEqual(rev_0005.down_revision, "0004_referral_entitlements")
 
+    def test_historical_topup_callback_is_stale_protected(self):
+        from bot.middlewares.action_lock import _is_stale_action
+
+        self.assertTrue(_is_stale_action("balance_resume_purchase:123:renew"))
+        self.assertFalse(_is_stale_action("balance_resume_topup"))
+
     def test_action_lock_prefixes_updated(self):
         self.assertIn("confirm_admin_balance_apply", LOCKED_ACTION_PREFIXES)
         self.assertIn("confirm_admin_balance_apply", STALE_ACTION_PREFIXES)
