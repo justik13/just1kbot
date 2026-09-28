@@ -4,8 +4,6 @@ from __future__ import annotations
 ADMIN_DASHBOARD_REVENUE_24H_LINE = """• Выручка за 24ч: <b>{fin_stats__rev_24h} ₽</b> ({fin_stats__count_24h} продаж)
 """
 
-ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES = "💰 Финансы и Очереди{fin_badge}"
-
 ADMIN_DASHBOARD_SECTION_USERS_BROADCAST = """{header}👥 <b>Управление пользователями и рассылками:</b>
 
 Выберите нужный раздел:"""
@@ -135,9 +133,6 @@ DASHBOARD_ACTIVE_PODPISOK_ACTIVE = """• Активных подписок: <b>
 DASHBOARD_WHITE_INTERNET_STATS = """• Белый Интернет: <b>{active_count}</b> акт. (трафик: <b>{traffic}</b>)
 """
 
-DASHBOARD_ATTENTION_ATTENTION = """⚠️ <b>Требует внимания:</b>
-"""
-
 DASHBOARD_AUDIT_LOG = "📜 Аудит-лог"
 
 DASHBOARD_AUDIT_LOG_DEYSTVIY_ADMINISTRAT = """{header}📜 <b>Аудит-лог действий администраторов</b> (Стр. {page}/{total_pages}, всего: {total_count})
@@ -148,16 +143,12 @@ DASHBOARD_AVG_CHECK_30D_AVG_CHECK = """• Средний чек (30д): <b>{fin
 
 """
 
-DASHBOARD_DISPUTY = "⚖️ Диспуты"
-
-DASHBOARD_DISPUTY_COUNT = "⚠️ Диспуты ({disputes_count})"
-
 DASHBOARD_FINANCIAL_METRICS = """💰 <b>Финансовые показатели:</b>
 """
 
-DASHBOARD_FINANSY_I_OCHEREDI = "💰 Финансы и Очереди"
+DASHBOARD_FINANSY_I_OCHEREDI = "💰 Финансы"
 
-DASHBOARD_FINANSY_OCHEREDI_I_PLATEZHNYE = """{header}💰 <b>Финансы, Очереди и Платежные споры:</b>
+DASHBOARD_FINANSY_OCHEREDI_I_PLATEZHNYE = """{header}💰 <b>Финансы:</b>
 
 Выберите нужный раздел:"""
 
@@ -199,14 +190,6 @@ DASHBOARD_NE_ZADANO_LINK_HIDDEN_OT_POL = """<code>{safe_mtproto_url_or}</code>
 
 """
 
-DASHBOARD_OCHEREDI = "🚨 Очереди ({dead_queues_count})"
-
-DASHBOARD_OCHEREDI_TASKS = "🔄 Очереди задач"
-
-DASHBOARD_OPEN_PLATEZHNYKH_DISPUTES = """• Открытых платежных споров: <b>{disputes_count}</b>
-
-"""
-
 DASHBOARD_OTPRAVTE_NOVUYU_SSYLKU_NA_MTPR = """Отправьте новую ссылку на MTProto Proxy (например, <code>https://t.me/proxy?server=...</code>)
 """
 
@@ -235,9 +218,6 @@ DASHBOARD_SISTEMNYE_SETTINGS_BOTA = """⚙️ <b>Системные настро
 DASHBOARD_SISTEMNYE_SETTINGS_I_LOGI_VYB = """{header}🛠 <b>Системные настройки и логи:</b>
 
 Выберите нужный раздел:"""
-
-DASHBOARD_STALE_TASKS_V_OCHEREDYAK = """• Зависших задач в очередях: <b>{dead_queues_count}</b>
-"""
 
 DASHBOARD_TEKHRABOTY_VKLYUCHENY = "🔴 Техработы: ВКЛЮЧЕНЫ"
 
@@ -314,6 +294,3 @@ AUDIT_DETAIL_LABELS = {
     'devices_restored': 'Устройства восстановлены',
     'new_end': 'Новый срок',
 }
-
-
-ADMIN_DASHBOARD_FINANCE_BADGE = " ⚠️ ({count})"

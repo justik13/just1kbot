@@ -38,14 +38,8 @@ from .device import (
 )
 from .payment import (
     get_balance_amounts_keyboard,
-    get_balance_change_confirm_keyboard,
-    get_balance_change_shortage_keyboard,
-    get_balance_change_start_keyboard,
     get_balance_history_keyboard,
     get_balance_keyboard,
-    get_balance_purchase_confirm_keyboard,
-    get_balance_purchase_start_keyboard,
-    get_balance_shortage_keyboard,
     get_change_tariff_keyboard,
     get_order_checkout_keyboard,
     get_order_invoice_keyboard,
@@ -91,13 +85,7 @@ __all__ = [
     "get_balance_amounts_keyboard",
     "get_topup_waiting_keyboard",
     "get_topup_payment_keyboard",
-    "get_balance_purchase_start_keyboard",
-    "get_balance_purchase_confirm_keyboard",
-    "get_balance_change_start_keyboard",
-    "get_balance_change_confirm_keyboard",
     "get_same_tariff_keyboard",
-    "get_balance_shortage_keyboard",
-    "get_balance_change_shortage_keyboard",
     "get_topup_credit_keyboard",
     # admin dashboard
     "get_admin_menu",

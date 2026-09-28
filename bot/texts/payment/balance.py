@@ -64,13 +64,6 @@ BALANCE_TOPUP_CARD = """💳 <b>Пополнение баланса</b>
 
 Ссылка ведёт на защищённую страницу ЮKassa."""
 
-BALANCE_TOPUP_CREATING_LINK_CARD = """⏳ <b>Создаём ссылку на пополнение</b>
-
-Сумма: <b>{value_0} ₽</b>
-Текущий баланс: <b>{value_1} ₽</b>
-
-Ссылка появится здесь автоматически. Ручная проверка остаётся доступна."""
-
 BALANCE_TOTAL_AVAILABLE_LABEL = "💰 Баланс: <b>{int_balance_real_available} ₽</b>"
 
 BALANCE_VY_POLUCHITE_20_OT_SUMMY_POPOL = """Вы получите <b>+20%</b> от суммы пополнения на бонусный баланс!

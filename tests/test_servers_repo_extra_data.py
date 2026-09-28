@@ -45,10 +45,10 @@ class TestExtraDataAndCapacityInvariants(unittest.IsolatedAsyncioTestCase):
         server.consecutive_fails = 0
         server.consecutive_successes = 5
         server.extra_data = {
-            "secret_base_path": "/stream/v1",
+            "secret_base_path": "/assets/v1",
             "relays": [
-                {"code": "de", "name": "Germany", "path": "/stream/v1/de"},
-                {"code": "nl", "name": "Netherlands", "path": "/stream/v1/nl"},
+                {"code": "de", "name": "Germany", "path": "/assets/v1/de"},
+                {"code": "nl", "name": "Netherlands", "path": "/assets/v1/nl"},
             ],
             "custom_metadata": "preserve_this",
         }
@@ -59,12 +59,12 @@ class TestExtraDataAndCapacityInvariants(unittest.IsolatedAsyncioTestCase):
 
         # Node monitor reports snapshot where Netherlands was removed and Sweden was added
         authoritative_relays = [
-            {"code": "de", "name": "Germany", "path": "/stream/v1/de"},
-            {"code": "se", "name": "Sweden", "path": "/stream/v1/se"},
+            {"code": "de", "name": "Germany", "path": "/assets/v1/de"},
+            {"code": "se", "name": "Sweden", "path": "/assets/v1/se"},
         ]
         update_extra = {
             "relays": authoritative_relays,
-            "secret_base_path": "/stream/v1",
+            "secret_base_path": "/assets/v1",
         }
 
         updated_server, ok = await servers_repo.update_server_health_snapshot(
@@ -119,8 +119,8 @@ class TestExtraDataAndCapacityInvariants(unittest.IsolatedAsyncioTestCase):
             server.extra_data.get("secret_base_path")
             if isinstance(getattr(server, "extra_data", None), dict)
             else None
-        ) or "/stream/v1"
-        self.assertEqual(secret_path, "/stream/v1")
+        ) or "/assets/v1"
+        self.assertEqual(secret_path, "/assets/v1")
 
         relays = (
             server.extra_data.get("relays")

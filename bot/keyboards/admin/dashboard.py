@@ -6,8 +6,6 @@ from bot import texts
 
 def get_admin_menu(
     maintenance_enabled: bool = False,
-    dead_queues_count: int = 0,
-    disputes_count: int = 0,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -20,12 +18,8 @@ def get_admin_menu(
         callback_data="admin_cat_infra",
     )
 
-    fin_badge = ""
-    if disputes_count > 0 or dead_queues_count > 0:
-        fin_badge = texts.ADMIN_DASHBOARD_FINANCE_BADGE.format(count=disputes_count + dead_queues_count)
-
     builder.button(
-        text=texts.ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES.format(fin_badge=fin_badge),
+        text=texts.DASHBOARD_FINANSY_I_OCHEREDI,
         callback_data="admin_cat_finance",
     )
 
@@ -63,10 +57,7 @@ def get_admin_cat_infra_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_admin_cat_finance_keyboard(
-    dead_queues_count: int = 0,
-    disputes_count: int = 0,
-) -> InlineKeyboardMarkup:
+def get_admin_cat_finance_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_ISTORIYA_PLATEZHEJ, callback_data="admin_payments")
     builder.button(text=texts.BTN_ZHURNAL_POKUPOK, callback_data="admin_purchases")

@@ -355,9 +355,9 @@ run_doctor() {
         local c_doc
         c_doc="$(detect_amnezia_container 2>/dev/null || echo "amnezia-awg2")"
         if is_amnezia_container_running 2>/dev/null; then
-            echo -e "  ${GREEN}✔${NC} Docker контейнер ${c_doc} активен"
+            echo -e "  ${GREEN}✔${NC} Docker контейнер: ${c_doc} (активен)"
         else
-            echo -e "  ${RED}✗${NC} Docker контейнер ${c_doc} не запущен"
+            echo -e "  ${RED}✗${NC} Docker контейнер: ${c_doc} (не запущен)"
             failed=$((failed + 1))
         fi
         local conf_name="awg0.conf"
@@ -369,6 +369,14 @@ run_doctor() {
         fi
         if [[ "$conf_found" == "true" ]]; then
             echo -e "  ${GREEN}✔${NC} Конфигурационный файл ${conf_name} найден"
+            local proto_id proto_display
+            proto_id="$(detect_awg_protocol_version 2>/dev/null || echo "amneziawg2")"
+            case "$proto_id" in
+                "amneziawg3.1") proto_display="AmneziaWG 3.1" ;;
+                "amneziawg3")   proto_display="AmneziaWG 3.0" ;;
+                *)              proto_display="AmneziaWG 2.0" ;;
+            esac
+            echo -e "  ${GREEN}✔${NC} Протокол: ${proto_display} (${proto_id})"
             if docker exec "$c_doc" awg show awg0 >/dev/null 2>&1; then
                 echo -e "  ${GREEN}✔${NC} Интерфейс awg0 активен в ядре"
             fi
@@ -438,6 +446,32 @@ run_doctor() {
                 failed=$((failed + 1))
             else
                 echo -e "  ${YELLOW}!${NC} BOT_IP не настроен в state.json"
+            fi
+        elif [[ "$role" == "awg" || "$role" == "dual" ]]; then
+            local awg_p bot_ip
+            awg_p="$(get_state_val "awg_port" "8443")"
+            bot_ip="$(get_state_val "bot_ip")"
+
+            if echo "$ufw_out" | grep -E "${awg_p}(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                echo -e "  ${YELLOW}!${NC} Порт API AmneziaWG $awg_p открыт для всех (рекомендуется ограничить: just1knode set-bot-ip <IP>)"
+            elif [[ -n "$bot_ip" ]] && echo "$ufw_out" | grep -F "$bot_ip" | grep -q "$awg_p"; then
+                echo -e "  ${GREEN}✔${NC} Порт API AmneziaWG $awg_p защищен и доступен только с BOT_IP ($bot_ip)"
+            elif [[ -n "$bot_ip" ]]; then
+                echo -e "  ${YELLOW}!${NC} Правило для BOT_IP ($bot_ip) на порт $awg_p не найдено в UFW"
+                failed=$((failed + 1))
+            fi
+
+            if [[ "$role" == "dual" ]]; then
+                local relay_port origin_ip
+                relay_port="$(get_state_val "relay_port" "10443")"
+                origin_ip="$(get_state_val "origin_ip")"
+
+                if echo "$ufw_out" | grep -E "${relay_port}(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                    echo -e "  ${RED}✗${NC} УЯЗВИМОСТЬ: Порт релея $relay_port открыт для всех (0.0.0.0/0)!"
+                    failed=$((failed + 1))
+                elif [[ -n "$origin_ip" ]] && echo "$ufw_out" | grep -F "$origin_ip" | grep -q "$relay_port"; then
+                    echo -e "  ${GREEN}✔${NC} Порт $relay_port защищен и доступен только с ORIGIN_IP ($origin_ip)"
+                fi
             fi
         elif [[ "$role" == "relay" ]]; then
             local relay_port origin_ip
@@ -632,8 +666,15 @@ reset_node() {
     systemctl disable xray xray-api amnezia-api 2>/dev/null || true
     remove_traffic_watchdog_timer
     remove_amnezia_abuse_protection 2>/dev/null || true
-    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh /etc/letsencrypt/renewal-hooks/pre/01-stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/01-start-port80-docker.sh /etc/letsencrypt/renewal-hooks/pre/stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/start-port80-docker.sh 2>/dev/null || true
     rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api /etc/amnezia-api /opt/amnezia-api /etc/ssl/just1k_amnezia 2>/dev/null || true
+    if [[ ! -e /etc/nginx/sites-enabled/default ]]; then
+        if [[ -f /etc/nginx/sites-available/default.user.bak ]]; then
+            cp -a /etc/nginx/sites-available/default.user.bak /etc/nginx/sites-available/default 2>/dev/null || true
+            ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+            rm -f /etc/nginx/sites-available/default.user.bak 2>/dev/null || true
+        fi
+    fi
     systemctl reload nginx 2>/dev/null || true
     log "Узел успешно сброшен в исходное состояние."
 }
@@ -820,6 +861,9 @@ uninstall_node() {
         else
             node_cleanup_errors+=("Не удалось восстановить default.user.bak в Nginx")
         fi
+    elif [[ -f "${nginx_conf_dir}/sites-available/default" && ! -e "${nginx_conf_dir}/sites-enabled/default" ]]; then
+        info "Восстановление стандартного default сайта в Nginx..."
+        ln -sf "${nginx_conf_dir}/sites-available/default" "${nginx_conf_dir}/sites-enabled/default" 2>/dev/null || true
     fi
 
     if command -v nginx >/dev/null 2>&1; then
@@ -839,7 +883,12 @@ uninstall_node() {
     if [[ -d "$certbot_dir" ]] && [[ -z "$(ls -A "$certbot_dir" 2>/dev/null)" ]]; then
         rmdir "$certbot_dir" 2>/dev/null || true
     fi
-    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" 2>/dev/null || true
+    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/01-stop-port80-docker.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/01-start-port80-docker.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/stop-port80-docker.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/start-port80-docker.sh" 2>/dev/null || true
 
     info "8/11. Удаление конфигурации ядра sysctl и восстановление IPv6..."
     local sysctl_ipv6_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
@@ -855,10 +904,12 @@ uninstall_node() {
 
     info "9/11. Очистка правил фаервола (UFW)..."
     if command -v ufw >/dev/null 2>&1; then
-        local st_relay_port st_origin_ip st_bot_ip
+        local st_relay_port st_origin_ip st_bot_ip st_awg_port
         st_relay_port="$(get_state_val "relay_port" 2>/dev/null || true)"
         st_origin_ip="$(get_state_val "origin_ip" 2>/dev/null || true)"
         st_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+        st_awg_port="$(get_state_val "awg_port" 2>/dev/null || true)"
+        [[ -z "$st_awg_port" && (-f /etc/nginx/sites-available/just1k-amnezia.conf || -f /etc/systemd/system/amnezia-api.service) ]] && st_awg_port="8443"
 
         if [[ -n "$st_relay_port" ]]; then
             if [[ -n "$st_origin_ip" ]]; then
@@ -869,9 +920,16 @@ uninstall_node() {
         fi
         if [[ -n "$st_bot_ip" ]]; then
             ufw delete allow from "$st_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+            if [[ -n "$st_awg_port" ]]; then
+                ufw delete allow from "$st_bot_ip" to any port "$st_awg_port" proto tcp 2>/dev/null || true
+            fi
         fi
         ufw delete allow 8444/tcp 2>/dev/null || true
         ufw delete allow 8444 2>/dev/null || true
+        if [[ -n "$st_awg_port" ]]; then
+            ufw delete allow "${st_awg_port}/tcp" 2>/dev/null || true
+            ufw delete allow "${st_awg_port}" 2>/dev/null || true
+        fi
     fi
 
     info "10/11. Удаление состояния, бэкапов и блокировок..."
@@ -1088,26 +1146,28 @@ main_menu() {
             echo -e "  API URL: ${CYAN}${a_url}${NC}\n"
 
             echo -e "  ${BOLD}[1]${NC} 🔑 Показать данные для Telegram-бота (/admin)"
-            echo -e "  ${BOLD}[2]${NC} 📊 Статус узла и активные клиенты"
-            echo -e "  ${BOLD}[3]${NC} 🛡️  Добавить Relay на этот сервер (Режим Dual)"
-            echo -e "  ${BOLD}[4]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
-            echo -e "  ${BOLD}[5]${NC} 🩺 Комплексная самодиагностика (Doctor)"
-            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[7]${NC} ⚠️ Сбросить / переустановить узел"
-            echo -e "  ${BOLD}[8]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[2]${NC} 🤖 Настроить / обновить IP Telegram-бота (BOT_IP)"
+            echo -e "  ${BOLD}[3]${NC} 📊 Статус узла и активные клиенты"
+            echo -e "  ${BOLD}[4]${NC} 🛡️  Добавить Relay на этот сервер (Режим Dual)"
+            echo -e "  ${BOLD}[5]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[6]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[7]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[8]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[9]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-8]: " choice
+            read -rp "Выберите действие [0-9]: " choice
 
             case "$choice" in
                 1) show_amnezia_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
-                2) show_status; read -rp "Нажмите Enter для продолжения...";;
-                3) install_xray_relay_node; read -rp "Нажмите Enter для продолжения...";;
-                4) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
-                5) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                6) update_node; read -rp "Нажмите Enter для продолжения...";;
-                7) reset_node; read -rp "Нажмите Enter для продолжения...";;
-                8) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                2) set_origin_bot_ip; read -rp "Нажмите Enter для продолжения...";;
+                3) show_status; read -rp "Нажмите Enter для продолжения...";;
+                4) install_xray_relay_node; read -rp "Нажмите Enter для продолжения...";;
+                5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                6) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                7) update_node; read -rp "Нажмите Enter для продолжения...";;
+                8) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -1122,27 +1182,29 @@ main_menu() {
 
             echo -e "  ${BOLD}[1]${NC} 📋 Показать данные подключения Relay (для Origin)"
             echo -e "  ${BOLD}[2]${NC} 🔑 Показать данные AmneziaWG для Telegram-бота (/admin)"
-            echo -e "  ${BOLD}[3]${NC} 📊 Статус всех служб и сетевой трафик"
-            echo -e "  ${BOLD}[4]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
-            echo -e "  ${BOLD}[5]${NC} 🩺 Комплексная самодиагностика (Doctor)"
-            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[7]${NC} ⚡ Обновить ядро Xray-core"
-            echo -e "  ${BOLD}[8]${NC} ⚠️ Сбросить / переустановить узел"
-            echo -e "  ${BOLD}[9]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[3]${NC} 🤖 Настроить / обновить IP Telegram-бота (BOT_IP)"
+            echo -e "  ${BOLD}[4]${NC} 📊 Статус всех служб и сетевой трафик"
+            echo -e "  ${BOLD}[5]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[6]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[7]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[8]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[9]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[10]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-9]: " choice
+            read -rp "Выберите действие [0-10]: " choice
 
             case "$choice" in
                 1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
                 2) show_amnezia_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
-                3) show_status; read -rp "Нажмите Enter для продолжения...";;
-                4) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
-                5) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                6) update_node; read -rp "Нажмите Enter для продолжения...";;
-                7) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
-                8) reset_node; read -rp "Нажмите Enter для продолжения...";;
-                9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                3) set_origin_bot_ip; read -rp "Нажмите Enter для продолжения...";;
+                4) show_status; read -rp "Нажмите Enter для продолжения...";;
+                5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                6) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                7) update_node; read -rp "Нажмите Enter для продолжения...";;
+                8) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                9) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                10) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -1160,7 +1222,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 case "${2:-}" in
                     origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}" "${9:-}" ;;
                     relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-www.google.com}" ;;
-                    amnezia|awg) install_amnezia_node "${3:-}" "${4:-}" ;;
+                    amnezia|awg) install_amnezia_node "${3:-}" "${4:-}" "${5:-}" ;;
                     *) error "Неизвестный тип установки: $2. Доступно: origin, relay, amnezia, awg" ;;
                 esac
                 ;;
@@ -1175,13 +1237,14 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 ;;
             amnezia|awg)
                 case "${2:-}" in
-                    install|setup) install_amnezia_node "${3:-}" "${4:-}" ;;
+                    install|setup) install_amnezia_node "${3:-}" "${4:-}" "${5:-}" ;;
                     status) show_amnezia_status ;;
                     creds|bot) show_amnezia_bot_credentials ;;
+                    bot-ip|set-bot-ip) set_origin_bot_ip "${3:-}" ;;
                     backup) backup_amnezia_node "${3:-}" ;;
                     restore) restore_amnezia_node "${3:-}" ;;
                     uninstall|remove) uninstall_amnezia_component ;;
-                    *) install_amnezia_node "${2:-}" "${3:-}" ;;
+                    *) install_amnezia_node "${2:-}" "${3:-}" "${4:-}" ;;
                 esac
                 ;;
             backup)

@@ -41,14 +41,8 @@ from bot.texts.admin.users import (
 from bot.texts.common.status import MAINTENANCE_DEFAULT_MESSAGE as MAINTENANCE_DEFAULT_MESSAGE
 from bot.texts.connection.config import (
     CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE as CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE,
-    )
-from bot.texts.runtime.alerts import (
-    ALERT_QUEUE_RECOVERED as ALERT_QUEUE_RECOVERED,
-    ALERT_QUEUE_UNHEALTHY as ALERT_QUEUE_UNHEALTHY,
-    QUEUE_HEALTH_DEAD_PROBLEM as QUEUE_HEALTH_DEAD_PROBLEM,
-    QUEUE_HEALTH_OVERDUE_PROBLEM as QUEUE_HEALTH_OVERDUE_PROBLEM,
-    QUEUE_HEALTH_STALE_PROBLEM as QUEUE_HEALTH_STALE_PROBLEM,
 )
+
 
 from bot.texts import admin as _admin
 from bot.texts import common as _common

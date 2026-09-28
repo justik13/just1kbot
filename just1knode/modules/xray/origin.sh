@@ -258,7 +258,7 @@ EOF
         default_was_linked=1
         if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
             warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak в sites-available."
-            cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
+            cp -L "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
         fi
         rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
@@ -531,7 +531,7 @@ EOF
         default_was_linked_origin=1
         if grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null; then
             warn "Файл ${NGINX_CONF_DIR}/sites-enabled/default содержит пользовательские домены. Создаём резервную копию default.user.bak в sites-available."
-            cp -a "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
+            cp -L "${NGINX_CONF_DIR}/sites-enabled/default" "${NGINX_CONF_DIR}/sites-available/default.user.bak"
         fi
         rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
@@ -550,6 +550,34 @@ except Exception:
         ssl_reject_directive="ssl_reject_handshake on;"
     fi
 
+    local catchall_ssl_block
+    if [[ -n "$ssl_reject_directive" ]]; then
+        catchall_ssl_block="server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_reject_handshake on;
+}"
+    else
+        local dummy_dir="${DUMMY_CERT_DIR:-${NGINX_CONF_DIR}/fallback_ssl}"
+        mkdir -p "$dummy_dir"
+        if [[ ! -f "${dummy_dir}/dummy.crt" ]]; then
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                -keyout "${dummy_dir}/dummy.key" -out "${dummy_dir}/dummy.crt" \
+                -subj "/CN=invalid" 2>/dev/null || true
+        fi
+        catchall_ssl_block="server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_certificate ${dummy_dir}/dummy.crt;
+    ssl_certificate_key ${dummy_dir}/dummy.key;
+    return 444;
+}"
+    fi
+
     cat > "${NGINX_CONF_DIR}/sites-available/just1k-origin.conf" <<EOF
 # 0. Catch-All Default Server: сброс прямых сканирований по IP и неизвестным SNI
 server {
@@ -560,16 +588,7 @@ server {
     return 444;
 }
 
-server {
-    listen 443 ssl default_server;
-    listen [::]:443 ssl default_server;
-    server_name _;
-    server_tokens off;
-    ${ssl_reject_directive}
-    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
-    return 444;
-}
+${catchall_ssl_block}
 
 server {
     listen 80;
@@ -654,6 +673,8 @@ EOF
     configure_safe_ufw "80/tcp" "443/tcp"
     ufw delete allow 8444/tcp 2>/dev/null || true
     ufw delete allow 8444 2>/dev/null || true
+    ufw delete allow 8443/tcp 2>/dev/null || true
+    ufw delete allow 8443 2>/dev/null || true
     if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]]; then
         ufw allow from "$bot_ip" to any port 8444 proto tcp || true
     else
@@ -683,22 +704,31 @@ EOF
 }
 
 set_origin_bot_ip() {
-    title "ОБНОВЛЕНИЕ IP-АДРЕСА TELEGRAM-БОТА (BOT_IP ДЛЯ ПОРТА 8444)"
+    title "ОБНОВЛЕНИЕ IP-АДРЕСА TELEGRAM-БОТА (BOT_IP ДЛЯ ЗАЩИТЫ API)"
     check_root
     init_state_dir
     acquire_just1knode_lock
 
     local role
     role="$(get_state_val "role")"
-    if [[ "$role" != "origin" ]]; then
+    local target_port="8444"
+    local role_descr="Origin API (порт 8444)"
+
+    if [[ "$role" == "origin" ]]; then
+        target_port="8444"
+        role_descr="Origin API (порт 8444)"
+    elif [[ "$role" == "awg" || "$role" == "dual" ]]; then
+        target_port="$(get_state_val "awg_port" "8443")"
+        role_descr="AmneziaWG API (порт ${target_port})"
+    else
         release_just1knode_lock
-        error "Функция доступна только на Origin-узле (текущая роль: ${role:-не установлена})."
+        error "Функция доступна только на узлах с ролью Origin, AmneziaWG или Dual (текущая роль: ${role:-не установлена})."
         return 1
     fi
 
     local new_bot_ip="${1:-}"
     if [[ -z "$new_bot_ip" ]]; then
-        read -rp "Введите новый IP-адрес Telegram-бота: " new_bot_ip || true
+        read -rp "Введите новый IP-адрес Telegram-бота (для защиты ${role_descr}): " new_bot_ip || true
     fi
 
     new_bot_ip="$(echo "$new_bot_ip" | tr -d '[:space:]')"
@@ -723,7 +753,7 @@ set_origin_bot_ip() {
     fi
     if ! ufw status 2>/dev/null | grep -qi "Status: active"; then
         release_just1knode_lock
-        error "Фаервол UFW не активен (Status: inactive). Для безопасного обновления порта 8444 UFW должен быть включен."
+        error "Фаервол UFW не активен (Status: inactive). Для безопасного обновления порта ${target_port} UFW должен быть включен."
         return 1
     fi
 
@@ -731,33 +761,37 @@ set_origin_bot_ip() {
     old_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
 
     # Проверка no-op (если IP совпадает и правило уже активно)
-    if [[ "$new_bot_ip" == "$old_bot_ip" ]] && ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "8444"; then
-        ufw delete allow 8444/tcp 2>/dev/null || true
-        ufw delete allow 8444 2>/dev/null || true
+    if [[ "$new_bot_ip" == "$old_bot_ip" ]] && ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "$target_port"; then
+        ufw delete allow "${target_port}/tcp" 2>/dev/null || true
+        ufw delete allow "${target_port}" 2>/dev/null || true
+        if [[ "$role" == "origin" ]]; then
+            ufw delete allow 8443/tcp 2>/dev/null || true
+            ufw delete allow 8443 2>/dev/null || true
+        fi
         log "BOT_IP ($new_bot_ip) уже установлен и подтвержден в UFW. Изменений не требуется."
         release_just1knode_lock
         return 0
     fi
 
-    log "Применение нового правила фаервола UFW для порта 8444 ($new_bot_ip)..."
+    log "Применение нового правила фаервола UFW для ${role_descr} ($new_bot_ip)..."
     # Шаг 1: Добавляем новое правило ПЕРВЫМ (не ломая старый доступ)
-    if ! ufw allow from "$new_bot_ip" to any port 8444 proto tcp; then
+    if ! ufw allow from "$new_bot_ip" to any port "$target_port" proto tcp; then
         release_just1knode_lock
         error "Сбой выполнения команды 'ufw allow' для IP $new_bot_ip. Предыдущие правила сохранены."
         return 1
     fi
 
     # Шаг 2: Верифицируем, что правило реально появилось в UFW
-    if ! ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "8444"; then
-        ufw delete allow from "$new_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+    if ! ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "$target_port"; then
+        ufw delete allow from "$new_bot_ip" to any port "$target_port" proto tcp 2>/dev/null || true
         release_just1knode_lock
-        error "Верификация не пройдена: правило для $new_bot_ip на порт 8444 отсутствует в UFW. Изменение откатано."
+        error "Верификация не пройдена: правило для $new_bot_ip на порт $target_port отсутствует в UFW. Изменение откатано."
         return 1
     fi
 
     # Шаг 3: Атомарно фиксируем новый IP в state.json перед удалением старых правил
     if ! set_state_val "bot_ip" "$new_bot_ip"; then
-        ufw delete allow from "$new_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+        ufw delete allow from "$new_bot_ip" to any port "$target_port" proto tcp 2>/dev/null || true
         release_just1knode_lock
         error "Сбой сохранения bot_ip в state.json. Новое правило для $new_bot_ip откатано, старый доступ сохранен."
         return 1
@@ -765,13 +799,21 @@ set_origin_bot_ip() {
 
     # Шаг 4: Только после успешной фиксации состояния удаляем старое и широкие правила
     if [[ -n "$old_bot_ip" && "$old_bot_ip" != "$new_bot_ip" && "$old_bot_ip" != "any" && "$old_bot_ip" != "-" ]]; then
-        ufw delete allow from "$old_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+        ufw delete allow from "$old_bot_ip" to any port "$target_port" proto tcp 2>/dev/null || true
     fi
-    ufw delete allow 8444/tcp 2>/dev/null || true
-    ufw delete allow 8444 2>/dev/null || true
+    ufw delete allow "${target_port}/tcp" 2>/dev/null || true
+    ufw delete allow "${target_port}" 2>/dev/null || true
+    if [[ "$role" == "origin" ]]; then
+        ufw delete allow 8443/tcp 2>/dev/null || true
+        ufw delete allow 8443 2>/dev/null || true
+    fi
 
     log "BOT_IP успешно обновлен и зафиксирован в state.json: ${old_bot_ip:-не был задан} -> ${new_bot_ip}"
     release_just1knode_lock
+}
+
+set_node_bot_ip() {
+    set_origin_bot_ip "$@"
 }
 
 heal_and_update_origin_config() {
@@ -1130,9 +1172,35 @@ except Exception:
     local origin_vhost="${NGINX_CONF_DIR}/sites-available/just1k-origin.conf"
     if [[ -f "$origin_vhost" ]]; then
         manifest_track_file "$origin_vhost"
+        local ssl_reject_supported=0
+        local nginx_ver
+        nginx_ver="$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "0.0.0")"
+        if [[ -n "$nginx_ver" ]] && python3 -c "
+import sys
+try:
+    v = tuple(map(int, '$nginx_ver'.split('.')))
+    sys.exit(0 if v >= (1, 19, 4) else 1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+            ssl_reject_supported=1
+        fi
+        local heal_origin_domain
+        heal_origin_domain="$(get_state_val "domain" 2>/dev/null || true)"
+        local heal_dummy_dir="${DUMMY_CERT_DIR:-${NGINX_CONF_DIR}/fallback_ssl}"
+        mkdir -p "$heal_dummy_dir"
+        if [[ ! -f "${heal_dummy_dir}/dummy.crt" ]]; then
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                -keyout "${heal_dummy_dir}/dummy.key" -out "${heal_dummy_dir}/dummy.crt" \
+                -subj "/CN=invalid" 2>/dev/null || true
+        fi
+
         python3 -c "
-import sys, re
+import sys, re, os
 conf_path = sys.argv[1]
+ssl_rej = (sys.argv[2] == '1')
+domain = sys.argv[3] if len(sys.argv) > 3 else ''
+dummy_dir = sys.argv[4] if len(sys.argv) > 4 else ''
 try:
     with open(conf_path, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -1140,18 +1208,84 @@ try:
         default_type text/plain;
         return 404 \"Not Found\\\\n\";
     }'''
-    updated, count = re.subn(
+    content = re.sub(
         r'location\s+/\s*\{[^}]*try_files[^}]*\}',
         lambda m: new_loc,
         content
     )
-    if count > 0:
-        with open(conf_path, 'w', encoding='utf-8') as f:
-            f.write(updated)
-        print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found')
+
+    if ssl_rej:
+        catchall_ssl = '''server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_reject_handshake on;
+}'''
+    elif dummy_dir and os.path.isfile(f'{dummy_dir}/dummy.crt'):
+        catchall_ssl = f'''server {{
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_certificate {dummy_dir}/dummy.crt;
+    ssl_certificate_key {dummy_dir}/dummy.key;
+    return 444;
+}}'''
+    else:
+        catchall_ssl = ''
+
+    if 'listen 80 default_server' not in content:
+        catchall = f'''# 0. Catch-All Default Server: сброс прямых сканирований по IP и неизвестным SNI
+server {{
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    server_tokens off;
+    return 444;
+}}
+
+{catchall_ssl}
+
+'''
+        content = catchall + content
+    else:
+        def fix_catchall(m):
+            b = m.group(0)
+            if ssl_rej:
+                return '''server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_reject_handshake on;
+}'''
+            elif dummy_dir and os.path.isfile(f'{dummy_dir}/dummy.crt'):
+                return f'''server {{
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    ssl_certificate {dummy_dir}/dummy.crt;
+    ssl_certificate_key {dummy_dir}/dummy.key;
+    return 444;
+}}'''
+            return b
+        content = re.sub(r'server\s*\{[^}]*listen\s+443\s+ssl\s+default_server[^}]*\}', fix_catchall, content, flags=re.DOTALL)
+
+    content = re.sub(r'server\s*\{[^}]*listen\s+8443\s+ssl[^}]*\}\n*', '', content, flags=re.DOTALL)
+
+    with open(conf_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found, Catch-All защищен')
 except Exception:
     pass
-" "$origin_vhost" 2>/dev/null || true
+" "$origin_vhost" "$ssl_reject_supported" "$heal_origin_domain" "$heal_dummy_dir" 2>/dev/null || true
+    fi
+
+    # Удаление дефолтного сайта, если он был случайно восстановлен
+    if [[ -L "${NGINX_CONF_DIR}/sites-enabled/default" ]]; then
+        rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
 
     # Системное отключение IPv6
@@ -1165,7 +1299,7 @@ EOF
         sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
     fi
 
-    # Фаервол: принудительное приведение порта 8444 к desired state
+    # Фаервол: принудительное приведение портов к desired state (8444 для BOT_IP, удаление 8443)
     local heal_bot_ip
     heal_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
@@ -1175,7 +1309,13 @@ EOF
             ufw delete allow 8444 2>/dev/null || true
             warn "Фаервол UFW: устранена уязвимость — удалено глобальное правило на порт 8444."
         fi
-        # 2. Обеспечение точного правила для текущего BOT_IP
+        # 2. Удаление устаревших правил на порт 8443
+        if ufw status 2>/dev/null | grep -E "8443(/tcp)?\s+ALLOW" -q; then
+            ufw delete allow 8443/tcp 2>/dev/null || true
+            ufw delete allow 8443 2>/dev/null || true
+            warn "Фаервол UFW: устранена уязвимость — удалено устаревшее правило на порт 8443."
+        fi
+        # 3. Обеспечение точного правила для текущего BOT_IP
         if [[ -n "$heal_bot_ip" && "$heal_bot_ip" != "any" && "$heal_bot_ip" != "-" ]] && validate_ipv4 "$heal_bot_ip"; then
             if ! ufw status 2>/dev/null | grep -F "$heal_bot_ip" | grep -q "8444"; then
                 if ufw allow from "$heal_bot_ip" to any port 8444 proto tcp 2>/dev/null; then

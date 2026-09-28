@@ -112,14 +112,6 @@ async def _get_financial_stats(session: AsyncSession) -> dict:
     }
 
 
-async def _get_disputes_count(session: AsyncSession) -> int:
-    return 0
-
-
-async def _get_dead_queues_count(session: AsyncSession) -> int:
-    return 0
-
-
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
     from config.enums import ServerLifecycleStatus
     from database.repositories.servers_repo import (
@@ -195,8 +187,6 @@ async def _show_admin_dashboard(
     wl_stats = await get_white_internet_dashboard_stats(session)
     free_ips = await get_total_free_ips(session)
     fin_stats = await _get_financial_stats(session)
-    disputes_count = await _get_disputes_count(session)
-    dead_queues_count = await _get_dead_queues_count(session)
     servers_summary = await _get_servers_capacity_summary(session)
     maintenance_enabled = await MaintenanceService.is_enabled(session)
 
@@ -220,23 +210,12 @@ async def _show_admin_dashboard(
         f"{servers_summary}\n\n"
     )
 
-    if dead_queues_count > 0 or disputes_count > 0:
-        text += (
-            texts.DASHBOARD_ATTENTION_ATTENTION.format()+
-            texts.DASHBOARD_STALE_TASKS_V_OCHEREDYAK.format(dead_queues_count=dead_queues_count)+
-            texts.DASHBOARD_OPEN_PLATEZHNYKH_DISPUTES.format(disputes_count=disputes_count)
-        )
-
     if maintenance_enabled:
         text += texts.DASHBOARD_MAINTENANCE_ON
     else:
         text += texts.DASHBOARD_MAINTENANCE_OFF
 
-    kb = get_admin_menu(
-        maintenance_enabled=maintenance_enabled,
-        dead_queues_count=dead_queues_count,
-        disputes_count=disputes_count,
-    )
+    kb = get_admin_menu(maintenance_enabled=maintenance_enabled)
 
     try:
         await callback.message.edit_text(
@@ -309,12 +288,10 @@ async def show_admin_cat_finance(callback: CallbackQuery, state: FSMContext, ses
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
     await state.clear()
-    disputes_count = await _get_disputes_count(session)
-    dead_queues_count = await _get_dead_queues_count(session)
     header = format_admin_breadcrumbs(texts.DASHBOARD_FINANSY_I_OCHEREDI)
     text = texts.DASHBOARD_FINANSY_OCHEREDI_I_PLATEZHNYE.format(header=header)
     try:
-        await callback.message.edit_text(text, reply_markup=get_admin_cat_finance_keyboard(dead_queues_count, disputes_count), parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=get_admin_cat_finance_keyboard(), parse_mode="HTML")
     except TelegramBadRequest:
         pass
     await callback.answer(show_alert=False)

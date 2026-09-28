@@ -19,7 +19,7 @@ EXPECTED_FILES = {
     "payment/__init__.py", "payment/balance.py", "payment/topup.py", "payment/tariffs.py",
     "payment/tariff_change.py", "payment/status.py",
     "admin/__init__.py", "admin/dashboard.py", "admin/servers.py", "admin/users.py", "admin/tariffs.py",
-    "admin/subscriptions.py", "admin/finances.py", "admin/disputes.py", "admin/queues.py", "admin/broadcast.py", "admin/common.py",
+    "admin/subscriptions.py", "admin/finances.py", "admin/broadcast.py", "admin/common.py",
     "runtime/__init__.py", "runtime/alerts.py", "runtime/notifications.py",
 }
 

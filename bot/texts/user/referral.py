@@ -68,9 +68,7 @@ REFERRAL_TEXT_BALANCE = """🤝 <b>Реферальная программа</b>
 
 🔗 <b>Ваша ссылка для приглашения:</b>
 <code>{referral_link}</code>{inviter_line}"""
-
 REFERRAL_TIER_PROGRESS_NEXT = "\nДо уровня <b>{next_tier_name} ({next_rate_pct}%)</b>: ещё {needed_count}"
 
 REFERRAL_TIER_PROGRESS_MAX = "\n🏆 <b>Максимальный уровень</b>"
 
-REFERRAL_TOPUP_NOTIFY_TEMPLATE = '🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{amount} ₽</b> бонусов на баланс.'

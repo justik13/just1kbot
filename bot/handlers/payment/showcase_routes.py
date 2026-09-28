@@ -46,12 +46,9 @@ from .common import (
 
 logger = logging.getLogger(__name__)
 
+
 router = Router()
 
-
-def _hours_text(hours: int) -> str:
-    days, remainder = divmod(hours, 24)
-    return texts.TIME_DAYS_FORMAT.format(days=days) + (texts.DURATION_HOURS_SUFFIX.format(hours=remainder) if remainder else "")
 
 _START_KEYBOARD_BUILDER = InlineKeyboardBuilder()
 _START_KEYBOARD_BUILDER.button(

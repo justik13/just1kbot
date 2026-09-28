@@ -1988,6 +1988,281 @@ remove_traffic_watchdog_timer
         origin_content = origin_sh.read_text(encoding="utf-8")
         self.assertIn('local resolved_servers="77.88.8.8 77.88.8.1 195.208.4.1"', origin_content)
 
+    def test_amnezia_dual_mode_nginx_and_certbot_coexistence(self):
+        """Verify Amnezia module properly handles port 80 coexistence, protocol detection, and clean renewal hooks."""
+        amnezia_sh = REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh"
+        content = amnezia_sh.read_text(encoding="utf-8")
+
+        # 1. Removal of default site to prevent port 80 conflict with Docker proxies (using cp -L to dereference symlink)
+        self.assertIn('cp -L "$def_site" "/etc/nginx/sites-available/default.user.bak"', content)
+        self.assertIn('rm -f "$def_site"', content)
+
+        # 2. UFW port 80 opening before Certbot challenge with rollback on failure
+        self.assertIn('ufw allow 80/tcp comment "just1knode certbot verification"', content)
+        self.assertIn('ufw delete allow 80/tcp', content)
+
+        # 3. Dynamic container detection on host port 80 with fail-closed non-interactive mode and trap
+        self.assertIn("detect_host_port80_container()", content)
+        self.assertIn('pause_ans="N"', content)
+        self.assertIn('read -rp', content)
+        self.assertIn("trap 'if [[ -n", content)
+        self.assertIn('docker stop "$port80_container"', content)
+        self.assertIn('docker start "$stopped_container"', content)
+
+        # 4. Strict Nginx lifecycle check with default site restoration on failure
+        self.assertIn('systemctl restart nginx', content)
+        self.assertIn('systemctl is-active --quiet nginx', content)
+        self.assertIn('ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default', content)
+
+        # 5. Wildcard and IP in server_name
+        self.assertIn('server_name ${api_domain} ${my_ip} _;', content)
+
+        # 6. Streamlined Certbot deploy renewal hook (graceful reload, no unnecessary amnezia-api restart)
+        self.assertIn('deploy/restart-amnezia-nginx.sh', content)
+        self.assertIn('systemctl reload nginx', content)
+        hook_match = re.search(r'deploy_amnezia_certbot_renewal_hook\(\)\s*\{(.*?)\n\}', content, re.DOTALL)
+        self.assertIsNotNone(hook_match)
+        self.assertNotIn('systemctl restart amnezia-api', hook_match.group(1))
+
+        # 7. Common lib installer purges default site immediately after apt install with cp -L
+        common_sh = REPO_ROOT / "just1knode" / "lib" / "common.sh"
+        common_content = common_sh.read_text(encoding="utf-8")
+        self.assertIn('cp -L "$def_site" "${NGINX_CONF_DIR:-/etc/nginx}/sites-available/default.user.bak"', common_content)
+        self.assertIn('rm -f "$def_site"', common_content)
+
+        # 8. Protocol version detection and display (differentiating awg2, awg3, awg3.1)
+        self.assertIn("detect_awg_protocol_version()", content)
+        self.assertIn("amneziawg3.1", content)
+        self.assertIn("amneziawg3", content)
+        self.assertIn("amneziawg2", content)
+        self.assertIn("🌐 Протокол:", content)
+        self.assertIn("📦 Docker контейнер:", content)
+
+        # 9. Doctor check 3b displays protocol version and container status
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn("Docker контейнер:", just1knode_sh)
+        self.assertIn("Протокол:", just1knode_sh)
+
+        # 10. Amnezia Nginx Catch-All default_server with ssl_reject_handshake on domain mode
+        self.assertIn("listen ${public_port} ssl default_server;", content)
+        self.assertIn("ssl_reject_handshake on;", content)
+        self.assertIn("server_tokens off;", content)
+
+        # 11. Amnezia API UFW rule restricts to bot_ip
+        self.assertIn('ufw allow from "$bot_ip" to any port "$public_port" proto tcp comment "just1knode amnezia api"', content)
+
+    def test_detect_host_port80_container_filtering_behaviour(self):
+        """Verify detect_host_port80_container correctly matches host TCP :80 bindings and ignores container-only :80 or UDP :80."""
+        # Simulated docker ps outputs
+        test_cases = [
+            ("other-app\t0.0.0.0:8080->80/tcp", None),
+            ("proxy-app\t0.0.0.0:80->80/tcp", "proxy-app"),
+            ("custom-app\t0.0.0.0:80->8080/tcp", "custom-app"),
+            ("ipv6-proxy\t:::80->80/tcp", "ipv6-proxy"),
+            ("dual-proxy\t0.0.0.0:80->80/tcp, :::80->80/tcp", "dual-proxy"),
+            ("udp-service\t0.0.0.0:80->80/udp", None),
+            ("unrelated\t127.0.0.1:51820->51820/udp", None),
+        ]
+        import re
+        pattern = re.compile(r'(^|[ \t,])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp')
+        for ports_str, expected in test_cases:
+            parts = ports_str.split("\t")
+            name, ports = parts[0], parts[1]
+            match = pattern.search(ports)
+            result = name if match else None
+            self.assertEqual(result, expected, f"Failed for mapping: {ports}")
+
+    def test_detect_host_port80_container_host_network_behaviour(self):
+        """Verify 64-hex container ID extraction from /proc/$pid/cgroup for host-network containers."""
+        import re
+        cgroup_pattern = re.compile(r'[0-9a-f]{64}')
+
+        # 1. cgroup v2 format with systemd slice
+        cgroup_v2 = "0::/system.slice/docker-a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90.scope"
+        m2 = cgroup_pattern.search(cgroup_v2)
+        self.assertIsNotNone(m2)
+        self.assertEqual(m2.group(0), "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90")
+
+        # 2. cgroup v1 format
+        cgroup_v1 = "12:devices:/docker/11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff"
+        m1 = cgroup_pattern.search(cgroup_v1)
+        self.assertIsNotNone(m1)
+        self.assertEqual(m1.group(0), "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff")
+
+        # 3. Host non-docker service (e.g. systemd nginx)
+        cgroup_host = "0::/system.slice/nginx.service"
+        self.assertIsNone(cgroup_pattern.search(cgroup_host))
+
+    def test_detect_awg_protocol_version_behaviour(self):
+        """Verify detect_awg_protocol_version properly parses active vs disabled toggle flags and protocol_version."""
+        import re
+        re_3_1 = re.compile(r'^[ \t]*(RandomTrailers|DisableCookies)[ \t]*=[ \t]*(on|yes|true|1)|^[ \t]*protocol_version[ \t]*=[ \t]*3\.1', re.IGNORECASE | re.MULTILINE)
+        re_3_0 = re.compile(r'^[ \t]*(HeaderProtectionKey|Hpk)[ \t]*=[ \t]*[^ \t#;]|^[ \t]*(ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)[ \t]*=[ \t]*[^ \t#;]|^[ \t]*protocol_version[ \t]*=[ \t]*3(\.0)?', re.IGNORECASE | re.MULTILINE)
+
+        def mock_detect(conf: str) -> str:
+            if re_3_1.search(conf):
+                return "amneziawg3.1"
+            if re_3_0.search(conf):
+                return "amneziawg3"
+            return "amneziawg2"
+
+        # 1. Base AWG 2.0 configuration
+        conf_2_0 = "[Interface]\nPrivateKey = aaaa\nJc = 4\nS1 = 12\nH1 = 1\n"
+        self.assertEqual(mock_detect(conf_2_0), "amneziawg2")
+
+        # 2. AWG 3.1 with disabled flags (must NOT falsely detect as 3.1)
+        conf_disabled_3_1 = "[Interface]\nPrivateKey = aaaa\nRandomTrailers = off\nDisableCookies = 0\n"
+        self.assertEqual(mock_detect(conf_disabled_3_1), "amneziawg2")
+
+        # 3. AWG 3.0 with HeaderProtectionKey and disabled RandomTrailers
+        conf_3_0 = "[Interface]\nPrivateKey = aaaa\nHeaderProtectionKey = 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=\nRandomTrailers = off\n"
+        self.assertEqual(mock_detect(conf_3_0), "amneziawg3")
+
+        # 3b. AWG 3.0 with HeaderProtectionKey starting with '0' (valid base64 char)
+        conf_3_0_zero = "[Interface]\nPrivateKey = aaaa\nHeaderProtectionKey = 0VzSecretKeyCurve25519String=\n"
+        self.assertEqual(mock_detect(conf_3_0_zero), "amneziawg3")
+
+        # 3c. AWG 3.0 with timing parameters set to '0' (must detect as 3.0 matching vpn_parser.py)
+        conf_3_0_timing_zero = "[Interface]\nPrivateKey = aaaa\nContentPaddingAddition = 0\n"
+        self.assertEqual(mock_detect(conf_3_0_timing_zero), "amneziawg3")
+
+        # 4. AWG 3.1 with active flags
+        conf_3_1_on = "[Interface]\nPrivateKey = aaaa\nRandomTrailers = on\nDisableCookies = on\n"
+        self.assertEqual(mock_detect(conf_3_1_on), "amneziawg3.1")
+
+        conf_3_1_numeric = "[Interface]\nPrivateKey = aaaa\nRandomTrailers = 1\n"
+        self.assertEqual(mock_detect(conf_3_1_numeric), "amneziawg3.1")
+
+        # 5. AWG versions specified via protocol_version field
+        conf_pv_3_1 = "[Interface]\nPrivateKey = aaaa\nprotocol_version = 3.1\n"
+        self.assertEqual(mock_detect(conf_pv_3_1), "amneziawg3.1")
+
+        conf_pv_3_0 = "[Interface]\nPrivateKey = aaaa\nprotocol_version = 3.0\n"
+        self.assertEqual(mock_detect(conf_pv_3_0), "amneziawg3")
+
+        conf_pv_2 = "[Interface]\nPrivateKey = aaaa\nprotocol_version = 2\n"
+        self.assertEqual(mock_detect(conf_pv_2), "amneziawg2")
+
+    def test_default_site_symlink_dereference_behaviour(self):
+        """Verify cp -L correctly dereferences symlinks to avoid creating broken circular symlink backups."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            avail_dir = tmp_path / "sites-available"
+            enabled_dir = tmp_path / "sites-enabled"
+            avail_dir.mkdir()
+            enabled_dir.mkdir()
+
+            real_default = avail_dir / "default"
+            real_default.write_text("server { server_name _; listen 80; }", encoding="utf-8")
+
+            symlink_default = enabled_dir / "default"
+            try:
+                symlink_default.symlink_to(real_default)
+            except OSError:
+                # Windows without dev mode symlink privilege fallback
+                pass
+
+            backup_file = avail_dir / "default.user.bak"
+            # Using shutil.copy2 or python equivalent of cp -L (following symlinks)
+            if symlink_default.is_symlink():
+                shutil.copyfile(symlink_default.resolve(), backup_file)
+                self.assertFalse(backup_file.is_symlink(), "Backup must be a real file, not a symlink")
+                self.assertIn("server_name _;", backup_file.read_text(encoding="utf-8"))
+
+    def test_origin_nginx_catchall_zero_cert_leak(self):
+        """Verify Origin Nginx Catch-All default_server does not contain ssl_certificate when ssl_reject_handshake is supported."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("ssl_reject_handshake on;", origin_sh)
+        self.assertIn("listen 443 ssl default_server;", origin_sh)
+        self.assertIn("listen 80 default_server;", origin_sh)
+        self.assertIn("return 444;", origin_sh)
+
+        # Catchall block with ssl_reject_handshake must NOT have ssl_certificate
+        match = re.search(r'catchall_ssl_block="server\s*\{[^}]*ssl_reject_handshake on;[^}]*\}', origin_sh, re.DOTALL)
+        self.assertIsNotNone(match, "catchall_ssl_block with ssl_reject_handshake on; must be defined")
+        self.assertNotIn("ssl_certificate", match.group(0), "ssl_certificate must NOT be inside catchall when ssl_reject_handshake on is active")
+
+    def test_set_bot_ip_supports_origin_awg_and_dual_roles(self):
+        """Verify set_origin_bot_ip dynamically adapts target port based on role."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn('target_port="8444"', origin_sh)
+        self.assertIn('target_port="$(get_state_val "awg_port" "8443")"', origin_sh)
+        self.assertIn('ufw allow from "$new_bot_ip" to any port "$target_port" proto tcp', origin_sh)
+        self.assertIn('ufw delete allow 8443/tcp', origin_sh)
+
+    def test_heal_and_update_origin_config_cleans_8443_and_ensures_catchall(self):
+        """Verify heal_and_update_origin_config removes port 8443 and restores catchall without cert leak."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn('ufw delete allow 8443/tcp', origin_sh)
+        self.assertIn('listen 80 default_server', origin_sh)
+        self.assertIn('listen 443 ssl default_server', origin_sh)
+        self.assertIn("re.sub(r'server\\s*\\{[^}]*listen\\s+8443\\s+ssl[^}]*\\}\\n*', '', content, flags=re.DOTALL)", origin_sh)
+
+    def test_doctor_ufw_acl_validation_awg_and_dual(self):
+        """Verify run_doctor checks awg_port for awg and dual nodes."""
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('awg_p="$(get_state_val "awg_port" "8443")"', just1knode_sh)
+        self.assertIn("Порт API AmneziaWG $awg_p открыт для всех", just1knode_sh)
+        self.assertIn("Порт API AmneziaWG $awg_p защищен и доступен только с BOT_IP", just1knode_sh)
+
+
+    def test_validate_ip_ipv4_and_ipv6_behaviour(self):
+        """Verify validate_ip logic handles both IPv4 and IPv6 properly."""
+        import ipaddress
+
+        def mock_validate_ip(ip_str: str) -> bool:
+            if not ip_str or not isinstance(ip_str, str):
+                return False
+            try:
+                addr = ipaddress.ip_address(ip_str.strip())
+                return not addr.is_multicast and not addr.is_unspecified and not addr.is_reserved
+            except ValueError:
+                return False
+
+        # Valid IPv4
+        self.assertTrue(mock_validate_ip("192.168.1.1"))
+        self.assertTrue(mock_validate_ip("1.1.1.1"))
+        self.assertTrue(mock_validate_ip("185.220.101.5"))
+
+        # Valid IPv6
+        self.assertTrue(mock_validate_ip("2001:db8::1"))
+        self.assertTrue(mock_validate_ip("2a00:1450:4010:c08::71"))
+
+        # Invalid IP addresses
+        self.assertFalse(mock_validate_ip("256.1.1.1"))
+        self.assertFalse(mock_validate_ip("0.0.0.0"))
+        self.assertFalse(mock_validate_ip("255.255.255.255"))
+        self.assertFalse(mock_validate_ip("::"))
+        self.assertFalse(mock_validate_ip("not-an-ip"))
+
+    def test_uninstall_and_cleanup_cleans_awg_port_in_ufw(self):
+        """Verify uninstall_node and uninstall_amnezia_component remove awg_port and bot_ip from UFW."""
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('st_awg_port="$(get_state_val "awg_port" 2>/dev/null || true)"', just1knode_sh)
+        self.assertIn('ufw delete allow from "$st_bot_ip" to any port "$st_awg_port" proto tcp', just1knode_sh)
+        self.assertIn('ufw delete allow "${st_awg_port}/tcp"', just1knode_sh)
+
+        amnezia_sh = (REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
+        self.assertIn('ufw delete allow from "$bot_ip" to any port "$pub_port" proto tcp', amnezia_sh)
+
+    def test_origin_catchall_dummy_fallback_on_old_nginx(self):
+        """Verify origin fallback generates dummy cert instead of leaking domain cert on Nginx < 1.19.4."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("dummy_dir=", origin_sh)
+        self.assertIn("CN=invalid", origin_sh)
+        self.assertIn("ssl_certificate ${dummy_dir}/dummy.crt;", origin_sh)
+        self.assertIn("ssl_certificate {dummy_dir}/dummy.crt;", origin_sh)
+        self.assertNotIn("ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;", origin_sh)
+
+    def test_amnezia_catchall_dummy_fallback_on_old_nginx(self):
+        """Verify amnezia fallback generates dummy cert instead of leaking domain cert on Nginx < 1.19.4."""
+        amnezia_sh = (REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
+        self.assertIn("dummy_dir=", amnezia_sh)
+        self.assertIn("CN=invalid", amnezia_sh)
+        self.assertIn("ssl_certificate ${dummy_dir}/dummy.crt;", amnezia_sh)
+        self.assertIn("listen ${public_port} ssl default_server;", amnezia_sh)
+
 
 if __name__ == "__main__":
     unittest.main()
+

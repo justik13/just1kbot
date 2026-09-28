@@ -79,8 +79,6 @@ BTN_INSTRUCTION_IOS = "🍏 Инструкция iOS (для РФ)"
 
 BTN_INSTRUCTION_WINDOWS = "💻 Инструкции Windows"
 
-BTN_INSTRUKTSIYA_I_POMOSCH = "📖 Инструкция и помощь"
-
 BTN_INVITE_FRIEND = "🤝 Пригласить друга"
 
 BTN_ISTORIYA_OPERATSIJ = "📊 История операций"

@@ -50,7 +50,6 @@ ADMIN_SERVER_RELAYS_HEADER = """{header}🌐 <b>Статус Relay-узлов д
 ADMIN_SERVER_RELAYS_EMPTY = """\n<i>На этом сервере нет подключенных Relay-узлов. Доступен прямой выход в зону RU (зарубежный трафик блокируется).</i>\n"""
 ADMIN_SERVER_RELAYS_ROW = "• {flag} <b>{name}</b> (<code>{ip}:{port}</code>)\n  Статус: {status_badge}\n"
 ADMIN_SERVER_RELAYS_API_ERROR = "\n🔴 <b>Ошибка проверки узлов:</b> <code>{error}</code>\n"
-ADMIN_SERVER_RELAYS_ORIGIN_RTT = " (RTT: {origin_rtt} ms)"
 ADMIN_SERVER_RELAYS_ORIGIN_UNAVAILABLE = " (API недоступен)"
 ADMIN_SERVER_RELAYS_ERR_FETCH = "Не удалось получить статус релеев"
 ADMIN_SERVER_RELAYS_FALLBACK_NAME = "Релей"

@@ -1,18 +1,7 @@
 """Domain texts for payment/topup.py."""
 from __future__ import annotations
 
-PAYMENT_LINK_READY = """💳 <b>Ссылка на оплату готова!</b>
-
-Сумма: <b>{amount} ₽</b>
-Текущий баланс: <b>{balance} ₽</b>
-
-Нажмите кнопку ниже, чтобы перейти к оплате."""
-
 TOPUP_ALREADY_FINISHED_ALERT = "Пополнение уже завершено"
-
-TOPUP_CHECKING_ALERT = "Проверяем…"
-
-TOPUP_CONFIRMED_NOTICE = "✅ Оплата подтверждена. Зачисляем деньги на баланс."
 
 TOPUP_CREDITED_NOTICE = "✅ Баланс пополнен."
 
@@ -39,13 +28,7 @@ TOPUP_INVALID_AMOUNT = "Введите целую сумму без копеек
 
 TOPUP_MISSING_NOTICE = "Активная ссылка пополнения не найдена."
 
-TOPUP_NOT_FOUND_ALERT = "Пополнение не найдено"
-
 TOPUP_OPERATION_MINIMUM = "Для выбранной операции нужно пополнить минимум на <b>{minimum} ₽</b>."
 
-TOPUP_PROVIDER_CANCELLED_NOTICE = "Пополнение отменено платёжным провайдером."
 
-
-CHECKOUT_DESCRIPTION_RENEW = 'Продление доступа к информационному сервису Just1k'
-CHECKOUT_DESCRIPTION_TARIFF_CHANGE = 'Изменение параметров доступа к сервису Just1k'
 CHECKOUT_DESCRIPTION_DEFAULT = 'Предоставление доступа к информационному сервису Just1k'
