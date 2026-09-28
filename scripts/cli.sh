@@ -6,6 +6,7 @@
 # Использование:
 #   just1kbot               - Открыть интерактивное меню
 #   just1kbot status        - Проверить статус всех сервисов
+#   just1kbot version       - Показать версию и git-коммит
 #   just1kbot logs [name]   - Просмотр логов (по умолчанию: bot)
 #   just1kbot update        - Безопасное обновление (бэкап + git pull + rebuild)
 #   just1kbot backup        - Создать резервную копию базы данных
@@ -206,6 +207,56 @@ set_env_var() {
     else
         echo "${key}=${val}" >> "$env_file"
     fi
+}
+
+# --- Версия панели и проверка обновлений ---
+# Источник версии бота: pyproject.toml; коммит: git HEAD в PROJECT_DIR.
+get_bot_version() {
+    local ver=""
+    if [[ -f "${PROJECT_DIR}/pyproject.toml" ]]; then
+        ver=$(grep -E '^version = "' "${PROJECT_DIR}/pyproject.toml" 2>/dev/null | head -n1 | cut -d'"' -f2 || echo "")
+    fi
+    [[ -z "$ver" ]] && ver="unknown"
+    echo "$ver"
+}
+
+get_bot_commit() {
+    git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "n/a"
+}
+
+bot_version_label() {
+    local ver commit
+    ver="$(get_bot_version)"
+    commit="$(get_bot_commit)"
+    if [[ "$commit" == "n/a" ]]; then
+        echo "v${ver}"
+    else
+        echo "v${ver} (${commit})"
+    fi
+}
+
+# Best-effort проверка новой версии при входе в меню: один fetch с
+# ограничением по времени. При любой ошибке (нет сети/git/timeout)
+# молча пропускается и никогда не блокирует меню.
+check_bot_update_on_entry() {
+    command -v git >/dev/null 2>&1 || return 0
+    git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1 || return 0
+    local branch local_hash remote_hash
+    branch=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [[ -z "$branch" || "$branch" == "HEAD" ]]; then
+        return 0
+    fi
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 10s git -C "$PROJECT_DIR" fetch --quiet origin "$branch" 2>/dev/null || return 0
+    else
+        return 0
+    fi
+    local_hash=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "")
+    remote_hash=$(git -C "$PROJECT_DIR" rev-parse "origin/${branch}" 2>/dev/null || echo "")
+    if [[ -n "$local_hash" && -n "$remote_hash" && "$local_hash" != "$remote_hash" ]]; then
+        echo -e "  ${YELLOW}⚠️  Доступна новая версия в origin/${branch}: выполните [3] Безопасное обновление${NC}"
+    fi
+    return 0
 }
 
 dc_up() {
@@ -451,6 +502,8 @@ cmd_nginx_config() {
 # --- 1. Статус системы ---
 cmd_status() {
     echo -e "\n${BOLD}${BLUE}=== 📊 СТАТУС СЕРВИСОВ JUST1KBOT ===${NC}\n"
+    info "Версия: $(bot_version_label)"
+    echo ""
     docker compose ps
 
     echo -e "\n${BOLD}${BLUE}=== 💻 ИСПОЛЬЗОВАНИЕ РЕСУРСОВ ===${NC}\n"
@@ -1958,12 +2011,19 @@ cmd_uninstall() {
 
 # --- Интерактивное меню ---
 interactive_menu() {
+    # Однократная best-effort проверка обновлений при входе (не в цикле).
+    local _update_notice
+    _update_notice="$(check_bot_update_on_entry || true)"
     while true; do
         clear
         echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
         echo -e "${BOLD}${BLUE}║                         🚀 JUST1KBOT CONTROL PANEL                           ║${NC}"
         echo -e "${BOLD}${BLUE}║                     Консоль управления Telegram-ботом                        ║${NC}"
         echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo -e "  Версия: ${BOLD}$(bot_version_label)${NC}"
+        if [[ -n "$_update_notice" ]]; then
+            echo -e "${_update_notice}"
+        fi
         echo ""
         echo -e "  [${BOLD}1${NC}] 📊 ${BOLD}Статус системы${NC} (Healthcheck контейнеров, RAM/CPU, бэкапы)"
         echo -e "  [${BOLD}2${NC}] 📜 ${BOLD}Просмотр логов${NC} (Live stream: Bot, Caddy, Postgres, Redis)"
@@ -2081,6 +2141,9 @@ main() {
             status|ps)
                 cmd_status
                 ;;
+            version|--version|-v)
+                echo "just1kbot $(bot_version_label)"
+                ;;
             logs|log)
                 cmd_logs "${2:-bot}"
                 ;;
@@ -2122,7 +2185,7 @@ main() {
                 cmd_uninstall "$@"
                 ;;
             help|-h|--help)
-                echo -e "Использование: just1kbot [status|logs|update|preflight|backup|restore|restart|start|stop|config|nginx-config|doctor|clean|uninstall]"
+                echo -e "Использование: just1kbot [status|version|logs|update|preflight|backup|restore|restart|start|stop|config|nginx-config|doctor|clean|uninstall]"
                 ;;
             *)
                 error "Неизвестная команда: $1. Используйте 'just1kbot help'."

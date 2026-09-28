@@ -106,6 +106,53 @@ if [[ -f "$VERSION_FILE" ]]; then
     JUST1KNODE_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
 fi
 
+# Git-коммит рядом с VERSION: доступен при запуске из репозитория.
+# На проде (/opt/just1knode без .git) пусто — тогда показываем только версию.
+JUST1KNODE_COMMIT=""
+if [[ -n "${SCRIPT_DIR:-}" ]]; then
+    JUST1KNODE_COMMIT="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+fi
+
+# Единая метка версии: "v2.1.2 (abc1234)" или "v2.1.2" без коммита.
+node_version_label() {
+    if [[ -n "${JUST1KNODE_COMMIT:-}" ]]; then
+        echo "v${JUST1KNODE_VERSION} (${JUST1KNODE_COMMIT})"
+    else
+        echo "v${JUST1KNODE_VERSION}"
+    fi
+}
+
+# Строка версии внутри бокса панели: центрирование под ширину 61.
+print_node_version_box_line() {
+    local label pad_left pad_right
+    label="Версия: $(node_version_label)"
+    pad_left=$(( (61 - ${#label}) / 2 ))
+    pad_right=$(( 61 - ${#label} - pad_left ))
+    if [[ $pad_left -lt 0 || $pad_right -lt 0 ]]; then
+        label="${label:0:61}"
+        pad_left=0
+        pad_right=0
+    fi
+    printf '│%*s%s%*s│\n' "$pad_left" "" "$label" "$pad_right" ""
+}
+
+# Best-effort проверка новой версии при входе в меню: один короткий запрос
+# к VERSION на main. При любой ошибке молча пропускается и меню не блокирует.
+check_node_update_on_entry() {
+    local repo_url ref remote_ver
+    repo_url="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
+    ref="${JUST1KBOT_REF:-main}"
+    if [[ "$repo_url" != "https://github.com/justik13/just1kbot" || "$ref" != "main" ]]; then
+        return 0
+    fi
+    command -v curl >/dev/null 2>&1 || return 0
+    remote_ver="$(curl -fsSL --max-time 5 "https://raw.githubusercontent.com/justik13/just1kbot/main/just1knode/VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ -n "$remote_ver" && "$remote_ver" != "$JUST1KNODE_VERSION" ]]; then
+        echo -e "  ${YELLOW}⚠️  Доступна новая версия just1knode: v${remote_ver} (у вас v${JUST1KNODE_VERSION}). Воспользуйтесь пунктом «Обновить утилиту».${NC}"
+    fi
+    return 0
+}
+
 # Подключение библиотек
 # shellcheck source=lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
@@ -148,7 +195,7 @@ show_status() {
 
     local role
     role="$(get_state_val "role" "не настроен")"
-    echo -e "  Версия just1knode:    ${BOLD}${CYAN}v${JUST1KNODE_VERSION}${NC}"
+    echo -e "  Версия just1knode:    ${BOLD}${CYAN}$(node_version_label)${NC}"
     echo -e "  Роль узла:            ${BOLD}${GREEN}${role}${NC}"
 
     if [[ "$role" == "origin" ]]; then
@@ -1033,15 +1080,23 @@ main_menu() {
     init_state_dir
     ensure_global_symlink
 
+    # Однократная best-effort проверка обновлений при входе (не в цикле).
+    local _node_update_notice
+    _node_update_notice="$(check_node_update_on_entry || true)"
+
     while true; do
         clear
         echo -e "${BOLD}${BLUE}"
         echo "┌─────────────────────────────────────────────────────────────┐"
         echo "│                 🚀 JUST1KNODE CONTROL PANEL                 │"
         echo "│              Менеджер серверных узлов Just1kBot             │"
-        echo "│                        Версия: v${JUST1KNODE_VERSION}                       │"
+        print_node_version_box_line
         echo "└─────────────────────────────────────────────────────────────┘"
         echo -e "${NC}"
+        if [[ -n "$_node_update_notice" ]]; then
+            echo -e "${_node_update_notice}"
+            echo ""
+        fi
 
         local status
         status="$(get_node_status)"

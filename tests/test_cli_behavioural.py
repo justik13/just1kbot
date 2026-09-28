@@ -1038,6 +1038,147 @@ cmd_update
             proc_y.stdout + proc_y.stderr,
         )
 
+    # -------------------------------------------------------------------------
+    # 12. Panel version label and entry update check
+    # -------------------------------------------------------------------------
+
+    def test_version_command_prints_label(self):
+        """`just1kbot version` prints the label and exits 0."""
+        proc = self._run_cli_command("version")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("just1kbot v", proc.stdout)
+
+    def test_version_label_uses_pyproject_version(self):
+        """bot_version_label reads the version from pyproject.toml (no git in isolation)."""
+        (self.project_dir / "pyproject.toml").write_text(
+            '[project]\nname = "just1kbot"\nversion = "9.9.9"\n', encoding="utf-8"
+        )
+        proc = self._run_cli_command("version")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("v9.9.9", proc.stdout)
+
+    def test_update_check_on_entry_is_fail_safe_without_git(self):
+        """check_bot_update_on_entry exits 0 silently outside a git repo."""
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+check_bot_update_on_entry
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_on_entry_detects_behind_remote(self):
+        """check_bot_update_on_entry warns when origin/branch is ahead (local-path remote)."""
+        timeout_stub = self.bin_dir / "timeout"
+        timeout_stub.write_text("#!/bin/bash\nshift\nexec \"$@\"\n", encoding="utf-8")
+        timeout_stub.chmod(0o755)
+
+        git_env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+            "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}",
+        }
+        remote = self.root / "remote.git"
+        subprocess.run(
+            ["git", "init", "--bare", remote.as_posix()],
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "--git-dir", remote.as_posix(), "symbolic-ref", "HEAD", "refs/heads/main"],
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+        (self.project_dir / "probe.txt").write_text("1", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "-A"], cwd=str(self.project_dir), env=git_env, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "base"],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "remote", "add", "origin", remote.as_posix()],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "push", "origin", "main"],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+
+        clone = self.root / "clone"
+        subprocess.run(
+            ["git", "clone", remote.as_posix(), clone.as_posix()],
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+        (clone / "probe.txt").write_text("2", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "-A"], cwd=str(clone), env=git_env, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "ahead"], cwd=str(clone), env=git_env, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "push", "origin", "main"], cwd=str(clone), env=git_env, check=True, capture_output=True
+        )
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+check_bot_update_on_entry
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={
+                **os.environ,
+                "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}",
+                "JUST1KBOT_NO_SUDO": "1",
+            },
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Безопасное обновление", proc.stdout)
+
 
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
     """Regression guard: `error()` in scripts/setup.sh must abort the whole

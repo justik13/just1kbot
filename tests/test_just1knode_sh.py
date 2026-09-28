@@ -1039,6 +1039,48 @@ run_doctor
         self.assertIn("JUST1KBOT_REF", sh_content, "Dynamic ref resolution must be configured")
 
     # -------------------------------------------------------------------------
+    # F23: Panel version label and entry update check
+    # -------------------------------------------------------------------------
+    def test_node_version_label_format(self):
+        """node_version_label prints v<semver> with optional short commit."""
+        res = self._run_shell_snippet("node_version_label")
+        self.assertEqual(res.returncode, 0, f"node_version_label failed: {res.stderr}")
+        self.assertRegex(res.stdout.strip(), r"^v[0-9]+\.[0-9]+\.[0-9]+( \([0-9a-f]+\))?$")
+
+    def test_node_version_box_line_width(self):
+        """print_node_version_box_line keeps the 61-char inner box width."""
+        res = self._run_shell_snippet("print_node_version_box_line")
+        self.assertEqual(res.returncode, 0, f"box line failed: {res.stderr}")
+        # 61 inner chars + 2 borders; Python counts codepoints locale-independently.
+        line = res.stdout.strip()
+        self.assertEqual(len(line), 63)
+        self.assertTrue(line.startswith("│") and line.endswith("│"))
+
+    def test_node_update_check_skipped_for_custom_repo(self):
+        """check_node_update_on_entry exits 0 silently for non-default repo URL."""
+        res = self._run_shell_snippet(
+            "check_node_update_on_entry",
+            extra_env={"JUST1KBOT_REPO_URL": "https://example.com/custom.git"},
+        )
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.stdout.strip(), "")
+
+    def test_node_update_check_detects_newer_remote(self):
+        """check_node_update_on_entry warns when remote VERSION differs (mocked curl)."""
+        self._create_mock_script("curl", "#!/bin/sh\necho '99.99.99'\n")
+        res = self._run_shell_snippet("check_node_update_on_entry")
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("99.99.99", res.stdout)
+
+    def test_node_update_check_silent_when_up_to_date(self):
+        """check_node_update_on_entry stays silent when remote VERSION matches."""
+        current = (REPO_ROOT / "just1knode" / "VERSION").read_text(encoding="utf-8").strip()
+        self._create_mock_script("curl", f"#!/bin/sh\necho '{current}'\n")
+        res = self._run_shell_snippet("check_node_update_on_entry")
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.stdout.strip(), "")
+
+    # -------------------------------------------------------------------------
     # Functional Validation: Origin Node Installation & Complete Artifacts
     # -------------------------------------------------------------------------
     def test_functional_origin_node_installation_and_artifacts(self):
