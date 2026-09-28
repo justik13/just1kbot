@@ -263,18 +263,6 @@ def get_balance_amounts_keyboard(amounts: list[int]) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_back_or_cancel_topups_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_ZAKRYT_NEZAVERSHYONNYE_SSYLKI,
-        callback_data="balance_cancel_all",
-        style="danger",
-    )
-    builder.button(text=texts.BTN_BACK, callback_data="menu_balance")
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def get_topup_waiting_keyboard(payment_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -310,70 +298,6 @@ def get_topup_payment_keyboard(
     return builder.as_markup()
 
 
-def get_balance_purchase_start_keyboard(
-    quote_public_id: str, _back_callback: str | None = None, is_shortage: bool = False
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    action_text = texts.BTN_PAYMENT_PAY if is_shortage else texts.BTN_PAYMENT_BUY_FROM_BALANCE
-    builder.button(
-        text=action_text,
-        callback_data=f"balance_purchase_review:{quote_public_id}",
-        style="success",
-    )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data=f"balance_purchase_cancel:{quote_public_id}",
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def get_balance_purchase_confirm_keyboard(
-    quote_public_id: str, _back_callback: str | None = None
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_PAYMENT_CONFIRM_PURCHASE,
-        callback_data=f"balance_purchase_confirm:{quote_public_id}",
-        style="success",
-    )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data=f"balance_purchase_cancel:{quote_public_id}",
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def get_balance_change_start_keyboard(
-    quote_public_id: str, back_callback: str, is_shortage: bool = False
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    action_text = texts.BTN_PAYMENT_PAY if is_shortage else texts.BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE
-    builder.button(
-        text=action_text,
-        callback_data=f"balance_change_review:{quote_public_id}",
-        style="success",
-    )
-    builder.button(text=texts.BTN_BACK, callback_data=back_callback)
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def get_balance_change_confirm_keyboard(
-    quote_public_id: str, back_callback: str
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_PAYMENT_CONFIRM_TARIFF_CHANGE,
-        callback_data=f"balance_change_confirm:{quote_public_id}",
-        style="success",
-    )
-    builder.button(text=texts.BTN_BACK, callback_data=back_callback)
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -386,61 +310,16 @@ def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_balance_shortage_keyboard(
-    quote_public_id: str, exact_amount: int, _back_callback: str | None = None
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_PAYMENT_TOPUP_PRESET_AMOUNT.format(amount_rub=exact_amount),
-        callback_data=f"bal_short_exact:{quote_public_id}",
-        style="success",
-    )
-    builder.button(
-        text=texts.BTN_PAYMENT_SPECIFY_OTHER_AMOUNT,
-        callback_data=f"bal_short_custom:{quote_public_id}",
-    )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data=f"balance_purchase_cancel:{quote_public_id}",
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def get_balance_change_shortage_keyboard(
-    quote_public_id: str, exact_amount: int, back_callback: str
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_PAYMENT_TOPUP_PRESET_AMOUNT.format(amount_rub=exact_amount),
-        callback_data=f"bal_chg_short_exact:{quote_public_id}",
-        style="success",
-    )
-    builder.button(
-        text=texts.BTN_PAYMENT_SPECIFY_OTHER_AMOUNT,
-        callback_data=f"bal_chg_short_custom:{quote_public_id}",
-    )
-    builder.button(text=texts.BTN_BACK, callback_data=back_callback)
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def get_topup_credit_keyboard(
     context: dict | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     context = context or {}
-    tariff_id = context.get("tariff_id")
     source = context.get("source")
     if source == "white_internet":
         builder.button(
             text=texts.BTN_WL_RETURN_TO_SERVICE,
             callback_data="white_internet",
-        )
-    elif tariff_id and source in {"showcase", "renew", "change"}:
-        builder.button(
-            text=texts.BTN_PAYMENT_RETURN_TO_PURCHASE,
-            callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
         )
     builder.button(text=texts.BTN_PAYMENT_TO_BALANCE, callback_data="menu_balance")
     builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")

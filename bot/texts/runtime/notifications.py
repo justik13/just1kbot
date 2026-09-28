@@ -1,11 +1,6 @@
 """Domain texts for runtime/notifications.py."""
 from __future__ import annotations
 
-BALANCE_PURCHASE_SUCCESS_NOTIFICATION = """🎉 <b>{title}</b>
-
-Длительность: <b>{duration}</b>
-Лимит устройств: <b>{device_limit}</b>"""
-
 BALANCE_TOPUP_CREDITED = """✅ <b>Баланс пополнен на +{amount} ₽!</b>
 
 💰 Баланс: <b>{real_balance} ₽</b>
@@ -64,10 +59,6 @@ TIME_DAYS_HOURS_FORMAT = "{days} дн. {hours} ч."
 TIME_HOURS_MINUTES_FORMAT = "{hours} ч. {minutes} мин."
 
 TIME_SOON_LABEL = "в ближайшее время"
-
-TITLE_SUBSCRIPTION_EXTENDED = "Подписка успешно продлена!"
-
-TITLE_TARIFF_CHANGED = "Тариф успешно изменён!"
 
 TOPUP_LINK_CARD = """💳 <b>Оплата создана</b>
 

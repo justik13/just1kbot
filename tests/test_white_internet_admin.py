@@ -666,8 +666,6 @@ class TestWhiteInternetDashboardMetrics(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.admin.dashboard.get_white_internet_dashboard_stats", new=AsyncMock(return_value={"active_count": 7, "total_traffic_bytes": 53687091200})), \
              patch("bot.handlers.admin.dashboard.get_total_free_ips", new=AsyncMock(return_value=150)), \
              patch("bot.handlers.admin.dashboard._get_financial_stats", new=AsyncMock(return_value={"rev_24h": 1000, "count_24h": 2, "rev_7d": 5000, "rev_30d": 20000, "avg_check": 500})), \
-             patch("bot.handlers.admin.dashboard._get_disputes_count", new=AsyncMock(return_value=0)), \
-             patch("bot.handlers.admin.dashboard._get_dead_queues_count", new=AsyncMock(return_value=0)), \
              patch("bot.handlers.admin.dashboard._get_servers_capacity_summary", new=AsyncMock(return_value="🟢 Server-1")), \
              patch("bot.handlers.admin.dashboard.MaintenanceService.is_enabled", new=AsyncMock(return_value=False)):
 

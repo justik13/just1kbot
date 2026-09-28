@@ -28,6 +28,3 @@ REFERRAL_TEXT_BALANCE = """🤝 <b>Реферальная программа</b>
 
 🔗 <b>Ваша ссылка для приглашения:</b>
 <code>{referral_link}</code>{inviter_line}"""
-
-
-REFERRAL_TOPUP_NOTIFY_TEMPLATE = '🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{amount} ₽</b> бонусов на баланс.'

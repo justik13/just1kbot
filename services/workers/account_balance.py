@@ -9,7 +9,6 @@ from aiogram.exceptions import TelegramForbiddenError
 from sqlalchemy import or_, select, text
 
 from bot.keyboards.notifications import (
-    get_purchase_completed_notification_keyboard,
     get_referral_bonus_keyboard,
 )
 from bot.keyboards.payment import (
@@ -18,22 +17,16 @@ from bot.keyboards.payment import (
 )
 from bot.texts.runtime.alerts import ALERT_BALANCE_LIMIT_EXCEEDED
 from bot.texts.runtime.notifications import (
-    BALANCE_PURCHASE_SUCCESS_NOTIFICATION,
     BALANCE_TOPUP_CREDITED,
     BALANCE_TOPUP_RESUME_HINT,
     BALANCE_TOPUP_WELCOME_BONUS,
     REFERRAL_BONUS_ACCREDITED,
-    TIME_DAYS_FORMAT,
-    TIME_DAYS_HOURS_FORMAT,
-    TITLE_SUBSCRIPTION_EXTENDED,
-    TITLE_TARIFF_CHANGED,
     TOPUP_LINK_CARD,
 )
 from config.constants import WORKER_ERROR_SLEEP_INTERVAL
-from config.enums import ServiceType
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import Payment, TariffQuote, TariffVersion, User
+from database.models import Payment, TariffQuote, User
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import mark_user_bot_blocked
 from utils.datetime_helpers import now_utc
@@ -43,95 +36,6 @@ from utils.telegram import render_hub, safe_send_message
 logger = logging.getLogger(__name__)
 BALANCE_NOTIFICATION_INTERVAL = 10.0
 BALANCE_NOTIFICATION_BATCH = 50
-
-
-async def process_balance_purchase_notifications(bot: Bot) -> int:
-    async with session_scope() as session:
-        rows = (
-            await session.execute(
-                select(
-                    TariffQuote.id,
-                    User.telegram_id,
-                    TariffQuote.operation_type,
-                    TariffQuote.resulting_paid_hours,
-                    TariffQuote.resulting_bonus_hours,
-                    TariffVersion.duration_hours,
-                    TariffVersion.device_limit,
-                )
-                .join(User, User.id == TariffQuote.user_id)
-                .join(
-                    TariffVersion,
-                    TariffVersion.id == TariffQuote.target_tariff_version_id,
-                )
-                .where(
-                    TariffQuote.status == "consumed",
-                    TariffQuote.service_type == ServiceType.AWG.value,
-                    TariffQuote.operation_type.in_(
-                        ("purchase", "renew", "change")
-                    ),
-                    TariffQuote.purchase_notified_at.is_(None),
-                )
-                .order_by(TariffQuote.id)
-                .limit(BALANCE_NOTIFICATION_BATCH)
-            )
-        ).all()
-
-    delivered = 0
-    for (
-        quote_id,
-        telegram_id,
-        operation_type,
-        resulting_paid_hours,
-        resulting_bonus_hours,
-        duration_hours,
-        device_limit,
-    ) in rows:
-        try:
-            await global_send_limiter.acquire()
-            hours = (
-                resulting_paid_hours + resulting_bonus_hours
-                if operation_type == "change"
-                else duration_hours
-            )
-            days, remainder = divmod(hours, 24)
-            duration = (
-                TIME_DAYS_HOURS_FORMAT.format(days=days, hours=remainder)
-                if remainder
-                else TIME_DAYS_FORMAT.format(days=days)
-            )
-            title = (
-                TITLE_TARIFF_CHANGED
-                if operation_type == "change"
-                else TITLE_SUBSCRIPTION_EXTENDED
-            )
-            await bot.send_message(
-                telegram_id,
-                BALANCE_PURCHASE_SUCCESS_NOTIFICATION.format(
-                    title=title,
-                    duration=duration,
-                    device_limit=device_limit,
-                ),
-                reply_markup=get_purchase_completed_notification_keyboard(),
-                parse_mode="HTML",
-            )
-        except TelegramForbiddenError:
-            async with session_scope() as session:
-                await mark_user_bot_blocked(session, telegram_id)
-        except Exception:
-            logger.exception(
-                "Failed to notify balance purchase quote=%s", quote_id
-            )
-            continue
-        async with session_scope() as session:
-            quote = await session.scalar(
-                select(TariffQuote)
-                .where(TariffQuote.id == quote_id)
-                .with_for_update()
-            )
-            if quote and quote.purchase_notified_at is None:
-                quote.purchase_notified_at = now_utc()
-        delivered += 1
-    return delivered
 
 
 async def process_topup_link_presentations(bot: Bot) -> int:
@@ -380,7 +284,6 @@ async def account_balance_notifications_loop(
 ):
     while not shutdown_event.is_set():
         try:
-            await process_balance_purchase_notifications(bot)
             await process_topup_link_presentations(bot)
             await process_balance_notifications(bot)
         except asyncio.CancelledError:

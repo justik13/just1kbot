@@ -1509,6 +1509,19 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         wi_btn = next(b for b in buttons if b.callback_data == "white_internet")
         self.assertEqual(wi_btn.text, texts.BTN_WL_RETURN_TO_SERVICE)
 
+    def test_get_topup_credit_keyboard_default_and_legacy_context(self):
+        from bot.keyboards.payment import get_topup_credit_keyboard
+
+        for ctx in (None, {}, {"tariff_id": 1, "source": "showcase"}):
+            kb = get_topup_credit_keyboard(ctx)
+            buttons = [btn for row in kb.inline_keyboard for btn in row]
+            callbacks = [b.callback_data for b in buttons]
+
+            self.assertEqual(callbacks, ["menu_balance", "dismiss_notification"])
+            self.assertNotIn("balance_resume_purchase:1:showcase", callbacks)
+            for cb in callbacks:
+                self.assertFalse(cb.startswith("balance_resume_purchase:"))
+
     async def test_admin_payments_list_build_with_orders_and_legacy(self):
         from bot.handlers.admin.payments import _build_payments_list_text_and_kb
         from database.models import Order, Payment, User

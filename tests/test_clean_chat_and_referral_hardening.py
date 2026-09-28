@@ -248,7 +248,7 @@ class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):
     async def test_show_referrals_list_renders_last_page_on_out_of_bounds_page(self):
         from aiogram.types import CallbackQuery
 
-        from bot.handlers.profile import show_referrals_list
+        from bot.handlers.referral import show_referrals_list
 
         callback = MagicMock(spec=CallbackQuery)
         callback.data = "referrals_list:999"
@@ -269,8 +269,8 @@ class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):
         async def fake_render(bot, chat_id, text, reply_markup, trigger_message_id=None):
             rendered_texts.append((text, reply_markup))
 
-        with patch("bot.handlers.profile.get_user_referrals_paginated", AsyncMock(return_value=([last_page_referral], 21, 3))), \
-             patch("bot.handlers.profile.render_hub", side_effect=fake_render):
+        with patch("bot.handlers.referral.get_user_referrals_paginated", AsyncMock(return_value=([last_page_referral], 21, 3))), \
+             patch("bot.handlers.referral.render_hub", side_effect=fake_render):
             await show_referrals_list(callback, state, session, db_user=db_user)
 
         self.assertEqual(len(rendered_texts), 1)

@@ -50,22 +50,6 @@ ALERT_SERVER_RESTORED = """✅ <b>VPN-сервер восстановлен</b>
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
 API снова стабильно доступен."""
 
-ALERT_STALE_PAYMENTS_HEADER = """⚠️ <b>Обнаружены зависшие пополнения ({count} шт.)</b>
-
-{details}"""
-
-ALERT_STALE_PAYMENTS_MORE = """• ...и ещё {more_count} платежей
-"""
-
-ALERT_STALE_PAYMENT_ROW = """• {icon} #{payment_id} (user {telegram_id}): {amount} {currency} via {method}
-"""
-
-ALERT_STALE_BTN_OPEN_CARD = "💳 Платёж #{payment_id}: обработать"
-ALERT_STALE_BTN_QUEUES = "🧰 Диагностика очередей"
-ALERT_STALE_BTN_PAYMENTS = "📁 Все платежи"
-ALERT_STALE_BTN_DISMISS = "✕ Скрыть"
-
-
 ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоновых задач"
 
 ALERT_TITLE_WORKER_FAILED = "Фоновый воркер упал"
@@ -84,17 +68,6 @@ ALERT_WORKER_CRASH = """🚨 <b>{title}</b>
 🔁 <b>Падений:</b> {failure_count}
 ⚠️ <b>Тип ошибки:</b> <code>{error_type}</code>"""
 
-ALERT_QUEUE_UNHEALTHY = """🚨 <b>Durable queue unhealthy</b>
-Queue: <code>{queue_name}</code>
-Problems: {problems}{suffix}"""
-
-ALERT_QUEUE_RECOVERED = """✅ <b>Durable queue recovered</b>
-Queue: <code>{queue_name}</code>"""
-
-QUEUE_HEALTH_DEAD_PROBLEM = "{count} dead (oldest {oldest_age}s)"
-QUEUE_HEALTH_OVERDUE_PROBLEM = "{count} overdue (oldest {oldest_age}s)"
-QUEUE_HEALTH_STALE_PROBLEM = "{count} stale (oldest {oldest_age}s)"
-
 ALERT_INGRESS_PROBLEM = """⚠️ <b>Проблема с проксированием подписок (Ingress / Nginx)</b>
 
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
@@ -111,7 +84,6 @@ ALERT_INGRESS_RESTORED = """✅ <b>Проксирование подписок �
 Эндпоинт <code>{endpoint}</code> снова отвечает 200 OK."""
 
 ALERT_INGRESS_ERR_TIMEOUT = "Timeout (таймаут соединения)"
-ALERT_INGRESS_ERR_NETWORK = "недоступен (ошибка сети)"
 
 
 

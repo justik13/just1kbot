@@ -977,7 +977,7 @@ async def run_simulation(args: argparse.Namespace):
     from bot.handlers.connection import router as connection_router
     from bot.handlers.fallback import router as fallback_router
     from bot.handlers.payment import router as payment_router
-    from bot.handlers.profile import router as profile_router
+    from bot.handlers.referral import router as referral_router
     from bot.handlers.start import router as start_router
     from bot.handlers.support import router as support_router
     from bot.handlers.white_internet import router as white_internet_router
@@ -987,7 +987,7 @@ async def run_simulation(args: argparse.Namespace):
 
     for r in [
         start_router,
-        profile_router,
+        referral_router,
         connection_router,
         white_internet_router,
         *integration_routers,
