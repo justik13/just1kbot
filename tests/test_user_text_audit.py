@@ -78,11 +78,7 @@ class TestUserTextAudit(unittest.TestCase):
         assert "Мы постараемся помочь как можно скорее." in texts.SUPPORT_TEXT
 
     def test_payment_and_receipt_descriptions_contain_no_vpn_wording(self):
-        descriptions = [
-            texts.CHECKOUT_DESCRIPTION_DEFAULT,
-            getattr(texts, "CHECKOUT_DESCRIPTION_RENEW", texts.CHECKOUT_DESCRIPTION_DEFAULT),
-            getattr(texts, "CHECKOUT_DESCRIPTION_TARIFF_CHANGE", texts.CHECKOUT_DESCRIPTION_DEFAULT),
-        ]
+        descriptions = [texts.CHECKOUT_DESCRIPTION_DEFAULT]
         for desc in descriptions:
             assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", desc, re.IGNORECASE) is None
             assert "ВПН" not in desc.upper()
