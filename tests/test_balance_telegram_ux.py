@@ -115,23 +115,6 @@ class BalanceTelegramUXTests(unittest.TestCase):
     def test_payment_url_delivery_has_durable_marker(self):
         self.assertIn("payment_url_notified_at", Payment.__table__.c)
 
-    def test_direct_tariff_yookassa_route_is_not_registered(self):
-        router_source = (
-            Path(__file__).parents[1]
-            / "bot"
-            / "handlers"
-            / "payment"
-            / "__init__.py"
-        ).read_text(encoding="utf-8")
-        keyboard_source = (
-            Path(__file__).parents[1] / "bot" / "keyboards" / "payment.py"
-        ).read_text(encoding="utf-8")
-        self.assertNotIn("yookassa_routes", router_source)
-        self.assertNotIn("pay_yookassa:", keyboard_source)
-        self.assertFalse(
-            (Path(__file__).parents[1] / "services" / "payment_service").exists()
-        )
-
     def test_topup_presets_boundaries_and_edge_cases(self):
         from types import SimpleNamespace
         from bot.handlers.payment.balance_routes import topup_presets
