@@ -31,6 +31,4 @@ TOPUP_MISSING_NOTICE = "Активная ссылка пополнения не 
 TOPUP_OPERATION_MINIMUM = "Для выбранной операции нужно пополнить минимум на <b>{minimum} ₽</b>."
 
 
-CHECKOUT_DESCRIPTION_RENEW = 'Продление доступа к информационному сервису Just1k'
-CHECKOUT_DESCRIPTION_TARIFF_CHANGE = 'Изменение параметров доступа к сервису Just1k'
 CHECKOUT_DESCRIPTION_DEFAULT = 'Предоставление доступа к информационному сервису Just1k'

@@ -148,10 +148,6 @@ DASHBOARD_AVG_CHECK_30D_AVG_CHECK = """• Средний чек (30д): <b>{fin
 
 """
 
-DASHBOARD_DISPUTY = "⚖️ Диспуты"
-
-DASHBOARD_DISPUTY_COUNT = "⚠️ Диспуты ({disputes_count})"
-
 DASHBOARD_FINANCIAL_METRICS = """💰 <b>Финансовые показатели:</b>
 """
 
@@ -198,10 +194,6 @@ DASHBOARD_NEW_ZA_24_HOURS_NEW_24H = """• Новых за 24 часа: <b>{stat
 DASHBOARD_NE_ZADANO_LINK_HIDDEN_OT_POL = """<code>{safe_mtproto_url_or}</code>
 
 """
-
-DASHBOARD_OCHEREDI = "🚨 Очереди ({dead_queues_count})"
-
-DASHBOARD_OCHEREDI_TASKS = "🔄 Очереди задач"
 
 DASHBOARD_OPEN_PLATEZHNYKH_DISPUTES = """• Открытых платежных споров: <b>{disputes_count}</b>
 

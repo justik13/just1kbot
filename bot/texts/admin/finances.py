@@ -76,39 +76,8 @@ ADMIN_PAYMENT_MANUAL_REVIEW_LINE = """
 ADMIN_PAYMENT_REFUNDABLE_LINE = """
 <b>Можно вернуть:</b> {amount_rub} RUB"""
 
-# --- Refund flow -------------------------------------------------------------
-ADMIN_REFUND_START_BUTTON = "↩️ Вернуть доступный остаток"
 ADMIN_CLIENT_CARD_BUTTON = "👤 Карточка клиента"
-ADMIN_REFUND_CONFIRM_BUTTON = "✅ Подтвердить возврат {amount_rub} ₽"
-ADMIN_REFUND_CONFIRMATION_BODY = """⚠️ <b>Подтверждение возврата</b>
-
-Платёж: <code>#{payment_id}</code>
-YooKassa ID: <code>{provider_payment_id}</code>
-Будет возвращено: <b>{amount_rub} RUB</b>
-
-Сумма сначала будет заморожена на внутреннем балансе, затем durable worker отправит идемпотентный запрос в YooKassa."""
-ADMIN_REFUND_ACCEPTED_TEMPLATE = """✅ <b>Возврат принят</b>
-
-{status_text}
-Сумма: <b>{amount_rub} RUB</b>
-Operation: <code>{operation_id}</code>
-Статус: <code>{operation_status}</code>
-
-Зарезервированная сумма недоступна для новых покупок до подтверждения или безопасного завершения операции."""
-ADMIN_PAYMENTS_BACK_TO_LIST_BUTTON = "💳 К списку платежей"
-
-# --- Payment/refund alerts ----------------------------------------------------
 ADMIN_PAYMENT_NOT_FOUND_ALERT = "Платёж не найден"
-ADMIN_REFUND_NOT_AVAILABLE_ALERT = "Платёж недоступен для возврата"
-ADMIN_REFUND_NO_REMAINDER_ALERT = "Возвращаемого остатка уже нет"
-ADMIN_REFUND_ERR_ONLY_TOPUP = "Можно вернуть только пополнение баланса"
-ADMIN_REFUND_ERR_NOT_REFUNDABLE = "Платёж ещё не подтверждён или уже возвращён"
-ADMIN_REFUND_ERR_NO_PROVIDER_ID = "У платежа нет YooKassa ID"
-ADMIN_REFUND_ERR_MANUAL_REVIEW = "Возврат требует ручной проверки"
-ADMIN_REFUND_ENQUEUE_FAILED_ALERT = "Не удалось поставить возврат в очередь"
-ADMIN_REFUND_ENQUEUED_STATUS = "Возврат поставлен в durable-очередь."
-ADMIN_REFUND_ALREADY_QUEUED_STATUS = "Этот возврат уже находится в durable-очереди."
-REFUND_ORDER_DESCRIPTION_TEMPLATE = 'Возврат средств по заказу #{order_id}'
 
 ADMIN_ORDER_CARD_TEMPLATE = """🛠 Админка › 🧾 <b>Заказ #{short_id}</b>
 

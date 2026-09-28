@@ -11,7 +11,6 @@ from bot.texts.common.buttons import (
     BTN_DISMISS_ALERT,
     BTN_DISMISS_NOTIFICATION,
     BTN_ENABLE_SERVER,
-    BTN_HIDE,
     BTN_MAIN_MENU_NAV,
     BTN_MY_BALANCE,
     BTN_OPEN_USER_CARD,
@@ -97,9 +96,3 @@ def get_traffic_alert_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     builder.adjust(1)
     return builder.as_markup()
 
-
-def get_dismiss_alert_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text=BTN_HIDE, callback_data="dismiss_notification")
-    builder.adjust(1)
-    return builder.as_markup()

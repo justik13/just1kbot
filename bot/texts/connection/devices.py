@@ -40,8 +40,6 @@ DEVICE_CONFIG_CONF_CAPTION = """📁 <b>Файл для AmneziaWG</b>
 
 DEVICE_CONFIG_GENERATING = "⏳ Генерирую файлы..."
 
-DEVICE_CONFIG_UNAVAILABLE = "⚠️ Конфигурация недоступна. Обратитесь в поддержку."
-
 DEVICE_CONFIG_VPN_CAPTION = """📁 <b>Файл для AmneziaVPN</b>
 
 📱 Устройство: <b>{device_name}</b>
