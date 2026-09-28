@@ -193,7 +193,7 @@ async def show_referral_leaderboard(
             pass
         return
 
-    top_leaders = await get_referral_leaderboard(session, limit=10)
+    top_leaders = await get_referral_leaderboard(session, limit=5)
     user_rank, user_active_count = await get_user_referral_rank(
         session, db_user.telegram_id
     )

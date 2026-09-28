@@ -224,7 +224,7 @@ async def get_user_active_referrals_count(
 
 
 async def get_referral_leaderboard(
-    session: AsyncSession, limit: int = 10
+    session: AsyncSession, limit: int = 5
 ) -> list[tuple[int, int]]:
     """Return top referrers by count of active referred users [(telegram_id, active_count), ...]."""
     limit = max(1, min(limit, 100))

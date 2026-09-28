@@ -1082,3 +1082,23 @@ class TestReferralEligibilityAndRanks(unittest.TestCase):
             rank, count = asyncio.run(get_user_referral_rank(session, telegram_id=777))
             self.assertEqual(rank, 3)
             self.assertEqual(count, 5)
+
+    def test_get_referral_leaderboard_default_limit_and_result(self):
+        import asyncio
+        from database.repositories.users_repo import get_referral_leaderboard
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.all.return_value = [
+            (1001, 15),
+            (1002, 10),
+            (1003, 7),
+            (1004, 3),
+            (1005, 1),
+        ]
+        session.execute = AsyncMock(return_value=mock_result)
+
+        leaders = asyncio.run(get_referral_leaderboard(session))
+        self.assertEqual(len(leaders), 5)
+        self.assertEqual(leaders[0], (1001, 15))
+        self.assertEqual(leaders[4], (1005, 1))
