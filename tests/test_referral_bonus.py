@@ -37,37 +37,38 @@ class TestReferralTiers(unittest.TestCase):
         from services.referral_bonus import get_referral_tier
 
         # Tier 1: 0..4 -> 15% (Старт)
+        # Tier 1: 0..4 -> 15% (Уровень 1)
         for cnt in (0, 1, 2, 3, 4):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.15")
-            assert t.name == "Старт"
+            assert t.name == "Уровень 1"
             assert t.needed_for_next == (5 - cnt)
-            assert t.next_tier_name == "Активист"
+            assert t.next_tier_name == "Уровень 2"
             assert t.next_rate == Decimal("0.20")
 
-        # Tier 2: 5..9 -> 20% (Активист)
+        # Tier 2: 5..9 -> 20% (Уровень 2)
         for cnt in (5, 6, 7, 8, 9):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.20")
-            assert t.name == "Активист"
+            assert t.name == "Уровень 2"
             assert t.needed_for_next == (10 - cnt)
-            assert t.next_tier_name == "Мастер"
+            assert t.next_tier_name == "Уровень 3"
             assert t.next_rate == Decimal("0.25")
 
-        # Tier 3: 10..14 -> 25% (Мастер)
+        # Tier 3: 10..14 -> 25% (Уровень 3)
         for cnt in (10, 11, 12, 13, 14):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.25")
-            assert t.name == "Мастер"
+            assert t.name == "Уровень 3"
             assert t.needed_for_next == (15 - cnt)
-            assert t.next_tier_name == "Амбассадор"
+            assert t.next_tier_name == "Уровень 4"
             assert t.next_rate == Decimal("0.30")
 
-        # Tier 4: 15+ -> 30% (Амбассадор)
+        # Tier 4: 15+ -> 30% (Уровень 4)
         for cnt in (15, 20, 50, 100):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.30")
-            assert t.name == "Амбассадор"
+            assert t.name == "Уровень 4"
             assert t.needed_for_next is None
             assert t.next_tier_name is None
             assert t.next_rate is None
@@ -139,7 +140,7 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         assert entry.amount == Decimal(4)  # 15% of 30
         assert entry.metadata_["topup_payment_id"] == 42
         assert entry.metadata_["bonus_rate"] == "0.15"
-        assert entry.metadata_["tier_name"] == "Старт"
+        assert entry.metadata_["tier_name"] == "Уровень 1"
 
     def test_reverse_referral_bonus_for_topup(self):
         import asyncio
@@ -452,7 +453,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         assert referrer_entry.user_id == 10
         assert referrer_entry.amount == Decimal(75)  # 15% of 500
         assert referrer_entry.metadata_["bonus_rate"] == "0.15"
-        assert referrer_entry.metadata_["tier_name"] == "Старт"
+        assert referrer_entry.metadata_["tier_name"] == "Уровень 1"
 
         # Purchaser gets discount at checkout rather than bonus credit on balance
         assert res.purchaser_welcome_bonus == Decimal(0)
@@ -505,7 +506,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         assert referrer_entry.user_id == 10
         assert referrer_entry.amount == Decimal(200)  # 20% of 1000
         assert referrer_entry.metadata_["bonus_rate"] == "0.20"
-        assert referrer_entry.metadata_["tier_name"] == "Активист"
+        assert referrer_entry.metadata_["tier_name"] == "Уровень 2"
 
 
     def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus(self):

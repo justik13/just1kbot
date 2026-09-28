@@ -217,6 +217,7 @@ async def get_user_active_referrals_count(
             User.referred_by == telegram_id,
             User.is_deleted.is_(False),
             Order.status == "paid",
+            Order.amount_rub > 0,
         )
     )
     result = await session.scalar(stmt)
@@ -239,6 +240,7 @@ async def get_referral_leaderboard(
             referrer.is_deleted.is_(False),
             referral.is_deleted.is_(False),
             Order.status == "paid",
+            Order.amount_rub > 0,
         )
         .group_by(referrer.telegram_id)
         .order_by(text("active_count DESC"), referrer.telegram_id.asc())
@@ -270,6 +272,7 @@ async def get_user_referral_rank(
             referrer.is_deleted.is_(False),
             referral.is_deleted.is_(False),
             Order.status == "paid",
+            Order.amount_rub > 0,
         )
         .group_by(referrer.telegram_id)
         .subquery()
@@ -302,6 +305,7 @@ async def is_eligible_for_referral_first_discount(
         select(func.count(Order.id)).where(
             Order.user_id == user_id,
             Order.status == "paid",
+            Order.amount_rub > 0,
         )
     )
     if not isinstance(paid_orders, (int, float)):
@@ -316,6 +320,7 @@ async def is_eligible_for_referral_first_discount(
             Payment.user_id == user_id,
             Payment.credited_at.is_not(None),
             Payment.fulfillment_status == "succeeded",
+            Payment.amount > 0,
         )
     )
     if not isinstance(paid_payments, (int, float)):

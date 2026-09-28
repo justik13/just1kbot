@@ -211,10 +211,10 @@ def _validate_xhttp_padding_bytes(val: str | None) -> str:
 
 # Referral System Constants
 REFERRAL_TIERS: tuple[tuple[int, Decimal, str], ...] = (
-    (0, Decimal("0.15"), "Старт"),
-    (5, Decimal("0.20"), "Активист"),
-    (10, Decimal("0.25"), "Мастер"),
-    (15, Decimal("0.30"), "Амбассадор"),
+    (0, Decimal("0.15"), "Уровень 1"),
+    (5, Decimal("0.20"), "Уровень 2"),
+    (10, Decimal("0.25"), "Уровень 3"),
+    (15, Decimal("0.30"), "Уровень 4"),
 )
 REFERRAL_DEFAULT_RATE: Decimal = Decimal("0.15")
 REFERRAL_WELCOME_DISCOUNT_PERCENT: Decimal = Decimal("0.25")
