@@ -519,7 +519,7 @@ def test_server_endpoint(mock_awg_env):
     resp = client.get("/server", headers={"x-api-key": "secret-test-api-key"})
     assert resp.status_code == 200
     data = resp.json()
-    assert data["name"] == ""
+    assert data["name"] == "amnezia-awg2"
     assert data["protocols"] == ["amneziawg2", "amneziawg3"]
     assert data["port"] == 44321
     assert data["maxPeers"] > 0
