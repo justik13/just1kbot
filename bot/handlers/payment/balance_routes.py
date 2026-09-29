@@ -118,12 +118,19 @@ async def _get_pending_topup_order(
 async def _count_pending_topup_orders(
     session: AsyncSession, user_id: int
 ) -> int:
+    # Mirror _get_pending_topup_order(): only fresh pendings with a payment
+    # URL block new topups. Stale rows without URL (gateway failed before
+    # invoice) or older than 15 min must not block the funnel forever —
+    # Order pendings are never auto-expired (cleanup covers only payments).
+    cutoff = now_utc() - timedelta(minutes=15)
     return (
         await session.scalar(
             select(func.count(Order.id)).where(
                 Order.user_id == user_id,
                 Order.service_type == "topup",
                 Order.status == "pending",
+                Order.payment_url.is_not(None),
+                Order.created_at >= cutoff,
             )
         )
         or 0
@@ -273,7 +280,7 @@ async def _create_and_render_topup(
             bot,
             chat_id,
             texts.ERROR_PAYMENT_SERVICE,
-            get_back_button("menu_balance"),
+            get_back_button(back_to),
         )
         return
 
@@ -378,6 +385,14 @@ async def choose_topup_amount(
             callback.bot,
             callback.message.chat.id,
             _topup_errors()["topup_blocked"],
+            get_back_button("menu_balance"),
+        )
+        return
+    if getattr(db_user, "financial_hold", False):
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
             get_back_button("menu_balance"),
         )
         return

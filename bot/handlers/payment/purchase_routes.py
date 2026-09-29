@@ -20,7 +20,12 @@ from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.tariffs_repo import get_tariff_by_id
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.maintenance_service import MaintenanceService
-from services.order_service import InsufficientBalanceError, OrderService
+from services.order_service import (
+    AccountDebtBlockedError,
+    FinancialHoldBlockedError,
+    InsufficientBalanceError,
+    OrderService,
+)
 from utils.datetime_helpers import now_utc
 from utils.telegram import EFFECT_CONFETTI, render_hub
 
@@ -154,12 +159,28 @@ async def handle_order_pay_card(
             current_tariff, tariff, sub_end, now=now
         )
         if due_rub <= Decimal("0.00"):
-            order = await OrderService.pay_from_wallet(
-                session,
-                user_id=db_user_id,
-                service_type="awg",
-                tariff_id=tariff.id,
-            )
+            try:
+                order = await OrderService.pay_from_wallet(
+                    session,
+                    user_id=db_user_id,
+                    service_type="awg",
+                    tariff_id=tariff.id,
+                )
+            except FinancialHoldBlockedError:
+                await callback.answer(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
+                return
+            except (AccountDebtBlockedError, InsufficientBalanceError):
+                await callback.answer(texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
+                return
+            except Exception as exc:
+                logger.exception(
+                    "Zero-cost tariff change failed for user %s, tariff %s: %s",
+                    db_user_id,
+                    tariff.id,
+                    exc,
+                )
+                await callback.answer(texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True)
+                return
             balance = await get_account_balance(session, user_id=db_user_id)
             tariff_name = get_tariff_display_name(order.device_limit or 2)
             await render_hub(
