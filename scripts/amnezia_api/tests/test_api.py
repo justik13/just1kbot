@@ -514,7 +514,8 @@ def test_auth_fail_closed(mock_awg_env):
         assert resp3.status_code == 500
 
 
-def test_server_endpoint(mock_awg_env):
+def test_server_endpoint(mock_awg_env, monkeypatch):
+    monkeypatch.delenv("SERVER_NAME", raising=False)
     client = TestClient(amnezia_app.app)
     resp = client.get("/server", headers={"x-api-key": "secret-test-api-key"})
     assert resp.status_code == 200
