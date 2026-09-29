@@ -47,6 +47,56 @@ class AccountDebtBlockedError(Exception):
 
 class OrderService:
     @staticmethod
+    async def _load_settlement_user(
+        session: AsyncSession, user_id: int
+    ) -> User | None:
+        """Authoritative user read for the settlement boundary.
+
+        Never use session.get() here: it may return the identity-map
+        cached instance without SQL (and without any row lock), so a hold
+        set concurrently (e.g. between UserContextMiddleware load and an
+        order_check press) would be invisible. An explicit SELECT ...
+        FOR UPDATE always hits the database and locks the row.
+        Same lock order as FulfillmentService (Order -> User), so no new
+        deadlock class is introduced.
+        """
+        return await session.scalar(
+            select(User).where(User.id == user_id).with_for_update()
+        )
+
+    @staticmethod
+    async def _settle_benefits(
+        session: AsyncSession, order: Order, *, was_canceled: bool
+    ) -> None:
+        """Credit wallet / grant referral bonus / fulfill access."""
+        # Ledger records: ONLY topup credits user's bot wallet
+        if order.service_type == "topup":
+            credit_meta = {"source": f"{order.payment_method}_topup"}
+            if was_canceled:
+                credit_meta["revived"] = True
+            await create_order_credit(
+                session,
+                user_id=order.user_id,
+                amount_rub=order.amount_rub,
+                order_id=order.id,
+                metadata=credit_meta,
+            )
+
+        # Grant referral bonus for topups and external payments (cards/gateways)
+        if order.service_type == "topup" or order.payment_method != "wallet":
+            from services.referral_bonus import grant_referral_bonus_for_topup
+
+            await grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=order.user_id,
+                order_id=str(order.id),
+                topup_amount=order.amount_rub,
+            )
+
+        # Fulfill benefits linearly
+        await FulfillmentService.fulfill_order(session, order)
+        await session.flush()
+    @staticmethod
     def calculate_tariff_change(
         current_tariff: Tariff | None,
         target_tariff: Tariff,
@@ -385,8 +435,39 @@ class OrderService:
             return None
 
         if order.status == "paid":
-            logger.info("Order %s already marked paid, ignoring duplicate execution", order.id)
             order._newly_paid = False
+            if (order.metadata_ or {}).get("settlement_held"):
+                # Release path: a repeat settlement attempt (e.g. order_check
+                # after the hold was lifted) completes withheld benefits.
+                # Credit/bonus inserts are idempotent; the flag is cleared
+                # first so a second release is a no-op early return.
+                release_user = await OrderService._load_settlement_user(
+                    session, order.user_id
+                )
+                if release_user is not None:
+                    still_hold = bool(
+                        getattr(release_user, "financial_hold", False)
+                    )
+                    still_block = bool(
+                        getattr(release_user, "topup_blocked", False)
+                    )
+                    still_blocked = still_hold or (
+                        order.service_type == "topup" and still_block
+                    )
+                    if still_blocked:
+                        return order
+                cleared_meta = dict(order.metadata_ or {})
+                cleared_meta.pop("settlement_held", None)
+                cleared_meta.pop("settlement_hold_reason", None)
+                order.metadata_ = cleared_meta
+                order._newly_paid = True
+                await OrderService._settle_benefits(
+                    session, order, was_canceled=False
+                )
+                logger.info(
+                    "Order %s released from settlement hold and fulfilled",
+                    order.id,
+                )
             return order
 
         if order.status == "refunded":
@@ -427,33 +508,41 @@ class OrderService:
         if external_id:
             order.external_id = external_id
 
-        # Ledger records: ONLY topup credits user's bot wallet
-        if order.service_type == "topup":
-            credit_meta = {"source": f"{order.payment_method}_topup"}
-            if was_canceled:
-                credit_meta["revived"] = True
-            await create_order_credit(
-                session,
-                user_id=order.user_id,
-                amount_rub=order.amount_rub,
-                order_id=order.id,
-                metadata=credit_meta,
-            )
+        # Settlement boundary: funnel guards (topup_blocked/financial_hold)
+        # use stale ORM state and only cover creation. Money arriving here
+        # (webhook or manual order_check) must not credit/fulfill a blocked
+        # user. Mark paid (money fact) but hold benefits for manual review.
+        # No new status (migration-free): flag in metadata_.
+        settlement_user = await OrderService._load_settlement_user(
+            session, order.user_id
+        )
+        if settlement_user is not None:
+            is_hold = bool(getattr(settlement_user, "financial_hold", False))
+            is_topup_block = bool(getattr(settlement_user, "topup_blocked", False))
+            blocked_topup = order.service_type == "topup" and (is_hold or is_topup_block)
+            blocked_tariff = order.service_type != "topup" and is_hold
+            if blocked_topup or blocked_tariff:
+                held_meta = dict(order.metadata_ or {})
+                held_meta["settlement_held"] = True
+                held_meta["settlement_hold_reason"] = (
+                    "financial_hold" if is_hold else "topup_blocked"
+                )
+                order.metadata_ = held_meta
+                # Not a fresh settlement for UX purposes: suppress the
+                # "credited" notification in the webhook handler, which keys
+                # off status == paid and _newly_paid.
+                order._newly_paid = False
+                await session.flush()
+                logger.warning(
+                    "Order %s paid under hold/block (user %s, service=%s): "
+                    "credited/fulfillment withheld for manual review",
+                    order.id,
+                    order.user_id,
+                    order.service_type,
+                )
+                return order
 
-        # Grant referral bonus for topups and external payments (cards/gateways)
-        if order.service_type == "topup" or order.payment_method != "wallet":
-            from services.referral_bonus import grant_referral_bonus_for_topup
-
-            await grant_referral_bonus_for_topup(
-                session,
-                purchaser_user_id=order.user_id,
-                order_id=str(order.id),
-                topup_amount=order.amount_rub,
-            )
-
-        # Fulfill benefits linearly
-        await FulfillmentService.fulfill_order(session, order)
-        await session.flush()
+        await OrderService._settle_benefits(session, order, was_canceled=was_canceled)
         logger.info("Order %s marked paid and fulfilled successfully", order.id)
         return order
 

@@ -74,6 +74,8 @@ def payment_display_status(payment) -> str:
 
 
 def order_display_status(order: Order) -> str:
+    if (order.metadata_ or {}).get("settlement_held"):
+        return "requires_manual_review"
     if order.status == "paid":
         return "completed"
     if order.status == "canceled":
@@ -602,6 +604,14 @@ async def show_order_card(
         if order.description
         else ""
     )
+    held_meta = order.metadata_ or {}
+    held_line = (
+        texts.ADMIN_ORDER_HELD_LINE.format(
+            reason=safe(str(held_meta.get("settlement_hold_reason", "hold")))
+        )
+        if held_meta.get("settlement_held")
+        else ""
+    )
     rendered = texts.ADMIN_ORDER_CARD_TEMPLATE.format(
         short_id=str(order.id)[:8],
         user_label=user_label,
@@ -617,6 +627,7 @@ async def show_order_card(
         refunded_at_line=refunded_at_line,
         external_id_line=external_id_line,
         description_line=description_line,
+        held_line=held_line,
     )
     builder = InlineKeyboardBuilder()
     if user_telegram_id:

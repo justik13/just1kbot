@@ -97,19 +97,32 @@ def _history_lines(entries: list) -> str:
     return "\n".join(lines)
 
 
+def _pending_topup_conditions(user_id: int):
+    """Single canonical predicate for fresh topup pendings.
+
+    Both the visible-invoice lookup and the funnel-limit count must use
+    the same definition, otherwise they drift (one blocks what the other
+    cannot see). Fresh = has payment URL and created within 15 min:
+    stale rows without URL (gateway failed) or older than the dedup
+    window must not block the funnel forever — Order pendings are never
+    auto-expired (cleanup covers only payments).
+    """
+    cutoff = now_utc() - timedelta(minutes=15)
+    return (
+        Order.user_id == user_id,
+        Order.service_type == "topup",
+        Order.status == "pending",
+        Order.payment_url.is_not(None),
+        Order.created_at >= cutoff,
+    )
+
+
 async def _get_pending_topup_order(
     session: AsyncSession, user_id: int
 ) -> Order | None:
-    cutoff = now_utc() - timedelta(minutes=15)
     return await session.scalar(
         select(Order)
-        .where(
-            Order.user_id == user_id,
-            Order.service_type == "topup",
-            Order.status == "pending",
-            Order.payment_url.is_not(None),
-            Order.created_at >= cutoff,
-        )
+        .where(*_pending_topup_conditions(user_id))
         .order_by(Order.created_at.desc())
         .limit(1)
     )
@@ -121,9 +134,7 @@ async def _count_pending_topup_orders(
     return (
         await session.scalar(
             select(func.count(Order.id)).where(
-                Order.user_id == user_id,
-                Order.service_type == "topup",
-                Order.status == "pending",
+                *_pending_topup_conditions(user_id)
             )
         )
         or 0
@@ -273,7 +284,7 @@ async def _create_and_render_topup(
             bot,
             chat_id,
             texts.ERROR_PAYMENT_SERVICE,
-            get_back_button("menu_balance"),
+            get_back_button(back_to),
         )
         return
 
@@ -378,6 +389,14 @@ async def choose_topup_amount(
             callback.bot,
             callback.message.chat.id,
             _topup_errors()["topup_blocked"],
+            get_back_button("menu_balance"),
+        )
+        return
+    if getattr(db_user, "financial_hold", False):
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
             get_back_button("menu_balance"),
         )
         return
@@ -589,6 +608,25 @@ async def resume_topup(
 ) -> None:
     await callback.answer(show_alert=False)
     if db_user is None:
+        return
+    # Same funnel policy as creation: blocked/held users must not be
+    # handed a live invoice. Settlement holds the credit anyway
+    # (mark_order_paid), this is the UX-layer reject.
+    if getattr(db_user, "topup_blocked", False):
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            _topup_errors()["topup_blocked"],
+            get_back_button("menu_balance"),
+        )
+        return
+    if getattr(db_user, "financial_hold", False):
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+            get_back_button("menu_balance"),
+        )
         return
     pending_topup = await _get_pending_topup_order(session, db_user.id)
     if pending_topup is None or not pending_topup.payment_url:

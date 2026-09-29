@@ -392,6 +392,10 @@ async def render_quick_renew(
             for t in tariffs
             if getattr(t, "device_limit", 2) == fallback_limit
         ]
+        # Header must match the actually offered tier, not the legacy limit.
+        display_limit = fallback_limit if renew_tariffs else current_limit
+    else:
+        display_limit = current_limit
 
     if not renew_tariffs:
         # If still no matching tier tariffs, offer active tariffs choice instead of dead-end error
@@ -419,7 +423,7 @@ async def render_quick_renew(
         )
         return
 
-    tariff_name = get_tariff_display_name(current_limit)
+    tariff_name = get_tariff_display_name(display_limit)
 
     text = texts.PAYMENT_QUICK_RENEW_HEADER.format(
         tariff_name=tariff_name,
