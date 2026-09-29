@@ -105,6 +105,13 @@ class YooKassaService:
                 method, cls.API + path, json=payload, headers=headers
             ) as response:
                 code = response.status
+                # Ambiguity (the provider may have applied the operation while
+                # we never learned the outcome) is only meaningful when the
+                # request was NOT rejected: YooKassa treats HTTP 4xx as a
+                # failed request, so nothing was created there even if the
+                # error body is unreadable. 2xx means the object exists (we
+                # simply cannot read it), 5xx means the result is unknown.
+                ambiguous_read = ambiguous_on_failure and not (400 <= code < 500)
                 try:
                     data = await response.json(content_type=None)
                 except asyncio.CancelledError:
@@ -122,7 +129,7 @@ class YooKassaService:
                         error_kind=YooKassaErrorKind.TIMEOUT,
                         status_code=code,
                         retryable=True,
-                        ambiguous=ambiguous_on_failure,
+                        ambiguous=ambiguous_read,
                     )
                 except aiohttp.ClientError as exc:
                     logger.warning(
@@ -138,7 +145,7 @@ class YooKassaService:
                         error_kind=YooKassaErrorKind.NETWORK_ERROR,
                         status_code=code,
                         retryable=True,
-                        ambiguous=ambiguous_on_failure,
+                        ambiguous=ambiguous_read,
                     )
                 except (ValueError, TypeError):
                     logger.warning(
@@ -153,7 +160,7 @@ class YooKassaService:
                         error_kind=YooKassaErrorKind.INVALID_RESPONSE,
                         status_code=code,
                         retryable=200 <= code < 300 or code >= 500,
-                        ambiguous=ambiguous_on_failure,
+                        ambiguous=ambiguous_read,
                     )
                 except Exception as exc:
                     logger.warning(
@@ -169,7 +176,7 @@ class YooKassaService:
                         error_kind=YooKassaErrorKind.UNKNOWN,
                         status_code=code,
                         retryable=False,
-                        ambiguous=ambiguous_on_failure,
+                        ambiguous=ambiguous_read,
                     )
                 elapsed_ms = (time.monotonic() - start) * 1000
                 if 200 <= code < 300:
@@ -195,7 +202,7 @@ class YooKassaService:
                         error_kind=YooKassaErrorKind.INVALID_RESPONSE,
                         status_code=code,
                         retryable=True,
-                        ambiguous=ambiguous_on_failure,
+                        ambiguous=ambiguous_read,
                     )
                 kind = YooKassaErrorKind.UNKNOWN
                 if code in (401, 403):

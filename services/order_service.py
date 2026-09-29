@@ -296,6 +296,14 @@ class OrderService:
                     held_meta["payment_creation_ambiguous"] = True
                     order.metadata_ = held_meta
                     await session.flush()
+                    # Commit here, not at the end of the request: the caller
+                    # now performs Telegram I/O inside the same transaction,
+                    # and any failure there would roll the order back and
+                    # reintroduce exactly the money-loss this branch prevents.
+                    # The order is the only row this request has written, and
+                    # the external side effect may already exist, so making it
+                    # durable immediately is the correct boundary.
+                    await session.commit()
                     raise
                 # NOTE: rollback() expires EVERY ORM object of this session
                 # (including the caller's User). Callers must capture

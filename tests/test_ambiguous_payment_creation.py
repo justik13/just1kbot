@@ -93,6 +93,57 @@ class GatewayAmbiguousClassificationTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class AmbiguousClassificationByHttpCodeTests(unittest.IsolatedAsyncioTestCase):
+    """YooKassa: 4xx means rejected, only 5xx/unreachable is unknown."""
+
+    async def _result(self, status, json_side_effect):
+        from unittest.mock import AsyncMock as _AsyncMock, patch as _patch
+
+        from services import yookassa_service
+
+        resp = MagicMock()
+        resp.status = status
+        resp.json = _AsyncMock(side_effect=json_side_effect)
+        fake_settings = SimpleNamespace(
+            YOOKASSA_SHOP_ID="shop", YOOKASSA_SECRET_KEY="secret"
+        )
+        with (
+            _patch("aiohttp.ClientSession.request") as mock_req,
+            _patch(
+                "services.yookassa_service.get_settings",
+                return_value=fake_settings,
+            ),
+        ):
+            mock_req.return_value.__aenter__.return_value = resp
+            return await yookassa_service.YooKassaService.create_payment_result(
+                {"amount": {"value": "500.00", "currency": "RUB"}},
+                idempotency_key="k",
+            )
+
+    async def test_400_with_malformed_body_is_not_ambiguous(self):
+        result = await self._result(400, ValueError("bad json"))
+        self.assertFalse(result.ok)
+        self.assertFalse(result.ambiguous)
+        self.assertEqual(result.status_code, 400)
+
+    async def test_400_with_non_dict_body_is_not_ambiguous(self):
+        result = await self._result(400, ["unexpected"])
+        self.assertFalse(result.ok)
+        self.assertFalse(result.ambiguous)
+
+    async def test_500_with_malformed_body_is_ambiguous(self):
+        result = await self._result(500, ValueError("bad json"))
+        self.assertFalse(result.ok)
+        self.assertTrue(result.ambiguous)
+
+    async def test_200_with_malformed_body_is_ambiguous(self):
+        # Server accepted the request and sent something unreadable: the
+        # payment may well exist, so the outcome is unknown.
+        result = await self._result(200, ValueError("bad json"))
+        self.assertFalse(result.ok)
+        self.assertTrue(result.ambiguous)
+
+
 class CreateOrderKeepsOrderTests(unittest.IsolatedAsyncioTestCase):
     async def _run(self, gateway_error):
         from services.order_service import OrderService
@@ -100,6 +151,7 @@ class CreateOrderKeepsOrderTests(unittest.IsolatedAsyncioTestCase):
         session = MagicMock()
         session.flush = AsyncMock()
         session.rollback = AsyncMock()
+        session.commit = AsyncMock()
         session.scalar = AsyncMock(return_value=None)  # no dedup hit
         session.get = AsyncMock(return_value=None)
         created: list = []
@@ -127,6 +179,9 @@ class CreateOrderKeepsOrderTests(unittest.IsolatedAsyncioTestCase):
         )
         session.rollback.assert_not_awaited()
         session.flush.assert_awaited()
+        # Durable before the caller performs Telegram I/O: a failure there
+        # must not be able to roll the order back and lose the payment.
+        session.commit.assert_awaited_once()
         self.assertTrue(order.metadata_["payment_creation_ambiguous"])
         # No invoice means the funnel keeps ignoring the order: it must not
         # be counted as an unfinished topup and must not be shown to the user.
@@ -135,6 +190,7 @@ class CreateOrderKeepsOrderTests(unittest.IsolatedAsyncioTestCase):
     async def test_definitive_failure_rolls_back(self):
         order, session = await self._run(RuntimeError("validation_failed"))
         session.rollback.assert_awaited_once()
+        session.commit.assert_not_awaited()
 
 
 class HandlerAmbiguousNoticeTests(unittest.IsolatedAsyncioTestCase):
