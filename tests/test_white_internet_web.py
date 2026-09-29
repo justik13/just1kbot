@@ -573,7 +573,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             mock_generate.assert_not_called()
 
     async def test_feed_handles_malformed_relays_and_hidden_gracefully(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,

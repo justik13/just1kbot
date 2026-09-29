@@ -59,7 +59,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
     """Test quota calculation, two-pool deduction, carryover, and cap enforcement."""
 
     async def test_deduct_traffic_base_first_and_overshoot(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
@@ -160,7 +160,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
 
     async def test_renew_subscription_resets_period_usage_and_preserves_carried_topup(self):
         """Renewal must reset period usage to 0, preserve node snapshots, and carry unused topup."""
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         sub = WhiteInternetSubscription(
             id=1,
             user_id=10,
