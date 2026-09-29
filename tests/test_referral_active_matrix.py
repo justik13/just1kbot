@@ -2,7 +2,7 @@
 
 Runs only with TEST_DATABASE_URL (CI). Skipped on Windows dev machines.
 
-Active = qualifying top-up ≥ REFERRAL_ACTIVE_MIN_TOPUP_RUB (35 = cheapest tariff):
+Active = qualifying top-up ≥ REFERRAL_ACTIVE_MIN_TOPUP_RUB (68 = discounted Base-30):
   A:  paid topup Order 100, no Payment            -> counts
   A2: paid topup Order 10 (dust)                  -> NOT counted
   A3: paid non-topup Order 500 (tariff purchase)  -> NOT counted

@@ -221,11 +221,12 @@ REFERRAL_WELCOME_DISCOUNT_PERCENT: Decimal = Decimal("0.25")
 # Minimum qualifying top-up for a referral to become "active".
 # Dust top-ups below this threshold neither activate the referral
 # (leaderboard/tier counting) nor consume the inviter's tier step.
-# 35 RUB = cheapest tariff ("Базовый", 7 days): any top-up that can actually
-# buy something activates, so no genuine tariff buyer is filtered out
-# (UI presets suggest 35/90/100+); anything below cannot. Tier farming 15
-# actives then costs >= 525 RUB in gateway-traced payments instead of 150.
-REFERRAL_ACTIVE_MIN_TOPUP_RUB: Decimal = Decimal("35")
+# 68 RUB = discounted first Base-30 tariff (90 - 25%): the smallest *real*
+# purchase. A referred test-week buyer pays 27 (35 - 25%) and intentionally
+# does NOT activate; White Internet buyers (188+ discounted) always qualify.
+# Independent business constant, NOT auto-derived from tariffs: if tariff
+# prices or the welcome rate change, adjust it manually in one place.
+REFERRAL_ACTIVE_MIN_TOPUP_RUB: Decimal = Decimal("68")
 
 
 CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
