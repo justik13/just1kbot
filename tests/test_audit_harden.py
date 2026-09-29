@@ -688,5 +688,73 @@ class AdminHeldCardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("financial_hold", text)
 
 
+class WebhookHeldNotificationTests(unittest.IsolatedAsyncioTestCase):
+    """Direct regression: a held settlement must never notify 'credited'."""
+
+    async def test_webhook_held_topup_sends_no_success_notice(self):
+        from bot.handlers.webhook import yookassa_webhook_handler
+        from database.models import User
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        order = MagicMock()
+        order.id = uuid4()
+        order.user_id = 21
+        order.service_type = "topup"
+        order.status = "pending"
+        order.amount_rub = Decimal("500")
+        order.payment_method = "yookassa"
+        order.metadata_ = {}
+        order.external_id = None
+        order._newly_paid = False
+        held_user = User(
+            id=21, telegram_id=111, financial_hold=True, topup_blocked=False
+        )
+
+        session = MagicMock()
+        # Real call order: inbox lookup -> None; process_webhook_event loads
+        # the order; mark_order_paid re-reads it under lock, then loads the
+        # settlement user with a fresh SELECT ... FOR UPDATE.
+        session.scalar = _AsyncMock(side_effect=[None, order, order, held_user])
+        session.execute = _AsyncMock()
+        session.flush = _AsyncMock()
+
+        scope_ctx = MagicMock()
+        scope_ctx.__aenter__ = _AsyncMock(return_value=session)
+        scope_ctx.__aexit__ = _AsyncMock(return_value=False)
+
+        request = MagicMock()
+        request.content_length = 300
+        request.app = {"bot": MagicMock()}
+        request.json = _AsyncMock(
+            return_value={
+                "type": "notification",
+                "event": "payment.succeeded",
+                "object": {
+                    "id": "pay-held-1",
+                    "status": "succeeded",
+                    "metadata": {"order_id": str(order.id)},
+                },
+            }
+        )
+
+        with (
+            patch("bot.handlers.webhook.session_scope", return_value=scope_ctx),
+            patch(
+                "bot.handlers.webhook._get_real_ip", return_value="185.71.76.1"
+            ),
+            patch("bot.handlers.webhook._is_yookassa_ip", return_value=True),
+            patch(
+                "bot.handlers.payment.balance_routes._render_balance",
+                new=_AsyncMock(),
+            ) as mock_render,
+        ):
+            response = await yookassa_webhook_handler(request)
+
+        self.assertEqual(response.status, 200)
+        self.assertTrue((order.metadata_ or {}).get("settlement_held"))
+        self.assertFalse(order._newly_paid)
+        mock_render.assert_not_awaited()
+
+
 if __name__ == "__main__":
     unittest.main()
