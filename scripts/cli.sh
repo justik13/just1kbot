@@ -972,6 +972,26 @@ cmd_update() {
             return 1
         fi
         current_branch="main"
+    elif [[ "$current_branch" != "main" ]]; then
+        warn "⚠️ Текущая ветка '$current_branch' отличается от основной production-ветки 'main'!"
+        warn "Production обязан работать на ветке main для обеспечения стабильности."
+        local switch_to_main="y"
+        if [[ -t 0 ]]; then
+            if ! read -r -t 60 -p "Переключиться на ветку main перед обновлением? (Y/n): " switch_to_main; then
+                echo ""
+                switch_to_main="y"
+            fi
+        fi
+        if [[ ! "$switch_to_main" =~ ^[Nn]$ ]]; then
+            info "Переключаемся на ветку main..."
+            if ! git checkout main 2>/dev/null; then
+                error "Не удалось переключиться на ветку main! Проверьте git status."
+                return 1
+            fi
+            current_branch="main"
+        else
+            warn "Продолжаем обновление на ветке '$current_branch' по запросу администратора."
+        fi
     fi
 
     local rollback_commit=""
@@ -1125,6 +1145,25 @@ cmd_update() {
     fi
 
     info "Проверка инвариантов базы данных (Invariant Integrity Audit)..."
+    local db_ready=false
+    local db_wait=0
+    while [ "$db_wait" -lt 30 ]; do
+        local cur_db_h
+        cur_db_h="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo starting)"
+        if [ "$cur_db_h" = "healthy" ]; then
+            db_ready=true
+            break
+        fi
+        sleep 2
+        db_wait=$((db_wait + 2))
+    done
+
+    if [ "$db_ready" != "true" ]; then
+        error "База данных (just1kbot_db) не находится в состоянии healthy! Проверка инвариантов отменена."
+        _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        return 1
+    fi
+
     if ! docker compose run --rm --no-deps bot python scripts/audit_invariants.py; then
         error "Нарушение инвариантов базы данных после применения миграций! Развёртывание прервано."
         _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
@@ -1188,6 +1227,13 @@ cmd_update() {
         # Закрепление безопасных прав доступа на хосте
         chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
         chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
+
+        if [ "$did_stash" = "true" ]; then
+            echo ""
+            warn "⚠️ ВНИМАНИЕ: Ваши локальные изменения сохранены в git stash (stash@{0}) и НЕ были применены автоматически."
+            info "Для просмотра сохранённых изменений: git stash show -p"
+            info "Для применения изменений к обновлённому коду: git stash pop"
+        fi
 
         if is_external_nginx_enabled; then
             info "Проверка внешнего Nginx после обновления контейнеров..."
