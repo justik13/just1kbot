@@ -333,6 +333,12 @@ inbounds.append({
         'xhttpSettings': {
             'mode': 'packet-up',
             'path': f'{secret_path}/default',
+            'uplinkHTTPMethod': 'GET',
+            'uplinkDataPlacement': 'header',
+            'uplinkDataKey': 'data',
+            'scMaxEachPostBytes': 4096,
+            'scMaxConcurrentPosts': 1,
+            'scMinPostsIntervalMs': 30,
             'xPaddingObfsMode': True,
             'xPaddingKey': 'dc',
             'xPaddingHeader': 'X-Cache',
@@ -923,6 +929,12 @@ if not def_ib:
             'xhttpSettings': {
                 'mode': 'packet-up',
                 'path': secret_base + '/default',
+                'uplinkHTTPMethod': 'GET',
+                'uplinkDataPlacement': 'header',
+                'uplinkDataKey': 'data',
+                'scMaxEachPostBytes': 4096,
+                'scMaxConcurrentPosts': 1,
+                'scMinPostsIntervalMs': 30,
                 'xPaddingObfsMode': True,
                 'xPaddingKey': 'dc',
                 'xPaddingHeader': 'X-Cache',
@@ -944,6 +956,19 @@ for ib in inbounds:
             'destOverride': ['tls', 'http', 'quic'],
             'routeOnly': False
         }
+
+# 2.4. Канонический uplink-профиль XHTTP: аплинк без тел (GET + данные в
+# заголовках data-{i}), иначе edge Yandex Cloud CDN отвечает 413 на тела.
+for ib in inbounds:
+    tag = ib.get('tag', '')
+    if tag == 'just1k-wl-default' or tag.startswith('just1k-wl-inbound-'):
+        xs = ib.setdefault('streamSettings', {}).setdefault('xhttpSettings', {})
+        xs['uplinkHTTPMethod'] = 'GET'
+        xs['uplinkDataPlacement'] = 'header'
+        xs['uplinkDataKey'] = 'data'
+        xs['scMaxEachPostBytes'] = 4096
+        xs['scMaxConcurrentPosts'] = 1
+        xs['scMinPostsIntervalMs'] = 30
 
 # 3. DNS: Split-DNS с UseIPv4 и skipFallback для доменов РФ (строго отечественные резолверы)
 cfg['dns'] = {

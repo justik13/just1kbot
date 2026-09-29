@@ -246,6 +246,12 @@ new_ib = {
         'xhttpSettings': {
             'mode': 'packet-up',
             'path': in_path,
+            'uplinkHTTPMethod': 'GET',
+            'uplinkDataPlacement': 'header',
+            'uplinkDataKey': 'data',
+            'scMaxEachPostBytes': 4096,
+            'scMaxConcurrentPosts': 1,
+            'scMinPostsIntervalMs': 30,
             'xPaddingObfsMode': True,
             'xPaddingKey': 'dc',
             'xPaddingHeader': 'X-Cache',
