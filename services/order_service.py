@@ -225,9 +225,16 @@ class OrderService:
                 order.external_id = invoice.external_id
                 order.payment_url = invoice.payment_url
             except Exception as exc:
+                order_id = order.id
                 logger.exception(
-                    "Gateway failed to create payment for order %s: %s", order.id, exc
+                    "Gateway failed to create payment for order %s: %s", order_id, exc
                 )
+                # NOTE: rollback() expires EVERY ORM object of this session
+                # (including the caller's User). Callers must capture
+                # user_id/telegram_id as plain ints BEFORE calling
+                # create_order() and never touch ORM attributes in except.
+                # Prod 2026-09-29: logger.exception(..., user.id) after this
+                # rollback raised MissingGreenlet and masked YooKassa TIMEOUT.
                 await session.rollback()
                 raise
 

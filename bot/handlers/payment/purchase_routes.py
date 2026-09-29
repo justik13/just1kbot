@@ -46,6 +46,9 @@ async def handle_order_pay_wallet(
     if not db_user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
+    # Capture primitive before DB/gateway IO: on failure the session may be
+    # rolled back (expired ORM -> MissingGreenlet if db_user.id is touched).
+    db_user_id = db_user.id
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
@@ -68,7 +71,7 @@ async def handle_order_pay_wallet(
     try:
         order = await OrderService.pay_from_wallet(
             session,
-            user_id=db_user.id,
+            user_id=db_user_id,
             service_type="awg",
             tariff_id=tariff.id,
         )
@@ -78,14 +81,14 @@ async def handle_order_pay_wallet(
     except Exception as exc:
         logger.exception(
             "Wallet payment failed for user %s, tariff %s: %s",
-            db_user.id,
+            db_user_id,
             tariff_id,
             exc,
         )
         await callback.answer(texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True)
         return
 
-    balance = await get_account_balance(session, user_id=db_user.id)
+    balance = await get_account_balance(session, user_id=db_user_id)
     tariff_name = get_tariff_display_name(order.device_limit or 2)
     is_change = bool(order.metadata_ and order.metadata_.get("is_tariff_change"))
     operation = texts.PAYMENT_OP_TITLE_CHANGE if is_change else texts.PURCHASE_COMPLETED
@@ -116,6 +119,9 @@ async def handle_order_pay_card(
     if not db_user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
+    # Capture primitive before gateway IO: OrderService.create_order() does
+    # session.rollback() on gateway failure, expiring db_user (MissingGreenlet).
+    db_user_id = db_user.id
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
@@ -150,11 +156,11 @@ async def handle_order_pay_card(
         if due_rub <= Decimal("0.00"):
             order = await OrderService.pay_from_wallet(
                 session,
-                user_id=db_user.id,
+                user_id=db_user_id,
                 service_type="awg",
                 tariff_id=tariff.id,
             )
-            balance = await get_account_balance(session, user_id=db_user.id)
+            balance = await get_account_balance(session, user_id=db_user_id)
             tariff_name = get_tariff_display_name(order.device_limit or 2)
             await render_hub(
                 callback.bot,
@@ -179,7 +185,7 @@ async def handle_order_pay_card(
         bot_username = getattr(getattr(callback.bot, "_me", None), "username", None)
         order = await OrderService.create_order(
             session,
-            user_id=db_user.id,
+            user_id=db_user_id,
             service_type="awg",
             tariff_id=tariff.id,
             payment_method="yookassa",
@@ -187,7 +193,7 @@ async def handle_order_pay_card(
         )
     except Exception as exc:
         logger.exception(
-            "Failed to create YooKassa order for user %s: %s", db_user.id, exc
+            "Failed to create YooKassa order for user %s: %s", db_user_id, exc
         )
         await callback.answer(texts.ERROR_PAYMENT_SERVICE, show_alert=True)
         return
