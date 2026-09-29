@@ -119,8 +119,10 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
         session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
-        # 1. purchaser, 2. referrer, 3. active_referrals_count (0), 4. existing check (None)
-        session.scalar = AsyncMock(side_effect=[purchaser, referrer, 0, None])
+        # 1. purchaser, 2. referrer, 3. active_referrals_count (0),
+        # 4. other qualifying order (None), 5. other qualifying payment (None),
+        # 6. existing check (None)
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, 0, None, None, None])
         session.add = fake_add
         session.flush = AsyncMock()
 
@@ -433,8 +435,10 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
         session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
-        # 1. purchaser, 2. referrer, 3. active_referrals_count (0 -> 15% rate), 4. existing check (None)
-        session.scalar = AsyncMock(side_effect=[purchaser, referrer, 0, None])
+        # 1. purchaser, 2. referrer, 3. active_referrals_count (0 -> 15% rate),
+        # 4. other qualifying order (None), 5. other qualifying payment (None),
+        # 6. existing check (None)
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, 0, None, None, None])
         session.add = fake_add
         session.flush = AsyncMock()
 
@@ -487,8 +491,13 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
         session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
-        # 1. purchaser, 2. referrer, 3. active_referrals_count (5 -> 20% rate "Активист"), 4. existing check (None)
-        session.scalar = AsyncMock(side_effect=[purchaser, referrer, 5, None])
+        # Repeat top-up: purchaser already qualified before, so the full count
+        # applies. 1. purchaser, 2. referrer, 3. active_referrals_count (5),
+        # 4. other qualifying order (exists -> short-circuits payment check),
+        # 5. existing check (None)
+        session.scalar = AsyncMock(
+            side_effect=[purchaser, referrer, 5, "prior-qualifying-order-id", None]
+        )
         session.add = fake_add
         session.flush = AsyncMock()
 
@@ -507,6 +516,105 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         assert referrer_entry.amount == Decimal(200)  # 20% of 1000
         assert referrer_entry.metadata_["bonus_rate"] == "0.20"
         assert referrer_entry.metadata_["tier_name"] == "Уровень 2"
+
+    def test_first_activation_does_not_boost_own_rate(self):
+        """5th referral's own first top-up is still paid at 15%, not 20%."""
+        import asyncio
+
+        from database.models import AccountLedgerEntry
+        from services.referral_bonus import grant_referral_bonus_for_topup
+
+        added_entries = []
+
+        referrer = MagicMock()
+        referrer.id = 10
+        referrer.telegram_id = 1000
+        referrer.is_banned = False
+
+        purchaser = MagicMock()
+        purchaser.id = 20
+        purchaser.telegram_id = 2000
+        purchaser.referred_by = 1000
+
+        def fake_add(entry):
+            if isinstance(entry, AccountLedgerEntry):
+                added_entries.append(entry)
+
+        session = AsyncMock()
+        # active=5 already includes this first-time payer -> effective 4 -> 15%
+        session.scalar = AsyncMock(
+            side_effect=[purchaser, referrer, 5, None, None, None]
+        )
+        session.add = fake_add
+        session.flush = AsyncMock()
+
+        res = asyncio.run(
+            grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=20,
+                payment_id=103,
+                topup_amount=1000,
+            )
+        )
+
+        assert len(added_entries) == 1
+        referrer_entry = added_entries[0]
+        assert referrer_entry.amount == Decimal(150)  # 15% of 1000, not 20%
+        assert referrer_entry.metadata_["bonus_rate"] == "0.15"
+        assert referrer_entry.metadata_["active_referrals_count"] == 4
+        assert res.referrer_bonus == Decimal(150)
+
+    def test_dust_topup_does_not_consume_tier_step(self):
+        """Sub-threshold top-up keeps the full count (it never activates)."""
+        import asyncio
+
+        from config.constants import REFERRAL_ACTIVE_MIN_TOPUP_RUB
+        from database.models import AccountLedgerEntry
+        from services.referral_bonus import grant_referral_bonus_for_topup
+
+        dust_amount = int(REFERRAL_ACTIVE_MIN_TOPUP_RUB) - 5
+        assert dust_amount > 0
+        expected_bonus = (dust_amount * 20) // 100  # tier 2 rate, no decrement
+        assert expected_bonus > 0
+
+        added_entries = []
+
+        referrer = MagicMock()
+        referrer.id = 10
+        referrer.telegram_id = 1000
+        referrer.is_banned = False
+
+        purchaser = MagicMock()
+        purchaser.id = 20
+        purchaser.telegram_id = 2000
+        purchaser.referred_by = 1000
+
+        def fake_add(entry):
+            if isinstance(entry, AccountLedgerEntry):
+                added_entries.append(entry)
+
+        session = AsyncMock()
+        session.scalar = AsyncMock(
+            side_effect=[purchaser, referrer, 5, None, None, None]
+        )
+        session.add = fake_add
+        session.flush = AsyncMock()
+
+        res = asyncio.run(
+            grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=20,
+                payment_id=104,
+                topup_amount=dust_amount,
+            )
+        )
+
+        assert len(added_entries) == 1
+        referrer_entry = added_entries[0]
+        assert referrer_entry.amount == Decimal(expected_bonus)
+        assert referrer_entry.metadata_["bonus_rate"] == "0.20"
+        assert referrer_entry.metadata_["active_referrals_count"] == 5
+        assert res.referrer_bonus == Decimal(expected_bonus)
 
 
     def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus(self):
@@ -626,8 +734,9 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         mock_referrer.telegram_id = 100
         mock_referrer.is_banned = False
 
-        # 1. purchaser, 2. referrer, 3. active_count=10 (tier 3: 25% "Мастер"), 4. existing check (None)
-        session.scalar.side_effect = [mock_purchaser, mock_referrer, 10, None]
+        # 1. purchaser, 2. referrer, 3. active_count=10, 4. other order (exists:
+        # repeat top-up, full tier 3 rate 25%), 5. existing check (None)
+        session.scalar.side_effect = [mock_purchaser, mock_referrer, 10, "prior-order-id", None]
 
         res = asyncio.run(grant_referral_bonus_for_topup(session, purchaser_user_id=10, payment_id=1, topup_amount=Decimal(100)))
 
@@ -1126,11 +1235,12 @@ class TestReferralEligibilityAndRanks(unittest.TestCase):
 
 
 class TestActiveReferralsLegacyPayments(unittest.TestCase):
-    """Active = paid Order (new flow) OR real-money topup (legacy flow).
+    """Active = qualifying top-up (Order topup ≥ threshold OR legacy real-money payment).
 
     Regression: referred users with succeeded/credited payments but no Order
     (e.g. purchases before orders table) must count as active, while pure
-    admin_adjustment freebies (no Order, no Payment) must NOT count.
+    admin_adjustment freebies (no Order, no Payment), direct tariff purchases
+    and dust top-ups below the threshold must NOT count.
     """
 
     def test_condition_covers_orders_and_payments_with_abuse_guards(self):
@@ -1145,6 +1255,8 @@ class TestActiveReferralsLegacyPayments(unittest.TestCase):
         self.assertIn("paid", compiled)
         self.assertIn("succeeded", compiled)
         self.assertIn("credited_at", compiled)
+        self.assertIn("topup", compiled)
+        self.assertIn("service_type", compiled)
 
     def test_count_counts_legacy_topup_without_order(self):
         import asyncio

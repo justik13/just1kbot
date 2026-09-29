@@ -11,7 +11,11 @@ from decimal import ROUND_DOWN, Decimal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import REFERRAL_DEFAULT_RATE, REFERRAL_TIERS
+from config.constants import (
+    REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+    REFERRAL_DEFAULT_RATE,
+    REFERRAL_TIERS,
+)
 from config.enums import AdminAuditAction
 from database.models import AccountLedgerEntry, User
 from database.repositories.account_ledger_repo import (
@@ -127,7 +131,11 @@ async def is_first_topup_eligible(
     *,
     user_id: int,
 ) -> bool:
-    """Return True if user was referred by someone and has no completed top-ups yet."""
+    """Return True if user was referred by someone and has no completed qualifying top-ups yet.
+
+    Only top-ups ≥ REFERRAL_ACTIVE_MIN_TOPUP_RUB burn eligibility: dust
+    top-ups neither activate the referral nor hide the bonus preview.
+    """
     purchaser = await session.scalar(
         select(User).where(
             User.id == user_id,
@@ -152,6 +160,7 @@ async def is_first_topup_eligible(
             Payment.user_id == user_id,
             Payment.credited_at.is_not(None),
             Payment.fulfillment_status == "succeeded",
+            Payment.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
         )
     )
     order_count = await session.scalar(
@@ -159,9 +168,63 @@ async def is_first_topup_eligible(
             Order.user_id == user_id,
             Order.service_type == "topup",
             Order.status == "paid",
+            Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
         )
     )
     return (count or 0) == 0 and (order_count or 0) == 0
+
+
+async def _has_other_qualifying_topup(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    exclude_order_id: str | uuid.UUID | None,
+    exclude_payment_id: int | None,
+) -> bool:
+    """True if the user has any qualifying top-up besides the current operation.
+
+    Used to decide whether the current top-up newly activates the referral:
+    the tier rate must be computed from the active count *before* this
+    activation, so a first qualifying top-up must not boost its own rate.
+    """
+    from database.models import Order, Payment
+
+    order_conds = [
+        Order.user_id == user_id,
+        Order.service_type == "topup",
+        Order.status == "paid",
+        Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+    ]
+    if exclude_order_id is not None:
+        try:
+            excl = (
+                exclude_order_id
+                if isinstance(exclude_order_id, uuid.UUID)
+                else uuid.UUID(str(exclude_order_id))
+            )
+        except (ValueError, TypeError, AttributeError):
+            excl = None
+        if excl is not None:
+            order_conds.append(Order.id != excl)
+    other_order = await session.scalar(
+        select(Order.id).where(*order_conds).limit(1)
+    )
+    if other_order is not None:
+        return True
+
+    payment_conds = [
+        Payment.user_id == user_id,
+        Payment.provider_status == "succeeded",
+        Payment.fulfillment_status == "succeeded",
+        Payment.credited_at.is_not(None),
+        Payment.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+    ]
+    if exclude_payment_id is not None:
+        payment_conds.append(Payment.id != exclude_payment_id)
+    other_payment = await session.scalar(
+        select(Payment.id).where(*payment_conds).limit(1)
+    )
+    return other_payment is not None
 
 
 async def grant_referral_bonus_for_topup(
@@ -223,7 +286,22 @@ async def grant_referral_bonus_for_topup(
     from database.repositories.users_repo import get_user_active_referrals_count
 
     active_count = await get_user_active_referrals_count(session, referrer.telegram_id)
-    tier_info = get_referral_tier(active_count)
+    # Tier is earned by referrals activated BEFORE this top-up: a first
+    # qualifying top-up must not boost its own rate (0-4 -> 15% for the 5th
+    # payer; 20% starts from their NEXT top-up). Repeat top-ups keep the
+    # full count. Dust top-ups (< threshold) never activate, so no decrement.
+    first_activation = not await _has_other_qualifying_topup(
+        session,
+        user_id=purchaser.id,
+        exclude_order_id=order_id,
+        exclude_payment_id=payment_id,
+    )
+    current_qualifies = Decimal(str(topup_amount)) >= REFERRAL_ACTIVE_MIN_TOPUP_RUB
+    if first_activation and current_qualifies:
+        effective_count = max(0, active_count - 1)
+    else:
+        effective_count = active_count
+    tier_info = get_referral_tier(effective_count)
     bonus = calculate_referral_bonus(topup_amount, rate=tier_info.rate)
     if bonus <= 0:
         return ReferralBonusGrantResult(
@@ -260,7 +338,7 @@ async def grant_referral_bonus_for_topup(
                     "topup_order_id": str(order_id) if order_id is not None else None,
                     "bonus_rate": str(tier_info.rate),
                     "tier_name": tier_info.name,
-                    "active_referrals_count": active_count,
+                    "active_referrals_count": effective_count,
                 },
             )
         )
@@ -279,7 +357,7 @@ async def grant_referral_bonus_for_topup(
                 "order_id": order_id,
                 "bonus_rate": str(tier_info.rate),
                 "tier_name": tier_info.name,
-                "active_referrals_count": active_count,
+                "active_referrals_count": effective_count,
             },
         )
     else:

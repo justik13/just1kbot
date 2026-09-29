@@ -441,7 +441,11 @@ async def choose_topup_amount(
             int_balance_bonus_available=int(balance.bonus_available)
         )
 
-    from services.referral_bonus import is_first_topup_eligible
+    from services.referral_bonus import (
+        calculate_referral_bonus,
+        get_referral_tier,
+        is_first_topup_eligible,
+    )
 
     is_first_eligible = await is_first_topup_eligible(
         session, user_id=db_user.id
@@ -449,16 +453,42 @@ async def choose_topup_amount(
 
     bonus_notice = ""
     if is_first_eligible:
-        bonus_lines = "\n".join(
-            texts.BALANCE_NA_BONUS_BALANCE.format(amt=amt, amt____10=amt * 20 // 100)
-            for amt in amounts
+        # Preview the inviter's actual tier rate (15-30%), not a fixed 20%.
+        # The bonus accrues to the inviter; hide the notice if the inviter
+        # is gone/banned since no bonus would be granted.
+        from database.repositories.users_repo import (
+            get_user_active_referrals_count,
+            get_user_by_telegram_id,
         )
-        bonus_notice = (
-            texts.BALANCE_BONUS_NA_PERVOE_TOPUP.format()
-            + texts.BALANCE_VY_POLUCHITE_20_OT_SUMMY_POPOL.format()
-            + texts.BALANCE_PODROBNEE_V_MENYU_PRIGLASIT_DR.format()
-            + texts.BALANCE_RASCHET_BONUSA_K_SUMME.format(bonus_lines=bonus_lines)
-        )
+
+        referrer = None
+        if getattr(db_user, "referred_by", None):
+            referrer = await get_user_by_telegram_id(session, db_user.referred_by)
+        if (
+            referrer is not None
+            and not getattr(referrer, "is_deleted", False)
+            and not getattr(referrer, "is_banned", False)
+        ):
+            ref_active = await get_user_active_referrals_count(
+                session, referrer.telegram_id
+            )
+            ref_rate = get_referral_tier(ref_active).rate
+            rate_pct = int(ref_rate * 100)
+            bonus_lines = "\n".join(
+                texts.BALANCE_NA_BONUS_BALANCE.format(
+                    amt=amt,
+                    amt____10=int(calculate_referral_bonus(amt, rate=ref_rate)),
+                )
+                for amt in amounts
+            )
+            bonus_notice = (
+                texts.BALANCE_BONUS_NA_PERVOE_TOPUP.format()
+                + texts.BALANCE_VY_POLUCHITE_20_OT_SUMMY_POPOL.format(
+                    rate_pct=rate_pct
+                )
+                + texts.BALANCE_PODROBNEE_V_MENYU_PRIGLASIT_DR.format()
+                + texts.BALANCE_RASCHET_BONUSA_K_SUMME.format(bonus_lines=bonus_lines)
+            )
 
     text = (
         texts.BALANCE_TOPUP_BALANCE.format()
