@@ -99,9 +99,10 @@ class YooKassaGateway(BasePaymentGateway):
                 # Timeout / 5xx / unreadable response: YooKassa may have
                 # created the payment anyway. Report it as unknown so the
                 # caller keeps the order and can still be settled by webhook.
+                # Machine-readable token (no prose): full diagnostics are in
+                # the log line above, and user wording lives in bot/texts.
                 raise PaymentCreationAmbiguousError(
-                    f"YooKassa payment creation result unknown: "
-                    f"{result.error_kind or 'unknown'}"
+                    f"payment_creation_ambiguous:{result.error_kind or 'unknown'}"
                 )
             raise RuntimeError(
                 f"YooKassa payment creation error: {result.error_kind or 'unknown'}"
