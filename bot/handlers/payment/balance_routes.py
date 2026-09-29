@@ -10,7 +10,7 @@ from utils.datetime_helpers import now_utc
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -115,6 +115,21 @@ async def _get_pending_topup_order(
     )
 
 
+async def _count_pending_topup_orders(
+    session: AsyncSession, user_id: int
+) -> int:
+    return (
+        await session.scalar(
+            select(func.count(Order.id)).where(
+                Order.user_id == user_id,
+                Order.service_type == "topup",
+                Order.status == "pending",
+            )
+        )
+        or 0
+    )
+
+
 async def _render_balance(
     bot,
     chat_id: int,
@@ -202,6 +217,43 @@ async def _create_and_render_topup(
         await _render_maintenance(target, session, back_to="menu_balance")
         return
 
+    back_to = (
+        "white_internet"
+        if (context or {}).get("source") == "white_internet"
+        else "menu_balance"
+    )
+
+    # Funnel guards: choose_topup_amount() checks topup_blocked, but preset
+    # callbacks and custom-amount messages arrive here directly, so enforce
+    # here to close the bypass.
+    if getattr(user, "topup_blocked", False):
+        await render_hub(
+            bot,
+            chat_id,
+            _topup_errors()["topup_blocked"],
+            get_back_button(back_to),
+        )
+        return
+
+    if getattr(user, "financial_hold", False):
+        await render_hub(
+            bot,
+            chat_id,
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+            get_back_button(back_to),
+        )
+        return
+
+    pending_count = await _count_pending_topup_orders(session, user_id)
+    if pending_count >= get_settings().BALANCE_MAX_UNFINISHED_TOPUPS:
+        await render_hub(
+            bot,
+            chat_id,
+            _topup_errors()["too_many_unfinished_topups"],
+            get_back_button(back_to),
+        )
+        return
+
     try:
         bot_username = getattr(getattr(bot, "_me", None), "username", None)
         order_meta = {"context": context} if context else None
@@ -228,11 +280,6 @@ async def _create_and_render_topup(
     balance = await get_account_balance(session, user_id=user_id)
     text = texts.BALANCE_TOPUP_CARD.format(
         value_0=int(order.amount_rub), value_1=int(balance.available)
-    )
-    back_to = (
-        "white_internet"
-        if (context or {}).get("source") == "white_internet"
-        else "menu_balance"
     )
     await render_hub(
         bot,

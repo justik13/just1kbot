@@ -47,11 +47,15 @@ def _make_callback():
 
 class TopupGatewayFailureTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_and_render_topup_timeout_renders_payment_error(self):
+        from types import SimpleNamespace
+
         from bot.handlers.payment.balance_routes import _create_and_render_topup
 
         user = _ExpiredAfterGatewayUser(user_id=1, telegram_id=872658825)
         session = MagicMock()
+        session.scalar = AsyncMock(return_value=0)  # no pending topups
         cb = _make_callback()
+        fake_cfg = SimpleNamespace(BALANCE_MAX_UNFINISHED_TOPUPS=3)
 
         async def _failing_create_order(*args, **kwargs):
             user._expired = True  # simulate session.rollback() expiry
@@ -61,6 +65,10 @@ class TopupGatewayFailureTests(unittest.IsolatedAsyncioTestCase):
             patch(
                 "bot.handlers.payment.balance_routes.MaintenanceService.can_user_perform_action",
                 new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "bot.handlers.payment.balance_routes.get_settings",
+                return_value=fake_cfg,
             ),
             patch(
                 "bot.handlers.payment.balance_routes.OrderService.create_order",
