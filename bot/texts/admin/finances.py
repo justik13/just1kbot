@@ -85,8 +85,9 @@ ADMIN_ORDER_CARD_TEMPLATE = """🛠 Админка › 🧾 <b>Заказ #{shor
 📦 <b>Услуга:</b> {tariff_label} ({service_type})
 📊 <b>Статус:</b> {status_icon} {status_name} (<code>{status}</code>)
 💳 <b>Метод:</b> <code>{payment_method}</code>
-🕒 <b>Создан:</b> {created_at}{paid_at_line}{refunded_at_line}{external_id_line}{description_line}"""
+🕒 <b>Создан:</b> {created_at}{paid_at_line}{refunded_at_line}{external_id_line}{description_line}{held_line}"""
 ADMIN_ORDER_PAID_AT_LINE = "\n✅ <b>Оплачен:</b> {paid_at}"
+ADMIN_ORDER_HELD_LINE = "\n⛔ <b>Удержан:</b> {reason} — зачисление и выдача удержаны, требуется ручное решение"
 ADMIN_ORDER_REFUNDED_AT_LINE = "\n↩️ <b>Возврат:</b> {refunded_at}"
 ADMIN_ORDER_EXTERNAL_ID_LINE = "\n🔗 <b>Внешний ID:</b> <code>{external_id}</code>"
 ADMIN_ORDER_DESCRIPTION_LINE = "\n📝 <b>Описание:</b> {description}"

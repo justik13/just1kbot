@@ -612,5 +612,57 @@ class OrderCheckHeldTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class AdminHeldCardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_held_order_maps_to_manual_review(self):
+        from bot.handlers.admin.payments import order_display_status
+
+        held = MagicMock(status="paid", metadata_={"settlement_held": True})
+        self.assertEqual(order_display_status(held), "requires_manual_review")
+        clean = MagicMock(status="paid", metadata_={})
+        self.assertEqual(order_display_status(clean), "completed")
+
+    async def test_held_order_card_shows_reason(self):
+        from bot.handlers.admin import payments as admin_payments
+        from utils.datetime_helpers import now_utc
+
+        order_id = uuid4()
+        order = MagicMock()
+        order.id = order_id
+        order.user_id = 5
+        order.service_type = "topup"
+        order.status = "paid"
+        order.amount_rub = Decimal("500")
+        order.payment_method = "yookassa"
+        order.created_at = now_utc()
+        order.paid_at = now_utc()
+        order.refunded_at = None
+        order.external_id = None
+        order.description = None
+        order.metadata_ = {
+            "settlement_held": True,
+            "settlement_hold_reason": "financial_hold",
+        }
+        order.tariff = None
+        user = MagicMock(username=None, telegram_id=555)
+        order.user = user
+        session = MagicMock()
+        session.scalar = AsyncMock(return_value=order)
+        cb = MagicMock()
+        cb.from_user = MagicMock(id=1)
+        cb.data = f"admin_order_card:{order_id}"
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+        cb.answer = AsyncMock()
+        state = MagicMock()
+        state.clear = AsyncMock()
+        with patch(
+            "bot.handlers.admin.payments.is_admin", return_value=True
+        ):
+            await admin_payments.show_order_card(cb, state, session)
+        text = cb.message.edit_text.await_args.args[0]
+        self.assertIn("Ручная проверка", text)
+        self.assertIn("financial_hold", text)
+
+
 if __name__ == "__main__":
     unittest.main()
