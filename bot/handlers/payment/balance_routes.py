@@ -189,8 +189,15 @@ async def _create_and_render_topup(
     if bot is None or chat_id is None:
         return
 
+    # Capture primitives BEFORE any gateway IO: OrderService.create_order()
+    # does session.rollback() on gateway failure, which expires all ORM
+    # objects of this session. Touching user.id/user.telegram_id afterwards
+    # raises MissingGreenlet (see prod 2026-09-29 YooKassa TIMEOUT).
+    user_id = user.id
+    telegram_id = user.telegram_id
+
     if not await MaintenanceService.can_user_perform_action(
-        session, user.telegram_id
+        session, telegram_id
     ):
         await _render_maintenance(target, session, back_to="menu_balance")
         return
@@ -200,7 +207,7 @@ async def _create_and_render_topup(
         order_meta = {"context": context} if context else None
         order = await OrderService.create_order(
             session,
-            user_id=user.id,
+            user_id=user_id,
             service_type="topup",
             amount_rub=Decimal(amount),
             payment_method="yookassa",
@@ -209,7 +216,7 @@ async def _create_and_render_topup(
             bot_username=bot_username,
         )
     except Exception as exc:
-        logger.exception("Failed to create topup order for user %s: %s", user.id, exc)
+        logger.exception("Failed to create topup order for user %s: %s", user_id, exc)
         await render_hub(
             bot,
             chat_id,
@@ -218,7 +225,7 @@ async def _create_and_render_topup(
         )
         return
 
-    balance = await get_account_balance(session, user_id=user.id)
+    balance = await get_account_balance(session, user_id=user_id)
     text = texts.BALANCE_TOPUP_CARD.format(
         value_0=int(order.amount_rub), value_1=int(balance.available)
     )
@@ -415,6 +422,10 @@ async def create_preset_topup(
         session, callback.from_user.id
     ):
         await _render_maintenance(callback, session, back_to="menu_balance")
+        return
+    cfg = get_settings()
+    if amount < cfg.BALANCE_MIN_TOPUP_RUB or amount > cfg.BALANCE_MAX_CUSTOM_TOPUP_RUB:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
     await _create_and_render_topup(callback, session, db_user, amount)
 
