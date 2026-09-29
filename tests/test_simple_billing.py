@@ -2507,7 +2507,10 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             status="canceled",
             metadata_={},
         )
-        session.scalar.return_value = order
+        session.scalar.side_effect = [
+            order,
+            User(id=10, telegram_id=10010, financial_hold=False, topup_blocked=False),
+        ]
         # Settlement hold boundary re-reads the user with a row lock:
         # a clean (non-held) user must keep the revive-and-credit path.
         session.get.return_value = User(
@@ -2538,10 +2541,10 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             status="pending",
             metadata_={},
         )
-        session.scalar.return_value = order
-        session.get.return_value = User(
-            id=11, telegram_id=10011, financial_hold=True, topup_blocked=False
-        )
+        session.scalar.side_effect = [
+            order,
+            User(id=11, telegram_id=10011, financial_hold=True, topup_blocked=False),
+        ]
 
         with patch("services.order_service.create_order_credit") as mock_credit, \
              patch("services.referral_bonus.grant_referral_bonus_for_topup") as mock_grant, \

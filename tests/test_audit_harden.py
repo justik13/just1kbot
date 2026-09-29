@@ -427,5 +427,181 @@ class ResumeHoldTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class SettlementReleaseTests(unittest.IsolatedAsyncioTestCase):
+    async def _run_release(self, *, hold=False):
+        from services.order_service import OrderService
+
+        order = MagicMock()
+        order.id = uuid4()
+        order.user_id = 12
+        order.service_type = "topup"
+        order.status = "paid"
+        order.amount_rub = Decimal("500")
+        order.payment_method = "yookassa"
+        order.metadata_ = {"settlement_held": True}
+        order.external_id = None
+        user = SimpleNamespace(id=12, financial_hold=hold, topup_blocked=False)
+        session = MagicMock()
+        session.scalar = AsyncMock(side_effect=[order, user])
+        session.flush = AsyncMock()
+        with (
+            patch(
+                "services.order_service.create_order_credit",
+                new=AsyncMock(),
+            ) as mock_credit,
+            patch(
+                "services.referral_bonus.grant_referral_bonus_for_topup",
+                new=AsyncMock(),
+            ) as mock_grant,
+            patch(
+                "services.order_service.FulfillmentService.fulfill_order",
+                new=AsyncMock(),
+            ) as mock_fulfill,
+        ):
+            result = await OrderService.mark_order_paid(session, order.id)
+        return result, mock_credit, mock_grant, mock_fulfill
+
+    async def test_release_after_hold_lifted_settles(self):
+        result, mock_credit, mock_grant, mock_fulfill = await self._run_release(
+            hold=False
+        )
+        self.assertTrue(result._newly_paid)
+        self.assertNotIn("settlement_held", result.metadata_ or {})
+        mock_credit.assert_awaited_once()
+        mock_grant.assert_awaited_once()
+        mock_fulfill.assert_awaited_once()
+
+    async def test_still_held_stays_withheld(self):
+        result, mock_credit, mock_grant, mock_fulfill = await self._run_release(
+            hold=True
+        )
+        self.assertFalse(result._newly_paid)
+        self.assertTrue((result.metadata_ or {}).get("settlement_held"))
+        mock_credit.assert_not_awaited()
+        mock_grant.assert_not_awaited()
+        mock_fulfill.assert_not_awaited()
+
+
+class UnexpectedFailureRollbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_wallet_unexpected_rolls_back(self):
+        from bot import texts
+        from bot.handlers.payment import purchase_routes
+
+        cb = MagicMock()
+        cb.from_user = MagicMock(id=111)
+        cb.data = "order_pay_wallet:2"
+        cb.bot = MagicMock()
+        cb.message = MagicMock()
+        cb.message.chat = MagicMock(id=123)
+        cb.answer = AsyncMock()
+        session = MagicMock()
+        session.rollback = AsyncMock()
+        db_user = _make_user()
+        tariff = MagicMock(id=2, is_active=True)
+        with (
+            patch(
+                "bot.handlers.payment.purchase_routes.MaintenanceService.can_user_perform_action",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "bot.handlers.payment.purchase_routes.get_tariff_by_id",
+                new=AsyncMock(return_value=tariff),
+            ),
+            patch(
+                "bot.handlers.payment.purchase_routes.OrderService.pay_from_wallet",
+                new=AsyncMock(side_effect=RuntimeError("fulfill boom")),
+            ),
+        ):
+            await purchase_routes.handle_order_pay_wallet(
+                cb, session, db_user=db_user
+            )
+        session.rollback.assert_awaited_once()
+        # First answer is the processing notice, last must be the failure.
+        cb.answer.assert_awaited_with(
+            texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True
+        )
+
+    async def test_zero_cost_unexpected_rolls_back(self):
+        from decimal import Decimal as _Decimal
+
+        from bot import texts
+        from bot.handlers.payment import purchase_routes
+        from utils.datetime_helpers import now_utc
+
+        cb = MagicMock()
+        cb.from_user = MagicMock(id=111)
+        cb.data = "order_pay_card:2"
+        cb.bot = MagicMock()
+        cb.message = MagicMock()
+        cb.message.chat = MagicMock(id=123)
+        cb.answer = AsyncMock()
+        session = MagicMock()
+        session.rollback = AsyncMock()
+        db_user = _make_user()
+        db_user.current_tariff_id = 1
+        db_user.subscription_end = now_utc() + timedelta(days=5)
+        tariff = MagicMock(id=2, is_active=True)
+        current = MagicMock(id=1)
+        with (
+            patch(
+                "bot.handlers.payment.purchase_routes.MaintenanceService.can_user_perform_action",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "bot.handlers.payment.purchase_routes.get_tariff_by_id",
+                new=AsyncMock(side_effect=[tariff, current]),
+            ),
+            patch(
+                "bot.handlers.payment.purchase_routes.OrderService.calculate_tariff_change",
+                return_value=(_Decimal("0.00"), 10),
+            ),
+            patch(
+                "bot.handlers.payment.purchase_routes.OrderService.pay_from_wallet",
+                new=AsyncMock(side_effect=RuntimeError("fulfill boom")),
+            ),
+        ):
+            await purchase_routes.handle_order_pay_card(
+                cb, session, db_user=db_user
+            )
+        session.rollback.assert_awaited_once()
+        cb.answer.assert_awaited_once_with(
+            texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True
+        )
+
+
+class OrderCheckHeldTests(unittest.IsolatedAsyncioTestCase):
+    async def test_early_paid_held_shows_dispute(self):
+        from bot import texts
+        from bot.handlers.payment import purchase_routes
+
+        cb = MagicMock()
+        cb.from_user = MagicMock(id=111)
+        cb.data = f"order_check:{uuid4()}"
+        cb.bot = MagicMock()
+        cb.message = MagicMock()
+        cb.message.chat = MagicMock(id=123)
+        cb.answer = AsyncMock()
+        session = MagicMock()
+        db_user = _make_user()
+        held_order = MagicMock()
+        held_order.user_id = db_user.id
+        held_order.status = "paid"
+        held_order.service_type = "topup"
+        held_order.metadata_ = {"settlement_held": True}
+        session.get = AsyncMock(return_value=held_order)
+        with patch(
+            "bot.handlers.payment.balance_routes._render_balance",
+            new=AsyncMock(
+                side_effect=AssertionError("must not render credited balance")
+            ),
+        ):
+            await purchase_routes.handle_order_check(
+                cb, session, db_user=db_user
+            )
+        cb.answer.assert_awaited_once_with(
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

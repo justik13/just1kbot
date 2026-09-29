@@ -87,12 +87,19 @@ async def handle_order_pay_wallet(
         await callback.answer(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
         return
     except Exception as exc:
+        # pay_from_wallet() may have flushed a partial paid order before
+        # failing (debit/fulfill). Roll back instead of committing it:
+        # session_scope() commits on clean return.
         logger.exception(
             "Wallet payment failed for user %s, tariff %s: %s",
             db_user_id,
             tariff_id,
             exc,
         )
+        try:
+            await session.rollback()
+        except Exception:
+            pass
         await callback.answer(texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True)
         return
 
@@ -170,8 +177,8 @@ async def handle_order_pay_card(
         if due_rub <= Decimal("0.00"):
             # NOTE: only pre-mutation domain errors are caught here
             # (hold/debt/insufficient are raised before any DB change).
-            # Unexpected exceptions must propagate so session_scope()
-            # rolls back instead of committing a partial paid order.
+            # Unexpected failures must roll back the partial paid order
+            # instead of committing it (session_scope commits on return).
             try:
                 order = await OrderService.pay_from_wallet(
                     session,
@@ -184,6 +191,19 @@ async def handle_order_pay_card(
                 return
             except (AccountDebtBlockedError, InsufficientBalanceError):
                 await callback.answer(texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
+                return
+            except Exception as exc:
+                logger.exception(
+                    "Zero-cost tariff change failed for user %s, tariff %s: %s",
+                    db_user_id,
+                    tariff.id,
+                    exc,
+                )
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                await callback.answer(texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True)
                 return
             balance = await get_account_balance(session, user_id=db_user_id)
             tariff_name = get_tariff_display_name(order.device_limit or 2)
@@ -270,6 +290,13 @@ async def handle_order_check(
         return
 
     if order.status == "paid":
+        if (order.metadata_ or {}).get("settlement_held"):
+            # Benefits were withheld at settlement (hold/block): never
+            # present them as credited/granted.
+            await callback.answer(
+                texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
+            )
+            return
         if order.service_type == "topup":
             from .balance_routes import _render_balance
             from bot.keyboards.payment import get_topup_credit_keyboard
@@ -326,6 +353,14 @@ async def handle_order_check(
             )
             if not paid_order:
                 await callback.answer(texts.ERROR_PAYMENT_SERVICE, show_alert=True)
+                return
+
+            if (paid_order.metadata_ or {}).get("settlement_held"):
+                # Credit/fulfillment were withheld (hold/block at settlement):
+                # never show a success/credited card for withheld benefits.
+                await callback.answer(
+                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
+                )
                 return
 
             if paid_order.service_type == "topup":
