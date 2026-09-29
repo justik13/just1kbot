@@ -16,6 +16,8 @@ from database.repositories.servers_repo import (
     get_server_peer_counts,
     get_servers_paginated,
 )
+from utils.datetime_helpers import now_utc
+from utils.formatters import format_traffic
 from utils.telegram import safe
 from utils.text_limits import truncate_button_text
 
@@ -185,6 +187,15 @@ async def _show_server_card(
             used_clients=effective_capacity, max_clients=max_clients
         )
 
+    server_extra = getattr(server, "extra_data", {}) or {}
+    saved_cycle = server_extra.get("traffic_cycle")
+    current_cycle = now_utc().strftime("%Y-%m")
+    if saved_cycle == current_cycle:
+        monthly_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0)
+    else:
+        monthly_bytes = 0
+    traffic_month = format_traffic(monthly_bytes)
+
     rendered = (
         f"{header}"
         + texts.COMMON_KARTOCHKA_VPN_SERVER_ID.format(
@@ -194,6 +205,7 @@ async def _show_server_card(
         + f"{extra_status_info}"
         + texts.COMMON_PROTOKOL.format(safe_server_protocol=safe(server.protocol))
         + texts.COMMON_ZAPOLNENNOST_SLOTOV.format(slots_text=slots_text)
+        + texts.ADMIN_SERVER_MONTHLY_TRAFFIC.format(traffic_month=traffic_month)
         + texts.ADMIN_SERVER_API_URL.format(api_url=safe(server.api_url))
     )
 

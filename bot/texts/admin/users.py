@@ -355,6 +355,7 @@ ADMIN_USER_CARD = """🛠 Админка › 👥 Пользователи › �
 <b>🎁 Бонусный баланс:</b> {bonus_balance} ₽
 <b>Действует до:</b> {valid_until} ({days_left})
 <b>Устройств:</b> {devices_count}/{device_limit}
+<b>Трафик туннелей:</b> {total_traffic}
 <b>Приглашено рефералов:</b> {referrals_count}
 <b>Регистрация:</b> {created_at}"""
 

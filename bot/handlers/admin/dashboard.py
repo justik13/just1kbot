@@ -191,6 +191,8 @@ async def _show_admin_dashboard(
     maintenance_enabled = await MaintenanceService.is_enabled(session)
 
     wl_traffic_str = format_traffic(wl_stats["total_traffic_bytes"])
+    awg_total_str = format_traffic(stats.get("total_traffic_bytes", 0))
+    awg_avg_str = format_traffic(stats.get("avg_traffic_bytes_active", 0))
 
     header = format_admin_breadcrumbs(texts.DASHBOARD_MAIN_DASHBOARD)
     text = (
@@ -198,6 +200,7 @@ async def _show_admin_dashboard(
         texts.DASHBOARD_USERS_I_SUBSCRIPTION.format()+
         texts.DASHBOARD_TOTAL_USERS_TOTAL.format(stats__total=stats['total'])+
         texts.DASHBOARD_ACTIVE_PODPISOK_ACTIVE.format(stats__active=stats['active'])+
+        texts.DASHBOARD_AWG_TRAFFIC_STATS.format(total_traffic=awg_total_str, avg_traffic=awg_avg_str)+
         texts.DASHBOARD_WHITE_INTERNET_STATS.format(active_count=wl_stats['active_count'], traffic=wl_traffic_str)+
         texts.DASHBOARD_NEW_ZA_24_HOURS_NEW_24H.format(stats__new_24h=stats['new_24h'])+
         texts.DASHBOARD_FINANCIAL_METRICS.format()+

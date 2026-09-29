@@ -200,6 +200,8 @@ async def _process_server_traffic(
         return
 
     updates_data = {}
+    user_traffic_deltas: dict[int, int] = {}
+    server_delta: int = 0
     current_time = now_utc()
 
     async with session_scope() as session:
@@ -209,8 +211,11 @@ async def _process_server_traffic(
                 VPNProfile.peer_id,
                 VPNProfile.traffic_down,
                 VPNProfile.traffic_up,
+                VPNProfile.raw_last_down,
+                VPNProfile.raw_last_up,
                 VPNProfile.last_connected,
                 VPNProfile.is_active,
+                User.id,
                 User.is_banned,
                 User.telegram_id,
                 User.subscription_end,
@@ -227,8 +232,11 @@ async def _process_server_traffic(
             peer_id,
             t_down,
             t_up,
+            raw_last_down,
+            raw_last_up,
             last_conn,
             is_active,
+            user_id,
             is_banned,
             tg_id,
             sub_end,
@@ -240,8 +248,25 @@ async def _process_server_traffic(
             api_data = api_clients[peer_id]
             api_t_down = api_data.traffics.totalDownload
             api_t_up = api_data.traffics.totalUpload
-            new_t_down = api_t_down if api_t_down is not None else t_down
-            new_t_up = api_t_up if api_t_up is not None else t_up
+
+            raw_node_down = max(0, int(api_t_down)) if api_t_down is not None else (raw_last_down or 0)
+            raw_node_up = max(0, int(api_t_up)) if api_t_up is not None else (raw_last_up or 0)
+
+            # Monotonic delta accumulation:
+            # If node counter >= last snapshot: delta = current - last snapshot
+            # If node counter < last snapshot: node container was restarted or peer was re-added from 0 -> delta = current
+            last_down_val = raw_last_down if raw_last_down is not None else (t_down or 0)
+            last_up_val = raw_last_up if raw_last_up is not None else (t_up or 0)
+
+            delta_down = (raw_node_down - last_down_val) if raw_node_down >= last_down_val else raw_node_down
+            delta_up = (raw_node_up - last_up_val) if raw_node_up >= last_up_val else raw_node_up
+
+            delta_down = max(0, delta_down)
+            delta_up = max(0, delta_up)
+
+            new_t_down = (t_down or 0) + delta_down
+            new_t_up = (t_up or 0) + delta_up
+            total_delta = delta_down + delta_up
 
             last_conn_raw = (
                 api_data.lastHandshake
@@ -289,15 +314,22 @@ async def _process_server_traffic(
                 )
 
             if (
-                t_down != new_t_down
-                or t_up != new_t_up
+                delta_down > 0
+                or delta_up > 0
+                or raw_last_down != raw_node_down
+                or raw_last_up != raw_node_up
                 or last_conn != new_last_connected
             ):
                 updates_data[p_id] = {
                     "traffic_down": new_t_down,
                     "traffic_up": new_t_up,
+                    "raw_last_down": raw_node_down,
+                    "raw_last_up": raw_node_up,
                     "last_connected": new_last_connected,
                 }
+                if total_delta > 0:
+                    user_traffic_deltas[user_id] = user_traffic_deltas.get(user_id, 0) + total_delta
+                    server_delta += total_delta
 
             total_traffic = (new_t_down or 0) + (new_t_up or 0)
             if (
@@ -321,6 +353,8 @@ async def _process_server_traffic(
                     "id": profile_id,
                     "traffic_down": data.get("traffic_down"),
                     "traffic_up": data.get("traffic_up"),
+                    "raw_last_down": data.get("raw_last_down"),
+                    "raw_last_up": data.get("raw_last_up"),
                     "last_connected": data.get("last_connected"),
                 }
                 for profile_id, data in updates_data.items()
@@ -330,6 +364,30 @@ async def _process_server_traffic(
                     update(VPNProfile),
                     bulk_params,
                 )
+
+        if user_traffic_deltas:
+            for u_id, u_delta in user_traffic_deltas.items():
+                if u_delta > 0:
+                    await session.execute(
+                        update(User)
+                        .where(User.id == u_id)
+                        .values(total_traffic_bytes=User.total_traffic_bytes + u_delta)
+                    )
+
+        server_obj = await session.get(Server, server_id, with_for_update=True)
+        if server_obj:
+            raw_extra = getattr(server_obj, "extra_data", None)
+            extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+            current_cycle = current_time.strftime("%Y-%m")
+            saved_cycle = extra.get("traffic_cycle")
+            if saved_cycle != current_cycle:
+                if saved_cycle is not None or server_delta > 0:
+                    extra["traffic_cycle"] = current_cycle
+                    extra["monthly_traffic_bytes"] = server_delta
+                    server_obj.extra_data = extra
+            elif server_delta > 0:
+                extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_delta
+                server_obj.extra_data = extra
 
 
 
