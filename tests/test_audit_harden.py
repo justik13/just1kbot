@@ -61,17 +61,26 @@ class PendingCountTTLTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("service_type = 'topup'", compiled)
         self.assertIn("user_id = 7", compiled)
 
-    async def test_count_and_lookup_share_predicate(self):
+    async def test_lookup_uses_same_fresh_pending_filter(self):
+        # Same behavioral contract as the count: fresh (15-min window),
+        # topup, pending, with payment URL, scoped to the user.
         from bot.handlers.payment import balance_routes
 
-        # Both helpers must build on the single canonical predicate so the
-        # limit can never block what the lookup cannot see.
-        import inspect
+        session = MagicMock()
+        seen = []
 
-        lookup_src = inspect.getsource(balance_routes._get_pending_topup_order)
-        count_src = inspect.getsource(balance_routes._count_pending_topup_orders)
-        self.assertIn("_pending_topup_conditions", lookup_src)
-        self.assertIn("_pending_topup_conditions", count_src)
+        async def _capture(stmt):
+            seen.append(stmt)
+            return None
+
+        session.scalar = AsyncMock(side_effect=_capture)
+        await balance_routes._get_pending_topup_order(session, 7)
+        compiled = str(seen[0].compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("payment_url IS NOT NULL", compiled)
+        self.assertIn("created_at >=", compiled)
+        self.assertIn("status = 'pending'", compiled)
+        self.assertIn("service_type = 'topup'", compiled)
+        self.assertIn("user_id = 7", compiled)
 
 
 class TopupBackToTests(unittest.IsolatedAsyncioTestCase):
