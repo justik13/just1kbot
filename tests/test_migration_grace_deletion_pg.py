@@ -69,74 +69,88 @@ class MigrationGraceDeletionPgTests(unittest.IsolatedAsyncioTestCase):
         self.env_patcher.stop()
         await self.engine.dispose()
 
-    async def _make_migration_pair(self, session):
-        user = User(telegram_id=910001)
-        session.add(user)
-        await session.flush()
-        server = Server(
-            name="OldServer",
-            api_url="https://old.server",
-            api_key="key",
-            protocol="amneziawg2",
-        )
-        session.add(server)
-        await session.flush()
-        old = VPNProfile(
-            user_id=user.id,
-            server_id=server.id,
-            device_name="old-phone",
-            peer_id="peer-55",
-            client_name="tg_910001_p55",
-            provisioning_status="active",
-        )
-        new = VPNProfile(
-            user_id=user.id,
-            server_id=server.id,
-            device_name="new-phone",
-            provisioning_status="active",
-        )
-        session.add_all([old, new])
-        await session.flush()
-        return old, new
+    async def _make_migration_pair_ids(self):
+        """Create Server + old/new profiles in one transaction, return ids.
+
+        The finalizer MUST be invoked from a *fresh* AsyncSession: otherwise
+        the Server row stays in the first session identity map and a
+        many-to-one access resolves without SQL — masking the very lazy-load
+        (MissingGreenlet) the selectinload fix eliminates.
+        """
+        async with self.sessions.begin() as session:
+            user = User(telegram_id=910001)
+            session.add(user)
+            await session.flush()
+            server = Server(
+                name="OldServer",
+                api_url="https://old.server",
+                api_key="key",
+                protocol="amneziawg2",
+            )
+            session.add(server)
+            await session.flush()
+            old = VPNProfile(
+                user_id=user.id,
+                server_id=server.id,
+                device_name="old-phone",
+                peer_id="peer-55",
+                client_name="tg_910001_p55",
+                provisioning_status="active",
+            )
+            new = VPNProfile(
+                user_id=user.id,
+                server_id=server.id,
+                device_name="new-phone",
+                provisioning_status="active",
+            )
+            session.add_all([old, new])
+            await session.flush()
+            return old.id, new.id, server.id
 
     async def test_grace_deletion_resolves_protocol_without_lazy_load_crash(self):
+        old_id, new_id, server_id = await self._make_migration_pair_ids()
+
         async with self.sessions.begin() as session:
-            old, new = await self._make_migration_pair(session)
-            operation = SimpleNamespace(payload={"migrating_from_id": old.id})
+            new_profile = await session.get(VPNProfile, new_id)
+            operation = SimpleNamespace(payload={"migrating_from_id": old_id})
 
             with (
                 patch(
                     "services.api_operations_queue.resolve_profile_endpoint_snapshot",
                     new_callable=AsyncMock,
-                    return_value=(old.server_id, "OldServer", "https://old.server", "key"),
+                    return_value=(server_id, "OldServer", "https://old.server", "key"),
                 ),
                 patch(
                     "services.api_operations_queue.ensure_delete_operation",
                     new_callable=AsyncMock,
                 ) as mock_ensure_delete,
             ):
-                await _schedule_migration_grace_deletion(session, operation, new)
+                await _schedule_migration_grace_deletion(session, operation, new_profile)
 
-            self.assertEqual(old.provisioning_status, "deleting")
+            old_profile = await session.get(VPNProfile, old_id)
+            self.assertEqual(old_profile.provisioning_status, "deleting")
             mock_ensure_delete.assert_awaited_once()
             _, kwargs = mock_ensure_delete.call_args
             self.assertEqual(kwargs["protocol"], "amneziawg2")
             self.assertEqual(kwargs["peer_id"], "peer-55")
-            self.assertEqual(kwargs["server_id"], old.server_id)
+            self.assertEqual(kwargs["server_id"], server_id)
 
     async def test_no_migration_payload_is_noop(self):
+        old_id, new_id, _server_id = await self._make_migration_pair_ids()
+
         async with self.sessions.begin() as session:
-            old, new = await self._make_migration_pair(session)
+            new_profile = await session.get(VPNProfile, new_id)
             operation = SimpleNamespace(payload={})
 
             with patch(
                 "services.api_operations_queue.ensure_delete_operation",
                 new_callable=AsyncMock,
             ) as mock_ensure_delete:
-                await _schedule_migration_grace_deletion(session, operation, new)
+                await _schedule_migration_grace_deletion(session, operation, new_profile)
 
             mock_ensure_delete.assert_not_awaited()
-            self.assertEqual(old.provisioning_status, "active")
+            old_profile = await session.get(VPNProfile, old_id)
+            self.assertEqual(old_profile.provisioning_status, "active")
 
 
 if __name__ == "__main__":
