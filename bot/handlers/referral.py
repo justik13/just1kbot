@@ -6,7 +6,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.formatters import format_plural
+from bot.formatters import format_plural, pluralize
 from bot.keyboards import (
     get_history_keyboard,
     get_referral_keyboard,
@@ -220,7 +220,7 @@ async def show_referral_leaderboard(
                 if is_me
                 else texts.REFERRAL_LEADERBOARD_USER_OTHER.format(masked=masked)
             )
-            noun = format_plural(count, texts.NOUN_USERS)
+            noun = pluralize(count, texts.NOUN_USERS)
             line = texts.REFERRAL_LEADERBOARD_ITEM.format(
                 pos=pos,
                 medal=medal,
@@ -231,7 +231,7 @@ async def show_referral_leaderboard(
             rendered += f"{line}\n"
 
     if user_rank is not None and user_active_count > 0:
-        noun = format_plural(user_active_count, texts.NOUN_USERS)
+        noun = pluralize(user_active_count, texts.NOUN_USERS)
         rendered += texts.REFERRAL_LEADERBOARD_YOUR_RANK.format(
             rank=user_rank,
             count=user_active_count,
