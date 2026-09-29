@@ -13,7 +13,6 @@ from bot.keyboards.notifications import (
 )
 from bot.keyboards.payment import (
     get_topup_credit_keyboard,
-    get_topup_payment_keyboard,
 )
 from bot.texts.runtime.alerts import ALERT_BALANCE_LIMIT_EXCEEDED
 from bot.texts.runtime.notifications import (
@@ -21,7 +20,6 @@ from bot.texts.runtime.notifications import (
     BALANCE_TOPUP_RESUME_HINT,
     BALANCE_TOPUP_WELCOME_BONUS,
     REFERRAL_BONUS_ACCREDITED,
-    TOPUP_LINK_CARD,
 )
 from config.constants import WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
@@ -36,62 +34,6 @@ from utils.telegram import render_hub, safe_send_message
 logger = logging.getLogger(__name__)
 BALANCE_NOTIFICATION_INTERVAL = 10.0
 BALANCE_NOTIFICATION_BATCH = 50
-
-
-async def process_topup_link_presentations(bot: Bot) -> int:
-    async with session_scope() as session:
-        payment_ids = list(
-            (
-                await session.scalars(
-                    select(Payment.id)
-                    .where(
-                        Payment.payment_url.is_not(None),
-                        Payment.payment_url_notified_at.is_(None),
-                        Payment.ui_visible.is_(True),
-                    )
-                    .order_by(Payment.id)
-                    .limit(BALANCE_NOTIFICATION_BATCH)
-                )
-            ).all()
-        )
-    presented = 0
-    for payment_id in payment_ids:
-        async with session_scope() as session:
-            payment = await session.scalar(
-                select(Payment)
-                .where(Payment.id == payment_id)
-                .with_for_update()
-            )
-            context = payment.topup_context or {} if payment else {}
-            if (
-                payment is None
-                or payment.payment_url_notified_at is not None
-                or not payment.ui_visible
-                or not context.get("auto_show")
-            ):
-                continue
-            user = await session.get(User, payment.user_id)
-            if user is None:
-                continue
-            chat_id = int(context.get("chat_id") or user.telegram_id)
-            try:
-                await render_hub(
-                    bot,
-                    chat_id,
-                    TOPUP_LINK_CARD.format(amount=int(payment.amount)),
-                    get_topup_payment_keyboard(payment.payment_url, payment.id),
-                )
-            except TelegramForbiddenError:
-                await mark_user_bot_blocked(session, user.telegram_id)
-            except Exception:
-                logger.exception(
-                    "Failed to present top-up URL payment=%s", payment.id
-                )
-                continue
-            payment.payment_url_notified_at = now_utc()
-            payment.topup_context = {**context, "auto_show": False}
-            presented += 1
-    return presented
 
 
 async def process_balance_notifications(bot: Bot) -> int:
@@ -284,7 +226,6 @@ async def account_balance_notifications_loop(
 ):
     while not shutdown_event.is_set():
         try:
-            await process_topup_link_presentations(bot)
             await process_balance_notifications(bot)
         except asyncio.CancelledError:
             break

@@ -40,7 +40,6 @@ from bot.texts.runtime.notifications import (
     TIME_DAYS_HOURS_FORMAT,
     TIME_HOURS_MINUTES_FORMAT,
     TIME_SOON_LABEL,
-    TOPUP_LINK_CARD,
 )
 
 __all__ = [
@@ -79,5 +78,4 @@ __all__ = [
     "TIME_DAYS_HOURS_FORMAT",
     "TIME_HOURS_MINUTES_FORMAT",
     "TIME_SOON_LABEL",
-    "TOPUP_LINK_CARD",
 ]

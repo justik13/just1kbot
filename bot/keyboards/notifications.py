@@ -86,4 +86,3 @@ def get_traffic_alert_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     )
     builder.adjust(1)
     return builder.as_markup()
-

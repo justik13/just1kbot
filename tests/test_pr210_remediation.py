@@ -226,14 +226,8 @@ class TestKeyboardSerialization(unittest.IsolatedAsyncioTestCase):
 
     async def test_payment_keyboards_roundtrip(self):
         from bot.keyboards.payment import (
-            get_topup_payment_keyboard,
             get_same_tariff_keyboard,
         )
-
-        topup = self._roundtrip(get_topup_payment_keyboard("https://pay.example/x", 3))
-        styles = {btn.style for row in topup.inline_keyboard for btn in row}
-        self.assertIn("success", styles)
-        self.assertIn("danger", styles)
 
         same = self._roundtrip(get_same_tariff_keyboard())
         self.assertIn("payment_quick_renew", _kb_callbacks(same))

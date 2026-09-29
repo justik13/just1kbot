@@ -5,8 +5,6 @@ DATE_DAY_MONTH_FORMAT = "{day} {month}"
 
 DATE_DAY_MONTH_YEAR_FORMAT = "{day} {month} {year} г."
 
-DURATION_HOURS_SUFFIX = " {hours} ч."
-
 MAINTENANCE_DEFAULT_MESSAGE = "🛠 Бот находится на техническом обслуживании. Пожалуйста, попробуйте позже."
 
 MONTH_NAMES_LABELS = (

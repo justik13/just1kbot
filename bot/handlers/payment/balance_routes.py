@@ -10,7 +10,7 @@ from utils.datetime_helpers import now_utc
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -556,76 +556,4 @@ async def resume_topup(
             price=int(pending_topup.amount_rub),
             back_callback="menu_balance",
         ),
-    )
-
-
-@router.callback_query(F.data.startswith("balance_cancel:"))
-async def cancel_topup_ui(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User | None = None,
-) -> None:
-    await callback.answer(show_alert=False)
-    await state.clear()
-    if db_user is None:
-        return
-
-    # Cancel pending topups for user
-    await session.execute(
-        update(Order)
-        .where(
-            Order.user_id == db_user.id,
-            Order.service_type == "topup",
-            Order.status == "pending",
-        )
-        .values(status="canceled")
-    )
-    await session.flush()
-
-    await _render_balance(
-        callback.bot,
-        callback.message.chat.id,
-        session,
-        db_user,
-        notice=texts.TOPUP_HIDE_NOTICE,
-    )
-
-
-@router.callback_query(F.data == "balance_cancel_all")
-async def cancel_all_topups_ui(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User | None = None,
-) -> None:
-    await callback.answer(show_alert=False)
-    await state.clear()
-    if db_user is None:
-        return
-
-    result = await session.execute(
-        update(Order)
-        .where(
-            Order.user_id == db_user.id,
-            Order.service_type == "topup",
-            Order.status == "pending",
-        )
-        .values(status="canceled")
-    )
-    count = result.rowcount
-    await session.flush()
-
-    if count == 0:
-        await callback.answer(
-            texts.TOPUP_ALREADY_FINISHED_ALERT, show_alert=True
-        )
-    await _render_balance(
-        callback.bot,
-        callback.message.chat.id,
-        session,
-        db_user,
-        notice=texts.BALANCE_OTMENENO_SSYLOK.format(count=count)
-        if count > 0
-        else None,
     )

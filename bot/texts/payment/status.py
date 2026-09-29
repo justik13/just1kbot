@@ -20,4 +20,3 @@ PAYMENT_STATUS_NAMES = {
     'refunded': 'Возврат',
     'requires_manual_review': 'Ручная проверка',
 }
-

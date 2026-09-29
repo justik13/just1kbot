@@ -35,8 +35,4 @@ PAYMENT_DOWNGRADE_BLOCKED_PROFILES = """⚠️ <b>Смена тарифа нев
 
 PAYMENT_INSUFFICIENT_FUNDS_ALERT = "На балансе недостаточно средств."
 
-PAYMENT_TARIFF_CHANGE = """
-
-Не хватает {amount_rub} ₽. Минимальное пополнение — {value_1} ₽; после смены останется {value_2} ₽."""
-
 PAYMENT_TARIFF_UNAVAILABLE_NOTICE = "Выбранный тариф больше недоступен."

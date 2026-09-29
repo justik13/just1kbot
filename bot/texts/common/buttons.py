@@ -69,8 +69,6 @@ BTN_FILTER_BY_TARIFF_ACTIVE = "• 💎 По тарифам •"
 
 BTN_HELP_INSTRUCTIONS = "ℹ️ Помощь и Инструкции"
 
-BTN_HIDE = "✖ Скрыть"
-
 BTN_INSTALL_WINDOWS = "📥 Установка AmneziaVPN на Windows"
 
 BTN_INSTRUCTION_INCY = "📱 Инструкция INCY (Белый Интернет)"
@@ -88,8 +86,6 @@ BTN_ISTORIYA_PLATEZHEJ = "💳 История платежей"
 BTN_ISTORIYA_POPOLNENIJ = "🧾 История пополнений"
 
 BTN_LATEST_VERSION_GITHUB = "📦 Последняя версия (GitHub)"
-
-BTN_MAIN_MENU = "🏠 Главное меню"
 
 BTN_MAIN_MENU_NAV = "🏠 В главное меню"
 
@@ -122,8 +118,6 @@ BTN_PAYMENT_CANCEL = BTN_CANCEL_ACTION
 
 BTN_PAYMENT_CHECK = "🔄 Проверить оплату"
 
-BTN_PAYMENT_PAY = "💳 Оплатить"
-
 BTN_RENEW_ACCESS = "💳 Продлить доступ"
 
 
@@ -155,19 +149,11 @@ BTN_V_GLAVNOE_MENYU_BOTA = "🔙 В главное меню бота"
 
 BTN_WHITE_INTERNET = "⚪️ Белый Интернет"
 
-BTN_ZAKRYT_NEZAVERSHYONNYE_SSYLKI = "❌ Закрыть незавершённые ссылки"
-
 BTN_ZHURNAL_POKUPOK = "🛒 Журнал покупок"
-
-BUTTON_CHECK_TOPUP = "🔄 Проверить статус"
-
-BUTTON_CLOSE_TOPUP = "🗂 Закрыть эту ссылку"
 
 BUTTON_COPY_REFERRAL = "📋 Скопировать"
 
 BUTTON_CUSTOM_AMOUNT = "Другая сумма"
-
-BUTTON_OPEN_PAYMENT = "💳 Перейти к оплате"
 
 BUTTON_REFERRAL_LIST_COUNT = "👥 Мои рефералы ({count})"
 

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # --- Navigation buttons --------------------------------------------------
-ADMIN_BTN_BACK_TO_PAYMENT = "← Назад к платежу"
 ADMIN_BTN_BACK_TO_PAYMENTS = "← К списку платежей"
 ADMIN_BTN_PAGINATION_NEXT = "➡️"
 ADMIN_BTN_PAGINATION_PREV = "⬅️"
