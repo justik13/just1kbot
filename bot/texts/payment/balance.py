@@ -35,8 +35,6 @@ BALANCE_NA_BONUS_BALANCE = "• {amt} ₽ ➡️ <b>+{amt____10} ₽</b> на б
 
 BALANCE_OPERATION_DEFAULT_LABEL = "Операция"
 
-BALANCE_OTMENENO_SSYLOK = "Отменено {count} ссылок."
-
 BALANCE_PODROBNEE_V_MENYU_PRIGLASIT_DR = """<i>(подробнее в меню «Пригласить друга»)</i>
 
 """

@@ -803,6 +803,9 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertFalse(hasattr(texts, "BUTTON_CLOSE_TOPUP"))
         self.assertFalse(hasattr(texts, "BUTTON_OPEN_PAYMENT"))
         self.assertFalse(hasattr(texts, "TOPUP_LINK_CARD"))
+        self.assertFalse(hasattr(texts, "BALANCE_OTMENENO_SSYLOK"))
+        self.assertFalse(hasattr(texts, "TOPUP_ALREADY_FINISHED_ALERT"))
+        self.assertFalse(hasattr(texts, "TOPUP_HIDE_NOTICE"))
 
 
 if __name__ == "__main__":

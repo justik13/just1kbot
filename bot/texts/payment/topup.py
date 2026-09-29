@@ -1,8 +1,6 @@
 """Domain texts for payment/topup.py."""
 from __future__ import annotations
 
-TOPUP_ALREADY_FINISHED_ALERT = "Пополнение уже завершено"
-
 TOPUP_CREDITED_NOTICE = "✅ Баланс пополнен."
 
 TOPUP_CUSTOM_AMOUNT_PROMPT = """Введите сумму пополнения целым числом от {minimum} до {maximum} ₽.
@@ -21,8 +19,6 @@ TOPUP_ERROR_MINIMUM = "Минимальная сумма пополнения �
 TOPUP_ERROR_UNFINISHED = "У вас уже есть {limit} незавершённых пополнений. Проверьте их статус или закройте ненужную ссылку."
 
 TOPUP_ERROR_WHOLE_RUBLES = "Введите сумму целыми рублями без копеек."
-
-TOPUP_HIDE_NOTICE = "Ссылка закрыта и больше не показывается. Если платёж уже завершён, деньги всё равно поступят на баланс."
 
 TOPUP_INVALID_AMOUNT = "Введите целую сумму без копеек, пробелов и знаков. Например: <code>499</code>"
 

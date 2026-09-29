@@ -22,7 +22,6 @@ LOCKED_ACTION_PREFIXES = (
     "alt_connection:",
     # Платежи.
     "balance_create:",
-    "balance_cancel:",
     "order_pay_wallet:",
     "order_pay_card:",
     "order_check:",
@@ -87,6 +86,8 @@ STALE_ACTION_PREFIXES = (
     "confirm_mass_bonus_apply",
     "admin_bal_preset:",
     "balance_check:",
+    "balance_cancel:",
+    "balance_cancel_all",
     "confirm_server_delete:",
     "confirm_server_purge:",
     "admin_server_toggle_apply:",
