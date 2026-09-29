@@ -1088,6 +1088,34 @@ check_bot_update_on_entry
         self.assertIn("Безопасное обновление", proc.stdout)
 
     @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_builds_clean_compare_url(self):
+        """Origin URL variants (.git suffix, trailing slash, SSH) map to one API path."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        for origin_url in [
+            "https://github.com/justik13/just1kbot.git",
+            "https://github.com/justik13/just1kbot",
+            "https://github.com/justik13/just1kbot/",
+            "git@github.com:justik13/just1kbot.git",
+        ]:
+            subprocess.run(
+                ["git", "remote", "set-url", "origin", origin_url],
+                cwd=str(self.project_dir),
+                env=git_env,
+                check=True,
+                capture_output=True,
+            )
+            self._mock_compare_api('{"status":"ahead","ahead_by":1,"behind_by":0}')
+            proc = self._run_update_check_snippet()
+            self.assertEqual(proc.returncode, 0, f"failed for origin={origin_url}")
+            self.assertIn("Безопасное обновление", proc.stdout, f"no notice for origin={origin_url}")
+            argv = self._curl_argv()
+            self.assertIn(
+                "repos/justik13/just1kbot/compare/", argv, f"bad API URL for origin={origin_url}"
+            )
+            self.assertNotIn("just1kbot.git/compare", argv, f".git leaked for origin={origin_url}")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
     def test_update_check_on_entry_silent_unless_remote_ahead(self):
         """behind/identical/diverged compare statuses stay silent (no false positives)."""
         git_env = self._git_check_env()
@@ -1153,17 +1181,26 @@ check_bot_update_on_entry
         )
 
     def _mock_compare_api(self, payload):
-        """Stub curl: record the call in a marker file, print canned compare-API payload."""
+        """Stub curl: record the call (marker + argv log), print canned compare-API payload."""
         marker = self.bin_dir / "curl.called"
+        argv_log = self.bin_dir / "curl.argv"
         stub = self.bin_dir / "curl"
         stub.write_text(
-            f"#!/bin/bash\ntouch \"{marker.as_posix()}\"\nprintf '%s' '{payload}'\n",
+            f"#!/bin/bash\ntouch \"{marker.as_posix()}\"\n"
+            f"printf '%s\\n' \"$@\" > \"{argv_log.as_posix()}\"\n"
+            f"printf '%s' '{payload}'\n",
             encoding="utf-8",
         )
         stub.chmod(0o755)
         if marker.exists():
             marker.unlink()
+        if argv_log.exists():
+            argv_log.unlink()
         return marker
+
+    def _curl_argv(self):
+        argv_log = self.bin_dir / "curl.argv"
+        return argv_log.read_text(encoding="utf-8") if argv_log.exists() else ""
 
     def _git_commit_in(self, path, text, message, git_env):
         (path / "probe.txt").write_text(text, encoding="utf-8")

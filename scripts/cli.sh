@@ -247,8 +247,10 @@ check_bot_update_on_entry() {
     git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1 || return 0
     local origin_url owner_repo branch local_sha api_url cmp_status
     origin_url=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || echo "")
-    if [[ "$origin_url" =~ ^(https://github\.com/|git@github\.com:)([^/]+)/([^/]+?)(\.git)?$ ]]; then
+    origin_url="${origin_url%/}"
+    if [[ "$origin_url" =~ ^(https://github\.com/|git@github\.com:)([^/]+)/([^/]+)$ ]]; then
         owner_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]}"
+        owner_repo="${owner_repo%.git}"
     else
         return 0
     fi
