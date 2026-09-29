@@ -1098,7 +1098,7 @@ async def get_server():
 
     return {
         "id": os.getenv("SERVER_ID", container),
-        "name": os.getenv("SERVER_NAME", container),
+        "name": os.getenv("SERVER_NAME", ""),
         "region": os.getenv("SERVER_REGION", ""),
         "weight": int(os.getenv("SERVER_WEIGHT", "0")),
         "protocol": primary_proto,
