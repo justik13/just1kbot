@@ -139,11 +139,14 @@ update_node() {
     check_root
     init_state_dir
     acquire_just1knode_lock
+    trap release_just1knode_lock RETURN EXIT
 
     local target="${1:-all}"
 
     if [[ "$target" == "core" ]]; then
         update_xray_core
+        release_just1knode_lock
+        trap - RETURN EXIT
         return
     fi
 
@@ -169,7 +172,7 @@ update_node() {
     fi
 
     if [[ $download_ok -eq 1 ]]; then
-        if ! tar -xzf "$tmp_tar" -C "$tmp_dir" --strip-components=1 2>/dev/null; then
+        if ! tar -xzf "$tmp_tar" -C "$tmp_dir" --strip-components=1 --no-same-owner 2>/dev/null; then
             rm -rf "$tmp_tar" "$tmp_dir"
             error "Ошибка целостности архива: распаковка не удалась. Обновление прервано."
         fi
@@ -358,6 +361,7 @@ update_node() {
             # 3. Установка обновлений just1knode
             if [[ -d "${tmp_dir}/just1knode" ]]; then
                 mkdir -p "$node_dir"
+                find "$node_dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
                 if ! cp -a "${tmp_dir}/just1knode/." "${node_dir}/" 2>/dev/null; then
                     rollback_node_components || true
                     rm -rf "$tmp_tar" "$tmp_dir"
@@ -488,5 +492,8 @@ update_node() {
     title "ОБНОВЛЕНИЕ И АВТО-КОНФИГУРАЦИЯ УЗЛА УСПЕШНО ЗАВЕРШЕНЫ!"
     echo -e "${GREEN}✔ Все параметры Xray, DNS (Split-DNS), IPv4 и системные настройки приведены к эталону.${NC}"
     echo -e "${GREEN}✔ 100% российских сервисов (включая 2ip.ru, Госуслуги, банки) направляются через Origin.${NC}\n"
+
+    release_just1knode_lock
+    trap - RETURN EXIT
 }
 

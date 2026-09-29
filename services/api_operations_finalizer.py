@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from bot import texts
 from database.connection import session_scope
@@ -154,6 +155,7 @@ async def _schedule_migration_grace_deletion(session, operation, profile) -> Non
     old_profile = (
         await session.execute(
             select(VPNProfile)
+            .options(selectinload(VPNProfile.server))
             .where(VPNProfile.id == migrating_from_id)
             .with_for_update()
         )
@@ -168,6 +170,13 @@ async def _schedule_migration_grace_deletion(session, operation, profile) -> Non
                 s_url,
                 s_key,
             ) = await resolve_profile_endpoint_snapshot(session, old_profile)
+            old_protocol = None
+            if old_profile.server:
+                old_protocol = old_profile.server.protocol
+            elif s_id:
+                old_server = await session.get(Server, s_id)
+                if old_server:
+                    old_protocol = old_server.protocol
             await ensure_delete_operation(
                 session,
                 idempotency_key=f"delete-peer:{old_profile.id}:{old_profile.peer_id}",
@@ -178,7 +187,7 @@ async def _schedule_migration_grace_deletion(session, operation, profile) -> Non
                 api_key_snapshot=s_key,
                 peer_id=old_profile.peer_id,
                 client_name=old_profile.client_name,
-                protocol=old_profile.server.protocol if old_profile.server else None,
+                protocol=old_protocol,
                 audit_reason="device_migration_grace_expired",
                 next_attempt_at=now_utc() + timedelta(minutes=15),
             )

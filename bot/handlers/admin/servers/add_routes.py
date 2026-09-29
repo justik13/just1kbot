@@ -387,7 +387,7 @@ async def process_add_server(
 
         api_max_peers = server_info.get_effective_max_peers()
 
-        if api_max_peers == server_info.SERVER_MAX_PEERS:
+        if not (server_info.maxPeers or server_info.serverMaxPeers):
             logger.warning(
                 "Amnezia API did not return max peers for %s. "
                 "Using safe default %s instead of %s.",
@@ -398,7 +398,7 @@ async def process_add_server(
 
             api_max_peers = SAFE_DEFAULT_MAX_PEERS
 
-        api_server_name = (server_info.name or all_data["name"])[:50]
+        api_server_name = (all_data.get("name") or server_info.name or "AmneziaWG")[:50]
 
         existing = await get_server_by_api_url(
             session,
