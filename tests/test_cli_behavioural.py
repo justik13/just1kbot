@@ -1038,6 +1038,275 @@ cmd_update
             proc_y.stdout + proc_y.stderr,
         )
 
+    # -------------------------------------------------------------------------
+    # 12. Panel version label and entry update check
+    # -------------------------------------------------------------------------
+
+    def test_version_command_prints_label(self):
+        """`just1kbot version` prints the label and exits 0."""
+        proc = self._run_cli_command("version")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("just1kbot v", proc.stdout)
+
+    def test_version_label_uses_pyproject_version(self):
+        """bot_version_label reads the version from pyproject.toml (no git in isolation)."""
+        (self.project_dir / "pyproject.toml").write_text(
+            '[project]\nname = "just1kbot"\nversion = "9.9.9"\n', encoding="utf-8"
+        )
+        proc = self._run_cli_command("version")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("v9.9.9", proc.stdout)
+
+    def test_update_check_on_entry_is_fail_safe_without_git(self):
+        """check_bot_update_on_entry exits 0 silently outside a git repo."""
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+check_bot_update_on_entry
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_on_entry_detects_remote_ahead(self):
+        """Notice only when compare API reports remote strictly ahead (mocked, no network)."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        self._mock_compare_api('{"status":"ahead","ahead_by":2,"behind_by":0}')
+        proc = self._run_update_check_snippet()
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Безопасное обновление", proc.stdout)
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_builds_clean_compare_url(self):
+        """Origin URL variants (.git suffix, trailing slash, SSH) map to one API path."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        for origin_url in [
+            "https://github.com/justik13/just1kbot.git",
+            "https://github.com/justik13/just1kbot",
+            "https://github.com/justik13/just1kbot/",
+            "git@github.com:justik13/just1kbot.git",
+        ]:
+            subprocess.run(
+                ["git", "remote", "set-url", "origin", origin_url],
+                cwd=str(self.project_dir),
+                env=git_env,
+                check=True,
+                capture_output=True,
+            )
+            self._mock_compare_api('{"status":"ahead","ahead_by":1,"behind_by":0}')
+            proc = self._run_update_check_snippet()
+            self.assertEqual(proc.returncode, 0, f"failed for origin={origin_url}")
+            self.assertIn("Безопасное обновление", proc.stdout, f"no notice for origin={origin_url}")
+            argv = self._curl_argv()
+            self.assertIn(
+                "repos/justik13/just1kbot/compare/", argv, f"bad API URL for origin={origin_url}"
+            )
+            self.assertNotIn("just1kbot.git/compare", argv, f".git leaked for origin={origin_url}")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_on_entry_silent_unless_remote_ahead(self):
+        """behind/identical/diverged compare statuses stay silent (no false positives)."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        for status in ["behind", "identical", "diverged"]:
+            self._mock_compare_api(f'{{"status":"{status}","ahead_by":0,"behind_by":1}}')
+            proc = self._run_update_check_snippet()
+            self.assertEqual(proc.returncode, 0, f"failed for status={status}")
+            self.assertEqual(proc.stdout.strip(), "", f"notice shown for status={status}")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_on_entry_silent_for_invalid_api_response(self):
+        """Garbage/empty/error API payloads never produce a notice."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        for payload in ["not json", "", '{"message":"Not Found"}']:
+            self._mock_compare_api(payload)
+            proc = self._run_update_check_snippet()
+            self.assertEqual(proc.returncode, 0, f"failed for payload={payload!r}")
+            self.assertEqual(proc.stdout.strip(), "", f"notice shown for payload={payload!r}")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_makes_no_request_for_non_github_origin(self):
+        """Custom (non-github) origins are skipped without any network call."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env, origin_url="file:///tmp/custom.git")
+        marker = self._mock_compare_api('{"status":"ahead"}')
+        proc = self._run_update_check_snippet()
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
+        self.assertFalse(marker.exists(), "curl must not be called for non-github origin")
+
+    def _git_check_env(self):
+        """Env with git identity and passthrough `timeout` stub (no real waiting)."""
+        timeout_stub = self.bin_dir / "timeout"
+        timeout_stub.write_text("#!/bin/bash\nshift\nexec \"$@\"\n", encoding="utf-8")
+        timeout_stub.chmod(0o755)
+        return {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+            "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}",
+        }
+
+    def _init_local_git_project(self, git_env, origin_url="https://github.com/justik13/just1kbot.git"):
+        """Init project_dir on main with one commit; origin URL is never contacted (curl mocked)."""
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+        self._git_commit_in(self.project_dir, "1", "base", git_env)
+        subprocess.run(
+            ["git", "remote", "add", "origin", origin_url],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+
+    def _mock_compare_api(self, payload):
+        """Stub curl: record the call (marker + argv log), print canned compare-API payload."""
+        marker = self.bin_dir / "curl.called"
+        argv_log = self.bin_dir / "curl.argv"
+        stub = self.bin_dir / "curl"
+        stub.write_text(
+            f"#!/bin/bash\ntouch \"{marker.as_posix()}\"\n"
+            f"printf '%s\\n' \"$@\" > \"{argv_log.as_posix()}\"\n"
+            f"printf '%s' '{payload}'\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        if marker.exists():
+            marker.unlink()
+        if argv_log.exists():
+            argv_log.unlink()
+        return marker
+
+    def _curl_argv(self):
+        argv_log = self.bin_dir / "curl.argv"
+        return argv_log.read_text(encoding="utf-8") if argv_log.exists() else ""
+
+    def _git_commit_in(self, path, text, message, git_env):
+        (path / "probe.txt").write_text(text, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "-A"], cwd=str(path), env=git_env, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", message], cwd=str(path), env=git_env, check=True, capture_output=True
+        )
+
+    def _run_update_check_snippet(self):
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+check_bot_update_on_entry
+"""
+        return subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={
+                **os.environ,
+                "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}",
+                "JUST1KBOT_NO_SUDO": "1",
+            },
+            check=False,
+        )
+
+    def _git_state_snapshot(self, git_env):
+        refs = subprocess.run(
+            ["git", "for-each-ref"],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        fetch_head = self.project_dir / ".git" / "FETCH_HEAD"
+        head_content = fetch_head.read_text(encoding="utf-8") if fetch_head.exists() else None
+        return (refs, head_content)
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_on_entry_silent_when_local_ahead(self):
+        """No notice when compare API says remote is behind local (hotfix state)."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        self._git_commit_in(self.project_dir, "2", "local-hotfix", git_env)
+        self._mock_compare_api('{"status":"behind","ahead_by":0,"behind_by":1}')
+        proc = self._run_update_check_snippet()
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_on_entry_silent_when_diverged(self):
+        """No notice when histories diverged (updater handles it, not the indicator)."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        self._git_commit_in(self.project_dir, "2", "local-change", git_env)
+        self._mock_compare_api('{"status":"diverged","ahead_by":1,"behind_by":1}')
+        proc = self._run_update_check_snippet()
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_on_entry_detects_behind_from_detached(self):
+        """Detached HEAD behind origin/main still reports an available update."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        self._git_commit_in(self.project_dir, "2", "second", git_env)
+        base_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD~1"],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "checkout", base_sha],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+        )
+        self._mock_compare_api('{"status":"ahead","ahead_by":1,"behind_by":0}')
+        proc = self._run_update_check_snippet()
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Безопасное обновление", proc.stdout)
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_does_not_modify_git_state(self):
+        """Entry check is read-only: refs and FETCH_HEAD unchanged (compare API, no fetch)."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        self._mock_compare_api('{"status":"ahead","ahead_by":1,"behind_by":0}')
+        before = self._git_state_snapshot(git_env)
+        proc = self._run_update_check_snippet()
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Безопасное обновление", proc.stdout)
+        after = self._git_state_snapshot(git_env)
+        self.assertEqual(before, after)
+
 
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
     """Regression guard: `error()` in scripts/setup.sh must abort the whole
