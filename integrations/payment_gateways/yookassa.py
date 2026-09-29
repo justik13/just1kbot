@@ -7,6 +7,7 @@ from decimal import Decimal
 from config.settings import get_settings
 from integrations.payment_gateways.base import (
     BasePaymentGateway,
+    PaymentCreationAmbiguousError,
     PaymentInvoice,
     PaymentStatusResult,
     WebhookResult,
@@ -88,11 +89,20 @@ class YooKassaGateway(BasePaymentGateway):
         )
         if not result.ok or not result.value:
             logger.error(
-                "YooKassa payment creation failed for order %s: kind=%s, status=%s",
+                "YooKassa payment creation failed for order %s: kind=%s, status=%s, ambiguous=%s",
                 order_id,
                 result.error_kind,
                 result.status_code,
+                result.ambiguous,
             )
+            if result.ambiguous:
+                # Timeout / 5xx / unreadable response: YooKassa may have
+                # created the payment anyway. Report it as unknown so the
+                # caller keeps the order and can still be settled by webhook.
+                raise PaymentCreationAmbiguousError(
+                    f"YooKassa payment creation result unknown: "
+                    f"{result.error_kind or 'unknown'}"
+                )
             raise RuntimeError(
                 f"YooKassa payment creation error: {result.error_kind or 'unknown'}"
             )

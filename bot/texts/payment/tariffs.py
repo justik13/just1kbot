@@ -69,6 +69,8 @@ PAYMENT_ORDER_PAYMENT_CANCELLED = "Платеж был отменен."
 
 PAYMENT_ORDER_WAITING_PAYMENT = "Оплата еще не поступила. Если вы уже оплатили, подождите минуту."
 
+PAYMENT_CREATION_STATUS_UNKNOWN = "Не удалось подтвердить создание платежа. Если вы уже оплатили, подождите минуту — доступ выдастся автоматически. Если не оплачивали, попробуйте ещё раз."
+
 PAYMENT_PRICE_RUB_FORMAT = "{amount_rub} ₽"
 
 PAYMENT_PURCHASE_INVALID_OPERATION = "Некорректная покупка"

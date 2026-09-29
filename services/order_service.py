@@ -20,6 +20,7 @@ from database.repositories.account_ledger_repo import (
     create_order_refund_debit,
     get_account_balance,
 )
+from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.fulfillment_service import FulfillmentService
 from services.referral_bonus import reverse_referral_bonus_for_topup
@@ -282,6 +283,20 @@ class OrderService:
                 logger.exception(
                     "Gateway failed to create payment for order %s: %s", order_id, exc
                 )
+                if isinstance(exc, PaymentCreationAmbiguousError):
+                    # The provider may have created the payment (timeout, 5xx,
+                    # unreadable response). Rolling back would destroy the
+                    # order together with the only reference to it, and the
+                    # incoming `payment.succeeded` webhook would then find
+                    # nothing and be retried by YooKassa for 24h. Keep the
+                    # order so the webhook can still settle it, and flag it
+                    # for operators: no payment_url means it stays invisible
+                    # in the funnel and the user simply retries the purchase.
+                    held_meta = dict(order.metadata_ or {})
+                    held_meta["payment_creation_ambiguous"] = True
+                    order.metadata_ = held_meta
+                    await session.flush()
+                    raise
                 # NOTE: rollback() expires EVERY ORM object of this session
                 # (including the caller's User). Callers must capture
                 # user_id/telegram_id as plain ints BEFORE calling
