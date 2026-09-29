@@ -376,13 +376,15 @@ async def _process_server_traffic(
 
         server_obj = await session.get(Server, server_id, with_for_update=True)
         if server_obj:
-            extra = dict(server_obj.extra_data or {})
+            raw_extra = getattr(server_obj, "extra_data", None)
+            extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
             current_cycle = current_time.strftime("%Y-%m")
             saved_cycle = extra.get("traffic_cycle")
             if saved_cycle != current_cycle:
-                extra["traffic_cycle"] = current_cycle
-                extra["monthly_traffic_bytes"] = server_delta
-                server_obj.extra_data = extra
+                if saved_cycle is not None or server_delta > 0:
+                    extra["traffic_cycle"] = current_cycle
+                    extra["monthly_traffic_bytes"] = server_delta
+                    server_obj.extra_data = extra
             elif server_delta > 0:
                 extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_delta
                 server_obj.extra_data = extra
