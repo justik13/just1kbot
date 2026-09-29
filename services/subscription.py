@@ -475,7 +475,7 @@ class SubscriptionService:
             and not is_vpn_access_expired(user.subscription_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
             and not user.is_banned
             and not user.financial_hold
-            and not getattr(user, "is_deleted", False)
+            and not user.is_deleted
         )
         profiles = await get_user_profiles(session, user.id)
         for profile in profiles:

@@ -427,6 +427,34 @@ class OrderService:
         if external_id:
             order.external_id = external_id
 
+        # Settlement boundary: funnel guards (topup_blocked/financial_hold)
+        # use stale ORM state and only cover creation. Money arriving here
+        # (webhook or manual order_check) must not credit/fulfill a blocked
+        # user. Mark paid (money fact) but hold benefits for manual review.
+        # No new status (migration-free): flag in metadata_.
+        settlement_user = await session.get(User, order.user_id, with_for_update=True)
+        if settlement_user is not None:
+            is_hold = bool(getattr(settlement_user, "financial_hold", False))
+            is_topup_block = bool(getattr(settlement_user, "topup_blocked", False))
+            blocked_topup = order.service_type == "topup" and (is_hold or is_topup_block)
+            blocked_tariff = order.service_type != "topup" and is_hold
+            if blocked_topup or blocked_tariff:
+                held_meta = dict(order.metadata_ or {})
+                held_meta["settlement_held"] = True
+                held_meta["settlement_hold_reason"] = (
+                    "financial_hold" if is_hold else "topup_blocked"
+                )
+                order.metadata_ = held_meta
+                await session.flush()
+                logger.warning(
+                    "Order %s paid under hold/block (user %s, service=%s): "
+                    "credited/fulfillment withheld for manual review",
+                    order.id,
+                    order.user_id,
+                    order.service_type,
+                )
+                return order
+
         # Ledger records: ONLY topup credits user's bot wallet
         if order.service_type == "topup":
             credit_meta = {"source": f"{order.payment_method}_topup"}

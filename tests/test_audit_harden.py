@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 
 def _make_callback(data="balance_create:500"):
@@ -51,12 +52,26 @@ class PendingCountTTLTests(unittest.IsolatedAsyncioTestCase):
             return 0
 
         session.scalar = fake_scalar
-        result = await _count_pending_topup_orders(session, 1)
+        result = await _count_pending_topup_orders(session, 7)
         self.assertEqual(result, 0)
         compiled = str(seen[0].compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("payment_url IS NOT NULL", compiled)
-        self.assertIn("created_at", compiled)
-        self.assertIn("pending", compiled)
+        self.assertIn("created_at >=", compiled)
+        self.assertIn("status = 'pending'", compiled)
+        self.assertIn("service_type = 'topup'", compiled)
+        self.assertIn("user_id = 7", compiled)
+
+    async def test_count_and_lookup_share_predicate(self):
+        from bot.handlers.payment import balance_routes
+
+        # Both helpers must build on the single canonical predicate so the
+        # limit can never block what the lookup cannot see.
+        import inspect
+
+        lookup_src = inspect.getsource(balance_routes._get_pending_topup_order)
+        count_src = inspect.getsource(balance_routes._count_pending_topup_orders)
+        self.assertIn("_pending_topup_conditions", lookup_src)
+        self.assertIn("_pending_topup_conditions", count_src)
 
 
 class TopupBackToTests(unittest.IsolatedAsyncioTestCase):
@@ -165,11 +180,16 @@ class SyncDeletedTests(unittest.IsolatedAsyncioTestCase):
             patch(
                 "services.subscription.enqueue_api_operation",
                 new=AsyncMock(),
-            ),
+            ) as mock_enqueue,
         ):
             await SubscriptionService._sync_access_state(session, user)
         self.assertFalse(profile.desired_is_active)
         self.assertFalse(profile.is_active)
+        self.assertIsNone(profile.desired_expires_at)
+        mock_enqueue.assert_awaited_once()
+        self.assertEqual(
+            mock_enqueue.await_args.kwargs["payload"]["status"], "disabled"
+        )
 
 
 class ZeroCostGuardTests(unittest.IsolatedAsyncioTestCase):
@@ -187,6 +207,8 @@ class ZeroCostGuardTests(unittest.IsolatedAsyncioTestCase):
         session = MagicMock()
         db_user = MagicMock()
         db_user.id = 1
+        db_user.financial_hold = False
+        db_user.topup_blocked = False
         db_user.current_tariff_id = 1
         db_user.subscription_end = now_utc() + timedelta(days=5)
 
@@ -284,6 +306,125 @@ class RenewFallbackNameTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(mock_hub.awaited)
         self.assertIn("TIER-5", mock_hub.await_args.args[2])
         self.assertNotIn("TIER-4", mock_hub.await_args.args[2])
+
+
+class SettlementHoldTests(unittest.IsolatedAsyncioTestCase):
+    async def _run_mark_paid(self, *, hold=False, blocked=False):
+        from services.order_service import OrderService
+
+        order = MagicMock()
+        order.id = uuid4()
+        order.user_id = 9
+        order.service_type = "topup"
+        order.status = "pending"
+        order.amount_rub = Decimal("500")
+        order.payment_method = "yookassa"
+        order.metadata_ = {}
+        order.external_id = None
+        user = SimpleNamespace(
+            id=9, financial_hold=hold, topup_blocked=blocked
+        )
+        session = MagicMock()
+        session.scalar = AsyncMock(return_value=order)
+        session.flush = AsyncMock()
+
+        async def fake_get(model, pk, **kwargs):
+            return user
+
+        session.get = fake_get
+        with (
+            patch(
+                "services.order_service.create_order_credit",
+                new=AsyncMock(
+                    side_effect=AssertionError("credit must not happen under hold")
+                ),
+            ),
+            patch(
+                "services.referral_bonus.grant_referral_bonus_for_topup",
+                new=AsyncMock(
+                    side_effect=AssertionError("bonus must not happen under hold")
+                ),
+            ),
+            patch(
+                "services.order_service.FulfillmentService.fulfill_order",
+                new=AsyncMock(
+                    side_effect=AssertionError("fulfill must not happen under hold")
+                ),
+            ),
+        ):
+            result = await OrderService.mark_order_paid(session, order.id)
+        return result, order
+
+    async def test_topup_hold_withholds_credit(self):
+        result, order = await self._run_mark_paid(hold=True)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "paid")
+        self.assertTrue((result.metadata_ or {}).get("settlement_held"))
+
+    async def test_topup_blocked_withholds_credit(self):
+        result, order = await self._run_mark_paid(blocked=True)
+        self.assertIsNotNone(result)
+        self.assertTrue((result.metadata_ or {}).get("settlement_held"))
+
+
+class OrderPayCardHoldTests(unittest.IsolatedAsyncioTestCase):
+    async def test_old_button_blocked_under_hold(self):
+        from bot import texts
+        from bot.handlers.payment import purchase_routes
+
+        cb = MagicMock()
+        cb.from_user = MagicMock(id=111)
+        cb.data = "order_pay_card:2"
+        cb.bot = MagicMock()
+        cb.message = MagicMock()
+        cb.message.chat = MagicMock(id=123)
+        cb.answer = AsyncMock()
+        session = MagicMock()
+        db_user = _make_user(financial_hold=True)
+        with (
+            patch(
+                "bot.handlers.payment.purchase_routes.MaintenanceService.can_user_perform_action",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "bot.handlers.payment.purchase_routes.OrderService.create_order",
+                new=AsyncMock(
+                    side_effect=AssertionError("must not create under hold")
+                ),
+            ),
+        ):
+            await purchase_routes.handle_order_pay_card(
+                cb, session, db_user=db_user
+            )
+        cb.answer.assert_awaited_once_with(
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
+        )
+
+
+class ResumeHoldTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resume_hidden_under_hold(self):
+        from bot import texts
+        from bot.handlers.payment import balance_routes
+
+        cb = _make_callback("balance_resume_topup")
+        session = MagicMock()
+        db_user = _make_user(financial_hold=True)
+        pending = MagicMock(payment_url="https://pay.test/x")
+        with (
+            patch(
+                "bot.handlers.payment.balance_routes._get_pending_topup_order",
+                new=AsyncMock(return_value=pending),
+            ),
+            patch(
+                "bot.handlers.payment.balance_routes.render_hub",
+                new=AsyncMock(),
+            ) as mock_hub,
+        ):
+            await balance_routes.resume_topup(cb, session, db_user=db_user)
+        self.assertTrue(mock_hub.awaited)
+        self.assertEqual(
+            mock_hub.await_args.args[2], texts.PAYMENT_DISPUTE_BLOCKED_NOTICE
+        )
 
 
 if __name__ == "__main__":

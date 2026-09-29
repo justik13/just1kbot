@@ -83,6 +83,9 @@ async def handle_order_pay_wallet(
     except InsufficientBalanceError:
         await callback.answer(texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
         return
+    except FinancialHoldBlockedError:
+        await callback.answer(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
+        return
     except Exception as exc:
         logger.exception(
             "Wallet payment failed for user %s, tariff %s: %s",
@@ -132,6 +135,12 @@ async def handle_order_pay_card(
     ):
         await _render_maintenance(callback, session, back_to="payment_showcase")
         return
+    # Mirror select_tariff(): old order_pay_card buttons must not bypass it.
+    # Authoritative enforcement lives at settlement (mark_order_paid);
+    # this is an early UX reject on (possibly stale) middleware state.
+    if getattr(db_user, "financial_hold", False):
+        await callback.answer(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
+        return
 
     try:
         tariff_id = int(callback.data.split(":")[1])
@@ -159,6 +168,10 @@ async def handle_order_pay_card(
             current_tariff, tariff, sub_end, now=now
         )
         if due_rub <= Decimal("0.00"):
+            # NOTE: only pre-mutation domain errors are caught here
+            # (hold/debt/insufficient are raised before any DB change).
+            # Unexpected exceptions must propagate so session_scope()
+            # rolls back instead of committing a partial paid order.
             try:
                 order = await OrderService.pay_from_wallet(
                     session,
@@ -171,15 +184,6 @@ async def handle_order_pay_card(
                 return
             except (AccountDebtBlockedError, InsufficientBalanceError):
                 await callback.answer(texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
-                return
-            except Exception as exc:
-                logger.exception(
-                    "Zero-cost tariff change failed for user %s, tariff %s: %s",
-                    db_user_id,
-                    tariff.id,
-                    exc,
-                )
-                await callback.answer(texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True)
                 return
             balance = await get_account_balance(session, user_id=db_user_id)
             tariff_name = get_tariff_display_name(order.device_limit or 2)
