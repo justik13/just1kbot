@@ -273,8 +273,18 @@ async def select_tariff(
 
     tariff_name = get_tariff_display_name(device_limit)
     base_price = int(tariff.price_rub)
-    if source != "change" and await is_eligible_for_referral_first_discount(
-        session, db_user.id
+    # Mirror OrderService.create_order(): a tariff change is charged by
+    # proportional due without referral discount, so never badge it —
+    # otherwise showcase and invoice would show different prices.
+    is_change_case = (
+        getattr(db_user, "current_tariff_id", None) is not None
+        and getattr(db_user, "current_tariff_id", None) != tariff.id
+        and await _is_subscription_active(db_user)
+    )
+    if (
+        source != "change"
+        and not is_change_case
+        and await is_eligible_for_referral_first_discount(session, db_user.id)
     ):
         discount = int(
             (Decimal(tariff.price_rub) * REFERRAL_WELCOME_DISCOUNT_PERCENT).quantize(
