@@ -215,11 +215,16 @@ async def get_user_referrals_paginated(
     return result.scalars().all(), count, page
 
 
-def _referral_real_payment_condition(referral) -> object:
-    """Active = paid Order (new flow) OR real-money topup (legacy flow).
+def _referral_paid_activity_condition(referral) -> object:
+    """Paid activity = paid Order (any funding source, #296 contract) OR real topup.
 
-    Pure admin_adjustment freebies (no Order, no succeeded Payment) must NOT
-    count: otherwise free balance grants would boost referrer tiers.
+    Order branch intentionally follows the #296 paid-Order contract and does
+    NOT trace wallet funding provenance (real vs bonus balance): a wallet
+    Order paid purely from bonus/admin balance still yields paid status,
+    because provenance tracking would be banking overengineering.
+    The Payment branch requires a real external topup (succeeded +
+    fulfilled + credited), so pure admin_adjustment freebies never count
+    until actually spent — see audit note on PR #306.
     """
     paid_order = (
         select(Order.id)
@@ -247,14 +252,14 @@ def _referral_real_payment_condition(referral) -> object:
 async def get_user_active_referrals_count(
     session: AsyncSession, telegram_id: int
 ) -> int:
-    """Return count of referred users with real-money revenue (Order or topup)."""
+    """Return count of referred users with paid activity (Order or real topup)."""
     if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:
         return 0
     stmt = (
-        select(func.count(func.distinct(User.id))).where(
+        select(func.count(User.id)).where(
             User.referred_by == telegram_id,
             User.is_deleted.is_(False),
-            _referral_real_payment_condition(User),
+            _referral_paid_activity_condition(User),
         )
     )
     result = await session.scalar(stmt)
@@ -270,12 +275,12 @@ async def get_referral_leaderboard(
     referral = aliased(User)
 
     stmt = (
-        select(referrer.telegram_id, func.count(func.distinct(referral.id)).label("active_count"))
+        select(referrer.telegram_id, func.count(referral.id).label("active_count"))
         .join(referral, referral.referred_by == referrer.telegram_id)
         .where(
             referrer.is_deleted.is_(False),
             referral.is_deleted.is_(False),
-            _referral_real_payment_condition(referral),
+            _referral_paid_activity_condition(referral),
         )
         .group_by(referrer.telegram_id)
         .order_by(text("active_count DESC"), referrer.telegram_id.asc())
@@ -299,13 +304,13 @@ async def get_user_referral_rank(
     subq = (
         select(
             referrer.telegram_id.label("tid"),
-            func.count(func.distinct(referral.id)).label("cnt"),
+            func.count(referral.id).label("cnt"),
         )
         .join(referral, referral.referred_by == referrer.telegram_id)
         .where(
             referrer.is_deleted.is_(False),
             referral.is_deleted.is_(False),
-            _referral_real_payment_condition(referral),
+            _referral_paid_activity_condition(referral),
         )
         .group_by(referrer.telegram_id)
         .subquery()

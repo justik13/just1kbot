@@ -1115,10 +1115,10 @@ class TestActiveReferralsLegacyPayments(unittest.TestCase):
 
     def test_condition_covers_orders_and_payments_with_abuse_guards(self):
         from database.models import User
-        from database.repositories.users_repo import _referral_real_payment_condition
+        from database.repositories.users_repo import _referral_paid_activity_condition
 
         compiled = str(
-            _referral_real_payment_condition(User).compile(compile_kwargs={"literal_binds": True})
+            _referral_paid_activity_condition(User).compile(compile_kwargs={"literal_binds": True})
         )
         self.assertIn("orders", compiled)
         self.assertIn("payments", compiled)
