@@ -334,13 +334,11 @@ class SettlementHoldTests(unittest.IsolatedAsyncioTestCase):
             id=9, financial_hold=hold, topup_blocked=blocked
         )
         session = MagicMock()
-        session.scalar = AsyncMock(return_value=order)
+        # Production settlement reads the order first, then the user via an
+        # explicit SELECT ... FOR UPDATE (never session.get, which can hit
+        # the identity map). Mirror that call order exactly.
+        session.scalar = AsyncMock(side_effect=[order, user])
         session.flush = AsyncMock()
-
-        async def fake_get(model, pk, **kwargs):
-            return user
-
-        session.get = fake_get
         with (
             patch(
                 "services.order_service.create_order_credit",
@@ -369,11 +367,15 @@ class SettlementHoldTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.status, "paid")
         self.assertTrue((result.metadata_ or {}).get("settlement_held"))
+        # Webhook keys its "credited" notice off _newly_paid: held
+        # settlement must stay silent.
+        self.assertFalse(result._newly_paid)
 
     async def test_topup_blocked_withholds_credit(self):
         result, order = await self._run_mark_paid(blocked=True)
         self.assertIsNotNone(result)
         self.assertTrue((result.metadata_ or {}).get("settlement_held"))
+        self.assertFalse(result._newly_paid)
 
 
 class OrderPayCardHoldTests(unittest.IsolatedAsyncioTestCase):
@@ -579,8 +581,7 @@ class UnexpectedFailureRollbackTests(unittest.IsolatedAsyncioTestCase):
 
 
 class OrderCheckHeldTests(unittest.IsolatedAsyncioTestCase):
-    async def test_early_paid_held_shows_dispute(self):
-        from bot import texts
+    async def _run_check(self, settled_order):
         from bot.handlers.payment import purchase_routes
 
         cb = MagicMock()
@@ -598,18 +599,41 @@ class OrderCheckHeldTests(unittest.IsolatedAsyncioTestCase):
         held_order.service_type = "topup"
         held_order.metadata_ = {"settlement_held": True}
         session.get = AsyncMock(return_value=held_order)
-        with patch(
-            "bot.handlers.payment.balance_routes._render_balance",
-            new=AsyncMock(
-                side_effect=AssertionError("must not render credited balance")
+        with (
+            patch(
+                "bot.handlers.payment.purchase_routes.OrderService.mark_order_paid",
+                new=AsyncMock(return_value=settled_order),
             ),
+            patch(
+                "bot.handlers.payment.balance_routes._render_balance",
+                new=AsyncMock(),
+            ) as mock_balance,
         ):
             await purchase_routes.handle_order_check(
                 cb, session, db_user=db_user
             )
+        return cb, mock_balance
+
+    async def test_early_paid_held_shows_dispute(self):
+        from bot import texts
+
+        still_held = MagicMock(metadata_={"settlement_held": True})
+        cb, mock_balance = await self._run_check(still_held)
+        mock_balance.assert_not_awaited()
         cb.answer.assert_awaited_once_with(
             texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
         )
+
+    async def test_early_paid_released_renders_credited(self):
+        from bot import texts
+
+        released = MagicMock(
+            service_type="topup", metadata_={}, amount_rub=Decimal("500")
+        )
+        cb, mock_balance = await self._run_check(released)
+        mock_balance.assert_awaited_once()
+        _, kwargs = mock_balance.await_args
+        self.assertEqual(kwargs.get("notice"), texts.TOPUP_CREDITED_NOTICE)
 
 
 class AdminHeldCardTests(unittest.IsolatedAsyncioTestCase):

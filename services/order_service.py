@@ -528,6 +528,10 @@ class OrderService:
                     "financial_hold" if is_hold else "topup_blocked"
                 )
                 order.metadata_ = held_meta
+                # Not a fresh settlement for UX purposes: suppress the
+                # "credited" notification in the webhook handler, which keys
+                # off status == paid and _newly_paid.
+                order._newly_paid = False
                 await session.flush()
                 logger.warning(
                     "Order %s paid under hold/block (user %s, service=%s): "

@@ -80,7 +80,7 @@ async def handle_order_pay_wallet(
             service_type="awg",
             tariff_id=tariff.id,
         )
-    except InsufficientBalanceError:
+    except (AccountDebtBlockedError, InsufficientBalanceError):
         await callback.answer(texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
         return
     except FinancialHoldBlockedError:
@@ -291,12 +291,17 @@ async def handle_order_check(
 
     if order.status == "paid":
         if (order.metadata_ or {}).get("settlement_held"):
-            # Benefits were withheld at settlement (hold/block): never
-            # present them as credited/granted.
-            await callback.answer(
-                texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
-            )
-            return
+            # Benefits were withheld at settlement (hold/block). Route the
+            # repeat check through settlement: if the hold was lifted this
+            # releases credit/fulfillment, otherwise it stays withheld.
+            # Never present withheld benefits as credited/granted.
+            paid_order = await OrderService.mark_order_paid(session, order.id)
+            if not paid_order or (paid_order.metadata_ or {}).get("settlement_held"):
+                await callback.answer(
+                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
+                )
+                return
+            order = paid_order
         if order.service_type == "topup":
             from .balance_routes import _render_balance
             from bot.keyboards.payment import get_topup_credit_keyboard
