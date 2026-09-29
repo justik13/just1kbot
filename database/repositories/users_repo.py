@@ -329,7 +329,11 @@ async def get_user_referral_rank(
 async def is_eligible_for_referral_first_discount(
     session: AsyncSession, user_id: int
 ) -> bool:
-    """Check if user was referred by someone and hasn't made any paid orders yet."""
+    """Check if user was referred by someone and hasn't paid for any tariff yet.
+
+    Balance top-ups neither grant the discount nor burn eligibility for it:
+    the 25% welcome discount applies to the first tariff order only.
+    """
     user = await session.get(User, user_id)
     if (
         not user
@@ -344,6 +348,7 @@ async def is_eligible_for_referral_first_discount(
             Order.user_id == user_id,
             Order.status == "paid",
             Order.amount_rub > 0,
+            Order.service_type != "topup",
         )
     )
     if not isinstance(paid_orders, (int, float)):

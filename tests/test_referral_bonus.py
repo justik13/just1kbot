@@ -1062,6 +1062,26 @@ class TestReferralEligibilityAndRanks(unittest.TestCase):
 
         self.assertFalse(asyncio.run(is_eligible_for_referral_first_discount(session, 3)))
 
+    def test_is_eligible_ignores_paid_topups(self):
+        """A paid balance top-up must not burn the 25% first-tariff discount."""
+        import asyncio
+        from database.repositories.users_repo import is_eligible_for_referral_first_discount
+
+        session = AsyncMock()
+        user_invited = MagicMock(id=4, telegram_id=400, referred_by=100)
+        session.get = AsyncMock(return_value=user_invited)
+        seen = []
+
+        async def fake_scalar(stmt):
+            seen.append(stmt)
+            return 0
+
+        session.scalar = fake_scalar
+
+        self.assertTrue(asyncio.run(is_eligible_for_referral_first_discount(session, 4)))
+        orders_where = str(seen[0].compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("service_type != 'topup'", orders_where)
+
     def test_get_user_referral_rank_unranked_for_zero_active(self):
         import asyncio
         from database.repositories.users_repo import get_user_referral_rank
