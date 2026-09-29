@@ -1103,3 +1103,72 @@ class TestReferralEligibilityAndRanks(unittest.TestCase):
         self.assertEqual(len(leaders), 5)
         self.assertEqual(leaders[0], (1001, 15))
         self.assertEqual(leaders[4], (1005, 1))
+
+
+class TestActiveReferralsLegacyPayments(unittest.TestCase):
+    """Active = paid Order (new flow) OR real-money topup (legacy flow).
+
+    Regression: referred users with succeeded/credited payments but no Order
+    (e.g. purchases before orders table) must count as active, while pure
+    admin_adjustment freebies (no Order, no Payment) must NOT count.
+    """
+
+    def test_condition_covers_orders_and_payments_with_abuse_guards(self):
+        from database.models import User
+        from database.repositories.users_repo import _referral_paid_activity_condition
+
+        compiled = str(
+            _referral_paid_activity_condition(User).compile(compile_kwargs={"literal_binds": True})
+        )
+        self.assertIn("orders", compiled)
+        self.assertIn("payments", compiled)
+        self.assertIn("paid", compiled)
+        self.assertIn("succeeded", compiled)
+        self.assertIn("credited_at", compiled)
+
+    def test_count_counts_legacy_topup_without_order(self):
+        import asyncio
+        from database.repositories.users_repo import get_user_active_referrals_count
+
+        session = AsyncMock()
+        captured = {}
+
+        async def fake_scalar(stmt):
+            captured["sql"] = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+            return 2
+
+        session.scalar = fake_scalar
+        count = asyncio.run(get_user_active_referrals_count(session, 777000111))
+        self.assertEqual(count, 2)
+        self.assertIn("payments", captured["sql"])
+        self.assertIn("orders", captured["sql"])
+
+    def test_count_rejects_invalid_ids_without_db_call(self):
+        import asyncio
+        from database.repositories.users_repo import get_user_active_referrals_count
+
+        for bad in (0, -5, "777000111", None):
+            session = AsyncMock()
+            count = asyncio.run(get_user_active_referrals_count(session, bad))
+            self.assertEqual(count, 0)
+            session.scalar.assert_not_called()
+
+    def test_leaderboard_query_covers_legacy_payments(self):
+        import asyncio
+        from database.repositories.users_repo import get_referral_leaderboard
+
+        session = AsyncMock()
+        captured = {}
+        mock_result = MagicMock()
+        mock_result.all.return_value = [(777000111, 2)]
+        session.execute = AsyncMock(return_value=mock_result)
+
+        async def fake_execute(stmt):
+            captured["sql"] = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+            return mock_result
+
+        session.execute = fake_execute
+        leaders = asyncio.run(get_referral_leaderboard(session))
+        self.assertEqual(leaders, [(777000111, 2)])
+        self.assertIn("payments", captured["sql"])
+        self.assertIn("orders", captured["sql"])
