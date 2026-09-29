@@ -845,6 +845,139 @@ cmd_update
         self.assertLess(stop_idx, migrate_idx, "Cold Deploy: bot must be stopped before running migrate")
         self.assertLess(migrate_idx, audit_idx, "Invariant check must run after migrate")
 
+    def test_cmd_update_recreates_networks_when_compose_mtu_changes(self):
+        """cmd_update runs `compose down` before up when the pulled update changes docker network opts (MTU)."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+
+        # Push upstream an update that only changes docker network MTU
+        other_dir = self.root / "other"
+        upstream_dir = self.root / "upstream.git"
+        subprocess.run(
+            ["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "config", "user.email", "dev@test.local"], cwd=other_dir, check=True)
+        subprocess.run(["git", "config", "user.name", "Developer"], cwd=other_dir, check=True)
+        (other_dir / "docker-compose.yml").write_text(
+            "services: {}\nnetworks:\n  frontend_net:\n    driver: bridge\n"
+            "    driver_opts:\n      com.docker.network.driver.mtu: \"1440\"\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "docker-compose.yml"], cwd=other_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Clamp docker bridge MTU"], cwd=other_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=other_dir, check=True)
+
+        docker_log = self.root / "docker_calls.log"
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            f"#!/bin/bash\n"
+            f'echo "$*" >> "{docker_log.as_posix()}"\n'
+            f'if [[ "$1" == "inspect" ]]; then\n'
+            f'    if [[ "$*" == *"just1kbot_caddy"* ]]; then echo "running"; elif [[ "$*" == *"just1kbot_migrate"* ]]; then echo "exited/0"; else echo "healthy"; fi\n'
+            f'    exit 0\n'
+            f'fi\n'
+            f"exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        test_script = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"cmd_update failed: {proc.stdout}\n{proc.stderr}")
+        self.assertIn("пересоздаю сети", proc.stdout)
+
+        calls = docker_log.read_text(encoding="utf-8").splitlines()
+        down_idx = next((i for i, line in enumerate(calls) if line.strip() == "down"), -1)
+        up_idx = next((i for i, line in enumerate(calls) if "up -d" in line), -1)
+        self.assertNotEqual(down_idx, -1, "docker compose down must be called on network opts change")
+        self.assertNotEqual(up_idx, -1, "docker compose up -d must be called after down")
+        self.assertLess(down_idx, up_idx, "Networks must be recreated before starting services")
+
+    def test_cmd_update_keeps_rolling_start_without_compose_network_change(self):
+        """cmd_update must NOT run `compose down` when the update does not touch docker network opts."""
+        work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
+
+        other_dir = self.root / "other"
+        upstream_dir = self.root / "upstream.git"
+        subprocess.run(
+            ["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "config", "user.email", "dev@test.local"], cwd=other_dir, check=True)
+        subprocess.run(["git", "config", "user.name", "Developer"], cwd=other_dir, check=True)
+        (other_dir / "app_version.txt").write_text("v2.0.0", encoding="utf-8")
+        subprocess.run(["git", "add", "app_version.txt"], cwd=other_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Release v2.0.0"], cwd=other_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=other_dir, check=True)
+
+        docker_log = self.root / "docker_calls.log"
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            f"#!/bin/bash\n"
+            f'echo "$*" >> "{docker_log.as_posix()}"\n'
+            f'if [[ "$1" == "inspect" ]]; then\n'
+            f'    if [[ "$*" == *"just1kbot_caddy"* ]]; then echo "running"; elif [[ "$*" == *"just1kbot_migrate"* ]]; then echo "exited/0"; else echo "healthy"; fi\n'
+            f'    exit 0\n'
+            f'fi\n'
+            f"exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        test_script = f"""
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+cd "{work_dir.as_posix()}"
+source scripts/cli.sh >/dev/null 2>&1 || true
+
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
+"""
+        proc = subprocess.run(
+            ["bash", "-c", test_script],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"cmd_update failed: {proc.stdout}\n{proc.stderr}")
+
+        calls = docker_log.read_text(encoding="utf-8").splitlines()
+        down_calls = [line for line in calls if line.strip() == "down"]
+        self.assertEqual(down_calls, [], "rolling update must not tear down containers")
+
     def test_cmd_update_aborts_and_rolls_back_when_invariant_audit_fails(self):
         """cmd_update aborts rollout and initiates rollback if invariant audit fails."""
         work_dir = self._init_git_scenario()

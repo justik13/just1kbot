@@ -1170,8 +1170,24 @@ cmd_update() {
         return 1
     fi
 
+    # `compose up` never applies new network opts (e.g. MTU) to existing
+    # networks — only a recreate does. Detect compose network changes in the
+    # pulled update and recreate networks (named volumes survive plain down).
+    local need_network_recreate="false"
+    if git diff --name-only "$rollback_commit"..HEAD -- docker-compose.yml 2>/dev/null | grep -q .; then
+        if git diff "$rollback_commit"..HEAD -- docker-compose.yml 2>/dev/null | grep -Eq '^[+-].*(driver_opts|mtu|networks:)'; then
+            need_network_recreate="true"
+        fi
+    fi
+
     info "Шаг 5/6. Запуск обновлённых сервисов..."
-    dc_up
+    if [[ "$need_network_recreate" == "true" ]]; then
+        warn "Обновление изменило параметры docker-сетей — пересоздаю сети (краткий даунтайм ~1 мин, данные в volumes сохраняются)..."
+        docker compose down
+        dc_up
+    else
+        dc_up
+    fi
 
     info "Шаг 6/6. Проверка статуса здоровья сервисов (Healthcheck)..."
     local timeout=60
