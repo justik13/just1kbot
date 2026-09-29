@@ -910,7 +910,7 @@ cmd_update
         self.assertIn("пересоздаю сети", proc.stdout)
 
         calls = docker_log.read_text(encoding="utf-8").splitlines()
-        down_idx = next((i for i, line in enumerate(calls) if line.strip() == "down"), -1)
+        down_idx = next((i for i, line in enumerate(calls) if "compose down" in line), -1)
         up_idx = next((i for i, line in enumerate(calls) if "up -d" in line), -1)
         self.assertNotEqual(down_idx, -1, "docker compose down must be called on network opts change")
         self.assertNotEqual(up_idx, -1, "docker compose up -d must be called after down")
@@ -975,7 +975,7 @@ cmd_update
         self.assertEqual(proc.returncode, 0, f"cmd_update failed: {proc.stdout}\n{proc.stderr}")
 
         calls = docker_log.read_text(encoding="utf-8").splitlines()
-        down_calls = [line for line in calls if line.strip() == "down"]
+        down_calls = [line for line in calls if "compose down" in line]
         self.assertEqual(down_calls, [], "rolling update must not tear down containers")
 
     def test_cmd_update_aborts_and_rolls_back_when_invariant_audit_fails(self):
