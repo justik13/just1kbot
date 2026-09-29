@@ -51,7 +51,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         return app
 
     async def test_full_subscription_lifecycle(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         node_epoch = "epoch_20260830_initial123"
 
         # 1. Setup Server & User

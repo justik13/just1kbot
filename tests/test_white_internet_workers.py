@@ -16,7 +16,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
     """Test state reconciliation, stale-write detection, and epoch drift."""
 
     async def test_reconciliation_cycle_advances_version_and_epoch(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         server = Server(
             id=1,
             name="Origin-MSK",
@@ -76,7 +76,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
     async def test_reconciliation_detects_node_restart_epoch_drift(self):
         """When node restarts, check_health returns a new epoch, triggering sub reconciliation."""
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         server = Server(
             id=1,
             name="Origin-MSK",
@@ -144,7 +144,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
     async def test_reconciliation_inactive_sub_sets_synced_inactive(self):
         """When sub is expired/disabled, sync sets provisioning_status to SYNCED_INACTIVE."""
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         server = Server(
             id=1,
             name="Origin-MSK",
@@ -202,7 +202,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
     async def test_reconciliation_expires_overdue_active_subscription(self):
         """Active subscription with expires_at <= now must be atomically expired and synced inactive."""
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         server = Server(
             id=1,
             name="Origin-NL",
@@ -388,7 +388,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
     async def test_reconciliation_bounded_parallelism(self):
         """Reconciliation worker must process tasks concurrently bounded by Semaphore(10)."""
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         server = Server(
             id=1,
             name="Origin-MSK",
@@ -568,7 +568,7 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
     """Test monotonic traffic delta computation and grant ledger deduction."""
 
     async def test_traffic_sync_monotonic_delta_and_epoch_reset(self):
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         server = Server(
             id=1,
             name="Origin-MSK",
@@ -638,7 +638,7 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
 
     async def test_traffic_worker_handles_node_restart_epoch_reset(self):
         """When node restarts, epoch resets baseline to 0 and computes delta from new counters."""
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         server = Server(
             id=1,
             name="Origin-MSK",
@@ -709,7 +709,7 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
 
     async def test_traffic_worker_handles_stats_reset_within_same_epoch(self):
         """When stats reset within same epoch (uplink < snapshot), worker rebases baseline cleanly."""
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         server = Server(
             id=1,
             name="Origin-MSK",
@@ -780,7 +780,7 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
 
     async def test_traffic_worker_poison_record_isolation(self):
         """Poison client records (corrupted stats, bad UUID, DB exceptions) must not abort the batch."""
-        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         server = Server(
             id=1,
             name="Origin-MSK",
