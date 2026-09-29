@@ -197,6 +197,9 @@ class User(Base):
 
     device_creations_today: Mapped[int] = mapped_column(Integer, default=0)
     last_creation_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    total_traffic_bytes: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0")
+    )
 
     profiles = relationship(
         "VPNProfile",
@@ -269,6 +272,12 @@ class VPNProfile(Base):
 
     traffic_down: Mapped[int] = mapped_column(BigInteger, default=0)
     traffic_up: Mapped[int] = mapped_column(BigInteger, default=0)
+    raw_last_down: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0")
+    )
+    raw_last_up: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0")
+    )
 
     last_connected: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

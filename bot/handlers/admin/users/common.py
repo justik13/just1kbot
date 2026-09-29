@@ -83,6 +83,8 @@ def format_user_card_text(
         devices_count = len(profiles)
         device_limit = user.device_limit or 0
 
+    total_traffic_str = format_traffic(getattr(user, "total_traffic_bytes", 0) or 0)
+
     card_text = texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,
         username=safe(user.username),
@@ -97,6 +99,7 @@ def format_user_card_text(
         days_left=days_left_str,
         devices_count=devices_count,
         device_limit=device_limit,
+        total_traffic=total_traffic_str,
         referrals_count=referrals_count,
         created_at=format_datetime(user.created_at),
     )

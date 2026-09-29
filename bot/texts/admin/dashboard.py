@@ -130,6 +130,9 @@ AUDIT_LOG_EMPTY = "<i>Лог действий пуст.</i>"
 DASHBOARD_ACTIVE_PODPISOK_ACTIVE = """• Активных подписок: <b>{stats__active}</b>
 """
 
+DASHBOARD_AWG_TRAFFIC_STATS = """• Трафик туннелей: <b>{total_traffic}</b> (ср. на подписчика: <b>{avg_traffic}</b>)
+"""
+
 DASHBOARD_WHITE_INTERNET_STATS = """• Белый Интернет: <b>{active_count}</b> акт. (трафик: <b>{traffic}</b>)
 """
 
