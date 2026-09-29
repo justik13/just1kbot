@@ -186,7 +186,8 @@ async def _show_server_card(
             used_clients=effective_capacity, max_clients=max_clients
         )
 
-    traffic_month = format_traffic(int((server.extra_data or {}).get("monthly_traffic_bytes", 0)))
+    server_extra = getattr(server, "extra_data", {}) or {}
+    traffic_month = format_traffic(int(server_extra.get("monthly_traffic_bytes", 0) or 0))
 
     rendered = (
         f"{header}"
