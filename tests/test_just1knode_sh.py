@@ -1080,6 +1080,21 @@ run_doctor
         self.assertEqual(res.returncode, 0)
         self.assertEqual(res.stdout.strip(), "")
 
+    def test_node_update_check_silent_when_remote_older(self):
+        """No 'new version' notice when remote VERSION is older than local."""
+        self._create_mock_script("curl", "#!/bin/sh\necho '0.0.0'\n")
+        res = self._run_shell_snippet("check_node_update_on_entry")
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.stdout.strip(), "")
+
+    def test_node_update_check_silent_for_invalid_remote(self):
+        """Malformed remote VERSION values are ignored, never rendered."""
+        for bad in ["2.1.2-beta", "garbage", "", "v2.1.3", "999"]:
+            self._create_mock_script("curl", f"#!/bin/sh\necho '{bad}'\n")
+            res = self._run_shell_snippet("check_node_update_on_entry")
+            self.assertEqual(res.returncode, 0, f"failed for remote={bad!r}: {res.stderr}")
+            self.assertEqual(res.stdout.strip(), "", f"notice shown for remote={bad!r}")
+
     # -------------------------------------------------------------------------
     # Functional Validation: Origin Node Installation & Complete Artifacts
     # -------------------------------------------------------------------------

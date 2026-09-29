@@ -235,25 +235,36 @@ bot_version_label() {
     fi
 }
 
-# Best-effort проверка новой версии при входе в меню: один fetch с
-# ограничением по времени. При любой ошибке (нет сети/git/timeout)
-# молча пропускается и никогда не блокирует меню.
+# Best-effort проверка новой версии при входе в меню. Строго read-only:
+# сравнивает локальный HEAD с origin через GitHub compare API, не меняет
+# .git (нет fetch), не вызывает cmd_update. Уведомляет только когда remote
+# строго новее (compare status "ahead"); ahead/diverged/identical и любые
+# ошибки (нет сети/curl/timeout, rate-limit, не-github remote) молча
+# пропускаются (fail-safe).
 check_bot_update_on_entry() {
     command -v git >/dev/null 2>&1 || return 0
+    command -v curl >/dev/null 2>&1 || return 0
     git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1 || return 0
-    local branch local_hash remote_hash
-    branch=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-    if [[ -z "$branch" || "$branch" == "HEAD" ]]; then
-        return 0
-    fi
-    if command -v timeout >/dev/null 2>&1; then
-        timeout 10s git -C "$PROJECT_DIR" fetch --quiet origin "$branch" 2>/dev/null || return 0
+    local origin_url owner_repo branch local_sha api_url cmp_status
+    origin_url=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || echo "")
+    if [[ "$origin_url" =~ ^(https://github\.com/|git@github\.com:)([^/]+)/([^/]+?)(\.git)?$ ]]; then
+        owner_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]}"
     else
         return 0
     fi
-    local_hash=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "")
-    remote_hash=$(git -C "$PROJECT_DIR" rev-parse "origin/${branch}" 2>/dev/null || echo "")
-    if [[ -n "$local_hash" && -n "$remote_hash" && "$local_hash" != "$remote_hash" ]]; then
+    branch=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [[ -z "$branch" || "$branch" == "HEAD" ]]; then
+        branch="main"
+    fi
+    local_sha=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "")
+    [[ "$local_sha" =~ ^[0-9a-f]{40}$ ]] || return 0
+    api_url="https://api.github.com/repos/${owner_repo}/compare/${local_sha}...${branch}"
+    if command -v timeout >/dev/null 2>&1; then
+        cmp_status=$(timeout 10s curl -fsSL --max-time 8 "$api_url" 2>/dev/null | grep -o '"status": *"[^"]*"' | head -n1 | cut -d'"' -f4 || true)
+    else
+        return 0
+    fi
+    if [[ "$cmp_status" == "ahead" ]]; then
         echo -e "  ${YELLOW}⚠️  Доступна новая версия в origin/${branch}: выполните [3] Безопасное обновление${NC}"
     fi
     return 0

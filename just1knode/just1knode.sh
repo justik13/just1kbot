@@ -136,10 +136,12 @@ print_node_version_box_line() {
     printf '│%*s%s%*s│\n' "$pad_left" "" "$label" "$pad_right" ""
 }
 
-# Best-effort проверка новой версии при входе в меню: один короткий запрос
-# к VERSION на main. При любой ошибке молча пропускается и меню не блокирует.
+# Best-effort проверка новой версии при входе в меню. Только информация:
+# один короткий запрос к VERSION на main и сравнение, не вызывает update_node.
+# Уведомляет только когда remote строго новее локальной (semver-направление);
+# равные, более старые и невалидные значения молча пропускаются.
 check_node_update_on_entry() {
-    local repo_url ref remote_ver
+    local repo_url ref remote_ver newest
     repo_url="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
     ref="${JUST1KBOT_REF:-main}"
     if [[ "$repo_url" != "https://github.com/justik13/just1kbot" || "$ref" != "main" ]]; then
@@ -147,7 +149,10 @@ check_node_update_on_entry() {
     fi
     command -v curl >/dev/null 2>&1 || return 0
     remote_ver="$(curl -fsSL --max-time 5 "https://raw.githubusercontent.com/justik13/just1kbot/main/just1knode/VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
-    if [[ -n "$remote_ver" && "$remote_ver" != "$JUST1KNODE_VERSION" ]]; then
+    [[ "$remote_ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
+    [[ "$JUST1KNODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
+    newest="$(printf '%s\n%s\n' "$JUST1KNODE_VERSION" "$remote_ver" | sort -V | tail -n 1)"
+    if [[ "$newest" == "$remote_ver" && "$remote_ver" != "$JUST1KNODE_VERSION" ]]; then
         echo -e "  ${YELLOW}⚠️  Доступна новая версия just1knode: v${remote_ver} (у вас v${JUST1KNODE_VERSION}). Воспользуйтесь пунктом «Обновить утилиту».${NC}"
     fi
     return 0
