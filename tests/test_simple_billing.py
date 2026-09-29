@@ -2508,6 +2508,11 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             metadata_={},
         )
         session.scalar.return_value = order
+        # Settlement hold boundary re-reads the user with a row lock:
+        # a clean (non-held) user must keep the revive-and-credit path.
+        session.get.return_value = User(
+            id=10, telegram_id=10010, financial_hold=False, topup_blocked=False
+        )
 
         with patch("services.order_service.create_order_credit") as mock_credit, \
              patch("services.referral_bonus.grant_referral_bonus_for_topup") as mock_grant, \
@@ -2520,6 +2525,34 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             mock_credit.assert_called_once()
             mock_grant.assert_called_once()
             mock_fulfill.assert_called_once()
+
+    async def test_mark_order_paid_withholds_credit_under_financial_hold(self):
+        """Settlement boundary: paid fact is kept but credit/bonus/fulfill are withheld."""
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=11,
+            service_type="topup",
+            amount_rub=Decimal("100.00"),
+            status="pending",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = User(
+            id=11, telegram_id=10011, financial_hold=True, topup_blocked=False
+        )
+
+        with patch("services.order_service.create_order_credit") as mock_credit, \
+             patch("services.referral_bonus.grant_referral_bonus_for_topup") as mock_grant, \
+             patch("services.order_service.FulfillmentService.fulfill_order") as mock_fulfill:
+            paid_order = await OrderService.mark_order_paid(session, order_uuid)
+            self.assertIsNotNone(paid_order)
+            self.assertEqual(paid_order.status, "paid")
+            self.assertTrue(paid_order.metadata_.get("settlement_held"))
+            mock_credit.assert_not_called()
+            mock_grant.assert_not_called()
+            mock_fulfill.assert_not_called()
 
     async def test_revoke_order_locks_user_row_with_for_update(self):
         """Verify FulfillmentService.revoke_order locks User row with with_for_update=True."""
