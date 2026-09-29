@@ -6,11 +6,20 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+# Host uplink MTU is 1448 (tunnel), so bridges must stay below it:
+# with default 1500 large TLS records (e.g. YooKassa api) were silently
+# dropped for containers while the host itself worked (prod 2026-09-29).
+# 1440 leaves headroom for extra encapsulation. Requires network recreate
+# (compose down/up) to take effect. Complements the MSS-clamp rule.
 networks:
   frontend_net:
     driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1440"
   backend_net:
     driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1440"
 
 services:
   db:
