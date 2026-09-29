@@ -218,6 +218,98 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("45.6 GB", card)
         self.assertIn("12345", card)
 
+    async def test_monthly_server_traffic_cycle_rotation_with_zero_delta(self):
+        """When month changes but server_delta is 0, monthly_traffic_bytes resets to 0 and cycle advances."""
+        server_info = {"id": 1, "name": "NL-1"}
+        peer_id = "test-peer-uuid-1"
+
+        # Node returns same bytes as last raw -> server_delta is 0!
+        api_clients = {
+            peer_id: self._make_mock_client_data(down_bytes=1000, up_bytes=500)
+        }
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_row = (
+            10, peer_id, 1000, 500, 1000, 500, None, True, 42, False, 123456789,
+            datetime(2028, 1, 1, tzinfo=timezone.utc), False,
+        )
+        mock_result.all.return_value = [mock_row]
+        mock_session.execute.return_value = mock_result
+
+        mock_server = Server(
+            id=1,
+            name="NL-1",
+            extra_data={"traffic_cycle": "1999-01", "monthly_traffic_bytes": 500 * 1024 * 1024},
+        )
+        mock_session.get.return_value = mock_server
+
+        with patch("services.workers.traffic.session_scope") as mock_scope, \
+             patch("services.slots_cache.get_server_generation", return_value=1):
+            mock_scope.return_value.__aenter__.return_value = mock_session
+            await _process_server_traffic(server_info, api_clients, expected_gen=1)
+
+        current_cycle = datetime.now(timezone.utc).strftime("%Y-%m")
+        # Ensure session.get was called with with_for_update=True
+        mock_session.get.assert_called_with(Server, 1, with_for_update=True)
+        # Even with delta == 0, the cycle rotated and monthly traffic reset to 0!
+        self.assertEqual(mock_server.extra_data["traffic_cycle"], current_cycle)
+        self.assertEqual(mock_server.extra_data["monthly_traffic_bytes"], 0)
+
+    async def test_user_cumulative_total_across_multiple_profiles(self):
+        """When a user has multiple devices, deltas from all profiles are summed into User.total_traffic_bytes."""
+        server_info = {"id": 1, "name": "NL-1"}
+        peer_1 = "peer-dev-1"
+        peer_2 = "peer-dev-2"
+
+        # User 42 has 2 profiles:
+        # Profile 1: was 100MB, node is 110MB (delta = 10MB)
+        # Profile 2: was 200MB, node is 220MB (delta = 20MB)
+        # Total user delta must be 30MB
+        delta_1 = 10 * 1024 * 1024
+        delta_2 = 20 * 1024 * 1024
+
+        api_clients = {
+            peer_1: self._make_mock_client_data(down_bytes=110 * 1024 * 1024, up_bytes=0),
+            peer_2: self._make_mock_client_data(down_bytes=220 * 1024 * 1024, up_bytes=0),
+        }
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        row_1 = (
+            101, peer_1, 100 * 1024 * 1024, 0, 100 * 1024 * 1024, 0, None, True, 42, False, 123456789,
+            datetime(2028, 1, 1, tzinfo=timezone.utc), False,
+        )
+        row_2 = (
+            102, peer_2, 200 * 1024 * 1024, 0, 200 * 1024 * 1024, 0, None, True, 42, False, 123456789,
+            datetime(2028, 1, 1, tzinfo=timezone.utc), False,
+        )
+        mock_result.all.return_value = [row_1, row_2]
+        mock_session.execute.return_value = mock_result
+
+        mock_server = Server(
+            id=1,
+            name="NL-1",
+            extra_data={"traffic_cycle": datetime.now(timezone.utc).strftime("%Y-%m"), "monthly_traffic_bytes": 0},
+        )
+        mock_session.get.return_value = mock_server
+
+        with patch("services.workers.traffic.session_scope") as mock_scope, \
+             patch("services.slots_cache.get_server_generation", return_value=1):
+            mock_scope.return_value.__aenter__.return_value = mock_session
+            await _process_server_traffic(server_info, api_clients, expected_gen=1)
+
+        # Check calls to session.execute
+        # call[0]: select VPNProfile
+        # call[1]: bulk update VPNProfile
+        # call[2]: update(User).where(User.id == 42).values(total_traffic_bytes=User.total_traffic_bytes + 30MB)
+        self.assertGreaterEqual(len(mock_session.execute.call_args_list), 3)
+        user_update_stmt = mock_session.execute.call_args_list[2][0][0]
+        # Check compiled SQL or parameter values
+        self.assertIn("users", str(user_update_stmt))
+        # Total server delta is delta_1 + delta_2 = 30MB
+        self.assertEqual(mock_server.extra_data["monthly_traffic_bytes"], delta_1 + delta_2)
+
 
 if __name__ == "__main__":
     unittest.main()

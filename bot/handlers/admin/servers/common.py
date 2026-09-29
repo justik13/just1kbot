@@ -16,6 +16,7 @@ from database.repositories.servers_repo import (
     get_server_peer_counts,
     get_servers_paginated,
 )
+from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
 from utils.telegram import safe
 from utils.text_limits import truncate_button_text
@@ -187,7 +188,13 @@ async def _show_server_card(
         )
 
     server_extra = getattr(server, "extra_data", {}) or {}
-    traffic_month = format_traffic(int(server_extra.get("monthly_traffic_bytes", 0) or 0))
+    saved_cycle = server_extra.get("traffic_cycle")
+    current_cycle = now_utc().strftime("%Y-%m")
+    if saved_cycle == current_cycle:
+        monthly_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0)
+    else:
+        monthly_bytes = 0
+    traffic_month = format_traffic(monthly_bytes)
 
     rendered = (
         f"{header}"
