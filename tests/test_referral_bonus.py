@@ -1138,7 +1138,7 @@ class TestActiveReferralsLegacyPayments(unittest.TestCase):
             return 2
 
         session.scalar = fake_scalar
-        count = asyncio.run(get_user_active_referrals_count(session, 872658825))
+        count = asyncio.run(get_user_active_referrals_count(session, 777000111))
         self.assertEqual(count, 2)
         self.assertIn("payments", captured["sql"])
         self.assertIn("orders", captured["sql"])
@@ -1147,7 +1147,7 @@ class TestActiveReferralsLegacyPayments(unittest.TestCase):
         import asyncio
         from database.repositories.users_repo import get_user_active_referrals_count
 
-        for bad in (0, -5, "872658825", None):
+        for bad in (0, -5, "777000111", None):
             session = AsyncMock()
             count = asyncio.run(get_user_active_referrals_count(session, bad))
             self.assertEqual(count, 0)
@@ -1160,7 +1160,7 @@ class TestActiveReferralsLegacyPayments(unittest.TestCase):
         session = AsyncMock()
         captured = {}
         mock_result = MagicMock()
-        mock_result.all.return_value = [(872658825, 2)]
+        mock_result.all.return_value = [(777000111, 2)]
         session.execute = AsyncMock(return_value=mock_result)
 
         async def fake_execute(stmt):
@@ -1169,6 +1169,6 @@ class TestActiveReferralsLegacyPayments(unittest.TestCase):
 
         session.execute = fake_execute
         leaders = asyncio.run(get_referral_leaderboard(session))
-        self.assertEqual(leaders, [(872658825, 2)])
+        self.assertEqual(leaders, [(777000111, 2)])
         self.assertIn("payments", captured["sql"])
         self.assertIn("orders", captured["sql"])
