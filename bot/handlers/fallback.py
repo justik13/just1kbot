@@ -148,11 +148,6 @@ async def dismiss_notification(
     await back_to_main_menu(callback, state, db_user, session)
 
 
-@router.callback_query(F.data == "ignore")
-async def ignore_callback(callback: CallbackQuery):
-    await callback.answer(show_alert=False)
-
-
 @router.callback_query(F.data.in_({"menu_profile", "back_to_profile"}))
 async def legacy_profile_callback(
     callback: CallbackQuery,

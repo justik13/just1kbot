@@ -363,18 +363,6 @@ def build_conf_file_from_dict(data: dict) -> str | None:
         raise VPNConfigParseError(f"Unexpected error: {e}") from e
 
 
-def build_vpn_file(uri: str) -> str | None:
-    if not uri or not isinstance(uri, str):
-        return None
-    try:
-        data = decode_vpn_uri_to_json(uri)
-        if data is None:
-            return None
-        return build_vpn_file_from_dict(data)
-    except Exception:
-        return None
-
-
 def build_conf_file(uri: str) -> str | None:
     if not uri or not isinstance(uri, str):
         return None

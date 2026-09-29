@@ -56,11 +56,3 @@ def format_tg_time(
         clean_spec = format_spec.replace(" ", "")
         return f'<tg-time unix="{unix_ts}" format="{clean_spec}">{fallback}</tg-time>'
     return f'<tg-time unix="{unix_ts}">{fallback}</tg-time>'
-
-
-
-def get_country_display(country_flag: str | None, default_text: str = "🌐") -> str:
-    """Return country flag string configured on the server, or default fallback."""
-    if not country_flag:
-        return default_text
-    return country_flag.strip()

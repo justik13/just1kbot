@@ -10,7 +10,7 @@ from bot.handlers.white_internet import (
     handle_wl_reset_devices,
     process_white_internet_buy,
     process_white_internet_renew,
-    process_topup_pack,
+    process_topup_execute,
     process_add_device_confirm,
 )
 from config.enums import WhiteInternetStatus
@@ -126,7 +126,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.white_internet.get_account_balance", return_value=high_balance) as mock_balance, \
              patch("services.white_internet_service.WhiteInternetService.topup_quota", return_value=(True, "OK", MagicMock())) as mock_topup, \
              patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock) as mock_menu:
-            await process_topup_pack(query, self.session)
+            await process_topup_execute(query, self.session)
 
             mock_balance.assert_awaited_once_with(self.session, user_id=self.user.id)
             mock_topup.assert_awaited_once_with(self.session, self.user.id, 25, actor_telegram_id=self.tg_user.id)
@@ -155,11 +155,11 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
              patch("services.white_internet_service.WhiteInternetService.topup_quota", return_value=(True, "OK", MagicMock())) as mock_topup, \
              patch("bot.handlers.white_internet.show_white_internet_menu", new_callable=AsyncMock):
             # First purchase
-            await process_topup_pack(query, self.session)
+            await process_topup_execute(query, self.session)
             self.assertEqual(mock_topup.await_count, 1)
 
             # Second purchase with identical message_id must not be blocked by ADMIN_BALANCE_OP_ALREADY_PROCESSED
-            await process_topup_pack(query, self.session)
+            await process_topup_execute(query, self.session)
             self.assertEqual(mock_topup.await_count, 2)
 
     async def test_add_device_confirm_allows_repeated_purchases(self):

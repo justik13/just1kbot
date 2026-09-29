@@ -26,14 +26,8 @@ logger = logging.getLogger(__name__)
 # Verified via live API scan (696 tested against Telegram servers, exactly 6 supported):
 # ==============================================================================
 EFFECT_LIKE = "5107584321108051014"        # 👍 Like / Thumbs Up (system confirmations, rename)
-EFFECT_DISLIKE = "5104858069142078462"     # 👎 Dislike / Thumbs Down (cancellations)
-EFFECT_HEART = "5159385139981059251"       # ❤️ Heart (gratitude, reviews)
 EFFECT_FIRE = "5104841245755180586"        # 🔥 Fire (VPN device creation, referral rewards)
 EFFECT_CONFETTI = "5046509860389126442"    # 🎉 Confetti (balance topup, plan purchase, renewal)
-EFFECT_POOP = "5046589136895476101"        # 💩 Poop (system errors)
-
-# Backward-compatibility aliases
-EFFECT_LIGHTNING = EFFECT_FIRE              # 🔥 Primary effect on VPN device creation
 
 _hub_cache = TTLCache(maxsize=HUB_CACHE_MAX_SIZE, ttl=HUB_CACHE_TTL)
 
@@ -340,15 +334,6 @@ async def _delete_hub_messages(
     return failed_ids
 
 
-async def delete_hub_ids(bot, chat_id: int, msg_ids: list[int]) -> list[int]:
-    if not msg_ids:
-        return []
-
-    lock = _get_hub_render_lock(chat_id)
-    async with lock:
-        return await _delete_hub_messages(bot, chat_id, msg_ids)
-
-
 def _is_message_effect_error(exc: Exception) -> bool:
     """Return True if TelegramBadRequest was caused by an unsupported or invalid message_effect_id."""
     err = str(exc).lower()
@@ -653,150 +638,6 @@ async def render_hub(
 
 
 
-async def send_hub_photo(
-    bot,
-    chat_id: int,
-    photo: InputFile,
-    caption: str | None = None,
-    reply_markup: InlineKeyboardMarkup | None = None,
-    parse_mode: str | None = "HTML",
-    session: AsyncSession | None = None,
-) -> int:
-    _maybe_cleanup_cache()
-
-    lock = _get_hub_render_lock(chat_id)
-    async with lock:
-        old_ids = await _dispatch_load_hub_ids_from_db(chat_id, session=session)
-
-        if caption:
-            caption = caption[:1024]
-
-        try:
-            msg = await _send_with_resilience(
-                lambda: bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo,
-                    caption=caption,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode,
-                ),
-                chat_id=chat_id,
-                context="send_hub_photo",
-            )
-        except TelegramBadRequest as exc:
-            error = str(exc).lower()
-            if "parse" in error or "entities" in error:
-                logger.warning(
-                    "HTML parse failed in send_hub_photo for chat %s; using plain text",
-                    chat_id,
-                )
-                plain = html.unescape(re.sub(r"<[^>]+>", "", caption or ""))[:1024]
-                msg = await _send_with_resilience(
-                    lambda: bot.send_photo(
-                        chat_id=chat_id,
-                        photo=photo,
-                        caption=plain,
-                        reply_markup=reply_markup,
-                        parse_mode=None,
-                    ),
-                    chat_id=chat_id,
-                    context="send_hub_photo_plain",
-                )
-            else:
-                raise
-
-        try:
-            await _dispatch_store_hub_id_in_db(chat_id, msg.message_id, session=session)
-        except Exception:
-            # Store BEFORE deleting the old hub: on failure we remove only the
-            # NEW message and leave the OLD hub fully intact (no user-visible
-            # gap). Deleting old first would wipe the chat if persistence fails.
-            try:
-                await asyncio.shield(
-                    bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
-                )
-            except Exception:
-                pass
-            raise
-
-        if old_ids:
-            await _dispatch_delete_hub_messages(bot, chat_id, old_ids, session=session)
-
-        return msg.message_id
-
-
-async def send_hub_document(
-    bot,
-    chat_id: int,
-    document: InputFile,
-    caption: str | None = None,
-    reply_markup: InlineKeyboardMarkup | None = None,
-    parse_mode: str | None = "HTML",
-    session: AsyncSession | None = None,
-) -> int:
-    _maybe_cleanup_cache()
-
-    lock = _get_hub_render_lock(chat_id)
-    async with lock:
-        old_ids = await _dispatch_load_hub_ids_from_db(chat_id, session=session)
-
-        if caption:
-            caption = caption[:1024]
-
-        try:
-            msg = await _send_with_resilience(
-                lambda: bot.send_document(
-                    chat_id=chat_id,
-                    document=document,
-                    caption=caption,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode,
-                ),
-                chat_id=chat_id,
-                context="send_hub_document",
-            )
-        except TelegramBadRequest as exc:
-            error = str(exc).lower()
-            if "parse" in error or "entities" in error:
-                logger.warning(
-                    "HTML parse failed in send_hub_document for chat %s; using plain text",
-                    chat_id,
-                )
-                plain = html.unescape(re.sub(r"<[^>]+>", "", caption or ""))[:1024]
-                msg = await _send_with_resilience(
-                    lambda: bot.send_document(
-                        chat_id=chat_id,
-                        document=document,
-                        caption=plain,
-                        reply_markup=reply_markup,
-                        parse_mode=None,
-                    ),
-                    chat_id=chat_id,
-                    context="send_hub_document_plain",
-                )
-            else:
-                raise
-
-        try:
-            await _dispatch_store_hub_id_in_db(chat_id, msg.message_id, session=session)
-        except Exception:
-            # Store BEFORE deleting the old hub (see send_hub_photo): on
-            # persistence failure we remove only the NEW document and keep the
-            # old hub intact, so the user is never left without a hub screen.
-            try:
-                await asyncio.shield(
-                    bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
-                )
-            except Exception:
-                pass
-            raise
-
-        if old_ids:
-            await _dispatch_delete_hub_messages(bot, chat_id, old_ids, session=session)
-
-        return msg.message_id
-
-
 async def _append_hub_document_unlocked(
     bot,
     chat_id: int,
@@ -855,29 +696,6 @@ async def _append_hub_document_unlocked(
         raise
 
     return msg.message_id
-
-
-async def append_hub_document(
-    bot,
-    chat_id: int,
-    document: InputFile,
-    caption: str | None = None,
-    reply_markup: InlineKeyboardMarkup | None = None,
-    parse_mode: str | None = "HTML",
-    session: AsyncSession | None = None,
-) -> int:
-    _maybe_cleanup_cache()
-    lock = _get_hub_render_lock(chat_id)
-    async with lock:
-        return await _append_hub_document_unlocked(
-            bot=bot,
-            chat_id=chat_id,
-            document=document,
-            caption=caption,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-            session=session,
-        )
 
 
 async def _append_hub_message_unlocked(

@@ -627,7 +627,7 @@ exit 0
         self.assertIn("BOT_DOMAIN должен быть доменным именем (FQDN)", res_ip_domain.stderr + res_ip_domain.stdout)
 
     # -------------------------------------------------------------------------
-    # F20: Verified Update Rollback in update_xray
+    # F20: Verified Update Rollback in update_xray_core
     # -------------------------------------------------------------------------
     def test_update_xray_fail_closed_rollback(self):
         self._prepare_base_env()
@@ -661,11 +661,11 @@ systemctl() {
     return 0
 }
 
-update_xray
+update_xray_core
 """
         res = self._run_shell_snippet(cmd)
         self.assertNotEqual(
-            res.returncode, 0, "update_xray must exit with error on service restart failure"
+            res.returncode, 0, "update_xray_core must exit with error on service restart failure"
         )
         self.assertIn("Xray не запустился после обновления", res.stdout + res.stderr)
         self.assertIn(
