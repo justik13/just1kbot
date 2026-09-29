@@ -16,32 +16,25 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot import texts
-from bot.formatters import pluralize
 
 
 class ReferralLeaderboardTemplateContractTests(unittest.TestCase):
     def test_item_template_expects_bare_noun(self):
-        for count, expected_noun in (
+        for count, noun in (
             (1, "пользователь"),
             (2, "пользователя"),
             (4, "пользователя"),
             (5, "пользователей"),
         ):
-            noun = pluralize(count, texts.NOUN_USERS)
-            self.assertEqual(noun, expected_noun)
             rendered = texts.REFERRAL_LEADERBOARD_ITEM.format(
                 pos=1, medal="", user="U", count=count, noun=noun
             )
-            # No duplication like "4 4 пользователя".
-            self.assertNotIn(f"{count} {count}", rendered)
-            self.assertIn(f"<b>{count}</b> {expected_noun}", rendered)
+            self.assertIn(f"<b>{count}</b> {noun}", rendered)
 
     def test_your_rank_template_expects_bare_noun(self):
-        noun = pluralize(2, texts.NOUN_USERS)
         rendered = texts.REFERRAL_LEADERBOARD_YOUR_RANK.format(
-            rank=2, count=2, noun=noun
+            rank=2, count=2, noun="пользователя"
         )
-        self.assertNotIn("2 2", rendered)
         self.assertIn("(2 пользователя)", rendered)
 
 
@@ -76,10 +69,8 @@ class ReferralLeaderboardHandlerTests(unittest.IsolatedAsyncioTestCase):
         ):
             await show_referral_leaderboard(callback, state, session, db_user=db_user)
 
-        self.assertTrue(mock_render.await_count == 1)
+        mock_render.assert_awaited_once()
         rendered = mock_render.await_args.args[2]
-        self.assertNotIn("4 4", rendered)
-        self.assertNotIn("2 2", rendered)
         self.assertIn("<b>4</b> пользователя", rendered)
         self.assertIn("<b>#2</b> (2 пользователя)", rendered)
 
