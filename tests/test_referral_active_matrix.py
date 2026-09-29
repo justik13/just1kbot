@@ -1,16 +1,19 @@
-"""Postgres behavioral matrix for referral paid-activity qualification.
+"""Postgres behavioral matrix for referral qualifying-activity qualification.
 
 Runs only with TEST_DATABASE_URL (CI). Skipped on Windows dev machines.
 
-Matrix (referrer R):
-  A: paid Order amount>0, no Payment            -> counts
-  B: succeeded+fulfilled+credited Payment       -> counts (legacy, no Order)
-  C: succeeded Payment, credited_at NULL        -> NOT counted
-  D: refunded/reversed Payment                  -> NOT counted
-  E: no Order, no Payment (freebie sub)         -> NOT counted
-  F: deleted referral with paid Order           -> NOT counted
-  G: pending Order only                         -> NOT counted
-  H: zero-amount paid Order                     -> NOT counted
+Active = qualifying top-up ≥ REFERRAL_ACTIVE_MIN_TOPUP_RUB (68 = discounted Base-30):
+  A:  paid topup Order 100, no Payment            -> counts
+  A2: paid topup Order 10 (dust)                  -> NOT counted
+  A3: paid non-topup Order 500 (tariff purchase)  -> NOT counted
+  B:  succeeded+fulfilled+credited Payment 100    -> counts (legacy, no Order)
+  B2: succeeded+fulfilled+credited Payment 10     -> NOT counted (dust)
+  C:  succeeded Payment, credited_at NULL         -> NOT counted
+  D:  refunded/reversed Payment                   -> NOT counted
+  E:  no Order, no Payment (freebie sub)          -> NOT counted
+  F:  deleted referral with paid topup Order      -> NOT counted
+  G:  pending topup Order only                    -> NOT counted
+  H:  zero-amount paid topup Order                 -> NOT counted
 
 Expected: active == 2 (A, B).
 """
@@ -103,7 +106,10 @@ class ReferralPaidActivityMatrixTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             ref = await users_repo.create_user(session, telegram_id=900001)
             a = await users_repo.create_user(session, telegram_id=900002, referred_by=900001)
+            a2 = await users_repo.create_user(session, telegram_id=900010, referred_by=900001)
+            a3 = await users_repo.create_user(session, telegram_id=900011, referred_by=900001)
             b = await users_repo.create_user(session, telegram_id=900003, referred_by=900001)
+            b2 = await users_repo.create_user(session, telegram_id=900012, referred_by=900001)
             c = await users_repo.create_user(session, telegram_id=900004, referred_by=900001)
             d = await users_repo.create_user(session, telegram_id=900005, referred_by=900001)
             # E: nothing (freebie) — user exists, no Order/Payment rows
@@ -112,10 +118,16 @@ class ReferralPaidActivityMatrixTests(unittest.IsolatedAsyncioTestCase):
             g = await users_repo.create_user(session, telegram_id=900008, referred_by=900001)
             h = await users_repo.create_user(session, telegram_id=900009, referred_by=900001)
 
-            # A: paid order
-            session.add(Order(user_id=a.id, amount_rub=Decimal("100"), status="paid"))
-            # B: real topup, no order
+            # A: qualifying paid topup order
+            session.add(Order(user_id=a.id, service_type="topup", amount_rub=Decimal("100"), status="paid"))
+            # A2: dust topup below threshold
+            session.add(Order(user_id=a2.id, service_type="topup", amount_rub=Decimal("10"), status="paid"))
+            # A3: direct tariff purchase is NOT a top-up
+            session.add(Order(user_id=a3.id, service_type="awg", amount_rub=Decimal("500"), status="paid"))
+            # B: real legacy topup, no order
             session.add(self._payment(b.id, "b"))
+            # B2: legacy dust topup
+            session.add(self._payment(b2.id, "b2", amount=Decimal("10")))
             # C: succeeded but never credited
             session.add(self._payment(c.id, "c", credited=False))
             # D: refunded/reversed
@@ -128,13 +140,13 @@ class ReferralPaidActivityMatrixTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             # E: nothing (freebie) — no rows
-            # F: deleted referral with paid order
-            session.add(Order(user_id=f.id, amount_rub=Decimal("100"), status="paid"))
+            # F: deleted referral with qualifying paid topup order
+            session.add(Order(user_id=f.id, service_type="topup", amount_rub=Decimal("100"), status="paid"))
             f.is_deleted = True
-            # G: pending order only
-            session.add(Order(user_id=g.id, amount_rub=Decimal("100"), status="pending"))
-            # H: zero-amount paid order
-            session.add(Order(user_id=h.id, amount_rub=Decimal("0"), status="paid"))
+            # G: pending topup order only
+            session.add(Order(user_id=g.id, service_type="topup", amount_rub=Decimal("100"), status="pending"))
+            # H: zero-amount paid topup order
+            session.add(Order(user_id=h.id, service_type="topup", amount_rub=Decimal("0"), status="paid"))
 
             count = await users_repo.get_user_active_referrals_count(session, 900001)
             self.assertEqual(count, 2)

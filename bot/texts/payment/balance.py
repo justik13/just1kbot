@@ -31,7 +31,7 @@ BALANCE_HISTORY_TITLE = """🧾 <b>История операций</b>
 
 BALANCE_INSUFFICIENT_FUNDS_DIFFERENCE = "Задолженность: <b>{value_0} ₽</b>"
 
-BALANCE_NA_BONUS_BALANCE = "• {amt} ₽ ➡️ <b>+{amt____10} ₽</b> на бонусный баланс"
+BALANCE_NA_BONUS_BALANCE = "• {amt} ₽ ➡️ <b>+{amt____10} ₽</b> на бонусный баланс пригласившего"
 
 BALANCE_OPERATION_DEFAULT_LABEL = "Операция"
 
@@ -64,7 +64,10 @@ BALANCE_TOPUP_CARD = """💳 <b>Пополнение баланса</b>
 
 BALANCE_TOTAL_AVAILABLE_LABEL = "💰 Баланс: <b>{int_balance_real_available} ₽</b>"
 
-BALANCE_VY_POLUCHITE_20_OT_SUMMY_POPOL = """Вы получите <b>+20%</b> от суммы пополнения на бонусный баланс!
+# NOTE: legacy key name kept to avoid churn; the value is a template with
+# the inviter's actual tier rate (15-30%), NOT a fixed 20%. The bonus goes
+# to the inviter's balance, not the topping-up user's.
+BALANCE_VY_POLUCHITE_20_OT_SUMMY_POPOL = """Ваш пригласивший получит <b>+{rate_pct}%</b> от суммы пополнения на свой бонусный баланс!
 """
 
 HISTORY_EMPTY = "<i>История пуста. У вас пока не было пополнений.</i>"

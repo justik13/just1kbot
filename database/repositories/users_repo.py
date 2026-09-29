@@ -9,6 +9,7 @@ from config.constants import (
     AMNEZIA_PROTOCOLS,
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
+    REFERRAL_ACTIVE_MIN_TOPUP_RUB,
     XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
@@ -216,22 +217,22 @@ async def get_user_referrals_paginated(
 
 
 def _referral_paid_activity_condition(referral) -> object:
-    """Paid activity = paid Order (any funding source, #296 contract) OR real topup.
+    """Qualifying activity = paid top-up Order ≥ threshold OR legacy real top-up.
 
-    Order branch intentionally follows the #296 paid-Order contract and does
-    NOT trace wallet funding provenance (real vs bonus balance): a wallet
-    Order paid purely from bonus/admin balance still yields paid status,
-    because provenance tracking would be banking overengineering.
-    The Payment branch requires a real external topup (succeeded +
-    fulfilled + credited), so pure admin_adjustment freebies never count
-    until actually spent — see audit note on PR #306.
+    Only real balance top-ups count: direct tariff purchases (any funding
+    source, including bonus-funded wallet orders) and dust top-ups below
+    REFERRAL_ACTIVE_MIN_TOPUP_RUB do NOT activate the referral. The legacy
+    Payment branch covers real external top-ups made before the orders table
+    (succeeded + fulfilled + credited), so pure admin_adjustment freebies
+    never count until actually topped up.
     """
-    paid_order = (
+    qualifying_topup_order = (
         select(Order.id)
         .where(
             Order.user_id == referral.id,
+            Order.service_type == "topup",
             Order.status == "paid",
-            Order.amount_rub > 0,
+            Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
         )
         .exists()
     )
@@ -242,17 +243,21 @@ def _referral_paid_activity_condition(referral) -> object:
             Payment.provider_status == "succeeded",
             Payment.fulfillment_status == "succeeded",
             Payment.credited_at.is_not(None),
-            Payment.amount > 0,
+            Payment.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
         )
         .exists()
     )
-    return or_(paid_order, real_topup)
+    return or_(qualifying_topup_order, real_topup)
 
 
 async def get_user_active_referrals_count(
     session: AsyncSession, telegram_id: int
 ) -> int:
-    """Return count of referred users with paid activity (Order or real topup)."""
+    """Return count of referred users with a qualifying top-up (≥ threshold).
+
+    Each referral counts at most once: repeat top-ups earn the referrer a
+    percentage but never increment this counter.
+    """
     if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:
         return 0
     stmt = (

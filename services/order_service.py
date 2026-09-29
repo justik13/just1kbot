@@ -82,8 +82,11 @@ class OrderService:
                 metadata=credit_meta,
             )
 
-        # Grant referral bonus for topups and external payments (cards/gateways)
-        if order.service_type == "topup" or order.payment_method != "wallet":
+        # Referral bonus accrues ONLY on balance top-ups: direct tariff
+        # purchases (external gateway or wallet) must not mint referrer
+        # bonuses, otherwise refunds of non-topup orders would leave
+        # unreversed bonuses behind (reversal covers top-ups only).
+        if order.service_type == "topup":
             from services.referral_bonus import grant_referral_bonus_for_topup
 
             await grant_referral_bonus_for_topup(

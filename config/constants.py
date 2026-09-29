@@ -218,6 +218,15 @@ REFERRAL_TIERS: tuple[tuple[int, Decimal, str], ...] = (
 )
 REFERRAL_DEFAULT_RATE: Decimal = Decimal("0.15")
 REFERRAL_WELCOME_DISCOUNT_PERCENT: Decimal = Decimal("0.25")
+# Minimum qualifying top-up for a referral to become "active".
+# Dust top-ups below this threshold neither activate the referral
+# (leaderboard/tier counting) nor consume the inviter's tier step.
+# 68 RUB = discounted first Base-30 tariff (90 - 25%): the smallest *real*
+# purchase. A referred test-week buyer pays 27 (35 - 25%) and intentionally
+# does NOT activate; White Internet buyers (188+ discounted) always qualify.
+# Independent business constant, NOT auto-derived from tariffs: if tariff
+# prices or the welcome rate change, adjust it manually in one place.
+REFERRAL_ACTIVE_MIN_TOPUP_RUB: Decimal = Decimal("68")
 
 
 CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
@@ -293,6 +302,7 @@ __all__ = [
     "RATE_LIMIT_REQUESTS_PER_MINUTE",
     "REFERRAL_DEFAULT_RATE",
     "REFERRAL_TIERS",
+    "REFERRAL_ACTIVE_MIN_TOPUP_RUB",
     "REFERRAL_WELCOME_DISCOUNT_PERCENT",
     "SELF_HEALING_MAX_PER_CYCLE",
     "ServerHealthState",
