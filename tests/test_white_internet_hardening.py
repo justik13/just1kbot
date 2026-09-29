@@ -578,9 +578,9 @@ class TestGroupIWhiteInternetRepoGrantConservation(unittest.IsolatedAsyncioTestC
 
 
 class TestGroupJWhiteInternetServiceDynamicQuotaAndOptions(unittest.TestCase):
-    """Group J: White Internet Service Dynamic Quota and VLESS OPTIONS."""
+    """Group J: White Internet Service Dynamic Quota and VLESS uplink profile."""
 
-    def test_generate_vless_links_enforces_options_method(self):
+    def test_generate_vless_links_enforces_bodiless_get_uplink(self):
         sub = WhiteInternetSubscription(uuid=str(uuid.uuid4()))
         links = WhiteInternetService.generate_vless_links(sub, cdn_domain="cdn.example.test")
         self.assertEqual(len(links), 1)
@@ -593,16 +593,23 @@ class TestGroupJWhiteInternetServiceDynamicQuotaAndOptions(unittest.TestCase):
         query = urllib.parse.parse_qs(parsed.query)
         self.assertIn("extra", query)
         extra_json = json.loads(query["extra"][0])
-        self.assertEqual(extra_json.get("uplinkHTTPMethod"), "OPTIONS")
+        # Bodiless uplink: Yandex Cloud CDN edge answers 413 to any request
+        # carrying a body, so uploads travel via GET in data-{i} headers.
+        self.assertEqual(extra_json.get("uplinkHTTPMethod"), "GET")
+        self.assertEqual(extra_json.get("uplinkDataPlacement"), "header")
+        self.assertEqual(extra_json.get("uplinkDataKey"), "data")
+        self.assertEqual(extra_json.get("scMaxEachPostBytes"), 4096)
         self.assertEqual(extra_json.get("mode"), "packet-up")
         self.assertTrue(extra_json.get("xPaddingObfsMode"))
 
-    def test_generate_full_xray_config_enforces_options(self):
+    def test_generate_full_xray_config_enforces_bodiless_uplink(self):
         sub = WhiteInternetSubscription(uuid=str(uuid.uuid4()))
         cfg = WhiteInternetService.generate_full_xray_config(sub, cdn_domain="cdn.example.test")
         outbound = next(o for o in cfg["outbounds"] if o.get("tag") == "proxy-white-internet")
         xhttp_settings = outbound["streamSettings"]["xhttpSettings"]
-        self.assertEqual(xhttp_settings["uplinkHTTPMethod"], "OPTIONS")
+        self.assertEqual(xhttp_settings["uplinkHTTPMethod"], "GET")
+        self.assertEqual(xhttp_settings["uplinkDataPlacement"], "header")
+        self.assertEqual(xhttp_settings["uplinkDataKey"], "data")
         self.assertEqual(xhttp_settings["mode"], "packet-up")
 
 

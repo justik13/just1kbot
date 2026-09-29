@@ -222,7 +222,17 @@ REFERRAL_WELCOME_DISCOUNT_PERCENT: Decimal = Decimal("0.25")
 
 CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "mode": "packet-up",
-    "uplinkHTTPMethod": "OPTIONS",
+    # Uplink without request bodies: Yandex Cloud CDN edge answers 413 to ANY
+    # request carrying a body (observed 28-29.09.2026, all methods). Header
+    # placement keeps uploads bodiless (data travels in data-{i} headers).
+    "uplinkHTTPMethod": "GET",
+    "uplinkDataPlacement": "header",
+    "uplinkDataKey": "data",
+    # Keep a single upload post within the server-side scMaxEachPostBytes
+    # limit (Xray itself answers 413 when a post exceeds it).
+    "scMaxEachPostBytes": 4096,
+    "scMaxConcurrentPosts": 1,
+    "scMinPostsIntervalMs": 30,
     "xPaddingPlacement": "queryInHeader",
     "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
     "xPaddingHeader": "X-Cache",

@@ -47,7 +47,9 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
         extra = json.loads(extra_json)
 
         # Invariants from SSOT:
-        self.assertEqual(extra["uplinkHTTPMethod"], "OPTIONS")
+        self.assertEqual(extra["uplinkHTTPMethod"], "GET")
+        self.assertEqual(extra["uplinkDataPlacement"], "header")
+        self.assertEqual(extra["uplinkDataKey"], "data")
         self.assertTrue(extra["xPaddingObfsMode"])
         self.assertEqual(extra["xPaddingKey"], "dc")
         self.assertEqual(extra["xPaddingHeader"], "X-Cache")

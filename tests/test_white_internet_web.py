@@ -264,7 +264,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     wl_url = decoded_lines[0]
                     self.assertTrue(wl_url.startswith("vless://"))
                     self.assertIn("/assets/v1", unquote(wl_url))
-                    self.assertIn("OPTIONS", unquote(wl_url))
+                    decoded_url = unquote(wl_url)
+                    self.assertIn('"uplinkHTTPMethod":"GET"', decoded_url)
+                    self.assertIn('"uplinkDataPlacement":"header"', decoded_url)
 
     async def test_feed_without_hwid_returns_403_hwid_required(self):
         now = datetime.now(timezone.utc)

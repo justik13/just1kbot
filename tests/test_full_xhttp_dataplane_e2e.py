@@ -6,13 +6,14 @@ Verifies:
    - {secret_base_path}/default for standalone origin
    - {secret_base_path}/{code} when relaying
 2. Complete data-plane flow simulation:
-   Client -> Nginx (TLS/HTTP2, OPTIONS->POST mapping, buffer settings) -> Xray XHTTP (packet-up, xPadding) -> Relay -> Internet.
+   Client -> Nginx (TLS/HTTP2, buffer settings) -> Xray XHTTP (packet-up, xPadding, bodiless GET uplink) -> Relay -> Internet.
 3. XHTTP packet-up obfuscation parameters compliance with CDN spec:
    - xPaddingPlacement="queryInHeader"
    - xPaddingKey="dc"
    - xPaddingHeader="X-Cache"
    - xPaddingMethod="tokenish"
-   - uplinkHTTPMethod="OPTIONS"
+   - uplinkHTTPMethod="GET" with uplinkDataPlacement="header" (bodiless
+     uploads: Yandex Cloud CDN edge answers 413 to any request with a body)
 4. Relay egress enforcement (Anti-Russian Exit):
    - Origin node just1k-wl-default routes strictly to relay outbound tunnel
    - Standalone origin without relays blocks direct egress (routes to blackhole)
@@ -178,7 +179,9 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertEqual(extra_data.get("xPaddingKey"), DEFAULT_WHITE_INTERNET_PADDING_KEY)
         self.assertEqual(extra_data.get("xPaddingHeader"), "X-Cache")
         self.assertEqual(extra_data.get("xPaddingMethod"), "tokenish")
-        self.assertEqual(extra_data.get("uplinkHTTPMethod"), "OPTIONS")
+        self.assertEqual(extra_data.get("uplinkHTTPMethod"), "GET")
+        self.assertEqual(extra_data.get("uplinkDataPlacement"), "header")
+        self.assertEqual(extra_data.get("uplinkDataKey"), "data")
         self.assertEqual(extra_data.get("mode"), "packet-up")
         self.assertTrue(extra_data.get("xPaddingObfsMode"))
 
@@ -193,7 +196,7 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         xhttp_settings = outbound["streamSettings"]["xhttpSettings"]
         self.assertEqual(xhttp_settings.get("xPaddingPlacement"), "queryInHeader")
         self.assertEqual(xhttp_settings.get("path"), "/w_custom/default")
-        self.assertEqual(xhttp_settings.get("uplinkHTTPMethod"), "OPTIONS")
+        self.assertEqual(xhttp_settings.get("uplinkHTTPMethod"), "GET")
 
         # just1knode template must also use queryInHeader
         sh_content = _read_just1knode_content()
