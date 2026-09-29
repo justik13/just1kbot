@@ -538,6 +538,9 @@ class TestMigrationFinalizerHook(unittest.IsolatedAsyncioTestCase):
             provisioning_status="active",
         )
 
+        old_server = Server(id=10, protocol="amneziawg2")
+        old_profile.server = old_server
+
         mock_execute_res = MagicMock()
         mock_execute_res.scalar_one_or_none.return_value = old_profile
         mock_session.execute = AsyncMock(return_value=mock_execute_res)
@@ -555,6 +558,7 @@ class TestMigrationFinalizerHook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["peer_id"], "peer-55")
         self.assertEqual(kwargs["server_id"], 10)
         self.assertEqual(kwargs["profile_id"], 55)
+        self.assertEqual(kwargs["protocol"], "amneziawg2")
         self.assertEqual(kwargs["audit_reason"], "device_migration_grace_expired")
         self.assertIsNotNone(kwargs.get("next_attempt_at"))
         delta = kwargs["next_attempt_at"] - now_utc()
@@ -609,6 +613,44 @@ class TestMigrationFinalizerHook(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(old_profile.provisioning_status, "deleting")
         mock_ensure_delete.assert_called_once()
+
+    @patch("services.api_operations_queue.ensure_delete_operation", new_callable=AsyncMock)
+    @patch("services.api_operations_queue.resolve_profile_endpoint_snapshot", new_callable=AsyncMock)
+    async def test_migration_grace_deletion_fallback_protocol_from_db(
+        self, mock_resolve_snapshot, mock_ensure_delete
+    ):
+        from services.api_operations_finalizer import _schedule_migration_grace_deletion
+
+        mock_session = AsyncMock()
+        operation = SimpleNamespace(
+            payload={"migrating_from_id": 55},
+        )
+        new_profile = SimpleNamespace(
+            id=99,
+            provisioning_status="active",
+        )
+        old_profile = VPNProfile(
+            id=55,
+            server_id=10,
+            peer_id="peer-55",
+            client_name="tg_123_p55",
+            provisioning_status="active",
+        )
+        old_profile.server = None
+
+        mock_execute_res = MagicMock()
+        mock_execute_res.scalar_one_or_none.return_value = old_profile
+        mock_session.execute = AsyncMock(return_value=mock_execute_res)
+        mock_session.get = AsyncMock(return_value=Server(id=10, protocol="amneziawg2"))
+
+        mock_resolve_snapshot.return_value = (10, "OldServer", "https://old.server", "key")
+
+        await _schedule_migration_grace_deletion(mock_session, operation, new_profile)
+
+        self.assertEqual(old_profile.provisioning_status, "deleting")
+        mock_ensure_delete.assert_called_once()
+        _, kwargs = mock_ensure_delete.call_args
+        self.assertEqual(kwargs["protocol"], "amneziawg2")
 
 
 class TestDeviceMigrateRoutes(unittest.IsolatedAsyncioTestCase):
