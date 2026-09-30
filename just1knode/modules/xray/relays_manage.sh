@@ -971,10 +971,12 @@ if os.path.exists(rf):
 
 # Поиск целевого релея по индексу, коду или имени
 matched_code = None
+target_ip = None
 if target.isdigit():
     idx = int(target) - 1
     if 0 <= idx < len(relays):
         matched_code = relays[idx].get('code')
+        target_ip = relays[idx].get('ip')
         relays[idx]['sni'] = new_sni
         relays[idx]['security'] = new_sec
 
@@ -982,6 +984,7 @@ if not matched_code:
     for r in relays:
         if str(r.get('code', '')).lower() == target or str(r.get('name', '')).lower() == target:
             matched_code = r.get('code')
+            target_ip = r.get('ip')
             r['sni'] = new_sni
             r['security'] = new_sec
             break
@@ -1000,19 +1003,36 @@ if not matched_code:
     print(f'NOT_FOUND: Relay {target} not found in relays registry or config')
     sys.exit(1)
 
-if not any(r.get('code') == matched_code for r in relays):
-    relays.append({
-        'code': matched_code,
-        'name': f'Релей {matched_code.upper()}',
-        'sni': new_sni,
-        'security': new_sec
-    })
-
 out_tag = f'just1k-wl-outbound-{matched_code}'
 target_ob = next((ob for ob in cfg.get('outbounds', []) if ob.get('tag') == out_tag), None)
 if not target_ob:
     print(f'NOT_FOUND: Outbound {out_tag} not found in Xray config')
     sys.exit(1)
+
+if not target_ip:
+    vnext = target_ob.get('settings', {}).get('vnext', [{}])
+    if vnext:
+        target_ip = vnext[0].get('address')
+
+if not any(r.get('code') == matched_code for r in relays):
+    relays.append({
+        'code': matched_code,
+        'name': f'Релей {matched_code.upper()}',
+        'ip': target_ip or '',
+        'sni': new_sni,
+        'security': new_sec
+    })
+
+# Валидация DNS для режима TLS во избежание NDPI_UNRESOLVED_HOSTNAME (сверка SNI ➔ DNS)
+if new_sec == 'tls' and target_ip and os.environ.get('JUST1KNODE_SKIP_DNS_CHECK') != '1':
+    import socket
+    try:
+        addr_info = socket.getaddrinfo(new_sni, None, socket.AF_INET)
+        resolved_ips = {ai[4][0] for ai in addr_info if ai[4]}
+        if target_ip not in resolved_ips:
+            print(f'WARN_DNS_MISMATCH|{target_ip}|{\",\".join(resolved_ips)}')
+    except Exception as e:
+        print(f'WARN_DNS_ERROR|{target_ip}|{e}')
 
 st = target_ob.setdefault('streamSettings', {})
 st['security'] = new_sec
@@ -1077,7 +1097,36 @@ print(f'OK:{matched_code}')
         return 1
     fi
 
-    local matched_code="${update_res#OK:}"
+    if echo "$update_res" | grep -q "WARN_DNS_"; then
+        local dns_warn
+        dns_warn=$(echo "$update_res" | grep "WARN_DNS_" | head -n1)
+        if echo "$dns_warn" | grep -q "^WARN_DNS_MISMATCH"; then
+            local exp_ip
+            exp_ip=$(echo "$dns_warn" | cut -d'|' -f2)
+            local act_ips
+            act_ips=$(echo "$dns_warn" | cut -d'|' -f3)
+            warn "ВНИМАНИЕ: Домен '$new_sni' в DNS указывает на [$act_ips], а ожидаемый IP релея: $exp_ip!"
+            warn "Несовпадение SNI и DNS на линке к зарубежному релею может вызвать блокировку ТСПУ (NDPI_UNRESOLVED_HOSTNAME)."
+        else
+            local err_detail
+            err_detail=$(echo "$dns_warn" | cut -d'|' -f3)
+            warn "ВНИМАНИЕ: Не удалось разрезолвить домен '$new_sni' в DNS ($err_detail)."
+        fi
+
+        if [[ -t 0 ]]; then
+            echo -e "${YELLOW}Вы уверены, что хотите применить этот SNI? [y/N]: ${NC}"
+            local ans=""
+            read -rp "" ans || ans="n"
+            if [[ "${ans,,}" != "y" && "${ans,,}" != "yes" ]]; then
+                manifest_rollback
+                error "Операция отменена пользователем."
+                return 1
+            fi
+        fi
+    fi
+
+    local matched_code
+    matched_code=$(echo "$update_res" | grep "^OK:" | head -n1 | cut -d: -f2)
 
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
         manifest_rollback

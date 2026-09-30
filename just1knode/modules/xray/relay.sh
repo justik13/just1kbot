@@ -111,15 +111,13 @@ TARGET_DIR="/usr/local/etc/xray/tls"
 install -d -m 750 -o root -g nogroup "$TARGET_DIR"
 
 if [ -n "${RENEWED_LINEAGE:-}" ] && [ -n "$RELAY_SNI" ]; then
-    case "$RENEWED_LINEAGE" in
-        *"$RELAY_SNI"*)
-            if [ -f "/etc/letsencrypt/live/${RELAY_SNI}/fullchain.pem" ]; then
-                install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${RELAY_SNI}/fullchain.pem" "${TARGET_DIR}/fullchain.pem"
-                install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${RELAY_SNI}/privkey.pem" "${TARGET_DIR}/privkey.pem"
-                systemctl restart xray 2>/dev/null || true
-            fi
-            ;;
-    esac
+    if [ "$(basename "$RENEWED_LINEAGE")" = "$RELAY_SNI" ]; then
+        if [ -f "/etc/letsencrypt/live/${RELAY_SNI}/fullchain.pem" ]; then
+            install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${RELAY_SNI}/fullchain.pem" "${TARGET_DIR}/fullchain.pem"
+            install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${RELAY_SNI}/privkey.pem" "${TARGET_DIR}/privkey.pem"
+            systemctl restart xray 2>/dev/null || true
+        fi
+    fi
 fi
 EOF
     chmod 755 /etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh

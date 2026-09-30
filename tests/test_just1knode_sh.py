@@ -387,6 +387,7 @@ exit 0
         cmd = 'update_relay_sni "de" "de.example.com" "tls"'
         res = self._run_shell_snippet(cmd)
         self.assertEqual(res.returncode, 0, f"update_relay_sni failed: {res.stderr + res.stdout}")
+        self.assertIn("ВНИМАНИЕ", res.stderr + res.stdout)
 
         with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
             updated = json.load(f)
@@ -2393,7 +2394,7 @@ remove_traffic_watchdog_timer
         self.assertIn("openssl x509 -checkend 86400", relay_sh)
         self.assertIn("port80_was_open", relay_sh)
         # Ensure deploy hook checks RENEWED_LINEAGE against RELAY_SNI
-        self.assertIn('case "$RENEWED_LINEAGE" in\n        *"$RELAY_SNI"*)', relay_sh)
+        self.assertIn('[ "$(basename "$RENEWED_LINEAGE")" = "$RELAY_SNI" ]', relay_sh)
 
     def test_add_relay_node_supports_legacy_and_new_syntax(self):
         """Verify add_relay_node correctly parses legacy positional args and new tls args."""
