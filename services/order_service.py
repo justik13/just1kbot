@@ -8,12 +8,12 @@ import logging
 import math
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from config.constants import REFERRAL_WELCOME_DISCOUNT_PERCENT
-from database.models import Order, Tariff, User
+from database.models import AccountLedgerEntry, Order, Tariff, User
 from database.repositories.users_repo import (
     is_eligible_for_referral_first_discount,
 )
@@ -722,35 +722,50 @@ class OrderService:
             order.refunded_at = now_utc()
 
             if order.service_type == "topup":
-                refund_ref = (
-                    (result.external_id or "").strip()
-                    or f"refund_{len(processed_refund_ids)}"
-                )
-                target_cumulative = new_total_refunded.quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-                prev_cumulative = refunded_so_far.quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-                ledger_delta = target_cumulative - prev_cumulative
-
-                if ledger_delta > 0:
-                    await create_order_refund_debit(
-                        session,
-                        user_id=order.user_id,
-                        amount_rub=ledger_delta,
-                        order_id=order.id,
-                        refund_id=refund_ref,
-                        metadata={"source": "yookassa_refund"},
+                has_credit = bool(
+                    await session.scalar(
+                        select(func.count(AccountLedgerEntry.id)).where(
+                            AccountLedgerEntry.order_id == order.id,
+                            AccountLedgerEntry.entry_type == "payment_credit",
+                        )
                     )
-                await reverse_referral_bonus_for_topup(
-                    session,
-                    order_id=order.id,
-                    refund_amount=refund_amount,
-                    original_topup_amount=order.amount_rub,
-                    total_refunded_amount=new_total_refunded,
-                    refund_id=refund_ref,
                 )
+
+                if has_credit:
+                    refund_ref = (
+                        (result.external_id or "").strip()
+                        or f"refund_{len(processed_refund_ids)}"
+                    )
+                    target_cumulative = new_total_refunded.quantize(
+                        Decimal("1"), rounding=ROUND_HALF_UP
+                    )
+                    prev_cumulative = refunded_so_far.quantize(
+                        Decimal("1"), rounding=ROUND_HALF_UP
+                    )
+                    ledger_delta = target_cumulative - prev_cumulative
+
+                    if ledger_delta > 0:
+                        await create_order_refund_debit(
+                            session,
+                            user_id=order.user_id,
+                            amount_rub=ledger_delta,
+                            order_id=order.id,
+                            refund_id=refund_ref,
+                            metadata={"source": "yookassa_refund"},
+                        )
+                    await reverse_referral_bonus_for_topup(
+                        session,
+                        order_id=order.id,
+                        refund_amount=refund_amount,
+                        original_topup_amount=order.amount_rub,
+                        total_refunded_amount=new_total_refunded,
+                        refund_id=refund_ref,
+                    )
+                else:
+                    logger.info(
+                        "Order %s topup has no payment_credit in ledger (held or uncredited); skipping refund debit",
+                        order.id,
+                    )
 
             is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")
             if is_fully_refunded:
