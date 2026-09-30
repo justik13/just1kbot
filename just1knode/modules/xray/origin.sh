@@ -1145,9 +1145,8 @@ try:
         if not code or not path or not port: continue
         cf_path = os.path.join(nginx_dir, f'{code}.conf')
         cf_base = path.rstrip('/')
-        if not os.path.exists(cf_path):
-            with open(cf_path, 'w', encoding='utf-8') as cf:
-                cf.write(f'''location = {cf_base} {{
+        desired_conf = f'''# Relay location for {code}
+location = {cf_base} {{
     return 404;
 }}
 
@@ -1174,8 +1173,23 @@ location ^~ {path} {{
     add_header X-Accel-Buffering no always;
     add_header Accept-Ranges none always;
 }}
-''')
-            print(f'[+] Восстановлен Nginx конфиг для релея {code}')
+'''
+        needs_write = True
+        if os.path.exists(cf_path):
+            try:
+                with open(cf_path, 'r', encoding='utf-8') as cf_cur:
+                    cur_text = cf_cur.read()
+                if (f'location = {cf_base}' in cur_text and
+                    'CDN-Cache-Control' in cur_text and
+                    'xhttp_proxy_method' in cur_text and
+                    f'proxy_pass http://127.0.0.1:{port}' in cur_text):
+                    needs_write = False
+            except Exception:
+                needs_write = True
+        if needs_write:
+            with open(cf_path, 'w', encoding='utf-8') as cf:
+                cf.write(desired_conf)
+            print(f'[+] Согласован Nginx конфиг для релея {code}')
 except Exception:
     pass
 " "$RELAYS_FILE" "$NGINX_RELAYS_DIR" 2>/dev/null || true
