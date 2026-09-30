@@ -26,13 +26,13 @@ from aiogram import Bot
 from sqlalchemy import func, select
 
 from bot import texts
+from bot.formatters import get_tariff_display_name
 from bot.keyboards import get_payment_success_keyboard
 from bot.keyboards.payment import get_topup_credit_keyboard
 from config.constants import WORKER_ERROR_SLEEP_INTERVAL
 from database.connection import session_scope
 from database.models import AccountLedgerEntry, Order, User
 from database.repositories.account_ledger_repo import get_account_balance
-from database.repositories.tariffs_repo import get_tariff_by_id
 from services.order_notifications import (
     LATE_NOTIFY_ATTEMPTS_KEY,
     LATE_NOTIFY_PENDING_KEY,
@@ -151,12 +151,9 @@ async def _send_late_push(bot: Bot, session, order: Order, user: User) -> bool:
             )
         else:
             balance = await get_account_balance(session, user_id=user.id)
-            tariff = (
-                await get_tariff_by_id(session, order.tariff_id)
-                if order.tariff_id
-                else None
-            )
-            tariff_name = tariff.name if tariff and tariff.name else "—"
+            # Same tier label as the request path (credit_notify.py):
+            # two pushes for one order must never name the tariff differently.
+            tariff_name = get_tariff_display_name(order.device_limit or 2)
             is_change = bool(
                 order.metadata_ and order.metadata_.get("is_tariff_change")
             )
@@ -197,6 +194,18 @@ async def _deliver_one(bot: Bot, order_id) -> bool:
             return False
         meta = dict(order.metadata_ or {})
         if not meta.get(LATE_NOTIFY_PENDING_KEY):
+            return False
+
+        # Status may have changed since the batch select (e.g. full refund
+        # landed after settlement). A non-paid order must never receive a
+        # "credited" push — drop the debt instead of delivering it.
+        if order.status != "paid":
+            mark_notified(order)
+            logger.info(
+                "Credit-notify drops order %s: status is %s, not paid",
+                order.id,
+                order.status,
+            )
             return False
 
         # Still held (no release yet): money has not moved, stay silent and

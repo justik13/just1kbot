@@ -220,6 +220,73 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
         self.assertNotIn("late_notify_pending", order.metadata_)
 
+    async def test_drops_debt_when_no_longer_paid(self):
+        """A refund landed after settlement: never send a 'credited' push."""
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order(
+            status="refunded", metadata_={"late_notify_pending": True}
+        )
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(return_value=order)
+        with (
+            patch.object(
+                worker, "session_scope", return_value=_scope_with(session)
+            ),
+            patch.object(
+                worker, "_send_late_push", new=AsyncMock(return_value=True)
+            ) as mock_send,
+        ):
+            self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
+            mock_send.assert_not_called()
+        self.assertNotIn("late_notify_pending", order.metadata_)
+
+    async def test_late_push_topup_names_credited_notice(self):
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order()
+        user = _user()
+        session = AsyncMock(spec=AsyncSession)
+        snapshot = MagicMock(real_available=Decimal("150"))
+        with (
+            patch.object(
+                worker, "get_account_balance", new=AsyncMock(return_value=snapshot)
+            ),
+            patch.object(
+                worker, "safe_send_message", new=AsyncMock(return_value=99)
+            ) as mock_send,
+        ):
+            self.assertTrue(
+                await worker._send_late_push(AsyncMock(), session, order, user)
+            )
+            text = mock_send.await_args[0][2]
+        from bot import texts
+
+        self.assertIn(texts.TOPUP_CREDITED_NOTICE, text)
+
+    async def test_late_push_tariff_uses_tier_label(self):
+        """Worker card must name the tariff exactly like the request path."""
+        from bot.formatters import get_tariff_display_name
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order(service_type="awg", device_limit=2)
+        user = _user()
+        session = AsyncMock(spec=AsyncSession)
+        snapshot = MagicMock(real_available=Decimal("0"), bonus_available=Decimal("0"))
+        with (
+            patch.object(
+                worker, "get_account_balance", new=AsyncMock(return_value=snapshot)
+            ),
+            patch.object(
+                worker, "safe_send_message", new=AsyncMock(return_value=99)
+            ) as mock_send,
+        ):
+            self.assertTrue(
+                await worker._send_late_push(AsyncMock(), session, order, user)
+            )
+            text = mock_send.await_args[0][2]
+        self.assertIn(get_tariff_display_name(2), text)
+
     async def test_batch_counts_deliveries(self):
         from services.workers import credit_notifications as worker
 
