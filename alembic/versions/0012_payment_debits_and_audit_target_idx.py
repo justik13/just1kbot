@@ -8,6 +8,7 @@ Create Date: 2026-08-26 00:00:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from sqlalchemy import text
 
 from alembic import op
 
@@ -95,5 +96,9 @@ def downgrade() -> None:
             # Restore the redundant indexes removed by the upgrade so the
             # downgrade matches the pre-0012 schema exactly.
             op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_audit_logs_created_at ON audit_logs (created_at)")
-            op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_payment_events_payment_id ON payment_events (payment_id)")
+            # 0032 drops payment_events, so only recreate the index when the table exists.
+            if bind.scalar(text("SELECT to_regclass('public.payment_events')")) is not None:
+                op.execute(
+                    "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_payment_events_payment_id ON payment_events (payment_id)"
+                )
             op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_hub_messages_chat_id ON hub_messages (chat_id)")

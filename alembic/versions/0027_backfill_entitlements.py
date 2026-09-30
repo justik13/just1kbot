@@ -105,17 +105,22 @@ END $$;
 """
 
 DOWNGRADE_CLEANUP_SQL = """
-DELETE FROM entitlement_entries
-WHERE source_type = 'admin'
-  AND entry_type = 'manual_grant'
-  AND source_id LIKE 'legacy_0027_grant_%'
-  AND (metadata->>'reason') = 'legacy_active_subscription_backfill'
+DO $$
+BEGIN
+  IF to_regclass('public.entitlement_entries') IS NOT NULL THEN
+    DELETE FROM entitlement_entries
+    WHERE source_type = 'admin'
+      AND entry_type = 'manual_grant'
+      AND source_id LIKE 'legacy_0027_grant_%'
+      AND (metadata->>'reason') = 'legacy_active_subscription_backfill';
+  END IF;
+END $$;
 """
 
 DOWNGRADE_FAIL_CLOSED_CHECK_SQL = """
 DO $$
 BEGIN
-  IF EXISTS (
+  IF to_regclass('public.entitlement_entries') IS NOT NULL AND EXISTS (
     SELECT 1 FROM entitlement_entries
     WHERE entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
       AND days_delta = 0
@@ -126,18 +131,23 @@ END $$;
 """
 
 DOWNGRADE_CONSTRAINT_SQL = """
-ALTER TABLE entitlement_entries ADD CONSTRAINT ck_entitlement_entries_shape CHECK (
-  (entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
-   AND days_delta > 0 AND reversed_entry_id IS NULL
-   AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
-  OR
-  (entry_type = 'tariff_change' AND source_type = 'quote'
-   AND days_delta = 0 AND hours_delta > 0 AND reversed_entry_id IS NULL)
-  OR
-  (entry_type = 'referral_reversal' AND days_delta < 0
-   AND reversed_entry_id IS NOT NULL
-   AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
-)
+DO $$
+BEGIN
+  IF to_regclass('public.entitlement_entries') IS NOT NULL THEN
+    ALTER TABLE entitlement_entries ADD CONSTRAINT ck_entitlement_entries_shape CHECK (
+      (entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
+       AND days_delta > 0 AND reversed_entry_id IS NULL
+       AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
+      OR
+      (entry_type = 'tariff_change' AND source_type = 'quote'
+       AND days_delta = 0 AND hours_delta > 0 AND reversed_entry_id IS NULL)
+      OR
+      (entry_type = 'referral_reversal' AND days_delta < 0
+       AND reversed_entry_id IS NOT NULL
+       AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
+    );
+  END IF;
+END $$;
 """
 
 
