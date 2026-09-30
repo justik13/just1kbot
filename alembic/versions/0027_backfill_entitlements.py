@@ -181,5 +181,14 @@ def downgrade() -> None:
     op.execute(DOWNGRADE_FAIL_CLOSED_CHECK_SQL)
 
     # 3. Restore strict pre-0027 constraint
-    op.execute("ALTER TABLE entitlement_entries DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape")
+    # 0032 drops entitlement_entries, so both statements are guarded on the table
+    # still existing. "DROP CONSTRAINT IF EXISTS" does not help here: it tolerates
+    # a missing constraint, not a missing table.
+    op.execute(
+        "DO $$ BEGIN "
+        "IF to_regclass('public.entitlement_entries') IS NULL THEN RETURN; END IF; "
+        "ALTER TABLE entitlement_entries "
+        "DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape; "
+        "END $$;"
+    )
     op.execute(DOWNGRADE_CONSTRAINT_SQL)
