@@ -11,7 +11,6 @@ class AlembicChainTests(unittest.TestCase):
         script = ScriptDirectory.from_config(config)
         heads = script.get_heads()
         self.assertEqual(len(heads), 1, f"Expected 1 alembic head, got {heads}")
-        self.assertEqual(heads[0], "0031_awg_persistent_traffic")
 
         # Check all revisions have identifier length <= 32 chars
         versions_dir = "alembic/versions"

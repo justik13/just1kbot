@@ -39,7 +39,18 @@ class DomainEnumsSSOTTests(unittest.TestCase):
 
     def test_all_enums_declared_are_strenums_with_values(self):
         """Every exported enum in config.enums must be a valid StrEnum with non-empty members."""
-        self.assertEqual(len(config.enums.__all__), 28)
+        defined = {
+            name
+            for name, value in vars(config.enums).items()
+            if isinstance(value, type)
+            and issubclass(value, StrEnum)
+            and value is not StrEnum
+        }
+        self.assertEqual(
+            set(config.enums.__all__),
+            defined,
+            "config.enums.__all__ must list exactly the StrEnum classes declared in the module",
+        )
         for enum_name in config.enums.__all__:
             enum_cls = getattr(config.enums, enum_name)
             self.assertTrue(
@@ -80,13 +91,8 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.TariffQuoteStatus),
         )
 
-        # 3. PaidValueLedgerEntry entry_type
-        self.assertEqual(
-            _extract_check_constraint_in(models.PaidValueLedgerEntry.__table__, "ck_paid_value_ledger_entry_type"),
-            set(config.enums.PaidValueEntryType),
-        )
 
-        # 4. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
+        # 3. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
         self.assertEqual(
             _extract_check_constraint_in(models.Payment.__table__, "ck_payments_provider_status"),
             set(config.enums.PaymentProviderStatus),
@@ -104,41 +110,22 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.PaymentCheckoutStatus),
         )
 
-        # 5. AccountLedgerEntry entry_type
+        # 4. AccountLedgerEntry entry_type
         self.assertEqual(
             _extract_check_constraint_in(models.AccountLedgerEntry.__table__, "ck_account_ledger_entry_type"),
             set(config.enums.AccountLedgerEntryType),
         )
 
-        # 6. AccountBalanceReservation reservation_type & status
-        self.assertEqual(
-            _extract_check_constraint_in(models.AccountBalanceReservation.__table__, "ck_account_reservations_type"),
-            set(config.enums.AccountReservationType),
-        )
-        self.assertEqual(
-            _extract_check_constraint_in(models.AccountBalanceReservation.__table__, "ck_account_reservations_status"),
-            set(config.enums.AccountReservationStatus),
-        )
 
-        # 7. WebhookInbox status
+        # 5. WebhookInbox status
         self.assertEqual(
             _extract_check_constraint_in(models.WebhookInbox.__table__, "ck_webhook_inbox_status"),
             set(config.enums.WebhookInboxStatus),
         )
 
-        # 8. EntitlementEntry entry_type
-        self.assertEqual(
-            _extract_check_constraint_in(models.EntitlementEntry.__table__, "ck_entitlement_entries_type"),
-            set(config.enums.EntitlementEntryType),
-        )
 
-        # 9. PaymentProviderOperation status
-        self.assertEqual(
-            _extract_check_constraint_in(models.PaymentProviderOperation.__table__, "ck_payment_provider_operations_status"),
-            set(config.enums.PaymentProviderOperationStatus),
-        )
 
-        # 10. APIOperation operation_type & status
+        # 6. APIOperation operation_type & status
         self.assertEqual(
             _extract_check_constraint_in(models.APIOperation.__table__, "ck_api_operations_operation_type"),
             set(config.enums.ApiOperationType),
@@ -148,7 +135,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.ApiOperationStatus),
         )
 
-        # 11. Order status & service_type
+        # 7. Order status & service_type
         self.assertEqual(
             _extract_check_constraint_in(models.Order.__table__, "ck_orders_status"),
             set(config.enums.OrderStatus),
@@ -170,7 +157,6 @@ class DomainEnumsSSOTTests(unittest.TestCase):
 
         # ApiOperation and PaymentQueue use 'cancelled' (double 'l')
         self.assertEqual(config.enums.ApiOperationStatus.CANCELLED, "cancelled")
-        self.assertEqual(config.enums.PaymentQueueStatus.CANCELLED, "cancelled")
 
     def test_default_tariffs_seeds_ssot_layering(self):
         """DEFAULT_TARIFFS_SEEDS must live strictly in config.tariffs and NOT in bot.texts."""

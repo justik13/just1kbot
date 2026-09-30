@@ -5,7 +5,6 @@ from pathlib import Path
 from sqlalchemy import BigInteger
 
 from database.models import (
-    AccountBalanceReservation,
     AccountLedgerAllocation,
     AccountLedgerEntry,
     Payment,
@@ -36,7 +35,6 @@ class AccountLedgerSchemaTests(unittest.TestCase):
         for table in (
             AccountLedgerEntry.__table__,
             AccountLedgerAllocation.__table__,
-            AccountBalanceReservation.__table__,
         ):
             for foreign_key in table.foreign_keys:
                 self.assertEqual(foreign_key.ondelete, "RESTRICT")

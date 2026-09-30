@@ -4,7 +4,6 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.types import Chat, Message
-from aiogram.types import User as TelegramUser
 
 from bot.handlers.white_internet import _get_effective_tariff_info
 from bot.middlewares.clean_chat import CleanChatMiddleware

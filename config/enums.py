@@ -39,21 +39,6 @@ class PaymentReconciliationStatus(StrEnum):
     MANUAL_REVIEW = "manual_review"
 
 
-class PaymentDisputeStatus(StrEnum):
-    OPEN = "open"
-    WON_BY_MERCHANT = "won_by_merchant"
-    LOST_BY_MERCHANT = "lost_by_merchant"
-    MANUAL_REVIEW = "manual_review"
-
-
-class ProviderRefundOperationStatus(StrEnum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    RETRY = "retry"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
 class TariffQuoteStatus(StrEnum):
     ACTIVE = "active"
     CONSUMED = "consumed"
@@ -76,32 +61,6 @@ class AccountLedgerEntryType(StrEnum):
     REFUND_DEBIT = "refund_debit"
     CHARGEBACK_DEBIT = "chargeback_debit"
     ADMIN_ADJUSTMENT = "admin_adjustment"
-
-
-class AccountReservationType(StrEnum):
-    REFUND = "refund"
-    DISPUTE = "dispute"
-
-
-class AccountReservationStatus(StrEnum):
-    ACTIVE = "active"
-    RELEASED = "released"
-    CONSUMED = "consumed"
-
-
-class PaidValueEntryType(StrEnum):
-    ACCOUNT_PURCHASE = "account_purchase"
-    TARIFF_CONVERSION = "tariff_conversion"
-    MANUAL_ADJUSTMENT = "manual_adjustment"
-
-
-class EntitlementEntryType(StrEnum):
-    ACCOUNT_PURCHASE_GRANT = "account_purchase_grant"
-    REFERRAL_USER_BONUS = "referral_user_bonus"
-    REFERRAL_REFERRER_BONUS = "referral_referrer_bonus"
-    REFERRAL_REVERSAL = "referral_reversal"
-    MANUAL_GRANT = "manual_grant"
-    TARIFF_CHANGE = "tariff_change"
 
 
 class ApiOperationType(StrEnum):
@@ -142,17 +101,7 @@ class ServerLifecycleStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
-class PaymentProviderOperationStatus(StrEnum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    RETRY = "retry"
-    SUCCEEDED = "succeeded"
-    DEAD = "dead"
-    CANCELLED = "cancelled"
-
-
 # Backward-compatible alias for payment outbox queue status
-PaymentQueueStatus = PaymentProviderOperationStatus
 
 
 class VPNProvisioningStatus(StrEnum):
@@ -277,23 +226,15 @@ class OrderServiceType(StrEnum):
 
 __all__ = [
     "AccountLedgerEntryType",
-    "AccountReservationStatus",
-    "AccountReservationType",
     "AdminAuditAction",
     "ApiOperationStatus",
     "ApiOperationType",
-    "EntitlementEntryType",
     "OrderStatus",
     "OrderServiceType",
-    "PaidValueEntryType",
     "PaymentCheckoutStatus",
-    "PaymentDisputeStatus",
     "PaymentFulfillmentStatus",
-    "PaymentProviderOperationStatus",
     "PaymentProviderStatus",
-    "PaymentQueueStatus",
     "PaymentReconciliationStatus",
-    "ProviderRefundOperationStatus",
     "ServerHealthState",
     "ServerLifecycleStatus",
     "ServiceType",

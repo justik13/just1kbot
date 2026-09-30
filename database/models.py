@@ -30,17 +30,12 @@ from sqlalchemy.orm import (
 from config.constants import AMNEZIA_PROTOCOL
 from config.enums import (
     AccountLedgerEntryType,
-    AccountReservationStatus,
-    AccountReservationType,
     ApiOperationStatus,
     ApiOperationType,
-    EntitlementEntryType,
     OrderStatus,
     OrderServiceType,
-    PaidValueEntryType,
     PaymentCheckoutStatus,
     PaymentFulfillmentStatus,
-    PaymentProviderOperationStatus,
     PaymentProviderStatus,
     PaymentReconciliationStatus,
     ServerHealthState,
@@ -520,69 +515,6 @@ class TariffQuote(Base):
     source_tariff_version = relationship("TariffVersion", foreign_keys=[source_tariff_version_id])
 
 
-class PaidValueLedgerEntry(Base):
-    """Append-only paid subscription value created only from account purchases."""
-
-    __tablename__ = "paid_value_ledger"
-    __table_args__ = (
-        CheckConstraint(
-            sql_enum_in("entry_type", PaidValueEntryType),
-            name="ck_paid_value_ledger_entry_type",
-        ),
-        CheckConstraint("currency = 'RUB'", name="ck_paid_value_ledger_currency_rub"),
-        CheckConstraint(
-            "paid_value_rub_delta <> 'NaN'::numeric",
-            name="ck_paid_value_ledger_finite_value",
-        ),
-        CheckConstraint(
-            "entry_type <> 'account_purchase' OR "
-            "(quote_id IS NOT NULL AND paid_hours_delta > 0 "
-            "AND paid_value_rub_delta > 0)",
-            name="ck_paid_value_account_purchase_shape",
-        ),
-        CheckConstraint(
-            "entry_type <> 'tariff_conversion' OR quote_id IS NOT NULL",
-            name="ck_paid_value_conversion_shape",
-        ),
-        Index(
-            "uq_paid_value_account_purchase",
-            "quote_id",
-            unique=True,
-            postgresql_where=text("entry_type='account_purchase'"),
-        ),
-        Index(
-            "uq_paid_value_conversion_quote",
-            "quote_id",
-            unique=True,
-            postgresql_where=text("entry_type='tariff_conversion'"),
-        ),
-    )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    source_type: Mapped[str] = mapped_column(String(40), nullable=False)
-    source_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    entry_type: Mapped[str] = mapped_column(String(40), nullable=False)
-    paid_hours_delta: Mapped[int] = mapped_column(Integer, nullable=False)
-    paid_value_rub_delta: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
-    currency: Mapped[str] = mapped_column(
-        String(3), nullable=False, default="RUB", server_default=text("'RUB'")
-    )
-    tariff_version_id: Mapped[int] = mapped_column(
-        ForeignKey("tariff_versions.id", ondelete="RESTRICT"), nullable=False
-    )
-    quote_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tariff_quotes.id", ondelete="RESTRICT"), index=True
-    )
-    metadata_: Mapped[dict] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
-    )
-
-
 class Payment(Base):
     """YooKassa balance top-up tracked through provider and account-ledger state."""
 
@@ -740,7 +672,6 @@ class Payment(Base):
     payment_method: Mapped[str | None] = mapped_column(String(50))
 
     user = relationship("User", back_populates="payments")
-    events = relationship("PaymentEvent", back_populates="payment", cascade="all, delete-orphan")
 
 
 class Order(Base):
@@ -964,115 +895,6 @@ class AccountLedgerAllocation(Base):
     )
 
 
-class AccountBalanceReservation(Base):
-    """Spend hold used while an external refund or dispute is unresolved."""
-
-    __tablename__ = "account_balance_reservations"
-    __table_args__ = (
-        CheckConstraint(
-            sql_enum_in("reservation_type", AccountReservationType),
-            name="ck_account_reservations_type",
-        ),
-        CheckConstraint(
-            sql_enum_in("status", AccountReservationStatus),
-            name="ck_account_reservations_status",
-        ),
-        CheckConstraint(
-            "amount > 0 AND amount = trunc(amount)",
-            name="ck_account_reservations_whole_positive_amount",
-        ),
-        CheckConstraint("currency = 'RUB'", name="ck_account_reservations_currency_rub"),
-        CheckConstraint(
-            "(status = 'active' AND resolved_at IS NULL) OR "
-            "(status IN ('released','consumed') AND resolved_at IS NOT NULL)",
-            name="ck_account_reservations_lifecycle",
-        ),
-        Index(
-            "ix_account_reservations_active_user",
-            "user_id",
-            "id",
-            postgresql_where=text("status='active'"),
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    payment_id: Mapped[int] = mapped_column(
-        ForeignKey("payments.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    reservation_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    currency: Mapped[str] = mapped_column(
-        String(3), nullable=False, default="RUB", server_default=text("'RUB'")
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="active", server_default=text("'active'")
-    )
-    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, unique=True)
-    metadata_: Mapped[dict] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
-    )
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class PaymentProviderOperation(Base):
-    __tablename__ = "payment_provider_operations"
-    __table_args__ = (
-        CheckConstraint(
-            "operation_type IN ('create_payment','reconcile_payment')",
-            name="ck_payment_provider_operations_type",
-        ),
-        CheckConstraint(
-            sql_enum_in("status", PaymentProviderOperationStatus),
-            name="ck_payment_provider_operations_status",
-        ),
-        Index(
-            "ix_payment_provider_operations_claim",
-            "next_attempt_at",
-            "id",
-            postgresql_where=text("status IN ('pending','retry')"),
-        ),
-        Index(
-            "ix_payment_provider_operations_lease",
-            "locked_at",
-            postgresql_where=text("status = 'processing'"),
-        ),
-        Index(
-            "uq_payment_provider_create",
-            "payment_id",
-            unique=True,
-            postgresql_where=text("operation_type='create_payment'"),
-        ),
-    )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    payment_id: Mapped[int] = mapped_column(
-        ForeignKey("payments.id", ondelete="RESTRICT"), index=True
-    )
-    operation_type: Mapped[str] = mapped_column(String(30))
-    status: Mapped[str] = mapped_column(
-        String(20), default="pending", server_default=text("'pending'")
-    )
-    idempotency_key: Mapped[str] = mapped_column(String(100), unique=True)
-    payload: Mapped[dict] = mapped_column(JSONB)
-    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
-    max_attempts: Mapped[int] = mapped_column(Integer, default=12, server_default=text("12"))
-    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    locked_by: Mapped[str | None] = mapped_column(String(100))
-    last_error_code: Mapped[str | None] = mapped_column(String(100))
-    last_error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=now_utc, onupdate=now_utc
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
 class WebhookInbox(Base):
     __tablename__ = "webhook_inbox"
     __table_args__ = (
@@ -1114,107 +936,6 @@ class WebhookInbox(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class EntitlementEntry(Base):
-    __tablename__ = "entitlement_entries"
-    __table_args__ = (
-        UniqueConstraint(
-            "beneficiary_user_id",
-            "source_type",
-            "source_id",
-            "entry_type",
-            name="uq_entitlement_entries_source",
-        ),
-        CheckConstraint(
-            sql_enum_in("entry_type", EntitlementEntryType),
-            name="ck_entitlement_entries_type",
-        ),
-        CheckConstraint(
-            "(entry_type IN ('account_purchase_grant','referral_user_bonus',"
-            "'referral_referrer_bonus','manual_grant') "
-            "AND reversed_entry_id IS NULL "
-            "AND ((days_delta = 0 AND hours_delta > 0) OR (days_delta > 0 AND (hours_delta IS NULL OR hours_delta = days_delta * 24)))) OR "
-            "(entry_type = 'tariff_change' AND source_type = 'quote' "
-            "AND days_delta = 0 AND hours_delta > 0 "
-            "AND reversed_entry_id IS NULL) OR "
-            "(entry_type = 'referral_reversal' AND days_delta < 0 "
-            "AND reversed_entry_id IS NOT NULL "
-            "AND (hours_delta IS NULL OR hours_delta = days_delta * 24))",
-            name="ck_entitlement_entries_shape",
-        ),
-        Index(
-            "ix_entitlement_entries_user_history",
-            "beneficiary_user_id",
-            "created_at",
-            "id",
-        ),
-    )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    beneficiary_user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    source_type: Mapped[str] = mapped_column(String(30), nullable=False)
-    source_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    entry_type: Mapped[str] = mapped_column(String(40), nullable=False)
-    days_delta: Mapped[int] = mapped_column(Integer, nullable=False)
-    hours_delta: Mapped[int | None] = mapped_column(Integer)
-    device_limit_snapshot: Mapped[int | None] = mapped_column(Integer)
-    tariff_id_snapshot: Mapped[int | None] = mapped_column(Integer)
-    metadata_: Mapped[dict] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
-    )
-    reversed_entry_id: Mapped[int | None] = mapped_column(
-        ForeignKey("entitlement_entries.id", ondelete="RESTRICT")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
-    )
-
-
-class PaymentRefund(Base):
-    __tablename__ = "payment_refunds"
-    __table_args__ = (
-        CheckConstraint(
-            "provider_status IN ('pending','succeeded','canceled')",
-            name="ck_payment_refunds_provider_status",
-        ),
-    )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    payment_id: Mapped[int] = mapped_column(
-        ForeignKey("payments.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    provider_refund_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    currency: Mapped[str] = mapped_column(String(20), nullable=False)
-    provider_status: Mapped[str] = mapped_column(String(20), nullable=False)
-    event_key: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class PaymentEvent(Base):
-    __tablename__ = "payment_events"
-
-    __table_args__ = (Index("ix_payment_events_payment_created", "payment_id", "created_at"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    payment_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("payments.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    provider_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    source: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    details: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-    payment = relationship("Payment", back_populates="events")
 
 
 class AuditLog(Base):

@@ -52,7 +52,6 @@ from config.enums import (
 from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
-    PaidValueLedgerEntry,
     Server,
     TariffQuote,
     TariffVersion,
@@ -336,26 +335,6 @@ async def assert_inv_11_account_ledger_conservation(session: AsyncSession) -> In
     )
 
 
-async def assert_inv_12_paid_value_ledger_consistency(session: AsyncSession) -> InvariantResult:
-    """Inv 12: Paid value ledger entries have non-null finite amounts and hours."""
-    violations = await session.scalars(
-        select(PaidValueLedgerEntry).where(
-            or_(
-                PaidValueLedgerEntry.paid_value_rub_delta.is_(None),
-                PaidValueLedgerEntry.paid_hours_delta.is_(None),
-            )
-        )
-    )
-    v_list = violations.all()
-    if v_list:
-        return InvariantResult(
-            12, "Paid Value Ledger Consistency", False, f"Violations found: {len(v_list)} entries"
-        )
-    return InvariantResult(
-        12, "Paid Value Ledger Consistency", True, "All paid value ledger entries are consistent"
-    )
-
-
 async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
     """Inv 13: All VPN servers use AWG or Xray protocol (pure WireGuard 'wg' is strictly rejected)."""
     violations = await session.scalars(
@@ -451,7 +430,6 @@ ALL_INVARIANT_CHECKS = [
     assert_inv_9_tariff_quotes_consistency,
     assert_inv_10_account_balance_non_negativity,
     assert_inv_11_account_ledger_conservation,
-    assert_inv_12_paid_value_ledger_consistency,
     assert_inv_13_vpn_protocol,
     assert_inv_14_origin_server_capacity,
     assert_inv_15_alembic_single_head,
