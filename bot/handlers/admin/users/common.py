@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
@@ -9,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
+from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
 from config.enums import WhiteInternetProvisioningStatus
 from database.models import Server, Tariff, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
@@ -115,6 +117,28 @@ MANUAL_GRANT_ALLOWED_STATUSES = {
     "failed",
     "requires_manual_review",
 }
+
+
+def format_subscription_days_text(days: int) -> str:
+    """Render a subscription duration, using the permanent label past the cap.
+
+    Shared by every admin extend/grant/reduce route so the permanent-subscription
+    wording can never drift between screens.
+    """
+    if days >= PERMANENT_SUBSCRIPTION_DAYS:
+        return texts.ADMIN_SUB_PERMANENT_LABEL
+    return texts.TIME_DAYS_FORMAT.format(days=days)
+
+
+def resolve_subscription_end(base_end, days: int):
+    """Compute the new subscription end date for a ``days`` adjustment.
+
+    Returns the permanent end date once ``days`` reaches the cap, otherwise adds
+    ``days`` to ``base_end``.
+    """
+    if days >= PERMANENT_SUBSCRIPTION_DAYS:
+        return PERMANENT_END_DATE
+    return base_end + timedelta(days=days)
 
 
 def _validate_positive_int(text: str | None) -> int | None:

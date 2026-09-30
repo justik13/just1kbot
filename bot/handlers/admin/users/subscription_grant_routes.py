@@ -1,10 +1,8 @@
 import logging
 from config.constants import (
     AdminAuditAction,
-    PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
 )
-from datetime import timedelta
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -40,6 +38,8 @@ from .common import (
     _get_representative_tariff,
     _get_tariff_groups,
     _validate_positive_int,
+    format_subscription_days_text,
+    resolve_subscription_end,
 )
 
 router = Router()
@@ -227,17 +227,9 @@ async def admin_sub_grant_confirm(
 
     current_time = now_utc()
 
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_time + timedelta(days=days)
-    )
+    new_end = resolve_subscription_end(current_time, days)
 
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    days_text = format_subscription_days_text(days)
 
     tariff_name = get_tariff_group_name(tariff.device_limit)
 
@@ -390,17 +382,9 @@ async def admin_sub_grant_custom_process(
 
     current_time = now_utc()
 
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_time + timedelta(days=days)
-    )
+    new_end = resolve_subscription_end(current_time, days)
 
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    days_text = format_subscription_days_text(days)
 
     tariff_name = get_tariff_group_name(tariff.device_limit)
 
@@ -516,11 +500,7 @@ async def admin_sub_grant_apply(
 
         invalidate_user_cache(telegram_id)
 
-        days_text = (
-            texts.ADMIN_SUB_PERMANENT_LABEL
-            if days >= PERMANENT_SUBSCRIPTION_DAYS
-            else texts.TIME_DAYS_FORMAT.format(days=days)
-        )
+        days_text = format_subscription_days_text(days)
 
         tariff_name = get_tariff_group_name(tariff.device_limit)
 

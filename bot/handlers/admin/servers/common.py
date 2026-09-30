@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_admin_server_card_keyboard
 from database.repositories.servers_repo import (
+    is_xray_server,
     get_server_count,
     get_server_peer_counts,
     get_servers_paginated,
@@ -62,10 +63,7 @@ async def _build_servers_list_text_and_kb(
             status = texts.STATUS_ACTIVE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
             proto_badge = (
                 "[Xray]"
-                if (
-                    getattr(server, "protocol", None) == "xray"
-                    or "xray_origin" in (getattr(server, "capabilities", None) or [])
-                )
+                if is_xray_server(server)
                 else "[AWG]"
             )
             db_used = db_counts.get(server.id, 0)
@@ -211,10 +209,7 @@ async def _show_server_card(
 
     if ping_result:
         rendered += texts.COMMON_REZULTAT_PROVERKI_SVYAZI.format(ping_result=ping_result)
-    is_xray = (
-        getattr(server, "protocol", None) == "xray"
-        or "xray_origin" in (getattr(server, "capabilities", None) or [])
-    )
+    is_xray = is_xray_server(server)
     try:
         await callback.message.edit_text(
             rendered,

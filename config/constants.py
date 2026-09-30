@@ -44,6 +44,7 @@ AMNEZIA_PROTOCOLS: tuple[str, ...] = (
 )
 AMNEZIA_DOCKER_CONTAINER = "amnezia-awg2"
 XRAY_PROTOCOL = "xray"
+XRAY_ORIGIN_CAPABILITY = "xray_origin"
 
 # Default AmneziaWG Client Network Settings
 DEFAULT_AWG_DNS1 = "8.8.8.8"
@@ -329,5 +330,7 @@ __all__ = [
     "WhiteInternetProvisioningStatus",
     "WhiteInternetStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
+    "XRAY_ORIGIN_CAPABILITY",
+    "XRAY_PROTOCOL",
     "YOOKASSA_IP_RANGES",
 ]

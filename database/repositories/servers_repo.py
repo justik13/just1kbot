@@ -4,7 +4,12 @@ from typing import TypedDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS, XRAY_PROTOCOL
+from config.constants import (
+    AMNEZIA_PROTOCOL,
+    AMNEZIA_PROTOCOLS,
+    XRAY_ORIGIN_CAPABILITY,
+    XRAY_PROTOCOL,
+)
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
@@ -18,6 +23,20 @@ CAPACITY_CONSUMING_STATUSES = (
     "delete_failed",
     "create_cleanup_pending",
 )
+
+
+def is_xray_server(server) -> bool:
+    """Whether a server belongs to the Xray contour.
+
+    A server counts as Xray when its protocol is the Xray protocol, or when it
+    advertises the ``xray_origin`` capability (relay/origin nodes carry a
+    different protocol but still speak Xray to the edge). This is the single
+    definition of the predicate; callers must not re-derive it from the raw
+    string literals.
+    """
+    if getattr(server, "protocol", None) == XRAY_PROTOCOL:
+        return True
+    return XRAY_ORIGIN_CAPABILITY in (getattr(server, "capabilities", None) or [])
 
 
 def _capacity_consuming_profiles_condition():
@@ -548,7 +567,7 @@ async def migrate_origin_subscriptions(
     if target_server.protocol != XRAY_PROTOCOL or not target_server.is_active:
         raise ValueError("Target server is not an active Xray node.")
 
-    if "xray_origin" not in (target_server.capabilities or []):
+    if XRAY_ORIGIN_CAPABILITY not in (target_server.capabilities or []):
         raise ValueError("Target server does not have the required 'xray_origin' capability.")
 
     relays = (target_server.extra_data or {}).get("relays", [])
