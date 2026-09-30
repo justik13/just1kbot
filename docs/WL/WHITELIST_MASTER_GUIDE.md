@@ -249,7 +249,7 @@
 | Метод | Механика | Плюсы | Минусы | Вердикт |
 | :--- | :--- | :--- | :--- | :--- |
 | **1. VLESS XHTTP через Yandex Cloud CDN (Каскад)** | Трафик идет на белый IP CDN Яндекса ➔ Origin РФ ➔ Exit Германия | **Высокая стабильность в тестах**, белый IP CDN, легитимный сертификат, обфускация XHTTP | Требует настройки двух серверов и аккаунта YC | 🏆 **ОСНОВНОЙ ПРОТЕСТИРОВАННЫЙ ВАРИАНТ** |
-| **2. VLESS + Reality на российском VPS** | Аренда VPS в РФ (Timeweb, VK, Yandex), Reality под `vk.com`/`ya.ru` | Высокая скорость, простота настройки (1 сервер) | Риск вылета IP из белого списка, блокировки хостерами за VPN | **Рабочий, но нестабильный вариант** |
+| **2. VLESS + Reality на российском VPS** | Аренда VPS в РФ (Timeweb, VK, Yandex), Reality под собственный домен (SelfSteal SNI) | Высокая скорость, простота настройки (1 сервер) | Риск вылета IP из белого списка, блокировки хостерами за проксирование. Не пробивает режим L3 Default-Drop (белые списки на сотовых вышках без белого IP) | **Рабочий для проводного интернета, но не для жестких белых списков** |
 | **3. XDRIVE (Storage-as-a-Transport)** | Обмен пакетами через WebDAV облака (Яндекс Диск / Google Drive) по WAL-схеме | Не зависит от CDN и прокси-портов, легитимный SNI и префикс диска, иммунитет к 413 | Открытые креды в конфиге клиента, лимиты WebDAV 429 (макс 2–4 чел на акк), нет поддержки в мобильных клиентах | 🔬 **Экспериментальный аварийный R&D-резерв** |
 | **4. Host Front (Shared-хостинг REG.RU/Beget)** | Проксирование через Apache `.htaccess` `mod_proxy` на виртуальном хостинге | Дешево (~299 ₽/мес), IP в белых списках, не нужен аккаунт в CDN | Баны хостером по AUP/TOS, лимиты CloudLinux (10-20 процессов), обрывы по таймаутам | **Временный аварийный костыль** |
 | **5. Yandex Serverless Cloud Functions** | Развертывание функции-прокси на `functions.yandexcloud.net` | Бесплатный тариф (1 млн вызовов в месяц), IP гарантированно в БС | Ограничение по таймаутам (не держит долгоживущие TCP), низкая скорость | **Подходит только для легкого серфинга** |
@@ -823,7 +823,7 @@ flowchart TD
 | `YOUR_SECRET_PATH` | Секретный URL-эндпоинт XHTTP | `/api/v3/secure-data` | Nginx location, Xray, Клиенты |
 | `YOUR_PADDING_KEY` | Двухсимвольный ключ обфускации | `dc` | Xray Settings, Клиенты |
 | `YOUR_EMAIL` | Email для выпуска Let's Encrypt | `admin@example.com` | Certbot |
-| `YOUR_REALITY_SNI` | Маскировочный домен для VLESS REALITY | `dl.google.com` | Xray Exit & Origin (Вариант B) |
+| `YOUR_REALITY_SNI` | Собственный домен для SelfSteal REALITY (A-запись на Exit) | `reality.YOUR_DOMAIN.COM` | Xray Exit & Origin (Вариант B) |
 | `YOUR_REALITY_PUBLIC_KEY` | Публичный ключ Reality (x25519) | `m_7e...` | Xray Origin Outbound (Вариант B) |
 | `YOUR_REALITY_PRIVATE_KEY` | Приватный ключ Reality (x25519) | `sK4...` | Xray Exit Inbound (Вариант B) |
 | `YOUR_REALITY_SHORT_ID` | Short ID для Reality | `0123456789abcdef` | Xray Exit & Origin (Вариант B) |
@@ -915,8 +915,15 @@ ufw allow from "$ORIGIN_IP" to any port 10443 proto tcp
 ufw --force enable
 ```
 
-#### Вариант B (Быстрый / Бездоменный): VLESS REALITY (порт 10443 / 443, Vision)
-*Не требует собственного домена и выпуска Let's Encrypt сертификата. Идеально для мгновенного ввода в строй новых зарубежных VPS по чистому IP-адресу.*
+#### Вариант B: VLESS REALITY (порт 10443 / 443, Vision) и архитектура SelfSteal SNI
+*Альтернатива классическому VLESS+TLS для межузлового линка Origin ➔ Exit или прямого подключения при наличии чистого зарубежного IP.*
+
+> ⚠️ **КРИТИЧЕСКОЕ ПРЕДОСТЕРЕЖЕНИЕ (net4people/bbs #668, Телеграф Datagio 29.09.2026):**
+> **Запрет на использование чужих заимствованных SNI (`dl.google.com`, `apple.com`, `microsoft.com` и «соседей по подсети»):**
+> 1. ТСПУ и nDPI (правило `NDPI_UNRESOLVED_HOSTNAME`) выполняют **пассивную корреляцию SNI ➔ DNS**: если сетевой пакет с SNI `dl.google.com` летит на IP вашего VPS в Германии/Финляндии, а DNS-резолвинг `dl.google.com` возвращает реальные подсети Google (`142.250.x.x` / `172.217.x.x`), ТСПУ немедленно фиксирует аномалию и инициирует блокировку (RST / Drop).
+> 2. Исследование [net4people #668](https://github.com/net4people/bbs/issues/668) доказало, что даже подбор «соседа по подсети `/24`» (neighbor IP) проваливает проверку, так как nDPI сверяет точный IP хоста из DNS-ответа, а не просто принадлежность к автономной системе.
+> 3. **Стандарт 2026 года — SelfSteal SNI:** для REALITY используется **собственный домен** (DNS A-запись указывает напрямую на IP Exit-сервера, без Cloudflare Proxy), а в качестве `dest` указывается локальный веб-сервер-заглушка (`127.0.0.1:9443` в Nginx/Caddy) с настоящим сертификатом Let's Encrypt.
+> 4. **Ограничение для Белого Интернета:** REALITY на зарубежном сервере защищает от DPI, но **не пробивает режим L3 Default-Drop (белые списки на сотовых вышках)**, поскольку зарубежный IP отсутствует в белых списках РКН/Минцифры. Для белых списков клиентский трафик ОБЯЗАН идти через Yandex Cloud CDN (Вариант 1).
 
 1. **Генерация ключей x25519:**
    ```bash
@@ -925,7 +932,32 @@ ufw --force enable
    # Private key: sK4... (сохранить для REALITY_PRIVATE_KEY)
    # Public key:  m_7... (сохранить для Origin REALITY_PUBLIC_KEY)
    ```
-2. **Конфигурация Exit с REALITY:**
+
+2. **Настройка локального fallback веб-сервера (SelfSteal Nginx на `127.0.0.1:9443`):**
+   ```bash
+   apt-get install -y nginx certbot python3-certbot-nginx
+   certbot certonly --standalone -d "reality.YOUR_DOMAIN.COM" --non-interactive --agree-tos -m "admin@YOUR_DOMAIN.COM"
+
+   cat > /etc/nginx/sites-available/reality-selfsteal.conf <<'EOF'
+   server {
+       listen 127.0.0.1:9443 ssl http2;
+       server_name reality.YOUR_DOMAIN.COM;
+
+       ssl_certificate /etc/letsencrypt/live/reality.YOUR_DOMAIN.COM/fullchain.pem;
+       ssl_certificate_key /etc/letsencrypt/live/reality.YOUR_DOMAIN.COM/privkey.pem;
+       ssl_protocols TLSv1.2 TLSv1.3;
+
+       location / {
+           return 200 "OK\n";
+           add_header Content-Type text/plain;
+       }
+   }
+   EOF
+   ln -s /etc/nginx/sites-available/reality-selfsteal.conf /etc/nginx/sites-enabled/
+   nginx -t && systemctl reload nginx
+   ```
+
+3. **Конфигурация Exit с REALITY (SelfSteal SNI):**
    ```json
    {
      "log": { "loglevel": "warning" },
@@ -944,9 +976,9 @@ ufw --force enable
            "security": "reality",
            "realitySettings": {
              "show": false,
-             "dest": "dl.google.com:443",
+             "dest": "127.0.0.1:9443",
              "xver": 0,
-             "serverNames": ["dl.google.com"],
+             "serverNames": ["reality.YOUR_DOMAIN.COM"],
              "privateKey": "YOUR_REALITY_PRIVATE_KEY",
              "shortIds": ["0123456789abcdef"]
            }
@@ -1264,7 +1296,7 @@ EOF
 #   "network": "tcp",
 #   "security": "reality",
 #   "realitySettings": {
-#     "serverName": "dl.google.com",
+#     "serverName": "reality.YOUR_DOMAIN.COM",
 #     "fingerprint": "chrome",
 #     "publicKey": "YOUR_REALITY_PUBLIC_KEY",
 #     "shortId": "0123456789abcdef"
