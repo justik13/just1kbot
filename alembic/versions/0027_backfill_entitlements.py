@@ -120,12 +120,18 @@ END $$;
 DOWNGRADE_FAIL_CLOSED_CHECK_SQL = """
 DO $$
 BEGIN
-  IF to_regclass('public.entitlement_entries') IS NOT NULL AND EXISTS (
-    SELECT 1 FROM entitlement_entries
-    WHERE entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
-      AND days_delta = 0
-  ) THEN
-    RAISE EXCEPTION 'Cannot downgrade migration 0027: sub-day entitlement entries (days_delta = 0) exist. Downgrade aborted to prevent ledger corruption.';
+  -- Nested IF, not "IF a AND EXISTS (...)": PostgreSQL plans that single
+  -- expression as a whole, so the reference to entitlement_entries would be
+  -- resolved before to_regclass() is even evaluated. The inner statement is
+  -- planned only once the outer IF has been taken.
+  IF to_regclass('public.entitlement_entries') IS NOT NULL THEN
+    IF EXISTS (
+      SELECT 1 FROM entitlement_entries
+      WHERE entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
+        AND days_delta = 0
+    ) THEN
+      RAISE EXCEPTION 'Cannot downgrade migration 0027: sub-day entitlement entries (days_delta = 0) exist. Downgrade aborted to prevent ledger corruption.';
+    END IF;
   END IF;
 END $$;
 """
