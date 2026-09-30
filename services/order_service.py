@@ -685,14 +685,29 @@ class OrderService:
                 )
                 return None
 
-            refund_amount = (
-                result.amount_rub
-                if result.amount_rub is not None
-                else order.amount_rub
-            )
             order_meta = dict(order.metadata_ or {})
             refunded_so_far = Decimal(str(order_meta.get("refunded_amount_rub", "0")))
             processed_refund_ids = list(order_meta.get("processed_refund_ids", []))
+
+            if result.amount_rub is not None:
+                refund_amount = result.amount_rub
+            else:
+                # The gateway payload carries no amount (amount.value missing).
+                # Falling back to the FULL order amount here would overshoot the
+                # cumulative total when partial refunds were already recorded
+                # (so_far + full_amount > order_amount → false full refund +
+                # oversized ledger debit + premature revoke). Assume only the
+                # not-yet-refunded remainder was returned.
+                refund_amount = max(Decimal("0"), order.amount_rub - refunded_so_far)
+                logger.warning(
+                    "Refund %s for order %s has no amount in payload, "
+                    "assuming remainder %s (order %s, refunded so far %s)",
+                    result.external_id,
+                    order.id,
+                    refund_amount,
+                    order.amount_rub,
+                    refunded_so_far,
+                )
 
             # Deduplication for the exact same refund event
             if result.external_id and result.external_id in processed_refund_ids:

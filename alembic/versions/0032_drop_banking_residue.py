@@ -80,9 +80,23 @@ def upgrade() -> None:
     )
 
     # 2. Drop the reservation identity trigger; it guards a table that is going away.
-    op.execute("DROP TRIGGER IF EXISTS account_reservation_identity ON public.account_balance_reservations")
-    op.execute("DROP TRIGGER IF EXISTS paid_value_ledger_append_only ON public.paid_value_ledger")
-    op.execute("DROP TRIGGER IF EXISTS entitlement_entries_append_only ON public.entitlement_entries")
+    #    Guarded by to_regclass so a manual re-run of the upgrade body after the
+    #    tables are gone does not abort with "relation does not exist"
+    #    (plain DROP TRIGGER ... ON <table> checks the table even with IF EXISTS).
+    for _trigger, _table in (
+        ("account_reservation_identity", "account_balance_reservations"),
+        ("paid_value_ledger_append_only", "paid_value_ledger"),
+        ("entitlement_entries_append_only", "entitlement_entries"),
+    ):
+        op.execute(
+            f"""
+    DO $$ BEGIN
+      IF to_regclass('public.{_table}') IS NOT NULL THEN
+        DROP TRIGGER IF EXISTS {_trigger} ON public.{_table};
+      END IF;
+    END $$;
+    """
+        )
 
     # 3. Drop the tables themselves.
     for table in DROPPED_TABLES:
@@ -102,4 +116,8 @@ def downgrade() -> None:
     #
     # Recovering the data itself requires restoring a pre-migration backup, which
     # is this project's documented production path.
+    #
+    # NOTE on re-runs: every statement in upgrade() is guarded
+    # (to_regclass for the trigger drops, IF EXISTS for the table drops),
+    # so re-applying the upgrade body after a downgrade is safe.
     pass

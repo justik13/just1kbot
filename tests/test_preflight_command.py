@@ -90,6 +90,26 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
         "WHERE o.status = 'paid' AND o.service_type = 'topup' AND l.amount <> o.amount_rub",
     ),
     (
+        "3D_SETTLEMENT_HELD_TOPUPS",
+        "SELECT '3D_SETTLEMENT_HELD_TOPUPS' AS block, CASE WHEN count(*) = 0 "
+        "THEN 'OK (clean)' ELSE 'WARN: SETTLEMENT-HELD ORDERS n=' || count(*) END AS verdict "
+        "FROM orders WHERE status = 'paid' "
+        "AND coalesce(metadata ->> 'settlement_held', 'false') = 'true'",
+    ),
+    (
+        "3E_NEGATIVE_LEDGER_POSITIONS",
+        "SELECT '3E_NEGATIVE_LEDGER_POSITIONS' AS block, CASE WHEN count(*) = 0 "
+        "THEN 'OK (0 violations)' ELSE 'CRITICAL: HAS VIOLATIONS n=' || count(*) END AS verdict "
+        "FROM (SELECT user_id FROM account_ledger_entries "
+        "GROUP BY user_id HAVING SUM(amount) < 0) AS neg",
+    ),
+    (
+        "3F_ACCOUNTS_ON_HOLD",
+        "SELECT '3F_ACCOUNTS_ON_HOLD' AS block, CASE WHEN count(*) = 0 "
+        "THEN 'OK (clean)' ELSE 'WARN: ACCOUNTS ON HOLD n=' || count(*) END AS verdict "
+        "FROM users WHERE financial_hold OR topup_blocked",
+    ),
+    (
         "4A_INFLIGHT_ORDERS",
         "SELECT '4A_INFLIGHT_ORDERS' AS block, CASE WHEN count(*) = 0 THEN 'OK (clean)' "
         "ELSE 'WARN: IN-FLIGHT ORDERS n=' || count(*) END AS verdict FROM orders "
@@ -101,6 +121,12 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
         "ELSE 'WARN: IN-FLIGHT PAYMENTS n=' || count(*) END AS verdict FROM payments "
         "WHERE provider_status IN ('creating','pending','waiting_for_capture') "
         "AND created_at > now() - interval '30 minutes'",
+    ),
+    (
+        "4C_BROADCAST_STOPPING_ORPHANS",
+        "SELECT '4C_BROADCAST_STOPPING_ORPHANS' AS block, CASE WHEN count(*) = 0 THEN 'OK (clean)' "
+        "ELSE 'WARN: ORPHAN STOPPING ROWS n=' || count(*) END AS verdict FROM broadcast_progress "
+        "WHERE status = 'stopping'",
     ),
 )
 
@@ -261,10 +287,23 @@ class TestPreflightStatementsExecute(unittest.IsolatedAsyncioTestCase):
             "3A_REFERRAL_DISCOUNT_FLOOR",
             "3B_PAID_TOPUP_NOT_CREDITED",
             "3C_CREDIT_AMOUNT_DESYNC",
+            "3E_NEGATIVE_LEDGER_POSITIONS",
         ):
             verdict = await self._verdict_for(statements[label])
             with self.subTest(block=label):
                 self.assertEqual(verdict, "OK (0 violations)")
+
+    async def test_watch_blocks_are_clean_on_clean_db(self):
+        """WARN blocks must report OK (clean) on a clean database."""
+        statements = dict(PREFLIGHT_STATEMENTS)
+        for label in (
+            "3D_SETTLEMENT_HELD_TOPUPS",
+            "3F_ACCOUNTS_ON_HOLD",
+            "4C_BROADCAST_STOPPING_ORPHANS",
+        ):
+            verdict = await self._verdict_for(statements[label])
+            with self.subTest(block=label):
+                self.assertEqual(verdict, "OK (clean)")
 
 
 if __name__ == "__main__":
