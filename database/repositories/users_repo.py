@@ -219,42 +219,29 @@ async def get_user_referrals_paginated(
 def _referral_paid_activity_condition(referral) -> object:
     """Qualifying activity: real-money order or legacy real top-up, ≥ threshold.
 
-    Three branches, all require amount ≥ REFERRAL_ACTIVE_MIN_TOPUP_RUB:
+    Two branches, both require amount ≥ REFERRAL_ACTIVE_MIN_TOPUP_RUB:
 
-    1. qualifying_topup_order — balance top-up (`service_type='topup'`) with
-       any payment method and status `paid`.  Covers the standard top-up flow.
+    1. qualifying_order — any paid order with:
+       - service_type == 'topup' (standard balance top-up flow), OR
+       - payment_method != 'wallet' (direct tariff/service purchase via real external gateway).
+       Wallet orders for non-topup services (including those paid from admin-gifted
+       compensation balance) are intentionally excluded: gifted roubles must not
+       activate referrals.
 
-    2. external_gateway_order — any paid order routed through a real external
-       payment gateway (`payment_method != 'wallet'`), regardless of
-       `service_type`.  Covers users who buy a tariff directly via card/Stars
-       without first topping up.  Wallet orders (including those paid from
-       admin-gifted balance) are intentionally excluded: gifted roubles must
-       not mint referral bonuses.
-
-    3. real_topup — legacy `payments` rows (pre-orders-table era): succeeded +
-       fulfilled + credited.  Pure admin_adjustment freebies never have a
+    2. real_topup — legacy `payments` rows (pre-orders-table era): succeeded +
+       fulfilled + credited. Pure admin_adjustment freebies never have a
        `payments` row and therefore do not count.
     """
-    qualifying_topup_order = (
+    qualifying_order = (
         select(Order.id)
         .where(
             Order.user_id == referral.id,
-            Order.service_type == "topup",
             Order.status == "paid",
             Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-        )
-        .exists()
-    )
-    # Direct tariff (or any service) purchase via real external gateway.
-    # payment_method='wallet' is excluded because the wallet may be funded
-    # by admin compensation credits rather than real money.
-    external_gateway_order = (
-        select(Order.id)
-        .where(
-            Order.user_id == referral.id,
-            Order.payment_method != "wallet",
-            Order.status == "paid",
-            Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+            or_(
+                Order.service_type == "topup",
+                Order.payment_method != "wallet",
+            ),
         )
         .exists()
     )
@@ -269,15 +256,15 @@ def _referral_paid_activity_condition(referral) -> object:
         )
         .exists()
     )
-    return or_(qualifying_topup_order, external_gateway_order, real_topup)
+    return or_(qualifying_order, real_topup)
 
 
 async def get_user_active_referrals_count(
     session: AsyncSession, telegram_id: int
 ) -> int:
-    """Return count of referred users with a qualifying top-up (≥ threshold).
+    """Return count of referred users with qualifying paid activity (≥ threshold).
 
-    Each referral counts at most once: repeat top-ups earn the referrer a
+    Each referral counts at most once: repeat payments earn the referrer a
     percentage but never increment this counter.
     """
     if not isinstance(telegram_id, int) or telegram_id < 1 or telegram_id > MAX_INT64:

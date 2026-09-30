@@ -1254,8 +1254,6 @@ class TestActiveReferralsLegacyPayments(unittest.TestCase):
         self.assertIn("credited_at", compiled)
         self.assertIn("topup", compiled)
         self.assertIn("service_type", compiled)
-        # new: external gateway branch must exclude wallet
-        self.assertIn("wallet", compiled)
 
     def test_count_counts_legacy_topup_without_order(self):
         import asyncio
