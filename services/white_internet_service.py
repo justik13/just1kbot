@@ -43,7 +43,7 @@ from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
-from database.models import Server, Tariff, TariffQuote, WhiteInternetSubscription
+from database.models import Server, Tariff, TariffQuote, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     AccountLedgerError,
@@ -229,6 +229,51 @@ class WhiteInternetService:
         )
 
     @classmethod
+    async def _debit_for_quote(
+        cls,
+        session: AsyncSession,
+        *,
+        user: User,
+        quote: TariffQuote,
+        price: Decimal,
+        insufficient_text: str,
+        **extra_message_kwargs,
+    ) -> tuple[bool, str, None] | None:
+        """Persist the quote and debit the wallet, cancelling the quote on failure.
+
+        Returns ``None`` when the debit succeeded. On failure it returns the exact
+        ``(False, message, None)`` tuple the callers hand back, so every White
+        Internet purchase path (subscription, trial conversion, renewal, device
+        slot, traffic top-up) reports an identical outcome for the same financial
+        fault. This is the single debit boundary for the subsystem.
+        """
+        session.add(quote)
+        await session.flush()
+        try:
+            await create_purchase_debit(
+                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+            )
+        except InsufficientAccountBalanceError:
+            quote.status = TariffQuoteStatus.CANCELLED
+            await session.flush()
+            balance_snap = await get_account_balance(session, user_id=user.id)
+            return (
+                False,
+                insufficient_text.format(
+                    price=int(price),
+                    balance=balance_snap.available,
+                    shortage=max(price - balance_snap.available, Decimal(0)),
+                    **extra_message_kwargs,
+                ),
+                None,
+            )
+        except AccountLedgerError as exc:
+            quote.status = TariffQuoteStatus.CANCELLED
+            await session.flush()
+            return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+        return None
+
+    @classmethod
     async def purchase_subscription(
         cls, session: AsyncSession, user_id: int, debit_balance: bool = True
     ):
@@ -287,31 +332,15 @@ class WhiteInternetService:
                 resulting_paid_hours=tariff_version.duration_hours,
                 resulting_paid_value=Decimal(tariff_version.price_rub),
             )
-            session.add(quote)
-            await session.flush()
-            try:
-                await create_purchase_debit(
-                    session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
-                )
-            except InsufficientAccountBalanceError:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                balance_snap = await get_account_balance(session, user_id=user.id)
-                return (
-                    False,
-                    texts.WL_INSUFFICIENT_BALANCE_BUY.format(
-                        price=int(tariff_version.price_rub),
-                        balance=balance_snap.available,
-                        shortage=max(
-                            Decimal(tariff_version.price_rub) - balance_snap.available, Decimal(0)
-                        ),
-                    ),
-                    None,
-                )
-            except AccountLedgerError as exc:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+            debit_failure = await cls._debit_for_quote(
+                session,
+                user=user,
+                quote=quote,
+                price=tariff_version.price_rub,
+                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
+            )
+            if debit_failure is not None:
+                return debit_failure
 
             quote.status = TariffQuoteStatus.CONSUMED
             quote_id = quote.id
@@ -415,29 +444,15 @@ class WhiteInternetService:
                 resulting_paid_hours=tariff_version.duration_hours,
                 resulting_paid_value=tier_price,
             )
-            session.add(quote)
-            await session.flush()
-            try:
-                await create_purchase_debit(
-                    session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
-                )
-            except InsufficientAccountBalanceError:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                balance_snap = await get_account_balance(session, user_id=user.id)
-                return (
-                    False,
-                    texts.WL_INSUFFICIENT_BALANCE_BUY.format(
-                        price=int(tier_price),
-                        balance=balance_snap.available,
-                        shortage=max(tier_price - balance_snap.available, Decimal(0)),
-                    ),
-                    None,
-                )
-            except AccountLedgerError as exc:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+            debit_failure = await cls._debit_for_quote(
+                session,
+                user=user,
+                quote=quote,
+                price=tier_price,
+                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
+            )
+            if debit_failure is not None:
+                return debit_failure
             quote.status = TariffQuoteStatus.CONSUMED
             quote.consumed_at = now_utc()
 
@@ -592,31 +607,15 @@ class WhiteInternetService:
                 resulting_paid_hours=tariff_version.duration_hours,
                 resulting_paid_value=tier_price,
             )
-            session.add(quote)
-            await session.flush()
-            try:
-                await create_purchase_debit(
-                    session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
-                )
-            except InsufficientAccountBalanceError:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                balance_snap = await get_account_balance(session, user_id=user.id)
-                return (
-                    False,
-                    texts.WL_INSUFFICIENT_BALANCE_RENEW.format(
-                        price=int(tier_price),
-                        balance=balance_snap.available,
-                        shortage=max(
-                            tier_price - balance_snap.available, Decimal(0)
-                        ),
-                    ),
-                    None,
-                )
-            except AccountLedgerError as exc:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+            debit_failure = await cls._debit_for_quote(
+                session,
+                user=user,
+                quote=quote,
+                price=tier_price,
+                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_RENEW,
+            )
+            if debit_failure is not None:
+                return debit_failure
             quote.status = TariffQuoteStatus.CONSUMED
             quote.consumed_at = now_utc()
             quote_id = quote.id
@@ -760,29 +759,15 @@ class WhiteInternetService:
                 amount_due=price,
                 expires_at=now + timedelta(minutes=15),
             )
-            session.add(quote)
-            await session.flush()
-            try:
-                await create_purchase_debit(
-                    session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
-                )
-            except InsufficientAccountBalanceError:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                balance_snap = await get_account_balance(session, user_id=user.id)
-                return (
-                    False,
-                    texts.WL_INSUFFICIENT_BALANCE_BUY.format(
-                        price=int(price),
-                        balance=balance_snap.available,
-                        shortage=max(price - balance_snap.available, Decimal(0)),
-                    ),
-                    None,
-                )
-            except AccountLedgerError as exc:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+            debit_failure = await cls._debit_for_quote(
+                session,
+                user=user,
+                quote=quote,
+                price=price,
+                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
+            )
+            if debit_failure is not None:
+                return debit_failure
 
         # Apply node migration ONLY after successful financial debit
         old_origin_for_cleanup: Server | None = None
@@ -916,30 +901,16 @@ class WhiteInternetService:
                 amount_due=pack_price,
                 expires_at=now + timedelta(minutes=15),
             )
-            session.add(quote)
-            await session.flush()
-            try:
-                await create_purchase_debit(
-                    session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
-                )
-            except InsufficientAccountBalanceError:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                balance_snap = await get_account_balance(session, user_id=user.id)
-                return (
-                    False,
-                    texts.WL_INSUFFICIENT_BALANCE_TOPUP.format(
-                        gb=pack_gb,
-                        price=int(pack_price),
-                        balance=balance_snap.available,
-                        shortage=max(pack_price - balance_snap.available, Decimal(0)),
-                    ),
-                    None,
-                )
-            except AccountLedgerError as exc:
-                quote.status = TariffQuoteStatus.CANCELLED
-                await session.flush()
-                return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+            debit_failure = await cls._debit_for_quote(
+                session,
+                user=user,
+                quote=quote,
+                price=pack_price,
+                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_TOPUP,
+                gb=pack_gb,
+            )
+            if debit_failure is not None:
+                return debit_failure
             quote.status = TariffQuoteStatus.CONSUMED
             quote_id = quote.id
 

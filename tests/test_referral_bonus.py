@@ -1011,7 +1011,7 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
         )
 
         with patch("services.order_service.get_payment_gateway", return_value=mock_gw), \
-             patch("database.repositories.users_repo.is_eligible_for_referral_first_discount", return_value=True):
+             patch("services.order_service.is_eligible_for_referral_first_discount", return_value=True):
             order = asyncio.run(
                 OrderService.create_order(
                     session,
@@ -1055,7 +1055,7 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
         )
 
         with patch("services.order_service.get_payment_gateway", return_value=mock_gw), \
-             patch("database.repositories.users_repo.is_eligible_for_referral_first_discount", return_value=False):
+             patch("services.order_service.is_eligible_for_referral_first_discount", return_value=False):
             order = asyncio.run(
                 OrderService.create_order(
                     session,
@@ -1100,7 +1100,7 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
         with patch("services.order_service.get_account_balance", return_value=balance_snap), \
              patch("services.order_service.create_order_debit") as mock_debit, \
              patch("services.fulfillment_service.FulfillmentService.fulfill_order", new_callable=AsyncMock), \
-             patch("database.repositories.users_repo.is_eligible_for_referral_first_discount", return_value=True):
+             patch("services.order_service.is_eligible_for_referral_first_discount", return_value=True):
             order = asyncio.run(
                 OrderService.pay_from_wallet(
                     session,
