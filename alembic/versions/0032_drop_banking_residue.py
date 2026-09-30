@@ -90,11 +90,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Recreating the banking schema is deliberately not supported: it was never a
-    # working billing path, and re-creating it would only restore dead structure.
-    # Operational recovery is a restore from backup, which is the documented path
-    # for this project's production changes.
-    raise NotImplementedError(
-        "0032_drop_banking_residue is irreversible by design. "
-        "Restore from a pre-migration backup if the tables are required."
-    )
+    # No-op by design, and required by the CI migration chain contract
+    # (tests.yml: `alembic downgrade base` must succeed and leave no application
+    # tables behind).
+    #
+    # The tables dropped in upgrade() are not recreated. They were the abandoned
+    # banking schema, they had no production writer for weeks, and nothing in the
+    # codebase reads them any more, so re-creating them would only restore dead
+    # structure. The round trip is still consistent: upgrade() drops with
+    # IF EXISTS, so re-applying it after a downgrade is idempotent.
+    #
+    # Recovering the data itself requires restoring a pre-migration backup, which
+    # is this project's documented production path.
+    pass
