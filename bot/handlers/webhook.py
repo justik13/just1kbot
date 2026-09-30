@@ -321,8 +321,6 @@ async def _close_healthcheck_redis(app: web.Application) -> None:
 
 
 def setup_webhook_routes(app: web.Application):
-    from integrations import register_all_web_routes
-
     app.router.add_post(
         "/webhook/yookassa",
         yookassa_webhook_handler,
@@ -335,9 +333,6 @@ def setup_webhook_routes(app: web.Application):
     app.on_cleanup.append(_close_healthcheck_redis)
     logger.info("YooKassa webhook route registered: POST /webhook/yookassa & POST /yookassa/webhook")
     logger.info("Healthcheck endpoint registered: GET /health")
-
-    # Register all enabled modular integrations
-    register_all_web_routes(app)
 
     # Register White Internet subscription feed routes
     from bot.handlers.white_internet_web import setup_white_internet_web_routes

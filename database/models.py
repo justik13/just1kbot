@@ -39,11 +39,9 @@ from config.enums import (
     OrderServiceType,
     PaidValueEntryType,
     PaymentCheckoutStatus,
-    PaymentDisputeStatus,
     PaymentFulfillmentStatus,
     PaymentProviderOperationStatus,
     PaymentProviderStatus,
-    PaymentQueueStatus,
     PaymentReconciliationStatus,
     ServerHealthState,
     ServerLifecycleStatus,
@@ -59,25 +57,6 @@ from utils.encryption import EncryptedString
 
 
 API_OPERATION_TYPES = tuple(s.value for s in ApiOperationType)
-API_OPERATION_STATUSES = tuple(s.value for s in ApiOperationStatus)
-PAYMENT_PROVIDER_STATUSES = tuple(s.value for s in PaymentProviderStatus)
-PAYMENT_FULFILLMENT_STATUSES = tuple(s.value for s in PaymentFulfillmentStatus)
-PAYMENT_RECONCILIATION_STATUSES = tuple(s.value for s in PaymentReconciliationStatus)
-PAYMENT_PROVIDER_OPERATION_STATUSES = tuple(s.value for s in PaymentProviderOperationStatus)
-PAYMENT_QUEUE_STATUSES = tuple(s.value for s in PaymentQueueStatus)
-ACCOUNT_LEDGER_ENTRY_TYPES = tuple(s.value for s in AccountLedgerEntryType)
-ACCOUNT_RESERVATION_TYPES = tuple(s.value for s in AccountReservationType)
-ACCOUNT_RESERVATION_STATUSES = tuple(s.value for s in AccountReservationStatus)
-PAID_VALUE_ENTRY_TYPES = tuple(s.value for s in PaidValueEntryType)
-ENTITLEMENT_ENTRY_TYPES = tuple(s.value for s in EntitlementEntryType)
-TARIFF_QUOTE_OPERATIONS = tuple(s.value for s in TariffQuoteOperation)
-TARIFF_QUOTE_STATUSES = tuple(s.value for s in TariffQuoteStatus)
-VPN_PROVISIONING_STATUSES = tuple(s.value for s in VPNProvisioningStatus)
-WEBHOOK_INBOX_STATUSES = tuple(s.value for s in WebhookInboxStatus)
-PAYMENT_DISPUTE_STATUSES = tuple(s.value for s in PaymentDisputeStatus)
-PAYMENT_CHECKOUT_STATUSES = tuple(s.value for s in PaymentCheckoutStatus)
-ORDER_STATUSES = tuple(s.value for s in OrderStatus)
-ORDER_SERVICE_TYPES = tuple(s.value for s in OrderServiceType)
 
 
 class Base(DeclarativeBase):

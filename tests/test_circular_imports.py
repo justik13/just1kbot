@@ -38,8 +38,8 @@ class CircularImportRegressionTests(unittest.TestCase):
     def test_utils_http_rate_limiter_import(self):
         self._assert_isolated_code("import utils.http_rate_limiter")
 
-    def test_utils_vpn_helpers_import(self):
-        self._assert_isolated_code("import utils.vpn_helpers")
+    def test_utils_vpn_parser_import(self):
+        self._assert_isolated_code("import utils.vpn_parser")
 
     def test_integrations_package_import(self):
         self._assert_isolated_code("import integrations")
@@ -52,8 +52,8 @@ class CircularImportRegressionTests(unittest.TestCase):
 
     def test_order_dependent_import_permutations(self):
         permutations = [
-            "import integrations; import utils.vpn_helpers; import bot.main",
-            "import utils.vpn_helpers; import integrations; import bot.main",
+            "import integrations; import utils.vpn_parser; import bot.main",
+            "import utils.vpn_parser; import integrations; import bot.main",
             "import bot.handlers.webhook; import utils.http_rate_limiter; import integrations",
         ]
         for code in permutations:
@@ -62,23 +62,17 @@ class CircularImportRegressionTests(unittest.TestCase):
 
     def test_architectural_single_source_of_truth(self):
         import config.constants
-        import utils.vpn_helpers
 
         # Protocol
         self.assertEqual(config.constants.AMNEZIA_PROTOCOL, "amneziawg2")
-        self.assertEqual(utils.vpn_helpers.AMNEZIA_PROTOCOL, config.constants.AMNEZIA_PROTOCOL)
 
         # AWG DNS and MTU defaults
         self.assertEqual(config.constants.DEFAULT_AWG_DNS1, "8.8.8.8")
         self.assertEqual(config.constants.DEFAULT_AWG_DNS2, "8.8.4.4")
         self.assertEqual(config.constants.DEFAULT_AWG_MTU, "1280")
-        self.assertEqual(utils.vpn_helpers.DEFAULT_AWG_DNS1, "8.8.8.8")
-        self.assertEqual(utils.vpn_helpers.DEFAULT_AWG_DNS2, "8.8.4.4")
-        self.assertEqual(utils.vpn_helpers.DEFAULT_AWG_MTU, "1280")
 
         # Config Size limit
         self.assertEqual(config.constants.MAX_RAW_CONFIG_BYTES, 65536)
-        self.assertEqual(utils.vpn_helpers.MAX_RAW_CONFIG_BYTES, config.constants.MAX_RAW_CONFIG_BYTES)
 
         # Rate limiter defaults
         self.assertEqual(config.constants.RATE_LIMIT_REQUESTS_PER_MINUTE, 30.0)

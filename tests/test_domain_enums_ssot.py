@@ -56,78 +56,10 @@ class DomainEnumsSSOTTests(unittest.TestCase):
                 self.assertEqual(enum_cls(member.value), member)
 
     def test_model_tuples_derived_from_enums(self):
-        """database.models tuple constants must match exactly the values from config.enums."""
+        """The one live database.models tuple constant must match config.enums exactly."""
         self.assertEqual(
             models.API_OPERATION_TYPES,
             tuple(s.value for s in config.enums.ApiOperationType),
-        )
-        self.assertEqual(
-            models.API_OPERATION_STATUSES,
-            tuple(s.value for s in config.enums.ApiOperationStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_PROVIDER_STATUSES,
-            tuple(s.value for s in config.enums.PaymentProviderStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_FULFILLMENT_STATUSES,
-            tuple(s.value for s in config.enums.PaymentFulfillmentStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_RECONCILIATION_STATUSES,
-            tuple(s.value for s in config.enums.PaymentReconciliationStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_PROVIDER_OPERATION_STATUSES,
-            tuple(s.value for s in config.enums.PaymentProviderOperationStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_QUEUE_STATUSES,
-            tuple(s.value for s in config.enums.PaymentQueueStatus),
-        )
-        self.assertEqual(
-            models.ACCOUNT_LEDGER_ENTRY_TYPES,
-            tuple(s.value for s in config.enums.AccountLedgerEntryType),
-        )
-        self.assertEqual(
-            models.ACCOUNT_RESERVATION_TYPES,
-            tuple(s.value for s in config.enums.AccountReservationType),
-        )
-        self.assertEqual(
-            models.ACCOUNT_RESERVATION_STATUSES,
-            tuple(s.value for s in config.enums.AccountReservationStatus),
-        )
-        self.assertEqual(
-            models.PAID_VALUE_ENTRY_TYPES,
-            tuple(s.value for s in config.enums.PaidValueEntryType),
-        )
-        self.assertEqual(
-            models.ENTITLEMENT_ENTRY_TYPES,
-            tuple(s.value for s in config.enums.EntitlementEntryType),
-        )
-        self.assertEqual(
-            models.TARIFF_QUOTE_OPERATIONS,
-            tuple(s.value for s in config.enums.TariffQuoteOperation),
-        )
-        self.assertEqual(
-            models.TARIFF_QUOTE_STATUSES,
-            tuple(s.value for s in config.enums.TariffQuoteStatus),
-        )
-        self.assertEqual(
-            models.VPN_PROVISIONING_STATUSES,
-            tuple(s.value for s in config.enums.VPNProvisioningStatus),
-        )
-        self.assertEqual(
-            models.WEBHOOK_INBOX_STATUSES,
-            tuple(s.value for s in config.enums.WebhookInboxStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_DISPUTE_STATUSES,
-            tuple(s.value for s in config.enums.PaymentDisputeStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_CHECKOUT_STATUSES,
-            tuple(s.value for s in config.enums.PaymentCheckoutStatus),
         )
 
     def test_database_model_constraints_match_enums(self):
