@@ -75,7 +75,9 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
         "3B_PAID_TOPUP_NOT_CREDITED",
         "SELECT '3B_PAID_TOPUP_NOT_CREDITED' AS block, CASE WHEN count(*) = 0 "
         "THEN 'OK (0 violations)' ELSE 'CRITICAL: HAS VIOLATIONS n=' || count(*) END AS verdict "
-        "FROM orders o WHERE o.status = 'paid' AND o.service_type = 'topup' AND NOT EXISTS ("
+        "FROM orders o WHERE o.status = 'paid' AND o.service_type = 'topup' "
+        "AND coalesce(o.metadata ->> 'settlement_held', 'false') <> 'true' "
+        "AND NOT EXISTS ("
         "SELECT 1 FROM account_ledger_entries l WHERE l.order_id = o.id "
         "AND l.entry_type = 'payment_credit')",
     ),
@@ -192,6 +194,7 @@ class TestPreflightCommandIsShellSafe(unittest.TestCase):
         from database.models import Order
 
         self.assertIn("metadata ->> 'is_referral_discount'", PREFLIGHT_SQL)
+        self.assertIn("metadata ->> 'settlement_held'", PREFLIGHT_SQL)
         self.assertNotIn("metadata_", PREFLIGHT_SQL)
         # And the attribute must still map to that column, so the SQL above is not
         # silently drifting away from the model either.
