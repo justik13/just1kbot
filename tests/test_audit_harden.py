@@ -441,6 +441,7 @@ class ResumeHoldTests(unittest.IsolatedAsyncioTestCase):
 class SettlementReleaseTests(unittest.IsolatedAsyncioTestCase):
     async def _run_release(self, *, hold=False):
         from services.order_service import OrderService
+        from services.referral_bonus import ReferralBonusGrantResult
 
         order = MagicMock()
         order.id = uuid4()
@@ -462,7 +463,7 @@ class SettlementReleaseTests(unittest.IsolatedAsyncioTestCase):
             ) as mock_credit,
             patch(
                 "services.referral_bonus.grant_referral_bonus_for_topup",
-                new=AsyncMock(),
+                new=AsyncMock(return_value=ReferralBonusGrantResult()),
             ) as mock_grant,
             patch(
                 "services.order_service.FulfillmentService.fulfill_order",
