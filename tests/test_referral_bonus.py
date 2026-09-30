@@ -757,7 +757,6 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         balance_snap = AccountBalanceSnapshot(
             accounting_position=Decimal(40),
             available=Decimal(40),
-            reserved=Decimal(0),
             debt=Decimal(0),
             real_available=Decimal(0),
             bonus_available=Decimal(40),
@@ -961,7 +960,6 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         balance_snap = AccountBalanceSnapshot(
             accounting_position=Decimal("100.00"),
             available=Decimal("100.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
             bonus_available=Decimal("24.00"),
         )
@@ -1013,7 +1011,7 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
         )
 
         with patch("services.order_service.get_payment_gateway", return_value=mock_gw), \
-             patch("database.repositories.users_repo.is_eligible_for_referral_first_discount", return_value=True):
+             patch("services.order_service.is_eligible_for_referral_first_discount", return_value=True):
             order = asyncio.run(
                 OrderService.create_order(
                     session,
@@ -1057,7 +1055,7 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
         )
 
         with patch("services.order_service.get_payment_gateway", return_value=mock_gw), \
-             patch("database.repositories.users_repo.is_eligible_for_referral_first_discount", return_value=False):
+             patch("services.order_service.is_eligible_for_referral_first_discount", return_value=False):
             order = asyncio.run(
                 OrderService.create_order(
                     session,
@@ -1094,7 +1092,6 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
         balance_snap = AccountBalanceSnapshot(
             accounting_position=Decimal("300.00"),
             available=Decimal("300.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
             real_available=Decimal("300.00"),
             bonus_available=Decimal("0.00"),
@@ -1103,7 +1100,7 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
         with patch("services.order_service.get_account_balance", return_value=balance_snap), \
              patch("services.order_service.create_order_debit") as mock_debit, \
              patch("services.fulfillment_service.FulfillmentService.fulfill_order", new_callable=AsyncMock), \
-             patch("database.repositories.users_repo.is_eligible_for_referral_first_discount", return_value=True):
+             patch("services.order_service.is_eligible_for_referral_first_discount", return_value=True):
             order = asyncio.run(
                 OrderService.pay_from_wallet(
                     session,

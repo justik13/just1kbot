@@ -13,23 +13,15 @@ from typing import Any
 
 from config.enums import (
     AccountLedgerEntryType,
-    AccountReservationStatus,
-    AccountReservationType,
     AdminAuditAction,
     ApiOperationStatus,
     ApiOperationType,
-    EntitlementEntryType,
     OrderServiceType,
     OrderStatus,
-    PaidValueEntryType,
     PaymentCheckoutStatus,
-    PaymentDisputeStatus,
     PaymentFulfillmentStatus,
-    PaymentProviderOperationStatus,
     PaymentProviderStatus,
-    PaymentQueueStatus,
     PaymentReconciliationStatus,
-    ProviderRefundOperationStatus,
     ServerHealthState,
     ServerLifecycleStatus,
     ServiceType,
@@ -52,6 +44,7 @@ AMNEZIA_PROTOCOLS: tuple[str, ...] = (
 )
 AMNEZIA_DOCKER_CONTAINER = "amnezia-awg2"
 XRAY_PROTOCOL = "xray"
+XRAY_ORIGIN_CAPABILITY = "xray_origin"
 
 # Default AmneziaWG Client Network Settings
 DEFAULT_AWG_DNS1 = "8.8.8.8"
@@ -94,12 +87,6 @@ SELF_HEALING_MAX_PER_CYCLE = 50
 
 # Local payment-expiry window: the cleanup worker marks a payment canceled
 # only after a provider GET still reports pending (provider-verified LOCAL
-# cancellation - NOT a provider-side auto-cancel). YooKassa does not offer a
-# documented way to expire a redirect payment in `pending`; a late provider
-# success after local expiry is the expected manual_review reconciliation
-# path, never a silent credit.
-PAYMENT_EXPIRATION_HOURS = 48
-
 # API Client timings and concurrency
 API_CONCURRENCY_LIMIT = 20
 API_RETRY_COUNT = 2
@@ -262,8 +249,6 @@ __all__ = [
     "API_RETRY_COUNT",
     "API_TIMEOUT",
     "AccountLedgerEntryType",
-    "AccountReservationStatus",
-    "AccountReservationType",
     "AdminAuditAction",
     "ApiOperationStatus",
     "CANONICAL_XHTTP_PROFILE",
@@ -278,7 +263,6 @@ __all__ = [
     "DEFAULT_WHITE_INTERNET_SUPPORT_URL",
     "DEFAULT_XRAY_ORIGIN_MAX_CLIENTS",
     "DEVICE_DAILY_LIMIT",
-    "EntitlementEntryType",
     "OrderServiceType",
     "OrderStatus",
     "GRACE_PERIOD_HOURS",
@@ -288,16 +272,10 @@ __all__ = [
     "NOTIFICATION_INTERVAL",
     "PERMANENT_END_DATE",
     "PERMANENT_SUBSCRIPTION_DAYS",
-    "PaidValueEntryType",
-    "PAYMENT_EXPIRATION_HOURS",
     "PaymentCheckoutStatus",
-    "PaymentDisputeStatus",
     "PaymentFulfillmentStatus",
-    "PaymentProviderOperationStatus",
     "PaymentProviderStatus",
-    "PaymentQueueStatus",
     "PaymentReconciliationStatus",
-    "ProviderRefundOperationStatus",
     "RATE_LIMIT_BURST",
     "RATE_LIMIT_REQUESTS_PER_MINUTE",
     "REFERRAL_DEFAULT_RATE",
@@ -345,5 +323,7 @@ __all__ = [
     "WhiteInternetProvisioningStatus",
     "WhiteInternetStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
+    "XRAY_ORIGIN_CAPABILITY",
+    "XRAY_PROTOCOL",
     "YOOKASSA_IP_RANGES",
 ]

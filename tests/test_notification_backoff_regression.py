@@ -1,6 +1,6 @@
 import unittest
 
-from bot.constants import NOTIFICATION_INTERVAL
+from config.constants import NOTIFICATION_INTERVAL
 from services.workers.notifications import MAX_RETRY_COUNT, _get_backoff_delay
 
 

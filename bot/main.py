@@ -27,7 +27,6 @@ from bot import texts
 from config.constants import WHITE_INTERNET_SUB_PATH_PREFIX
 from bot.handlers.admin.broadcast import (
     _background_tasks,
-    _broadcast_stop_events,
     resume_pending_broadcasts,
 )
 from bot.handlers.webhook import setup_webhook_routes
@@ -283,9 +282,8 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     from bot.handlers.start import router as start_router
     from bot.handlers.support import router as support_router
     from bot.handlers.white_internet import router as white_internet_router
-    from integrations import get_all_bot_routers
 
-    # Clean parent router state on all known module-level routers (core & integrations)
+    # Clean parent router state on all known module-level routers
     # so setup_bot is strictly idempotent across multiple invocations and dynamic state transitions.
     for r in (
         start_router,
@@ -299,14 +297,11 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     ):
         r._parent_router = None
 
-    integration_routers = get_all_bot_routers()
-
     for r in [
         start_router,
         referral_router,
         connection_router,
         white_internet_router,
-        *integration_routers,
         support_router,
         payment_router,
         admin_router,
@@ -450,9 +445,6 @@ async def start_webhook_server(port: int, bot: object | None = None):
 
 
 async def _stop_broadcast_tasks():
-    for event in _broadcast_stop_events.values():
-        event.set()
-
     tasks = list(_background_tasks)
     for task in tasks:
         task.cancel()

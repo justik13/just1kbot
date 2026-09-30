@@ -30,7 +30,7 @@ class Migration0029Tests(unittest.TestCase):
         rev = scripts.get_revision("0029_rebase_wi_traffic_downlink")
         self.assertIsNotNone(rev)
         self.assertEqual(rev.down_revision, "0028_wi_notifications")
-        self.assertEqual(scripts.get_heads(), ["0031_awg_persistent_traffic"])
+        self.assertEqual(scripts.get_heads(), ["0032_drop_banking_residue"])
         self.assertEqual(self.migration.revision, "0029_rebase_wi_traffic_downlink")
         self.assertEqual(self.migration.down_revision, "0028_wi_notifications")
 

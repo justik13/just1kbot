@@ -1,5 +1,8 @@
 import logging
-from datetime import timedelta
+from config.constants import (
+    AdminAuditAction,
+    PERMANENT_SUBSCRIPTION_DAYS,
+)
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -8,11 +11,6 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import (
-    AdminAuditAction,
-    PERMANENT_END_DATE,
-    PERMANENT_SUBSCRIPTION_DAYS,
-)
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
@@ -33,7 +31,11 @@ from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
 from utils.telegram import render_hub
 
-from .common import _validate_positive_int
+from .common import (
+    _validate_positive_int,
+    format_subscription_days_text,
+    resolve_subscription_end,
+)
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -147,17 +149,9 @@ async def admin_sub_confirm_extend(
         else current_time
     )
 
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_end + timedelta(days=days)
-    )
+    new_end = resolve_subscription_end(current_end, days)
 
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    days_text = format_subscription_days_text(days)
 
     text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(
         telegram_id=telegram_id,
@@ -262,7 +256,6 @@ async def admin_sub_apply_extend(
             days,
             new_device_limit=None,
             new_tariff_id=None,
-            create_entitlement=True,
             admin_id=callback.from_user.id,
             reason="admin_sub_extend",
         )
@@ -274,11 +267,7 @@ async def admin_sub_apply_extend(
             telegram_id,
         )
 
-        days_text = (
-            texts.ADMIN_SUB_PERMANENT_LABEL
-            if days >= PERMANENT_SUBSCRIPTION_DAYS
-            else texts.TIME_DAYS_FORMAT.format(days=days)
-        )
+        days_text = format_subscription_days_text(days)
 
         await AuditService.log_action(
             session,
@@ -427,17 +416,9 @@ async def admin_sub_extend_custom_process(
         else current_time
     )
 
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_end + timedelta(days=days)
-    )
+    new_end = resolve_subscription_end(current_end, days)
 
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    days_text = format_subscription_days_text(days)
 
     confirm_text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(
         telegram_id=telegram_id,

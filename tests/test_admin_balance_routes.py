@@ -30,7 +30,6 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
         snapshot = AccountBalanceSnapshot(
             accounting_position=Decimal(100),
             available=Decimal(100),
-            reserved=Decimal(0),
             debt=Decimal(0),
             bonus_available=Decimal(100),
         )
@@ -248,7 +247,6 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
         stale_bonus_snapshot = AccountBalanceSnapshot(
             accounting_position=Decimal(500),
             available=Decimal(500),
-            reserved=Decimal(0),
             debt=Decimal(0),
             bonus_available=Decimal(0),  # User spent all bonus!
             real_available=Decimal(500),

@@ -6,7 +6,7 @@ from config.constants import AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS
 from database.models import Server
 from database.repositories.servers_repo import is_server_allocatable
 from services.amnezia_client import AmneziaClient
-from utils.vpn_helpers import _get_awg_block
+from utils.vpn_parser import _get_first_awg_container
 
 
 class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
@@ -62,15 +62,15 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
         for proto in AMNEZIA_PROTOCOLS:
             self.assertFalse(is_server_allocatable(server, proto))
 
-    def test_vpn_helpers_get_awg_block_strict_amnezia_awg2_container(self):
+    def test_first_awg_container_strict_amnezia_awg2_container(self):
         """Invariant: Only canonical amnezia-awg2 container is accepted; legacy or fictitious are rejected."""
         valid_data = {
             "containers": [
                 {"container": "amnezia-awg2", "awg": {"protocol_version": "3.1", "port": 51820}},
             ]
         }
-        self.assertIsNotNone(_get_awg_block(valid_data))
-        self.assertEqual(_get_awg_block(valid_data)["protocol_version"], "3.1")
+        self.assertIsNotNone(_get_first_awg_container(valid_data))
+        self.assertEqual(_get_first_awg_container(valid_data)["protocol_version"], "3.1")
 
         # Rejected legacy container
         legacy_data = {
@@ -78,7 +78,7 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
                 {"container": "amnezia-awg", "awg": {"protocol_version": "2", "port": 51820}},
             ]
         }
-        self.assertIsNone(_get_awg_block(legacy_data))
+        self.assertIsNone(_get_first_awg_container(legacy_data))
 
         # Rejected fictitious container
         awg3_data = {
@@ -86,7 +86,7 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
                 {"container": "amnezia-awg3", "awg": {"protocol_version": "3.1", "port": 51820}},
             ]
         }
-        self.assertIsNone(_get_awg_block(awg3_data))
+        self.assertIsNone(_get_first_awg_container(awg3_data))
 
     async def test_amnezia_client_protocol_propagation(self):
         """Invariant: AmneziaClient propagates server protocol to API requests."""

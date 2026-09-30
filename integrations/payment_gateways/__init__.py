@@ -1,19 +1,7 @@
-"""Payment gateways package."""
+"""Payment gateway adapters.
 
-from integrations.payment_gateways.base import (
-    BasePaymentGateway,
-    PaymentInvoice,
-    PaymentStatusResult,
-    WebhookResult,
-)
-from integrations.payment_gateways.factory import get_payment_gateway
-from integrations.payment_gateways.yookassa import YooKassaGateway
+Callers import the concrete submodule directly, e.g.::
 
-__all__ = [
-    "BasePaymentGateway",
-    "PaymentInvoice",
-    "PaymentStatusResult",
-    "WebhookResult",
-    "YooKassaGateway",
-    "get_payment_gateway",
-]
+    from integrations.payment_gateways.base import PaymentInvoice
+    from integrations.payment_gateways.factory import get_payment_gateway
+"""

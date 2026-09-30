@@ -33,10 +33,9 @@ class TrafficBatchUpdatePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as s:
             await s.execute(
                 text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "TRUNCATE account_ledger_allocations, account_ledger_entries, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, "
+                    "vpn_profiles, users, servers "
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -45,10 +44,9 @@ class TrafficBatchUpdatePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as s:
             await s.execute(
                 text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "TRUNCATE account_ledger_allocations, account_ledger_entries, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, "
+                    "vpn_profiles, users, servers "
                     "RESTART IDENTITY CASCADE"
                 )
             )

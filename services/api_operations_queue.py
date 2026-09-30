@@ -420,40 +420,6 @@ async def claim_api_operations(
     return claimed
 
 
-async def mark_api_operation_succeeded(
-    operation_id: int,
-    *,
-    worker_id: str,
-    expected_attempt_number: int,
-    session_factory: SessionFactory | None = None,
-) -> None:
-    """Finish an owned lease; repeated completion is an ownership error."""
-    from sqlalchemy import func
-
-    _validate_expected_attempt_number(expected_attempt_number)
-    async with _transaction(session_factory) as session:
-        result = await session.execute(
-            update(APIOperation)
-            .where(
-                APIOperation.id == operation_id,
-                APIOperation.status == "processing",
-                APIOperation.locked_by == worker_id,
-                APIOperation.attempts == expected_attempt_number,
-            )
-            .values(
-                status="succeeded",
-                completed_at=func.now(),
-                updated_at=func.now(),
-                locked_at=None,
-                locked_by=None,
-                last_error_code=None,
-                last_error=None,
-            )
-        )
-        if result.rowcount != 1:
-            raise APIOperationOwnershipError("operation is not leased by this worker")
-
-
 async def mark_api_operation_cancelled(
     operation_id: int, *, worker_id: str, expected_attempt_number: int,
     reason: str, session_factory: SessionFactory | None = None,
@@ -469,80 +435,6 @@ async def mark_api_operation_cancelled(
                  locked_at=None, locked_by=None, last_error_code=reason[:100]))
         if result.rowcount != 1:
             raise APIOperationOwnershipError("operation is not leased by this worker")
-
-
-async def retry_dead_api_operation(
-    operation_id: int, *, reason: str, reset_attempts: bool,
-    session_factory: SessionFactory | None = None,
-) -> None:
-    """Administrative repair primitive; the reason is retained for audit."""
-    from sqlalchemy import func
-    if not reason.strip():
-        raise APIOperationValidationError("audit reason must not be empty")
-    async with _transaction(session_factory) as session:
-        operation = (await session.execute(select(APIOperation).where(
-            APIOperation.id == operation_id, APIOperation.status == "dead"
-        ).with_for_update())).scalar_one_or_none()
-        if operation is None:
-            raise APIOperationValidationError("only dead operations can be retried")
-        operation.status = "retry"
-        operation.next_attempt_at = func.now()
-        operation.completed_at = None
-        operation.locked_at = operation.locked_by = None
-        operation.last_error_code = "manual_retry"
-        operation.last_error = reason[:2000]
-        if reset_attempts:
-            operation.attempts = 0
-
-
-async def mark_api_operation_failed(
-    operation_id: int,
-    *,
-    worker_id: str,
-    expected_attempt_number: int,
-    retryable: bool,
-    error_code: str,
-    error_message: str,
-    session_factory: SessionFactory | None = None,
-) -> str:
-    """Fail an owned fenced lease; error inputs must already be safe strings."""
-    from sqlalchemy import func
-
-    _validate_expected_attempt_number(expected_attempt_number)
-    if not isinstance(error_code, str):
-        raise APIOperationValidationError("error_code must be a string")
-    if not isinstance(error_message, str):
-        raise APIOperationValidationError("error_message must be a string")
-    safe_error_code = (error_code.strip() or "unknown_error")[:100]
-    safe_error_message = error_message[:2000]
-
-    async with _transaction(session_factory) as session:
-        operation = (
-            await session.execute(
-                select(APIOperation)
-                .where(
-                    APIOperation.id == operation_id,
-                    APIOperation.status == "processing",
-                    APIOperation.locked_by == worker_id,
-                    APIOperation.attempts == expected_attempt_number,
-                )
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
-        if operation is None:
-            raise APIOperationOwnershipError("operation is not leased by this worker")
-        should_retry = retryable and operation.attempts < operation.max_attempts
-        operation.status = "retry" if should_retry else "dead"
-        operation.next_attempt_at = (
-            func.now() + calculate_retry_delay(operation.attempts) if should_retry else operation.next_attempt_at
-        )
-        operation.completed_at = None if should_retry else func.now()
-        operation.updated_at = func.now()
-        operation.locked_at = None
-        operation.locked_by = None
-        operation.last_error_code = safe_error_code
-        operation.last_error = safe_error_message
-        return operation.status
 
 
 def _validate_expected_attempt_number(expected_attempt_number: int) -> None:

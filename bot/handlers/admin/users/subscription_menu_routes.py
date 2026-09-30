@@ -46,6 +46,7 @@ from .common import (
     _get_white_internet_card_info,
     _is_subscription_active,
     _validate_positive_int,
+    format_subscription_days_text,
 )
 
 router = Router()
@@ -1070,11 +1071,7 @@ async def admin_wi_confirm_extend(
 
     new_end = calculate_extension_end(wi_sub.expires_at, days)
 
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    days_text = format_subscription_days_text(days)
 
     text = texts.ADMIN_WI_CONFIRM_EXTEND.format(
         telegram_id=telegram_id,
@@ -1172,11 +1169,7 @@ async def admin_wi_apply_extend(
         await callback.answer(texts.ADMIN_WI_ACTION_FAILED.format(error=msg), show_alert=True)
         return
 
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    days_text = format_subscription_days_text(days)
 
     await AuditService.log_action(
         session,
@@ -1324,11 +1317,7 @@ async def admin_wi_extend_custom_process(
 
     new_end = calculate_extension_end(wi_sub.expires_at, days)
 
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    days_text = format_subscription_days_text(days)
 
     confirm_text = texts.ADMIN_WI_CONFIRM_EXTEND.format(
         telegram_id=telegram_id,

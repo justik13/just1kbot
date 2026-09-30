@@ -37,7 +37,7 @@ from database.models import (
     WhiteInternetSubscription,
 )
 from database.repositories import servers_repo, white_internet_repo
-from utils import now_utc
+from utils.datetime_helpers import now_utc
 
 try:
     from tests.db_utils import TRUNCATE_SQL

@@ -6,11 +6,8 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
-from database.models import (
-    API_OPERATION_STATUSES,
-    API_OPERATION_TYPES,
-    APIOperation,
-)
+from config.enums import ApiOperationStatus
+from database.models import API_OPERATION_TYPES, APIOperation
 from utils.encryption import EncryptedString
 
 
@@ -79,9 +76,10 @@ class APIOperationSchemaTests(unittest.TestCase):
 
     def test_status_constraint(self):
         sql = str(self._check_constraint("ck_api_operations_status").sqltext)
+        expected = {member.value for member in ApiOperationStatus}
         self.assertEqual(
-            {value for value in API_OPERATION_STATUSES if f"'{value}'" in sql},
-            set(API_OPERATION_STATUSES),
+            {value for value in expected if f"'{value}'" in sql},
+            expected,
         )
 
     def test_retry_constraints(self):
@@ -166,7 +164,7 @@ class APIOperationSchemaTests(unittest.TestCase):
     def test_alembic_graph_has_one_head(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         self.assertEqual(len(scripts.get_heads()), 1)
-        self.assertEqual(scripts.get_heads(), ["0031_awg_persistent_traffic"])
+        self.assertEqual(scripts.get_heads(), ["0032_drop_banking_residue"])
         self.assertEqual(scripts.get_bases(), ["0001_clean_baseline"])
 
 

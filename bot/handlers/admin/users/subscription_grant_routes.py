@@ -1,5 +1,8 @@
 import logging
-from datetime import timedelta
+from config.constants import (
+    AdminAuditAction,
+    PERMANENT_SUBSCRIPTION_DAYS,
+)
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -8,11 +11,6 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import (
-    AdminAuditAction,
-    PERMANENT_END_DATE,
-    PERMANENT_SUBSCRIPTION_DAYS,
-)
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
@@ -40,6 +38,8 @@ from .common import (
     _get_representative_tariff,
     _get_tariff_groups,
     _validate_positive_int,
+    format_subscription_days_text,
+    resolve_subscription_end,
 )
 
 router = Router()
@@ -227,17 +227,9 @@ async def admin_sub_grant_confirm(
 
     current_time = now_utc()
 
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_time + timedelta(days=days)
-    )
+    new_end = resolve_subscription_end(current_time, days)
 
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    days_text = format_subscription_days_text(days)
 
     tariff_name = get_tariff_group_name(tariff.device_limit)
 
@@ -390,17 +382,9 @@ async def admin_sub_grant_custom_process(
 
     current_time = now_utc()
 
-    new_end = (
-        PERMANENT_END_DATE
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else current_time + timedelta(days=days)
-    )
+    new_end = resolve_subscription_end(current_time, days)
 
-    days_text = (
-        texts.ADMIN_SUB_PERMANENT_LABEL
-        if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.TIME_DAYS_FORMAT.format(days=days)
-    )
+    days_text = format_subscription_days_text(days)
 
     tariff_name = get_tariff_group_name(tariff.device_limit)
 
@@ -510,18 +494,13 @@ async def admin_sub_grant_apply(
             days,
             new_device_limit=tariff.device_limit,
             new_tariff_id=tariff.id,
-            create_entitlement=True,
             admin_id=callback.from_user.id,
             reason="admin_sub_grant",
         )
 
         invalidate_user_cache(telegram_id)
 
-        days_text = (
-            texts.ADMIN_SUB_PERMANENT_LABEL
-            if days >= PERMANENT_SUBSCRIPTION_DAYS
-            else texts.TIME_DAYS_FORMAT.format(days=days)
-        )
+        days_text = format_subscription_days_text(days)
 
         tariff_name = get_tariff_group_name(tariff.device_limit)
 

@@ -5,7 +5,6 @@ from pathlib import Path
 import unittest
 from sqlalchemy import CheckConstraint
 
-import bot.constants
 import config.constants
 import config.enums
 import config.tariffs
@@ -27,28 +26,31 @@ class DomainEnumsSSOTTests(unittest.TestCase):
     """Verify that domain enums in config.enums strictly match model constants, DB constraints, and architecture rules."""
 
     def test_enums_exported_in_constants(self):
-        """All Enums in config.enums must be re-exported in config.constants and bot.constants."""
+        """All Enums in config.enums must be re-exported in config.constants."""
         for enum_name in config.enums.__all__:
             self.assertTrue(
                 hasattr(config.constants, enum_name),
                 f"{enum_name} missing from config.constants",
             )
-            self.assertTrue(
-                hasattr(bot.constants, enum_name),
-                f"{enum_name} missing from bot.constants",
-            )
             self.assertIs(
                 getattr(config.constants, enum_name),
-                getattr(config.enums, enum_name),
-            )
-            self.assertIs(
-                getattr(bot.constants, enum_name),
                 getattr(config.enums, enum_name),
             )
 
     def test_all_enums_declared_are_strenums_with_values(self):
         """Every exported enum in config.enums must be a valid StrEnum with non-empty members."""
-        self.assertEqual(len(config.enums.__all__), 28)
+        defined = {
+            name
+            for name, value in vars(config.enums).items()
+            if isinstance(value, type)
+            and issubclass(value, StrEnum)
+            and value is not StrEnum
+        }
+        self.assertEqual(
+            set(config.enums.__all__),
+            defined,
+            "config.enums.__all__ must list exactly the StrEnum classes declared in the module",
+        )
         for enum_name in config.enums.__all__:
             enum_cls = getattr(config.enums, enum_name)
             self.assertTrue(
@@ -65,78 +67,10 @@ class DomainEnumsSSOTTests(unittest.TestCase):
                 self.assertEqual(enum_cls(member.value), member)
 
     def test_model_tuples_derived_from_enums(self):
-        """database.models tuple constants must match exactly the values from config.enums."""
+        """The one live database.models tuple constant must match config.enums exactly."""
         self.assertEqual(
             models.API_OPERATION_TYPES,
             tuple(s.value for s in config.enums.ApiOperationType),
-        )
-        self.assertEqual(
-            models.API_OPERATION_STATUSES,
-            tuple(s.value for s in config.enums.ApiOperationStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_PROVIDER_STATUSES,
-            tuple(s.value for s in config.enums.PaymentProviderStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_FULFILLMENT_STATUSES,
-            tuple(s.value for s in config.enums.PaymentFulfillmentStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_RECONCILIATION_STATUSES,
-            tuple(s.value for s in config.enums.PaymentReconciliationStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_PROVIDER_OPERATION_STATUSES,
-            tuple(s.value for s in config.enums.PaymentProviderOperationStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_QUEUE_STATUSES,
-            tuple(s.value for s in config.enums.PaymentQueueStatus),
-        )
-        self.assertEqual(
-            models.ACCOUNT_LEDGER_ENTRY_TYPES,
-            tuple(s.value for s in config.enums.AccountLedgerEntryType),
-        )
-        self.assertEqual(
-            models.ACCOUNT_RESERVATION_TYPES,
-            tuple(s.value for s in config.enums.AccountReservationType),
-        )
-        self.assertEqual(
-            models.ACCOUNT_RESERVATION_STATUSES,
-            tuple(s.value for s in config.enums.AccountReservationStatus),
-        )
-        self.assertEqual(
-            models.PAID_VALUE_ENTRY_TYPES,
-            tuple(s.value for s in config.enums.PaidValueEntryType),
-        )
-        self.assertEqual(
-            models.ENTITLEMENT_ENTRY_TYPES,
-            tuple(s.value for s in config.enums.EntitlementEntryType),
-        )
-        self.assertEqual(
-            models.TARIFF_QUOTE_OPERATIONS,
-            tuple(s.value for s in config.enums.TariffQuoteOperation),
-        )
-        self.assertEqual(
-            models.TARIFF_QUOTE_STATUSES,
-            tuple(s.value for s in config.enums.TariffQuoteStatus),
-        )
-        self.assertEqual(
-            models.VPN_PROVISIONING_STATUSES,
-            tuple(s.value for s in config.enums.VPNProvisioningStatus),
-        )
-        self.assertEqual(
-            models.WEBHOOK_INBOX_STATUSES,
-            tuple(s.value for s in config.enums.WebhookInboxStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_DISPUTE_STATUSES,
-            tuple(s.value for s in config.enums.PaymentDisputeStatus),
-        )
-        self.assertEqual(
-            models.PAYMENT_CHECKOUT_STATUSES,
-            tuple(s.value for s in config.enums.PaymentCheckoutStatus),
         )
 
     def test_database_model_constraints_match_enums(self):
@@ -157,13 +91,8 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.TariffQuoteStatus),
         )
 
-        # 3. PaidValueLedgerEntry entry_type
-        self.assertEqual(
-            _extract_check_constraint_in(models.PaidValueLedgerEntry.__table__, "ck_paid_value_ledger_entry_type"),
-            set(config.enums.PaidValueEntryType),
-        )
 
-        # 4. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
+        # 3. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
         self.assertEqual(
             _extract_check_constraint_in(models.Payment.__table__, "ck_payments_provider_status"),
             set(config.enums.PaymentProviderStatus),
@@ -181,41 +110,22 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.PaymentCheckoutStatus),
         )
 
-        # 5. AccountLedgerEntry entry_type
+        # 4. AccountLedgerEntry entry_type
         self.assertEqual(
             _extract_check_constraint_in(models.AccountLedgerEntry.__table__, "ck_account_ledger_entry_type"),
             set(config.enums.AccountLedgerEntryType),
         )
 
-        # 6. AccountBalanceReservation reservation_type & status
-        self.assertEqual(
-            _extract_check_constraint_in(models.AccountBalanceReservation.__table__, "ck_account_reservations_type"),
-            set(config.enums.AccountReservationType),
-        )
-        self.assertEqual(
-            _extract_check_constraint_in(models.AccountBalanceReservation.__table__, "ck_account_reservations_status"),
-            set(config.enums.AccountReservationStatus),
-        )
 
-        # 7. WebhookInbox status
+        # 5. WebhookInbox status
         self.assertEqual(
             _extract_check_constraint_in(models.WebhookInbox.__table__, "ck_webhook_inbox_status"),
             set(config.enums.WebhookInboxStatus),
         )
 
-        # 8. EntitlementEntry entry_type
-        self.assertEqual(
-            _extract_check_constraint_in(models.EntitlementEntry.__table__, "ck_entitlement_entries_type"),
-            set(config.enums.EntitlementEntryType),
-        )
 
-        # 9. PaymentProviderOperation status
-        self.assertEqual(
-            _extract_check_constraint_in(models.PaymentProviderOperation.__table__, "ck_payment_provider_operations_status"),
-            set(config.enums.PaymentProviderOperationStatus),
-        )
 
-        # 10. APIOperation operation_type & status
+        # 6. APIOperation operation_type & status
         self.assertEqual(
             _extract_check_constraint_in(models.APIOperation.__table__, "ck_api_operations_operation_type"),
             set(config.enums.ApiOperationType),
@@ -225,7 +135,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.ApiOperationStatus),
         )
 
-        # 11. Order status & service_type
+        # 7. Order status & service_type
         self.assertEqual(
             _extract_check_constraint_in(models.Order.__table__, "ck_orders_status"),
             set(config.enums.OrderStatus),
@@ -247,7 +157,6 @@ class DomainEnumsSSOTTests(unittest.TestCase):
 
         # ApiOperation and PaymentQueue use 'cancelled' (double 'l')
         self.assertEqual(config.enums.ApiOperationStatus.CANCELLED, "cancelled")
-        self.assertEqual(config.enums.PaymentQueueStatus.CANCELLED, "cancelled")
 
     def test_default_tariffs_seeds_ssot_layering(self):
         """DEFAULT_TARIFFS_SEEDS must live strictly in config.tariffs and NOT in bot.texts."""

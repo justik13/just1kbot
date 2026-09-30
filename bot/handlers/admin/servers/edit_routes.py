@@ -1,5 +1,9 @@
 import logging
 
+from config.constants import (
+    AMNEZIA_PROTOCOLS,
+    AdminAuditAction,
+)
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -7,10 +11,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from config.constants import AMNEZIA_PROTOCOLS
 from config.enums import WhiteInternetStatus
 from database.models import (
     APIOperation,

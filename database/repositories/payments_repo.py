@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import Payment, PaymentEvent
+from database.models import Payment
 
 
 async def has_successful_topup(
@@ -68,29 +68,6 @@ async def get_payment_by_id(
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
-
-
-async def log_payment_event(
-    session: AsyncSession,
-    payment_id: int,
-    event_type: str,
-    *,
-    provider_status: str | None = None,
-    reason: str | None = None,
-    source: str | None = None,
-    details: str | None = None,
-) -> PaymentEvent:
-    event = PaymentEvent(
-        payment_id=payment_id,
-        event_type=event_type,
-        provider_status=provider_status,
-        reason=reason,
-        source=source,
-        details=details,
-    )
-    session.add(event)
-    await session.flush()
-    return event
 
 
 async def get_pending_payments_count_for_tariff(

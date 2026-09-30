@@ -54,31 +54,29 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Drop the expanded constraints
+    # Migration 0032 drops entitlement_entries, so the whole downgrade is guarded
+    # on the table still being present. Behaviour is unchanged when it exists.
     op.execute(
+        "DO $$ BEGIN "
+        "IF to_regclass('public.entitlement_entries') IS NULL THEN RETURN; END IF; "
+        # Drop the expanded constraints
         "ALTER TABLE public.entitlement_entries "
-        "DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape"
-    )
-    op.execute(
+        "DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape; "
         "ALTER TABLE public.entitlement_entries "
-        "DROP CONSTRAINT IF EXISTS ck_entitlement_entries_type"
-    )
-
-    # Restore baseline constraints with NOT VALID to avoid scanning existing referral rows
-    op.execute(
+        "DROP CONSTRAINT IF EXISTS ck_entitlement_entries_type; "
+        # Restore baseline constraints with NOT VALID to avoid scanning existing
+        # referral rows
         "ALTER TABLE public.entitlement_entries "
         "ADD CONSTRAINT ck_entitlement_entries_type "
-        "CHECK (entry_type IN ('account_purchase_grant', 'manual_grant', 'tariff_change')) NOT VALID"
-    )
-    op.execute(
+        "CHECK (entry_type IN ('account_purchase_grant', 'manual_grant', 'tariff_change')) NOT VALID; "
         "ALTER TABLE public.entitlement_entries "
-        "ADD CONSTRAINT ck_entitlement_entries_shape "
-        "CHECK ("
+        "ADD CONSTRAINT ck_entitlement_entries_shape CHECK ("
         "  (entry_type IN ('account_purchase_grant', 'manual_grant')"
         "   AND days_delta > 0 AND reversed_entry_id IS NULL"
         "   AND (hours_delta IS NULL OR hours_delta = days_delta * 24))"
         "  OR "
         "  (entry_type = 'tariff_change' AND source_type = 'quote'"
         "   AND days_delta = 0 AND hours_delta > 0 AND reversed_entry_id IS NULL)"
-        ") NOT VALID"
+        ") NOT VALID; "
+        "END $$;"
     )

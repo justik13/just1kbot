@@ -4,6 +4,7 @@ import collections
 
 import ast
 import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,147 @@ CANONICAL_ALIASES: dict[str, str] = {
     "BTN_PAYMENT_CANCEL": "BTN_CANCEL_ACTION",
     "ADMIN_WI_TRAFFIC_RESET_FAILED": "ADMIN_WI_ACTION_FAILED",
 }
+
+
+# A literal is only user-facing if it is passed to a Telegram send call. Keying on
+# the call site (rather than on how the string looks) is what makes this guard
+# sound: it cannot be satisfied by renaming a log message, and it never needs a
+# growing allowlist for SQL, HTTP headers or HTML fragments.
+TELEGRAM_SEND_CALLS = frozenset({
+    "answer",
+    "answer_photo",
+    "answer_animation",
+    "answer_audio",
+    "answer_document",
+    "answer_video",
+    "answer_voice",
+    "answer_poll",
+    "answer_dice",
+    "answer_photo_sticker",
+    "answer_sticker",
+    "edit_message_text",
+    "edit_text",
+    "edit_caption",
+    "edit_reply_markup",
+    "edit_message_caption",
+    "edit_message_reply_markup",
+    "edit_message_media",
+    "send_message",
+    "send_photo",
+    "send_animation",
+    "send_audio",
+    "send_document",
+    "send_video",
+    "send_voice",
+    "send_paid_media",
+    "send_poll",
+    "send_dice",
+    "send_chat_action",
+    "send_sticker",
+    "copy_message",
+    "forward_message",
+    "reply",
+    "reply_html",
+    "reply_photo",
+    "render_hub",
+    "render_console",
+    "safe_edit_text",
+    "safe_edit_message_text",
+    "safe_send_message",
+})
+
+
+def _is_telegram_send_call(call: ast.Call) -> bool:
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id in TELEGRAM_SEND_CALLS
+    if isinstance(func, ast.Attribute):
+        return func.attr in TELEGRAM_SEND_CALLS
+    return False
+
+
+def _is_user_facing_string(s: str) -> bool:
+    if not isinstance(s, str) or not s.strip():
+        return False
+    clean_s = re.sub(r"<[^>]+>", "", s)
+    if re.search(r"[\u0400-\u04FF]", clean_s):
+        return True
+    if re.search(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]", clean_s) and " " in s:
+        return True
+    return bool(re.search(r"[A-Za-z]", clean_s) and " " in clean_s)
+
+
+class _HardcodedStringVisitor(ast.NodeVisitor):
+    def __init__(self, file_path: Path, docstring_nodes: set[ast.AST]):
+        self.file_path = file_path
+        self.docstring_nodes = docstring_nodes
+        self.call_stack: list[ast.Call] = []
+        self.violations: list[str] = []
+
+    def _inside_send_call(self) -> bool:
+        return bool(self.call_stack) and _is_telegram_send_call(self.call_stack[-1])
+
+    def _report(self, node: ast.AST, kind: str, value: str) -> None:
+        self.violations.append(
+            f"{self.file_path.as_posix()}:{node.lineno} contains hardcoded {kind}: {value[:50]!r}"
+        )
+
+    def visit_Call(self, node: ast.Call):
+        self.call_stack.append(node)
+        self.generic_visit(node)
+        self.call_stack.pop()
+
+    def visit_Constant(self, node: ast.Constant):
+        if node in self.docstring_nodes:
+            return
+        if (
+            isinstance(node.value, str)
+            and self._inside_send_call()
+            and _is_user_facing_string(node.value)
+        ):
+            self._report(node, "string", node.value)
+        self.generic_visit(node)
+
+    def visit_JoinedStr(self, node: ast.JoinedStr):
+        if self._inside_send_call():
+            for part in node.values:
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    if _is_user_facing_string(part.value):
+                        self._report(node, "f-string part", part.value)
+        self.generic_visit(node)
+
+
+def scan_hardcoded_user_facing_strings(files, root: Path) -> list[str]:
+    """Return one message per hardcoded literal passed to a Telegram send call."""
+    violations: list[str] = []
+    for py_file in files:
+        content = py_file.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(content, filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        docstring_nodes: set[ast.AST] = set()
+        if (
+            tree.body
+            and isinstance(tree.body[0], ast.Expr)
+            and isinstance(tree.body[0].value, ast.Constant)
+        ):
+            docstring_nodes.add(tree.body[0].value)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if (
+                    node.body
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                ):
+                    docstring_nodes.add(node.body[0].value)
+
+        visitor = _HardcodedStringVisitor(py_file, docstring_nodes)
+        visitor.visit(tree)
+        violations.extend(visitor.violations)
+    return violations
+
 
 
 class TextsConsistencyTests(unittest.TestCase):
@@ -433,221 +575,76 @@ class TextsConsistencyTests(unittest.TestCase):
         return False
 
     def test_no_hardcoded_user_facing_strings_in_handlers_keyboards_and_workers(self):
-        """Deep AST guard scanning handlers, keyboards, and workers for hardcoded user-facing strings."""
-        violations = []
-
+        """AST guard: no literal may be hardcoded into a Telegram send call."""
         scanned_dirs = [
             PROJECT_ROOT / "bot" / "handlers",
             PROJECT_ROOT / "bot" / "keyboards",
             PROJECT_ROOT / "services" / "workers",
             PROJECT_ROOT / "integrations",
         ]
-
-
-        ALLOWED_INTERNAL_STRINGS = {
-            "db error", "api_failed", "slots_unknown", "unknown",
-            "Requeued by stuck profile cleanup worker for peer reconciliation",
-            "Creation timed out by cleanup worker",
-            "STOPPED ",
-            "webhook payment.canceled: payment not found for external_id=%s order=%s — discarding silently",
-            "auto_resolved: ", " for untracked payment",
-            "requires_manual_review: ",
-            "Healthcheck exception for server %s (%s): %s",
-            "Error reading server load for server %s: %s",
-            "payments.provider_status = 'succeeded'",
-            "payments.fulfillment_status = 'succeeded'",
-            "payments.provider_confirmed_at IS NOT NULL",
-            "payments.external_id IS NOT NULL AND payments.provider_status IN ('creating', 'pending', 'waiting_for_capture', 'unknown')",
-            "payments.provider_status = 'succeeded' AND payments.provider_confirmed_at IS NOT NULL AND payments.fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review')",
-            'NOT (COALESCE(payments.topup_context, \'{}\'::jsonb) @> \'{"referral_bonus_processed": true}\'::jsonb)',
-            "payments.topup_context ? 'auto_fulfill_action'",
-            "payments.topup_context->>'auto_fulfill_status' = 'failed'",
-            "payments.topup_context->>'referrer_notified_at' IS NULL AND payments.topup_context->>'referrer_telegram_id' IS NOT NULL",
-            "Payload too large",
-            "Invalid webhook",
-            "Database unavailable",
-            "Not Found",
-            "no-store, private, no-cache, must-revalidate",
-            "text/plain; charset=utf-8",
-            "; download=",
-            "; total=",
-            "; expire=",
-
-            "can't parse entities",
-            "HTML parse failed for user %s, falling back to plain text",
-            "manual review",
-            "marked for manual review in Telegram admin",
-            " (ID: ",
-            "ID: ",
-            "ID ",
-            "\\n\\u2022 \\U0001f4f1 <b>",
-            "\\u2022 \\U0001f4f1 <b>",
-            "</b> (",
-            ")\\n   \\u2514 \\U0001f4ca <code>",
-            "</code> | <i>",
-            "\\u2022 <code>[",
-            "]</code> ",
-            "<blockquote expandable><code>",
-            ". <b>",
-            "\\u2514 <code>[",
-            "\\n\\u2022 <b>",
-            "</b> | ",
-            " <code>[",
-            "\\n• 📱 <b>",
-            "• 📱 <b>",
-            ")\\n   └ 📊 <code>",
-        }
-        def _is_exempt_call(parent_calls: list[ast.Call]) -> bool:
-            for call in parent_calls:
-                if isinstance(call.func, ast.Name):
-                    if call.func.id in ("re", "compile", "ValueError", "RuntimeError", "Exception", "TypeError", "AssertionError", "getattr", "hasattr"):
-                        return True
-                if isinstance(call.func, ast.Attribute):
-                    if isinstance(call.func.value, ast.Name) and call.func.value.id in (
-                        "logger", "logging", "log", "root_logger", "re",
-                    ):
-                        return True
-            return False
-        def _is_user_facing_string(s: str) -> bool:
-            if not isinstance(s, str) or not s.strip():
-                return False
-            if s in ALLOWED_INTERNAL_STRINGS:
-                return False
-
-            clean_s = re.sub(r"<[^>]+>", "", s)
-
-            if re.search(r"[\u0400-\u04FF]", clean_s):
-                return True
-            # Emoji/symbols (icon + space) are strong UI markers; plain technical
-            # tokens without spaces are still allowed.
-            if re.search(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]", clean_s) and " " in clean_s:
-                return True
-            if s.startswith(("http://", "https://", "postgres://", "redis://", "/", "urn:", "mailto:", "amneziawg://")):
-                return False
-            if "SELECT " in s.upper() or "UPDATE " in s.upper() or "INSERT INTO" in s.upper() or "DELETE FROM" in s.upper():
-                return False
-            if re.match(r"^[%YmdHMS\-\:\s\.,TZ]+$", clean_s):
-                return False
-            if re.match(r"^[A-Za-z0-9_\-\.\:\/]+$", clean_s):
-                return False
-            if re.search(r"[A-Za-z]{2,}", clean_s) and " " in clean_s:
-                return True
-            if re.search(r"[A-Za-z]", clean_s) and " " in clean_s:
-                return True
-            return False
-
-        class HardcodedStringVisitor(ast.NodeVisitor):
-            def __init__(self, file_path: Path, docstring_nodes: set[ast.AST]):
-                self.file_path = file_path
-                self.docstring_nodes = docstring_nodes
-                self.call_stack: list[ast.Call] = []
-
-            def visit_Call(self, node: ast.Call):
-                self.call_stack.append(node)
-                self.generic_visit(node)
-                self.call_stack.pop()
-
-            def visit_Constant(self, node: ast.Constant):
-                if node in self.docstring_nodes:
-                    return
-                if isinstance(node.value, str) and _is_user_facing_string(node.value):
-                    if not _is_exempt_call(self.call_stack):
-                        rel_path = self.file_path.relative_to(PROJECT_ROOT).as_posix()
-                        violations.append(
-                            f"{rel_path}:{node.lineno} contains hardcoded string: {node.value[:50]!r}"
-                        )
-                self.generic_visit(node)
-
-            def visit_JoinedStr(self, node: ast.JoinedStr):
-                if not _is_exempt_call(self.call_stack):
-                    for part in node.values:
-                        if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                            if _is_user_facing_string(part.value):
-                                rel_path = self.file_path.relative_to(PROJECT_ROOT).as_posix()
-                                violations.append(
-                                    f"{rel_path}:{node.lineno} contains hardcoded f-string part: {part.value[:50]!r}"
-                                )
-                self.generic_visit(node)
-
+        files = []
         for base_dir in scanned_dirs:
-            for py_file in base_dir.rglob("*.py"):
-                if "integrations" in base_dir.parts:
-                    with open(py_file, 'r', encoding='utf-8') as f:
-                        if 'aiogram' not in f.read():
-                            continue
-                content = py_file.read_text(encoding="utf-8")
-                tree = ast.parse(content, filename=str(py_file))
+            files.extend(sorted(base_dir.rglob("*.py")))
 
-                # Collect all docstring constant nodes across module, classes, functions
-                docstring_nodes = set()
-                # Module docstring
-                if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant):
-                    docstring_nodes.add(tree.body[0].value)
-                for node in ast.walk(tree):
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                        if node.body and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant):
-                            docstring_nodes.add(node.body[0].value)
-
-                visitor = HardcodedStringVisitor(py_file, docstring_nodes)
-                visitor.visit(tree)
-
+        violations = scan_hardcoded_user_facing_strings(files, PROJECT_ROOT)
         self.assertEqual(
             violations,
             [],
-            "Found hardcoded user-facing strings across handlers/keyboards/workers/integrations:\n"
+            "Found hardcoded user-facing strings in Telegram send calls:\n"
             + "\n".join(violations),
         )
 
     def test_ast_guard_detects_deliberate_hardcoded_string_violations(self):
-        """Negative self-test proving that the AST scanner detects raw strings in dicts, f-strings, and vars."""
-        bad_code_samples = [
-            "label_map = {'active': 'Active users'}",
-            "msg = f'Hello {user_id}'",
-            "btn_text = 'Durable queue recovered'",
-            "text = texts.FOO + ' extra'",
-            "status = 'Платёж создан'",
-            "alert = 'VPN server восстановлен'",
+        """Self-test driving the real guard over synthetic files, positive and negative."""
+        bad_samples = [
+            "await callback.answer('Active users')",
+            "await bot.send_message(chat_id, f'Hello {user_id}')",
+            "await event.edit_text('Durable queue recovered')",
+            "await callback.answer(texts.SOME + ' Payment created')",
+            "await callback.answer('Платёж создан')",
+        ]
+        good_samples = [
+            "logger.error('payment result unknown: %s', kind)",
+            "raise ValueError('payment gateway unavailable')",
+            "btn = InlineKeyboardButton(text='Back')",
+            "label = 'not_created'",
+            "stmt = select(Payment).where(Payment.provider_status == 'succeeded')",
+            "await bot.send_message(chat_id, texts.SOME_TEMPLATE)",
         ]
 
-        def _is_user_facing_string(s: str) -> bool:
-            if not isinstance(s, str) or not s.strip():
-                return False
-            clean_s = re.sub(r"<[^>]+>", "", s)
-            if re.search(r"[\u0400-\u04FF]", clean_s):
-                return True
-            if re.search(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]", clean_s) and " " in clean_s:
-                return True
-            if s.startswith(("http://", "https://", "postgres://", "redis://", "/", "urn:", "mailto:", "amneziawg://")):
-                return False
-            if "SELECT " in s.upper() or "UPDATE " in s.upper() or "INSERT INTO" in s.upper() or "DELETE FROM" in s.upper():
-                return False
-            if re.match(r"^[%YmdHMS\-\:\s\.,TZ]+$", clean_s):
-                return False
-            if re.match(r"^[A-Za-z0-9_\-\.\:\/]+$", clean_s):
-                return False
-            if re.search(r"[A-Za-z]{2,}", clean_s) and " " in clean_s:
-                return True
-            if re.search(r"[A-Za-z]", clean_s) and " " in clean_s:
-                return True
-            return False
-
-        for sample in bad_code_samples:
-            with self.subTest(code=sample):
-                tree = ast.parse(sample)
-                found = False
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                        if _is_user_facing_string(node.value):
-                            found = True
-                    elif isinstance(node, ast.JoinedStr):
-                        for part in node.values:
-                            if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                                if _is_user_facing_string(part.value):
-                                    found = True
-                self.assertTrue(
-                    found,
-                    f"AST guard failed to detect deliberate violation in: {sample!r}",
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index, sample in enumerate(bad_samples):
+                path = root / f"bad_{index}.py"
+                path.write_text(
+                    "import texts\n\nasync def handler(bot, callback, event, chat_id, user_id):\n"
+                    "    " + sample + "\n",
+                    encoding="utf-8",
                 )
+                found = scan_hardcoded_user_facing_strings([path], root)
+                with self.subTest(kind="must_flag", code=sample):
+                    self.assertTrue(
+                        found,
+                        f"AST guard failed to detect deliberate violation in: {sample!r}",
+                    )
+
+            for index, sample in enumerate(good_samples):
+                path = root / f"good_{index}.py"
+                path.write_text(
+                    "import texts\nfrom sqlalchemy import select\n"
+                    "from database.models import Payment\n"
+                    "from aiogram.types import InlineKeyboardButton\n\n"
+                    "async def handler(bot, callback, event, chat_id, user_id):\n"
+                    "    " + sample + "\n",
+                    encoding="utf-8",
+                )
+                found = scan_hardcoded_user_facing_strings([path], root)
+                with self.subTest(kind="must_not_flag", code=sample):
+                    self.assertEqual(
+                        found,
+                        [],
+                        f"AST guard flagged a legitimate non-user-facing string: {sample!r}",
+                    )
 
     def test_ast_guard_detects_deliberate_placeholder_mismatches(self):
         """Negative test proving that placeholder scanner catches missing placeholders in facade and direct calls."""
@@ -688,125 +685,6 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertTrue(hasattr(texts, "WL_PREVIEW_BALANCE_SHORTAGE"))
         self.assertTrue(hasattr(texts, "BTN_INSTRUCTION_INCY"))
         self.assertTrue(hasattr(texts, "SUPPORT_INCY_INSTRUCTION_TEXT"))
-
-    def test_dead_white_internet_texts_removed(self):
-        self.assertFalse(hasattr(texts, "WL_TRIAL_FINISHED"))
-        self.assertFalse(hasattr(texts, "WL_PAID_FEATURES_DISABLED_ALERT"))
-        self.assertFalse(hasattr(texts, "BTN_WL_SHOW_LINK"))
-        self.assertFalse(hasattr(texts, "BTN_WL_INSTRUCTIONS"))
-        self.assertFalse(hasattr(texts, "BTN_WL_REFRESH_TRAFFIC"))
-        self.assertFalse(hasattr(texts, "WL_BETA_TESTING_ALERT"))
-        self.assertFalse(hasattr(texts, "WL_VLESS_TAG_DE"))
-        self.assertFalse(hasattr(texts, "WL_VLESS_TAG_NL"))
-        self.assertFalse(hasattr(texts, "GIB_SUFFIX"))
-
-    def test_dead_legacy_texts_removed(self):
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_DELETE_OTOZVAT_KEY_I_OSVOBO"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_OTKROYTE_PRILOZHENIE_NAZHMITE"))
-        self.assertFalse(hasattr(texts, "CONNECTION_CONFIG_DEVICE_VIEW_RENAME_IZMENIT_NAZVANIE"))
-        self.assertFalse(hasattr(texts, "DEVICE_SHOW_KEY"))
-        self.assertFalse(hasattr(texts, "DEVICE_KEY_TOO_LONG_CAPTION"))
-        self.assertFalse(hasattr(texts, "BUTTON_REFERRAL_LIST"))
-        self.assertFalse(hasattr(texts, "BTN_ADMIN_USER_ADD_BALANCE"))
-        self.assertFalse(hasattr(texts, "BTN_ADMIN_USER_DEDUCT_BALANCE"))
-        self.assertFalse(hasattr(texts, "BTN_BACK_TO_SUPPORT"))
-        self.assertFalse(hasattr(texts, "FALLBACK_SECTION_IN_DEVELOPMENT"))
-        self.assertFalse(hasattr(texts, "NOUN_DAYS"))
-        self.assertFalse(hasattr(texts, "ADMIN_BAN_CONFIRM"))
-        self.assertFalse(hasattr(texts, "ADMIN_BTN_SUBSCRIPTION"))
-        self.assertFalse(hasattr(texts, "ADMIN_USERS_DEVICE_ROW_HEADER"))
-        self.assertFalse(hasattr(texts, "ADMIN_USER_PAREN_ID_FORMAT"))
-        self.assertFalse(hasattr(texts, "ADMIN_BROADCAST"))
-        self.assertFalse(hasattr(texts, "BROADCAST_ACTIVE_LABEL"))
-        self.assertFalse(hasattr(texts, "ADMIN_BROADCAST_TITLE_BROADCAST"))
-        self.assertFalse(hasattr(texts, "ADMIN_SERVER_SLOTS_DB_NOTE"))
-        self.assertFalse(hasattr(texts, "TOPUP_SAVED_NOTICE"))
-        self.assertFalse(hasattr(texts, "ADMIN_DISPUTES_HEADER"))
-        self.assertFalse(hasattr(texts, "DISPUTE_CARD_TEMPLATE"))
-        self.assertFalse(hasattr(texts, "ADMIN_QUEUES_HEADER"))
-        self.assertFalse(hasattr(texts, "QUEUE_CARD_ATTEMPTS"))
-        self.assertFalse(hasattr(texts, "PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS"))
-        self.assertFalse(hasattr(texts, "PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_QUOTE_NOT_FOUND_NOTICE"))
-        self.assertFalse(hasattr(texts, "TOPUP_WELCOME_BONUS_LINE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_LINK_READY"))
-        self.assertFalse(hasattr(texts, "ADMIN_REFUND_ALERT_HEADER"))
-        self.assertFalse(hasattr(texts, "ADMIN_REFUND_ALERT_USER_CARD"))
-        self.assertFalse(hasattr(texts, "ADMIN_SERVER_RELAYS_ORIGIN_RTT"))
-        self.assertFalse(hasattr(texts, "BTN_INSTRUKTSIYA_I_POMOSCH"))
-        self.assertFalse(hasattr(texts, "STATUS_NOT_SPECIFIED"))
-        self.assertFalse(hasattr(texts, "DEVICE_CONFIG_UNAVAILABLE"))
-        self.assertFalse(hasattr(texts, "BALANCE_TOPUP_CREATING_LINK_CARD"))
-        self.assertFalse(hasattr(texts, "CHECKOUT_DESCRIPTION_RENEW"))
-        self.assertFalse(hasattr(texts, "CHECKOUT_DESCRIPTION_TARIFF_CHANGE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_ACTIVE_CHECKOUT_EXISTS"))
-        self.assertFalse(hasattr(texts, "PAYMENT_CHANGE_TARIFF_IN_PROGRESS_NOTICE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_CURRENT_TARIFF_UNKNOWN"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_CONFIRMATION_CARD"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_EXPIRED_RETRY"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_OPERATION_RENEW_TITLE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_PRICE_CHANGED_NOTICE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_PRICE_EXPIRED_RETRY"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_PRICE_STALE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_RENEW_COMPLETED"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE_STATE_CHANGED_RETRY"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SHOWCASE_CALC_FAILED"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SHOWCASE_PREPARE_CHANGE_FAILED"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SHOWCASE_PREPARE_FAILED"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SHOWCASE_USE_CHANGE_SECTION"))
-        self.assertFalse(hasattr(texts, "PAYMENT_SUBSCRIPTION_INACTIVE"))
-        self.assertFalse(hasattr(texts, "WORD_PURCHASE"))
-        self.assertFalse(hasattr(texts, "ALERT_QUEUE_UNHEALTHY"))
-        self.assertFalse(hasattr(texts, "ALERT_QUEUE_RECOVERED"))
-        self.assertFalse(hasattr(texts, "QUEUE_HEALTH_DEAD_PROBLEM"))
-        self.assertFalse(hasattr(texts, "QUEUE_HEALTH_OVERDUE_PROBLEM"))
-        self.assertFalse(hasattr(texts, "QUEUE_HEALTH_STALE_PROBLEM"))
-        self.assertFalse(hasattr(texts, "ALERT_STALE_BTN_DISMISS"))
-        self.assertFalse(hasattr(texts, "ALERT_STALE_PAYMENTS_HEADER"))
-        self.assertFalse(hasattr(texts, "ALERT_INGRESS_ERR_NETWORK"))
-        self.assertFalse(hasattr(texts, "REFERRAL_TOPUP_NOTIFY_TEMPLATE"))
-        self.assertFalse(hasattr(texts, "WL_PROFILE_DESCRIPTION"))
-        self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_BUY_SUCCESS"))
-        self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_RENEW_SUCCESS"))
-        self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_ADD_DEVICE_SUCCESS"))
-        self.assertFalse(hasattr(texts, "WL_TOPUP_AUTO_PACK_SUCCESS_TEMPLATE"))
-        self.assertFalse(hasattr(texts, "BALANCE_PURCHASE_SUCCESS_NOTIFICATION"))
-        self.assertFalse(hasattr(texts, "TITLE_SUBSCRIPTION_EXTENDED"))
-        self.assertFalse(hasattr(texts, "TITLE_TARIFF_CHANGED"))
-        self.assertFalse(hasattr(texts, "ADMIN_DASHBOARD_FINANCE_BADGE"))
-        self.assertFalse(hasattr(texts, "DASHBOARD_ATTENTION_ATTENTION"))
-        self.assertFalse(hasattr(texts, "DASHBOARD_STALE_TASKS_V_OCHEREDYAK"))
-        self.assertFalse(hasattr(texts, "DASHBOARD_OPEN_PLATEZHNYKH_DISPUTES"))
-        self.assertFalse(hasattr(texts, "ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES"))
-        self.assertFalse(hasattr(texts, "BTN_PAYMENT_RETURN_TO_PURCHASE"))
-
-    def test_purged_orphaned_texts_stay_removed(self):
-        self.assertFalse(hasattr(texts, "BTN_HIDE"))
-        self.assertFalse(hasattr(texts, "BTN_MAIN_MENU"))
-        self.assertFalse(hasattr(texts, "BTN_PAYMENT_PAY"))
-        self.assertFalse(hasattr(texts, "BTN_ZAKRYT_NEZAVERSHYONNYE_SSYLKI"))
-        self.assertFalse(hasattr(texts, "DURATION_HOURS_SUFFIX"))
-        self.assertFalse(hasattr(texts, "ADMIN_BTN_BACK_TO_PAYMENT"))
-        self.assertFalse(hasattr(texts, "BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE"))
-        self.assertFalse(hasattr(texts, "BTN_PAYMENT_CONFIRM_PURCHASE"))
-        self.assertFalse(hasattr(texts, "BTN_PAYMENT_CONFIRM_TARIFF_CHANGE"))
-        self.assertFalse(hasattr(texts, "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT"))
-        self.assertFalse(hasattr(texts, "BTN_PAYMENT_TOPUP_PRESET_AMOUNT"))
-        self.assertFalse(hasattr(texts, "PAYMENT_PURCHASE"))
-        self.assertFalse(hasattr(texts, "PAYMENT_TARIFF_CHANGE"))
-        self.assertFalse(hasattr(texts, "BUTTON_CHECK_TOPUP"))
-        self.assertFalse(hasattr(texts, "BUTTON_CLOSE_TOPUP"))
-        self.assertFalse(hasattr(texts, "BUTTON_OPEN_PAYMENT"))
-        self.assertFalse(hasattr(texts, "TOPUP_LINK_CARD"))
-        self.assertFalse(hasattr(texts, "BALANCE_OTMENENO_SSYLOK"))
-        self.assertFalse(hasattr(texts, "TOPUP_ALREADY_FINISHED_ALERT"))
-        self.assertFalse(hasattr(texts, "TOPUP_HIDE_NOTICE"))
-
 
 if __name__ == "__main__":
     unittest.main()

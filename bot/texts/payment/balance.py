@@ -78,4 +78,3 @@ HISTORY_HEADER = """🧾 <b>История пополнений</b>
 HISTORY_LIMIT_NOTE = """
 <i>Показаны последние 10 из {count} пополнений</i>"""
 
-PAYMENT_BALANCE = "Зарезервировано: <b>{value_0} ₽</b>"

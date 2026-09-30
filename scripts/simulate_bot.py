@@ -98,8 +98,6 @@ from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
     Base,
-    EntitlementEntry,
-    PaidValueLedgerEntry,
     Payment,
     Server,
     Tariff,
@@ -567,30 +565,7 @@ class SimulationAutoSeedMiddleware:
                     session.add(init_quote)
                     await session.flush()
 
-                    init_ent = EntitlementEntry(
-                        beneficiary_user_id=db_user.id,
-                        source_type="quote",
-                        source_id=str(init_quote.id),
-                        entry_type="account_purchase_grant",
-                        days_delta=30,
-                        hours_delta=720,
-                        device_limit_snapshot=5,
-                        tariff_id_snapshot=tariff_id,
-                        created_at=now_utc() - timedelta(days=2),
-                    )
-                    init_pvl = PaidValueLedgerEntry(
-                        user_id=db_user.id,
-                        source_type="quote",
-                        source_id=str(init_quote.id),
-                        entry_type="account_purchase",
-                        quote_id=init_quote.id,
-                        paid_hours_delta=720,
-                        paid_value_rub_delta=Decimal(180),
-                        currency="RUB",
-                        tariff_version_id=tv_id,
-                        created_at=now_utc() - timedelta(days=2),
-                    )
-                    session.add_all([entry_real, entry_bonus, init_ent, init_pvl])
+                    session.add_all([entry_real, entry_bonus])
 
                     # Create 1 Active Device (iPhone)
                     prof = VPNProfile(
@@ -751,17 +726,11 @@ async def run_simulation(args: argparse.Namespace):
 
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            # Ensure partial unique indexes required by ON CONFLICT clauses
+            # Partial unique indexes required by ON CONFLICT clauses
             await conn.execute(
                 text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_conversion_quote "
-                    "ON paid_value_ledger (quote_id) WHERE entry_type='tariff_conversion'"
-                )
-            )
-            await conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_account_purchase "
-                    "ON paid_value_ledger (quote_id) WHERE entry_type='account_purchase'"
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_tariff_quotes_active_change_user "
+                    "ON tariff_quotes (user_id) WHERE operation_type='change' AND status='active'"
                 )
             )
         logger.info("SQLite database schema initialized.")
@@ -981,16 +950,12 @@ async def run_simulation(args: argparse.Namespace):
     from bot.handlers.start import router as start_router
     from bot.handlers.support import router as support_router
     from bot.handlers.white_internet import router as white_internet_router
-    from integrations import get_all_bot_routers
-
-    integration_routers = get_all_bot_routers()
 
     for r in [
         start_router,
         referral_router,
         connection_router,
         white_internet_router,
-        *integration_routers,
         support_router,
         payment_router,
         admin_router,

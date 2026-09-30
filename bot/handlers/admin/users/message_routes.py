@@ -2,6 +2,7 @@
 
 import logging
 
+from config.constants import AdminAuditAction
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.fsm.context import FSMContext
@@ -10,7 +11,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction
 from bot.states import AdminStates
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.audit_service import AuditService

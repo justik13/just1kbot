@@ -8,18 +8,22 @@ import logging
 import math
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from config.constants import REFERRAL_WELCOME_DISCOUNT_PERCENT
-from database.models import Order, Tariff, User
+from database.models import AccountLedgerEntry, Order, Tariff, User
+from database.repositories.users_repo import (
+    is_eligible_for_referral_first_discount,
+)
 from database.repositories.account_ledger_repo import (
     create_order_credit,
     create_order_debit,
     create_order_refund_debit,
     get_account_balance,
 )
+from services.order_notifications import mark_notify_pending
 from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.fulfillment_service import FulfillmentService
@@ -70,6 +74,11 @@ class OrderService:
         session: AsyncSession, order: Order, *, was_canceled: bool
     ) -> None:
         """Credit wallet / grant referral bonus / fulfill access."""
+        # Notification debt: money just moved (fresh settlement or hold
+        # release). Whoever delivers the push first (webhook / order_check /
+        # credit-notify worker) clears the flag; the worker is the backstop
+        # for users who already left the payment screen.
+        mark_notify_pending(order)
         # Ledger records: ONLY topup credits user's bot wallet
         if order.service_type == "topup":
             credit_meta = {"source": f"{order.payment_method}_topup"}
@@ -90,12 +99,27 @@ class OrderService:
         if order.service_type == "topup":
             from services.referral_bonus import grant_referral_bonus_for_topup
 
-            await grant_referral_bonus_for_topup(
+            grant_result = await grant_referral_bonus_for_topup(
                 session,
                 purchaser_user_id=order.user_id,
                 order_id=str(order.id),
                 topup_amount=order.amount_rub,
             )
+            # Referrer push debt: the bonus money moved now, but the referrer
+            # is not looking at any screen. Armed only for genuinely new
+            # grants (never for historical orders, so no backfill spam);
+            # cleared by the credit-notify worker after delivery.
+            if (
+                grant_result.referrer_bonus > 0
+                and grant_result.referrer_user_id is not None
+            ):
+                referrer_meta = dict(order.metadata_ or {})
+                referrer_meta["referrer_notify_pending"] = {
+                    "user_id": grant_result.referrer_user_id,
+                    "telegram_id": grant_result.referrer_telegram_id,
+                    "bonus": str(grant_result.referrer_bonus),
+                }
+                order.metadata_ = referrer_meta
 
         # Fulfill benefits linearly
         await FulfillmentService.fulfill_order(session, order)
@@ -153,6 +177,80 @@ class OrderService:
         return due_rub, resulting_days
 
     @staticmethod
+    async def _resolve_order_terms(
+        session: AsyncSession,
+        *,
+        user: User | None,
+        user_id: int,
+        tariff_id: int | None,
+        amount_rub: Decimal | None,
+        duration_days: int | None,
+        device_limit: int | None,
+        description: str | None,
+        order_meta: dict,
+    ) -> tuple[Decimal | None, int | None, int | None, str | None]:
+        """Resolve price, duration, device limit and description for a tariff order.
+
+        This is the single source of truth for checkout pricing. It is shared by
+        ``create_order`` (external gateway) and ``pay_from_wallet`` (internal
+        balance) so the referral first-purchase discount and the tariff-change
+        proration can never drift between the two payment paths.
+
+        ``order_meta`` is mutated in place with the pricing annotations that the
+        order row and the fulfilment step read back.
+        """
+        if tariff_id is None:
+            return amount_rub, duration_days, device_limit, description
+
+        tariff = await session.get(Tariff, tariff_id)
+        if not tariff:
+            return amount_rub, duration_days, device_limit, description
+
+        now = now_utc()
+        current_tid = getattr(user, "current_tariff_id", None)
+        sub_end = getattr(user, "subscription_end", None)
+        is_tariff_change = bool(
+            user
+            and current_tid
+            and current_tid != tariff.id
+            and sub_end
+            and sub_end > now
+        )
+
+        if is_tariff_change:
+            order_meta["is_tariff_change"] = True
+            current_tariff = await session.get(Tariff, current_tid)
+            due_rub, resulting_days = OrderService.calculate_tariff_change(
+                current_tariff, tariff, sub_end, now=now
+            )
+            if amount_rub is None:
+                amount_rub = due_rub
+            if duration_days is None:
+                duration_days = resulting_days
+        else:
+            if amount_rub is None:
+                base_cost = Decimal(tariff.price_rub)
+                if await is_eligible_for_referral_first_discount(session, user_id):
+                    discount = (base_cost * REFERRAL_WELCOME_DISCOUNT_PERCENT).quantize(
+                        Decimal(1), rounding=ROUND_DOWN
+                    )
+                    amount_rub = max(Decimal(1), base_cost - discount)
+                    order_meta["is_referral_discount"] = True
+                    order_meta["discount_rub"] = int(discount)
+                    order_meta["original_price_rub"] = int(base_cost)
+                else:
+                    amount_rub = base_cost
+            if duration_days is None:
+                duration_days = tariff.duration_days
+
+        if device_limit is None:
+            device_limit = tariff.device_limit
+        if description is None:
+            description = f"{texts.CHECKOUT_DESCRIPTION_DEFAULT} ({tariff.name})"
+
+        return amount_rub, duration_days, device_limit, description
+
+    @staticmethod
     async def create_order(
         session: AsyncSession,
         *,
@@ -172,54 +270,19 @@ class OrderService:
         """Create a new commercial order and obtain payment link if external gateway."""
         user = await session.get(User, user_id)
         order_meta: dict = dict(metadata) if metadata else {}
-        if tariff_id is not None:
-            tariff = await session.get(Tariff, tariff_id)
-            if tariff:
-                now = now_utc()
-                current_tid = getattr(user, "current_tariff_id", None)
-                sub_end = getattr(user, "subscription_end", None)
-                is_tariff_change = bool(
-                    user
-                    and current_tid
-                    and current_tid != tariff.id
-                    and sub_end
-                    and sub_end > now
-                )
-                if is_tariff_change:
-                    order_meta["is_tariff_change"] = True
-                    current_tariff = await session.get(Tariff, current_tid)
-                    due_rub, resulting_days = OrderService.calculate_tariff_change(
-                        current_tariff, tariff, sub_end, now=now
-                    )
-                    if amount_rub is None:
-                        amount_rub = due_rub
-                    if duration_days is None:
-                        duration_days = resulting_days
-                else:
-                    if amount_rub is None:
-                        base_cost = Decimal(tariff.price_rub)
-                        from database.repositories.users_repo import (
-                            is_eligible_for_referral_first_discount,
-                        )
-
-                        if await is_eligible_for_referral_first_discount(
-                            session, user_id
-                        ):
-                            discount = (
-                                base_cost * REFERRAL_WELCOME_DISCOUNT_PERCENT
-                            ).quantize(Decimal(1), rounding=ROUND_DOWN)
-                            amount_rub = max(Decimal(1), base_cost - discount)
-                            order_meta["is_referral_discount"] = True
-                            order_meta["discount_rub"] = int(discount)
-                            order_meta["original_price_rub"] = int(base_cost)
-                        else:
-                            amount_rub = base_cost
-                    if duration_days is None:
-                        duration_days = tariff.duration_days
-                if device_limit is None:
-                    device_limit = tariff.device_limit
-                if description is None:
-                    description = f"{texts.CHECKOUT_DESCRIPTION_DEFAULT} ({tariff.name})"
+        amount_rub, duration_days, device_limit, description = (
+            await OrderService._resolve_order_terms(
+                session,
+                user=user,
+                user_id=user_id,
+                tariff_id=tariff_id,
+                amount_rub=amount_rub,
+                duration_days=duration_days,
+                device_limit=device_limit,
+                description=description,
+                order_meta=order_meta,
+            )
+        )
 
         final_amount = amount_rub if amount_rub is not None else Decimal("0.00")
         final_duration = duration_days if duration_days is not None else 0
@@ -337,54 +400,19 @@ class OrderService:
             raise FinancialHoldBlockedError("Financial hold active on user")
 
         order_meta: dict = dict(metadata) if metadata else {}
-        if tariff_id is not None:
-            tariff = await session.get(Tariff, tariff_id)
-            if tariff:
-                now = now_utc()
-                current_tid = getattr(user, "current_tariff_id", None)
-                sub_end = getattr(user, "subscription_end", None)
-                is_tariff_change = bool(
-                    user
-                    and current_tid
-                    and current_tid != tariff.id
-                    and sub_end
-                    and sub_end > now
-                )
-                if is_tariff_change:
-                    order_meta["is_tariff_change"] = True
-                    current_tariff = await session.get(Tariff, current_tid)
-                    due_rub, resulting_days = OrderService.calculate_tariff_change(
-                        current_tariff, tariff, sub_end, now=now
-                    )
-                    if amount_rub is None:
-                        amount_rub = due_rub
-                    if duration_days is None:
-                        duration_days = resulting_days
-                else:
-                    if amount_rub is None:
-                        base_cost = Decimal(tariff.price_rub)
-                        from database.repositories.users_repo import (
-                            is_eligible_for_referral_first_discount,
-                        )
-
-                        if await is_eligible_for_referral_first_discount(
-                            session, user_id
-                        ):
-                            discount = (
-                                base_cost * REFERRAL_WELCOME_DISCOUNT_PERCENT
-                            ).quantize(Decimal(1), rounding=ROUND_DOWN)
-                            amount_rub = max(Decimal(1), base_cost - discount)
-                            order_meta["is_referral_discount"] = True
-                            order_meta["discount_rub"] = int(discount)
-                            order_meta["original_price_rub"] = int(base_cost)
-                        else:
-                            amount_rub = base_cost
-                    if duration_days is None:
-                        duration_days = tariff.duration_days
-                if device_limit is None:
-                    device_limit = tariff.device_limit
-                if description is None:
-                    description = f"{texts.CHECKOUT_DESCRIPTION_DEFAULT} ({tariff.name})"
+        amount_rub, duration_days, device_limit, description = (
+            await OrderService._resolve_order_terms(
+                session,
+                user=user,
+                user_id=user_id,
+                tariff_id=tariff_id,
+                amount_rub=amount_rub,
+                duration_days=duration_days,
+                device_limit=device_limit,
+                description=description,
+                order_meta=order_meta,
+            )
+        )
 
         cost = amount_rub if amount_rub is not None else Decimal("0.00")
         balance_snapshot = await get_account_balance(
@@ -678,14 +706,35 @@ class OrderService:
                 )
                 return None
 
-            refund_amount = (
-                result.amount_rub
-                if result.amount_rub is not None
-                else order.amount_rub
-            )
             order_meta = dict(order.metadata_ or {})
             refunded_so_far = Decimal(str(order_meta.get("refunded_amount_rub", "0")))
             processed_refund_ids = list(order_meta.get("processed_refund_ids", []))
+
+            if result.amount_rub is not None:
+                refund_amount = result.amount_rub
+            else:
+                # The gateway payload carries no amount (amount.value missing).
+                # YooKassa always sends amount on refund.succeeded, so this is
+                # a malformed event: fail closed (defer to retry/manual
+                # review) instead of assuming any amount. Assuming the
+                # remainder would always exactly close the order and could
+                # wrongly revoke service on untrusted data.
+                logger.error(
+                    "Refund %s for order %s has no amount in payload "
+                    "(refunded so far %s of %s): "
+                    "deferring to retry/manual review",
+                    result.external_id,
+                    order.id,
+                    refunded_so_far,
+                    order.amount_rub,
+                )
+                order_meta = dict(order.metadata_ or {})
+                order_meta["refund_amount_missing"] = str(
+                    result.external_id or "unknown"
+                )
+                order.metadata_ = order_meta
+                await session.flush()
+                return None
 
             # Deduplication for the exact same refund event
             if result.external_id and result.external_id in processed_refund_ids:
@@ -715,35 +764,50 @@ class OrderService:
             order.refunded_at = now_utc()
 
             if order.service_type == "topup":
-                refund_ref = (
-                    (result.external_id or "").strip()
-                    or f"refund_{len(processed_refund_ids)}"
-                )
-                target_cumulative = new_total_refunded.quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-                prev_cumulative = refunded_so_far.quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-                ledger_delta = target_cumulative - prev_cumulative
-
-                if ledger_delta > 0:
-                    await create_order_refund_debit(
-                        session,
-                        user_id=order.user_id,
-                        amount_rub=ledger_delta,
-                        order_id=order.id,
-                        refund_id=refund_ref,
-                        metadata={"source": "yookassa_refund"},
+                has_credit = bool(
+                    await session.scalar(
+                        select(func.count(AccountLedgerEntry.id)).where(
+                            AccountLedgerEntry.order_id == order.id,
+                            AccountLedgerEntry.entry_type == "payment_credit",
+                        )
                     )
-                await reverse_referral_bonus_for_topup(
-                    session,
-                    order_id=order.id,
-                    refund_amount=refund_amount,
-                    original_topup_amount=order.amount_rub,
-                    total_refunded_amount=new_total_refunded,
-                    refund_id=refund_ref,
                 )
+
+                if has_credit:
+                    refund_ref = (
+                        (result.external_id or "").strip()
+                        or f"refund_{len(processed_refund_ids)}"
+                    )
+                    target_cumulative = new_total_refunded.quantize(
+                        Decimal("1"), rounding=ROUND_HALF_UP
+                    )
+                    prev_cumulative = refunded_so_far.quantize(
+                        Decimal("1"), rounding=ROUND_HALF_UP
+                    )
+                    ledger_delta = target_cumulative - prev_cumulative
+
+                    if ledger_delta > 0:
+                        await create_order_refund_debit(
+                            session,
+                            user_id=order.user_id,
+                            amount_rub=ledger_delta,
+                            order_id=order.id,
+                            refund_id=refund_ref,
+                            metadata={"source": "yookassa_refund"},
+                        )
+                    await reverse_referral_bonus_for_topup(
+                        session,
+                        order_id=order.id,
+                        refund_amount=refund_amount,
+                        original_topup_amount=order.amount_rub,
+                        total_refunded_amount=new_total_refunded,
+                        refund_id=refund_ref,
+                    )
+                else:
+                    logger.info(
+                        "Order %s topup has no payment_credit in ledger (held or uncredited); skipping refund debit",
+                        order.id,
+                    )
 
             is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")
             if is_fully_refunded:

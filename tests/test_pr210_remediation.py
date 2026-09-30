@@ -549,14 +549,27 @@ class TestAltConnectionFailClosed(unittest.IsolatedAsyncioTestCase):
 
 
 class TestIntegrationsAndCleanupVerification(unittest.TestCase):
-    def test_integrations_all_matches_defined_attributes(self):
-        """Verify integrations.__all__ contains only actual attributes and imports cleanly."""
+    def test_integrations_package_imports_cleanly(self):
+        """The integrations package must stay importable and expose the gateway surface.
+
+        The package ``__init__`` files are documentation only: callers import the
+        concrete gateway modules. This guards the import path, not a re-export list.
+        """
+        import importlib
+
         import integrations
-        for name in integrations.__all__:
-            self.assertTrue(
-                hasattr(integrations, name),
-                f"integrations.__all__ contains missing attribute '{name}'",
-            )
+        import integrations.payment_gateways as gateways
+
+        self.assertTrue(hasattr(integrations, "__doc__"))
+        self.assertTrue(hasattr(gateways, "__doc__"))
+
+        factory = importlib.import_module("integrations.payment_gateways.factory")
+        base = importlib.import_module("integrations.payment_gateways.base")
+        yookassa = importlib.import_module("integrations.payment_gateways.yookassa")
+
+        self.assertTrue(hasattr(factory, "get_payment_gateway"))
+        self.assertTrue(hasattr(base, "BasePaymentGateway"))
+        self.assertTrue(hasattr(yookassa, "YooKassaGateway"))
 
     def test_caddyfile_has_no_legacy_endpoints(self):
         """Verify Caddyfile and Caddyfile.ci do not contain deleted legacy endpoints."""

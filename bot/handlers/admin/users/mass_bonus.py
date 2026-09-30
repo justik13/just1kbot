@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from config.constants import AdminAuditAction
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -9,7 +10,6 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from database.models import User

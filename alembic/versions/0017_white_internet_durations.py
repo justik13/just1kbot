@@ -64,6 +64,8 @@ def upgrade() -> None:
     CREATE OR REPLACE FUNCTION public.reject_tariff_version_history_change() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+    DECLARE
+      v_used boolean := false;
     BEGIN
       IF TG_OP='DELETE' OR ROW(
         NEW.tariff_id, NEW.version_number, NEW.name_snapshot, NEW.duration_hours,
@@ -77,9 +79,13 @@ def upgrade() -> None:
         IF EXISTS(
           SELECT 1 FROM tariff_quotes
           WHERE source_tariff_version_id=OLD.id OR target_tariff_version_id=OLD.id
-        ) OR EXISTS(
-          SELECT 1 FROM paid_value_ledger WHERE tariff_version_id=OLD.id
         ) THEN
+          v_used := true;
+        ELSIF to_regclass('public.paid_value_ledger') IS NOT NULL THEN
+          EXECUTE 'SELECT EXISTS(SELECT 1 FROM public.paid_value_ledger WHERE tariff_version_id=$1)'
+          INTO v_used USING OLD.id;
+        END IF;
+        IF v_used THEN
           RAISE EXCEPTION 'used tariff version is immutable';
         END IF;
       END IF;
@@ -94,6 +100,8 @@ def downgrade() -> None:
     CREATE OR REPLACE FUNCTION public.reject_tariff_version_history_change() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+    DECLARE
+      v_used boolean := false;
     BEGIN
       IF TG_OP='DELETE' OR ROW(
         NEW.tariff_id, NEW.version_number, NEW.name_snapshot, NEW.duration_hours,
@@ -105,9 +113,13 @@ def downgrade() -> None:
         IF EXISTS(
           SELECT 1 FROM tariff_quotes
           WHERE source_tariff_version_id=OLD.id OR target_tariff_version_id=OLD.id
-        ) OR EXISTS(
-          SELECT 1 FROM paid_value_ledger WHERE tariff_version_id=OLD.id
         ) THEN
+          v_used := true;
+        ELSIF to_regclass('public.paid_value_ledger') IS NOT NULL THEN
+          EXECUTE 'SELECT EXISTS(SELECT 1 FROM public.paid_value_ledger WHERE tariff_version_id=$1)'
+          INTO v_used USING OLD.id;
+        END IF;
+        IF v_used THEN
           RAISE EXCEPTION 'used tariff version is immutable';
         END IF;
       END IF;

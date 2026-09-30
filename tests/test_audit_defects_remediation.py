@@ -9,11 +9,8 @@ from alembic.script import ScriptDirectory
 
 from bot.handlers.webhook import _get_real_ip
 from bot.middlewares.action_lock import LOCKED_ACTION_PREFIXES, STALE_ACTION_PREFIXES
-from database.models import (
-    PAYMENT_FULFILLMENT_STATUSES,
-    PAYMENT_PROVIDER_STATUSES,
-    Server,
-)
+from config.enums import PaymentFulfillmentStatus, PaymentProviderStatus
+from database.models import Server
 from database.repositories.servers_repo import update_server_health_snapshot
 from services.referral_bonus import reverse_referral_bonus_for_topup
 from services.workers.node_monitor import AUTO_DISABLED_CHECK_INTERVAL
@@ -22,11 +19,13 @@ from utils.datetime_helpers import now_utc
 
 class TestAuditDefectsRemediationSync(unittest.TestCase):
     def test_payment_status_constants_and_quote_type(self):
-        self.assertIn("waiting_for_capture", PAYMENT_PROVIDER_STATUSES)
-        self.assertNotIn("pending", PAYMENT_FULFILLMENT_STATUSES)
-        self.assertNotIn("reversal_pending", PAYMENT_FULFILLMENT_STATUSES)
+        provider_statuses = tuple(m.value for m in PaymentProviderStatus)
+        fulfillment_statuses = tuple(m.value for m in PaymentFulfillmentStatus)
+        self.assertIn("waiting_for_capture", provider_statuses)
+        self.assertNotIn("pending", fulfillment_statuses)
+        self.assertNotIn("reversal_pending", fulfillment_statuses)
         self.assertEqual(
-            PAYMENT_FULFILLMENT_STATUSES,
+            fulfillment_statuses,
             (
                 "not_ready",
                 "processing",

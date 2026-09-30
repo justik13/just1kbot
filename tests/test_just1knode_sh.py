@@ -19,6 +19,14 @@ REQUIREMENTS_TXT = REPO_ROOT / "scripts" / "xray_api" / "requirements.txt"
 
 
 class TestJust1kNodeScript(unittest.TestCase):
+    @classmethod
+    def _bp(cls, p: Path | str) -> str:
+        p_str = str(p).replace("\\", "/")
+        if os.name == "nt" and re.match(r"^[a-zA-Z]:", p_str):
+            drive = p_str[0].lower()
+            return f"/mnt/{drive}{p_str[2:]}"
+        return p_str
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.state_dir = Path(self.temp_dir) / "etc" / "just1knode"
@@ -157,12 +165,7 @@ exit 0
         backup_dir_val = extra_env.get("BACKUP_DIR", str(self.backup_dir)) if extra_env else str(self.backup_dir)
         state_dir_val = extra_env.get("STATE_DIR", str(self.state_dir)) if extra_env else str(self.state_dir)
 
-        def _bp(p: Path | str) -> str:
-            p_str = str(p).replace("\\", "/")
-            if os.name == "nt" and re.match(r"^[a-zA-Z]:", p_str):
-                drive = p_str[0].lower()
-                return f"/mnt/{drive}{p_str[2:]}"
-            return p_str
+        _bp = self._bp
 
         # Source just1knode.sh functions and run snippet with root bypass for testing
         full_script = f"""
@@ -471,9 +474,10 @@ exit 0
         new_conf = self.nginx_relays_d / "fr.conf"
         self.assertFalse(new_conf.exists())
 
+        new_conf_posix = self._bp(new_conf)
         cmd = f'''
-        manifest_begin "{new_conf}"
-        echo "fake nginx config" > "{new_conf}"
+        manifest_begin "{new_conf_posix}"
+        echo "fake nginx config" > "{new_conf_posix}"
         manifest_rollback
         '''
         res = self._run_shell_snippet(cmd)
@@ -919,7 +923,7 @@ update_node "all"
 run_doctor() {{
     local failed=0
     local domain="{domain}"
-    local cert_file="{cert_file}"
+    local cert_file="{self._bp(cert_file)}"
     local exp_date
     exp_date="$(openssl x509 -enddate -noout -in "$cert_file" | cut -d= -f2)"
 
@@ -1574,7 +1578,7 @@ run_doctor
             "server {\n    listen 80;\n    server_name myblog.org;\n}\n", encoding="utf-8"
         )
 
-        res = self._run_shell_snippet(f'detect_existing_nginx_sites "{self.nginx_conf_dir}"')
+        res = self._run_shell_snippet(f'detect_existing_nginx_sites "{self._bp(self.nginx_conf_dir)}"')
         self.assertEqual(
             res.returncode, 0, f"detect_existing_nginx_sites failed: stderr={res.stderr}"
         )
@@ -1596,7 +1600,7 @@ run_doctor
 
         # Simulate default backup check snippet from origin.sh
         snippet = f"""
-NGINX_CONF_DIR="{self.nginx_conf_dir}"
+NGINX_CONF_DIR="{self._bp(self.nginx_conf_dir)}"
 if [[ -f "${{NGINX_CONF_DIR}}/sites-enabled/default" ]] && grep -Eq '(^|[[:space:]])server_name[[:space:]]+[^_;]' "${{NGINX_CONF_DIR}}/sites-enabled/default" 2>/dev/null; then
     cp -a "${{NGINX_CONF_DIR}}/sites-enabled/default" "${{NGINX_CONF_DIR}}/sites-available/default.user.bak"
 fi
@@ -1626,7 +1630,7 @@ rm -f "${{NGINX_CONF_DIR}}/sites-enabled/default" 2>/dev/null || true
         (sites_enabled / "default").symlink_to(sites_available / "default")
 
         snippet = f"""
-NGINX_CONF_DIR="{self.nginx_conf_dir}"
+NGINX_CONF_DIR="{self._bp(self.nginx_conf_dir)}"
 default_was_linked_origin=0
 if [[ -f "${{NGINX_CONF_DIR}}/sites-enabled/default" ]]; then
     default_was_linked_origin=1
@@ -1649,13 +1653,14 @@ fi
         mock_bin = self.bin_dir
         group_log = Path(self.temp_dir) / "groupadd.log"
         user_log = Path(self.temp_dir) / "useradd.log"
-        user_log_posix = user_log.as_posix()
+        group_log_posix = self._bp(group_log)
+        user_log_posix = self._bp(user_log)
         (mock_bin / "groupadd").write_text(
-            f"#!/bin/bash\necho \"$@\" >> '{group_log}'\nexit 0\n", encoding="utf-8"
+            f"#!/bin/bash\necho \"$@\" >> '{group_log_posix}'\nexit 0\n", encoding="utf-8"
         )
         (mock_bin / "groupadd").chmod(0o755)
         (mock_bin / "useradd").write_text(
-            f"#!/bin/bash\necho \"$@\" >> '{user_log}'\nexit 0\n", encoding="utf-8"
+            f"#!/bin/bash\necho \"$@\" >> '{user_log_posix}'\nexit 0\n", encoding="utf-8"
         )
         (mock_bin / "useradd").chmod(0o755)
         (mock_bin / "getent").write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")
@@ -1669,7 +1674,7 @@ fi
         api_sh = REPO_ROOT / "just1knode" / "modules" / "xray" / "api.sh"
         res = self._run_shell_snippet(f"""
 unset -f ensure_xrayapi_user
-source '{api_sh.as_posix()}'
+source '{self._bp(api_sh)}'
 ensure_xrayapi_user
 """)
         self.assertEqual(res.returncode, 0, f"ensure_xrayapi_user failed: {res.stderr}")
@@ -1839,6 +1844,7 @@ ensure_xrayapi_user
         """uninstall_node must not restart Nginx when systemctl is-active returns non-zero."""
         self._prepare_base_env()
         nginx_log = Path(self.temp_dir) / "nginx_cmd.log"
+        nginx_log_posix = self._bp(nginx_log)
         self._create_mock_script(
             "systemctl",
             f"""#!/bin/sh
@@ -1846,10 +1852,10 @@ if [ "$1" = "is-active" ] && [ "$3" = "nginx" ]; then
     exit 3
 fi
 if [ "$1" = "restart" ] && [ "$2" = "nginx" ]; then
-    echo "RESTART_NGINX" >> "{nginx_log}"
+    echo "RESTART_NGINX" >> "{nginx_log_posix}"
 fi
 if [ "$1" = "reload" ] && [ "$2" = "nginx" ]; then
-    echo "RELOAD_NGINX" >> "{nginx_log}"
+    echo "RELOAD_NGINX" >> "{nginx_log_posix}"
 fi
 exit 0
 """,
@@ -1962,8 +1968,9 @@ exit 0
         systemd_dir = self.systemd_dir
         systemd_dir.mkdir(parents=True, exist_ok=True)
 
+        systemd_dir_posix = self._bp(systemd_dir)
         snippet = f"""
-export SYSTEMD_SYSTEM_DIR="{systemd_dir}"
+export SYSTEMD_SYSTEM_DIR="{systemd_dir_posix}"
 deploy_traffic_watchdog_timer
 """
         res = self._run_shell_snippet(snippet)
@@ -1983,7 +1990,7 @@ deploy_traffic_watchdog_timer
 
         # Removal
         remove_snippet = f"""
-export SYSTEMD_SYSTEM_DIR="{systemd_dir}"
+export SYSTEMD_SYSTEM_DIR="{systemd_dir_posix}"
 remove_traffic_watchdog_timer
 """
         res_rm = self._run_shell_snippet(remove_snippet)

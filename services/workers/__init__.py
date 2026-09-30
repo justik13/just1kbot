@@ -15,9 +15,9 @@ from bot.texts.runtime.alerts import (
 from config.settings import get_settings
 from utils.telegram import safe_send_message
 
-from .account_balance import account_balance_notifications_loop
 from .api_operations import api_operations_loop
 from .cleanup import cleanup_dangling_peers_loop
+from .credit_notifications import credit_notifications_loop
 from .heartbeat import heartbeat_loop
 from .node_monitor import node_monitor_loop
 from .notifications import subscription_notifications_loop
@@ -96,9 +96,9 @@ _ALERT_SHUTDOWN_GRACE = 1.0
 def _traffic(bot): return traffic_sync_loop(bot, shutdown_event)
 def _cleanup(bot): return cleanup_dangling_peers_loop(bot, shutdown_event)
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
+def _credit_notifications(bot): return credit_notifications_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
 def _api_operations(bot): return api_operations_loop(shutdown_event)
-def _account_balance(bot): return account_balance_notifications_loop(bot, shutdown_event)
 def _node_monitor(bot): return node_monitor_loop(bot, shutdown_event)
 def _white_internet_reconciliation(bot): return white_internet_reconciliation_loop(bot, shutdown_event)
 def _white_internet_traffic(bot): return white_internet_traffic_loop(bot, shutdown_event)
@@ -108,7 +108,7 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("traffic", _traffic, False),
     WorkerDefinition("cleanup", _cleanup, False),
     WorkerDefinition("notifications", _notifications, False),
-    WorkerDefinition("account_balance", _account_balance, False),
+    WorkerDefinition("credit_notifications", _credit_notifications, False),
     WorkerDefinition("heartbeat", _heartbeat, False),
     WorkerDefinition("node_monitor", _node_monitor, False),
     WorkerDefinition("white_internet_reconciliation", _white_internet_reconciliation, True),

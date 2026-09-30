@@ -76,6 +76,11 @@ def get_referral_tier(active_count: int) -> ReferralTierInfo:
 class ReferralBonusGrantResult:
     referrer_bonus: Decimal = Decimal(0)
     purchaser_welcome_bonus: Decimal = Decimal(0)
+    # Identity of the credited referrer (None when no bonus was granted).
+    # Carried so the settlement layer can arm the referrer push without
+    # re-querying; equality/hash intentionally cover amounts only.
+    referrer_user_id: int | None = None
+    referrer_telegram_id: int | None = None
 
     def __iter__(self):
         yield self.referrer_bonus
@@ -369,6 +374,8 @@ async def grant_referral_bonus_for_topup(
     return ReferralBonusGrantResult(
         referrer_bonus=referrer_bonus_granted,
         purchaser_welcome_bonus=purchaser_welcome_granted,
+        referrer_user_id=getattr(referrer, "id", None),
+        referrer_telegram_id=getattr(referrer, "telegram_id", None),
     )
 
 

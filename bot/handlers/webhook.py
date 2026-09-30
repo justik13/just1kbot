@@ -142,81 +142,32 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             if order and order.status == "paid" and getattr(order, "_newly_paid", False):
                 bot = request.app.get("bot")
                 if bot:
+                    from database.models import User
+                    from bot.handlers.payment.credit_notify import (
+                        notify_order_credited,
+                    )
+                    from services.order_notifications import (
+                        mark_notified,
+                        mark_notify_pending,
+                    )
+
+                    user = await session.get(User, order.user_id)
                     try:
-                        from database.models import User
-                        from database.repositories.account_ledger_repo import (
-                            get_account_balance,
+                        delivered = await notify_order_credited(
+                            bot, session, order, user
                         )
-                        from bot import texts
-                        from bot.formatters import get_tariff_display_name
-                        from bot.keyboards import get_payment_success_keyboard
-                        from utils.telegram import EFFECT_CONFETTI, render_hub
-
-                        user = await session.get(User, order.user_id)
-                        if user and user.telegram_id:
-                            if order.service_type == "topup":
-                                from bot.handlers.payment.balance_routes import (
-                                    _render_balance,
-                                )
-                                from bot.keyboards.payment import (
-                                    get_topup_credit_keyboard,
-                                )
-
-                                order_context = (
-                                    (order.metadata_ or {}).get("context")
-                                    if order.metadata_
-                                    else None
-                                )
-                                kb = (
-                                    get_topup_credit_keyboard(order_context)
-                                    if order_context
-                                    else None
-                                )
-                                await _render_balance(
-                                    bot,
-                                    user.telegram_id,
-                                    session,
-                                    user,
-                                    notice=texts.TOPUP_CREDITED_NOTICE,
-                                    message_effect_id=EFFECT_CONFETTI,
-                                    force_new=True,
-                                    custom_keyboard=kb,
-                                )
-                            else:
-                                balance = await get_account_balance(
-                                    session, user_id=user.id
-                                )
-                                tariff_name = get_tariff_display_name(
-                                    order.device_limit or 2
-                                )
-                                is_change = bool(
-                                    order.metadata_
-                                    and order.metadata_.get("is_tariff_change")
-                                )
-                                operation = (
-                                    texts.PAYMENT_OP_TITLE_CHANGE
-                                    if is_change
-                                    else texts.PURCHASE_COMPLETED
-                                )
-                                await render_hub(
-                                    bot,
-                                    user.telegram_id,
-                                    texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                                        operation_title=operation,
-                                        tariff_name=tariff_name,
-                                        duration_days=order.duration_days,
-                                        charged=int(order.amount_rub),
-                                        real_balance=int(balance.real_available),
-                                        bonus_balance=int(balance.bonus_available),
-                                    ),
-                                    get_payment_success_keyboard(),
-                                    message_effect_id=EFFECT_CONFETTI,
-                                    force_new=True,
-                                )
                     except Exception as exc:
                         logger.warning(
                             "Could not notify user of order fulfillment: %s", exc
                         )
+                        delivered = False
+                    if delivered:
+                        mark_notified(order)
+                    else:
+                        # Keep the debt: the credit-notify worker retries
+                        # the push for users who already left the screen.
+                        mark_notify_pending(order)
+                    await session.flush()
 
             if existing_event:
                 existing_event.status = inbox_status
@@ -321,8 +272,6 @@ async def _close_healthcheck_redis(app: web.Application) -> None:
 
 
 def setup_webhook_routes(app: web.Application):
-    from integrations import register_all_web_routes
-
     app.router.add_post(
         "/webhook/yookassa",
         yookassa_webhook_handler,
@@ -335,9 +284,6 @@ def setup_webhook_routes(app: web.Application):
     app.on_cleanup.append(_close_healthcheck_redis)
     logger.info("YooKassa webhook route registered: POST /webhook/yookassa & POST /yookassa/webhook")
     logger.info("Healthcheck endpoint registered: GET /health")
-
-    # Register all enabled modular integrations
-    register_all_web_routes(app)
 
     # Register White Internet subscription feed routes
     from bot.handlers.white_internet_web import setup_white_internet_web_routes

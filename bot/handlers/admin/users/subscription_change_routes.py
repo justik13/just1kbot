@@ -1,12 +1,12 @@
 import logging
 
+from config.constants import AdminAuditAction
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_change_tariff_keyboard,

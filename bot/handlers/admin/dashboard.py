@@ -1,5 +1,6 @@
 import logging
 import math
+from config.constants import AdminAuditAction
 from datetime import timedelta
 
 from aiogram import F, Router
@@ -11,7 +12,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction
 from bot.keyboards import (
     get_admin_cat_finance_keyboard,
     get_admin_cat_infra_keyboard,

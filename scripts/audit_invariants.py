@@ -3,7 +3,7 @@
 """
 Comprehensive Invariant Scanner for just1kbot Subsystems.
 
-Verifies 15 critical database, domain, cryptographic, and accounting invariants:
+Verifies 14 critical database, domain, cryptographic, and accounting invariants:
   1. Tariff Version Immutability & Constraint Invariant
   2. Server Lifecycle & Health Status Invariant
   3. White Internet Subscription State Invariant
@@ -15,7 +15,6 @@ Verifies 15 critical database, domain, cryptographic, and accounting invariants:
   9. Tariff Quotes State Consistency Invariant
  10. Account Balance Non-Negativity Invariant
  11. Account Ledger Entry Conservation Invariant
- 12. Paid Value Ledger Consistency Invariant
  13. VPN Profile Protocol Invariant (Exclusively AWG)
  14. Origin Server Capacity Non-Breach Invariant
  15. Alembic Migration Single Head Invariant
@@ -52,7 +51,6 @@ from config.enums import (
 from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
-    PaidValueLedgerEntry,
     Server,
     TariffQuote,
     TariffVersion,
@@ -336,26 +334,6 @@ async def assert_inv_11_account_ledger_conservation(session: AsyncSession) -> In
     )
 
 
-async def assert_inv_12_paid_value_ledger_consistency(session: AsyncSession) -> InvariantResult:
-    """Inv 12: Paid value ledger entries have non-null finite amounts and hours."""
-    violations = await session.scalars(
-        select(PaidValueLedgerEntry).where(
-            or_(
-                PaidValueLedgerEntry.paid_value_rub_delta.is_(None),
-                PaidValueLedgerEntry.paid_hours_delta.is_(None),
-            )
-        )
-    )
-    v_list = violations.all()
-    if v_list:
-        return InvariantResult(
-            12, "Paid Value Ledger Consistency", False, f"Violations found: {len(v_list)} entries"
-        )
-    return InvariantResult(
-        12, "Paid Value Ledger Consistency", True, "All paid value ledger entries are consistent"
-    )
-
-
 async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
     """Inv 13: All VPN servers use AWG or Xray protocol (pure WireGuard 'wg' is strictly rejected)."""
     violations = await session.scalars(
@@ -451,7 +429,6 @@ ALL_INVARIANT_CHECKS = [
     assert_inv_9_tariff_quotes_consistency,
     assert_inv_10_account_balance_non_negativity,
     assert_inv_11_account_ledger_conservation,
-    assert_inv_12_paid_value_ledger_consistency,
     assert_inv_13_vpn_protocol,
     assert_inv_14_origin_server_capacity,
     assert_inv_15_alembic_single_head,
@@ -473,8 +450,9 @@ async def run_all_invariants(session: AsyncSession | None = None) -> list[Invari
 
 
 def main() -> int:
+    n_invariants = len(ALL_INVARIANT_CHECKS)
     print("=" * 80)
-    print(" running 15 Subsystem Invariant Integrity Assertions ".center(80, "="))
+    print(f" running {n_invariants} Subsystem Invariant Integrity Assertions ".center(80, "="))
     print("=" * 80)
 
     results = asyncio.run(run_all_invariants())
@@ -489,7 +467,7 @@ def main() -> int:
     print("=" * 80)
     if all_passed:
         print(
-            " SUCCESS: All 15 invariant integrity assertions passed with 0 violations. ".center(
+            f" SUCCESS: All {n_invariants} invariant integrity assertions passed with 0 violations. ".center(
                 80, "="
             )
         )

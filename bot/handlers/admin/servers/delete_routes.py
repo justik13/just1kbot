@@ -1,5 +1,6 @@
 import logging
 
+from config.constants import AdminAuditAction
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
@@ -8,7 +9,6 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates

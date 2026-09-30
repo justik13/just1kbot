@@ -105,39 +105,55 @@ END $$;
 """
 
 DOWNGRADE_CLEANUP_SQL = """
-DELETE FROM entitlement_entries
-WHERE source_type = 'admin'
-  AND entry_type = 'manual_grant'
-  AND source_id LIKE 'legacy_0027_grant_%'
-  AND (metadata->>'reason') = 'legacy_active_subscription_backfill'
+DO $$
+BEGIN
+  IF to_regclass('public.entitlement_entries') IS NOT NULL THEN
+    DELETE FROM entitlement_entries
+    WHERE source_type = 'admin'
+      AND entry_type = 'manual_grant'
+      AND source_id LIKE 'legacy_0027_grant_%'
+      AND (metadata->>'reason') = 'legacy_active_subscription_backfill';
+  END IF;
+END $$;
 """
 
 DOWNGRADE_FAIL_CLOSED_CHECK_SQL = """
 DO $$
 BEGIN
-  IF EXISTS (
-    SELECT 1 FROM entitlement_entries
-    WHERE entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
-      AND days_delta = 0
-  ) THEN
-    RAISE EXCEPTION 'Cannot downgrade migration 0027: sub-day entitlement entries (days_delta = 0) exist. Downgrade aborted to prevent ledger corruption.';
+  -- Nested IF, not "IF a AND EXISTS (...)": PostgreSQL plans that single
+  -- expression as a whole, so the reference to entitlement_entries would be
+  -- resolved before to_regclass() is even evaluated. The inner statement is
+  -- planned only once the outer IF has been taken.
+  IF to_regclass('public.entitlement_entries') IS NOT NULL THEN
+    IF EXISTS (
+      SELECT 1 FROM entitlement_entries
+      WHERE entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
+        AND days_delta = 0
+    ) THEN
+      RAISE EXCEPTION 'Cannot downgrade migration 0027: sub-day entitlement entries (days_delta = 0) exist. Downgrade aborted to prevent ledger corruption.';
+    END IF;
   END IF;
 END $$;
 """
 
 DOWNGRADE_CONSTRAINT_SQL = """
-ALTER TABLE entitlement_entries ADD CONSTRAINT ck_entitlement_entries_shape CHECK (
-  (entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
-   AND days_delta > 0 AND reversed_entry_id IS NULL
-   AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
-  OR
-  (entry_type = 'tariff_change' AND source_type = 'quote'
-   AND days_delta = 0 AND hours_delta > 0 AND reversed_entry_id IS NULL)
-  OR
-  (entry_type = 'referral_reversal' AND days_delta < 0
-   AND reversed_entry_id IS NOT NULL
-   AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
-)
+DO $$
+BEGIN
+  IF to_regclass('public.entitlement_entries') IS NOT NULL THEN
+    ALTER TABLE entitlement_entries ADD CONSTRAINT ck_entitlement_entries_shape CHECK (
+      (entry_type IN ('account_purchase_grant', 'referral_user_bonus', 'referral_referrer_bonus', 'manual_grant')
+       AND days_delta > 0 AND reversed_entry_id IS NULL
+       AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
+      OR
+      (entry_type = 'tariff_change' AND source_type = 'quote'
+       AND days_delta = 0 AND hours_delta > 0 AND reversed_entry_id IS NULL)
+      OR
+      (entry_type = 'referral_reversal' AND days_delta < 0
+       AND reversed_entry_id IS NOT NULL
+       AND (hours_delta IS NULL OR hours_delta = days_delta * 24))
+    );
+  END IF;
+END $$;
 """
 
 
@@ -165,5 +181,14 @@ def downgrade() -> None:
     op.execute(DOWNGRADE_FAIL_CLOSED_CHECK_SQL)
 
     # 3. Restore strict pre-0027 constraint
-    op.execute("ALTER TABLE entitlement_entries DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape")
+    # 0032 drops entitlement_entries, so both statements are guarded on the table
+    # still existing. "DROP CONSTRAINT IF EXISTS" does not help here: it tolerates
+    # a missing constraint, not a missing table.
+    op.execute(
+        "DO $$ BEGIN "
+        "IF to_regclass('public.entitlement_entries') IS NULL THEN RETURN; END IF; "
+        "ALTER TABLE entitlement_entries "
+        "DROP CONSTRAINT IF EXISTS ck_entitlement_entries_shape; "
+        "END $$;"
+    )
     op.execute(DOWNGRADE_CONSTRAINT_SQL)

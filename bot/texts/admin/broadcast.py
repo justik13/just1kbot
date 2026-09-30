@@ -20,7 +20,6 @@ BROADCAST_STOPPED_ERROR_ALERT = """🚨 <b>Рассылка остановлен
 
 BROADCAST_BTN_DISMISS = "✅ Ок (Убрать)"
 
-BROADCAST_NOT_STARTED_STATUS = "Рассылка не запущена"
 
 BROADCAST_ERR_CAPTION_TOO_LONG = "⚠️ Подпись к медиа слишком длинная. Максимум {error_summary} символов."
 
@@ -65,7 +64,6 @@ BROADCAST_STARTED = """🚀 <b>Рассылка запущена!</b>
 
 BROADCAST_STEP_1_SELECT_AUDIENCE = "Шаг 1: Выбор аудитории"
 
-BROADCAST_STOPPING = "⏹ Рассылка останавливается..."
 
 BROADCAST_TEST_SENT_NOTICE = """✅ <b>Тестовое сообщение отправлено вам для проверки!</b>
 

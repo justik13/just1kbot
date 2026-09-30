@@ -15,7 +15,6 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import (
-    AccountBalanceReservation,
     AccountLedgerAllocation,
     AccountLedgerEntry,
     Payment,
@@ -48,7 +47,6 @@ class AccountLedgerInvariantError(AccountLedgerError):
 class AccountBalanceSnapshot:
     accounting_position: Decimal
     available: Decimal
-    reserved: Decimal
     debt: Decimal
     real_position: Decimal = ZERO
     bonus_position: Decimal = ZERO
@@ -95,17 +93,6 @@ async def get_account_balance(
         await session.scalar(
             select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
                 AccountLedgerEntry.user_id == user_id
-            )
-        )
-        or ZERO
-    )
-    reserved = Decimal(
-        await session.scalar(
-            select(
-                func.coalesce(func.sum(AccountBalanceReservation.amount), 0)
-            ).where(
-                AccountBalanceReservation.user_id == user_id,
-                AccountBalanceReservation.status == "active",
             )
         )
         or ZERO
@@ -164,16 +151,8 @@ async def get_account_balance(
     real_position = real_available
     bonus_position = bonus_available
 
-    if reserved > ZERO:
-        if real_available >= reserved:
-            real_available -= reserved
-        else:
-            rem_res = reserved - real_available
-            real_available = ZERO
-            bonus_available = max(ZERO, bonus_available - rem_res)
-
     available = max(ZERO, real_available + bonus_available)
-    accounting_available = max(ZERO, position - reserved)
+    accounting_available = max(ZERO, position)
     if available > accounting_available:
         reduction = available - accounting_available
         if bonus_available >= reduction:
@@ -187,7 +166,6 @@ async def get_account_balance(
     return AccountBalanceSnapshot(
         accounting_position=position,
         available=available,
-        reserved=reserved,
         debt=debt,
         real_position=real_position,
         bonus_position=bonus_position,
@@ -318,6 +296,51 @@ async def create_order_refund_debit(
     if quantized_amount <= 0:
         raise ValueError("Refund debit amount must be at least 1 ruble")
     amount = -abs(whole_rubles(quantized_amount))
+
+    # Cumulative cap (restores the pre-PR payment_debit_exceeds_topup guard
+    # for the order model): all refund/chargeback debits for the order must
+    # never exceed the credited amount. Without this, duplicate refund events
+    # with distinct IDs would over-debit the wallet into unbounded debt.
+    # The cap applies only when the original credit is readable; direct
+    # low-level callers with stubbed sessions keep the legacy behavior.
+    try:
+        credit_total = Decimal(
+            str(
+                await session.scalar(
+                    select(
+                        func.coalesce(func.sum(AccountLedgerEntry.amount), 0)
+                    ).where(
+                        AccountLedgerEntry.order_id == order_id,
+                        AccountLedgerEntry.entry_type == "payment_credit",
+                    )
+                )
+            )
+        )
+        debited_total = Decimal(
+            str(
+                await session.scalar(
+                    select(
+                        func.coalesce(func.sum(AccountLedgerEntry.amount), 0)
+                    ).where(
+                        AccountLedgerEntry.order_id == order_id,
+                        AccountLedgerEntry.entry_type.in_(
+                            ("refund_debit", "chargeback_debit")
+                        ),
+                    )
+                )
+            )
+        )
+    except (InvalidOperation, TypeError, ValueError):
+        credit_total = None
+        debited_total = None
+    if (
+        credit_total is not None
+        and debited_total is not None
+        and credit_total > 0
+        and abs(debited_total) + abs(amount) > credit_total
+    ):
+        raise AccountLedgerInvariantError("refund_debit_exceeds_credit")
+
     idempotency_key = f"order_refund:{order_id}:{refund_id.strip()}"
     values = {
         "user_id": user_id,
@@ -429,17 +452,6 @@ async def create_admin_adjustment(
             session, user_id=user_id, debit=entry, amount=abs(amount)
         )
     return entry, created
-
-
-async def _debit_is_reversed(session: AsyncSession, debit_id: int) -> bool:
-    return bool(
-        await session.scalar(
-            select(AccountLedgerEntry.id).where(
-                AccountLedgerEntry.entry_type == "purchase_reversal",
-                AccountLedgerEntry.reversal_of_id == debit_id,
-            )
-        )
-    )
 
 
 async def _batch_credit_capacities(
@@ -669,44 +681,6 @@ async def create_purchase_debit(
     return debit, created
 
 
-async def create_purchase_reversal(
-    session: AsyncSession,
-    *,
-    debit_id: int,
-    metadata: dict | None = None,
-) -> tuple[AccountLedgerEntry, bool]:
-    debit = await session.scalar(
-        select(AccountLedgerEntry).where(AccountLedgerEntry.id == debit_id)
-    )
-    if debit is None or debit.entry_type != "purchase_debit":
-        raise LookupError("purchase_debit_not_found")
-    await lock_account_user(session, debit.user_id)
-    debit = await session.scalar(
-        select(AccountLedgerEntry)
-        .where(AccountLedgerEntry.id == debit_id)
-        .with_for_update()
-    )
-    values = {
-        "user_id": debit.user_id,
-        "entry_type": "purchase_reversal",
-        "amount": abs(Decimal(debit.amount)),
-        "currency": "RUB",
-        "payment_id": None,
-        "quote_id": debit.quote_id,
-        "reversal_of_id": debit.id,
-        "idempotency_key": f"purchase-reversal:{debit.id}",
-        "metadata_": dict(metadata or {}),
-    }
-    return await _insert_or_get_entry(
-        session,
-        values=values,
-        economic_lookup=(
-            (AccountLedgerEntry.entry_type == "purchase_reversal")
-            & (AccountLedgerEntry.reversal_of_id == debit.id)
-        ),
-    )
-
-
 async def get_payment_refundable_amount(
     session: AsyncSession,
     *,
@@ -729,172 +703,7 @@ async def get_payment_refundable_amount(
     if credit is None:
         return ZERO
     capacity = await _credit_capacity(session, credit)
-    active_reservations = Decimal(
-        await session.scalar(
-            select(
-                func.coalesce(func.sum(AccountBalanceReservation.amount), 0)
-            ).where(
-                AccountBalanceReservation.payment_id == payment.id,
-                AccountBalanceReservation.status == "active",
-            )
-        )
-        or ZERO
-    )
-    return max(ZERO, capacity - active_reservations)
-
-
-async def reserve_payment_funds(
-    session: AsyncSession,
-    *,
-    payment_id: int,
-    reservation_type: str,
-    amount: object,
-    idempotency_key: str,
-    metadata: dict | None = None,
-) -> tuple[AccountBalanceReservation, bool]:
-    if reservation_type not in {"refund", "dispute"}:
-        raise ValueError("invalid reservation type")
-    amount = whole_rubles(amount)
-    payment = await session.scalar(select(Payment).where(Payment.id == payment_id))
-    if payment is None:
-        raise LookupError("topup_payment_not_found")
-    user = await lock_account_user(session, payment.user_id)
-    existing = await session.scalar(
-        select(AccountBalanceReservation).where(
-            AccountBalanceReservation.idempotency_key == idempotency_key
-        )
-    )
-    if existing is not None:
-        if (
-            existing.user_id != user.id
-            or existing.payment_id != payment.id
-            or existing.reservation_type != reservation_type
-            or existing.amount != amount
-        ):
-            raise AccountLedgerConflictError("reservation_idempotency_conflict")
-        return existing, False
-    refundable = await get_payment_refundable_amount(
-        session, payment_id=payment.id, for_update=False
-    )
-    snapshot = await get_account_balance(
-        session, user_id=user.id, for_update=False, locked_user=user
-    )
-    if amount > refundable or amount > snapshot.available:
-        raise InsufficientAccountBalanceError("insufficient_refundable_balance")
-    reservation = AccountBalanceReservation(
-        user_id=user.id,
-        payment_id=payment.id,
-        reservation_type=reservation_type,
-        amount=amount,
-        currency="RUB",
-        status="active",
-        idempotency_key=idempotency_key,
-        metadata_=dict(metadata or {}),
-    )
-    session.add(reservation)
-    await session.flush()
-    return reservation, True
-
-
-async def resolve_reservation(
-    session: AsyncSession,
-    *,
-    reservation_id: int,
-    outcome: str,
-) -> AccountBalanceReservation:
-    if outcome not in {"released", "consumed"}:
-        raise ValueError("invalid reservation outcome")
-    reservation = await session.scalar(
-        select(AccountBalanceReservation).where(
-            AccountBalanceReservation.id == reservation_id
-        )
-    )
-    if reservation is None:
-        raise LookupError("reservation_not_found")
-    await lock_account_user(session, reservation.user_id)
-    reservation = await session.scalar(
-        select(AccountBalanceReservation)
-        .where(AccountBalanceReservation.id == reservation_id)
-        .with_for_update()
-    )
-    if reservation.status == outcome:
-        return reservation
-    if reservation.status != "active":
-        raise AccountLedgerConflictError("reservation_already_resolved")
-    reservation.status = outcome
-    reservation.resolved_at = now_utc()
-    await session.flush()
-    return reservation
-
-
-async def create_payment_debit(
-    session: AsyncSession,
-    *,
-    payment_id: int,
-    entry_type: str,
-    amount: object,
-    idempotency_key: str,
-    metadata: dict | None = None,
-) -> tuple[AccountLedgerEntry, bool]:
-    if entry_type not in {"refund_debit", "chargeback_debit"}:
-        raise ValueError("invalid payment debit type")
-    amount = whole_rubles(amount)
-    # Global lock hierarchy is Payment -> User: acquire the Payment row lock
-    # BEFORE the per-user advisory/user lock so this function stays
-    # deadlock-free even when called without a pre-held Payment lock.
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
-    if payment is None:
-        raise LookupError("topup_payment_not_found")
-    await lock_account_user(session, payment.user_id)
-    if payment.currency != "RUB":
-        raise AccountLedgerConflictError("payment_is_not_refundable_topup")
-    existing = await session.scalar(
-        select(AccountLedgerEntry).where(
-            AccountLedgerEntry.idempotency_key == idempotency_key
-        )
-    )
-    if existing is not None:
-        if (
-            existing.user_id != payment.user_id
-            or existing.payment_id != payment.id
-            or existing.entry_type != entry_type
-            or existing.amount != -amount
-        ):
-            raise AccountLedgerConflictError("payment_debit_idempotency_conflict")
-        return existing, False
-    already_debited = abs(
-        Decimal(
-            await session.scalar(
-                select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
-                    AccountLedgerEntry.payment_id == payment.id,
-                    AccountLedgerEntry.entry_type.in_(
-                        ("refund_debit", "chargeback_debit")
-                    ),
-                )
-            )
-            or ZERO
-        )
-    )
-    if already_debited + amount > Decimal(payment.amount):
-        raise AccountLedgerInvariantError("payment_debit_exceeds_topup")
-    values = {
-        "user_id": payment.user_id,
-        "entry_type": entry_type,
-        "amount": -amount,
-        "currency": "RUB",
-        "payment_id": payment.id,
-        "quote_id": None,
-        "reversal_of_id": None,
-        "idempotency_key": idempotency_key,
-        "metadata_": dict(metadata or {}),
-    }
-    return await _insert_or_get_entry(
-        session,
-        values=values,
-        economic_lookup=AccountLedgerEntry.idempotency_key == idempotency_key,
-    )
+    return max(ZERO, capacity)
 
 
 async def get_account_history(
