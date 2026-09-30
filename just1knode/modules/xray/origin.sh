@@ -867,13 +867,17 @@ if os.path.exists(relays_file):
 
 # Читаем базовый путь из state.json
 secret_base = '/stream'
+s_data = {}
 if os.path.exists(state_file):
     try:
         with open(state_file, 'r', encoding='utf-8') as sf:
-            s_data = json.load(sf)
+            loaded_s = json.load(sf)
+            if isinstance(loaded_s, dict):
+                s_data = loaded_s
             secret_base = s_data.get('secret_base_path', '/stream')
-    except:
+    except Exception:
         secret_base = '/stream'
+        s_data = {}
 
 # 1. OUTBOUNDS: гарантия наличия и параметров
 outbounds = cfg.setdefault('outbounds', [])
@@ -904,6 +908,92 @@ if not any(ob.get('tag') == 'just1k-wl-api' for ob in outbounds):
         'tag': 'just1k-wl-api',
         'protocol': 'blackhole'
     })
+
+# 1.5. Авто-миграция Relay-узлов с REALITY / google.com на VLESS+TLS (Zero-Manual-Commands)
+root_domains = []
+raw_bot_domain = str(s_data.get('bot_domain') or '').strip()
+raw_domain = str(s_data.get('domain') or '').strip()
+for d_str in (raw_bot_domain, raw_domain):
+    if not d_str or d_str == '-': continue
+    parts = d_str.split('.')
+    if len(parts) >= 2:
+        root_domains.append('.'.join(parts[-2:]))
+    if len(parts) >= 3:
+        root_domains.append('.'.join(parts[-3:]))
+root_domains = list(dict.fromkeys(root_domains))
+
+relays_modified = False
+for r in relays:
+    if not isinstance(r, dict): continue
+    code = r.get('code')
+    ip = r.get('ip')
+    cur_sni = str(r.get('sni') or '')
+    cur_sec = str(r.get('security') or 'reality')
+
+    is_google_or_reality = ('google.com' in cur_sni.lower()) or (cur_sec == 'reality') or (not cur_sni)
+    if is_google_or_reality and code and ip:
+        matched_domain = None
+        cand_domains = []
+        for rd in root_domains:
+            cand_domains.append((str(code) + '.' + rd).lower())
+        if cur_sni and ('google.com' not in cur_sni.lower()) and cur_sni.lower() not in cand_domains:
+            cand_domains.append(cur_sni.lower())
+
+        for cand in cand_domains:
+            try:
+                import socket, ssl
+                addr_infos = socket.getaddrinfo(cand, None, socket.AF_INET)
+                ips = {ai[4][0] for ai in addr_infos}
+                if ip in ips:
+                    # Проверяем, что Relay уже слушает VLESS TLS на своем порту и отдает валидный сертификат
+                    relay_port = int(r.get('port', 10443))
+                    tls_ok = False
+                    try:
+                        ctx = ssl.create_default_context()
+                        with socket.create_connection((ip, relay_port), timeout=2.5) as s:
+                            with ctx.wrap_socket(s, server_hostname=cand) as ss:
+                                tls_ok = True
+                    except Exception:
+                        tls_ok = False
+
+                    if tls_ok:
+                        matched_domain = cand
+                        break
+            except Exception:
+                pass
+
+        if matched_domain:
+            print('[+] Авто-миграция Relay ' + str(code) + ': переключение на VLESS TLS (' + str(matched_domain) + ')')
+            r['sni'] = matched_domain
+            r['security'] = 'tls'
+            relays_modified = True
+            out_tag = 'just1k-wl-outbound-' + str(code)
+            for ob in outbounds:
+                if ob.get('tag') == out_tag:
+                    st = ob.setdefault('streamSettings', {})
+                    st['network'] = 'tcp'
+                    st['security'] = 'tls'
+                    st.pop('realitySettings', None)
+                    st['tlsSettings'] = {
+                        'serverName': matched_domain,
+                        'fingerprint': 'chrome',
+                        'alpn': ['h2', 'http/1.1']
+                    }
+
+if relays_modified:
+    d_r = os.path.dirname(os.path.abspath(relays_file))
+    r_fd, r_path = tempfile.mkstemp(dir=d_r, suffix='.tmp')
+    with os.fdopen(r_fd, 'w', encoding='utf-8') as rf_out:
+        json.dump(relays, rf_out, ensure_ascii=False, indent=2)
+        rf_out.flush()
+        os.fsync(rf_out.fileno())
+    os.replace(r_path, relays_file)
+    try:
+        import shutil
+        shutil.chown(relays_file, user='root', group='xrayapi')
+        os.chmod(relays_file, 0o660)
+    except Exception:
+        pass
 
 # 2. INBOUNDS: гарантия наличия базовых инбаундов и правильный sniffing
 inbounds = cfg.setdefault('inbounds', [])

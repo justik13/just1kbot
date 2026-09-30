@@ -908,12 +908,42 @@ systemctl restart xray
 EOF
 chmod 755 /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh
 
-# Защита портов
+# Защита портов (Zero-Signature: порт 80 закрыт, 10443 только для Origin)
 ufw allow 22/tcp
-ufw allow 80/tcp
 ufw allow from "$ORIGIN_IP" to any port 10443 proto tcp
 ufw --force enable
 ```
+
+##### Автоматизированное управление пулом релеев через `just1knode` (Zero-Manual Workflow):
+
+**1. Настройка Relay-узла (выполняется на каждом зарубежном сервере):**
+```bash
+# Миграция существующего релея на персональный домен в 1 команду:
+just1knode setup-domain de.YOUR_DOMAIN.COM
+
+# Или при первичной установке нового релея:
+just1knode install relay
+```
+*Утилита автоматически:*
+- Выполняет DNS Pre-flight проверку (A-запись домена ➔ публичный IP сервера).
+- Временно открывает порт 80 в UFW через Certbot pre-hook и немедленно закрывает его через post-hook (Zero-Signature: порт 80 остается закрыт 99.999% времени).
+- Настраивает сертификаты Let's Encrypt и автообновление через deploy-hook.
+- Выдает готовую команду для Origin.
+
+**2. Переключение на Origin-сервере (выполняется на сервере в РФ):**
+```bash
+# Команда переключения конкретного релея на домен (TLS):
+just1knode relay sni de de.YOUR_DOMAIN.COM tls
+
+# Или через интерактивное меню (пункт [5] выбора из списка активных релеев):
+just1knode relay
+```
+
+**3. Проверка статуса пула релеев на Origin:**
+```bash
+just1knode relay list
+```
+*Отображает список всех релеев с их SNI и режимами безопасности. Узлы с устаревшим `www.google.com` маркируются предупреждением `⚠️ ТСПУ риск`.*
 
 #### Вариант B: VLESS REALITY (порт 10443 / 443, Vision) и архитектура SelfSteal SNI
 *Альтернатива классическому VLESS+TLS для межузлового линка Origin ➔ Exit или прямого подключения при наличии чистого зарубежного IP.*

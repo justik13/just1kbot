@@ -59,10 +59,15 @@ if not relays and os.path.exists(cfg_file):
                 ip = vnext.get('address', '')
                 port = vnext.get('port', 10443)
                 uuid = ((vnext.get('users') or [{}])[0]).get('id', '')
-                sec = ob.get('streamSettings', {}).get('security', 'reality')
-                sni = ob.get('streamSettings', {}).get('realitySettings', {}).get('serverName', 'www.google.com')
-                pk = ob.get('streamSettings', {}).get('realitySettings', {}).get('publicKey', '')
-                sid = ob.get('streamSettings', {}).get('realitySettings', {}).get('shortId', '')
+                sec = ob.get('streamSettings', {}).get('security', 'tls')
+                if sec == 'tls':
+                    sni = ob.get('streamSettings', {}).get('tlsSettings', {}).get('serverName', '')
+                    pk = ''
+                    sid = ''
+                else:
+                    sni = ob.get('streamSettings', {}).get('realitySettings', {}).get('serverName', '')
+                    pk = ob.get('streamSettings', {}).get('realitySettings', {}).get('publicKey', '')
+                    sid = ob.get('streamSettings', {}).get('realitySettings', {}).get('shortId', '')
                 in_tag = f'just1k-wl-inbound-{code}'
                 in_ib = next((ib for ib in cfg.get('inbounds', []) if ib.get('tag') == in_tag), None)
                 path = in_ib.get('streamSettings', {}).get('xhttpSettings', {}).get('path', f'/stream/{code}') if in_ib else f'/stream/{code}'
@@ -132,16 +137,19 @@ try:
     with open(rf, 'r', encoding='utf-8') as f:
         relays = json.load(f)
     print(f'Всего релеев: {len(relays)}\n')
-    print(f'{\"ИМЯ\":<16} {\"КОД\":<6} {\"IP/ДОМЕН\":<22} {\"ПОРТ\":<8} {\"ПРОТОКОЛ\":<10} {\"ПУТЬ\":<20}')
-    print('-' * 84)
+    print(f'{\"ИМЯ\":<18} {\"КОД\":<6} {\"IP\":<18} {\"ПОРТ\":<7} {\"РЕЖИМ\":<9} {\"SNI / ДОМЕН\":<26} {\"ПУТЬ\":<15}')
+    print('-' * 102)
     for r in relays:
         name = r.get('name', '-')
         code = r.get('code', '-')
         ip = r.get('ip', '-')
         port = str(r.get('port', '-'))
         sec = r.get('security', '-')
+        sni = r.get('sni', '-')
         path = r.get('path', '-')
-        print(f'{name:<16} {code:<6} {ip:<22} {port:<8} {sec:<10} {path:<20}')
+        warning = ' ⚠️' if 'google.com' in sni else ''
+        sni_display = f'{sni}{warning}'
+        print(f'{name:<18} {code:<6} {ip:<18} {port:<7} {sec:<9} {sni_display:<26} {path:<15}')
 except Exception as e:
     print(f'Ошибка чтения реестра релеев: {e}')
 " "$RELAYS_FILE"
@@ -154,11 +162,51 @@ add_relay_node() {
     local port="${3:-10443}"
     local uuid="${4:-}"
     local code="${5:-de}"
-    local security_type="${6:-reality}"
-    local pubkey="${7:-}"
-    local shortid="${8:-}"
-    local sni="${9:-www.google.com}"
-    local badge="${10:-}"
+    local arg6="${6:-}"
+    local arg7="${7:-}"
+    local arg8="${8:-}"
+    local arg9="${9:-}"
+    local arg10="${10:-}"
+
+    local security_type="tls"
+    local pubkey=""
+    local shortid=""
+    local sni=""
+    local badge=""
+
+    if [[ "$arg6" == "tls" || "$arg6" == "reality" ]]; then
+        security_type="$arg6"
+        pubkey="$arg7"
+        shortid="$arg8"
+        sni="$arg9"
+        badge="$arg10"
+    elif [[ -n "$arg6" && "$arg6" != "-" ]]; then
+        # Легаси-синтаксис (v2.1.2): 6-й аргумент являлся pubkey для REALITY
+        security_type="reality"
+        pubkey="$arg6"
+        shortid="$arg7"
+        sni="$arg8"
+        badge="$arg9"
+    else
+        # arg6 пустой или "-"
+        if [[ -n "$arg7" || -n "$arg8" ]]; then
+            security_type="reality"
+            pubkey="$arg7"
+            shortid="$arg8"
+            sni="$arg9"
+            badge="$arg10"
+        else
+            security_type="tls"
+            pubkey=""
+            shortid=""
+            sni="$arg9"
+            badge="$arg10"
+        fi
+    fi
+
+    [[ "$pubkey" == "-" ]] && pubkey=""
+    [[ "$shortid" == "-" ]] && shortid=""
+    [[ "$sni" == "-" ]] && sni=""
 
     local role
     role="$(get_state_val "role")"
@@ -170,6 +218,35 @@ add_relay_node() {
         error "Имя, IP/Домен и UUID обязательны для добавления релея."
     fi
 
+    # Валидация специфичных параметров безопасности
+    if [[ "$security_type" == "tls" ]]; then
+        if [[ -z "$sni" ]]; then
+            if [[ -t 0 ]]; then
+                read -rp "Введите домен / SNI для релея в режиме TLS: " sni_in || true
+                sni="${sni_in:-}"
+            fi
+            if [[ -z "$sni" ]]; then
+                error "Для режима TLS обязательно указание домена (SNI). Укажите домен релея."
+                return 1
+            fi
+        fi
+    elif [[ "$security_type" == "reality" ]]; then
+        if [[ -z "$pubkey" ]]; then
+            error "Для режима REALITY обязательно указание публичного ключа (PublicKey)."
+            return 1
+        fi
+        if [[ -z "$sni" ]]; then
+            if [[ -t 0 ]]; then
+                read -rp "Введите домен / SNI для маскировки REALITY: " sni_in || true
+                sni="${sni_in:-}"
+            fi
+            if [[ -z "$sni" ]]; then
+                error "Для режима REALITY обязательно указание целевого SNI/домена."
+                return 1
+            fi
+        fi
+    fi
+
     # Санитизация кода страны во избежание path traversal
     if [[ ! "$code" =~ ^[a-zA-Z0-9_-]+$ ]]; then
         error "Недопустимый код страны: $code (разрешены только буквы, цифры, дефис и подчеркивание)."
@@ -179,6 +256,31 @@ add_relay_node() {
     secret_path="$(get_state_val "secret_base_path" "/stream")"
     if [[ -z "$secret_path" ]]; then
         secret_path="/stream"
+    fi
+
+    init_state_dir
+    local existing_relay_info
+    existing_relay_info=$(python3 -c "
+import json, os, sys
+rf = sys.argv[1]
+code = sys.argv[2]
+if os.path.exists(rf):
+    try:
+        with open(rf) as f:
+            for r in json.load(f):
+                if r.get('code') == code:
+                    print(f\"{r.get('name')}|{r.get('ip')}\")
+                    sys.exit(0)
+    except Exception:
+        pass
+" "$RELAYS_FILE" "$code" 2>/dev/null || true)
+
+    if [[ -n "$existing_relay_info" ]]; then
+        local old_name="${existing_relay_info%|*}"
+        local old_ip="${existing_relay_info#*|}"
+        if [[ "$old_ip" != "$ip" ]]; then
+            warn "Внимание: релей с кодом '$code' уже существует в реестре ($old_name, IP: $old_ip). Запись и маршрут будут перезаписаны новыми параметрами ($name, IP: $ip)."
+        fi
     fi
 
     acquire_just1knode_lock
@@ -290,9 +392,9 @@ if r_sec == 'reality':
     }
 else:
     stream_settings['tlsSettings'] = {
-        'serverName': r_sni,
+        'serverName': r_sni if r_sni else r_ip,
         'fingerprint': 'chrome',
-        'alpn': ['http/1.1']
+        'alpn': ['h2', 'http/1.1']
     }
 
 new_ob = {
@@ -760,6 +862,305 @@ except Exception as e:
     fi
 }
 
+update_relay_sni() {
+    local relay_target="${1:-}"
+    local new_sni="${2:-}"
+    local new_sec="${3:-tls}"
+    local force_flag="${4:-}"
+
+    local role
+    role="$(get_state_val "role")"
+    if [[ "$role" != "origin" ]]; then
+        error "Управление Relay-узлами доступно ТОЛЬКО на Origin-сервере (текущая роль: ${role:-не установлена})."
+        return 1
+    fi
+
+    # Интерактивный выбор релея, если аргумент не передан
+    if [[ -z "$relay_target" ]]; then
+        local list_output
+        list_output="$(get_relays_tsv)"
+        if [[ -z "$list_output" ]]; then
+            warn "Список Relay-узлов пуст."
+            return 1
+        fi
+        echo -e "\n${BOLD}=== ВЫБЕРИТЕ RELAY ДЛЯ НАСТРОЙКИ ДОМЕНА (SNI / TLS) ===${NC}\n"
+        local codes=()
+        local names=()
+        local ips=()
+        local snis=()
+        local secs=()
+        local count=0
+        while IFS=$'\t' read -r num code name ip sni sec; do
+            count=$((count + 1))
+            codes+=("$code")
+            names+=("$name")
+            ips+=("$ip")
+            snis+=("$sni")
+            secs+=("$sec")
+            local warn_badge=""
+            if [[ "$sni" == *"google.com"* || "$sec" == "reality" ]]; then
+                warn_badge=" ${YELLOW}[${sec:-reality} ⚠️]${NC}"
+            else
+                warn_badge=" ${GREEN}[${sec:-tls} ✔]${NC}"
+            fi
+            echo -e "  ${BOLD}[$count]${NC} $name (код: ${CYAN}$code${NC}, IP: $ip, SNI: ${sni:-не задан})${warn_badge}"
+        done <<< "$list_output"
+        echo -e "  ${BOLD}[0]${NC} ⬅️  Отмена\n"
+        read -rp "Выберите номер релея [0-$count]: " r_num
+        if [[ "$r_num" =~ ^[1-9][0-9]*$ ]] && (( r_num >= 1 && r_num <= count )); then
+            relay_target="${codes[$((r_num - 1))]}"
+            local sel_name="${names[$((r_num - 1))]}"
+            local sel_sni="${snis[$((r_num - 1))]}"
+            echo -e "\nВыбран Relay: ${BOLD}$sel_name${NC} (код: $relay_target, текущий SNI: $sel_sni)"
+        else
+            log "Отмена."
+            return 0
+        fi
+    fi
+
+    if [[ -z "$new_sni" ]]; then
+        read -rp "Введите домен / SNI для релея '$relay_target' (например: ${relay_target}.yourdomain.com): " new_sni_in
+        new_sni="${new_sni_in:-}"
+        if [[ -z "$new_sni" ]]; then
+            error "Новый домен / SNI не может быть пустым."
+            return 1
+        fi
+    fi
+
+    # Проверка на кириллические символы
+    local has_cyrillic
+    has_cyrillic=$(python3 -c "import sys, re; print('YES' if re.search(r'[\u0400-\u04FF]', sys.argv[1]) else 'NO')" "$new_sni" 2>/dev/null || true)
+    if [[ "$has_cyrillic" == "YES" ]]; then
+        error "Домен '$new_sni' содержит русские (кириллические) буквы! Введите корректный латинский домен."
+        return 1
+    fi
+
+    init_state_dir
+    auto_heal_relays_registry
+
+    acquire_just1knode_lock
+    manifest_begin
+
+    log "Обновление SNI и режима безопасности для релея '$relay_target' на '$new_sni' (${new_sec})..."
+
+    local update_res
+    update_res=$(python3 -c "
+import json, os, sys, tempfile
+
+cfg_file = sys.argv[1]
+rf = sys.argv[2]
+target = sys.argv[3].strip().lower()
+new_sni = sys.argv[4].strip()
+new_sec = sys.argv[5].strip().lower()
+if new_sec not in ('tls', 'reality'):
+    new_sec = 'tls'
+
+if not os.path.exists(cfg_file):
+    print('ERROR: config.json not found')
+    sys.exit(1)
+
+with open(cfg_file, 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+
+relays = []
+if os.path.exists(rf):
+    try:
+        with open(rf, 'r', encoding='utf-8') as f:
+            relays = json.load(f)
+    except Exception:
+        relays = []
+
+# Поиск целевого релея по индексу, коду или имени
+matched_code = None
+target_ip = None
+if target.isdigit():
+    idx = int(target) - 1
+    if 0 <= idx < len(relays):
+        matched_code = relays[idx].get('code')
+        target_ip = relays[idx].get('ip')
+        relays[idx]['sni'] = new_sni
+        relays[idx]['security'] = new_sec
+
+if not matched_code:
+    for r in relays:
+        if str(r.get('code', '')).lower() == target or str(r.get('name', '')).lower() == target:
+            matched_code = r.get('code')
+            target_ip = r.get('ip')
+            r['sni'] = new_sni
+            r['security'] = new_sec
+            break
+
+if not matched_code:
+    # Попробуем найти в outbounds Xray напрямую
+    for ob in cfg.get('outbounds', []):
+        tag = ob.get('tag', '')
+        if tag.startswith('just1k-wl-outbound-'):
+            c = tag.replace('just1k-wl-outbound-', '')
+            if c.lower() == target:
+                matched_code = c
+                break
+
+if not matched_code:
+    print(f'NOT_FOUND: Relay {target} not found in relays registry or config')
+    sys.exit(1)
+
+out_tag = f'just1k-wl-outbound-{matched_code}'
+target_ob = next((ob for ob in cfg.get('outbounds', []) if ob.get('tag') == out_tag), None)
+if not target_ob:
+    print(f'NOT_FOUND: Outbound {out_tag} not found in Xray config')
+    sys.exit(1)
+
+if not target_ip:
+    vnext = target_ob.get('settings', {}).get('vnext', [{}])
+    if vnext:
+        target_ip = vnext[0].get('address')
+
+if not any(r.get('code') == matched_code for r in relays):
+    relays.append({
+        'code': matched_code,
+        'name': f'Релей {matched_code.upper()}',
+        'ip': target_ip or '',
+        'sni': new_sni,
+        'security': new_sec
+    })
+
+# Валидация DNS для режима TLS во избежание NDPI_UNRESOLVED_HOSTNAME (сверка SNI ➔ DNS)
+if new_sec == 'tls' and target_ip and os.environ.get('JUST1KNODE_SKIP_DNS_CHECK') != '1':
+    import socket
+    try:
+        addr_info = socket.getaddrinfo(new_sni, None, socket.AF_INET)
+        resolved_ips = {ai[4][0] for ai in addr_info if ai[4]}
+        if target_ip not in resolved_ips:
+            print(f'WARN_DNS_MISMATCH|{target_ip}|{\",\".join(resolved_ips)}')
+    except Exception as e:
+        print(f'WARN_DNS_ERROR|{target_ip}|{e}')
+
+st = target_ob.setdefault('streamSettings', {})
+st['security'] = new_sec
+
+if new_sec == 'tls':
+    st.pop('realitySettings', None)
+    st['tlsSettings'] = {
+        'serverName': new_sni,
+        'fingerprint': 'chrome',
+        'alpn': ['h2', 'http/1.1']
+    }
+else:
+    st.pop('tlsSettings', None)
+    rs = st.setdefault('realitySettings', {})
+    rs['serverName'] = new_sni
+    rs.setdefault('fingerprint', 'chrome')
+    rs.setdefault('show', False)
+    if not rs.get('publicKey'):
+        # Check if stored in relays.json
+        pub = next((r.get('public_key') or r.get('pubkey') for r in relays if r.get('code') == matched_code and (r.get('public_key') or r.get('pubkey'))), None)
+        if pub and pub != '-':
+            rs['publicKey'] = pub
+        else:
+            print(f'ERROR: Outbound {out_tag} lacks publicKey for REALITY mode')
+            sys.exit(1)
+
+# Сохраняем обновленный config.json
+d = os.path.dirname(os.path.abspath(cfg_file))
+t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
+    json.dump(cfg, fp, indent=2)
+    fp.flush()
+    os.fsync(fp.fileno())
+os.replace(t_path, cfg_file)
+try:
+    os.chmod(cfg_file, 0o640)
+except Exception:
+    pass
+
+# Сохраняем обновленный relays.json
+if relays:
+    rd = os.path.dirname(os.path.abspath(rf))
+    rt_fd, rt_path = tempfile.mkstemp(dir=rd, suffix='.tmp')
+    with os.fdopen(rt_fd, 'w', encoding='utf-8') as fp:
+        json.dump(relays, fp, ensure_ascii=False, indent=2)
+        fp.flush()
+        os.fsync(fp.fileno())
+    os.replace(rt_path, rf)
+    try:
+        import shutil
+        shutil.chown(rf, user='root', group='xrayapi')
+        os.chmod(rf, 0o660)
+    except Exception:
+        pass
+
+print(f'OK:{matched_code}')
+" "$XRAY_CONFIG" "$RELAYS_FILE" "$relay_target" "$new_sni" "$new_sec" 2>/dev/null || true)
+
+    if ! echo "$update_res" | grep -q "^OK:"; then
+        manifest_rollback
+        error "Ошибка обновления релея: ${update_res:-Неизвестная ошибка}."
+        return 1
+    fi
+
+    if echo "$update_res" | grep -q "WARN_DNS_"; then
+        local dns_warn
+        dns_warn=$(echo "$update_res" | grep "WARN_DNS_" | head -n1)
+        if echo "$dns_warn" | grep -q "^WARN_DNS_MISMATCH"; then
+            local exp_ip
+            exp_ip=$(echo "$dns_warn" | cut -d'|' -f2)
+            local act_ips
+            act_ips=$(echo "$dns_warn" | cut -d'|' -f3)
+            warn "ВНИМАНИЕ: Домен '$new_sni' в DNS указывает на [$act_ips], а ожидаемый IP релея: $exp_ip!"
+            warn "Несовпадение SNI и DNS на линке к зарубежному релею может вызвать блокировку ТСПУ (NDPI_UNRESOLVED_HOSTNAME)."
+        else
+            local err_detail
+            err_detail=$(echo "$dns_warn" | cut -d'|' -f3)
+            warn "ВНИМАНИЕ: Не удалось разрезолвить домен '$new_sni' в DNS ($err_detail)."
+        fi
+
+        if [[ -t 0 ]]; then
+            echo -e "${YELLOW}Вы уверены, что хотите применить этот SNI? [y/N]: ${NC}"
+            local ans=""
+            read -rp "" ans || ans="n"
+            if [[ "${ans,,}" != "y" && "${ans,,}" != "yes" ]]; then
+                manifest_rollback
+                error "Операция отменена пользователем."
+                return 1
+            fi
+        else
+            if [[ "$force_flag" != "--force" && "${JUST1KNODE_FORCE:-0}" != "1" ]]; then
+                manifest_rollback
+                error "DNS-валидация не пройдена в неинтерактивном режиме для '$new_sni'. Передайте --force или JUST1KNODE_FORCE=1 для принудительного применения."
+                return 1
+            fi
+            warn "Неинтерактивный режим: принудительное применение SNI с несовпадающим DNS (--force)."
+        fi
+    fi
+
+    local matched_code
+    matched_code=$(echo "$update_res" | grep "^OK:" | head -n1 | cut -d: -f2)
+
+    if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+        manifest_rollback
+        error "Ошибка тестирования сгенерированной конфигурации Xray! Изменения отменены."
+        return 1
+    fi
+
+    set +e
+    systemctl restart xray
+    local xray_rc=$?
+    set -e
+    if [[ $xray_rc -ne 0 ]] || ! systemctl is-active --quiet xray; then
+        manifest_rollback
+        error "Xray не смог запуститься после обновления релея '${matched_code:-$relay_target}'. Выполнен полный откат."
+        return 1
+    fi
+
+    if systemctl is-active --quiet xray-api; then
+        systemctl restart xray-api || true
+    fi
+
+    manifest_commit
+    log "✔ Relay '$matched_code' успешно переключен на домен '$new_sni' (режим: $new_sec)!"
+    return 0
+}
+
 get_relays_tsv() {
     python3 -c "
 import json, os
@@ -769,7 +1170,7 @@ if os.path.exists(rf):
         with open(rf, 'r', encoding='utf-8', errors='replace') as f:
             data = json.load(f)
         for i, r in enumerate(data, 1):
-            print(f\"{i}\t{r.get('code','')}\t{r.get('name','')}\t{r.get('ip','')}\")
+            print(f\"{i}\t{r.get('code','')}\t{r.get('name','')}\t{r.get('ip','')}\t{r.get('sni','')}\t{r.get('security','')}\")
     except:
         pass
 "
@@ -790,9 +1191,10 @@ manage_relays_menu() {
     echo -e "  ${BOLD}[2]${NC} ➖ Удалить Relay-узел"
     echo -e "  ${BOLD}[3]${NC} ✏️  Переименовать Relay-узел"
     echo -e "  ${BOLD}[4]${NC} 📋 Список активных Relay-узлов"
+    echo -e "  ${BOLD}[5]${NC} 🔐 Изменить домен / SNI Relay-узла (VLESS TLS)"
     echo -e "  ${BOLD}[0]${NC} ⬅️  Назад"
     echo ""
-    read -rp "Выберите действие [0-4]: " r_choice
+    read -rp "Выберите действие [0-5]: " r_choice
 
     case "$r_choice" in
         1)
@@ -815,11 +1217,26 @@ try:
         tokens = tokens[1:]
     if len(tokens) >= 5:
         name, ip, port, uuid, code = tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]
-        sec = tokens[5] if len(tokens) > 5 else 'reality'
-        pk = tokens[6] if len(tokens) > 6 else ''
-        sid = tokens[7] if len(tokens) > 7 else ''
-        sni = tokens[8] if len(tokens) > 8 else 'www.google.com'
-        badge = tokens[9] if len(tokens) > 9 else ''
+        arg5 = tokens[5] if len(tokens) > 5 else ''
+        if arg5 in ('tls', 'reality'):
+            sec = arg5
+            pk = tokens[6] if len(tokens) > 6 and tokens[6] != '-' else ''
+            sid = tokens[7] if len(tokens) > 7 and tokens[7] != '-' else ''
+            sni = tokens[8] if len(tokens) > 8 and tokens[8] != '-' else ''
+            badge = tokens[9] if len(tokens) > 9 else ''
+        elif arg5 and arg5 != '-':
+            # Legacy command: 6th token was pubkey for reality
+            sec = 'reality'
+            pk = arg5
+            sid = tokens[6] if len(tokens) > 6 and tokens[6] != '-' else ''
+            sni = tokens[7] if len(tokens) > 7 and tokens[7] != '-' else ''
+            badge = tokens[8] if len(tokens) > 8 else ''
+        else:
+            sec = 'tls'
+            pk = ''
+            sid = ''
+            sni = tokens[8] if len(tokens) > 8 and tokens[8] != '-' else ''
+            badge = tokens[9] if len(tokens) > 9 else ''
         print(' '.join(shlex.quote(x) for x in [name, ip, port, uuid, code, sec, pk, sid, sni, badge]))
     else:
         sys.exit(1)
@@ -841,25 +1258,26 @@ except Exception:
                 read -rp "Код страны (например: de, nl, se) [по умолчанию: de]: " r_code
                 r_code="${r_code:-de}"
                 echo -e "Тип безопасности моста:"
-                echo -e "  [1] REALITY (Бессертификатный x25519 по IP, рекомендуемый)"
-                echo -e "  [2] TLS (Доменный сертификат Let's Encrypt)"
+                echo -e "  [1] TLS (Доменный сертификат Let's Encrypt на личном домене — Рекомендуется)"
+                echo -e "  [2] REALITY (Бессертификатный x25519 по IP)"
                 read -rp "Выберите тип [1/2, по умолчанию 1]: " t_choice
                 t_choice="${t_choice:-1}"
-                local r_sec="reality"
+                local r_sec="tls"
                 local r_pubkey=""
                 local r_shortid=""
-                local r_sni="www.google.com"
+                local r_sni=""
                 if [[ "$t_choice" == "1" ]]; then
+                    r_sec="tls"
+                    read -rp "TLS Домен / SNI Relay-ноды (например: ${r_code}.yourdomain.com): " r_sni_in
+                    r_sni="$r_sni_in"
+                    if [[ -z "$r_sni" ]]; then error "Домен SNI обязателен для TLS."; return 1; fi
+                else
                     r_sec="reality"
                     read -rp "REALITY Public Key: " r_pubkey
                     read -rp "REALITY Short ID: " r_shortid
-                    read -rp "REALITY SNI [по умолчанию: www.google.com]: " r_sni_in
-                    r_sni="${r_sni_in:-www.google.com}"
-                else
-                    r_sec="tls"
-                    read -rp "TLS Домен / SNI: " r_sni_in
-                    if [[ -z "$r_sni_in" ]]; then error "Домен SNI обязателен для TLS."; fi
+                    read -rp "REALITY SNI: " r_sni_in
                     r_sni="$r_sni_in"
+                    if [[ -z "$r_sni" ]]; then error "SNI обязателен для REALITY."; return 1; fi
                 fi
                 read -rp "Бейдж узла в INCY (например: ⚡ Зарубежный узел, Enter по умолчанию): " r_badge
                 add_relay_node "$r_name" "$r_ip" "$r_port" "$r_uuid" "$r_code" "$r_sec" "$r_pubkey" "$r_shortid" "$r_sni" "$r_badge"
@@ -876,7 +1294,7 @@ except Exception:
             local codes=()
             local names=()
             local count=0
-            while IFS=$'\t' read -r num code name ip; do
+            while IFS=$'\t' read -r num code name ip sni sec; do
                 count=$((count + 1))
                 codes+=("$code")
                 names+=("$name")
@@ -906,7 +1324,7 @@ except Exception:
             local codes=()
             local names=()
             local count=0
-            while IFS=$'\t' read -r num code name ip; do
+            while IFS=$'\t' read -r num code name ip sni sec; do
                 count=$((count + 1))
                 codes+=("$code")
                 names+=("$name")
@@ -928,6 +1346,9 @@ except Exception:
             ;;
         4)
             list_relays
+            ;;
+        5)
+            update_relay_sni ""
             ;;
         0)
             return

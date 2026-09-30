@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -157,6 +158,7 @@ exit 0
         env["SYSTEMD_SYSTEM_DIR"] = str(self.systemd_dir)
         env["CERTBOT_DIR"] = str(self.certbot_dir)
         env["LETSENCRYPT_DIR"] = str(self.letsencrypt_dir)
+        env["XRAY_TLS_DIR"] = str(self.xray_config_dir / "tls")
         env["WWW_HTML_DIR"] = str(self.www_html_dir)
         env["INSTALL_DIR"] = str(self.install_dir)
         if extra_env:
@@ -188,6 +190,7 @@ export XRAY_API_CONFIG_ENV='{_bp(self.xray_api_etc / "config.env")}'
 export SYSTEMD_SYSTEM_DIR='{_bp(self.systemd_dir)}'
 export CERTBOT_DIR='{_bp(self.certbot_dir)}'
 export LETSENCRYPT_DIR='{_bp(self.letsencrypt_dir)}'
+export XRAY_TLS_DIR='{_bp(self.xray_config_dir / "tls")}'
 export WWW_HTML_DIR='{_bp(self.www_html_dir)}'
 export INSTALL_DIR='{_bp(self.install_dir)}'
 
@@ -349,6 +352,71 @@ exit 0
         self.assertEqual(updated[0]["name"], "Финляндия")
         self.assertEqual(updated[0]["code"], "de")
 
+    def test_update_relay_sni(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "origin"}, f)
+
+        xray_config_file = self.xray_config_dir / "config.json"
+        with open(xray_config_file, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "inbounds": [],
+                    "outbounds": [
+                        {
+                            "tag": "just1k-wl-outbound-de",
+                            "protocol": "vless",
+                            "settings": {"vnext": [{"address": "1.2.3.4", "port": 10443}]},
+                            "streamSettings": {
+                                "security": "reality",
+                                "realitySettings": {"serverName": "www.google.com"},
+                            },
+                        }
+                    ],
+                },
+                f,
+            )
+
+        relays_data = [
+            {
+                "name": "Германия",
+                "code": "de",
+                "ip": "1.2.3.4",
+                "port": 10443,
+                "sni": "www.google.com",
+                "security": "reality",
+            }
+        ]
+        with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
+            json.dump(relays_data, f, ensure_ascii=False)
+
+        # Test 1: Non-interactive without --force must fail-closed on DNS mismatch
+        cmd_fail = 'update_relay_sni "de" "de.example.com" "tls"'
+        res_fail = self._run_shell_snippet(cmd_fail)
+        self.assertEqual(res_fail.returncode, 1, f"Expected non-interactive DNS mismatch to fail-closed: {res_fail.stderr + res_fail.stdout}")
+        self.assertIn("ВНИМАНИЕ", res_fail.stderr + res_fail.stdout)
+        self.assertIn("--force", res_fail.stderr + res_fail.stdout)
+        with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
+            unmodified = json.load(f)
+        self.assertEqual(unmodified[0]["sni"], "www.google.com")
+
+        # Test 2: Non-interactive with --force proceeds and updates relay & config
+        cmd = 'update_relay_sni "de" "de.example.com" "tls" "--force"'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"update_relay_sni failed: {res.stderr + res.stdout}")
+        self.assertIn("ВНИМАНИЕ", res.stderr + res.stdout)
+
+        with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
+            updated = json.load(f)
+        self.assertEqual(updated[0]["sni"], "de.example.com")
+        self.assertEqual(updated[0]["security"], "tls")
+
+        with open(xray_config_file, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        ob = next(o for o in cfg["outbounds"] if o["tag"] == "just1k-wl-outbound-de")
+        self.assertEqual(ob["streamSettings"]["security"], "tls")
+        self.assertEqual(ob["streamSettings"]["tlsSettings"]["serverName"], "de.example.com")
+
     def test_heal_and_update_origin_config(self):
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
@@ -468,6 +536,93 @@ exit 0
         rule_out_tags = [r.get("outboundTag") for r in reconciled["routing"]["rules"]]
         self.assertIn("just1k-wl-direct", rule_out_tags)
         self.assertIn("just1k-wl-api", rule_out_tags)
+
+    def test_heal_and_update_origin_config_handles_corrupt_state(self):
+        """When state_file is corrupt or not a dict, reconciliation should not crash with NameError or AttributeError."""
+        self._prepare_base_env()
+        xray_config_file = self.xray_config_dir / "config.json"
+        xray_config_file.parent.mkdir(parents=True, exist_ok=True)
+        xray_config_file.write_text('{"inbounds": [], "outbounds": []}', encoding="utf-8")
+        relays_file = self.state_dir / "relays.json"
+        relays_file.write_text("[]", encoding="utf-8")
+
+        py_reconcile = '''
+import json, os, sys
+cfg_file, relays_file, state_file = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(cfg_file, 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+relays = []
+secret_base = '/stream'
+s_data = {}
+if os.path.exists(state_file):
+    try:
+        with open(state_file, 'r', encoding='utf-8') as sf:
+            loaded_s = json.load(sf)
+            if isinstance(loaded_s, dict):
+                s_data = loaded_s
+            secret_base = s_data.get('secret_base_path', '/stream')
+    except Exception:
+        secret_base = '/stream'
+        s_data = {}
+
+has_reverse = bool(s_data.get('reverse_secret'))
+print("RECONCILE_SUCCESS")
+'''
+        broken_state = self.state_dir / "broken_state.json"
+
+        # Case 1: Corrupt non-JSON file
+        broken_state.write_text("NOT_VALID_JSON", encoding="utf-8")
+        res1 = subprocess.run(
+            [sys.executable, "-c", py_reconcile, str(xray_config_file), str(relays_file), str(broken_state)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(res1.returncode, 0, f"Case 1 crashed: {res1.stderr}")
+        self.assertIn("RECONCILE_SUCCESS", res1.stdout)
+
+        # Case 2: Valid JSON but not a dict (e.g. list [1, 2, 3])
+        broken_state.write_text("[1, 2, 3]", encoding="utf-8")
+        res2 = subprocess.run(
+            [sys.executable, "-c", py_reconcile, str(xray_config_file), str(relays_file), str(broken_state)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(res2.returncode, 0, f"Case 2 crashed: {res2.stderr}")
+        self.assertIn("RECONCILE_SUCCESS", res2.stdout)
+
+        # Verify origin.sh source contains the fix
+        origin_sh = (Path(__file__).parent.parent / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("s_data = {}", origin_sh)
+        self.assertIn("if isinstance(loaded_s, dict):", origin_sh)
+
+    def test_issue_relay_tls_cert_ufw_hooks_merge(self):
+        """issue_relay_tls_cert should safely merge ufw hooks into existing renewal config without duplicating."""
+        self._prepare_base_env()
+        self._create_mock_script("openssl", "#!/bin/sh\nexit 0\n")
+        domain = "relay.example.com"
+        live_dir = self.letsencrypt_dir / "live" / domain
+        live_dir.mkdir(parents=True, exist_ok=True)
+        (live_dir / "fullchain.pem").write_text("DUMMY_CERT", encoding="utf-8")
+        (live_dir / "privkey.pem").write_text("DUMMY_KEY", encoding="utf-8")
+
+        ren_dir = self.letsencrypt_dir / "renewal"
+        ren_dir.mkdir(parents=True, exist_ok=True)
+        ren_file = ren_dir / f"{domain}.conf"
+        ren_file.write_text("[renewalparams]\npre_hook = old_pre\npost_hook = old_post\n", encoding="utf-8")
+
+        cmd = f'issue_relay_tls_cert "{domain}"'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"issue_relay_tls_cert failed: {res.stderr + res.stdout}")
+
+        # Verify hooks were replaced, not duplicated
+        content = ren_file.read_text(encoding="utf-8")
+        self.assertEqual(content.count("pre_hook"), 1, "pre_hook should appear exactly once")
+        self.assertEqual(content.count("post_hook"), 1, "post_hook should appear exactly once")
+        self.assertIn("just1knode_ufw_opened_80", content)
+        self.assertNotIn("old_pre", content)
+        self.assertNotIn("old_post", content)
 
     def test_rollback_removes_newly_created_relay_nginx_conf(self):
         self._prepare_base_env()
@@ -890,6 +1045,9 @@ update_node "all"
         cert_dir.mkdir(parents=True, exist_ok=True)
         cert_file = cert_dir / "fullchain.pem"
         key_file = cert_dir / "privkey.pem"
+
+        if shutil.which("openssl") is None:
+            self.skipTest("openssl binary not found in PATH")
 
         # Generate test valid certificate with correct SAN
         subprocess.run(
@@ -1701,7 +1859,10 @@ ensure_xrayapi_user
         self.assertIn("dns", updated_cfg)
         self.assertEqual(updated_cfg["dns"]["queryStrategy"], "UseIPv4")
         st = xray_config.stat().st_mode & 0o777
-        self.assertEqual(st, 0o640, f"Expected 0640, got {oct(st)}")
+        if os.name != "nt":
+            self.assertEqual(st, 0o640, f"Expected 0640, got {oct(st)}")
+        else:
+            self.assertTrue(bool(st & 0o600))
 
         # Verify BitTorrent filtering and blackhole block outbound injected
         rules = updated_cfg.get("routing", {}).get("rules", [])
@@ -2325,6 +2486,64 @@ remove_traffic_watchdog_timer
         self.assertIn("CN=invalid", amnezia_sh)
         self.assertIn("ssl_certificate ${dummy_dir}/dummy.crt;", amnezia_sh)
         self.assertIn("listen ${public_port} ssl default_server;", amnezia_sh)
+
+    def test_relay_install_strictly_tls_and_validates_dns(self):
+        """Verify install_xray_relay_node strictly provisions VLESS TLS and validates DNS A-record."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn('local sec_mode="tls"', relay_sh)
+        self.assertIn('validate_relay_dns "$dest_server" "$my_ip"', relay_sh)
+        self.assertIn('issue_relay_tls_cert "$dest_server"', relay_sh)
+        # Verify new installations do not configure REALITY
+        self.assertNotIn('Режим REALITY (legacy)', relay_sh)
+
+    def test_relay_tls_cert_permanent_renewal_hooks_and_freshness_check(self):
+        """Verify issue_relay_tls_cert cleans up global hooks, scopes pre/post hooks to lineage, and installs deploy hook."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn('rm -f "${le_dir}/renewal-hooks/pre/05-just1knode-nginx.sh"', relay_sh)
+        self.assertIn('"${le_dir}/renewal-hooks/deploy/20-just1knode-restart-xray.sh"', relay_sh)
+        self.assertIn('--pre-hook "$pre_hook_cmd"', relay_sh)
+        self.assertIn('--post-hook "$post_hook_cmd"', relay_sh)
+        self.assertIn("openssl x509 -checkend 86400", relay_sh)
+        self.assertIn("port80_was_open", relay_sh)
+        # Ensure deploy hook checks RENEWED_LINEAGE against RELAY_SNI
+        self.assertIn('[ "$(basename "$RENEWED_LINEAGE")" = "$RELAY_SNI" ]', relay_sh)
+
+    def test_add_relay_node_supports_legacy_and_new_syntax(self):
+        """Verify add_relay_node correctly parses legacy positional args and new tls args."""
+        relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
+        self.assertIn('if [[ "$arg6" == "tls" || "$arg6" == "reality" ]]; then', relays_manage_sh)
+        self.assertIn('elif [[ -n "$arg6" && "$arg6" != "-" ]]; then', relays_manage_sh)
+        self.assertIn('security_type="reality"', relays_manage_sh)
+        self.assertIn('Для режима TLS обязательно указание домена (SNI)', relays_manage_sh)
+        self.assertIn('Для режима REALITY обязательно указание публичного ключа (PublicKey)', relays_manage_sh)
+
+    def test_show_relay_credentials_legacy_state_inspection_and_no_hardcoded_de(self):
+        """Verify show_relay_credentials normalizes missing security key in legacy state and avoids hardcoded de."""
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('r_sec="$(get_state_val "security" "")"', just1knode_sh)
+        self.assertIn('if [[ -z "$r_sec" ]]; then', just1knode_sh)
+        self.assertIn('sec = ib.get(\'streamSettings\', {}).get(\'security\')', just1knode_sh)
+        self.assertNotIn('local detected_code="de"', just1knode_sh)
+        self.assertIn('detected_code="relay-01"', just1knode_sh)
+
+    def test_heal_and_update_relay_config_auto_migrates_tls_on_cert_found(self):
+        """Verify heal_and_update_relay_config validates domain before selecting cert and guards TLS inbound."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn("ai = socket.getaddrinfo(domain, None, socket.AF_INET)", relay_sh)
+        self.assertIn("Автоматический перевод входящего туннеля Relay на VLESS + TLS", relay_sh)
+        self.assertIn("tls_cert_file = os.path.join(tls_cert_dir, 'fullchain.pem')", relay_sh)
+        self.assertIn("if sec_mode == 'tls' and os.path.exists(tls_cert_file) and os.path.exists(tls_key_file):", relay_sh)
+        self.assertIn("st['security'] = 'tls'", relay_sh)
+        self.assertIn("st.pop('realitySettings', None)", relay_sh)
+
+    def test_heal_and_update_origin_config_auto_migrates_relay_on_dns_match(self):
+        """Verify heal_and_update_origin_config matches multi-IP DNS A-record with TLS probe and upgrades outbounds."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("Авто-миграция Relay-узлов с REALITY / google.com на VLESS+TLS", origin_sh)
+        self.assertIn("addr_infos = socket.getaddrinfo(cand, None, socket.AF_INET)", origin_sh)
+        self.assertIn("ctx.wrap_socket(s, server_hostname=cand)", origin_sh)
+        self.assertIn("st.pop('realitySettings', None)", origin_sh)
+        self.assertIn("r['security'] = 'tls'", origin_sh)
 
 
 if __name__ == "__main__":
