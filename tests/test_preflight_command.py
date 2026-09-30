@@ -83,7 +83,7 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
         "SELECT '3A_REFERRAL_DISCOUNT_FLOOR' AS block, CASE WHEN count(*) = 0 "
         "THEN 'OK (0 violations)' ELSE 'CRITICAL: HAS VIOLATIONS n=' || count(*) END AS verdict "
         "FROM orders WHERE status = 'paid' AND payment_method <> 'wallet' "
-        "AND metadata_->>'is_referral_discount' = 'true' AND amount_rub < 1",
+        "AND (metadata ->> 'is_referral_discount') = 'true' AND amount_rub < 1",
     ),
     (
         "3B_PAID_ORDER_NOT_CREDITED",
@@ -162,6 +162,21 @@ class TestPreflightCommandIsShellSafe(unittest.TestCase):
         self.assertIn("pg_constraint", joined)             # PR invariants
         self.assertIn("account_ledger_entries", joined)    # financial integrity
         self.assertIn("status = 'pending'", joined)        # in-flight
+
+    def test_sql_uses_real_column_names_not_orm_attribute_names(self):
+        """The ORM renames reserved columns; raw SQL must use the database name.
+
+        ``Order.metadata_`` is the Python attribute, but the column is ``metadata``.
+        SQL written against the attribute name fails at runtime with
+        UndefinedColumnError, which is exactly how this shipped once.
+        """
+        from database.models import Order
+
+        self.assertIn("metadata ->> 'is_referral_discount'", PREFLIGHT_SQL)
+        self.assertNotIn("metadata_", PREFLIGHT_SQL)
+        # And the attribute must still map to that column, so the SQL above is not
+        # silently drifting away from the model either.
+        self.assertEqual(Order.metadata_.property.columns[0].name, "metadata")
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
