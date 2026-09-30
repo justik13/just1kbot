@@ -1,0 +1,42 @@
+# Исследовательские материалы, сетевой анализ и публикации (Research & Investigations)
+# Узконаправленные технические исследования, анализ DPI/ТСПУ, закрытые баг-трекеры, статьи и RFC
+
+## Исследования ТСПУ / DPI, цензуры и обхода блокировок
+- net4people/bbs Issue #668: REALITY 借同网段邻居站点仍无法通过 SNI→DNS 一致性检查 (Проверка соответствия SNI и DNS, пассивный DNS-кэш nDPI NDPI_UNRESOLVED_HOSTNAME):
+  https://github.com/net4people/bbs/issues/668
+- net4people/bbs Issue #277: Блокировки Reality и WS+TLS в сетях Ирана (MCCI, AS43358):
+  https://github.com/net4people/bbs/issues/277
+- net4people/bbs Issue #254: Анализ SNI Whitelist и скрытых атак на понижение (RPRX, 180s handshake drops):
+  https://github.com/net4people/bbs/issues/254
+- Исследование CERTainty (arXiv:2305.08189) — измерения расхождений DNS-резолверов и ложных срабатываний:
+  https://arxiv.org/abs/2305.08189
+- Habr #1075272: Практический анализ инспекции и перехвата DNS ТСПУ, сокетный флаг IP_RECVERR, утилита dpi-ch:
+  https://habr.com/ru/articles/1075272/
+- Habr #1044396: Инцидент постквантовых рукопожатий Reality (X25519MLKEM768 / Kyber):
+  https://habr.com/ru/articles/1044396/
+- Habr #1040846 & 4PDA #1094247: Предотвращение блокировок Datacenter IP и Cloudflare Captcha через Cloudflare WARP на Exit:
+  https://habr.com/ru/articles/1040846/
+  https://4pda.to/forum/index.php?showtopic=1094247
+- Telegraph (datagio systems, 29.09.2026): Переход на SelfSteal SNI (отказ от чужих SNI в пользу собственного домена и локальной заглушки 127.0.0.1:9443):
+  https://telegra.ph/Perehod-na-SelfSteal-SNI-prostaya-i-gramotnaya-nastrojka-dlya-vashego-VPN-09-29
+
+## Ядро Xray-core: релизы, спецификации и Pull Requests
+- Xray-core v26.9.30 (Тег prerelease: true, транспорт XDRIVE, PR #5645, PR #6748, PR #6754):
+  https://github.com/XTLS/Xray-core/releases/tag/v26.9.30
+  https://github.com/XTLS/Xray-core/pull/5645
+  https://github.com/XTLS/Xray-core/pull/6748
+  https://github.com/XTLS/Xray-core/pull/6754
+- Xray-core PR #5414 (Кастомизация XHTTP: uplinkHTTPMethod, xPaddingHeader, tokenish padding):
+  https://github.com/XTLS/Xray-core/pull/5414
+- Xray-core PR #6632 (Устранение сбоев GOAWAY в HTTP/2 через GetBody rewind):
+  https://github.com/XTLS/Xray-core/pull/6632
+- Xray-core PR #6307 (Снятие требования закрывающего слэша в путях XHTTP):
+  https://github.com/XTLS/Xray-core/pull/6307
+- Xray-core PR #6058 (Перенос domainStrategy в block sockopt во freedom outbound):
+  https://github.com/XTLS/Xray-core/pull/6058
+- Xray-core PR #6720 (Экспериментальная динамическая рандомизация pathTable/pathExtension — закрыт без слияния):
+  https://github.com/XTLS/Xray-core/pull/6720
+
+## Первоисточники обхода инцидента 413 Yandex Cloud CDN
+- CraftStick/node-installer-cdn коммит d614e6aa9 (Первое выявление дропа тел на нодах Мегафона и нарезка по 4096 байт в заголовки):
+  https://github.com/CraftStick/node-installer-cdn/commit/d614e6aa95627258fc330058b855907cae9e0491

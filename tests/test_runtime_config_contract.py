@@ -106,7 +106,29 @@ class RuntimeConfigContractTests(unittest.TestCase):
         self.assertEqual(settings.YOOKASSA_RETURN_URL, "https://t.me/{bot_username}")
         self.assertEqual(settings.REDIS_PASSWORD, "Redis_!@#%_pass")
 
+    def test_domain_rejects_cyrillic_homoglyphs_and_non_ascii(self):
+        # Russian 'а' (U+0430) instead of Latin 'a'
+        data_cyr = dict(BASE)
+        data_cyr["DOMAIN"] = "vpn.exаmple.test"
+        with self.assertRaises(ValidationError) as ctx:
+            self.build(data_cyr)
+        self.assertIn("Cyrillic lookalike character", str(ctx.exception))
+
+        # Russian 'с' (U+0441)
+        data_cyr_c = dict(BASE)
+        data_cyr_c["DOMAIN"] = "vpn.сdn.test"
+        with self.assertRaises(ValidationError) as ctx:
+            self.build(data_cyr_c)
+        self.assertIn("Cyrillic lookalike character", str(ctx.exception))
+
+        # Non-ASCII character
+        data_non_ascii = dict(BASE)
+        data_non_ascii["DOMAIN"] = "vpn.exámple.test"
+        with self.assertRaises(ValidationError) as ctx:
+            self.build(data_non_ascii)
+        self.assertIn("non-ASCII character", str(ctx.exception))
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -224,6 +224,21 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             value = value.strip().strip("'").strip('"')
         domain = value.strip().lower().rstrip(".")
+        cyrillic_lookalikes = {
+            "а": "a", "с": "c", "е": "e", "о": "o", "р": "p", "х": "x",
+            "у": "y", "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d",
+        }
+        for ch in domain:
+            if ch in cyrillic_lookalikes:
+                raise ValueError(
+                    f"DOMAIN contains Cyrillic lookalike character '{ch}' (intended Latin '{cyrillic_lookalikes[ch]}'). "
+                    "Please switch your keyboard to English."
+                )
+            if ord(ch) > 127:
+                raise ValueError(
+                    f"DOMAIN contains non-ASCII character '{ch}' (U+{ord(ch):04X}). "
+                    "Only ASCII domain names are supported."
+                )
         labels = domain.split(".")
         label_pattern = re.compile(
             r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"

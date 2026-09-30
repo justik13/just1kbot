@@ -490,6 +490,10 @@ EOF
 
     create_backup "${NGINX_RELAYS_DIR}/default.conf"
     cat > "${NGINX_RELAYS_DIR}/default.conf" <<EOF
+    location = ${secret_path} {
+        return 404;
+    }
+
     location ^~ ${secret_path}/default {
         proxy_pass http://127.0.0.1:8003;
         proxy_method \$xhttp_proxy_method;
@@ -506,7 +510,10 @@ EOF
         proxy_max_temp_file_size 0;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+        add_header Cache-Control "no-store, no-cache" always;
         add_header CDN-Cache-Control "no-store" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
         add_header X-Accel-Buffering no always;
         add_header Accept-Ranges none always;
     }
@@ -1137,9 +1144,13 @@ try:
         port = r.get('inbound_port') or r.get('port')
         if not code or not path or not port: continue
         cf_path = os.path.join(nginx_dir, f'{code}.conf')
-        if not os.path.exists(cf_path):
-            with open(cf_path, 'w', encoding='utf-8') as cf:
-                cf.write(f'''location ^~ {path} {{
+        cf_base = path.rstrip('/')
+        desired_conf = f'''# Relay location for {code}
+location = {cf_base} {{
+    return 404;
+}}
+
+location ^~ {path} {{
     proxy_pass http://127.0.0.1:{port};
     proxy_method \$xhttp_proxy_method;
     proxy_http_version 1.1;
@@ -1155,12 +1166,30 @@ try:
     proxy_max_temp_file_size 0;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    add_header Cache-Control \"no-store, no-cache\" always;
     add_header CDN-Cache-Control \"no-store\" always;
+    add_header Pragma \"no-cache\" always;
+    add_header Expires \"0\" always;
     add_header X-Accel-Buffering no always;
     add_header Accept-Ranges none always;
 }}
-''')
-            print(f'[+] Восстановлен Nginx конфиг для релея {code}')
+'''
+        needs_write = True
+        if os.path.exists(cf_path):
+            try:
+                with open(cf_path, 'r', encoding='utf-8') as cf_cur:
+                    cur_text = cf_cur.read()
+                if (f'location = {cf_base}' in cur_text and
+                    'CDN-Cache-Control' in cur_text and
+                    'xhttp_proxy_method' in cur_text and
+                    f'proxy_pass http://127.0.0.1:{port}' in cur_text):
+                    needs_write = False
+            except Exception:
+                needs_write = True
+        if needs_write:
+            with open(cf_path, 'w', encoding='utf-8') as cf:
+                cf.write(desired_conf)
+            print(f'[+] Согласован Nginx конфиг для релея {code}')
 except Exception:
     pass
 " "$RELAYS_FILE" "$NGINX_RELAYS_DIR" 2>/dev/null || true
