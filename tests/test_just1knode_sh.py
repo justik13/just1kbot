@@ -346,6 +346,59 @@ exit 0
         self.assertEqual(updated[0]["name"], "Финляндия")
         self.assertEqual(updated[0]["code"], "de")
 
+    def test_update_relay_sni(self):
+        self._prepare_base_env()
+        with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
+            json.dump({"role": "origin"}, f)
+
+        xray_config_file = self.xray_config_dir / "config.json"
+        with open(xray_config_file, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "inbounds": [],
+                    "outbounds": [
+                        {
+                            "tag": "just1k-wl-outbound-de",
+                            "protocol": "vless",
+                            "settings": {"vnext": [{"address": "1.2.3.4", "port": 10443}]},
+                            "streamSettings": {
+                                "security": "reality",
+                                "realitySettings": {"serverName": "www.google.com"},
+                            },
+                        }
+                    ],
+                },
+                f,
+            )
+
+        relays_data = [
+            {
+                "name": "Германия",
+                "code": "de",
+                "ip": "1.2.3.4",
+                "port": 10443,
+                "sni": "www.google.com",
+                "security": "reality",
+            }
+        ]
+        with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
+            json.dump(relays_data, f, ensure_ascii=False)
+
+        cmd = 'update_relay_sni "de" "de.example.com" "tls"'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"update_relay_sni failed: {res.stderr + res.stdout}")
+
+        with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
+            updated = json.load(f)
+        self.assertEqual(updated[0]["sni"], "de.example.com")
+        self.assertEqual(updated[0]["security"], "tls")
+
+        with open(xray_config_file, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        ob = next(o for o in cfg["outbounds"] if o["tag"] == "just1k-wl-outbound-de")
+        self.assertEqual(ob["streamSettings"]["security"], "tls")
+        self.assertEqual(ob["streamSettings"]["tlsSettings"]["serverName"], "de.example.com")
+
     def test_heal_and_update_origin_config(self):
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:

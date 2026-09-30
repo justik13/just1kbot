@@ -175,13 +175,14 @@ manifest_begin() {
 
     # Дедупликация и регистрация
     local seen_targets=()
-    for target in "${targets[@]}"; do
-        if [[ -z "$target" ]]; then
+    local tgt
+    for tgt in "${targets[@]}"; do
+        if [[ -z "$tgt" ]]; then
             continue
         fi
         local already_seen=0
         for s in "${seen_targets[@]}"; do
-            if [[ "$s" == "$target" ]]; then
+            if [[ "$s" == "$tgt" ]]; then
                 already_seen=1
                 break
             fi
@@ -189,17 +190,17 @@ manifest_begin() {
         if [[ $already_seen -eq 1 ]]; then
             continue
         fi
-        seen_targets+=("$target")
+        seen_targets+=("$tgt")
 
-        if [[ -f "$target" ]]; then
+        if [[ -f "$tgt" ]]; then
             local hash_orig
-            hash_orig="$(sha256sum "$target" | awk '{print $1}')"
+            hash_orig="$(sha256sum "$tgt" | awk '{print $1}')"
             local backup_path
-            backup_path="$TXN_DIR/files/$(basename "$target")_$$_${RANDOM}"
-            cp "$target" "$backup_path"
-            echo -e "${target}\tpresent\t${hash_orig}\t${backup_path}" >> "$MANIFEST_LOG"
+            backup_path="$TXN_DIR/files/$(basename "$tgt")_$$_${RANDOM}"
+            cp "$tgt" "$backup_path"
+            echo -e "${tgt}\tpresent\t${hash_orig}\t${backup_path}" >> "$MANIFEST_LOG"
         else
-            echo -e "${target}\tabsent\t-\t-" >> "$MANIFEST_LOG"
+            echo -e "${tgt}\tabsent\t-\t-" >> "$MANIFEST_LOG"
         fi
     done
 }

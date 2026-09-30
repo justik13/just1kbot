@@ -222,14 +222,15 @@ show_status() {
 
         list_relays
     elif [[ "$role" == "relay" ]]; then
-        local r_port r_orig r_sni
+        local r_port r_orig r_sni r_sec
         r_port="$(get_state_val "relay_port" "-")"
         r_orig="$(get_state_val "origin_ip" "-")"
         r_sni="$(get_state_val "sni" "-")"
+        r_sec="$(get_state_val "security" "tls")"
 
-        echo -e "  Порт REALITY:         ${CYAN}${r_port}${NC}"
+        echo -e "  Порт туннеля:         ${CYAN}${r_port}${NC} (${r_sec^^})"
         echo -e "  Разрешенный Origin:   ${CYAN}${r_orig}${NC}"
-        echo -e "  Маскировка SNI:       ${CYAN}${r_sni}${NC}"
+        echo -e "  Домен / SNI:          ${CYAN}${r_sni}${NC}"
 
         echo -e "\n  Службы:"
         systemctl is-active --quiet xray && echo -e "    Xray Relay:  ${GREEN}● Активен${NC}" || echo -e "    Xray Relay:  ${RED}○ Не работает${NC}"
@@ -252,14 +253,15 @@ show_status() {
         systemctl is-active --quiet amnezia-api && echo -e "    amnezia-api:          ${GREEN}● Активен${NC}" || echo -e "    amnezia-api:          ${RED}○ Не работает${NC}"
         systemctl is-active --quiet nginx && echo -e "    Nginx (8443):         ${GREEN}● Активен${NC}" || echo -e "    Nginx (8443):         ${RED}○ Не работает${NC}"
     elif [[ "$role" == "dual" ]]; then
-        local r_port r_orig r_sni a_url a_port
+        local r_port r_orig r_sni a_url a_port r_sec
         r_port="$(get_state_val "relay_port" "-")"
         r_orig="$(get_state_val "origin_ip" "-")"
         r_sni="$(get_state_val "sni" "-")"
+        r_sec="$(get_state_val "security" "tls")"
         a_url="$(get_state_val "awg_api_url" "-")"
         a_port="$(get_state_val "awg_port" "8443")"
 
-        echo -e "  [Relay] Порт REALITY: ${CYAN}${r_port}${NC} (Origin: ${r_orig}, SNI: ${r_sni})"
+        echo -e "  [Relay] Порт туннеля: ${CYAN}${r_port}${NC} (${r_sec^^}, Origin: ${r_orig}, SNI: ${r_sni})"
         echo -e "  [AWG]   API URL:      ${CYAN}${a_url}${NC} (HTTPS Порт: ${a_port})"
 
         echo -e "\n  Службы:"
@@ -324,16 +326,32 @@ show_relay_credentials() {
         return
     fi
 
-    local my_ip r_port r_uuid r_pubkey r_shortid r_sni
+    local my_ip r_port r_uuid r_sec r_pubkey r_shortid r_sni
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
     r_port="$(get_state_val "relay_port" "10443")"
     r_uuid="$(get_state_val "tunnel_uuid")"
-    r_pubkey="$(get_state_val "public_key")"
-    r_shortid="$(get_state_val "short_id")"
-    r_sni="$(get_state_val "sni" "www.google.com")"
+    r_sec="$(get_state_val "security" "tls")"
+    r_pubkey="$(get_state_val "public_key" "-")"
+    r_shortid="$(get_state_val "short_id" "-")"
+    r_sni="$(get_state_val "sni" "")"
+
+    local detected_code="de"
+    local geo_json
+    geo_json="$(curl -s --max-time 3 "https://ipinfo.io/${my_ip}/json" 2>/dev/null || true)"
+    if [[ -n "$geo_json" ]]; then
+        local c_code
+        c_code="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('country','').lower())" "$geo_json" 2>/dev/null || true)"
+        [[ -n "$c_code" && "$c_code" != "ru" ]] && detected_code="$c_code"
+    fi
 
     echo -e "${BOLD}Скопируйте и выполните эту команду на вашем Origin-сервере:${NC}"
-    echo -e "${GREEN}just1knode relay add \"Локация\" ${my_ip} ${r_port} \"${r_uuid}\" \"de\" \"reality\" \"${r_pubkey}\" \"${r_shortid}\" \"${r_sni}\"${NC}\n"
+    if [[ "$r_sec" == "tls" ]]; then
+        echo -e "${GREEN}just1knode relay add \"${detected_code^^}\" ${my_ip} ${r_port} \"${r_uuid}\" \"${detected_code}\" \"tls\" \"-\" \"-\" \"${r_sni}\"${NC}\n"
+        echo -e "${BOLD}Или, если релей уже был добавлен ранее, обновите SNI на Origin:${NC}"
+        echo -e "${CYAN}just1knode relay sni ${detected_code} ${r_sni} tls${NC}\n"
+    else
+        echo -e "${GREEN}just1knode relay add \"${detected_code^^}\" ${my_ip} ${r_port} \"${r_uuid}\" \"${detected_code}\" \"reality\" \"${r_pubkey}\" \"${r_shortid}\" \"${r_sni}\"${NC}\n"
+    fi
 }
 
 run_doctor() {
@@ -1160,36 +1178,40 @@ main_menu() {
             esac
 
         elif [[ "$status" == "relay" ]]; then
-            local r_port r_orig
+            local r_port r_orig r_sni r_sec
             r_port="$(get_state_val "relay_port" "10443")"
             r_orig="$(get_state_val "origin_ip" "-")"
+            r_sni="$(get_state_val "sni" "-")"
+            r_sec="$(get_state_val "security" "tls")"
 
             echo -e "  Статус текущего сервера: ${BOLD}${GREEN}🛡️ RELAY (Зарубежный выход)${NC}"
-            echo -e "  Порт: ${CYAN}${r_port}${NC} (REALITY)  |  Origin IP: ${CYAN}${r_orig}${NC}\n"
+            echo -e "  Порт: ${CYAN}${r_port}${NC} (${r_sec^^})  |  Origin IP: ${CYAN}${r_orig}${NC}  |  SNI: ${CYAN}${r_sni}${NC}\n"
 
             echo -e "  ${BOLD}[1]${NC} 📋 Показать данные подключения (команда для Origin)"
-            echo -e "  ${BOLD}[2]${NC} 📊 Статус туннеля и сетевой трафик"
-            echo -e "  ${BOLD}[3]${NC} ⚡ Добавить AmneziaWG на этот сервер (Режим Dual)"
-            echo -e "  ${BOLD}[4]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
-            echo -e "  ${BOLD}[5]${NC} 🩺 Комплексная самодиагностика (Doctor)"
-            echo -e "  ${BOLD}[6]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[7]${NC} ⚡ Обновить ядро Xray-core"
-            echo -e "  ${BOLD}[8]${NC} ⚠️ Сбросить / переустановить узел"
-            echo -e "  ${BOLD}[9]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[2]${NC} 🔐 Настроить персональный домен Relay (VLESS+TLS)"
+            echo -e "  ${BOLD}[3]${NC} 📊 Статус туннеля и сетевой трафик"
+            echo -e "  ${BOLD}[4]${NC} ⚡ Добавить AmneziaWG на этот сервер (Режим Dual)"
+            echo -e "  ${BOLD}[5]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[6]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[7]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[8]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[9]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[10]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-9]: " choice
+            read -rp "Выберите действие [0-10]: " choice
 
             case "$choice" in
                 1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
-                2) show_status; read -rp "Нажмите Enter для продолжения...";;
-                3) install_amnezia_node; read -rp "Нажмите Enter для продолжения...";;
-                4) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
-                5) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                6) update_node; read -rp "Нажмите Enter для продолжения...";;
-                7) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
-                8) reset_node; read -rp "Нажмите Enter для продолжения...";;
-                9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                2) setup_relay_domain; read -rp "Нажмите Enter для продолжения...";;
+                3) show_status; read -rp "Нажмите Enter для продолжения...";;
+                4) install_amnezia_node; read -rp "Нажмите Enter для продолжения...";;
+                5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                6) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                7) update_node; read -rp "Нажмите Enter для продолжения...";;
+                8) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                9) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                10) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -1229,38 +1251,42 @@ main_menu() {
             esac
 
         elif [[ "$status" == "dual" ]]; then
-            local r_port a_url
+            local r_port a_url r_sni r_sec
             r_port="$(get_state_val "relay_port" "10443")"
             a_url="$(get_state_val "awg_api_url" "-")"
+            r_sni="$(get_state_val "sni" "-")"
+            r_sec="$(get_state_val "security" "tls")"
 
             echo -e "  Статус текущего сервера: ${BOLD}${GREEN}⚡🛡️ DUAL (Relay + AmneziaWG)${NC}"
-            echo -e "  Relay Port: ${CYAN}${r_port}${NC}  |  Amnezia API: ${CYAN}${a_url}${NC}\n"
+            echo -e "  Relay: ${CYAN}${r_port}${NC} (${r_sec^^}, SNI: ${r_sni})  |  Amnezia API: ${CYAN}${a_url}${NC}\n"
 
             echo -e "  ${BOLD}[1]${NC} 📋 Показать данные подключения Relay (для Origin)"
-            echo -e "  ${BOLD}[2]${NC} 🔑 Показать данные AmneziaWG для Telegram-бота (/admin)"
-            echo -e "  ${BOLD}[3]${NC} 🤖 Настроить / обновить IP Telegram-бота (BOT_IP)"
-            echo -e "  ${BOLD}[4]${NC} 📊 Статус всех служб и сетевой трафик"
-            echo -e "  ${BOLD}[5]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
-            echo -e "  ${BOLD}[6]${NC} 🩺 Комплексная самодиагностика (Doctor)"
-            echo -e "  ${BOLD}[7]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
-            echo -e "  ${BOLD}[8]${NC} ⚡ Обновить ядро Xray-core"
-            echo -e "  ${BOLD}[9]${NC} ⚠️ Сбросить / переустановить узел"
-            echo -e "  ${BOLD}[10]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
+            echo -e "  ${BOLD}[2]${NC} 🔐 Настроить персональный домен Relay (VLESS+TLS)"
+            echo -e "  ${BOLD}[3]${NC} 🔑 Показать данные AmneziaWG для Telegram-бота (/admin)"
+            echo -e "  ${BOLD}[4]${NC} 🤖 Настроить / обновить IP Telegram-бота (BOT_IP)"
+            echo -e "  ${BOLD}[5]${NC} 📊 Статус всех служб и сетевой трафик"
+            echo -e "  ${BOLD}[6]${NC} ⏱️  Лимит сетевого трафика (Traffic Limit)"
+            echo -e "  ${BOLD}[7]${NC} 🩺 Комплексная самодиагностика (Doctor)"
+            echo -e "  ${BOLD}[8]${NC} 🔄 Обновить утилиту и конфигурацию узла (Auto-Heal & Update)"
+            echo -e "  ${BOLD}[9]${NC} ⚡ Обновить ядро Xray-core"
+            echo -e "  ${BOLD}[10]${NC} ⚠️ Сбросить / переустановить узел"
+            echo -e "  ${BOLD}[11]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"
             echo ""
-            read -rp "Выберите действие [0-10]: " choice
+            read -rp "Выберите действие [0-11]: " choice
 
             case "$choice" in
                 1) show_relay_credentials; read -rp "Нажмите Enter для продолжения...";;
-                2) show_amnezia_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
-                3) set_origin_bot_ip; read -rp "Нажмите Enter для продолжения...";;
-                4) show_status; read -rp "Нажмите Enter для продолжения...";;
-                5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
-                6) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                7) update_node; read -rp "Нажмите Enter для продолжения...";;
-                8) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
-                9) reset_node; read -rp "Нажмите Enter для продолжения...";;
-                10) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
+                2) setup_relay_domain; read -rp "Нажмите Enter для продолжения...";;
+                3) show_amnezia_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
+                4) set_origin_bot_ip; read -rp "Нажмите Enter для продолжения...";;
+                5) show_status; read -rp "Нажмите Enter для продолжения...";;
+                6) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
+                7) run_doctor; read -rp "Нажмите Enter для продолжения...";;
+                8) update_node; read -rp "Нажмите Enter для продолжения...";;
+                9) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
+                10) reset_node; read -rp "Нажмите Enter для продолжения...";;
+                11) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
                 *) warn "Неверный выбор."; sleep 1;;
             esac
@@ -1277,16 +1303,20 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
             install)
                 case "${2:-}" in
                     origin|xray-origin) install_xray_origin_node "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${8:-}" "${9:-}" ;;
-                    relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-www.google.com}" ;;
+                    relay|xray-relay|exit|xray-exit) install_xray_relay_node "${3:-10443}" "${4:-}" "${5:-}" "${6:-tls}" ;;
                     amnezia|awg) install_amnezia_node "${3:-}" "${4:-}" "${5:-}" ;;
                     *) error "Неизвестный тип установки: $2. Доступно: origin, relay, amnezia, awg" ;;
                 esac
                 ;;
+            setup-domain|relay-domain|setup_domain)
+                setup_relay_domain "${2:-}"
+                ;;
             relay)
                 case "${2:-}" in
-                    add) add_relay_node "${3:-}" "${4:-}" "${5:-10443}" "${6:-}" "${7:-de}" "${8:-reality}" "${9:-}" "${10:-}" "${11:-www.google.com}" "${12:-}" ;;
+                    add) add_relay_node "${3:-}" "${4:-}" "${5:-10443}" "${6:-}" "${7:-de}" "${8:-tls}" "${9:-}" "${10:-}" "${11:-}" "${12:-}" ;;
                     remove|del) remove_relay_node "${3:-}" ;;
                     rename) rename_relay_node "${3:-}" "${4:-}" ;;
+                    sni|domain) update_relay_sni "${3:-}" "${4:-}" "${5:-tls}" ;;
                     list) list_relays ;;
                     *) manage_relays_menu ;;
                 esac
