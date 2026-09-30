@@ -169,8 +169,6 @@ async def _render_balance(
                 int_snapshot_bonus_available=int(snapshot.bonus_available)
             )
         )
-    if snapshot.reserved > 0:
-        details.append(texts.PAYMENT_BALANCE.format(value_0=int(snapshot.reserved)))
     if snapshot.debt > 0:
         details.append(
             texts.BALANCE_INSUFFICIENT_FUNDS_DIFFERENCE.format(

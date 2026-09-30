@@ -19,7 +19,7 @@ from aiogram.types import CallbackQuery, Message, User as TgUser
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction
+from config.constants import AdminAuditAction
 from bot.handlers.admin.dashboard import _show_admin_dashboard
 from bot.handlers.admin.users.common import (
     _get_white_internet_card_info,

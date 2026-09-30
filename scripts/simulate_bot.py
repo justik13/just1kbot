@@ -981,16 +981,12 @@ async def run_simulation(args: argparse.Namespace):
     from bot.handlers.start import router as start_router
     from bot.handlers.support import router as support_router
     from bot.handlers.white_internet import router as white_internet_router
-    from integrations import get_all_bot_routers
-
-    integration_routers = get_all_bot_routers()
 
     for r in [
         start_router,
         referral_router,
         connection_router,
         white_internet_router,
-        *integration_routers,
         support_router,
         payment_router,
         admin_router,

@@ -757,7 +757,6 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         balance_snap = AccountBalanceSnapshot(
             accounting_position=Decimal(40),
             available=Decimal(40),
-            reserved=Decimal(0),
             debt=Decimal(0),
             real_available=Decimal(0),
             bonus_available=Decimal(40),
@@ -961,7 +960,6 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         balance_snap = AccountBalanceSnapshot(
             accounting_position=Decimal("100.00"),
             available=Decimal("100.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
             bonus_available=Decimal("24.00"),
         )
@@ -1094,7 +1092,6 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
         balance_snap = AccountBalanceSnapshot(
             accounting_position=Decimal("300.00"),
             available=Decimal("300.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
             real_available=Decimal("300.00"),
             bonus_available=Decimal("0.00"),

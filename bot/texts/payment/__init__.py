@@ -27,7 +27,6 @@ from bot.texts.payment.balance import (
     HISTORY_EMPTY,
     HISTORY_HEADER,
     HISTORY_LIMIT_NOTE,
-    PAYMENT_BALANCE,
 )
 
 from bot.texts.payment.status import (
@@ -164,7 +163,6 @@ __all__ = [
     "HISTORY_LIMIT_NOTE",
     "PAYMENT",
     "PAYMENT_ARCHIVED_TARIFF_NOTICE",
-    "PAYMENT_BALANCE",
     "PAYMENT_CHANGE_TARIFF_HEADER",
     "PAYMENT_CHANGE_TARIFF_TEMPORARILY_UNAVAILABLE",
     "PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB",

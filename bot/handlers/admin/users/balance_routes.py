@@ -1,4 +1,5 @@
 import logging
+from config.constants import AdminAuditAction
 from uuid import uuid4
 
 from aiogram import F, Router
@@ -9,7 +10,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import get_admin_user_balance_keyboard
 from bot.states import AdminStates

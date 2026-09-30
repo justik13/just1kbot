@@ -61,30 +61,23 @@ class CircularImportRegressionTests(unittest.TestCase):
                 self._assert_isolated_code(code)
 
     def test_architectural_single_source_of_truth(self):
-        import bot.constants
         import config.constants
-        import utils.http_rate_limiter
         import utils.vpn_helpers
 
         # Protocol
         self.assertEqual(config.constants.AMNEZIA_PROTOCOL, "amneziawg2")
-        self.assertEqual(bot.constants.AMNEZIA_PROTOCOL, config.constants.AMNEZIA_PROTOCOL)
         self.assertEqual(utils.vpn_helpers.AMNEZIA_PROTOCOL, config.constants.AMNEZIA_PROTOCOL)
 
         # AWG DNS and MTU defaults
         self.assertEqual(config.constants.DEFAULT_AWG_DNS1, "8.8.8.8")
         self.assertEqual(config.constants.DEFAULT_AWG_DNS2, "8.8.4.4")
         self.assertEqual(config.constants.DEFAULT_AWG_MTU, "1280")
-        self.assertEqual(bot.constants.DEFAULT_AWG_DNS1, "8.8.8.8")
-        self.assertEqual(bot.constants.DEFAULT_AWG_DNS2, "8.8.4.4")
-        self.assertEqual(bot.constants.DEFAULT_AWG_MTU, "1280")
         self.assertEqual(utils.vpn_helpers.DEFAULT_AWG_DNS1, "8.8.8.8")
         self.assertEqual(utils.vpn_helpers.DEFAULT_AWG_DNS2, "8.8.4.4")
         self.assertEqual(utils.vpn_helpers.DEFAULT_AWG_MTU, "1280")
 
         # Config Size limit
         self.assertEqual(config.constants.MAX_RAW_CONFIG_BYTES, 65536)
-        self.assertEqual(bot.constants.MAX_RAW_CONFIG_BYTES, config.constants.MAX_RAW_CONFIG_BYTES)
         self.assertEqual(utils.vpn_helpers.MAX_RAW_CONFIG_BYTES, config.constants.MAX_RAW_CONFIG_BYTES)
 
         # Rate limiter defaults
@@ -121,13 +114,13 @@ class CircularImportRegressionTests(unittest.TestCase):
 
     @staticmethod
     def _find_illegal_bot_imports_for_services(tree: ast.AST) -> list[tuple[int, str]]:
-        """Flag bot.* imports that are not the data-only facades bot.texts/bot.constants.
+        """Flag bot.* imports other than the data-only facade bot.texts.
 
-        Pure services may depend on the canonical text/constants catalogues (pure data,
+        Pure services may depend on the canonical text catalogue (pure data,
         no aiogram, no upward imports) but must never touch presentation/behavioural
         layers (bot.handlers, bot.middlewares, bot.states, bot.main, bot.keyboards).
         """
-        allowed_modules = {"bot.texts", "bot.constants"}
+        allowed_modules = {"bot.texts"}
         violations: list[tuple[int, str]] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -140,7 +133,7 @@ class CircularImportRegressionTests(unittest.TestCase):
                 module_name = node.module or ""
                 if module_name == "bot":
                     for alias in node.names:
-                        if alias.name not in {"texts", "constants"}:
+                        if alias.name not in {"texts"}:
                             violations.append((node.lineno, f"from bot import {alias.name}"))
                 elif module_name.startswith("bot.") and not any(module_name == am or module_name.startswith(am + ".") for am in allowed_modules):
                     violations.append((node.lineno, module_name))
@@ -166,8 +159,8 @@ class CircularImportRegressionTests(unittest.TestCase):
         Architecture Invariants:
         1. Pure core layers: config/, database/, integrations/, utils/ must NEVER import ANY
            module from the bot layer (bot, bot.texts, bot.keyboards, bot.handlers, etc.).
-        2. Pure services (services/*.py) may import ONLY the data-only facades bot.texts and
-           bot.constants (no aiogram, no upward imports); bot.handlers/bot.middlewares/
+        2. Pure services (services/*.py) may import ONLY the data-only facade bot.texts
+           (no aiogram, no upward imports); bot.handlers/bot.middlewares/
            bot.states/bot.main/bot.keyboards remain forbidden.
         3. Delivery adapter workers: services/workers/* may import only canonical presentation
            adapters (bot.texts.* and bot.keyboards.*), but must NEVER import bot.handlers,
@@ -232,7 +225,7 @@ class CircularImportRegressionTests(unittest.TestCase):
     def test_ast_guard_detects_deliberate_violation(self):
         """Negative self-test proving that the AST scanner detects direct, aliased, and dynamic upward imports."""
         bad_code_samples = [
-            ("import bot.constants", ("bot",)),
+            ("import bot.texts", ("bot",)),
             ("from bot.middlewares.user_context import invalidate_user_cache", ("bot.middlewares",)),
             ("from bot import texts", ("bot",)),
             ("import bot", ("bot",)),

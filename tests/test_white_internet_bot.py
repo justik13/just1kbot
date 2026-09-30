@@ -41,7 +41,6 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         low_balance = AccountBalanceSnapshot(
             accounting_position=Decimal("50.00"),
             available=Decimal("50.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
         )
 
@@ -65,7 +64,6 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         high_balance = AccountBalanceSnapshot(
             accounting_position=Decimal("500.00"),
             available=Decimal("500.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
         )
 
@@ -90,7 +88,6 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         high_balance = AccountBalanceSnapshot(
             accounting_position=Decimal("500.00"),
             available=Decimal("500.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
         )
 
@@ -117,7 +114,6 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         high_balance = AccountBalanceSnapshot(
             accounting_position=Decimal("150.00"),
             available=Decimal("150.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
         )
 
@@ -145,7 +141,6 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         high_balance = AccountBalanceSnapshot(
             accounting_position=Decimal("300.00"),
             available=Decimal("300.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
         )
 
@@ -182,7 +177,6 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         high_balance = AccountBalanceSnapshot(
             accounting_position=Decimal("500.00"),
             available=Decimal("500.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
         )
 

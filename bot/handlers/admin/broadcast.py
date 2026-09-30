@@ -2,6 +2,12 @@ import asyncio
 import html
 import logging
 
+from config.constants import (
+    AMNEZIA_PROTOCOLS,
+    XRAY_PROTOCOL,
+    AdminAuditAction,
+    TELEGRAM_MESSAGE_LIMIT,
+)
 from aiogram import F, Router
 from aiogram.exceptions import (
     TelegramBadRequest,
@@ -15,8 +21,6 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction, TELEGRAM_MESSAGE_LIMIT
-from config.constants import AMNEZIA_PROTOCOLS, XRAY_PROTOCOL
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from bot.keyboards import get_back_button
@@ -47,7 +51,6 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_CAPTION_LIMIT = 1024
 
-_broadcast_stop_events: dict[int, asyncio.Event] = {}
 # Tracks which admin_id is actively running a broadcast to prevent concurrent UI launches by the same admin
 _broadcast_in_progress: set[int] = set()
 # Tracks which broadcast progress record (id) is actively being processed by a worker task to prevent duplicate concurrent runs
@@ -70,15 +73,6 @@ def _start_background_task(coro) -> asyncio.Task:
     task.add_done_callback(lambda t: (_background_tasks.discard(t), _handle_task_result(t)))
     return task
 
-
-def _get_stop_event(admin_id: int) -> asyncio.Event:
-    if admin_id not in _broadcast_stop_events:
-        _broadcast_stop_events[admin_id] = asyncio.Event()
-    return _broadcast_stop_events[admin_id]
-
-
-def _cleanup_stop_event(admin_id: int) -> None:
-    _broadcast_stop_events.pop(admin_id, None)
 
 @router.callback_query(F.data == "admin_broadcast")
 async def start_broadcast(
@@ -497,7 +491,6 @@ async def _send_broadcast_to_users_with_resume(
     - Transient Failures: If a network/transient error fails both attempt and retry, the user is
       counted in `fail_count` and progress advances to prevent halting the entire broadcast pipeline.
     """
-    stop_event = None
     broadcast_text = None
     media_id = None
     content_type = None
@@ -524,17 +517,10 @@ async def _send_broadcast_to_users_with_resume(
             )
             if not progress:
                 return
-            if progress.status == "stopping":
-                progress.status = "stopped"
-                await session.commit()
-                final_progress = progress
-                return
             if progress.status != "in_progress":
                 return
 
             should_finalize = True
-            stop_event = _get_stop_event(admin_id)
-            stop_event.clear()
 
             broadcast_text = progress.broadcast_text
             media_id = progress.media_id
@@ -562,12 +548,7 @@ async def _send_broadcast_to_users_with_resume(
                 if not batch:
                     break
 
-            if stop_event and stop_event.is_set():
-                break
-
             for internal_id, uid in batch:
-                if stop_event and stop_event.is_set():
-                    break
                 is_success = False
                 is_forbidden = False
                 try:
@@ -637,12 +618,7 @@ async def _send_broadcast_to_users_with_resume(
                     progress_id,
                 )
                 if progress:
-                    if (
-                        stop_event and stop_event.is_set()
-                    ) or progress.status == "stopping":
-                        progress.status = "stopped"
-                    else:
-                        progress.status = "completed"
+                    progress.status = "completed"
                     await session.commit()
                     final_progress = progress
 
@@ -687,11 +663,8 @@ async def _send_broadcast_to_users_with_resume(
         raise
 
     finally:
-        if stop_event:
-            stop_event.clear()
         _active_broadcast_progress_ids.discard(progress_id)
         _broadcast_in_progress.discard(admin_id)
-        _cleanup_stop_event(admin_id)
 
         if final_progress and admin_id:
             try:
@@ -733,11 +706,6 @@ async def _send_broadcast_to_users_with_resume(
 async def resume_pending_broadcasts(bot):
     try:
         async with session_scope() as session:
-            await session.execute(
-                update(BroadcastProgress)
-                .where(BroadcastProgress.status == "stopping")
-                .values(status="stopped")
-            )
             stmt = (
                 select(BroadcastProgress)
                 .where(BroadcastProgress.status == "in_progress")
@@ -977,55 +945,6 @@ async def broadcast_confirm_launch(
     audience = data.get("target_audience", "all")
     await _start_broadcast_process(callback, state, session, audience)
 
-
-
-@router.callback_query(F.data == "broadcast_stop")
-async def stop_broadcast(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
-        return
-    admin_id = callback.from_user.id
-    if admin_id not in _broadcast_in_progress:
-        await callback.answer(
-            texts.BROADCAST_NOT_STARTED_STATUS,
-            show_alert=True,
-        )
-        return
-
-    try:
-        async with session_scope() as session:
-            await session.execute(
-                update(BroadcastProgress)
-                .where(
-                    BroadcastProgress.admin_id == admin_id,
-                    BroadcastProgress.status == "in_progress",
-                )
-                .values(status="stopping")
-            )
-            await session.commit()
-    except Exception as e:
-        logger.error(
-            "Failed to persist broadcast stop request: %s",
-            e,
-            exc_info=True,
-        )
-        await callback.answer(
-            texts.ERROR_TECHNICAL_ALERT,
-            show_alert=True,
-        )
-        return
-
-    # Set the in-memory event only after the durable DB state is committed.
-    # On restart, resume_pending_broadcasts converts the persisted "stopping"
-    # state to "stopped" and never resumes the broadcast.
-    _get_stop_event(admin_id).set()
-    await callback.answer(
-        texts.BROADCAST_STOPPING,
-        show_alert=True,
-    )
 
 
 @router.callback_query(F.data == "broadcast_dismiss")

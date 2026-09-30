@@ -2,6 +2,11 @@ import asyncio
 import logging
 import re
 
+from config.constants import (
+    DEFAULT_AWG_DNS1,
+    DEFAULT_AWG_DNS2,
+    DEFAULT_AWG_MTU,
+)
 from aiogram import F, Router
 from aiogram.exceptions import (
     TelegramBadRequest,
@@ -16,11 +21,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import (
-    DEFAULT_AWG_DNS1,
-    DEFAULT_AWG_DNS2,
-    DEFAULT_AWG_MTU,
-)
 from bot.keyboards import (
     get_alt_connection_keyboard,
     get_back_button,

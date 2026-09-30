@@ -141,7 +141,7 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
         with patch("services.white_internet_service.is_admin", return_value=False), \
              patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=self.sub), \
-             patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), reserved=Decimal("0"), debt=Decimal("0"))), \
+             patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), debt=Decimal("0"))), \
              patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock) as mock_debit, \
              patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
@@ -187,7 +187,7 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
         with patch("services.white_internet_service.is_admin", return_value=True), \
              patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=self.sub), \
-             patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), reserved=Decimal("0"), debt=Decimal("0"))), \
+             patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), debt=Decimal("0"))), \
              patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock) as mock_debit, \
              patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
@@ -276,7 +276,7 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
         with patch("services.white_internet_service.is_admin", return_value=True), \
              patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=self.sub), \
-             patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("50.00"), available=Decimal("50.00"), reserved=Decimal("0"), debt=Decimal("0"))), \
+             patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("50.00"), available=Decimal("50.00"), debt=Decimal("0"))), \
              patch("services.white_internet_service.create_purchase_debit", side_effect=InsufficientAccountBalanceError("Insufficient funds")), \
              patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version):
@@ -340,7 +340,7 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
 
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
-             patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), reserved=Decimal("0"), debt=Decimal("0"))), \
+             patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), debt=Decimal("0"))), \
              patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock) as mock_debit, \
              patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
              patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \

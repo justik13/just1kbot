@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from bot.constants import AMNEZIA_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL
 from database.models import Server, User, VPNProfile
 from database.repositories.servers_repo import (
     CAPACITY_CONSUMING_STATUSES,

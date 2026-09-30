@@ -305,7 +305,6 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         mock_bal.return_value = AccountBalanceSnapshot(
             accounting_position=Decimal("500.00"),
             available=Decimal("500.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
             real_available=Decimal("500.00"),
             bonus_available=Decimal("0.00"),
@@ -333,7 +332,6 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         mock_bal.return_value = AccountBalanceSnapshot(
             accounting_position=Decimal("50.00"),
             available=Decimal("50.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
             real_available=Decimal("50.00"),
             bonus_available=Decimal("0.00"),
@@ -847,7 +845,6 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         mock_bal.return_value = AccountBalanceSnapshot(
             accounting_position=Decimal("0.00"),
             available=Decimal("0.00"),
-            reserved=Decimal("0.00"),
             debt=Decimal("0.00"),
             real_available=Decimal("0.00"),
             bonus_available=Decimal("0.00"),

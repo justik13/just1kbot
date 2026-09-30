@@ -1,4 +1,9 @@
 import logging
+from config.constants import (
+    AdminAuditAction,
+    PERMANENT_END_DATE,
+    PERMANENT_SUBSCRIPTION_DAYS,
+)
 from datetime import timedelta
 
 from aiogram import F, Router
@@ -8,11 +13,6 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import (
-    AdminAuditAction,
-    PERMANENT_END_DATE,
-    PERMANENT_SUBSCRIPTION_DAYS,
-)
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,

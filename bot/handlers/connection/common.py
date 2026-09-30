@@ -1,12 +1,15 @@
 import logging
 import re
+from config.constants import (
+    AMNEZIA_PROTOCOLS,
+    GRACE_PERIOD_HOURS,
+)
 from datetime import timedelta
 
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AMNEZIA_PROTOCOLS, GRACE_PERIOD_HOURS
 from bot.keyboards import get_back_button
 from database.models import User
 from database.repositories.profiles_repo import (

@@ -5,7 +5,6 @@ from pathlib import Path
 import unittest
 from sqlalchemy import CheckConstraint
 
-import bot.constants
 import config.constants
 import config.enums
 import config.tariffs
@@ -27,22 +26,14 @@ class DomainEnumsSSOTTests(unittest.TestCase):
     """Verify that domain enums in config.enums strictly match model constants, DB constraints, and architecture rules."""
 
     def test_enums_exported_in_constants(self):
-        """All Enums in config.enums must be re-exported in config.constants and bot.constants."""
+        """All Enums in config.enums must be re-exported in config.constants."""
         for enum_name in config.enums.__all__:
             self.assertTrue(
                 hasattr(config.constants, enum_name),
                 f"{enum_name} missing from config.constants",
             )
-            self.assertTrue(
-                hasattr(bot.constants, enum_name),
-                f"{enum_name} missing from bot.constants",
-            )
             self.assertIs(
                 getattr(config.constants, enum_name),
-                getattr(config.enums, enum_name),
-            )
-            self.assertIs(
-                getattr(bot.constants, enum_name),
                 getattr(config.enums, enum_name),
             )
 

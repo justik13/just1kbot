@@ -1,5 +1,6 @@
 import re
 
+from config.constants import AdminAuditAction
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -7,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import DeviceManagementStates
 from database.models import User, VPNProfile
