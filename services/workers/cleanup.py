@@ -742,11 +742,14 @@ async def _cleanup_old_records():
         AdminOperationIdempotency.created_at < threshold_idempotency,
     )
 
-    # Prune old succeeded/dead webhook inbox records in per-batch committed transactions
+    # Prune old settled webhook inbox records in per-batch committed transactions.
+    # "dead" is no longer written since the inbox worker was removed in PR #277,
+    # but rows written before that purge still exist and must be reclaimed, so the
+    # retention predicate keeps covering both settled statuses.
     threshold_webhooks = current_time - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)
     webhooks_deleted = await _batch_delete_matching(
         WebhookInbox,
-        WebhookInbox.status.in_(["succeeded"]),
+        WebhookInbox.status.in_(["succeeded", "dead"]),
         WebhookInbox.received_at < threshold_webhooks,
     )
 
