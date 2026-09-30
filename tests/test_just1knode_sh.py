@@ -75,7 +75,6 @@ class TestJust1kNodeScript(unittest.TestCase):
         self._create_mock_script("userdel", "#!/bin/sh\nexit 0\n")
         self._create_mock_script("groupdel", "#!/bin/sh\nexit 0\n")
         self._create_mock_script("sysctl", "#!/bin/sh\nexit 0\n")
-        self._create_mock_script("openssl", "#!/bin/sh\nexit 0\n")
         self._create_mock_script(
             "unzip",
             """#!/bin/sh
@@ -598,6 +597,7 @@ print("RECONCILE_SUCCESS")
     def test_issue_relay_tls_cert_ufw_hooks_merge(self):
         """issue_relay_tls_cert should safely merge ufw hooks into existing renewal config without duplicating."""
         self._prepare_base_env()
+        self._create_mock_script("openssl", "#!/bin/sh\nexit 0\n")
         domain = "relay.example.com"
         live_dir = self.letsencrypt_dir / "live" / domain
         live_dir.mkdir(parents=True, exist_ok=True)
