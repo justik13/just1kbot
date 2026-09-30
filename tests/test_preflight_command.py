@@ -72,22 +72,20 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
         "AND (metadata ->> 'is_referral_discount') = 'true' AND amount_rub < 1",
     ),
     (
-        "3B_PAID_ORDER_NOT_CREDITED",
-        "SELECT '3B_PAID_ORDER_NOT_CREDITED' AS block, CASE WHEN count(*) = 0 "
+        "3B_PAID_TOPUP_NOT_CREDITED",
+        "SELECT '3B_PAID_TOPUP_NOT_CREDITED' AS block, CASE WHEN count(*) = 0 "
         "THEN 'OK (0 violations)' ELSE 'CRITICAL: HAS VIOLATIONS n=' || count(*) END AS verdict "
-        "FROM orders o WHERE o.status = 'paid' AND o.payment_method <> 'wallet' AND NOT EXISTS ("
-        "SELECT 1 FROM payments p WHERE p.public_order_id = o.id::text AND EXISTS ("
-        "SELECT 1 FROM account_ledger_entries l WHERE l.payment_id = p.id "
-        "AND l.entry_type = 'payment_credit'))",
+        "FROM orders o WHERE o.status = 'paid' AND o.service_type = 'topup' AND NOT EXISTS ("
+        "SELECT 1 FROM account_ledger_entries l WHERE l.order_id = o.id "
+        "AND l.entry_type = 'payment_credit')",
     ),
     (
         "3C_CREDIT_AMOUNT_DESYNC",
         "SELECT '3C_CREDIT_AMOUNT_DESYNC' AS block, CASE WHEN count(*) = 0 "
         "THEN 'OK (0 violations)' ELSE 'CRITICAL: HAS VIOLATIONS n=' || count(*) END AS verdict "
-        "FROM payments p "
-        "JOIN account_ledger_entries l ON l.payment_id = p.id AND l.entry_type = 'payment_credit' "
-        "JOIN orders o ON o.id::text = p.public_order_id "
-        "WHERE o.status = 'paid' AND l.amount <> o.amount_rub",
+        "FROM orders o "
+        "JOIN account_ledger_entries l ON l.order_id = o.id AND l.entry_type = 'payment_credit' "
+        "WHERE o.status = 'paid' AND o.service_type = 'topup' AND l.amount <> o.amount_rub",
     ),
     (
         "4A_INFLIGHT_ORDERS",

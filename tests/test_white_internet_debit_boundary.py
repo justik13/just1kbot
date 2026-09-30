@@ -5,7 +5,9 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from database.repositories.account_ledger_repo import (
+    AccountLedgerConflictError,
     AccountLedgerError,
+    AccountLedgerInvariantError,
     InsufficientAccountBalanceError,
 )
 from services.white_internet_service import WhiteInternetService
@@ -114,7 +116,7 @@ class DebitForQuoteTests(unittest.IsolatedAsyncioTestCase):
         quote = _quote()
         with patch(
             "services.white_internet_service.create_purchase_debit",
-            new=AsyncMock(side_effect=AccountLedgerError("invariant violated")),
+            new=AsyncMock(side_effect=AccountLedgerError("generic ledger failure")),
         ), patch(
             "services.white_internet_service.get_account_balance",
             new=AsyncMock(),
@@ -130,9 +132,45 @@ class DebitForQuoteTests(unittest.IsolatedAsyncioTestCase):
         ok, message, subscription = result
         self.assertFalse(ok)
         self.assertIsNone(subscription)
-        self.assertIn("invariant violated", message)
+        self.assertIn("generic ledger failure", message)
         self.assertEqual(quote.status, "cancelled")
         balance.assert_not_awaited()
+
+    async def test_invariant_error_cancels_quote_and_raises(self):
+        session = _session()
+        quote = _quote()
+        with patch(
+            "services.white_internet_service.create_purchase_debit",
+            new=AsyncMock(side_effect=AccountLedgerInvariantError("invariant broken")),
+        ):
+            with self.assertRaises(AccountLedgerInvariantError):
+                await WhiteInternetService._debit_for_quote(
+                    session,
+                    user=_user(),
+                    quote=quote,
+                    price=Decimal("150.00"),
+                    insufficient_text="unused",
+                )
+        self.assertEqual(quote.status, "cancelled")
+        self.assertEqual(session.flush.await_count, 2)
+
+    async def test_conflict_error_cancels_quote_and_raises(self):
+        session = _session()
+        quote = _quote()
+        with patch(
+            "services.white_internet_service.create_purchase_debit",
+            new=AsyncMock(side_effect=AccountLedgerConflictError("concurrent collision")),
+        ):
+            with self.assertRaises(AccountLedgerConflictError):
+                await WhiteInternetService._debit_for_quote(
+                    session,
+                    user=_user(),
+                    quote=quote,
+                    price=Decimal("150.00"),
+                    insufficient_text="unused",
+                )
+        self.assertEqual(quote.status, "cancelled")
+        self.assertEqual(session.flush.await_count, 2)
 
     async def test_subscriber_module_has_single_debit_boundary(self):
         """Guard against the boundary being copied back into individual paths."""

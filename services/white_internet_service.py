@@ -46,7 +46,9 @@ from config.enums import (
 from database.models import Server, Tariff, TariffQuote, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
+    AccountLedgerConflictError,
     AccountLedgerError,
+    AccountLedgerInvariantError,
     InsufficientAccountBalanceError,
     create_purchase_debit,
     get_account_balance,
@@ -271,6 +273,10 @@ class WhiteInternetService:
                 ),
                 None,
             )
+        except (AccountLedgerInvariantError, AccountLedgerConflictError):
+            quote.status = TariffQuoteStatus.CANCELLED
+            await session.flush()
+            raise
         except AccountLedgerError as exc:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
