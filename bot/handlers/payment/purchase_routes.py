@@ -21,6 +21,7 @@ from database.repositories.tariffs_repo import get_tariff_by_id
 from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.maintenance_service import MaintenanceService
+from services.order_notifications import mark_notified
 from services.order_service import (
     AccountDebtBlockedError,
     FinancialHoldBlockedError,
@@ -335,6 +336,9 @@ async def handle_order_check(
                 force_new=True,
                 custom_keyboard=kb,
             )
+            # Push delivered straight to the user looking at the screen:
+            # clear the debt so the credit-notify worker does not duplicate it.
+            mark_notified(order)
             return
 
         balance = await get_account_balance(session, user_id=db_user.id)
@@ -356,6 +360,7 @@ async def handle_order_check(
             message_effect_id=EFFECT_CONFETTI,
             force_new=True,
         )
+        mark_notified(order)
         return
 
     if order.external_id:
@@ -401,6 +406,7 @@ async def handle_order_check(
                     force_new=True,
                     custom_keyboard=kb,
                 )
+                mark_notified(paid_order)
                 return
 
             balance = await get_account_balance(session, user_id=db_user.id)
@@ -424,6 +430,7 @@ async def handle_order_check(
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
             )
+            mark_notified(paid_order)
             return
         elif status_res.is_canceled:
             OrderService.mark_order_canceled(order, reason="gateway_canceled")

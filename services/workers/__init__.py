@@ -17,6 +17,7 @@ from utils.telegram import safe_send_message
 
 from .api_operations import api_operations_loop
 from .cleanup import cleanup_dangling_peers_loop
+from .credit_notifications import credit_notifications_loop
 from .heartbeat import heartbeat_loop
 from .node_monitor import node_monitor_loop
 from .notifications import subscription_notifications_loop
@@ -95,6 +96,7 @@ _ALERT_SHUTDOWN_GRACE = 1.0
 def _traffic(bot): return traffic_sync_loop(bot, shutdown_event)
 def _cleanup(bot): return cleanup_dangling_peers_loop(bot, shutdown_event)
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
+def _credit_notifications(bot): return credit_notifications_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
 def _api_operations(bot): return api_operations_loop(shutdown_event)
 def _node_monitor(bot): return node_monitor_loop(bot, shutdown_event)
@@ -106,6 +108,7 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("traffic", _traffic, False),
     WorkerDefinition("cleanup", _cleanup, False),
     WorkerDefinition("notifications", _notifications, False),
+    WorkerDefinition("credit_notifications", _credit_notifications, False),
     WorkerDefinition("heartbeat", _heartbeat, False),
     WorkerDefinition("node_monitor", _node_monitor, False),
     WorkerDefinition("white_internet_reconciliation", _white_internet_reconciliation, True),

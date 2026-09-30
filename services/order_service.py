@@ -73,6 +73,14 @@ class OrderService:
         session: AsyncSession, order: Order, *, was_canceled: bool
     ) -> None:
         """Credit wallet / grant referral bonus / fulfill access."""
+        # Notification debt: money just moved (fresh settlement or hold
+        # release). Whoever delivers the push first (webhook / order_check /
+        # credit-notify worker) clears the flag; the worker is the backstop
+        # for users who already left the payment screen.
+        _notify_meta = dict(order.metadata_ or {})
+        _notify_meta["late_notify_pending"] = True
+        _notify_meta.pop("late_notify_attempts", None)
+        order.metadata_ = _notify_meta
         # Ledger records: ONLY topup credits user's bot wallet
         if order.service_type == "topup":
             credit_meta = {"source": f"{order.payment_method}_topup"}
