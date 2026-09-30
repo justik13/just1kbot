@@ -24,6 +24,7 @@ from bot.keyboards import (
 from bot.states import BalanceStates
 from config.settings import get_settings
 from database.models import Order, User
+from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_history,
@@ -278,6 +279,16 @@ async def _create_and_render_topup(
             metadata=order_meta,
             bot_username=bot_username,
         )
+    except PaymentCreationAmbiguousError:
+        # Order is kept on purpose (webhook may still settle it) — tell the
+        # user to wait rather than reporting a failed top-up.
+        await render_hub(
+            bot,
+            chat_id,
+            texts.PAYMENT_CREATION_STATUS_UNKNOWN,
+            get_back_button(back_to),
+        )
+        return
     except Exception as exc:
         logger.exception("Failed to create topup order for user %s: %s", user_id, exc)
         await render_hub(

@@ -18,6 +18,7 @@ from bot.keyboards import (
 from database.models import Order, User
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.tariffs_repo import get_tariff_by_id
+from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.maintenance_service import MaintenanceService
 from services.order_service import (
@@ -236,6 +237,14 @@ async def handle_order_pay_card(
             payment_method="yookassa",
             bot_username=bot_username,
         )
+    except PaymentCreationAmbiguousError:
+        # The provider may still create the payment; the order is kept so a
+        # webhook can settle it. Tell the user to wait instead of claiming
+        # the purchase failed.
+        await callback.answer(
+            texts.PAYMENT_CREATION_STATUS_UNKNOWN, show_alert=True
+        )
+        return
     except Exception as exc:
         logger.exception(
             "Failed to create YooKassa order for user %s: %s", db_user_id, exc
