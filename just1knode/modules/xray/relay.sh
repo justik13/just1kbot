@@ -90,26 +90,13 @@ issue_relay_tls_cert() {
     local xray_tls_dir="/usr/local/etc/xray/tls"
     install -d -m 750 -o root -g nogroup "$xray_tls_dir"
 
-    # 1. Постоянные renewal-хуки для Certbot (pre/post для Nginx и deploy для Xray)
-    install -d -m 755 /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post /etc/letsencrypt/renewal-hooks/deploy
+    # Очистка устаревших глобальных pre/post хуков во избежание остановки веб-серверов сторонних доменов
+    rm -f /etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh \
+          /etc/letsencrypt/renewal-hooks/post/05-just1knode-nginx.sh \
+          /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh 2>/dev/null || true
 
-    cat > /etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh <<'EOF'
-#!/bin/sh
-if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
-    touch /run/just1knode_nginx_was_active
-    systemctl stop nginx 2>/dev/null || true
-fi
-EOF
-    chmod 755 /etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh
-
-    cat > /etc/letsencrypt/renewal-hooks/post/05-just1knode-nginx.sh <<'EOF'
-#!/bin/sh
-if [ -f /run/just1knode_nginx_was_active ]; then
-    rm -f /run/just1knode_nginx_was_active
-    command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true
-fi
-EOF
-    chmod 755 /etc/letsencrypt/renewal-hooks/post/05-just1knode-nginx.sh
+    # Постоянный deploy-хук для Certbot: копирование ключей и перезапуск Xray при автообновлении сертификата Relay
+    install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
 
     cat > /etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh <<'EOF'
 #!/bin/sh
@@ -136,7 +123,9 @@ if [ -n "${RENEWED_LINEAGE:-}" ] && [ -n "$RELAY_SNI" ]; then
 fi
 EOF
     chmod 755 /etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh
-    rm -f /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh 2>/dev/null || true
+
+    local pre_hook_cmd='if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then touch /run/just1knode_nginx_was_active && systemctl stop nginx 2>/dev/null || true; fi'
+    local post_hook_cmd='if [ -f /run/just1knode_nginx_was_active ]; then rm -f /run/just1knode_nginx_was_active; command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true; fi'
 
     # 2. Если действующий сертификат для этого домена УЖЕ существует на хосте — используем его!
     if [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${domain}/privkey.pem" ]]; then
@@ -144,6 +133,11 @@ EOF
             log "✔ Обнаружен действующий сертификат Let's Encrypt для '$domain'!"
             install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${domain}/fullchain.pem" "${xray_tls_dir}/fullchain.pem"
             install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${domain}/privkey.pem" "${xray_tls_dir}/privkey.pem"
+            local ren_conf="/etc/letsencrypt/renewal/${domain}.conf"
+            if [[ -f "$ren_conf" ]]; then
+                grep -q "pre_hook" "$ren_conf" 2>/dev/null || echo "pre_hook = $pre_hook_cmd" >> "$ren_conf"
+                grep -q "post_hook" "$ren_conf" 2>/dev/null || echo "post_hook = $post_hook_cmd" >> "$ren_conf"
+            fi
             log "✔ Сертификат успешно привязан к Xray (без повторного обращения к Certbot)."
             return 0
         else
@@ -179,6 +173,8 @@ EOF
 
     local cert_rc=0
     certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email \
+        --pre-hook "$pre_hook_cmd" \
+        --post-hook "$post_hook_cmd" \
         -d "$domain" || cert_rc=$?
 
     if [[ $was_nginx_active -eq 1 ]]; then
@@ -237,63 +233,48 @@ install_xray_relay_node() {
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
 
-    local sec_mode="${4:-tls}"
+    local sec_mode="tls"
 
-    if [[ "$sec_mode" == "tls" ]]; then
-        if [[ -z "$dest_server" ]]; then
-            local auto_domain=""
-            local cert_dirs=(/etc/letsencrypt/live/*)
-            for c_dir in "${cert_dirs[@]}"; do
-                if [[ -f "${c_dir}/fullchain.pem" ]]; then
-                    local cand
-                    cand="$(basename "$c_dir")"
-                    if [[ "$cand" != "README" && "$cand" != "*" ]]; then
-                        auto_domain="$cand"
-                        break
-                    fi
+    if [[ -z "$dest_server" ]]; then
+        local auto_domain=""
+        local cert_dirs=(/etc/letsencrypt/live/*)
+        for c_dir in "${cert_dirs[@]}"; do
+            if [[ -f "${c_dir}/fullchain.pem" ]]; then
+                local cand
+                cand="$(basename "$c_dir")"
+                if [[ "$cand" != "README" && "$cand" != "*" ]]; then
+                    auto_domain="$cand"
+                    break
                 fi
-            done
-
-            echo -e "\n${BOLD}=== НАСТРОЙКА ДОМЕНА ДЛЯ СВЯЗИ ORIGIN ➔ RELAY (VLESS TLS) ===${NC}"
-            echo -e "Для исключения блокировок ТСПУ по сверке SNI ➔ DNS (nDPI NDPI_UNRESOLVED_HOSTNAME)"
-            echo -e "релей настраивается на вашем собственном домене с чистым сертификатом Let's Encrypt."
-            if [[ -n "$auto_domain" ]]; then
-                echo -e "${GREEN}✔ Обнаружен готовый сертификат Let's Encrypt для домена:${NC} ${BOLD}${auto_domain}${NC}"
-                read -rp "Использовать этот домен [Enter = ${auto_domain}]: " dest_in || true
-                dest_server="${dest_in:-$auto_domain}"
-            else
-                echo -e "Создайте DNS A-запись у вашего регистратора: ${CYAN}your-relay.yourdomain.com ➔ ${my_ip}${NC}\n"
-                read -rp "Введите домен Relay (например: your-relay.yourdomain.com): " dest_in || true
-                dest_server="${dest_in:-}"
             fi
-        fi
-        if [[ -z "$dest_server" ]]; then
-            error "Домен Relay обязателен для режима VLESS TLS. Использование сторонних SNI запрещено."
-            return 1
-        fi
+        done
 
-        # Валидация DNS A-записи домена (строго только для TLS)
-        if ! validate_relay_dns "$dest_server" "$my_ip"; then
-            return 1
-        fi
-
-        # Выпуск SSL сертификата (Zero-Signature: порт 80 открывается только на время ACME-челленджа)
-        if ! issue_relay_tls_cert "$dest_server"; then
-            return 1
-        fi
-    else
-        # Режим REALITY (legacy)
-        if [[ -z "$dest_server" ]]; then
-            echo -e "\n${BOLD}=== НАСТРОЙКА МАСКИРОВКИ RELAY (VLESS REALITY) ===${NC}"
-            echo -e "Введите внешний сайт для маскировки (dest/serverName)."
-            echo -e "Внимание: не используйте домены google.com во избежание блокировок ТСПУ по DPI."
-            read -rp "Введите целевой домен (например: www.apple.com, www.cloudflare.com): " dest_in || true
+        echo -e "\n${BOLD}=== НАСТРОЙКА ДОМЕНА ДЛЯ СВЯЗИ ORIGIN ➔ RELAY (VLESS TLS) ===${NC}"
+        echo -e "Для исключения блокировок ТСПУ по сверке SNI ➔ DNS (nDPI NDPI_UNRESOLVED_HOSTNAME)"
+        echo -e "релей настраивается на вашем собственном домене с чистым сертификатом Let's Encrypt."
+        if [[ -n "$auto_domain" ]]; then
+            echo -e "${GREEN}✔ Обнаружен готовый сертификат Let's Encrypt для домена:${NC} ${BOLD}${auto_domain}${NC}"
+            read -rp "Использовать этот домен [Enter = ${auto_domain}]: " dest_in || true
+            dest_server="${dest_in:-$auto_domain}"
+        else
+            echo -e "Создайте DNS A-запись у вашего регистратора: ${CYAN}your-relay.yourdomain.com ➔ ${my_ip}${NC}\n"
+            read -rp "Введите домен Relay (например: your-relay.yourdomain.com): " dest_in || true
             dest_server="${dest_in:-}"
         fi
-        if [[ -z "$dest_server" ]]; then
-            error "Целевой домен обязателен для маскировки VLESS REALITY."
-            return 1
-        fi
+    fi
+    if [[ -z "$dest_server" ]]; then
+        error "Домен Relay обязателен для режима VLESS TLS. Использование сторонних SNI запрещено."
+        return 1
+    fi
+
+    # Валидация DNS A-записи домена (строго только для TLS)
+    if ! validate_relay_dns "$dest_server" "$my_ip"; then
+        return 1
+    fi
+
+    # Выпуск SSL сертификата (Zero-Signature: порт 80 открывается только на время ACME-челленджа)
+    if ! issue_relay_tls_cert "$dest_server"; then
+        return 1
     fi
 
     # Проверка на наличие AmneziaWG (Zero-Collateral-Damage принцип)
@@ -318,47 +299,19 @@ install_xray_relay_node() {
     local tunnel_uuid
     tunnel_uuid="$($XRAY_BIN uuid)"
 
-    local stream_settings_json
-    local public_key=""
-    local short_id=""
-    if [[ "$sec_mode" == "tls" ]]; then
-        stream_settings_json="{
-        \"network\": \"tcp\",
-        \"security\": \"tls\",
-        \"tlsSettings\": {
-          \"alpn\": [\"h2\", \"http/1.1\"],
-          \"certificates\": [
-            {
-              \"certificateFile\": \"/usr/local/etc/xray/tls/fullchain.pem\",
-              \"keyFile\": \"/usr/local/etc/xray/tls/privkey.pem\"
-            }
-          ]
+    local stream_settings_json="{
+    \"network\": \"tcp\",
+    \"security\": \"tls\",
+    \"tlsSettings\": {
+      \"alpn\": [\"h2\", \"http/1.1\"],
+      \"certificates\": [
+        {
+          \"certificateFile\": \"/usr/local/etc/xray/tls/fullchain.pem\",
+          \"keyFile\": \"/usr/local/etc/xray/tls/privkey.pem\"
         }
-      }"
-    else
-        local x25519_out
-        x25519_out="$($XRAY_BIN x25519)"
-        local private_key
-        private_key="$(echo "$x25519_out" | grep -i 'PrivateKey:' | awk '{print $2}')"
-        public_key="$(echo "$x25519_out" | grep -iE 'Password|PublicKey' | awk '{print $NF}')"
-        short_id="$(python3 -c "import secrets; print(secrets.token_hex(8))")"
-        stream_settings_json="{
-        \"network\": \"tcp\",
-        \"security\": \"reality\",
-        \"realitySettings\": {
-          \"show\": false,
-          \"dest\": \"${dest_server}:443\",
-          \"xver\": 0,
-          \"serverNames\": [
-            \"${dest_server}\"
-          ],
-          \"privateKey\": \"${private_key}\",
-          \"shortIds\": [
-            \"${short_id}\"
-          ]
-        }
-      }"
-    fi
+      ]
+    }
+  }"
 
     log "Формирование конфигурации Relay ноды (VLESS ${sec_mode^^})..."
     cat > "$XRAY_CONFIG" <<EOF
@@ -482,14 +435,9 @@ EOF
     set_state_val "relay_port" "$relay_port"
     set_state_val "origin_ip" "$origin_ip"
     set_state_val "tunnel_uuid" "$tunnel_uuid"
-    set_state_val "security" "$sec_mode"
-    if [[ "$sec_mode" == "reality" ]]; then
-        set_state_val "public_key" "$public_key"
-        set_state_val "short_id" "$short_id"
-    else
-        set_state_val "public_key" "-"
-        set_state_val "short_id" "-"
-    fi
+    set_state_val "security" "tls"
+    set_state_val "public_key" "-"
+    set_state_val "short_id" "-"
     set_state_val "sni" "$dest_server"
 
     local detected_country="Зарубежный шлюз"
@@ -522,11 +470,7 @@ EOF
 
     title "УСТАНОВКА RELAY УЗЛА УСПЕШНО ЗАВЕРШЕНА!"
     echo -e "${BOLD}Команда для добавления этого Relay на вашем Origin-сервере:${NC}"
-    if [[ "$sec_mode" == "tls" ]]; then
-        echo -e "${GREEN}just1knode relay add \"${detected_country}\" ${my_ip} ${relay_port} ${tunnel_uuid} \"${detected_code}\" \"tls\" \"-\" \"-\" \"${dest_server}\"${NC}\n"
-    else
-        echo -e "${GREEN}just1knode relay add \"${detected_country}\" ${my_ip} ${relay_port} ${tunnel_uuid} \"${detected_code}\" \"reality\" \"${public_key}\" \"${short_id}\" \"${dest_server}\"${NC}\n"
-    fi
+    echo -e "${GREEN}just1knode relay add \"${detected_country}\" ${my_ip} ${relay_port} ${tunnel_uuid} \"${detected_code}\" \"tls\" \"-\" \"-\" \"${dest_server}\"${NC}\n"
     echo -e "${YELLOW}Примечание: вы можете заменить название \"${detected_country}\" на любое удобное вам.${NC}\n"
 }
 
@@ -771,6 +715,10 @@ heal_and_update_relay_config() {
 
     # 1. Автоматический перевод Relay на VLESS+TLS, если на хосте уже есть сертификат Let's Encrypt
     local le_domain=""
+    local my_ip
+    my_ip="$(get_my_ip 2>/dev/null || hostname -I | awk '{print $1}')"
+    local cur_sni
+    cur_sni="$(get_state_val "sni" "")"
     local cert_dirs=(/etc/letsencrypt/live/*)
     for c_dir in "${cert_dirs[@]}"; do
         if [[ -f "${c_dir}/fullchain.pem" && -f "${c_dir}/privkey.pem" ]]; then
@@ -778,17 +726,21 @@ heal_and_update_relay_config() {
             cand="$(basename "$c_dir")"
             if [[ "$cand" != "README" && "$cand" != "*" ]]; then
                 if openssl x509 -checkend 86400 -noout -in "${c_dir}/fullchain.pem" 2>/dev/null; then
-                    le_domain="$cand"
-                    break
+                    if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && "$cur_sni" == "$cand" ]]; then
+                        le_domain="$cand"
+                        break
+                    elif [[ -n "$my_ip" ]] && validate_relay_dns "$cand" "$my_ip" >/dev/null 2>&1; then
+                        le_domain="$cand"
+                        break
+                    fi
                 fi
             fi
         fi
     done
 
     if [[ -n "$le_domain" ]]; then
-        local cur_sec cur_sni
+        local cur_sec
         cur_sec="$(get_state_val "security" "")"
-        cur_sni="$(get_state_val "sni" "")"
         if [[ "$cur_sec" != "tls" || "$cur_sni" != "$le_domain" || ! -f "/usr/local/etc/xray/tls/fullchain.pem" ]]; then
             log "✔ Обнаружен действующий сертификат Let's Encrypt для '$le_domain'."
             log "Автоматический перевод входящего туннеля Relay на VLESS + TLS (Zero-Manual-Commands)..."
@@ -801,16 +753,20 @@ heal_and_update_relay_config() {
         fi
     fi
 
+    local current_sec
+    current_sec="$(get_state_val "security" "")"
+
     if ! python3 -c "
 import json, os, sys, tempfile
 cfg_file = sys.argv[1]
+sec_mode = sys.argv[2] if len(sys.argv) > 2 else ''
 with open(cfg_file, 'r', encoding='utf-8') as f:
     cfg = json.load(f)
 
-# Если сертификаты Xray TLS присутствуют, гарантируем, что входящий инбаунд настроен на VLESS+TLS
+# Если узел переведен на TLS и сертификаты присутствуют, гарантируем, что входящий инбаунд настроен на VLESS+TLS
 tls_cert_file = '/usr/local/etc/xray/tls/fullchain.pem'
 tls_key_file = '/usr/local/etc/xray/tls/privkey.pem'
-if os.path.exists(tls_cert_file) and os.path.exists(tls_key_file):
+if sec_mode == 'tls' and os.path.exists(tls_cert_file) and os.path.exists(tls_key_file):
     for ib in cfg.get('inbounds', []):
         if ib.get('tag') in ('inbound-reality', 'inbound-tls', 'from-origin') or ib.get('port') in (10443, 443):
             ib['tag'] = 'inbound-tls'
@@ -874,7 +830,7 @@ except Exception:
     pass
 
 print('[+] Xray Relay config успешно оптимизирован (UseIPv4 + Независимый DNS + VLESS TLS)')
-" "$XRAY_CONFIG"; then
+" "$XRAY_CONFIG" "$current_sec"; then
         manifest_rollback
         error "Ошибка выполнения Python-скрипта реконсиляции Relay."
     fi

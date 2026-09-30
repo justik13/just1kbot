@@ -923,19 +923,36 @@ for r in relays:
     is_google_or_reality = ('google.com' in cur_sni.lower()) or (cur_sec == 'reality') or (not cur_sni)
     if is_google_or_reality and code and ip:
         matched_domain = None
-        # Проверяем DNS A-запись вида {code}.{root_domain} (например: nl.example.com ➔ 198.51.100.1)
+        cand_domains = []
         if root_domain:
-            cand_domain = (str(code) + '.' + str(root_domain)).lower()
+            cand_domains.append((str(code) + '.' + str(root_domain)).lower())
+        if cur_sni and ('google.com' not in cur_sni.lower()) and cur_sni.lower() not in cand_domains:
+            cand_domains.append(cur_sni.lower())
+
+        for cand in cand_domains:
             try:
-                import socket
-                cand_ip = socket.gethostbyname(cand_domain)
-                if cand_ip == ip:
-                    matched_domain = cand_domain
+                import socket, ssl
+                addr_infos = socket.getaddrinfo(cand, None, socket.AF_INET)
+                ips = {ai[4][0] for ai in addr_infos}
+                if ip in ips:
+                    # Проверяем, что Relay уже слушает VLESS TLS на своем порту
+                    relay_port = int(r.get('port', 10443))
+                    tls_ok = False
+                    try:
+                        ctx = ssl.create_default_context()
+                        with socket.create_connection((ip, relay_port), timeout=2.5) as s:
+                            with ctx.wrap_socket(s, server_hostname=cand) as ss:
+                                tls_ok = True
+                    except ssl.SSLCertVerificationError:
+                        tls_ok = True
+                    except Exception:
+                        tls_ok = False
+
+                    if tls_ok:
+                        matched_domain = cand
+                        break
             except Exception:
                 pass
-
-        if not matched_domain and cur_sni and ('google.com' not in cur_sni.lower()):
-            matched_domain = cur_sni
 
         if matched_domain:
             print('[+] Авто-миграция Relay ' + str(code) + ': переключение на VLESS TLS (' + str(matched_domain) + ')')

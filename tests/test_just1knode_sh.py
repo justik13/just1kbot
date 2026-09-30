@@ -2374,22 +2374,22 @@ remove_traffic_watchdog_timer
         self.assertIn("ssl_certificate ${dummy_dir}/dummy.crt;", amnezia_sh)
         self.assertIn("listen ${public_port} ssl default_server;", amnezia_sh)
 
-    def test_relay_reality_setup_bypasses_dns_preflight(self):
-        """Verify install_xray_relay_node does not enforce DNS A verification when mode is reality."""
+    def test_relay_install_strictly_tls_and_validates_dns(self):
+        """Verify install_xray_relay_node strictly provisions VLESS TLS and validates DNS A-record."""
         relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
-        self.assertIn('if [[ "$sec_mode" == "tls" ]]; then', relay_sh)
+        self.assertIn('local sec_mode="tls"', relay_sh)
         self.assertIn('validate_relay_dns "$dest_server" "$my_ip"', relay_sh)
         self.assertIn('issue_relay_tls_cert "$dest_server"', relay_sh)
-        # Verify REALITY does not check DNS
-        reality_block = relay_sh.split('else\n        # Режим REALITY')[1].split('if command -v docker')[0]
-        self.assertNotIn('validate_relay_dns', reality_block)
+        # Verify new installations do not configure REALITY
+        self.assertNotIn('Режим REALITY (legacy)', relay_sh)
 
     def test_relay_tls_cert_permanent_renewal_hooks_and_freshness_check(self):
-        """Verify issue_relay_tls_cert installs nginx pre/post hooks, deploy hook without rogue fallbacks, and checks cert expiry."""
+        """Verify issue_relay_tls_cert cleans up global hooks, scopes pre/post hooks to lineage, and installs deploy hook."""
         relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
-        self.assertIn("/etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh", relay_sh)
-        self.assertIn("/etc/letsencrypt/renewal-hooks/post/05-just1knode-nginx.sh", relay_sh)
+        self.assertIn("rm -f /etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh", relay_sh)
         self.assertIn("/etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh", relay_sh)
+        self.assertIn('--pre-hook "$pre_hook_cmd"', relay_sh)
+        self.assertIn('--post-hook "$post_hook_cmd"', relay_sh)
         self.assertIn("openssl x509 -checkend 86400", relay_sh)
         self.assertIn("port80_was_open", relay_sh)
         # Ensure deploy hook checks RENEWED_LINEAGE against RELAY_SNI
@@ -2414,18 +2414,21 @@ remove_traffic_watchdog_timer
         self.assertIn('detected_code="relay-01"', just1knode_sh)
 
     def test_heal_and_update_relay_config_auto_migrates_tls_on_cert_found(self):
-        """Verify heal_and_update_relay_config automatically migrates to VLESS TLS when Let's Encrypt cert is present."""
+        """Verify heal_and_update_relay_config validates domain before selecting cert and guards TLS inbound."""
         relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn("validate_relay_dns \"$cand\" \"$my_ip\"", relay_sh)
         self.assertIn("Автоматический перевод входящего туннеля Relay на VLESS + TLS", relay_sh)
         self.assertIn("tls_cert_file = '/usr/local/etc/xray/tls/fullchain.pem'", relay_sh)
+        self.assertIn("if sec_mode == 'tls' and os.path.exists(tls_cert_file) and os.path.exists(tls_key_file):", relay_sh)
         self.assertIn("st['security'] = 'tls'", relay_sh)
         self.assertIn("st.pop('realitySettings', None)", relay_sh)
 
     def test_heal_and_update_origin_config_auto_migrates_relay_on_dns_match(self):
-        """Verify heal_and_update_origin_config matches DNS A-record and upgrades outbounds to VLESS TLS."""
+        """Verify heal_and_update_origin_config matches multi-IP DNS A-record with TLS probe and upgrades outbounds."""
         origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
         self.assertIn("Авто-миграция Relay-узлов с REALITY / google.com на VLESS+TLS", origin_sh)
-        self.assertIn("cand_ip = socket.gethostbyname(cand_domain)", origin_sh)
+        self.assertIn("addr_infos = socket.getaddrinfo(cand, None, socket.AF_INET)", origin_sh)
+        self.assertIn("ctx.wrap_socket(s, server_hostname=cand)", origin_sh)
         self.assertIn("st.pop('realitySettings', None)", origin_sh)
         self.assertIn("r['security'] = 'tls'", origin_sh)
 
