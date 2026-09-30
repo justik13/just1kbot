@@ -396,6 +396,7 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
 
     # Генерация Nginx Location для этого релея
     mkdir -p "$NGINX_RELAYS_DIR"
+    local nginx_relay_conf="${NGINX_RELAYS_DIR}/${code}.conf"
     local relay_base_path="${relay_inbound_path%/}"
     cat > "$nginx_relay_conf" <<EOF
 # Relay location for ${name} (${code})
