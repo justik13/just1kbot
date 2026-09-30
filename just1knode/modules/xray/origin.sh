@@ -867,13 +867,17 @@ if os.path.exists(relays_file):
 
 # Читаем базовый путь из state.json
 secret_base = '/stream'
+s_data = {}
 if os.path.exists(state_file):
     try:
         with open(state_file, 'r', encoding='utf-8') as sf:
-            s_data = json.load(sf)
+            loaded_s = json.load(sf)
+            if isinstance(loaded_s, dict):
+                s_data = loaded_s
             secret_base = s_data.get('secret_base_path', '/stream')
-    except:
+    except Exception:
         secret_base = '/stream'
+        s_data = {}
 
 # 1. OUTBOUNDS: гарантия наличия и параметров
 outbounds = cfg.setdefault('outbounds', [])

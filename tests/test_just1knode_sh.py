@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -74,6 +75,7 @@ class TestJust1kNodeScript(unittest.TestCase):
         self._create_mock_script("userdel", "#!/bin/sh\nexit 0\n")
         self._create_mock_script("groupdel", "#!/bin/sh\nexit 0\n")
         self._create_mock_script("sysctl", "#!/bin/sh\nexit 0\n")
+        self._create_mock_script("openssl", "#!/bin/sh\nexit 0\n")
         self._create_mock_script(
             "unzip",
             """#!/bin/sh
@@ -149,6 +151,7 @@ exit 0
         env["SYSTEMD_SYSTEM_DIR"] = str(self.systemd_dir)
         env["CERTBOT_DIR"] = str(self.certbot_dir)
         env["LETSENCRYPT_DIR"] = str(self.letsencrypt_dir)
+        env["XRAY_TLS_DIR"] = str(self.xray_config_dir / "tls")
         env["WWW_HTML_DIR"] = str(self.www_html_dir)
         env["INSTALL_DIR"] = str(self.install_dir)
         if extra_env:
@@ -185,6 +188,7 @@ export XRAY_API_CONFIG_ENV='{_bp(self.xray_api_etc / "config.env")}'
 export SYSTEMD_SYSTEM_DIR='{_bp(self.systemd_dir)}'
 export CERTBOT_DIR='{_bp(self.certbot_dir)}'
 export LETSENCRYPT_DIR='{_bp(self.letsencrypt_dir)}'
+export XRAY_TLS_DIR='{_bp(self.xray_config_dir / "tls")}'
 export WWW_HTML_DIR='{_bp(self.www_html_dir)}'
 export INSTALL_DIR='{_bp(self.install_dir)}'
 
@@ -384,7 +388,18 @@ exit 0
         with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
             json.dump(relays_data, f, ensure_ascii=False)
 
-        cmd = 'update_relay_sni "de" "de.example.com" "tls"'
+        # Test 1: Non-interactive without --force must fail-closed on DNS mismatch
+        cmd_fail = 'update_relay_sni "de" "de.example.com" "tls"'
+        res_fail = self._run_shell_snippet(cmd_fail)
+        self.assertEqual(res_fail.returncode, 1, f"Expected non-interactive DNS mismatch to fail-closed: {res_fail.stderr + res_fail.stdout}")
+        self.assertIn("ВНИМАНИЕ", res_fail.stderr + res_fail.stdout)
+        self.assertIn("--force", res_fail.stderr + res_fail.stdout)
+        with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
+            unmodified = json.load(f)
+        self.assertEqual(unmodified[0]["sni"], "www.google.com")
+
+        # Test 2: Non-interactive with --force proceeds and updates relay & config
+        cmd = 'update_relay_sni "de" "de.example.com" "tls" "--force"'
         res = self._run_shell_snippet(cmd)
         self.assertEqual(res.returncode, 0, f"update_relay_sni failed: {res.stderr + res.stdout}")
         self.assertIn("ВНИМАНИЕ", res.stderr + res.stdout)
@@ -519,6 +534,92 @@ exit 0
         rule_out_tags = [r.get("outboundTag") for r in reconciled["routing"]["rules"]]
         self.assertIn("just1k-wl-direct", rule_out_tags)
         self.assertIn("just1k-wl-api", rule_out_tags)
+
+    def test_heal_and_update_origin_config_handles_corrupt_state(self):
+        """When state_file is corrupt or not a dict, reconciliation should not crash with NameError or AttributeError."""
+        self._prepare_base_env()
+        xray_config_file = self.xray_config_dir / "config.json"
+        xray_config_file.parent.mkdir(parents=True, exist_ok=True)
+        xray_config_file.write_text('{"inbounds": [], "outbounds": []}', encoding="utf-8")
+        relays_file = self.state_dir / "relays.json"
+        relays_file.write_text("[]", encoding="utf-8")
+
+        py_reconcile = '''
+import json, os, sys
+cfg_file, relays_file, state_file = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(cfg_file, 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+relays = []
+secret_base = '/stream'
+s_data = {}
+if os.path.exists(state_file):
+    try:
+        with open(state_file, 'r', encoding='utf-8') as sf:
+            loaded_s = json.load(sf)
+            if isinstance(loaded_s, dict):
+                s_data = loaded_s
+            secret_base = s_data.get('secret_base_path', '/stream')
+    except Exception:
+        secret_base = '/stream'
+        s_data = {}
+
+has_reverse = bool(s_data.get('reverse_secret'))
+print("RECONCILE_SUCCESS")
+'''
+        broken_state = self.state_dir / "broken_state.json"
+
+        # Case 1: Corrupt non-JSON file
+        broken_state.write_text("NOT_VALID_JSON", encoding="utf-8")
+        res1 = subprocess.run(
+            [sys.executable, "-c", py_reconcile, str(xray_config_file), str(relays_file), str(broken_state)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(res1.returncode, 0, f"Case 1 crashed: {res1.stderr}")
+        self.assertIn("RECONCILE_SUCCESS", res1.stdout)
+
+        # Case 2: Valid JSON but not a dict (e.g. list [1, 2, 3])
+        broken_state.write_text("[1, 2, 3]", encoding="utf-8")
+        res2 = subprocess.run(
+            [sys.executable, "-c", py_reconcile, str(xray_config_file), str(relays_file), str(broken_state)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(res2.returncode, 0, f"Case 2 crashed: {res2.stderr}")
+        self.assertIn("RECONCILE_SUCCESS", res2.stdout)
+
+        # Verify origin.sh source contains the fix
+        origin_sh = (Path(__file__).parent.parent / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("s_data = {}", origin_sh)
+        self.assertIn("if isinstance(loaded_s, dict):", origin_sh)
+
+    def test_issue_relay_tls_cert_ufw_hooks_merge(self):
+        """issue_relay_tls_cert should safely merge ufw hooks into existing renewal config without duplicating."""
+        self._prepare_base_env()
+        domain = "relay.example.com"
+        live_dir = self.letsencrypt_dir / "live" / domain
+        live_dir.mkdir(parents=True, exist_ok=True)
+        (live_dir / "fullchain.pem").write_text("DUMMY_CERT", encoding="utf-8")
+        (live_dir / "privkey.pem").write_text("DUMMY_KEY", encoding="utf-8")
+
+        ren_dir = self.letsencrypt_dir / "renewal"
+        ren_dir.mkdir(parents=True, exist_ok=True)
+        ren_file = ren_dir / f"{domain}.conf"
+        ren_file.write_text("[renewalparams]\npre_hook = old_pre\npost_hook = old_post\n", encoding="utf-8")
+
+        cmd = f'issue_relay_tls_cert "{domain}"'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"issue_relay_tls_cert failed: {res.stderr + res.stdout}")
+
+        # Verify hooks were replaced, not duplicated
+        content = ren_file.read_text(encoding="utf-8")
+        self.assertEqual(content.count("pre_hook"), 1, "pre_hook should appear exactly once")
+        self.assertEqual(content.count("post_hook"), 1, "post_hook should appear exactly once")
+        self.assertIn("just1knode_ufw_opened_80", content)
+        self.assertNotIn("old_pre", content)
+        self.assertNotIn("old_post", content)
 
     def test_rollback_removes_newly_created_relay_nginx_conf(self):
         self._prepare_base_env()
@@ -940,6 +1041,9 @@ update_node "all"
         cert_dir.mkdir(parents=True, exist_ok=True)
         cert_file = cert_dir / "fullchain.pem"
         key_file = cert_dir / "privkey.pem"
+
+        if shutil.which("openssl") is None:
+            self.skipTest("openssl binary not found in PATH")
 
         # Generate test valid certificate with correct SAN
         subprocess.run(
@@ -1748,6 +1852,7 @@ ensure_xrayapi_user
         )
         updated_cfg = json.loads(xray_config.read_text(encoding="utf-8"))
         self.assertIn("dns", updated_cfg)
+        self.assertEqual(updated_cfg["dns"]["queryStrategy"], "UseIPv4")
         st = xray_config.stat().st_mode & 0o777
         if os.name != "nt":
             self.assertEqual(st, 0o640, f"Expected 0640, got {oct(st)}")
@@ -2387,8 +2492,8 @@ remove_traffic_watchdog_timer
     def test_relay_tls_cert_permanent_renewal_hooks_and_freshness_check(self):
         """Verify issue_relay_tls_cert cleans up global hooks, scopes pre/post hooks to lineage, and installs deploy hook."""
         relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
-        self.assertIn("rm -f /etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh", relay_sh)
-        self.assertIn("/etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh", relay_sh)
+        self.assertIn('rm -f "${le_dir}/renewal-hooks/pre/05-just1knode-nginx.sh"', relay_sh)
+        self.assertIn('"${le_dir}/renewal-hooks/deploy/20-just1knode-restart-xray.sh"', relay_sh)
         self.assertIn('--pre-hook "$pre_hook_cmd"', relay_sh)
         self.assertIn('--post-hook "$post_hook_cmd"', relay_sh)
         self.assertIn("openssl x509 -checkend 86400", relay_sh)
@@ -2419,7 +2524,7 @@ remove_traffic_watchdog_timer
         relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
         self.assertIn("ai = socket.getaddrinfo(domain, None, socket.AF_INET)", relay_sh)
         self.assertIn("Автоматический перевод входящего туннеля Relay на VLESS + TLS", relay_sh)
-        self.assertIn("tls_cert_file = '/usr/local/etc/xray/tls/fullchain.pem'", relay_sh)
+        self.assertIn("tls_cert_file = os.path.join(tls_cert_dir, 'fullchain.pem')", relay_sh)
         self.assertIn("if sec_mode == 'tls' and os.path.exists(tls_cert_file) and os.path.exists(tls_key_file):", relay_sh)
         self.assertIn("st['security'] = 'tls'", relay_sh)
         self.assertIn("st.pop('realitySettings', None)", relay_sh)

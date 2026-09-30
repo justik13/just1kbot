@@ -1353,7 +1353,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                     add) add_relay_node "${3:-}" "${4:-}" "${5:-10443}" "${6:-}" "${7:-de}" "${8:-tls}" "${9:-}" "${10:-}" "${11:-}" "${12:-}" ;;
                     remove|del) remove_relay_node "${3:-}" ;;
                     rename) rename_relay_node "${3:-}" "${4:-}" ;;
-                    sni|domain) update_relay_sni "${3:-}" "${4:-}" "${5:-tls}" ;;
+                    sni|domain) update_relay_sni "${3:-}" "${4:-}" "${5:-tls}" "${6:-}" ;;
                     list) list_relays ;;
                     *) manage_relays_menu ;;
                 esac

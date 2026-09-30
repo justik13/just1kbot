@@ -866,6 +866,7 @@ update_relay_sni() {
     local relay_target="${1:-}"
     local new_sni="${2:-}"
     local new_sec="${3:-tls}"
+    local force_flag="${4:-}"
 
     local role
     role="$(get_state_val "role")"
@@ -1122,6 +1123,13 @@ print(f'OK:{matched_code}')
                 error "Операция отменена пользователем."
                 return 1
             fi
+        else
+            if [[ "$force_flag" != "--force" && "${JUST1KNODE_FORCE:-0}" != "1" ]]; then
+                manifest_rollback
+                error "DNS-валидация не пройдена в неинтерактивном режиме для '$new_sni'. Передайте --force или JUST1KNODE_FORCE=1 для принудительного применения."
+                return 1
+            fi
+            warn "Неинтерактивный режим: принудительное применение SNI с несовпадающим DNS (--force)."
         fi
     fi
 

@@ -87,18 +87,20 @@ issue_relay_tls_cert() {
         return 1
     fi
 
-    local xray_tls_dir="/usr/local/etc/xray/tls"
-    install -d -m 750 -o root -g nogroup "$xray_tls_dir"
+    local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
+    local xray_tls_dir="${XRAY_TLS_DIR:-/usr/local/etc/xray/tls}"
+    install -d -m 750 "$xray_tls_dir" 2>/dev/null || mkdir -p "$xray_tls_dir"
+    chown root:nogroup "$xray_tls_dir" 2>/dev/null || true
 
     # Очистка устаревших глобальных pre/post хуков во избежание остановки веб-серверов сторонних доменов
-    rm -f /etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh \
-          /etc/letsencrypt/renewal-hooks/post/05-just1knode-nginx.sh \
-          /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh 2>/dev/null || true
+    rm -f "${le_dir}/renewal-hooks/pre/05-just1knode-nginx.sh" \
+          "${le_dir}/renewal-hooks/post/05-just1knode-nginx.sh" \
+          "${le_dir}/renewal-hooks/deploy/restart-xray.sh" 2>/dev/null || true
 
     # Постоянный deploy-хук для Certbot: копирование ключей и перезапуск Xray при автообновлении сертификата Relay
-    install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
+    install -d -m 755 "${le_dir}/renewal-hooks/deploy"
 
-    cat > /etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh <<'EOF'
+    cat > "${le_dir}/renewal-hooks/deploy/20-just1knode-restart-xray.sh" <<'EOF'
 #!/bin/sh
 set -eu
 STATE_FILE="/etc/just1knode/state.json"
@@ -112,29 +114,55 @@ install -d -m 750 -o root -g nogroup "$TARGET_DIR"
 
 if [ -n "${RENEWED_LINEAGE:-}" ] && [ -n "$RELAY_SNI" ]; then
     if [ "$(basename "$RENEWED_LINEAGE")" = "$RELAY_SNI" ]; then
-        if [ -f "/etc/letsencrypt/live/${RELAY_SNI}/fullchain.pem" ]; then
-            install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${RELAY_SNI}/fullchain.pem" "${TARGET_DIR}/fullchain.pem"
-            install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${RELAY_SNI}/privkey.pem" "${TARGET_DIR}/privkey.pem"
+        if [ -f "${RENEWED_LINEAGE}/fullchain.pem" ]; then
+            install -m 640 -o root -g nogroup "${RENEWED_LINEAGE}/fullchain.pem" "${TARGET_DIR}/fullchain.pem"
+            install -m 640 -o root -g nogroup "${RENEWED_LINEAGE}/privkey.pem" "${TARGET_DIR}/privkey.pem"
             systemctl restart xray 2>/dev/null || true
         fi
     fi
 fi
 EOF
-    chmod 755 /etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh
+    chmod 755 "${le_dir}/renewal-hooks/deploy/20-just1knode-restart-xray.sh"
 
-    local pre_hook_cmd="sh -c 'if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then touch /run/just1knode_nginx_was_active && systemctl stop nginx 2>/dev/null || true; fi'"
-    local post_hook_cmd="sh -c 'if [ -f /run/just1knode_nginx_was_active ]; then rm -f /run/just1knode_nginx_was_active; command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true; fi'"
+    local pre_hook_cmd="sh -c 'if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then touch /run/just1knode_nginx_was_active && systemctl stop nginx 2>/dev/null || true; fi; if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi \"Status: active\"; then if ! ufw status 2>/dev/null | grep -E \"(^|[[:space:]])80(/tcp)?[[:space:]]+ALLOW\" -q; then touch /run/just1knode_ufw_opened_80 && ufw allow 80/tcp comment \"just1knode certbot verification\" >/dev/null 2>&1 || true; fi; fi'"
+    local post_hook_cmd="sh -c 'if [ -f /run/just1knode_nginx_was_active ]; then rm -f /run/just1knode_nginx_was_active; command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true; fi; if [ -f /run/just1knode_ufw_opened_80 ]; then rm -f /run/just1knode_ufw_opened_80; ufw delete allow 80/tcp >/dev/null 2>&1 || true; ufw delete allow 80 >/dev/null 2>&1 || true; fi'"
 
     # 2. Если действующий сертификат для этого домена УЖЕ существует на хосте — используем его!
-    if [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${domain}/privkey.pem" ]]; then
-        if openssl x509 -checkend 86400 -noout -in "/etc/letsencrypt/live/${domain}/fullchain.pem" 2>/dev/null; then
+    if [[ -f "${le_dir}/live/${domain}/fullchain.pem" && -f "${le_dir}/live/${domain}/privkey.pem" ]]; then
+        if openssl x509 -checkend 86400 -noout -in "${le_dir}/live/${domain}/fullchain.pem" 2>/dev/null; then
             log "✔ Обнаружен действующий сертификат Let's Encrypt для '$domain'!"
-            install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${domain}/fullchain.pem" "${xray_tls_dir}/fullchain.pem"
-            install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${domain}/privkey.pem" "${xray_tls_dir}/privkey.pem"
-            local ren_conf="/etc/letsencrypt/renewal/${domain}.conf"
+            install -m 640 "${le_dir}/live/${domain}/fullchain.pem" "${xray_tls_dir}/fullchain.pem" 2>/dev/null || cp -f "${le_dir}/live/${domain}/fullchain.pem" "${xray_tls_dir}/fullchain.pem"
+            install -m 640 "${le_dir}/live/${domain}/privkey.pem" "${xray_tls_dir}/privkey.pem" 2>/dev/null || cp -f "${le_dir}/live/${domain}/privkey.pem" "${xray_tls_dir}/privkey.pem"
+            chown root:nogroup "${xray_tls_dir}/fullchain.pem" "${xray_tls_dir}/privkey.pem" 2>/dev/null || true
+            local ren_conf="${le_dir}/renewal/${domain}.conf"
             if [[ -f "$ren_conf" ]]; then
-                grep -q "pre_hook" "$ren_conf" 2>/dev/null || echo "pre_hook = $pre_hook_cmd" >> "$ren_conf"
-                grep -q "post_hook" "$ren_conf" 2>/dev/null || echo "post_hook = $post_hook_cmd" >> "$ren_conf"
+                python3 -c "
+import sys
+cf, pre_c, post_c = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(cf, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    new_lines = []
+    has_pre = False
+    has_post = False
+    for l in lines:
+        if l.strip().startswith('pre_hook'):
+            new_lines.append(f'pre_hook = {pre_c}\n')
+            has_pre = True
+        elif l.strip().startswith('post_hook'):
+            new_lines.append(f'post_hook = {post_c}\n')
+            has_post = True
+        else:
+            new_lines.append(l)
+    if not has_pre:
+        new_lines.append(f'pre_hook = {pre_c}\n')
+    if not has_post:
+        new_lines.append(f'post_hook = {post_c}\n')
+    with open(cf, 'w', encoding='utf-8') as f:
+        f.writelines(new_lines)
+except Exception:
+    pass
+" "$ren_conf" "$pre_hook_cmd" "$post_hook_cmd"
             fi
             log "✔ Сертификат успешно привязан к Xray (без повторного обращения к Certbot)."
             return 0
@@ -156,10 +184,11 @@ EOF
     local port80_was_open=0
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
         ufw_active=1
-        if ufw status 2>/dev/null | grep -E "^80(/tcp)?[[:space:]]" | grep -qi "ALLOW"; then
+        if ufw status 2>/dev/null | grep -E "(^|[[:space:]])80(/tcp)?[[:space:]]+ALLOW" -q; then
             port80_was_open=1
         else
             ufw allow 80/tcp comment "just1knode certbot verification" >/dev/null 2>&1 || true
+            touch /run/just1knode_ufw_opened_80
         fi
     fi
 
@@ -179,18 +208,20 @@ EOF
         systemctl start nginx 2>/dev/null || true
     fi
 
-    if [[ $ufw_active -eq 1 && $port80_was_open -eq 0 ]]; then
+    if [[ -f /run/just1knode_ufw_opened_80 ]]; then
+        rm -f /run/just1knode_ufw_opened_80
         ufw delete allow 80/tcp >/dev/null 2>&1 || true
         ufw delete allow 80 >/dev/null 2>&1 || true
     fi
 
-    if [[ $cert_rc -ne 0 || ! -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]]; then
+    if [[ $cert_rc -ne 0 || ! -f "${le_dir}/live/${domain}/fullchain.pem" ]]; then
         error "Сбой выпуска SSL-сертификата Let's Encrypt для $domain. Убедитесь, что порт 80 свободен и DNS указывает на этот сервер."
         return 1
     fi
 
-    install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${domain}/fullchain.pem" "${xray_tls_dir}/fullchain.pem"
-    install -m 640 -o root -g nogroup "/etc/letsencrypt/live/${domain}/privkey.pem" "${xray_tls_dir}/privkey.pem"
+    install -m 640 "${le_dir}/live/${domain}/fullchain.pem" "${xray_tls_dir}/fullchain.pem" 2>/dev/null || cp -f "${le_dir}/live/${domain}/fullchain.pem" "${xray_tls_dir}/fullchain.pem"
+    install -m 640 "${le_dir}/live/${domain}/privkey.pem" "${xray_tls_dir}/privkey.pem" 2>/dev/null || cp -f "${le_dir}/live/${domain}/privkey.pem" "${xray_tls_dir}/privkey.pem"
+    chown root:nogroup "${xray_tls_dir}/fullchain.pem" "${xray_tls_dir}/privkey.pem" 2>/dev/null || true
 
     log "SSL-сертификат Let's Encrypt успешно получен и привязан к Xray (автообновление настроено)."
     return 0
@@ -235,7 +266,8 @@ install_xray_relay_node() {
 
     if [[ -z "$dest_server" ]]; then
         local auto_domain=""
-        local cert_dirs=(/etc/letsencrypt/live/*)
+        local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
+        local cert_dirs=("${le_dir}"/live/*)
         for c_dir in "${cert_dirs[@]}"; do
             if [[ -f "${c_dir}/fullchain.pem" ]]; then
                 local cand
@@ -520,7 +552,8 @@ print('')
 
     # Авто-определение уже существующего сертификата Let's Encrypt на сервере
     local auto_domain=""
-    local cert_dirs=(/etc/letsencrypt/live/*)
+    local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
+    local cert_dirs=("${le_dir}"/live/*)
     for c_dir in "${cert_dirs[@]}"; do
         if [[ -f "${c_dir}/fullchain.pem" ]]; then
             local cand
@@ -717,7 +750,9 @@ heal_and_update_relay_config() {
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
     local cur_sni
     cur_sni="$(get_state_val "sni" "")"
-    local cert_dirs=(/etc/letsencrypt/live/*)
+    local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
+    local xray_tls_dir="${XRAY_TLS_DIR:-/usr/local/etc/xray/tls}"
+    local cert_dirs=("${le_dir}"/live/*)
     for c_dir in "${cert_dirs[@]}"; do
         if [[ -f "${c_dir}/fullchain.pem" && -f "${c_dir}/privkey.pem" ]]; then
             local cand
@@ -754,7 +789,7 @@ except Exception:
     if [[ -n "$le_domain" ]]; then
         local cur_sec
         cur_sec="$(get_state_val "security" "")"
-        if [[ "$cur_sec" != "tls" || "$cur_sni" != "$le_domain" || ! -f "/usr/local/etc/xray/tls/fullchain.pem" ]]; then
+        if [[ "$cur_sec" != "tls" || "$cur_sni" != "$le_domain" || ! -f "${xray_tls_dir}/fullchain.pem" ]]; then
             log "✔ Обнаружен действующий сертификат Let's Encrypt для '$le_domain'."
             log "Автоматический перевод входящего туннеля Relay на VLESS + TLS (Zero-Manual-Commands)..."
             if issue_relay_tls_cert "$le_domain"; then
@@ -780,8 +815,9 @@ with open(cfg_file, 'r', encoding='utf-8') as f:
     cfg = json.load(f)
 
 # Если узел переведен на TLS и сертификаты присутствуют, гарантируем, что входящий инбаунд настроен на VLESS+TLS
-tls_cert_file = '/usr/local/etc/xray/tls/fullchain.pem'
-tls_key_file = '/usr/local/etc/xray/tls/privkey.pem'
+tls_cert_dir = os.environ.get('XRAY_TLS_DIR', '/usr/local/etc/xray/tls')
+tls_cert_file = os.path.join(tls_cert_dir, 'fullchain.pem')
+tls_key_file = os.path.join(tls_cert_dir, 'privkey.pem')
 if sec_mode == 'tls' and os.path.exists(tls_cert_file) and os.path.exists(tls_key_file):
     for ib in cfg.get('inbounds', []):
         if ib.get('tag') in ('inbound-reality', 'inbound-tls', 'from-origin') or ib.get('port') in (10443, 443):
@@ -799,6 +835,7 @@ if sec_mode == 'tls' and os.path.exists(tls_cert_file) and os.path.exists(tls_ke
                     }
                 ]
             }
+            break
 
 for ob in cfg.get('outbounds', []):
     if ob.get('tag') == 'direct' or ob.get('protocol') == 'freedom':
