@@ -217,20 +217,42 @@ async def get_user_referrals_paginated(
 
 
 def _referral_paid_activity_condition(referral) -> object:
-    """Qualifying activity = paid top-up Order ≥ threshold OR legacy real top-up.
+    """Qualifying activity: real-money order or legacy real top-up, ≥ threshold.
 
-    Only real balance top-ups count: direct tariff purchases (any funding
-    source, including bonus-funded wallet orders) and dust top-ups below
-    REFERRAL_ACTIVE_MIN_TOPUP_RUB do NOT activate the referral. The legacy
-    Payment branch covers real external top-ups made before the orders table
-    (succeeded + fulfilled + credited), so pure admin_adjustment freebies
-    never count until actually topped up.
+    Three branches, all require amount ≥ REFERRAL_ACTIVE_MIN_TOPUP_RUB:
+
+    1. qualifying_topup_order — balance top-up (`service_type='topup'`) with
+       any payment method and status `paid`.  Covers the standard top-up flow.
+
+    2. external_gateway_order — any paid order routed through a real external
+       payment gateway (`payment_method != 'wallet'`), regardless of
+       `service_type`.  Covers users who buy a tariff directly via card/Stars
+       without first topping up.  Wallet orders (including those paid from
+       admin-gifted balance) are intentionally excluded: gifted roubles must
+       not mint referral bonuses.
+
+    3. real_topup — legacy `payments` rows (pre-orders-table era): succeeded +
+       fulfilled + credited.  Pure admin_adjustment freebies never have a
+       `payments` row and therefore do not count.
     """
     qualifying_topup_order = (
         select(Order.id)
         .where(
             Order.user_id == referral.id,
             Order.service_type == "topup",
+            Order.status == "paid",
+            Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+        )
+        .exists()
+    )
+    # Direct tariff (or any service) purchase via real external gateway.
+    # payment_method='wallet' is excluded because the wallet may be funded
+    # by admin compensation credits rather than real money.
+    external_gateway_order = (
+        select(Order.id)
+        .where(
+            Order.user_id == referral.id,
+            Order.payment_method != "wallet",
             Order.status == "paid",
             Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
         )
@@ -247,7 +269,7 @@ def _referral_paid_activity_condition(referral) -> object:
         )
         .exists()
     )
-    return or_(qualifying_topup_order, real_topup)
+    return or_(qualifying_topup_order, external_gateway_order, real_topup)
 
 
 async def get_user_active_referrals_count(

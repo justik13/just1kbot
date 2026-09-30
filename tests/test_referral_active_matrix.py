@@ -2,20 +2,21 @@
 
 Runs only with TEST_DATABASE_URL (CI). Skipped on Windows dev machines.
 
-Active = qualifying top-up ≥ REFERRAL_ACTIVE_MIN_TOPUP_RUB (68 = discounted Base-30):
-  A:  paid topup Order 100, no Payment            -> counts
-  A2: paid topup Order 10 (dust)                  -> NOT counted
-  A3: paid non-topup Order 500 (tariff purchase)  -> NOT counted
-  B:  succeeded+fulfilled+credited Payment 100    -> counts (legacy, no Order)
-  B2: succeeded+fulfilled+credited Payment 10     -> NOT counted (dust)
-  C:  succeeded Payment, credited_at NULL         -> NOT counted
-  D:  refunded/reversed Payment                   -> NOT counted
-  E:  no Order, no Payment (freebie sub)          -> NOT counted
-  F:  deleted referral with paid topup Order      -> NOT counted
-  G:  pending topup Order only                    -> NOT counted
-  H:  zero-amount paid topup Order                 -> NOT counted
+Active = real-money payment >= REFERRAL_ACTIVE_MIN_TOPUP_RUB (68 RUB):
+  A:  paid topup Order 100, payment_method yookassa  -> counts
+  A2: paid topup Order 10 (dust)                     -> NOT counted
+  A3: paid awg Order 500, payment_method yookassa    -> counts (external gateway)
+  A4: paid awg Order 500, payment_method wallet      -> NOT counted (gifted balance)
+  B:  succeeded+fulfilled+credited Payment 100       -> counts (legacy, no Order)
+  B2: succeeded+fulfilled+credited Payment 10        -> NOT counted (dust)
+  C:  succeeded Payment, credited_at NULL            -> NOT counted
+  D:  refunded/reversed Payment                      -> NOT counted
+  E:  no Order, no Payment (freebie sub)             -> NOT counted
+  F:  deleted referral with paid topup Order         -> NOT counted
+  G:  pending topup Order only                       -> NOT counted
+  H:  zero-amount paid topup Order                   -> NOT counted
 
-Expected: active == 2 (A, B).
+Expected: active == 3 (A, A3, B).
 """
 
 import os
@@ -108,6 +109,7 @@ class ReferralPaidActivityMatrixTests(unittest.IsolatedAsyncioTestCase):
             a = await users_repo.create_user(session, telegram_id=900002, referred_by=900001)
             a2 = await users_repo.create_user(session, telegram_id=900010, referred_by=900001)
             a3 = await users_repo.create_user(session, telegram_id=900011, referred_by=900001)
+            a4 = await users_repo.create_user(session, telegram_id=900013, referred_by=900001)
             b = await users_repo.create_user(session, telegram_id=900003, referred_by=900001)
             b2 = await users_repo.create_user(session, telegram_id=900012, referred_by=900001)
             c = await users_repo.create_user(session, telegram_id=900004, referred_by=900001)
@@ -118,19 +120,33 @@ class ReferralPaidActivityMatrixTests(unittest.IsolatedAsyncioTestCase):
             g = await users_repo.create_user(session, telegram_id=900008, referred_by=900001)
             h = await users_repo.create_user(session, telegram_id=900009, referred_by=900001)
 
-            # A: qualifying paid topup order
-            session.add(Order(user_id=a.id, service_type="topup", amount_rub=Decimal("100"), status="paid"))
-            # A2: dust topup below threshold
-            session.add(Order(user_id=a2.id, service_type="topup", amount_rub=Decimal("10"), status="paid"))
-            # A3: direct tariff purchase is NOT a top-up
-            session.add(Order(user_id=a3.id, service_type="awg", amount_rub=Decimal("500"), status="paid"))
+            # A: qualifying paid topup order via external gateway
+            session.add(Order(
+                user_id=a.id, service_type="topup", amount_rub=Decimal("100"),
+                status="paid", payment_method="yookassa",
+            ))
+            # A2: dust topup below threshold — NOT counted
+            session.add(Order(
+                user_id=a2.id, service_type="topup", amount_rub=Decimal("10"),
+                status="paid", payment_method="yookassa",
+            ))
+            # A3: direct tariff purchase via external gateway — counts (real money)
+            session.add(Order(
+                user_id=a3.id, service_type="awg", amount_rub=Decimal("500"),
+                status="paid", payment_method="yookassa",
+            ))
+            # A4: direct tariff purchase paid from wallet — NOT counted (may be gifted balance)
+            session.add(Order(
+                user_id=a4.id, service_type="awg", amount_rub=Decimal("500"),
+                status="paid", payment_method="wallet",
+            ))
             # B: real legacy topup, no order
             session.add(self._payment(b.id, "b"))
-            # B2: legacy dust topup
+            # B2: legacy dust topup — NOT counted
             session.add(self._payment(b2.id, "b2", amount=Decimal("10")))
-            # C: succeeded but never credited
+            # C: succeeded but never credited — NOT counted
             session.add(self._payment(c.id, "c", credited=False))
-            # D: refunded/reversed
+            # D: refunded/reversed — NOT counted
             session.add(
                 self._payment(
                     d.id,
@@ -140,22 +156,31 @@ class ReferralPaidActivityMatrixTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             # E: nothing (freebie) — no rows
-            # F: deleted referral with qualifying paid topup order
-            session.add(Order(user_id=f.id, service_type="topup", amount_rub=Decimal("100"), status="paid"))
+            # F: deleted referral with qualifying paid topup order — NOT counted (is_deleted)
+            session.add(Order(
+                user_id=f.id, service_type="topup", amount_rub=Decimal("100"),
+                status="paid", payment_method="yookassa",
+            ))
             f.is_deleted = True
-            # G: pending topup order only
-            session.add(Order(user_id=g.id, service_type="topup", amount_rub=Decimal("100"), status="pending"))
-            # H: zero-amount paid topup order
-            session.add(Order(user_id=h.id, service_type="topup", amount_rub=Decimal("0"), status="paid"))
+            # G: pending topup order only — NOT counted
+            session.add(Order(
+                user_id=g.id, service_type="topup", amount_rub=Decimal("100"),
+                status="pending", payment_method="yookassa",
+            ))
+            # H: zero-amount paid topup order — NOT counted
+            session.add(Order(
+                user_id=h.id, service_type="topup", amount_rub=Decimal("0"),
+                status="paid", payment_method="yookassa",
+            ))
 
             count = await users_repo.get_user_active_referrals_count(session, 900001)
-            self.assertEqual(count, 2)
+            self.assertEqual(count, 3, "Expected A, A3, B to be active")
 
             leaders = await users_repo.get_referral_leaderboard(session, limit=5)
-            self.assertIn((900001, 2), leaders)
+            self.assertIn((900001, 3), leaders)
 
             rank, active = await users_repo.get_user_referral_rank(session, 900001)
-            self.assertEqual(active, 2)
+            self.assertEqual(active, 3)
             self.assertEqual(rank, 1)
             self.assertIsNotNone(ref)
 
