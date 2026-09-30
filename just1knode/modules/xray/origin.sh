@@ -490,6 +490,10 @@ EOF
 
     create_backup "${NGINX_RELAYS_DIR}/default.conf"
     cat > "${NGINX_RELAYS_DIR}/default.conf" <<EOF
+    location = ${secret_path} {
+        return 404;
+    }
+
     location ^~ ${secret_path}/default {
         proxy_pass http://127.0.0.1:8003;
         proxy_method \$xhttp_proxy_method;
@@ -506,7 +510,10 @@ EOF
         proxy_max_temp_file_size 0;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+        add_header Cache-Control "no-store, no-cache" always;
         add_header CDN-Cache-Control "no-store" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
         add_header X-Accel-Buffering no always;
         add_header Accept-Ranges none always;
     }
@@ -1137,9 +1144,14 @@ try:
         port = r.get('inbound_port') or r.get('port')
         if not code or not path or not port: continue
         cf_path = os.path.join(nginx_dir, f'{code}.conf')
+        cf_base = path.rstrip('/')
         if not os.path.exists(cf_path):
             with open(cf_path, 'w', encoding='utf-8') as cf:
-                cf.write(f'''location ^~ {path} {{
+                cf.write(f'''location = {cf_base} {{
+    return 404;
+}}
+
+location ^~ {path} {{
     proxy_pass http://127.0.0.1:{port};
     proxy_method \$xhttp_proxy_method;
     proxy_http_version 1.1;
@@ -1155,7 +1167,10 @@ try:
     proxy_max_temp_file_size 0;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    add_header Cache-Control \"no-store, no-cache\" always;
     add_header CDN-Cache-Control \"no-store\" always;
+    add_header Pragma \"no-cache\" always;
+    add_header Expires \"0\" always;
     add_header X-Accel-Buffering no always;
     add_header Accept-Ranges none always;
 }}

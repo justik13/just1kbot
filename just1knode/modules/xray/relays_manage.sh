@@ -396,9 +396,13 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
 
     # Генерация Nginx Location для этого релея
     mkdir -p "$NGINX_RELAYS_DIR"
-    local nginx_relay_conf="${NGINX_RELAYS_DIR}/${code}.conf"
+    local relay_base_path="${relay_inbound_path%/}"
     cat > "$nginx_relay_conf" <<EOF
 # Relay location for ${name} (${code})
+location = ${relay_base_path} {
+    return 404;
+}
+
 location ^~ ${relay_inbound_path} {
     proxy_pass http://127.0.0.1:${next_port};
     proxy_method \$xhttp_proxy_method;
@@ -415,7 +419,10 @@ location ^~ ${relay_inbound_path} {
     proxy_max_temp_file_size 0;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    add_header Cache-Control "no-store, no-cache" always;
     add_header CDN-Cache-Control "no-store" always;
+    add_header Pragma "no-cache" always;
+    add_header Expires "0" always;
     add_header X-Accel-Buffering no always;
     add_header Accept-Ranges none always;
 }
