@@ -251,6 +251,18 @@ class TestPreflightStatementsExecute(unittest.IsolatedAsyncioTestCase):
         verdict = await self._verdict_for(dict(POSTFLIGHT_STATEMENTS)["1_MIGRATION_HEAD"])
         self.assertEqual(verdict, "OK", f"alembic_version is not at {EXPECTED_HEAD}")
 
+    async def test_financial_blocks_pass_on_clean_db(self):
+        """Financial pre-flight blocks must report OK (0 violations) on a clean database."""
+        statements = dict(PREFLIGHT_STATEMENTS)
+        for label in (
+            "3A_REFERRAL_DISCOUNT_FLOOR",
+            "3B_PAID_TOPUP_NOT_CREDITED",
+            "3C_CREDIT_AMOUNT_DESYNC",
+        ):
+            verdict = await self._verdict_for(statements[label])
+            with self.subTest(block=label):
+                self.assertEqual(verdict, "OK (0 violations)")
+
 
 if __name__ == "__main__":
     unittest.main()

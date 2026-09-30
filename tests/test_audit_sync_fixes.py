@@ -15,7 +15,7 @@ from services.workers.traffic import traffic_sync_loop
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
     def test_alembic_chain_reaches_0031_in_order(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(len(scripts.get_heads()), 1)
+        self.assertEqual(scripts.get_heads(), ["0032_drop_banking_residue"])
         self.assertEqual(
             scripts.get_revision("0031_awg_persistent_traffic").down_revision,
             "0030_simple_billing",
