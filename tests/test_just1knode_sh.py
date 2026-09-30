@@ -2545,6 +2545,26 @@ remove_traffic_watchdog_timer
         self.assertIn("st.pop('realitySettings', None)", origin_sh)
         self.assertIn("r['security'] = 'tls'", origin_sh)
 
+    def test_relays_manage_enforces_chown_xrayapi_and_retains_default_direct_route(self):
+        """Verify relays_manage enforces group xrayapi on config.json and retains just1k-wl-direct route."""
+        relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
+        self.assertIn("shutil.chown(cfg_file, user='root', group='xrayapi')", relays_manage_sh)
+        self.assertIn("os.chmod(cfg_file, 0o640)", relays_manage_sh)
+        # Ensure default route is strictly just1k-wl-direct, not new_def_out or block
+        self.assertIn("r['outboundTag'] = 'just1k-wl-direct'", relays_manage_sh)
+        self.assertNotIn("r['outboundTag'] = new_def_out", relays_manage_sh)
+
+    def test_xray_api_service_unit_has_partof_xray(self):
+        """Verify xray-api.service unit binds lifecycle to xray.service via PartOf."""
+        api_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "api.sh").read_text(encoding="utf-8")
+        self.assertIn("PartOf=xray.service", api_sh)
+
+    def test_xray_api_app_discovers_default_inbound_on_origin_fallback(self):
+        """Verify app.py get_target_inbounds guarantees just1k-wl-default on Origin even if config.json unreadable."""
+        app_py = (REPO_ROOT / "scripts" / "xray_api" / "app.py").read_text(encoding="utf-8")
+        self.assertIn('if is_origin_node and "just1k-wl-default" not in discovered_tags:', app_py)
+        self.assertIn('discovered_tags.insert(0, "just1k-wl-default")', app_py)
+
 
 if __name__ == "__main__":
     unittest.main()

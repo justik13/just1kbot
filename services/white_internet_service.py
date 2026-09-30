@@ -1081,8 +1081,9 @@ class WhiteInternetService:
         ALREADY_NEWER against runtime inventory. Anything unconfirmed stays
         PENDING_CREATE for the background worker to converge.
         """
+        extra = origin_node.extra_data if isinstance(getattr(origin_node, "extra_data", None), dict) else {}
         expected_inbound_tags: set[str] = set()
-        for relay in (origin_node.extra_data or {}).get("relays", []) or []:
+        for relay in extra.get("relays", []) or []:
             if isinstance(relay, dict):
                 code = relay.get("code")
             elif isinstance(relay, str):
@@ -1091,7 +1092,8 @@ class WhiteInternetService:
                 code = None
             if code:
                 expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
-        if not expected_inbound_tags:
+        origin_hidden = bool(extra.get("origin_hidden", False))
+        if not origin_hidden or not expected_inbound_tags:
             expected_inbound_tags.add("just1k-wl-default")
         target_version = sub.desired_version or 1
         try:

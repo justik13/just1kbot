@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -562,6 +563,57 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(swept, 1)
         mock_done.assert_awaited_once_with(sess, 4)
         mock_client.sync_client.assert_not_called()
+
+    async def test_reconciliation_verifies_default_inbound_alongside_relays(self):
+        """Regression test: expected_inbound_tags must contain both just1k-wl-default and relay tags."""
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+        task = {
+            "sub_id": 1,
+            "uuid": "test-uuid",
+            "desired_active": True,
+            "target_version": 2,
+            "expected_relays": [{"code": "nl"}, {"code": "pl"}],
+            "origin_hidden": False,
+        }
+
+        # Case 1: verified_inbounds missing just1k-wl-default (the bug scenario) -> must fail closed
+        resp_missing_default = MagicMock(
+            result=SyncResult.APPLIED,
+            verified_epoch="epoch-100",
+            verified_inbounds=["just1k-wl-inbound-nl", "just1k-wl-inbound-pl"],
+        )
+        mock_client.sync_client.return_value = resp_missing_default
+
+        mock_session = AsyncMock()
+        sub = MagicMock(
+            id=1,
+            actual_version=1,
+            desired_version=2,
+            last_reconciled_node_epoch="epoch-99",
+            provisioning_status=WhiteInternetProvisioningStatus.PENDING_UPDATE,
+        )
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def sf():
+            yield mock_session
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+            res = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
+            self.assertFalse(res, "Sync must not succeed if just1k-wl-default is missing from verified_inbounds")
+            self.assertNotEqual(sub.actual_version, 2, "Subscription must not advance version when inbounds check fails")
+
+            # Case 2: verified_inbounds includes both relays AND just1k-wl-default -> must succeed
+            resp_full = MagicMock(
+                result=SyncResult.APPLIED,
+                verified_epoch="epoch-100",
+                verified_inbounds=["just1k-wl-default", "just1k-wl-inbound-nl", "just1k-wl-inbound-pl"],
+            )
+            mock_client.sync_client.return_value = resp_full
+            res2 = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
+            self.assertTrue(res2, "Sync must succeed when all inbounds including just1k-wl-default are verified")
+            self.assertEqual(sub.actual_version, 2)
 
 
 class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
@@ -1277,3 +1329,4 @@ class TestReconciliationQueryRegression(unittest.IsolatedAsyncioTestCase):
         query_sql = str(stmt_subs.compile())
         self.assertIn("white_internet_subscriptions.expires_at <=", query_sql)
         self.assertIn("white_internet_subscriptions.status IN", query_sql)
+

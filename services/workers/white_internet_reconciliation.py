@@ -93,6 +93,7 @@ class WhiteInternetReconciliationWorker:
         desired_active = task["desired_active"]
         target_version = task["target_version"]
         expected_relays = task.get("expected_relays") or []
+        origin_hidden = bool(task.get("origin_hidden", False))
 
         expected_inbound_tags = set()
         if expected_relays:
@@ -100,7 +101,7 @@ class WhiteInternetReconciliationWorker:
                 code = r.get("code")
                 if code:
                     expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
-        else:
+        if not origin_hidden or not expected_inbound_tags:
             expected_inbound_tags.add("just1k-wl-default")
 
         notify_user_id: int | None = None
@@ -361,6 +362,7 @@ class WhiteInternetReconciliationWorker:
                     s.xray_instance_boot_id,
                     s.xray_instance_starttime,
                     (s.extra_data or {}).get("relays", []),
+                    bool((s.extra_data or {}).get("origin_hidden", False)),
                 )
                 for s in servers
                 if (
@@ -373,8 +375,8 @@ class WhiteInternetReconciliationWorker:
             ]
 
         # Check health outside DB transaction
-        active_server_targets: list[tuple[int, str, str, str, list]] = []  # (id, api_url, api_key, epoch, relays)
-        for server_id, _name, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime, relays in server_list:
+        active_server_targets: list[tuple[int, str, str, str, list, bool]] = []  # (id, api_url, api_key, epoch, relays, origin_hidden)
+        for server_id, _name, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime, relays, origin_hidden in server_list:
             is_healthy, node_epoch, health_data = await self.client.check_health(api_url, api_key)
             if is_healthy and node_epoch and health_data:
                 boot_id = health_data.get("boot_id")
@@ -402,10 +404,10 @@ class WhiteInternetReconciliationWorker:
                             fresh_server = await sess.scalar(select(Server).where(Server.id == server_id))
                             target_node_epoch = fresh_server.xray_instance_epoch if fresh_server else None
 
-                active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch, relays))
+                active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch, relays, origin_hidden))
 
         synced_count = 0
-        for server_id, api_url, api_key, target_epoch, relays in active_server_targets:
+        for server_id, api_url, api_key, target_epoch, relays, origin_hidden in active_server_targets:
             if not target_epoch:
                 continue
 
@@ -464,6 +466,7 @@ class WhiteInternetReconciliationWorker:
                         "desired_active": desired_active,
                         "target_version": sub.desired_version,
                         "expected_relays": relays,
+                        "origin_hidden": origin_hidden,
                     })
 
             # Bounded concurrent execution outside DB transaction

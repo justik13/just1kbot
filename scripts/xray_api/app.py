@@ -359,7 +359,21 @@ def get_target_inbounds() -> List[str]:
             discovered_tags.append(tag)
 
     if not discovered_tags and relay_tags:
-        discovered_tags = relay_tags
+        discovered_tags = list(relay_tags)
+
+    # Invariant: Origin nodes that host relays or have role 'origin' must always manage just1k-wl-default,
+    # ensuring fallback survival even if reading config.json encounters permission errors or locks.
+    is_origin_node = bool(relay_tags)
+    if not is_origin_node and STATE_FILE_PATH.exists():
+        try:
+            with open(STATE_FILE_PATH, "r", encoding="utf-8") as f:
+                sdata = json.load(f)
+                if isinstance(sdata, dict) and sdata.get("role") == "origin":
+                    is_origin_node = True
+        except Exception:
+            pass
+    if is_origin_node and "just1k-wl-default" not in discovered_tags:
+        discovered_tags.insert(0, "just1k-wl-default")
 
     # 3. Fallback to environment override (for mock/test environments without real config files)
     if not discovered_tags:
