@@ -250,7 +250,15 @@ async def _get_effective_tariff_info(
         if isinstance(quota_val, int) and quota_val > 0:
             base_quota_bytes = quota_val
     except Exception:
-        pass
+        # Falling back to the env defaults is intentional so the menu still renders,
+        # but it must never be silent: a wrong price is a money-path defect.
+        logger.exception(
+            "White Internet tariff lookup failed; falling back to env defaults "
+            "(price=%s, duration_days=%s, base_quota_bytes=%s)",
+            base_price,
+            duration_days,
+            base_quota_bytes,
+        )
     return base_price, int(base_price), duration_days, base_quota_bytes
 
 

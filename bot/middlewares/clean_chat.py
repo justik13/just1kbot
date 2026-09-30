@@ -102,7 +102,17 @@ class CleanChatMiddleware(BaseMiddleware):
                     if await state.get_state() is not None:
                         return await handler(event, data)
                 except Exception:
-                    pass
+                    # FSM storage is unreachable. Deleting the message here would
+                    # destroy user data because of an infrastructure blip, so fail
+                    # open and let the handler process it.
+                    logger.warning(
+                        "CleanChat FSM state lookup failed; leaving message %s "
+                        "in chat %s undeleted",
+                        event.message_id,
+                        event.chat.id,
+                        exc_info=True,
+                    )
+                    return await handler(event, data)
 
             _ensure_worker_started()
             try:
