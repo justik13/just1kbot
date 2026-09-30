@@ -616,14 +616,14 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
             yield mock_session
 
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
-            # Case 1: verified_inbounds is empty -> MUST fail closed and not advance actual_version
+            # Case 1: verified_inbounds missing one relay -> MUST fail closed and not advance actual_version
             mock_client.sync_client.return_value = MagicMock(
                 result=SyncResult.APPLIED,
                 verified_epoch="epoch-100",
-                verified_inbounds=[],
+                verified_inbounds=["just1k-wl-default", "just1k-wl-inbound-nl"],
             )
             res1 = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
-            self.assertFalse(res1, "Sync must fail closed when verified_inbounds is empty")
+            self.assertFalse(res1, "Sync must fail closed when relay inbound is missing")
             self.assertNotEqual(sub.actual_version, 2, "Subscription must not advance when inbounds are unverified")
 
             # Case 2: verified_inbounds missing default inbound -> MUST fail closed

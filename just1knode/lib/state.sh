@@ -195,6 +195,8 @@ manifest_begin() {
         if [[ -f "$tgt" ]]; then
             local hash_orig
             hash_orig="$(sha256sum "$tgt" | awk '{print $1}')"
+            local backup_path
+            backup_path="$TXN_DIR/files/$(basename "$tgt")_$$_${RANDOM}"
             cp -p "$tgt" "$backup_path" 2>/dev/null || cp "$tgt" "$backup_path"
             echo -e "${tgt}\tpresent\t${hash_orig}\t${backup_path}" >> "$MANIFEST_LOG"
         else

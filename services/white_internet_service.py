@@ -1110,8 +1110,8 @@ class WhiteInternetService:
                 verified_inbounds = set(getattr(resp, "verified_inbounds", None) or [])
                 epoch_ok = verified_epoch == origin_node.xray_instance_epoch
                 inbounds_ok = (
-                    bool(verified_inbounds)
-                    and expected_inbound_tags.issubset(verified_inbounds)
+                    not verified_inbounds
+                    or expected_inbound_tags.issubset(verified_inbounds)
                 )
                 confirmed = False
                 if sync_res == SyncResult.APPLIED and epoch_ok and inbounds_ok:

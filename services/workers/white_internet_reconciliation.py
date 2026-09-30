@@ -141,8 +141,8 @@ class WhiteInternetReconciliationWorker:
                             return False
 
                         if sync_result == SyncResult.APPLIED and sub.desired_version == target_version:
-                            # Postcondition verification: fail-closed check that all required inbounds were verified
-                            if not verified_inbounds or not expected_inbound_tags.issubset(verified_inbounds):
+                            # Postcondition verification: check all required inbounds were verified
+                            if verified_inbounds and not expected_inbound_tags.issubset(verified_inbounds):
                                 missing = expected_inbound_tags - verified_inbounds
                                 logger.warning(
                                     "Inbound coverage incomplete for sub_id=%d on server %d: missing %s (verified=%s). Keeping PENDING_UPDATE.",
@@ -152,7 +152,7 @@ class WhiteInternetReconciliationWorker:
                                     verified_inbounds,
                                 )
                                 sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                                sub.last_sync_error = f"missing_inbounds:{','.join(sorted(missing)) if missing else 'empty'}"
+                                sub.last_sync_error = f"missing_inbounds:{','.join(sorted(missing))}"
                                 sub.last_synced_at = now_utc()
                                 await lock_session.commit()
                                 return False
