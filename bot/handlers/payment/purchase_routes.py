@@ -22,6 +22,7 @@ from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.maintenance_service import MaintenanceService
 from services.order_notifications import mark_notified
+from .credit_notify import build_tariff_success_card
 from services.order_service import (
     AccountDebtBlockedError,
     FinancialHoldBlockedError,
@@ -342,21 +343,12 @@ async def handle_order_check(
             return
 
         balance = await get_account_balance(session, user_id=db_user.id)
-        tariff_name = get_tariff_display_name(order.device_limit or 2)
-        is_change = bool(order.metadata_ and order.metadata_.get("is_tariff_change"))
-        operation = texts.PAYMENT_OP_TITLE_CHANGE if is_change else texts.PURCHASE_COMPLETED
+        text, keyboard = build_tariff_success_card(order, balance)
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                operation_title=operation,
-                tariff_name=tariff_name,
-                duration_days=order.duration_days,
-                charged=int(order.amount_rub),
-                real_balance=int(balance.real_available),
-                bonus_balance=int(balance.bonus_available),
-            ),
-            get_payment_success_keyboard(),
+            text,
+            keyboard,
             message_effect_id=EFFECT_CONFETTI,
             force_new=True,
         )
@@ -410,23 +402,12 @@ async def handle_order_check(
                 return
 
             balance = await get_account_balance(session, user_id=db_user.id)
-            tariff_name = get_tariff_display_name(paid_order.device_limit or 2)
-            is_change = bool(
-                paid_order.metadata_ and paid_order.metadata_.get("is_tariff_change")
-            )
-            operation = texts.PAYMENT_OP_TITLE_CHANGE if is_change else texts.PURCHASE_COMPLETED
+            text, keyboard = build_tariff_success_card(paid_order, balance)
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                    operation_title=operation,
-                    tariff_name=tariff_name,
-                    duration_days=paid_order.duration_days,
-                    charged=int(paid_order.amount_rub),
-                    real_balance=int(balance.real_available),
-                    bonus_balance=int(balance.bonus_available),
-                ),
-                get_payment_success_keyboard(),
+                text,
+                keyboard,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
             )

@@ -221,11 +221,18 @@ async def _deliver_one(bot: Bot, order_id) -> bool:
             )
         )
         if not has_credit:
+            # Genuine anomaly (pre-flight 3B owns it), not a delivery blip:
+            # bound the warnings the same way as send failures instead of
+            # warning every 5 minutes forever.
             logger.warning(
                 "Credit-notify skips order %s: paid but no payment_credit "
                 "(pre-flight 3B owns this anomaly)",
                 order.id,
             )
+            if _note_failed_attempt(order, meta):
+                logger.warning(
+                    "Credit-notify gives up on anomalous order %s", order.id
+                )
             return False
 
         user = await session.get(User, order.user_id)
@@ -245,17 +252,14 @@ async def _deliver_one(bot: Bot, order_id) -> bool:
             )
             return True
 
-        attempts = int(meta.get(LATE_NOTIFY_ATTEMPTS_KEY, 0) or 0) + 1
-        if attempts >= MAX_NOTIFY_ATTEMPTS:
-            mark_notified(order)
+        attempts = _note_failed_attempt(order, meta)
+        if attempts is None:
             logger.warning(
                 "Credit-notify gives up on order %s after %s attempts",
                 order.id,
-                attempts,
+                MAX_NOTIFY_ATTEMPTS,
             )
             return False
-        meta[LATE_NOTIFY_ATTEMPTS_KEY] = attempts
-        order.metadata_ = meta
         logger.info(
             "Credit-notify attempt %s/%s failed for order %s, will retry",
             attempts,
@@ -263,3 +267,18 @@ async def _deliver_one(bot: Bot, order_id) -> bool:
             order.id,
         )
         return False
+
+
+def _note_failed_attempt(order: Order, meta: dict) -> int | None:
+    """Record one failed delivery attempt for a debted order.
+
+    Returns the attempt number, or None when the budget is exhausted (the
+    debt is dropped via mark_notified so the order stops being selected).
+    """
+    attempts = int(meta.get(LATE_NOTIFY_ATTEMPTS_KEY, 0) or 0) + 1
+    if attempts >= MAX_NOTIFY_ATTEMPTS:
+        mark_notified(order)
+        return None
+    meta[LATE_NOTIFY_ATTEMPTS_KEY] = attempts
+    order.metadata_ = meta
+    return attempts

@@ -19,6 +19,35 @@ from database.models import Order, User
 logger = logging.getLogger(__name__)
 
 
+def build_tariff_success_card(order: Order, balance):
+    """Build the (text, keyboard) purchase-success card for a tariff order.
+
+    Single source of truth for the card previously copy-pasted across the
+    order_check renders and the webhook push: tier label, tariff-change
+    title and balance figures must never drift between delivery paths.
+    """
+    from bot import texts
+    from bot.formatters import get_tariff_display_name
+    from bot.keyboards import get_payment_success_keyboard
+
+    tariff_name = get_tariff_display_name(order.device_limit or 2)
+    is_change = bool(order.metadata_ and order.metadata_.get("is_tariff_change"))
+    operation = (
+        texts.PAYMENT_OP_TITLE_CHANGE if is_change else texts.PURCHASE_COMPLETED
+    )
+    return (
+        texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+            operation_title=operation,
+            tariff_name=tariff_name,
+            duration_days=order.duration_days,
+            charged=int(order.amount_rub),
+            real_balance=int(balance.real_available),
+            bonus_balance=int(balance.bonus_available),
+        ),
+        get_payment_success_keyboard(),
+    )
+
+
 async def notify_order_credited(
     bot,
     session: AsyncSession,
@@ -27,8 +56,6 @@ async def notify_order_credited(
 ) -> bool:
     """Send the credited/success card for a settled order."""
     from bot import texts
-    from bot.formatters import get_tariff_display_name
-    from bot.keyboards import get_payment_success_keyboard
     from database.repositories.account_ledger_repo import get_account_balance
     from utils.telegram import EFFECT_CONFETTI, render_hub
 
@@ -54,28 +81,16 @@ async def notify_order_credited(
                 custom_keyboard=kb,
             )
         else:
+            from database.repositories.account_ledger_repo import get_account_balance
+            from utils.telegram import render_hub
+
             balance = await get_account_balance(session, user_id=user.id)
-            tariff_name = get_tariff_display_name(order.device_limit or 2)
-            is_change = bool(
-                order.metadata_ and order.metadata_.get("is_tariff_change")
-            )
-            operation = (
-                texts.PAYMENT_OP_TITLE_CHANGE
-                if is_change
-                else texts.PURCHASE_COMPLETED
-            )
+            text, keyboard = build_tariff_success_card(order, balance)
             await render_hub(
                 bot,
                 user.telegram_id,
-                texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                    operation_title=operation,
-                    tariff_name=tariff_name,
-                    duration_days=order.duration_days,
-                    charged=int(order.amount_rub),
-                    real_balance=int(balance.real_available),
-                    bonus_balance=int(balance.bonus_available),
-                ),
-                get_payment_success_keyboard(),
+                text,
+                keyboard,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
             )

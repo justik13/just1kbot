@@ -117,6 +117,32 @@ class TestCreditNotifySender(unittest.IsolatedAsyncioTestCase):
         user = _user(telegram_id=None)
         self.assertFalse(await notify_order_credited(bot, session, order, user))
 
+    async def test_tariff_uses_shared_card_builder(self):
+        from bot.formatters import get_tariff_display_name
+        from bot.handlers.payment.credit_notify import notify_order_credited
+
+        bot = AsyncMock()
+        session = AsyncMock(spec=AsyncSession)
+        order = _topup_order(service_type="awg", device_limit=2)
+        user = _user()
+        snapshot = MagicMock(
+            real_available=Decimal("100"), bonus_available=Decimal("0")
+        )
+        with (
+            patch(
+                "database.repositories.account_ledger_repo.get_account_balance",
+                new=AsyncMock(return_value=snapshot),
+            ),
+            patch(
+                "utils.telegram.render_hub", new=AsyncMock()
+            ) as mock_render,
+        ):
+            self.assertTrue(
+                await notify_order_credited(bot, session, order, user)
+            )
+            text = mock_render.await_args[0][2]
+        self.assertIn(get_tariff_display_name(2), text)
+
 
 def _scope_with(session):
     scope = MagicMock()

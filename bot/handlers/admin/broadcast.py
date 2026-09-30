@@ -704,6 +704,20 @@ async def _send_broadcast_to_users_with_resume(
 async def resume_pending_broadcasts(bot):
     try:
         async with session_scope() as session:
+            # One-time orphan drain: the stop-broadcast flow was removed, so
+            # rows stuck in 'stopping' (written before the removal) would
+            # otherwise warn in pre-flight forever without any code resolving
+            # them. Fold them into the terminal 'stopped' state at startup.
+            converted = await session.execute(
+                update(BroadcastProgress)
+                .where(BroadcastProgress.status == "stopping")
+                .values(status="stopped")
+            )
+            if converted.rowcount:
+                logger.info(
+                    "Marked %s orphan stopping broadcast(s) as stopped",
+                    converted.rowcount,
+                )
             stmt = (
                 select(BroadcastProgress)
                 .where(BroadcastProgress.status == "in_progress")

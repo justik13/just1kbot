@@ -22,9 +22,14 @@ LATE_NOTIFY_ATTEMPTS_KEY = "late_notify_attempts"
 
 
 def mark_notify_pending(order: Order) -> None:
-    """Record an undelivered notification debt on the order (no DB IO)."""
+    """Record an undelivered notification debt on the order (no DB IO).
+
+    Also drops any stale attempt counter: a new settlement (fresh or hold
+    release) re-arms the full retry budget.
+    """
     meta = dict(order.metadata_ or {})
     meta[LATE_NOTIFY_PENDING_KEY] = True
+    meta.pop(LATE_NOTIFY_ATTEMPTS_KEY, None)
     order.metadata_ = meta
 
 

@@ -23,6 +23,7 @@ from database.repositories.account_ledger_repo import (
     create_order_refund_debit,
     get_account_balance,
 )
+from services.order_notifications import mark_notify_pending
 from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.fulfillment_service import FulfillmentService
@@ -77,10 +78,7 @@ class OrderService:
         # release). Whoever delivers the push first (webhook / order_check /
         # credit-notify worker) clears the flag; the worker is the backstop
         # for users who already left the payment screen.
-        _notify_meta = dict(order.metadata_ or {})
-        _notify_meta["late_notify_pending"] = True
-        _notify_meta.pop("late_notify_attempts", None)
-        order.metadata_ = _notify_meta
+        mark_notify_pending(order)
         # Ledger records: ONLY topup credits user's bot wallet
         if order.service_type == "topup":
             credit_meta = {"source": f"{order.payment_method}_topup"}
