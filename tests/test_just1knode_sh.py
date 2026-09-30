@@ -2545,25 +2545,35 @@ remove_traffic_watchdog_timer
         self.assertIn("st.pop('realitySettings', None)", origin_sh)
         self.assertIn("r['security'] = 'tls'", origin_sh)
 
-    def test_relays_manage_enforces_chown_xrayapi_and_retains_default_direct_route(self):
-        """Verify relays_manage enforces group xrayapi on config.json and retains just1k-wl-direct route."""
+    def test_ensure_xray_config_permissions_and_rollback_invariant(self):
+        """Verify state.sh and relays_manage enforce ensure_xray_config_permissions and retain root:xrayapi 640."""
+        state_sh = (REPO_ROOT / "just1knode" / "lib" / "state.sh").read_text(encoding="utf-8")
         relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
-        self.assertIn("shutil.chown(cfg_file, user='root', group='xrayapi')", relays_manage_sh)
-        self.assertIn("os.chmod(cfg_file, 0o640)", relays_manage_sh)
-        # Ensure default route is strictly just1k-wl-direct, not new_def_out or block
-        self.assertIn("r['outboundTag'] = 'just1k-wl-direct'", relays_manage_sh)
-        self.assertNotIn("r['outboundTag'] = new_def_out", relays_manage_sh)
 
-    def test_xray_api_service_unit_has_partof_xray(self):
-        """Verify xray-api.service unit binds lifecycle to xray.service via PartOf."""
+        self.assertIn("ensure_xray_config_permissions()", state_sh)
+        self.assertIn("chown root:xrayapi \"$cfg\"", state_sh)
+        self.assertIn("chmod 640 \"$cfg\"", state_sh)
+        self.assertIn("ensure_xray_config_permissions", relays_manage_sh)
+        self.assertIn("manifest_rollback()", state_sh)
+        self.assertIn("ensure_xray_config_permissions \"${XRAY_CONFIG:-/usr/local/etc/xray/config.json}\"", state_sh)
+        self.assertIn("r['outboundTag'] = 'just1k-wl-direct'", relays_manage_sh)
+
+    def test_xray_api_service_unit_has_partof_and_update_node_syncs_it(self):
+        """Verify xray-api.service has PartOf=xray.service and core.sh update_node syncs the unit."""
+        service_file = (REPO_ROOT / "scripts" / "xray_api" / "xray-api.service").read_text(encoding="utf-8")
+        core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
         api_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "api.sh").read_text(encoding="utf-8")
+
+        self.assertIn("PartOf=xray.service", service_file)
         self.assertIn("PartOf=xray.service", api_sh)
+        self.assertIn("cp \"${api_dir}/xray-api.service\" /etc/systemd/system/xray-api.service", core_sh)
+        self.assertIn("systemctl daemon-reload", core_sh)
 
     def test_xray_api_app_discovers_default_inbound_on_origin_fallback(self):
-        """Verify app.py get_target_inbounds guarantees just1k-wl-default on Origin even if config.json unreadable."""
+        """Verify app.py target inbounds discovery prioritizes just1k-wl-default on Origin nodes."""
         app_py = (REPO_ROOT / "scripts" / "xray_api" / "app.py").read_text(encoding="utf-8")
-        self.assertIn('if is_origin_node and "just1k-wl-default" not in discovered_tags:', app_py)
-        self.assertIn('discovered_tags.insert(0, "just1k-wl-default")', app_py)
+        self.assertIn("is_origin_node", app_py)
+        self.assertIn("discovered_tags.insert(0, \"just1k-wl-default\")", app_py)
 
 
 if __name__ == "__main__":

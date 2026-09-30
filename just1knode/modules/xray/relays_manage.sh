@@ -502,6 +502,7 @@ except Exception:
         manifest_rollback
         error "Ошибка генерации конфигурации Xray для релея."
     fi
+    ensure_xray_config_permissions "$XRAY_CONFIG"
 
     # Генерация Nginx Location для этого релея
     mkdir -p "$NGINX_RELAYS_DIR"
@@ -696,10 +697,11 @@ if 'routing' in cfg and 'rules' in cfg['routing']:
             if isinstance(existing_ib, list) and in_tag in existing_ib:
                 r['inboundTag'] = [t for t in existing_ib if t != in_tag]
 
-# Дефолтный маршрут для just1k-wl-default всегда ведет напрямую в Рунет (just1k-wl-direct)
+# Default inbound traffic for Russia always routes directly via Moscow IP
 default_rule_found = False
 for r in cfg.get('routing', {}).get('rules', []):
-    if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r:
+    if (r.get('inboundTag') == ['just1k-wl-default'] or 'just1k-wl-default' in r.get('inboundTag', [])) and 'domain' not in r and 'ip' not in r:
+        r['inboundTag'] = ['just1k-wl-default']
         r['outboundTag'] = 'just1k-wl-direct'
         default_rule_found = True
         break
@@ -712,14 +714,8 @@ if not default_rule_found:
 
 with open(cfg_file, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
-try:
-    import shutil
-    shutil.chown(cfg_file, user='root', group='xrayapi')
-    os.chmod(cfg_file, 0o640)
-    os.chmod(os.path.dirname(os.path.abspath(cfg_file)), 0o755)
-except Exception:
-    pass
 "
+    ensure_xray_config_permissions "$XRAY_CONFIG"
 
     # Удаление Nginx конфига
     rm -f "${NGINX_RELAYS_DIR}/${code}.conf"
@@ -1085,13 +1081,7 @@ with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
     fp.flush()
     os.fsync(fp.fileno())
 os.replace(t_path, cfg_file)
-try:
-    import shutil
-    shutil.chown(cfg_file, user='root', group='xrayapi')
-    os.chmod(cfg_file, 0o640)
-    os.chmod(d, 0o755)
-except Exception:
-    pass
+
 
 # Сохраняем обновленный relays.json
 if relays:
@@ -1117,6 +1107,7 @@ print(f'OK:{matched_code}')
         error "Ошибка обновления релея: ${update_res:-Неизвестная ошибка}."
         return 1
     fi
+    ensure_xray_config_permissions "$XRAY_CONFIG"
 
     if echo "$update_res" | grep -q "WARN_DNS_"; then
         local dns_warn

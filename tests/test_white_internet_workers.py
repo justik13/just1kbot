@@ -10,7 +10,7 @@ from config.enums import ServerHealthState, ServerLifecycleStatus, WhiteInternet
 from database.models import Server, User, WhiteInternetSubscription
 from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
 from services.workers.white_internet_traffic import WhiteInternetTrafficWorker
-from services.xray_node_client import SyncResult, XrayNodeClient
+from services.xray_node_client import SyncResponse, SyncResult, XrayNodeClient
 
 
 class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
@@ -49,7 +49,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 12345})
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-100",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
@@ -112,7 +116,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         mock_client = AsyncMock(spec=XrayNodeClient)
         # Node returns NEW epoch (Xray restarted!)
         mock_client.check_health.return_value = (True, "epoch-200", {"boot_id": "boot-1", "starttime": 2000})
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-200",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
         mock_session = AsyncMock()
@@ -179,7 +187,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         mock_client = AsyncMock()
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 1000})
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-100",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
@@ -237,7 +249,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 12345})
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-100",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
@@ -434,7 +450,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 max_concurrent_observed = active_concurrent
             await asyncio.sleep(0.01)
             active_concurrent -= 1
-            return SyncResult.APPLIED, None
+            return SyncResponse(
+                SyncResult.APPLIED,
+                verified_epoch="epoch-100",
+                verified_inbounds=["just1k-wl-default"],
+            )
 
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 1000})
@@ -511,7 +531,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
             id=3, server_id=7, client_uuid="orphan-uuid-1", desired_version=4, status="pending"
         )
         mock_client = AsyncMock(spec=XrayNodeClient)
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-5",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
         sess = AsyncMock()
@@ -564,26 +588,18 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         mock_done.assert_awaited_once_with(sess, 4)
         mock_client.sync_client.assert_not_called()
 
-    async def test_reconciliation_verifies_default_inbound_alongside_relays(self):
-        """Regression test: expected_inbound_tags must contain both just1k-wl-default and relay tags."""
+    async def test_reconciliation_verifies_default_inbound_and_fails_closed(self):
+        """Verify reconciliation strictly checks inbound coverage and fails closed on empty verified_inbounds."""
         mock_client = AsyncMock(spec=XrayNodeClient)
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+
         task = {
             "sub_id": 1,
-            "uuid": "test-uuid",
+            "uuid": "test-uuid-1",
             "desired_active": True,
             "target_version": 2,
             "expected_relays": [{"code": "nl"}, {"code": "pl"}],
-            "origin_hidden": False,
         }
-
-        # Case 1: verified_inbounds missing just1k-wl-default (the bug scenario) -> must fail closed
-        resp_missing_default = MagicMock(
-            result=SyncResult.APPLIED,
-            verified_epoch="epoch-100",
-            verified_inbounds=["just1k-wl-inbound-nl", "just1k-wl-inbound-pl"],
-        )
-        mock_client.sync_client.return_value = resp_missing_default
 
         mock_session = AsyncMock()
         sub = MagicMock(
@@ -600,19 +616,34 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
             yield mock_session
 
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
-            res = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
-            self.assertFalse(res, "Sync must not succeed if just1k-wl-default is missing from verified_inbounds")
-            self.assertNotEqual(sub.actual_version, 2, "Subscription must not advance version when inbounds check fails")
+            # Case 1: verified_inbounds is empty -> MUST fail closed and not advance actual_version
+            mock_client.sync_client.return_value = MagicMock(
+                result=SyncResult.APPLIED,
+                verified_epoch="epoch-100",
+                verified_inbounds=[],
+            )
+            res1 = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
+            self.assertFalse(res1, "Sync must fail closed when verified_inbounds is empty")
+            self.assertNotEqual(sub.actual_version, 2, "Subscription must not advance when inbounds are unverified")
 
-            # Case 2: verified_inbounds includes both relays AND just1k-wl-default -> must succeed
-            resp_full = MagicMock(
+            # Case 2: verified_inbounds missing default inbound -> MUST fail closed
+            mock_client.sync_client.return_value = MagicMock(
+                result=SyncResult.APPLIED,
+                verified_epoch="epoch-100",
+                verified_inbounds=["just1k-wl-inbound-nl", "just1k-wl-inbound-pl"],
+            )
+            res2 = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
+            self.assertFalse(res2, "Sync must not succeed if just1k-wl-default is missing from verified_inbounds")
+            self.assertNotEqual(sub.actual_version, 2)
+
+            # Case 3: verified_inbounds includes default AND all relays -> MUST succeed
+            mock_client.sync_client.return_value = MagicMock(
                 result=SyncResult.APPLIED,
                 verified_epoch="epoch-100",
                 verified_inbounds=["just1k-wl-default", "just1k-wl-inbound-nl", "just1k-wl-inbound-pl"],
             )
-            mock_client.sync_client.return_value = resp_full
-            res2 = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
-            self.assertTrue(res2, "Sync must succeed when all inbounds including just1k-wl-default are verified")
+            res3 = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
+            self.assertTrue(res3, "Sync must succeed when all inbounds including just1k-wl-default are verified")
             self.assertEqual(sub.actual_version, 2)
 
 

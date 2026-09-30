@@ -93,16 +93,11 @@ class WhiteInternetReconciliationWorker:
         desired_active = task["desired_active"]
         target_version = task["target_version"]
         expected_relays = task.get("expected_relays") or []
-        origin_hidden = bool(task.get("origin_hidden", False))
-
-        expected_inbound_tags = set()
-        if expected_relays:
-            for r in expected_relays:
-                code = r.get("code")
-                if code:
-                    expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
-        if not origin_hidden or not expected_inbound_tags:
-            expected_inbound_tags.add("just1k-wl-default")
+        expected_inbound_tags = {"just1k-wl-default"}
+        for r in expected_relays:
+            code = r.get("code") if isinstance(r, dict) else r
+            if code:
+                expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
 
         notify_user_id: int | None = None
         async with self._get_sub_lock(sub_id):
@@ -139,24 +134,25 @@ class WhiteInternetReconciliationWorker:
                         sync_result = resp.result if hasattr(resp, "result") else resp[0]
                         err_msg = resp.error if hasattr(resp, "error") else resp[1]
                         verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
-                        verified_inbounds = getattr(resp, "verified_inbounds", None) or []
+                        verified_inbounds = set(getattr(resp, "verified_inbounds", None) or [])
 
                         sub = await white_internet_repo.get_subscription_with_lock(lock_session, sub_id)
                         if sub is None:
                             return False
 
                         if sync_result == SyncResult.APPLIED and sub.desired_version == target_version:
-                            # Postcondition verification: check all required inbounds were verified
-                            if verified_inbounds and not expected_inbound_tags.issubset(set(verified_inbounds)):
-                                missing = expected_inbound_tags - set(verified_inbounds)
+                            # Postcondition verification: fail-closed check that all required inbounds were verified
+                            if not verified_inbounds or not expected_inbound_tags.issubset(verified_inbounds):
+                                missing = expected_inbound_tags - verified_inbounds
                                 logger.warning(
-                                    "Inbound coverage incomplete for sub_id=%d on server %d: missing %s. Keeping PENDING_UPDATE.",
+                                    "Inbound coverage incomplete for sub_id=%d on server %d: missing %s (verified=%s). Keeping PENDING_UPDATE.",
                                     sub_id,
                                     server_id,
                                     missing,
+                                    verified_inbounds,
                                 )
                                 sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                                sub.last_sync_error = f"missing_inbounds:{','.join(sorted(missing))}"
+                                sub.last_sync_error = f"missing_inbounds:{','.join(sorted(missing)) if missing else 'empty'}"
                                 sub.last_synced_at = now_utc()
                                 await lock_session.commit()
                                 return False

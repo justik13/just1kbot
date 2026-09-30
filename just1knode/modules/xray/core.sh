@@ -410,6 +410,10 @@ update_node() {
                 ensure_xrayapi_user
                 chown -R root:xrayapi "$api_dir" 2>/dev/null || true
                 chmod -R 750 "$api_dir" 2>/dev/null || true
+                if [[ -f "${api_dir}/xray-api.service" ]]; then
+                    cp "${api_dir}/xray-api.service" /etc/systemd/system/xray-api.service 2>/dev/null || true
+                    systemctl daemon-reload 2>/dev/null || true
+                fi
                 if [[ "$api_was_active" == "true" ]]; then
                     if ! systemctl restart xray-api 2>/dev/null || ! systemctl is-active --quiet xray-api 2>/dev/null; then
                         rollback_node_components || true
