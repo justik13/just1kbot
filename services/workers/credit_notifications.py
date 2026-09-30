@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from decimal import Decimal, InvalidOperation
 
 from aiogram import Bot
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from bot import texts
 from bot.formatters import get_tariff_display_name
@@ -37,7 +38,7 @@ from database.repositories.account_ledger_repo import get_account_balance
 from services.order_notifications import (
     LATE_NOTIFY_ATTEMPTS_KEY,
     LATE_NOTIFY_PENDING_KEY,
-    REFERRER_NOTIFIED_KEY,
+    REFERRER_PENDING_KEY,
     mark_notified,
     mark_referrer_notified,
 )
@@ -104,7 +105,11 @@ async def deliver_pending_credit_notifications(bot: Bot) -> int:
                 select(Order.id)
                 .where(
                     Order.status == "paid",
-                    Order.metadata_[LATE_NOTIFY_PENDING_KEY].astext == "true",
+                    or_(
+                        Order.metadata_[LATE_NOTIFY_PENDING_KEY].astext
+                        == "true",
+                        Order.metadata_.has_key(REFERRER_PENDING_KEY),
+                    ),
                 )
                 .order_by(Order.created_at.asc())
                 .limit(CREDIT_NOTIFY_BATCH_SIZE)
@@ -208,186 +213,216 @@ async def _send_referrer_push(bot: Bot, referrer: dict) -> bool:
 
 
 async def _deliver_one(bot: Bot, order_id) -> bool:
-    """Deliver a single late push. True only on confirmed delivery.
+    """Deliver outstanding pushes for one order. True if anything delivered.
+
+    Owner and referrer debts are fully independent: the webhook/button may
+    clear the owner debt first without touching the referrer one.
 
     Three phases so the row lock is never held during Telegram I/O:
 
     1. Snapshot (short read-only session): eligibility + plain scalars.
-    2. Send (no session at all): owner push, then referrer push.
-    3. Finalize (brief locked session): re-check the debt is still open
+    2. Send (no session at all): owner push and/or referrer push.
+    3. Finalize (brief locked session): re-check each debt is still open
        (a concurrent webhook/button may have delivered first), then clear
        markers or record the failed attempt.
     """
-    snap = await _snapshot_eligible(order_id)
+    snap = await _snapshot(order_id)
     if snap is None:
         return False
-    if snap["outcome"] == "wait":
+    owner, ref = snap["owner"], snap["referrer"]
+    if owner is None and ref is None:
         return False
-    if snap["outcome"] == "anomaly":
+    if owner is not None and owner["kind"] == "wait":
+        return False
+    if owner is not None and owner["kind"] == "anomaly":
         await _finalize_attempt(order_id)
         return False
-    if snap["outcome"] == "drop":
-        await _drop_debt(order_id)
-        return False
+    if owner is not None and owner["kind"] == "drop":
+        await _drop_debts(order_id, owner=True, referrer=False)
+        owner = None
+        if ref is None:
+            return False
+    if ref is not None and ref["kind"] == "drop":
+        await _drop_debts(order_id, owner=False, referrer=True)
+        ref = None
+        if owner is None:
+            return False
 
-    owner_ok = await _send_late_push(
-        bot,
-        snap["service_type"],
-        snap["order_fields"],
-        snap["telegram_id"],
-        snap["real_available"],
-        snap["bonus_available"],
+    owner_ok = (
+        await _send_late_push(
+            bot,
+            owner["service_type"],
+            owner["fields"],
+            owner["telegram_id"],
+            owner["real_available"],
+            owner["bonus_available"],
+        )
+        if owner is not None
+        else None
     )
-    referrer_ok = True
-    if owner_ok and snap["referrer"] is not None:
-        referrer_ok = await _send_referrer_push(bot, snap["referrer"])
-    elif snap["referrer"] is not None:
-        # Owner push failed and will be retried; the referrer push rides
-        # along with the next attempt instead of spamming separately.
-        referrer_ok = False
-
-    return await _finalize_delivery(
-        order_id, owner_ok=owner_ok, referrer_ok=referrer_ok,
-        referrer_pending=snap["referrer"] is not None,
+    ref_ok = (
+        await _send_referrer_push(bot, ref) if ref is not None else None
     )
+    return await _finalize_delivery(order_id, owner_ok, ref_ok)
 
 
-async def _snapshot_eligible(order_id) -> dict | None:
-    """Read-only eligibility snapshot. None = nothing to do (no writes)."""
+async def _snapshot(order_id) -> dict | None:
+    """Read-only snapshot of both debts. None = nothing to do (no writes)."""
     async with session_scope() as session:
         order = await session.get(Order, order_id)
         if order is None:
             return None
         meta = dict(order.metadata_ or {})
-        if not meta.get(LATE_NOTIFY_PENDING_KEY):
-            return None
-
-        # Status is re-checked under lock at finalize time as well; an early
-        # drop here avoids wasting a send on an already-refunded order.
-        if order.status != "paid":
-            return {"outcome": "drop"}
-
-        # Still held (no release yet): money has not moved, stay silent and
-        # do not consume attempts — the release will re-arm the debt.
-        if meta.get("settlement_held"):
-            return {"outcome": "wait"}
-
-        # Never notify without an actual credit in the ledger.
-        has_credit = await session.scalar(
-            select(func.count(AccountLedgerEntry.id)).where(
-                AccountLedgerEntry.order_id == order.id,
-                AccountLedgerEntry.entry_type == "payment_credit",
-            )
-        )
-        if not has_credit:
-            logger.warning(
-                "Credit-notify skips order %s: paid but no payment_credit "
-                "(pre-flight 3B owns this anomaly)",
-                order.id,
-            )
-            return {"outcome": "anomaly"}
-
-        user = await session.get(User, order.user_id)
-        # Already synced as blocked by another path (broadcast, WI traffic,
-        # expiry notifications): do not burn attempts on a walled user.
-        if user is None or not user.telegram_id or user.is_bot_blocked:
-            return {"outcome": "drop"}
+        owner = None
+        if meta.get(LATE_NOTIFY_PENDING_KEY):
+            # Status is re-checked under lock at finalize time as well; an
+            # early drop here avoids wasting a send on a refunded order.
+            if order.status != "paid":
+                owner = {"kind": "drop"}
+            elif meta.get("settlement_held"):
+                # Still held (no release yet): money has not moved, stay
+                # silent and do not consume attempts — the release re-arms.
+                owner = {"kind": "wait"}
+            else:
+                # Never notify without an actual credit in the ledger.
+                has_credit = await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.order_id == order.id,
+                        AccountLedgerEntry.entry_type == "payment_credit",
+                    )
+                )
+                if not has_credit:
+                    logger.warning(
+                        "Credit-notify skips order %s: paid but no "
+                        "payment_credit (pre-flight 3B owns this anomaly)",
+                        order.id,
+                    )
+                    owner = {"kind": "anomaly"}
+                else:
+                    user = await session.get(User, order.user_id)
+                    # Already synced as blocked by another path (broadcast,
+                    # WI traffic, expiry notifications): do not burn attempts
+                    # on a walled user.
+                    if (
+                        user is None
+                        or not user.telegram_id
+                        or user.is_bot_blocked
+                    ):
+                        owner = {"kind": "drop"}
+                    else:
+                        balance = await get_account_balance(
+                            session, user_id=user.id
+                        )
+                        owner = {
+                            "kind": "send",
+                            "service_type": order.service_type,
+                            "fields": {
+                                "id": order.id,
+                                "amount_rub": order.amount_rub,
+                                "duration_days": order.duration_days,
+                                "device_limit": order.device_limit,
+                                "context": (order.metadata_ or {}).get(
+                                    "context"
+                                ),
+                                "is_tariff_change": bool(
+                                    (order.metadata_ or {}).get(
+                                        "is_tariff_change"
+                                    )
+                                ),
+                            },
+                            "telegram_id": user.telegram_id,
+                            "real_available": int(balance.real_available),
+                            "bonus_available": int(balance.bonus_available),
+                        }
 
         referrer = None
-        if (
-            order.service_type == "topup"
-            and not meta.get(REFERRER_NOTIFIED_KEY)
-        ):
-            referrer = await _find_unnotified_referrer(session, order)
+        debt = meta.get(REFERRER_PENDING_KEY)
+        if isinstance(debt, dict) and debt.get("user_id") is not None:
+            ref_user = await session.get(User, debt["user_id"])
+            try:
+                bonus = int(Decimal(str(debt.get("bonus", "0"))))
+            except (InvalidOperation, TypeError, ValueError):
+                bonus = 0
+            if (
+                ref_user is None
+                or not ref_user.telegram_id
+                or ref_user.is_bot_blocked
+                or bonus <= 0
+            ):
+                referrer = {"kind": "drop"}
+            else:
+                referrer = {
+                    "kind": "send",
+                    "telegram_id": ref_user.telegram_id,
+                    "bonus": bonus,
+                }
 
-        balance = await get_account_balance(session, user_id=user.id)
-        return {
-            "outcome": "send",
-            "service_type": order.service_type,
-            "order_fields": {
-                "id": order.id,
-                "amount_rub": order.amount_rub,
-                "duration_days": order.duration_days,
-                "device_limit": order.device_limit,
-                "context": (order.metadata_ or {}).get("context"),
-                "is_tariff_change": bool(
-                    (order.metadata_ or {}).get("is_tariff_change")
-                ),
-            },
-            "user_id": user.id,
-            "telegram_id": user.telegram_id,
-            "real_available": int(balance.real_available),
-            "bonus_available": int(balance.bonus_available),
-            "referrer": referrer,
-        }
-
-
-async def _find_unnotified_referrer(session, order: Order) -> dict | None:
-    """Find a referral bonus minted by this order whose owner is reachable."""
-    rows = (
-        await session.execute(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.entry_type == "admin_adjustment",
-                AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.user_id != order.user_id,
-                AccountLedgerEntry.metadata_["topup_order_id"].astext
-                == str(order.id),
-            )
-        )
-    ).scalars().all()
-    for entry in rows:
-        user = await session.get(User, entry.user_id)
-        if user is None or not user.telegram_id or user.is_bot_blocked:
-            continue
-        return {
-            "user_id": user.id,
-            "telegram_id": user.telegram_id,
-            "bonus": entry.amount,
-        }
-    return None
+        if owner is None and referrer is None:
+            return None
+        return {"owner": owner, "referrer": referrer}
 
 
 async def _finalize_delivery(
-    order_id, *, owner_ok: bool, referrer_ok: bool, referrer_pending: bool
+    order_id, owner_ok: bool | None, ref_ok: bool | None
 ) -> bool:
-    """Re-check the debt under a brief row lock, then clear or count."""
+    """Re-check each debt under a brief row lock, then clear or count."""
+    delivered = False
     async with session_scope() as session:
         order = await session.get(Order, order_id, with_for_update=True)
         if order is None:
             return False
         meta = dict(order.metadata_ or {})
-        if not meta.get(LATE_NOTIFY_PENDING_KEY):
-            # Delivered concurrently (webhook/button) while we were sending.
-            return False
-        if order.status != "paid":
+
+        if owner_ok is not None and meta.get(LATE_NOTIFY_PENDING_KEY):
+            if order.status != "paid":
+                mark_notified(order)
+                logger.info(
+                    "Credit-notify drops order %s: status is %s, not paid",
+                    order.id,
+                    order.status,
+                )
+            elif owner_ok:
+                mark_notified(order)
+                logger.info(
+                    "Credit-notify delivered late push for order %s", order.id
+                )
+                delivered = True
+            elif _note_failed_attempt(order, meta) is None:
+                mark_referrer_notified(order)
+                logger.warning(
+                    "Credit-notify gives up on order %s", order.id
+                )
+
+        if ref_ok is not None and meta.get(REFERRER_PENDING_KEY):
+            if order.status != "paid":
+                mark_referrer_notified(order)
+            elif ref_ok:
+                mark_referrer_notified(order)
+                logger.info(
+                    "Credit-notify delivered referrer push for order %s",
+                    order.id,
+                )
+                delivered = True
+            elif _note_failed_attempt(order, meta) is None:
+                mark_notified(order)
+                mark_referrer_notified(order)
+                logger.warning(
+                    "Credit-notify gives up on referrer push for order %s",
+                    order.id,
+                )
+    return delivered
+
+
+async def _drop_debts(order_id, *, owner: bool, referrer: bool) -> None:
+    """Clear dead debts under a brief row lock."""
+    async with session_scope() as session:
+        order = await session.get(Order, order_id, with_for_update=True)
+        if order is None:
+            return
+        if owner:
             mark_notified(order)
-            logger.info(
-                "Credit-notify drops order %s: status is %s, not paid",
-                order.id,
-                order.status,
-            )
-            return False
-        if not owner_ok:
-            return _note_failed_attempt(order, meta) is not None
-        mark_notified(order)
-        if referrer_pending and referrer_ok:
+        if referrer:
             mark_referrer_notified(order)
-        logger.info(
-            "Credit-notify delivered late push for order %s", order.id
-        )
-        return True
-
-
-async def _drop_debt(order_id) -> None:
-    """Clear a dead debt under a brief row lock (user gone/blocked/refunded)."""
-    async with session_scope() as session:
-        order = await session.get(Order, order_id, with_for_update=True)
-        if order is None:
-            return
-        meta = dict(order.metadata_ or {})
-        if not meta.get(LATE_NOTIFY_PENDING_KEY):
-            return
-        mark_notified(order)
         logger.info("Credit-notify drops dead debt for order %s", order.id)
 
 

@@ -735,6 +735,9 @@ class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
     async def test_mark_topup_order_paid_triggers_referral_bonus(
         self, mock_fulfill, mock_credit, mock_bonus
     ):
+        from services.referral_bonus import ReferralBonusGrantResult
+
+        mock_bonus.return_value = ReferralBonusGrantResult()
         session = AsyncMock(spec=AsyncSession)
         order_uuid = uuid.uuid4()
         order = Order(
@@ -2628,6 +2631,9 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         with patch("services.order_service.create_order_credit") as mock_credit, \
              patch("services.referral_bonus.grant_referral_bonus_for_topup") as mock_grant, \
              patch("services.order_service.FulfillmentService.fulfill_order") as mock_fulfill:
+            from services.referral_bonus import ReferralBonusGrantResult
+
+            mock_grant.return_value = ReferralBonusGrantResult()
             paid_order = await OrderService.mark_order_paid(session, order_uuid)
             self.assertIsNotNone(paid_order)
             self.assertEqual(paid_order.status, "paid")

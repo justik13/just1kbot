@@ -19,7 +19,7 @@ from database.models import Order
 
 LATE_NOTIFY_PENDING_KEY = "late_notify_pending"
 LATE_NOTIFY_ATTEMPTS_KEY = "late_notify_attempts"
-REFERRER_NOTIFIED_KEY = "referrer_notified"
+REFERRER_PENDING_KEY = "referrer_notify_pending"
 
 
 def mark_notify_pending(order: Order) -> None:
@@ -43,12 +43,7 @@ def mark_notified(order: Order) -> None:
 
 
 def mark_referrer_notified(order: Order) -> None:
-    """Record a delivered referrer push (no DB IO).
-
-    Unlike the owner debt (cleared on delivery), this marker is SET: bonus
-    ledger entries are stable, so without a success memory every worker pass
-    would resend the referrer push.
-    """
+    """Clear the referrer-push debt after a confirmed delivery (no DB IO)."""
     meta = dict(order.metadata_ or {})
-    meta[REFERRER_NOTIFIED_KEY] = True
+    meta.pop(REFERRER_PENDING_KEY, None)
     order.metadata_ = meta

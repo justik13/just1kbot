@@ -99,12 +99,27 @@ class OrderService:
         if order.service_type == "topup":
             from services.referral_bonus import grant_referral_bonus_for_topup
 
-            await grant_referral_bonus_for_topup(
+            grant_result = await grant_referral_bonus_for_topup(
                 session,
                 purchaser_user_id=order.user_id,
                 order_id=str(order.id),
                 topup_amount=order.amount_rub,
             )
+            # Referrer push debt: the bonus money moved now, but the referrer
+            # is not looking at any screen. Armed only for genuinely new
+            # grants (never for historical orders, so no backfill spam);
+            # cleared by the credit-notify worker after delivery.
+            if (
+                grant_result.referrer_bonus > 0
+                and grant_result.referrer_user_id is not None
+            ):
+                referrer_meta = dict(order.metadata_ or {})
+                referrer_meta["referrer_notify_pending"] = {
+                    "user_id": grant_result.referrer_user_id,
+                    "telegram_id": grant_result.referrer_telegram_id,
+                    "bonus": str(grant_result.referrer_bonus),
+                }
+                order.metadata_ = referrer_meta
 
         # Fulfill benefits linearly
         await FulfillmentService.fulfill_order(session, order)
