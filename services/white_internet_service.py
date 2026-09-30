@@ -257,12 +257,16 @@ class WhiteInternetService:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
+            # Coerce once: the callers pass tariff_version.price_rub, tier_price,
+            # price or pack_price, and the shortage arithmetic must not depend on
+            # which of them happens to arrive as a Decimal.
+            amount = Decimal(price)
             return (
                 False,
                 insufficient_text.format(
-                    price=int(price),
+                    price=int(amount),
                     balance=balance_snap.available,
-                    shortage=max(price - balance_snap.available, Decimal(0)),
+                    shortage=max(amount - balance_snap.available, Decimal(0)),
                     **extra_message_kwargs,
                 ),
                 None,
