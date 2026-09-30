@@ -607,6 +607,42 @@
    ```
 4. **Защита префиксов от коллизий через модификатор `^~`:**
    В Nginx стандартные префиксные директивы (`location /path`) имеют более низкий приоритет, чем регулярные выражения (`location ~ \.ext$`). При наличии любых regex-правил запросы к XHTTP или подпискам могут непреднамеренно перехватываться. Использование `location ^~ ${XHTTP_PATH}` и `location ^~ /sub/wl` гарантирует немедленную остановку поиска регулярных выражений и бесперебойную передачу трафика в апстрим.
+5. **Пул соединений Upstream Keepalive (`keepalive 128`) против TIME_WAIT и исчерпания локальных сокетов:**
+   В схеме Bodiless GET Uplink полезная нагрузка разбивается на множество мелких чанков по 4096 байт, что порождает интенсивный поток коротких HTTP-запросов между Nginx и локальным процессом Xray-core (`127.0.0.1:8003`). Без использования пула соединений Nginx на каждый чанк открывает и закрывает отдельный TCP-сокет, что под нагрузкой приводит к лавинообразному росту сокетов в состоянии `TIME_WAIT` и фатальной ошибке `Cannot assign requested address`.
+   *Решение (архитектурный стандарт `CraftStick/node-installer-cdn`):*
+   ```nginx
+   upstream xray_xhttp_backend {
+       server 127.0.0.1:8003;
+       keepalive 128;
+   }
+   ```
+   В блоке `location`:
+   ```nginx
+   proxy_pass http://xray_xhttp_backend;
+   proxy_http_version 1.1;
+   proxy_set_header Connection "";
+   ```
+6. **Маскировка точного пути и защита от активных зондов (404 Trailing Slash Camouflage):**
+   Автоматические сканеры ЦСУ ГРЧЦ и поисковые боты выполняют активное зондирование подозрительных путей веб-сервера. Если зонд выполняет `GET /w_abcdef`, он получает естественный ответ `404 Not Found`. Трафик туннеля XHTTP всегда обращается к подпутям сессий (`/w_abcdef/default` или `/<path>/<uuid>/<seq>`), которые попадают в `location /w_abcdef/` и прозрачно проксируются в Xray:
+   ```nginx
+   location = /w_abcdef {
+       return 404;
+   }
+   location /w_abcdef/ {
+       proxy_pass http://xray_xhttp_backend;
+       ...
+   }
+   ```
+7. **Заголовок `CDN-Cache-Control` (RFC 9213) и гарантия отсутствия кеширования на Edge:**
+   Некоторые отечественные CDN-сервисы могут игнорировать стандартный заголовок `Cache-Control` из-за встроенных правил оптимизации статики. Передача стандартизированного заголовка `CDN-Cache-Control: no-store` на уровне HTTP-ответов Nginx жестко запрещает любым промежуточным кеширующим серверам сохранять пакетные стримы XHTTP:
+   ```nginx
+   add_header X-Accel-Buffering no always;
+   add_header Cache-Control "no-store, no-cache" always;
+   add_header CDN-Cache-Control "no-store" always;
+   add_header Pragma "no-cache" always;
+   add_header Expires "0" always;
+   add_header Accept-Ranges none always;
+   ```
 
 ### 3.5. Парадокс первичной доставки подписок (Bootstrap Paradox) и решение через CDN-проксирование
 
@@ -2463,6 +2499,10 @@ curl -fsSL https://cheburcheck.ru/install-probe.sh | sudo sh
 | **Клиент не может обновить подписку во время шатдауна** | URL подписки ведет на сторонний заблокированный хост (Bootstrap Paradox) | Настроить выдачу подписки строго через забеленный CDN: `https://cdn.YOUR_DOMAIN.COM/sub/wl/{token}` |
 | **HTTP 403 Forbidden на Origin** | Сработал Mobile-Only geo-фильтр (подключение через Wi-Fi/Ethernet или IP не опознан в пулах RIPEstat) | Проверить подключение через мобильную сеть LTE/5G либо обновить диапазоны через `/usr/local/bin/update-mobile-ranges.sh` |
 | **HTTP 504 Gateway Timeout (YC CDN)** | Origin не ответил за 5 секунд (превышен Origin response timeout CDN) | Проверить задержки и связность между Origin и Exit-сервером, отключить IPv6 на Origin (`sysctl net.ipv6.conf.all.disable_ipv6=1`) |
+| **По Wi-Fi работает, а на мобильной сети глухо (`ping n/a`)** | Домен для клиентов `cdn.domain.com` ошибочно указывает A-записью прямо на IP Origin-сервера вместо CNAME на техдомен CDN | Трафик идет мимо CDN. Заменить DNS-запись: строго `Type: CNAME`, `Name: cdn`, `Target: <технический домен YC CDN>`. Проверка: `getent ahostsv4 cdn.domain.com` обязан возвращать IP Anycast Яндекса |
+| **Утечка реального IP Origin через CT-логи** | Для поддомена Origin (`rnd.domain.com`) выпущен публичный Let's Encrypt, попавший в базы Certificate Transparency (`crt.sh`) | Использовать Wildcard-сертификат `*.domain.com` либо самоподписанный SSL на Origin (`self-signed`) с включенной опцией «Игнорировать сертификат источника» в панели Yandex Cloud CDN |
+| **Скрытый сбой Nginx / certbot (Гомоглифы)** | При настройке домена или пути случайно набраны визуально неотличимые кириллические буквы (`с`, `а`, `о`, `р`, `е`, `х`) | Проверить строку через IDNA/punycode или скрипт поиска не-латинских символов (`ord(ch) > 127`), перенабрать строку строго в английской раскладке |
+| **Массовые TIME_WAIT и `Cannot assign requested address`** | Нарезка Bodiless GET генерирует поток HTTP/1.1 запросов без повторного использования локальных сокетов | Настроить в Nginx пул соединений: `upstream xray_xhttp_backend { server 127.0.0.1:8003; keepalive 128; }` и `proxy_set_header Connection "";` |
 
 ### 9.1. Послойная изоляция сбоев: CDN vs Nginx vs Xray и специфика таймаутов (5-секундный лимит YC)
 
