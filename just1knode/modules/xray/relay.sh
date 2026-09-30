@@ -124,8 +124,8 @@ fi
 EOF
     chmod 755 /etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh
 
-    local pre_hook_cmd='if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then touch /run/just1knode_nginx_was_active && systemctl stop nginx 2>/dev/null || true; fi'
-    local post_hook_cmd='if [ -f /run/just1knode_nginx_was_active ]; then rm -f /run/just1knode_nginx_was_active; command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true; fi'
+    local pre_hook_cmd="sh -c 'if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then touch /run/just1knode_nginx_was_active && systemctl stop nginx 2>/dev/null || true; fi'"
+    local post_hook_cmd="sh -c 'if [ -f /run/just1knode_nginx_was_active ]; then rm -f /run/just1knode_nginx_was_active; command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true; fi'"
 
     # 2. Если действующий сертификат для этого домена УЖЕ существует на хосте — используем его!
     if [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" && -f "/etc/letsencrypt/live/${domain}/privkey.pem" ]]; then
@@ -716,7 +716,7 @@ heal_and_update_relay_config() {
     # 1. Автоматический перевод Relay на VLESS+TLS, если на хосте уже есть сертификат Let's Encrypt
     local le_domain=""
     local my_ip
-    my_ip="$(get_my_ip 2>/dev/null || hostname -I | awk '{print $1}')"
+    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
     local cur_sni
     cur_sni="$(get_state_val "sni" "")"
     local cert_dirs=(/etc/letsencrypt/live/*)
@@ -729,15 +729,30 @@ heal_and_update_relay_config() {
                     if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && "$cur_sni" == "$cand" ]]; then
                         le_domain="$cand"
                         break
-                    elif [[ -n "$my_ip" ]] && validate_relay_dns "$cand" "$my_ip" >/dev/null 2>&1; then
-                        le_domain="$cand"
-                        break
+                    elif [[ -n "$my_ip" ]]; then
+                        # Бесшумная проверка DNS без интерактивного зависания
+                        local is_match
+                        is_match=$(python3 -c "
+import socket, sys
+domain, exp_ip = sys.argv[1], sys.argv[2]
+try:
+    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
+    ips = {x[4][0] for x in ai if x[4]}
+    print('YES' if exp_ip in ips else 'NO')
+except Exception:
+    print('NO')
+" "$cand" "$my_ip" 2>/dev/null || echo "NO")
+                        if [[ "$is_match" == "YES" ]]; then
+                            le_domain="$cand"
+                            break
+                        fi
                     fi
                 fi
             fi
         fi
     done
 
+    local cert_issued=0
     if [[ -n "$le_domain" ]]; then
         local cur_sec
         cur_sec="$(get_state_val "security" "")"
@@ -745,16 +760,19 @@ heal_and_update_relay_config() {
             log "✔ Обнаружен действующий сертификат Let's Encrypt для '$le_domain'."
             log "Автоматический перевод входящего туннеля Relay на VLESS + TLS (Zero-Manual-Commands)..."
             if issue_relay_tls_cert "$le_domain"; then
-                set_state_val "security" "tls"
-                set_state_val "sni" "$le_domain"
-                set_state_val "public_key" "-"
-                set_state_val "short_id" "-"
+                cert_issued=1
             fi
+        else
+            cert_issued=1
         fi
     fi
 
     local current_sec
-    current_sec="$(get_state_val "security" "")"
+    if [[ $cert_issued -eq 1 ]]; then
+        current_sec="tls"
+    else
+        current_sec="$(get_state_val "security" "")"
+    fi
 
     if ! python3 -c "
 import json, os, sys, tempfile
@@ -863,5 +881,14 @@ EOF
     fi
 
     manifest_commit
+
+    # Синхронизируем state.json строго ПОСЛЕ успешного теста и запуска Xray:
+    if [[ $cert_issued -eq 1 && "$current_sec" == "tls" ]]; then
+        set_state_val "security" "tls"
+        set_state_val "sni" "$le_domain"
+        set_state_val "public_key" "-"
+        set_state_val "short_id" "-"
+    fi
+
     log "Оптимизация и обновление конфигурации Relay завершены успешно!"
 }

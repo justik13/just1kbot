@@ -906,11 +906,17 @@ if not any(ob.get('tag') == 'just1k-wl-api' for ob in outbounds):
     })
 
 # 1.5. Авто-миграция Relay-узлов с REALITY / google.com на VLESS+TLS (Zero-Manual-Commands)
-root_domain = s_data.get('bot_domain') or ''
-if not root_domain and s_data.get('domain'):
-    parts = str(s_data.get('domain')).split('.')
+root_domains = []
+raw_bot_domain = str(s_data.get('bot_domain') or '').strip()
+raw_domain = str(s_data.get('domain') or '').strip()
+for d_str in (raw_bot_domain, raw_domain):
+    if not d_str or d_str == '-': continue
+    parts = d_str.split('.')
     if len(parts) >= 2:
-        root_domain = '.'.join(parts[-2:])
+        root_domains.append('.'.join(parts[-2:]))
+    if len(parts) >= 3:
+        root_domains.append('.'.join(parts[-3:]))
+root_domains = list(dict.fromkeys(root_domains))
 
 relays_modified = False
 for r in relays:
@@ -924,8 +930,8 @@ for r in relays:
     if is_google_or_reality and code and ip:
         matched_domain = None
         cand_domains = []
-        if root_domain:
-            cand_domains.append((str(code) + '.' + str(root_domain)).lower())
+        for rd in root_domains:
+            cand_domains.append((str(code) + '.' + rd).lower())
         if cur_sni and ('google.com' not in cur_sni.lower()) and cur_sni.lower() not in cand_domains:
             cand_domains.append(cur_sni.lower())
 
@@ -935,7 +941,7 @@ for r in relays:
                 addr_infos = socket.getaddrinfo(cand, None, socket.AF_INET)
                 ips = {ai[4][0] for ai in addr_infos}
                 if ip in ips:
-                    # Проверяем, что Relay уже слушает VLESS TLS на своем порту
+                    # Проверяем, что Relay уже слушает VLESS TLS на своем порту и отдает валидный сертификат
                     relay_port = int(r.get('port', 10443))
                     tls_ok = False
                     try:
@@ -943,8 +949,6 @@ for r in relays:
                         with socket.create_connection((ip, relay_port), timeout=2.5) as s:
                             with ctx.wrap_socket(s, server_hostname=cand) as ss:
                                 tls_ok = True
-                    except ssl.SSLCertVerificationError:
-                        tls_ok = True
                     except Exception:
                         tls_ok = False
 

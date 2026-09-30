@@ -2416,7 +2416,7 @@ remove_traffic_watchdog_timer
     def test_heal_and_update_relay_config_auto_migrates_tls_on_cert_found(self):
         """Verify heal_and_update_relay_config validates domain before selecting cert and guards TLS inbound."""
         relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
-        self.assertIn("validate_relay_dns \"$cand\" \"$my_ip\"", relay_sh)
+        self.assertIn("ai = socket.getaddrinfo(domain, None, socket.AF_INET)", relay_sh)
         self.assertIn("Автоматический перевод входящего туннеля Relay на VLESS + TLS", relay_sh)
         self.assertIn("tls_cert_file = '/usr/local/etc/xray/tls/fullchain.pem'", relay_sh)
         self.assertIn("if sec_mode == 'tls' and os.path.exists(tls_cert_file) and os.path.exists(tls_key_file):", relay_sh)
