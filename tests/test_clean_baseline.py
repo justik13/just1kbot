@@ -54,6 +54,25 @@ class CleanBaselineTests(unittest.TestCase):
         # And payments must survive: the admin UI and dashboard still read it.
         self.assertNotIn("DROP TABLE IF EXISTS public.payments", source)
 
+    def test_legacy_downgrades_tolerate_dropped_tables(self):
+        """Downgrades touching dropped tables must be guarded by to_regclass.
+
+        Migration 0032 removes the banking tables without recreating them, so
+        every older downgrade that names one must skip itself when the table
+        is gone — otherwise `alembic downgrade base` aborts mid-chain. This
+        pins the guards (execution itself is covered by the CI downgrade).
+        """
+        for filename, table in (
+            ("0004_referral_entitlements.py", "entitlement_entries"),
+            ("0012_payment_debits_and_audit_target_idx.py", "payment_events"),
+            ("0017_white_internet_durations.py", "paid_value_ledger"),
+            ("0027_backfill_entitlements.py", "entitlement_entries"),
+        ):
+            with self.subTest(migration=filename):
+                source = (VERSIONS / filename).read_text(encoding="utf-8")
+                self.assertIn("to_regclass", source)
+                self.assertIn(table, source)
+
 
 if __name__ == "__main__":
     unittest.main()

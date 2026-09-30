@@ -699,21 +699,27 @@ class OrderService:
                 refund_amount = result.amount_rub
             else:
                 # The gateway payload carries no amount (amount.value missing).
-                # Falling back to the FULL order amount here would overshoot the
-                # cumulative total when partial refunds were already recorded
-                # (so_far + full_amount > order_amount → false full refund +
-                # oversized ledger debit + premature revoke). Assume only the
-                # not-yet-refunded remainder was returned.
-                refund_amount = max(Decimal("0"), order.amount_rub - refunded_so_far)
-                logger.warning(
-                    "Refund %s for order %s has no amount in payload, "
-                    "assuming remainder %s (order %s, refunded so far %s)",
+                # YooKassa always sends amount on refund.succeeded, so this is
+                # a malformed event: fail closed (defer to retry/manual
+                # review) instead of assuming any amount. Assuming the
+                # remainder would always exactly close the order and could
+                # wrongly revoke service on untrusted data.
+                logger.error(
+                    "Refund %s for order %s has no amount in payload "
+                    "(refunded so far %s of %s): "
+                    "deferring to retry/manual review",
                     result.external_id,
                     order.id,
-                    refund_amount,
-                    order.amount_rub,
                     refunded_so_far,
+                    order.amount_rub,
                 )
+                order_meta = dict(order.metadata_ or {})
+                order_meta["refund_amount_missing"] = str(
+                    result.external_id or "unknown"
+                )
+                order.metadata_ = order_meta
+                await session.flush()
+                return None
 
             # Deduplication for the exact same refund event
             if result.external_id and result.external_id in processed_refund_ids:

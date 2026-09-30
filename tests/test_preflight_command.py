@@ -104,6 +104,16 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
         "GROUP BY user_id HAVING SUM(amount) < 0) AS neg",
     ),
     (
+        "3G_REFUND_DEBIT_EXCEEDS_CREDIT",
+        "SELECT '3G_REFUND_DEBIT_EXCEEDS_CREDIT' AS block, CASE WHEN count(*) = 0 "
+        "THEN 'OK (0 violations)' ELSE 'CRITICAL: HAS VIOLATIONS n=' || count(*) END AS verdict "
+        "FROM orders o WHERE o.status IN ('paid', 'refunded') AND ("
+        "SELECT COALESCE(SUM(-l.amount), 0) FROM account_ledger_entries l "
+        "WHERE l.order_id = o.id AND l.entry_type IN ('refund_debit', 'chargeback_debit')"
+        ") > (SELECT COALESCE(SUM(l2.amount), 0) FROM account_ledger_entries l2 "
+        "WHERE l2.order_id = o.id AND l2.entry_type = 'payment_credit')",
+    ),
+    (
         "3F_ACCOUNTS_ON_HOLD",
         "SELECT '3F_ACCOUNTS_ON_HOLD' AS block, CASE WHEN count(*) = 0 "
         "THEN 'OK (clean)' ELSE 'WARN: ACCOUNTS ON HOLD n=' || count(*) END AS verdict "
@@ -280,6 +290,177 @@ class TestPreflightStatementsExecute(unittest.IsolatedAsyncioTestCase):
         verdict = await self._verdict_for(dict(POSTFLIGHT_STATEMENTS)["1_MIGRATION_HEAD"])
         self.assertEqual(verdict, "OK", f"alembic_version is not at {EXPECTED_HEAD}")
 
+    async def _seed_user(self, conn, telegram_id: int) -> int:
+        # Explicit values: several NOT NULL columns rely on Python-side
+        # defaults only, so a bare (telegram_id) insert would fail.
+        row = (
+            await conn.execute(
+                text(
+                    "INSERT INTO users (telegram_id, is_deleted, is_banned, "
+                    "is_bot_blocked, device_limit, notification_retry_count, "
+                    "notified_3d, notified_1d, notified_2h, notified_expired, "
+                    "notified_grace_12h, device_creations_today, created_at) "
+                    "VALUES (:tg, false, false, false, 0, 0, false, false, "
+                    "false, false, false, 0, now()) RETURNING id"
+                ),
+                {"tg": telegram_id},
+            )
+        ).one()
+        return int(row[0])
+
+    async def _seed_order(
+        self, conn, user_id: int, amount: str = "200"
+    ) -> str:
+        row = (
+            await conn.execute(
+                text(
+                    "INSERT INTO orders (id, user_id, service_type, amount_rub, "
+                    "payment_method, status, metadata) VALUES "
+                    "(gen_random_uuid(), :uid, 'topup', :amt, 'yookassa', "
+                    "'paid', '{}'::jsonb) RETURNING id"
+                ),
+                {"uid": user_id, "amt": amount},
+            )
+        ).one()
+        return str(row[0])
+
+    async def _seed_ledger(
+        self,
+        conn,
+        user_id: int,
+        entry_type: str,
+        amount: str,
+        order_id: str | None,
+        key: str,
+        ledger_id: int,
+    ) -> None:
+        await conn.execute(
+            text(
+                "INSERT INTO account_ledger_entries (id, user_id, entry_type, "
+                "amount, currency, order_id, idempotency_key) VALUES "
+                "(:lid, :uid, :etype, :amt, 'RUB', "
+                "CAST(:oid AS uuid), :key)"
+            ),
+            {
+                "lid": ledger_id,
+                "uid": user_id,
+                "etype": entry_type,
+                "amt": amount,
+                "oid": order_id,
+                "key": key,
+            },
+        )
+
+    async def _seed_hazard(self, kind: str):
+        """Insert one synthetic violation; returns an async cleanup closure."""
+        import random
+        import uuid as uuid_lib
+
+        tag = uuid_lib.uuid4().hex[:12]
+        async with self.engine.begin() as conn:
+            tg = 7900000000000 + random.randint(1, 999999999)
+            user_id = await self._seed_user(conn, tg)
+            order_id = await self._seed_order(conn, user_id)
+            if kind == "uncredited":
+                pass
+            elif kind == "desync":
+                await self._seed_ledger(
+                    conn, user_id, "payment_credit", "199", order_id,
+                    f"preflight-test-{tag}", random.randint(10**12, 10**13),
+                )
+            elif kind == "negative":
+                await conn.execute(
+                    text("DELETE FROM orders WHERE id = CAST(:oid AS uuid)"),
+                    {"oid": order_id},
+                )
+                order_id = None
+                await self._seed_ledger(
+                    conn, user_id, "admin_adjustment", "-5", None,
+                    f"preflight-test-{tag}", random.randint(10**12, 10**13),
+                )
+            elif kind == "overrefund":
+                await self._seed_ledger(
+                    conn, user_id, "payment_credit", "200", order_id,
+                    f"preflight-test-{tag}-c", random.randint(10**12, 10**13),
+                )
+                await self._seed_ledger(
+                    conn, user_id, "refund_debit", "-250", order_id,
+                    f"preflight-test-{tag}-r", random.randint(10**12, 10**13),
+                )
+            else:
+                raise AssertionError(f"unknown hazard {kind}")
+
+        async def cleanup():
+            async with self.engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "DELETE FROM account_ledger_entries WHERE user_id = :uid"
+                    ),
+                    {"uid": user_id},
+                )
+                if order_id is not None:
+                    await conn.execute(
+                        text("DELETE FROM orders WHERE id = CAST(:oid AS uuid)"),
+                        {"oid": order_id},
+                    )
+                await conn.execute(
+                    text("DELETE FROM users WHERE id = :uid"), {"uid": user_id}
+                )
+
+        return cleanup
+
+    async def test_hazard_uncredited_topup_is_critical(self):
+        cleanup = await self._seed_hazard("uncredited")
+        try:
+            verdict = await self._verdict_for(
+                dict(PREFLIGHT_STATEMENTS)["3B_PAID_TOPUP_NOT_CREDITED"]
+            )
+            self.assertTrue(
+                verdict.startswith("CRITICAL"),
+                f"3B must fire on uncredited topup, got: {verdict}",
+            )
+        finally:
+            await cleanup()
+
+    async def test_hazard_desync_is_critical(self):
+        cleanup = await self._seed_hazard("desync")
+        try:
+            verdict = await self._verdict_for(
+                dict(PREFLIGHT_STATEMENTS)["3C_CREDIT_AMOUNT_DESYNC"]
+            )
+            self.assertTrue(
+                verdict.startswith("CRITICAL"),
+                f"3C must fire on desync, got: {verdict}",
+            )
+        finally:
+            await cleanup()
+
+    async def test_hazard_negative_position_is_critical(self):
+        cleanup = await self._seed_hazard("negative")
+        try:
+            verdict = await self._verdict_for(
+                dict(PREFLIGHT_STATEMENTS)["3E_NEGATIVE_LEDGER_POSITIONS"]
+            )
+            self.assertTrue(
+                verdict.startswith("CRITICAL"),
+                f"3E must fire on negative position, got: {verdict}",
+            )
+        finally:
+            await cleanup()
+
+    async def test_hazard_overrefund_is_critical(self):
+        cleanup = await self._seed_hazard("overrefund")
+        try:
+            verdict = await self._verdict_for(
+                dict(PREFLIGHT_STATEMENTS)["3G_REFUND_DEBIT_EXCEEDS_CREDIT"]
+            )
+            self.assertTrue(
+                verdict.startswith("CRITICAL"),
+                f"3G must fire on over-refund, got: {verdict}",
+            )
+        finally:
+            await cleanup()
+
     async def test_financial_blocks_pass_on_clean_db(self):
         """Financial pre-flight blocks must report OK (0 violations) on a clean database."""
         statements = dict(PREFLIGHT_STATEMENTS)
@@ -288,6 +469,7 @@ class TestPreflightStatementsExecute(unittest.IsolatedAsyncioTestCase):
             "3B_PAID_TOPUP_NOT_CREDITED",
             "3C_CREDIT_AMOUNT_DESYNC",
             "3E_NEGATIVE_LEDGER_POSITIONS",
+            "3G_REFUND_DEBIT_EXCEEDS_CREDIT",
         ):
             verdict = await self._verdict_for(statements[label])
             with self.subTest(block=label):

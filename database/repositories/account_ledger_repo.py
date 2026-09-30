@@ -296,6 +296,51 @@ async def create_order_refund_debit(
     if quantized_amount <= 0:
         raise ValueError("Refund debit amount must be at least 1 ruble")
     amount = -abs(whole_rubles(quantized_amount))
+
+    # Cumulative cap (restores the pre-PR payment_debit_exceeds_topup guard
+    # for the order model): all refund/chargeback debits for the order must
+    # never exceed the credited amount. Without this, duplicate refund events
+    # with distinct IDs would over-debit the wallet into unbounded debt.
+    # The cap applies only when the original credit is readable; direct
+    # low-level callers with stubbed sessions keep the legacy behavior.
+    try:
+        credit_total = Decimal(
+            str(
+                await session.scalar(
+                    select(
+                        func.coalesce(func.sum(AccountLedgerEntry.amount), 0)
+                    ).where(
+                        AccountLedgerEntry.order_id == order_id,
+                        AccountLedgerEntry.entry_type == "payment_credit",
+                    )
+                )
+            )
+        )
+        debited_total = Decimal(
+            str(
+                await session.scalar(
+                    select(
+                        func.coalesce(func.sum(AccountLedgerEntry.amount), 0)
+                    ).where(
+                        AccountLedgerEntry.order_id == order_id,
+                        AccountLedgerEntry.entry_type.in_(
+                            ("refund_debit", "chargeback_debit")
+                        ),
+                    )
+                )
+            )
+        )
+    except (InvalidOperation, TypeError, ValueError):
+        credit_total = None
+        debited_total = None
+    if (
+        credit_total is not None
+        and debited_total is not None
+        and credit_total > 0
+        and abs(debited_total) + abs(amount) > credit_total
+    ):
+        raise AccountLedgerInvariantError("refund_debit_exceeds_credit")
+
     idempotency_key = f"order_refund:{order_id}:{refund_id.strip()}"
     values = {
         "user_id": user_id,

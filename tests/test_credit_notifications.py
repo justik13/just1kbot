@@ -151,12 +151,28 @@ def _scope_with(session):
     return scope
 
 
+def _empty_rows():
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    return result
+
+
 class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
     def _session(self, order, user, has_credit=1):
         session = AsyncMock(spec=AsyncSession)
-        session.get = AsyncMock(side_effect=[order, user])
+        session.get = AsyncMock(side_effect=[order, user, order, order])
         session.scalar = AsyncMock(return_value=has_credit)
+        session.execute = AsyncMock(return_value=_empty_rows())
         return session
+
+    def _balance(self, worker):
+        return patch.object(
+            worker,
+            "get_account_balance",
+            new=AsyncMock(
+                return_value=MagicMock(real_available=150, bonus_available=0)
+            ),
+        )
 
     async def test_delivers_and_clears_debt(self):
         from services.workers import credit_notifications as worker
@@ -167,6 +183,7 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 worker, "session_scope", return_value=_scope_with(session)
             ),
+            self._balance(worker),
             patch.object(
                 worker, "_send_late_push", new=AsyncMock(return_value=True)
             ) as mock_send,
@@ -195,11 +212,15 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(order.metadata_.get("late_notify_pending"))
         self.assertNotIn("late_notify_attempts", order.metadata_)
 
-    async def test_skips_uncredited_order(self):
+    async def test_skips_uncredited_order_with_bounded_attempts(self):
         from services.workers import credit_notifications as worker
 
         order = _topup_order(metadata_={"late_notify_pending": True})
-        session = self._session(order, _user(), has_credit=0)
+        session = AsyncMock(spec=AsyncSession)
+        # Anomaly path loads no user: snapshot order, then finalize order.
+        session.get = AsyncMock(side_effect=[order, order])
+        session.scalar = AsyncMock(return_value=0)
+        session.execute = AsyncMock(return_value=_empty_rows())
         with (
             patch.object(
                 worker, "session_scope", return_value=_scope_with(session)
@@ -210,6 +231,7 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
             mock_send.assert_not_called()
+        self.assertEqual(order.metadata_.get("late_notify_attempts"), 1)
         self.assertTrue(order.metadata_.get("late_notify_pending"))
 
     async def test_gives_up_after_max_attempts(self):
@@ -226,6 +248,7 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 worker, "session_scope", return_value=_scope_with(session)
             ),
+            self._balance(worker),
             patch.object(
                 worker, "_send_late_push", new=AsyncMock(return_value=False)
             ),
@@ -238,23 +261,25 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
 
         order = _topup_order(metadata_={"late_notify_pending": True})
         session = AsyncMock(spec=AsyncSession)
-        session.get = AsyncMock(side_effect=[order, None])
+        session.get = AsyncMock(side_effect=[order, None, order])
         session.scalar = AsyncMock(return_value=1)
+        session.execute = AsyncMock(return_value=_empty_rows())
         with patch.object(
             worker, "session_scope", return_value=_scope_with(session)
         ):
             self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
         self.assertNotIn("late_notify_pending", order.metadata_)
 
-    async def test_drops_debt_when_no_longer_paid(self):
-        """A refund landed after settlement: never send a 'credited' push."""
+    async def test_drops_debt_when_user_blocked(self):
         from services.workers import credit_notifications as worker
 
-        order = _topup_order(
-            status="refunded", metadata_={"late_notify_pending": True}
-        )
+        order = _topup_order(metadata_={"late_notify_pending": True})
         session = AsyncMock(spec=AsyncSession)
-        session.get = AsyncMock(return_value=order)
+        session.get = AsyncMock(
+            side_effect=[order, _user(is_bot_blocked=True), order]
+        )
+        session.scalar = AsyncMock(return_value=1)
+        session.execute = AsyncMock(return_value=_empty_rows())
         with (
             patch.object(
                 worker, "session_scope", return_value=_scope_with(session)
@@ -267,23 +292,90 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
             mock_send.assert_not_called()
         self.assertNotIn("late_notify_pending", order.metadata_)
 
+    async def test_drops_debt_when_no_longer_paid(self):
+        """A refund landed after settlement: never send a 'credited' push."""
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order(
+            status="refunded", metadata_={"late_notify_pending": True}
+        )
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(side_effect=[order, order])
+        with (
+            patch.object(
+                worker, "session_scope", return_value=_scope_with(session)
+            ),
+            patch.object(
+                worker, "_send_late_push", new=AsyncMock(return_value=True)
+            ) as mock_send,
+        ):
+            self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
+            mock_send.assert_not_called()
+        self.assertNotIn("late_notify_pending", order.metadata_)
+
+    async def test_referrer_push_sent_once_then_remembered(self):
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order(metadata_={"late_notify_pending": True})
+        session = self._session(order, _user())
+        bonus_entry = MagicMock(user_id=20, amount=Decimal("15"))
+        rows = MagicMock()
+        rows.scalars.return_value.all.return_value = [bonus_entry]
+        session.execute = AsyncMock(return_value=rows)
+        session.get = AsyncMock(
+            side_effect=[order, _user(), _user(id=20), order]
+        )
+        with (
+            patch.object(
+                worker, "session_scope", return_value=_scope_with(session)
+            ),
+            self._balance(worker),
+            patch.object(
+                worker, "_send_late_push", new=AsyncMock(return_value=True)
+            ),
+            patch.object(
+                worker, "_send_referrer_push", new=AsyncMock(return_value=True)
+            ) as mock_ref,
+        ):
+            self.assertTrue(await worker._deliver_one(AsyncMock(), order.id))
+            mock_ref.assert_awaited_once()
+        self.assertNotIn("late_notify_pending", order.metadata_)
+        self.assertTrue(order.metadata_.get("referrer_notified"))
+
+    async def test_referrer_skipped_when_already_notified(self):
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order(
+            metadata_={"late_notify_pending": True, "referrer_notified": True}
+        )
+        session = self._session(order, _user())
+        with (
+            patch.object(
+                worker, "session_scope", return_value=_scope_with(session)
+            ),
+            self._balance(worker),
+            patch.object(
+                worker, "_send_late_push", new=AsyncMock(return_value=True)
+            ),
+            patch.object(
+                worker, "_send_referrer_push", new=AsyncMock(return_value=True)
+            ) as mock_ref,
+        ):
+            self.assertTrue(await worker._deliver_one(AsyncMock(), order.id))
+            mock_ref.assert_not_called()
+        self.assertNotIn("late_notify_pending", order.metadata_)
+
     async def test_late_push_topup_names_credited_notice(self):
         from services.workers import credit_notifications as worker
 
-        order = _topup_order()
-        user = _user()
-        session = AsyncMock(spec=AsyncSession)
-        snapshot = MagicMock(real_available=Decimal("150"))
-        with (
-            patch.object(
-                worker, "get_account_balance", new=AsyncMock(return_value=snapshot)
-            ),
-            patch.object(
-                worker, "safe_send_message", new=AsyncMock(return_value=99)
-            ) as mock_send,
-        ):
+        with patch.object(
+            worker, "safe_send_message", new=AsyncMock(return_value=99)
+        ) as mock_send:
             self.assertTrue(
-                await worker._send_late_push(AsyncMock(), session, order, user)
+                await worker._send_late_push(
+                    AsyncMock(), "topup",
+                    {"context": None}, 123, 150, 0,
+                )
             )
             text = mock_send.await_args[0][2]
         from bot import texts
@@ -295,23 +387,40 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
         from bot.formatters import get_tariff_display_name
         from services.workers import credit_notifications as worker
 
-        order = _topup_order(service_type="awg", device_limit=2)
-        user = _user()
-        session = AsyncMock(spec=AsyncSession)
-        snapshot = MagicMock(real_available=Decimal("0"), bonus_available=Decimal("0"))
-        with (
-            patch.object(
-                worker, "get_account_balance", new=AsyncMock(return_value=snapshot)
-            ),
-            patch.object(
-                worker, "safe_send_message", new=AsyncMock(return_value=99)
-            ) as mock_send,
-        ):
+        fields = {
+            "context": None,
+            "device_limit": 2,
+            "is_tariff_change": False,
+            "duration_days": 30,
+            "amount_rub": Decimal("200"),
+        }
+        with patch.object(
+            worker, "safe_send_message", new=AsyncMock(return_value=99)
+        ) as mock_send:
             self.assertTrue(
-                await worker._send_late_push(AsyncMock(), session, order, user)
+                await worker._send_late_push(
+                    AsyncMock(), "awg", fields, 123, 100, 0
+                )
             )
             text = mock_send.await_args[0][2]
         self.assertIn(get_tariff_display_name(2), text)
+
+    async def test_referrer_push_names_bonus(self):
+        from services.workers import credit_notifications as worker
+
+        with patch.object(
+            worker, "safe_send_message", new=AsyncMock(return_value=99)
+        ) as mock_send:
+            self.assertTrue(
+                await worker._send_referrer_push(
+                    AsyncMock(), {"telegram_id": 555, "bonus": Decimal("15")}
+                )
+            )
+            text = mock_send.await_args[0][2]
+        from bot import texts
+
+        self.assertIn("15", text)
+        self.assertTrue(len(texts.REFERRAL_BONUS_ACCREDITED) > 0)
 
     async def test_batch_counts_deliveries(self):
         from services.workers import credit_notifications as worker

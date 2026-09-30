@@ -399,6 +399,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
             order_id=str(order_uuid),
             is_paid=False,
             is_refunded=True,
+            amount_rub=Decimal("200.00"),
             external_id="ext-pay-888",
         )
         mock_gw_factory.return_value = mock_gw
@@ -1440,14 +1441,14 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
     @patch("services.order_service.FulfillmentService.revoke_order")
     @patch("services.order_service.create_order_refund_debit")
     @patch("services.order_service.get_payment_gateway")
-    async def test_process_webhook_event_refund_without_amount_uses_remainder(
+    async def test_process_webhook_event_refund_without_amount_defers(
         self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
     ):
-        """Refund payload without amount must not overshoot the cumulative total.
+        """Refund payload without amount is malformed: fail closed.
 
-        Order 200 with 80 already refunded + amount-less webhook must assume
-        the remainder (120), not the full order amount (which would record
-        280/200 and over-debit the ledger).
+        No ledger debit, no bonus reversal, no revoke, no status change —
+        the webhook returns None (retry) and the order is flagged for
+        manual review instead of being closed on an assumption.
         """
         mock_gw = AsyncMock()
         order_uuid = uuid.uuid4()
@@ -1477,26 +1478,35 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
 
         success = await OrderService.process_webhook_event(session, {"some": "payload"})
 
-        self.assertTrue(success)
-        self.assertEqual(order.status, "refunded")
-        self.assertEqual(Decimal(order.metadata_["refunded_amount_rub"]), Decimal("200"))
-        mock_refund_debit.assert_called_once_with(
-            session,
-            user_id=10,
-            amount_rub=Decimal("120"),
-            order_id=order_uuid,
-            refund_id="ext-pay-nonamount",
-            metadata={"source": "yookassa_refund"},
+        self.assertIsNone(success)
+        self.assertEqual(order.status, "paid")
+        self.assertEqual(
+            order.metadata_.get("refund_amount_missing"), "ext-pay-nonamount"
         )
-        mock_rev_bonus.assert_called_once_with(
-            session,
-            order_id=order_uuid,
-            refund_amount=Decimal("120"),
-            original_topup_amount=Decimal("200.00"),
-            total_refunded_amount=Decimal("200"),
-            refund_id="ext-pay-nonamount",
+        # Prior partial accounting untouched.
+        self.assertEqual(Decimal(order.metadata_["refunded_amount_rub"]), Decimal("80"))
+        mock_refund_debit.assert_not_called()
+        mock_rev_bonus.assert_not_called()
+        mock_revoke.assert_not_called()
+
+    async def test_process_webhook_event_refund_capped_at_credit(self):
+        """Duplicate refunds with distinct IDs cannot over-debit past credit."""
+        from database.repositories.account_ledger_repo import (
+            AccountLedgerInvariantError,
+            create_order_refund_debit,
         )
-        mock_revoke.assert_called_once_with(session, order)
+
+        session = AsyncMock(spec=AsyncSession)
+        # Existing debits already total 150 of 200 credited; new 100 overflows.
+        session.scalar = AsyncMock(side_effect=[Decimal("200"), Decimal("-150")])
+        with self.assertRaises(AccountLedgerInvariantError):
+            await create_order_refund_debit(
+                session,
+                user_id=10,
+                amount_rub=Decimal("100"),
+                order_id=uuid.uuid4(),
+                refund_id="ext-second",
+            )
 
     @patch("services.fulfillment_service.invalidate_user_cache")
     @patch("services.fulfillment_service.SubscriptionService.sync_access_state")
