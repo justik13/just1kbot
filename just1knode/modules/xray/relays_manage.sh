@@ -162,14 +162,51 @@ add_relay_node() {
     local port="${3:-10443}"
     local uuid="${4:-}"
     local code="${5:-de}"
-    local security_type="${6:-tls}"
-    local pubkey="${7:-}"
+    local arg6="${6:-}"
+    local arg7="${7:-}"
+    local arg8="${8:-}"
+    local arg9="${9:-}"
+    local arg10="${10:-}"
+
+    local security_type="tls"
+    local pubkey=""
+    local shortid=""
+    local sni=""
+    local badge=""
+
+    if [[ "$arg6" == "tls" || "$arg6" == "reality" ]]; then
+        security_type="$arg6"
+        pubkey="$arg7"
+        shortid="$arg8"
+        sni="$arg9"
+        badge="$arg10"
+    elif [[ -n "$arg6" && "$arg6" != "-" ]]; then
+        # Легаси-синтаксис (v2.1.2): 6-й аргумент являлся pubkey для REALITY
+        security_type="reality"
+        pubkey="$arg6"
+        shortid="$arg7"
+        sni="$arg8"
+        badge="$arg9"
+    else
+        # arg6 пустой или "-"
+        if [[ -n "$arg7" || -n "$arg8" ]]; then
+            security_type="reality"
+            pubkey="$arg7"
+            shortid="$arg8"
+            sni="$arg9"
+            badge="$arg10"
+        else
+            security_type="tls"
+            pubkey=""
+            shortid=""
+            sni="$arg9"
+            badge="$arg10"
+        fi
+    fi
+
     [[ "$pubkey" == "-" ]] && pubkey=""
-    local shortid="${8:-}"
     [[ "$shortid" == "-" ]] && shortid=""
-    local sni="${9:-}"
     [[ "$sni" == "-" ]] && sni=""
-    local badge="${10:-}"
 
     local role
     role="$(get_state_val "role")"
@@ -181,6 +218,35 @@ add_relay_node() {
         error "Имя, IP/Домен и UUID обязательны для добавления релея."
     fi
 
+    # Валидация специфичных параметров безопасности
+    if [[ "$security_type" == "tls" ]]; then
+        if [[ -z "$sni" ]]; then
+            if [[ -t 0 ]]; then
+                read -rp "Введите домен / SNI для релея в режиме TLS: " sni_in || true
+                sni="${sni_in:-}"
+            fi
+            if [[ -z "$sni" ]]; then
+                error "Для режима TLS обязательно указание домена (SNI). Укажите домен релея."
+                return 1
+            fi
+        fi
+    elif [[ "$security_type" == "reality" ]]; then
+        if [[ -z "$pubkey" ]]; then
+            error "Для режима REALITY обязательно указание публичного ключа (PublicKey)."
+            return 1
+        fi
+        if [[ -z "$sni" ]]; then
+            if [[ -t 0 ]]; then
+                read -rp "Введите домен / SNI для маскировки REALITY: " sni_in || true
+                sni="${sni_in:-}"
+            fi
+            if [[ -z "$sni" ]]; then
+                error "Для режима REALITY обязательно указание целевого SNI/домена."
+                return 1
+            fi
+        fi
+    fi
+
     # Санитизация кода страны во избежание path traversal
     if [[ ! "$code" =~ ^[a-zA-Z0-9_-]+$ ]]; then
         error "Недопустимый код страны: $code (разрешены только буквы, цифры, дефис и подчеркивание)."
@@ -190,6 +256,31 @@ add_relay_node() {
     secret_path="$(get_state_val "secret_base_path" "/stream")"
     if [[ -z "$secret_path" ]]; then
         secret_path="/stream"
+    fi
+
+    init_state_dir
+    local existing_relay_info
+    existing_relay_info=$(python3 -c "
+import json, os, sys
+rf = sys.argv[1]
+code = sys.argv[2]
+if os.path.exists(rf):
+    try:
+        with open(rf) as f:
+            for r in json.load(f):
+                if r.get('code') == code:
+                    print(f\"{r.get('name')}|{r.get('ip')}\")
+                    sys.exit(0)
+    except Exception:
+        pass
+" "$RELAYS_FILE" "$code" 2>/dev/null || true)
+
+    if [[ -n "$existing_relay_info" ]]; then
+        local old_name="${existing_relay_info%|*}"
+        local old_ip="${existing_relay_info#*|}"
+        if [[ "$old_ip" != "$ip" ]]; then
+            warn "Внимание: релей с кодом '$code' уже существует в реестре ($old_name, IP: $old_ip). Запись и маршрут будут перезаписаны новыми параметрами ($name, IP: $ip)."
+        fi
     fi
 
     acquire_just1knode_lock
@@ -934,10 +1025,19 @@ if new_sec == 'tls':
         'alpn': ['h2', 'http/1.1']
     }
 else:
+    st.pop('tlsSettings', None)
     rs = st.setdefault('realitySettings', {})
     rs['serverName'] = new_sni
     rs.setdefault('fingerprint', 'chrome')
     rs.setdefault('show', False)
+    if not rs.get('publicKey'):
+        # Check if stored in relays.json
+        pub = next((r.get('public_key') or r.get('pubkey') for r in relays if r.get('code') == matched_code and (r.get('public_key') or r.get('pubkey'))), None)
+        if pub and pub != '-':
+            rs['publicKey'] = pub
+        else:
+            print(f'ERROR: Outbound {out_tag} lacks publicKey for REALITY mode')
+            sys.exit(1)
 
 # Сохраняем обновленный config.json
 d = os.path.dirname(os.path.abspath(cfg_file))
@@ -1060,11 +1160,26 @@ try:
         tokens = tokens[1:]
     if len(tokens) >= 5:
         name, ip, port, uuid, code = tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]
-        sec = tokens[5] if len(tokens) > 5 else 'tls'
-        pk = tokens[6] if len(tokens) > 6 and tokens[6] != '-' else ''
-        sid = tokens[7] if len(tokens) > 7 and tokens[7] != '-' else ''
-        sni = tokens[8] if len(tokens) > 8 and tokens[8] != '-' else ''
-        badge = tokens[9] if len(tokens) > 9 else ''
+        arg5 = tokens[5] if len(tokens) > 5 else ''
+        if arg5 in ('tls', 'reality'):
+            sec = arg5
+            pk = tokens[6] if len(tokens) > 6 and tokens[6] != '-' else ''
+            sid = tokens[7] if len(tokens) > 7 and tokens[7] != '-' else ''
+            sni = tokens[8] if len(tokens) > 8 and tokens[8] != '-' else ''
+            badge = tokens[9] if len(tokens) > 9 else ''
+        elif arg5 and arg5 != '-':
+            # Legacy command: 6th token was pubkey for reality
+            sec = 'reality'
+            pk = arg5
+            sid = tokens[6] if len(tokens) > 6 and tokens[6] != '-' else ''
+            sni = tokens[7] if len(tokens) > 7 and tokens[7] != '-' else ''
+            badge = tokens[8] if len(tokens) > 8 else ''
+        else:
+            sec = 'tls'
+            pk = ''
+            sid = ''
+            sni = tokens[8] if len(tokens) > 8 and tokens[8] != '-' else ''
+            badge = tokens[9] if len(tokens) > 9 else ''
         print(' '.join(shlex.quote(x) for x in [name, ip, port, uuid, code, sec, pk, sid, sni, badge]))
     else:
         sys.exit(1)

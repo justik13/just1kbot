@@ -330,18 +330,55 @@ show_relay_credentials() {
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
     r_port="$(get_state_val "relay_port" "10443")"
     r_uuid="$(get_state_val "tunnel_uuid")"
-    r_sec="$(get_state_val "security" "tls")"
-    r_pubkey="$(get_state_val "public_key" "-")"
-    r_shortid="$(get_state_val "short_id" "-")"
+    r_sec="$(get_state_val "security" "")"
+    r_pubkey="$(get_state_val "public_key" "")"
+    r_shortid="$(get_state_val "short_id" "")"
     r_sni="$(get_state_val "sni" "")"
 
-    local detected_code="de"
+    # Определение режима и нормализация для узлов v2.1.2 (где security не сохранялось в state.json)
+    if [[ -z "$r_sec" ]]; then
+        if [[ -n "$r_pubkey" && "$r_pubkey" != "-" ]]; then
+            r_sec="reality"
+        elif [[ -f "$XRAY_CONFIG" ]]; then
+            r_sec="$(python3 -c "
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        cfg = json.load(f)
+    for ib in cfg.get('inbounds', []):
+        sec = ib.get('streamSettings', {}).get('security')
+        if sec in ('tls', 'reality'):
+            print(sec)
+            sys.exit(0)
+except Exception:
+    pass
+print('reality')
+" "$XRAY_CONFIG" 2>/dev/null || echo "reality")"
+        else
+            r_sec="reality"
+        fi
+        set_state_val "security" "$r_sec" 2>/dev/null || true
+    fi
+
+    [[ -z "$r_pubkey" ]] && r_pubkey="-"
+    [[ -z "$r_shortid" ]] && r_shortid="-"
+
+    local detected_code=""
     local geo_json
     geo_json="$(curl -s --max-time 3 "https://ipinfo.io/${my_ip}/json" 2>/dev/null || true)"
     if [[ -n "$geo_json" ]]; then
         local c_code
         c_code="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('country','').lower())" "$geo_json" 2>/dev/null || true)"
         [[ -n "$c_code" && "$c_code" != "ru" ]] && detected_code="$c_code"
+    fi
+    if [[ -z "$detected_code" && -n "$r_sni" ]]; then
+        local first_label="${r_sni%%.*}"
+        if [[ "$first_label" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            detected_code="${first_label,,}"
+        fi
+    fi
+    if [[ -z "$detected_code" ]]; then
+        detected_code="relay-01"
     fi
 
     echo -e "${BOLD}Скопируйте и выполните эту команду на вашем Origin-сервере:${NC}"
@@ -1123,7 +1160,7 @@ main_menu() {
         if [[ "$status" == "unconfigured" ]]; then
             echo -e "  Статус текущего сервера: ${BOLD}${YELLOW}⚪ НЕ НАСТРОЕН${NC}\n"
             echo -e "  ${BOLD}[1]${NC} 🌐 Установить Origin узел (Белый Интернет — Входной шлюз в РФ)"
-            echo -e "  ${BOLD}[2]${NC} 🛡️  Установить Relay узел (Белый Интернет — Зарубежный выход VLESS REALITY)"
+            echo -e "  ${BOLD}[2]${NC} 🛡️  Установить Relay узел (Белый Интернет — Зарубежный выход VLESS TLS)"
             echo -e "  ${BOLD}[3]${NC} ⚡ Настроить AmneziaWG узел (Зарубежный выход AmneziaWG API)"
             echo -e "  ${BOLD}[4]${NC} 🗑️  Полное удаление (Uninstall just1knode с сервера)"
             echo -e "  ${BOLD}[0]${NC} ❌ Выход"

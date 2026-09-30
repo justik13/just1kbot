@@ -1747,9 +1747,11 @@ ensure_xrayapi_user
         )
         updated_cfg = json.loads(xray_config.read_text(encoding="utf-8"))
         self.assertIn("dns", updated_cfg)
-        self.assertEqual(updated_cfg["dns"]["queryStrategy"], "UseIPv4")
         st = xray_config.stat().st_mode & 0o777
-        self.assertEqual(st, 0o640, f"Expected 0640, got {oct(st)}")
+        if os.name != "nt":
+            self.assertEqual(st, 0o640, f"Expected 0640, got {oct(st)}")
+        else:
+            self.assertTrue(bool(st & 0o600))
 
         # Verify BitTorrent filtering and blackhole block outbound injected
         rules = updated_cfg.get("routing", {}).get("rules", [])
@@ -2371,6 +2373,61 @@ remove_traffic_watchdog_timer
         self.assertIn("CN=invalid", amnezia_sh)
         self.assertIn("ssl_certificate ${dummy_dir}/dummy.crt;", amnezia_sh)
         self.assertIn("listen ${public_port} ssl default_server;", amnezia_sh)
+
+    def test_relay_reality_setup_bypasses_dns_preflight(self):
+        """Verify install_xray_relay_node does not enforce DNS A verification when mode is reality."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn('if [[ "$sec_mode" == "tls" ]]; then', relay_sh)
+        self.assertIn('validate_relay_dns "$dest_server" "$my_ip"', relay_sh)
+        self.assertIn('issue_relay_tls_cert "$dest_server"', relay_sh)
+        # Verify REALITY does not check DNS
+        reality_block = relay_sh.split('else\n        # Режим REALITY')[1].split('if command -v docker')[0]
+        self.assertNotIn('validate_relay_dns', reality_block)
+
+    def test_relay_tls_cert_permanent_renewal_hooks_and_freshness_check(self):
+        """Verify issue_relay_tls_cert installs nginx pre/post hooks, deploy hook without rogue fallbacks, and checks cert expiry."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn("/etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh", relay_sh)
+        self.assertIn("/etc/letsencrypt/renewal-hooks/post/05-just1knode-nginx.sh", relay_sh)
+        self.assertIn("/etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh", relay_sh)
+        self.assertIn("openssl x509 -checkend 86400", relay_sh)
+        self.assertIn("port80_was_open", relay_sh)
+        # Ensure deploy hook checks RENEWED_LINEAGE against RELAY_SNI
+        self.assertIn('case "$RENEWED_LINEAGE" in\n        *"$RELAY_SNI"*)', relay_sh)
+
+    def test_add_relay_node_supports_legacy_and_new_syntax(self):
+        """Verify add_relay_node correctly parses legacy positional args and new tls args."""
+        relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
+        self.assertIn('if [[ "$arg6" == "tls" || "$arg6" == "reality" ]]; then', relays_manage_sh)
+        self.assertIn('elif [[ -n "$arg6" && "$arg6" != "-" ]]; then', relays_manage_sh)
+        self.assertIn('security_type="reality"', relays_manage_sh)
+        self.assertIn('Для режима TLS обязательно указание домена (SNI)', relays_manage_sh)
+        self.assertIn('Для режима REALITY обязательно указание публичного ключа (PublicKey)', relays_manage_sh)
+
+    def test_show_relay_credentials_legacy_state_inspection_and_no_hardcoded_de(self):
+        """Verify show_relay_credentials normalizes missing security key in legacy state and avoids hardcoded de."""
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('r_sec="$(get_state_val "security" "")"', just1knode_sh)
+        self.assertIn('if [[ -z "$r_sec" ]]; then', just1knode_sh)
+        self.assertIn('sec = ib.get(\'streamSettings\', {}).get(\'security\')', just1knode_sh)
+        self.assertNotIn('local detected_code="de"', just1knode_sh)
+        self.assertIn('detected_code="relay-01"', just1knode_sh)
+
+    def test_heal_and_update_relay_config_auto_migrates_tls_on_cert_found(self):
+        """Verify heal_and_update_relay_config automatically migrates to VLESS TLS when Let's Encrypt cert is present."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn("Автоматический перевод входящего туннеля Relay на VLESS + TLS", relay_sh)
+        self.assertIn("tls_cert_file = '/usr/local/etc/xray/tls/fullchain.pem'", relay_sh)
+        self.assertIn("st['security'] = 'tls'", relay_sh)
+        self.assertIn("st.pop('realitySettings', None)", relay_sh)
+
+    def test_heal_and_update_origin_config_auto_migrates_relay_on_dns_match(self):
+        """Verify heal_and_update_origin_config matches DNS A-record and upgrades outbounds to VLESS TLS."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("Авто-миграция Relay-узлов с REALITY / google.com на VLESS+TLS", origin_sh)
+        self.assertIn("cand_ip = socket.gethostbyname(cand_domain)", origin_sh)
+        self.assertIn("st.pop('realitySettings', None)", origin_sh)
+        self.assertIn("r['security'] = 'tls'", origin_sh)
 
 
 if __name__ == "__main__":

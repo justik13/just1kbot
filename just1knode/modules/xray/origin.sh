@@ -905,6 +905,71 @@ if not any(ob.get('tag') == 'just1k-wl-api' for ob in outbounds):
         'protocol': 'blackhole'
     })
 
+# 1.5. Авто-миграция Relay-узлов с REALITY / google.com на VLESS+TLS (Zero-Manual-Commands)
+root_domain = s_data.get('bot_domain') or ''
+if not root_domain and s_data.get('domain'):
+    parts = str(s_data.get('domain')).split('.')
+    if len(parts) >= 2:
+        root_domain = '.'.join(parts[-2:])
+
+relays_modified = False
+for r in relays:
+    if not isinstance(r, dict): continue
+    code = r.get('code')
+    ip = r.get('ip')
+    cur_sni = str(r.get('sni') or '')
+    cur_sec = str(r.get('security') or 'reality')
+
+    is_google_or_reality = ('google.com' in cur_sni.lower()) or (cur_sec == 'reality') or (not cur_sni)
+    if is_google_or_reality and code and ip:
+        matched_domain = None
+        # Проверяем DNS A-запись вида {code}.{root_domain} (например: nl.example.com ➔ 198.51.100.1)
+        if root_domain:
+            cand_domain = (str(code) + '.' + str(root_domain)).lower()
+            try:
+                import socket
+                cand_ip = socket.gethostbyname(cand_domain)
+                if cand_ip == ip:
+                    matched_domain = cand_domain
+            except Exception:
+                pass
+
+        if not matched_domain and cur_sni and ('google.com' not in cur_sni.lower()):
+            matched_domain = cur_sni
+
+        if matched_domain:
+            print('[+] Авто-миграция Relay ' + str(code) + ': переключение на VLESS TLS (' + str(matched_domain) + ')')
+            r['sni'] = matched_domain
+            r['security'] = 'tls'
+            relays_modified = True
+            out_tag = 'just1k-wl-outbound-' + str(code)
+            for ob in outbounds:
+                if ob.get('tag') == out_tag:
+                    st = ob.setdefault('streamSettings', {})
+                    st['network'] = 'tcp'
+                    st['security'] = 'tls'
+                    st.pop('realitySettings', None)
+                    st['tlsSettings'] = {
+                        'serverName': matched_domain,
+                        'fingerprint': 'chrome',
+                        'alpn': ['h2', 'http/1.1']
+                    }
+
+if relays_modified:
+    d_r = os.path.dirname(os.path.abspath(relays_file))
+    r_fd, r_path = tempfile.mkstemp(dir=d_r, suffix='.tmp')
+    with os.fdopen(r_fd, 'w', encoding='utf-8') as rf_out:
+        json.dump(relays, rf_out, ensure_ascii=False, indent=2)
+        rf_out.flush()
+        os.fsync(rf_out.fileno())
+    os.replace(r_path, relays_file)
+    try:
+        import shutil
+        shutil.chown(relays_file, user='root', group='xrayapi')
+        os.chmod(relays_file, 0o660)
+    except Exception:
+        pass
+
 # 2. INBOUNDS: гарантия наличия базовых инбаундов и правильный sniffing
 inbounds = cfg.setdefault('inbounds', [])
 
