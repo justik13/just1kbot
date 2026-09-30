@@ -1,0 +1,10 @@
+[Unit]
+Description=Just1kNode Traffic Limit Watchdog Timer (every 15 min)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+Unit=just1knode-traffic.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Just1kNode Traffic Limit Watchdog Service
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/mnt/d/project/opencode/just1kbot/just1knode/just1knode.sh limit check
+StandardOutput=journal
+StandardError=journal

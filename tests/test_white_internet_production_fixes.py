@@ -43,6 +43,33 @@ from services.workers.node_monitor import (
 from utils.datetime_helpers import now_utc
 
 
+
+
+class MockProbeResponse:
+    def __init__(self, status):
+        self.status = status
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        pass
+
+
+class MockXrayClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        pass
+
+    async def check_health(self, api_url, api_key):
+        return True, 1, {"status": "ok"}
+
+
 class TestWhiteInternetProductionFixes(unittest.IsolatedAsyncioTestCase):
     async def test_show_white_internet_menu_message_not_modified_shows_toast(self):
         """When message is not modified, do NOT call query.message.answer, show toast instead."""
@@ -160,16 +187,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
         class MockSession:
             def __init__(self, status=502):
                 self.status = status
@@ -182,19 +199,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
 
             def get(self, url, **kwargs):
                 return MockProbeResponse(status=self.status)
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
 
         session_mock = AsyncMock()
         mock_settings = MagicMock()
@@ -286,29 +290,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             extra_data={"cdn_domain": "cdn.just1k.best"},
         )
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
-
         session_mock = AsyncMock()
         mock_settings = MagicMock()
         mock_settings.ADMIN_IDS = [999999]
@@ -367,29 +348,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             capabilities=["xray_origin"],
             extra_data={"cdn_domain": "cdn.just1k.best"},
         )
-
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
 
         session_mock = AsyncMock()
         mock_settings = MagicMock()
@@ -460,29 +418,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             extra_data={"cdn_domain": "cdn.just1k.best"},
         )
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
-
         session_mock = AsyncMock()
         mock_settings = MagicMock()
         mock_settings.ADMIN_IDS = [999999]
@@ -544,19 +479,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             capabilities=["xray_origin"],
             extra_data={"cdn_domain": "cdn.just1k.best"},
         )
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
 
         session_mock = AsyncMock()
         mock_settings = MagicMock()
@@ -646,29 +568,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             extra_data={"cdn_domain": "cdn.just1k.best"},
         )
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
-
         session_mock = AsyncMock()
         mock_settings = MagicMock()
         mock_settings.ADMIN_IDS = [999999]
@@ -738,16 +637,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             async def check_health(self, api_url, api_key):
                 raise RuntimeError("Core API connection refused")
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
         session_mock = AsyncMock()
         mock_settings = MagicMock()
         mock_settings.ADMIN_IDS = [999999]
@@ -814,29 +703,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             extra_data={"cdn_domain": "cdn.just1k.best"},
         )
 
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
-
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
         session_mock = AsyncMock()
         mock_settings = MagicMock()
         mock_settings.ADMIN_IDS = [999999]
@@ -899,16 +765,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             async def check_health(self, api_url, api_key):
                 return True, 1, {"status": "ok", "sub_path_prefix": "/node_custom_feed"}
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
         session_mock = AsyncMock()
         mock_settings = MagicMock()
         mock_settings.ADMIN_IDS = [999999]
@@ -963,29 +819,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             capabilities=["xray_origin"],
             extra_data={"cdn_domain": "cdn.just1k.best", "sub_path_prefix": "/custom_alert_feed"},
         )
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
-
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
 
         session_mock = AsyncMock()
         mock_settings = MagicMock()
@@ -1075,19 +908,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             extra_data={"cdn_domain": "cdn.just1k.best"},
         )
 
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
-
         session_mock = AsyncMock()
         mock_settings = MagicMock()
         mock_settings.ADMIN_IDS = [999999]
@@ -1144,29 +964,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             capabilities=["xray_origin"],
             extra_data={"cdn_domain": "cdn.just1k.best", "ingress_problem": True},
         )
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
-
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
 
         session_mock = AsyncMock()
         mock_settings = MagicMock()
@@ -1410,19 +1207,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             def get(self, url, **kwargs):
                 return MockProbeResponse(status=502)
 
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
-
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
              patch("services.workers.node_monitor.session_scope", return_value=mock_scope), \
              patch("services.xray_node_client.XrayNodeClient", MockXrayClient), \
@@ -1459,16 +1243,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
         class MockDualProbeSession:
             async def __aenter__(self):
                 return self
@@ -1481,19 +1255,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
                     return MockProbeResponse(status=200)
                 # CDN returns 504 Gateway Timeout
                 return MockProbeResponse(status=504)
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
 
         session_mock = AsyncMock()
         mock_settings = MagicMock()
@@ -1546,16 +1307,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
         class MockDualProbeFailingSession:
             async def __aenter__(self):
                 return self
@@ -1565,19 +1316,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
 
             def get(self, url, **kwargs):
                 return MockProbeResponse(status=502)
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
 
         session_mock = AsyncMock()
         mock_settings = MagicMock()
@@ -1633,16 +1371,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
         class MockDualProbeCdnFailingSession:
             async def __aenter__(self):
                 return self
@@ -1655,19 +1383,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
                     return MockProbeResponse(status=200)
                 # CDN returns 504 Gateway Timeout
                 return MockProbeResponse(status=504)
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
 
         session_mock = AsyncMock()
         mock_settings = MagicMock()
@@ -1733,16 +1448,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        class MockProbeResponse:
-            def __init__(self, status):
-                self.status = status
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
         class MockDualProbeRecoveredSession:
             async def __aenter__(self):
                 return self
@@ -1752,19 +1457,6 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
 
             def get(self, url, **kwargs):
                 return MockProbeResponse(status=200)
-
-        class MockXrayClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                pass
-
-            async def check_health(self, api_url, api_key):
-                return True, 1, {"status": "ok"}
 
         session_mock = AsyncMock()
         mock_settings = MagicMock()
