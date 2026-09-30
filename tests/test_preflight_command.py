@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 DB = os.getenv("TEST_DATABASE_URL")
 
+EXPECTED_BASE = "0031_awg_persistent_traffic"
 EXPECTED_HEAD = "0032_drop_banking_residue"
 
 DROPPED_TABLES = (
@@ -46,14 +47,13 @@ DROPPED_TABLES = (
 
 _DROPPED_LIST = ",".join(f"'{name}'" for name in DROPPED_TABLES)
 
-# Each entry is (block label, statement). Keep them single-line and free of
-# double quotes, dollar signs and backticks so the assembled command can be
-# pasted straight into a double-quoted shell argument.
+# Pre-flight statements: run BEFORE applying migration 0032 against the baseline database.
+# Verifies expected baseline revision, invariant constraints on kept tables, and zero in-flight operations.
 PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
     (
-        "1_MIGRATION_HEAD",
-        "SELECT '1_MIGRATION_HEAD' AS block, CASE WHEN (SELECT version_num FROM alembic_version) = "
-        f"'{EXPECTED_HEAD}' THEN 'OK' ELSE 'FAIL: MISMATCH have=' || "
+        "1_MIGRATION_BASE",
+        "SELECT '1_MIGRATION_BASE' AS block, CASE WHEN (SELECT version_num FROM alembic_version) = "
+        f"'{EXPECTED_BASE}' THEN 'OK' ELSE 'FAIL: MISMATCH have=' || "
         "(SELECT version_num FROM alembic_version) END AS verdict",
     ),
     (
@@ -63,20 +63,6 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
         "FROM pg_constraint k WHERE k.contype = 'f' "
         f"AND k.confrelid IN (SELECT oid FROM pg_class WHERE relname IN ({_DROPPED_LIST})) "
         f"AND k.conrelid NOT IN (SELECT oid FROM pg_class WHERE relname IN ({_DROPPED_LIST}))",
-    ),
-    (
-        "2B_DROPPED_TABLES_GONE",
-        "SELECT '2B_DROPPED_TABLES_GONE' AS block, CASE WHEN count(*) = 0 "
-        "THEN 'OK (0 tables remain)' ELSE 'CRITICAL: n=' || count(*) || "
-        "' dropped tables still present' END AS verdict "
-        f"FROM pg_class WHERE relname IN ({_DROPPED_LIST})",
-    ),
-    (
-        "2C_NO_FUNCTION_REF_DROPPED",
-        "SELECT '2C_NO_FUNCTION_REF_DROPPED' AS block, CASE WHEN count(*) = 0 "
-        "THEN 'OK (0 violations)' ELSE 'CRITICAL: n=' || count(*) || "
-        "' functions still reference dropped tables' END AS verdict "
-        "FROM pg_proc WHERE prosrc ~ '" + "|".join(DROPPED_TABLES) + "'",
     ),
     (
         "3A_REFERRAL_DISCOUNT_FLOOR",
@@ -118,29 +104,63 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
     ),
 )
 
-PREFLIGHT_SQL = " ".join(f"{stmt};" for _, stmt in PREFLIGHT_STATEMENTS)
+# Post-flight statements: run AFTER applying migration 0032.
+# Verifies expected head revision, 8 dropped tables gone, and clean functions without stale references.
+POSTFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
+    (
+        "1_MIGRATION_HEAD",
+        "SELECT '1_MIGRATION_HEAD' AS block, CASE WHEN (SELECT version_num FROM alembic_version) = "
+        f"'{EXPECTED_HEAD}' THEN 'OK' ELSE 'FAIL: MISMATCH have=' || "
+        "(SELECT version_num FROM alembic_version) END AS verdict",
+    ),
+    (
+        "2B_DROPPED_TABLES_GONE",
+        "SELECT '2B_DROPPED_TABLES_GONE' AS block, CASE WHEN count(*) = 0 "
+        "THEN 'OK (0 tables remain)' ELSE 'CRITICAL: n=' || count(*) || "
+        "' dropped tables still present' END AS verdict "
+        f"FROM pg_class WHERE relname IN ({_DROPPED_LIST})",
+    ),
+    (
+        "2C_NO_FUNCTION_REF_DROPPED",
+        "SELECT '2C_NO_FUNCTION_REF_DROPPED' AS block, CASE WHEN count(*) = 0 "
+        "THEN 'OK (0 violations)' ELSE 'CRITICAL: n=' || count(*) || "
+        "' functions still reference dropped tables' END AS verdict "
+        "FROM pg_proc WHERE prosrc ~ '" + "|".join(DROPPED_TABLES) + "'",
+    ),
+)
 
+PREFLIGHT_SQL = " ".join(f"{stmt};" for _, stmt in PREFLIGHT_STATEMENTS)
 PREFLIGHT_COMMAND = (
     'docker compose exec -T db psql -U just1kbot -d just1kbot_bot -x -c "'
     + PREFLIGHT_SQL
     + '"'
 )
 
+POSTFLIGHT_SQL = " ".join(f"{stmt};" for _, stmt in POSTFLIGHT_STATEMENTS)
+POSTFLIGHT_COMMAND = (
+    'docker compose exec -T db psql -U just1kbot -d just1kbot_bot -x -c "'
+    + POSTFLIGHT_SQL
+    + '"'
+)
+
 
 class TestPreflightCommandIsShellSafe(unittest.TestCase):
-    """The command must survive being pasted into a double-quoted shell argument."""
+    """The commands must survive being pasted into a double-quoted shell argument."""
 
-    def test_command_has_exactly_one_pair_of_wrapper_quotes(self):
-        self.assertEqual(PREFLIGHT_COMMAND.count('"'), 2)
-        self.assertTrue(PREFLIGHT_COMMAND.startswith("docker compose exec -T db psql "))
+    def test_commands_have_exactly_one_pair_of_wrapper_quotes(self):
+        for name, cmd in (("preflight", PREFLIGHT_COMMAND), ("postflight", POSTFLIGHT_COMMAND)):
+            with self.subTest(command=name):
+                self.assertEqual(cmd.count('"'), 2)
+                self.assertTrue(cmd.startswith("docker compose exec -T db psql "))
 
     def test_sql_body_has_no_shell_hazard_characters(self):
-        for char, name in (('"', "double quote"), ("$", "dollar sign"), ("`", "backtick"), ("\\", "backslash")):
-            with self.subTest(character=name):
-                self.assertNotIn(char, PREFLIGHT_SQL)
+        for sql_name, sql in (("preflight", PREFLIGHT_SQL), ("postflight", POSTFLIGHT_SQL)):
+            for char, char_name in (('"', "double quote"), ("$", "dollar sign"), ("`", "backtick"), ("\\", "backslash")):
+                with self.subTest(command=sql_name, character=char_name):
+                    self.assertNotIn(char, sql)
 
     def test_every_verdict_is_a_pass_fail_not_a_vanity_count(self):
-        for label, stmt in PREFLIGHT_STATEMENTS:
+        for label, stmt in PREFLIGHT_STATEMENTS + POSTFLIGHT_STATEMENTS:
             with self.subTest(block=label):
                 self.assertIn("AS verdict", stmt)
                 self.assertIn("CASE WHEN", stmt)
@@ -155,8 +175,9 @@ class TestPreflightCommandIsShellSafe(unittest.TestCase):
         # The inbox worker was removed in PR #277; pending rows accumulate forever,
         # so probing them would always report a false positive.
         self.assertNotIn("webhook_inbox", PREFLIGHT_SQL)
+        self.assertNotIn("webhook_inbox", POSTFLIGHT_SQL)
 
-    def test_all_four_mandatory_blocks_are_present(self):
+    def test_all_four_mandatory_blocks_are_present_in_preflight(self):
         joined = PREFLIGHT_SQL
         self.assertIn("alembic_version", joined)          # migrations
         self.assertIn("pg_constraint", joined)             # PR invariants
@@ -203,7 +224,7 @@ class TestPreflightStatementsExecute(unittest.IsolatedAsyncioTestCase):
 
     async def test_every_statement_executes_and_returns_a_verdict(self):
         failures = []
-        for label, stmt in PREFLIGHT_STATEMENTS:
+        for label, stmt in PREFLIGHT_STATEMENTS + POSTFLIGHT_STATEMENTS:
             try:
                 verdict = await self._verdict_for(stmt)
             except Exception as exc:
@@ -211,11 +232,11 @@ class TestPreflightStatementsExecute(unittest.IsolatedAsyncioTestCase):
                 continue
             if not verdict:
                 failures.append(f"{label}: returned an empty verdict")
-        self.assertEqual(failures, [], "pre-flight statements failed:\n" + "\n".join(failures))
+        self.assertEqual(failures, [], "statements failed:\n" + "\n".join(failures))
 
     async def test_schema_blocks_pass_after_migration(self):
-        """Blocks 2A-2C must be green once 0032 has been applied."""
-        statements = dict(PREFLIGHT_STATEMENTS)
+        """Post-flight blocks must be green once 0032 has been applied."""
+        statements = dict(PREFLIGHT_STATEMENTS + POSTFLIGHT_STATEMENTS)
         for label in (
             "2A_KEPT_TABLE_FK_INTO_DROPPED",
             "2B_DROPPED_TABLES_GONE",
@@ -229,7 +250,7 @@ class TestPreflightStatementsExecute(unittest.IsolatedAsyncioTestCase):
                 )
 
     async def test_migration_head_matches_expected_revision(self):
-        verdict = await self._verdict_for(dict(PREFLIGHT_STATEMENTS)["1_MIGRATION_HEAD"])
+        verdict = await self._verdict_for(dict(POSTFLIGHT_STATEMENTS)["1_MIGRATION_HEAD"])
         self.assertEqual(verdict, "OK", f"alembic_version is not at {EXPECTED_HEAD}")
 
 
