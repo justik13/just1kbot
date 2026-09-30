@@ -174,37 +174,48 @@ class TestPreflightStatementsExecute(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.engine.dispose()
 
-    async def test_each_statement_returns_a_single_verdict_row(self):
+    async def _verdict_for(self, stmt: str) -> str:
+        """Run one statement in its own transaction and return its verdict.
+
+        Each statement gets a fresh connection on purpose. If one of them is
+        invalid, an aborted transaction would otherwise mask every later
+        statement and the failure would be reported against the wrong block.
+        """
         async with self.engine.connect() as conn:
-            for label, stmt in PREFLIGHT_STATEMENTS:
-                with self.subTest(block=label):
-                    rows = (await conn.execute(text(stmt))).mappings().all()
-                    self.assertEqual(len(rows), 1, f"{label} must return exactly one verdict row")
-                    verdict = rows[0]["verdict"]
-                    self.assertIsInstance(verdict, str)
-                    self.assertTrue(verdict, f"{label} returned an empty verdict")
+            row = (await conn.execute(text(stmt))).mappings().one()
+        self.assertIn("verdict", row.keys(), f"statement has no verdict column: {stmt[:80]}")
+        return row["verdict"]
+
+    async def test_every_statement_executes_and_returns_a_verdict(self):
+        failures = []
+        for label, stmt in PREFLIGHT_STATEMENTS:
+            try:
+                verdict = await self._verdict_for(stmt)
+            except Exception as exc:
+                failures.append(f"{label}: {type(exc).__name__}: {exc}")
+                continue
+            if not verdict:
+                failures.append(f"{label}: returned an empty verdict")
+        self.assertEqual(failures, [], "pre-flight statements failed:\n" + "\n".join(failures))
 
     async def test_schema_blocks_pass_after_migration(self):
         """Blocks 2A-2C must be green once 0032 has been applied."""
-        async with self.engine.connect() as conn:
-            for label in (
-                "2A_KEPT_TABLE_FK_INTO_DROPPED",
-                "2B_DROPPED_TABLES_GONE",
-                "2C_NO_FUNCTION_REF_DROPPED",
-            ):
-                stmt = dict(PREFLIGHT_STATEMENTS)[label]
-                verdict = (await conn.execute(text(stmt))).scalar_one()
-                with self.subTest(block=label):
-                    self.assertTrue(
-                        verdict.startswith("OK"),
-                        f"{label} is not green after migration: {verdict}",
-                    )
+        statements = dict(PREFLIGHT_STATEMENTS)
+        for label in (
+            "2A_KEPT_TABLE_FK_INTO_DROPPED",
+            "2B_DROPPED_TABLES_GONE",
+            "2C_NO_FUNCTION_REF_DROPPED",
+        ):
+            verdict = await self._verdict_for(statements[label])
+            with self.subTest(block=label):
+                self.assertTrue(
+                    verdict.startswith("OK"),
+                    f"{label} is not green after migration: {verdict}",
+                )
 
     async def test_migration_head_matches_expected_revision(self):
-        async with self.engine.connect() as conn:
-            stmt = dict(PREFLIGHT_STATEMENTS)["1_MIGRATION_HEAD"]
-            verdict = (await conn.execute(text(stmt))).scalar_one()
-        self.assertEqual(verdict, "OK")
+        verdict = await self._verdict_for(dict(PREFLIGHT_STATEMENTS)["1_MIGRATION_HEAD"])
+        self.assertEqual(verdict, "OK", f"alembic_version is not at {EXPECTED_HEAD}")
 
 
 if __name__ == "__main__":
