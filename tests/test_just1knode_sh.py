@@ -501,6 +501,11 @@ exit 0
                 self.assertFalse(ib["sniffing"]["routeOnly"])
                 self.assertIn("quic", ib["sniffing"]["destOverride"])
 
+        # 5. Check BitTorrent and SMTP:25 blocking rules on Origin
+        origin_rules = updated["routing"]["rules"]
+        self.assertTrue(any(r.get("protocol") == ["bittorrent"] and r.get("outboundTag") == "just1k-wl-block" for r in origin_rules), "BitTorrent block rule must be present on Origin")
+        self.assertTrue(any((r.get("port") == "25" or r.get("port") == 25) and r.get("outboundTag") == "just1k-wl-block" for r in origin_rules), "SMTP:25 block rule must be present on Origin")
+
     def test_heal_reconstructs_missing_invariants(self):
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
@@ -1864,9 +1869,10 @@ ensure_xrayapi_user
         else:
             self.assertTrue(bool(st & 0o600))
 
-        # Verify BitTorrent filtering and blackhole block outbound injected
+        # Verify BitTorrent and SMTP:25 filtering and blackhole block outbound injected
         rules = updated_cfg.get("routing", {}).get("rules", [])
         self.assertTrue(any("bittorrent" in r.get("protocol", []) for r in rules), "BitTorrent protocol rule must be present")
+        self.assertTrue(any((r.get("port") == "25" or r.get("port") == 25) and r.get("outboundTag") == "block" for r in rules), "SMTP:25 block rule must be present on Relay")
         self.assertTrue(any(ob.get("tag") == "block" and ob.get("protocol") == "blackhole" for ob in updated_cfg.get("outbounds", [])), "Blackhole outbound must be present")
 
     # -------------------------------------------------------------------------

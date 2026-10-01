@@ -430,6 +430,14 @@ if not any(r.get('protocol') == ['bittorrent'] for r in rules):
         'outboundTag': 'just1k-wl-block'
     })
 
+# Запрет SMTP (порт 25)
+if not any((r.get('port') == '25' or r.get('port') == 25) for r in rules):
+    rules.insert(0, {
+        'type': 'field',
+        'port': '25',
+        'outboundTag': 'just1k-wl-block'
+    })
+
 # Вставляем правило выхода на Relay СТРОГО ПОСЛЕ правил прямого выхода для доменов РФ (dom_rule),
 # но ДО любых IP-based правил, чтобы исключить DNS-резолвинг на Origin
 dom_rule = next((r for r in rules if r.get('outboundTag') == 'just1k-wl-direct' and 'domain' in r), None)

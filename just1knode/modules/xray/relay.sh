@@ -380,6 +380,11 @@ install_xray_relay_node() {
           "bittorrent"
         ],
         "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "port": "25",
+        "outboundTag": "block"
       }
     ]
   },
@@ -1008,6 +1013,13 @@ if not has_bt_proto:
     rules.insert(0, {
         'type': 'field',
         'protocol': ['bittorrent'],
+        'outboundTag': 'block'
+    })
+has_smtp_port = any(r.get('type') == 'field' and (r.get('port') == '25' or r.get('port') == 25) for r in rules)
+if not has_smtp_port:
+    rules.insert(0, {
+        'type': 'field',
+        'port': '25',
         'outboundTag': 'block'
     })
 
