@@ -376,6 +376,13 @@ rules.append({
     'outboundTag': 'just1k-wl-block'
 })
 
+# Запрет исходящего SMTP (порт 25, защита от спама)
+rules.append({
+    'type': 'field',
+    'port': '25',
+    'outboundTag': 'just1k-wl-block'
+})
+
 # Split-Routing: прямой выход в Рунет с московского IP Origin-сервера
 rules.append({
     'type': 'field',
@@ -1115,6 +1122,14 @@ if not any(r.get('protocol') == ['bittorrent'] and r.get('outboundTag') == 'just
         'outboundTag': 'just1k-wl-block'
     })
 
+# 4.1c. Блокировка исходящего SMTP (порт 25)
+if not any((r.get('port') == '25' or r.get('port') == 25) and r.get('outboundTag') == 'just1k-wl-block' for r in rules):
+    rules.insert(1, {
+        'type': 'field',
+        'port': '25',
+        'outboundTag': 'just1k-wl-block'
+    })
+
 
 # 4.2. Правило Direct для доменов РФ
 ru_domains = [
@@ -1572,9 +1587,8 @@ EOF
         error "Откат выполнен: служба Xray не смогла запуститься с новой конфигурацией."
     fi
 
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api 2>/dev/null || true
-    fi
+    # systemd автоматически перезапускает xray-api благодаря PartOf=xray.service
+    ensure_xray_api_healthy
 
     manifest_commit
     log "Оптимизация и восстановление конфигурации Origin завершены успешно!"

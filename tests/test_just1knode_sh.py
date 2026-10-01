@@ -501,6 +501,11 @@ exit 0
                 self.assertFalse(ib["sniffing"]["routeOnly"])
                 self.assertIn("quic", ib["sniffing"]["destOverride"])
 
+        # 5. Check BitTorrent and SMTP:25 blocking rules on Origin
+        origin_rules = updated["routing"]["rules"]
+        self.assertTrue(any(r.get("protocol") == ["bittorrent"] and r.get("outboundTag") == "just1k-wl-block" for r in origin_rules), "BitTorrent block rule must be present on Origin")
+        self.assertTrue(any((r.get("port") == "25" or r.get("port") == 25) and r.get("outboundTag") == "just1k-wl-block" for r in origin_rules), "SMTP:25 block rule must be present on Origin")
+
     def test_heal_reconstructs_missing_invariants(self):
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
@@ -1450,7 +1455,7 @@ run_doctor
         hook_content = hook_file.read_text(encoding="utf-8")
         self.assertIn("systemctl reload nginx", hook_content)
         self.assertIn("systemctl restart xray", hook_content)
-        self.assertIn("systemctl restart xray-api", hook_content)
+        self.assertIn("systemctl start xray-api", hook_content)
 
     def test_heal_and_update_origin_config_with_relays(self):
         self._prepare_base_env()
@@ -1864,9 +1869,10 @@ ensure_xrayapi_user
         else:
             self.assertTrue(bool(st & 0o600))
 
-        # Verify BitTorrent filtering and blackhole block outbound injected
+        # Verify BitTorrent and SMTP:25 filtering and blackhole block outbound injected
         rules = updated_cfg.get("routing", {}).get("rules", [])
         self.assertTrue(any("bittorrent" in r.get("protocol", []) for r in rules), "BitTorrent protocol rule must be present")
+        self.assertTrue(any((r.get("port") == "25" or r.get("port") == 25) and r.get("outboundTag") == "block" for r in rules), "SMTP:25 block rule must be present on Relay")
         self.assertTrue(any(ob.get("tag") == "block" and ob.get("protocol") == "blackhole" for ob in updated_cfg.get("outbounds", [])), "Blackhole outbound must be present")
 
     # -------------------------------------------------------------------------
@@ -2586,15 +2592,55 @@ remove_traffic_watchdog_timer
         self.assertIn("r['outboundTag'] = 'just1k-wl-direct'", relays_manage_sh)
 
     def test_xray_api_service_unit_has_partof_and_update_node_syncs_it(self):
-        """Verify xray-api.service has PartOf=xray.service and core.sh update_node syncs the unit."""
+        """Verify xray-api.service has PartOf=xray.service, start limit resilience, and ensure_xray_api_healthy."""
         service_file = (REPO_ROOT / "scripts" / "xray_api" / "xray-api.service").read_text(encoding="utf-8")
         core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
         api_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "api.sh").read_text(encoding="utf-8")
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        ssl_sh = (REPO_ROOT / "just1knode" / "lib" / "ssl.sh").read_text(encoding="utf-8")
+        traffic_watchdog_sh = (REPO_ROOT / "just1knode" / "lib" / "traffic_watchdog.sh").read_text(encoding="utf-8")
 
         self.assertIn("PartOf=xray.service", service_file)
+        self.assertIn("StartLimitIntervalSec=30", service_file)
+        self.assertIn("StartLimitBurst=15", service_file)
+
         self.assertIn("PartOf=xray.service", api_sh)
+        self.assertIn("StartLimitIntervalSec=30", api_sh)
+        self.assertIn("StartLimitBurst=15", api_sh)
+
         self.assertIn("cp \"${api_dir}/xray-api.service\" /etc/systemd/system/xray-api.service", core_sh)
         self.assertIn("systemctl daemon-reload", core_sh)
+
+        # Invariant: ensure_xray_api_healthy avoids duplicate restarts and returns non-zero on failure
+        self.assertIn("ensure_xray_api_healthy()", common_sh)
+        self.assertIn("return 1", common_sh)
+        self.assertIn("ensure_xray_api_healthy", origin_sh)
+        self.assertIn("ensure_xray_api_healthy", core_sh)
+        self.assertIn("ensure_xray_api_healthy", relays_manage_sh)
+
+        # Invariant: certbot deploy hook does not execute blind duplicate restart of xray-api
+        self.assertNotIn("systemctl restart xray\nsystemctl restart xray-api", ssl_sh.replace(" ", "").replace("2>/dev/null||true", ""))
+        self.assertIn("systemctl start xray-api", ssl_sh)
+
+        # Invariant: traffic watchdog resume calls ensure_xray_api_healthy strictly after successful xray start
+        self.assertIn("if [[ $xray_started -eq 1 ]]; then", traffic_watchdog_sh)
+        self.assertIn("ensure_xray_api_healthy", traffic_watchdog_sh)
+
+        # Invariant: Doctor reports FAILED status on services without hidden side-effects
+        self.assertIn("systemctl is-failed", just1knode_sh)
+        self.assertIn("FAILED", just1knode_sh)
+
+    def test_traffic_watchdog_resume_guards_xray_api_start_when_xray_config_invalid(self):
+        """Verify watchdog resume does not attempt to start xray-api if xray config test fails."""
+        watchdog_sh = (REPO_ROOT / "just1knode" / "lib" / "traffic_watchdog.sh").read_text(encoding="utf-8")
+        self.assertIn("local xray_started=0", watchdog_sh)
+        self.assertIn("xray_started=1", watchdog_sh)
+        self.assertIn("if [[ $xray_started -eq 1 ]]; then", watchdog_sh)
+        self.assertIn("ensure_xray_api_healthy || true", watchdog_sh)
+        self.assertNotIn("systemctl start xray-api", watchdog_sh)
 
     def test_xray_api_app_discovers_default_inbound_on_origin_fallback(self):
         """Verify app.py target inbounds discovery prioritizes just1k-wl-default on Origin nodes."""

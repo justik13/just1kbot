@@ -202,3 +202,47 @@ validate_ip() {
     fi
 }
 
+ensure_xray_api_healthy() {
+    # Функция вызывается на узлах, где установлен агент xray-api (Origin / Dual).
+    if [[ ! -f /etc/systemd/system/xray-api.service && ! -f /lib/systemd/system/xray-api.service ]]; then
+        return 0
+    fi
+
+    # 1. Если служба уже активна (systemd автоматически перезапустил её через PartOf=xray.service),
+    # повторный restart категорически не вызываем, чтобы не провоцировать start-limit-hit.
+    if systemctl is-active --quiet xray-api 2>/dev/null; then
+        return 0
+    fi
+
+    # 2. Если служба в процессе запуска (activating), даем до 2.5 секунд на завершение
+    local attempts=5
+    while [[ $attempts -gt 0 ]]; do
+        if systemctl is-active --quiet xray-api 2>/dev/null; then
+            return 0
+        fi
+        local state
+        state="$(systemctl is-active xray-api 2>/dev/null || true)"
+        if [[ "$state" != "activating" ]]; then
+            break
+        fi
+        sleep 0.5
+        attempts=$((attempts - 1))
+    done
+
+    # 3. Если служба в статусе failed (например start-limit-hit) — сбрасываем лимит ошибок
+    if systemctl is-failed --quiet xray-api 2>/dev/null; then
+        systemctl reset-failed xray-api 2>/dev/null || true
+    fi
+
+    # 4. Выполняем контролируемый старт службы
+    systemctl start xray-api 2>/dev/null || true
+    sleep 0.5
+
+    # 5. Проверяем финальный статус: функция возвращает 0 только при реальной активности службы
+    if systemctl is-active --quiet xray-api 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+

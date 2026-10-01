@@ -229,6 +229,8 @@ WL_WEB_UNSYNCED = "Шлюз синхронизируется, повторите
 WL_WEB_CDN_UNCONFIGURED = "Сетевой шлюз временно недоступен. Обратитесь к администратору."
 WL_WEB_DEVICE_LIMIT_EXCEEDED = "Лимит устройств ({active}/{limit}). Управление: @{bot_username}"
 WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включите отправку HWID в приложении."
+WL_ANNOUNCE_MAINTENANCE = "⚠️ Сервер на техническом обслуживании. Связь скоро восстановится."
+
 
 
 

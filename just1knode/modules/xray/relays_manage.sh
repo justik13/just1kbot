@@ -114,9 +114,7 @@ if relays is not None:
 
     if echo "$heal_out" | grep -q "HEALED"; then
         echo -e "${GREEN}✔${NC} ${heal_out//HEALED/}"
-        if systemctl is-active --quiet xray-api 2>/dev/null; then
-            systemctl restart xray-api 2>/dev/null || true
-        fi
+        ensure_xray_api_healthy
     fi
 }
 
@@ -432,6 +430,14 @@ if not any(r.get('protocol') == ['bittorrent'] for r in rules):
         'outboundTag': 'just1k-wl-block'
     })
 
+# Запрет SMTP (порт 25)
+if not any((r.get('port') == '25' or r.get('port') == 25) for r in rules):
+    rules.insert(0, {
+        'type': 'field',
+        'port': '25',
+        'outboundTag': 'just1k-wl-block'
+    })
+
 # Вставляем правило выхода на Relay СТРОГО ПОСЛЕ правил прямого выхода для доменов РФ (dom_rule),
 # но ДО любых IP-based правил, чтобы исключить DNS-резолвинг на Origin
 dom_rule = next((r for r in rules if r.get('outboundTag') == 'just1k-wl-direct' and 'domain' in r), None)
@@ -628,9 +634,7 @@ except Exception:
         manifest_rollback
         error "Xray не запустился после добавления релея $name ($code). Выполнен полный откат."
     fi
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api || true
-    fi
+    ensure_xray_api_healthy
     manifest_commit
 
     log "Relay '${name}' (код: ${code}) успешно добавлен и подключен к шлюзу Origin!"
@@ -781,9 +785,7 @@ except Exception:
         manifest_rollback
         error "Xray не запустился после удаления релея $target. Выполнен полный откат."
     fi
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api || true
-    fi
+    ensure_xray_api_healthy
     manifest_commit
 
     log "Relay '${target}' (код: ${code}) успешно удален."
@@ -1165,9 +1167,7 @@ print(f'OK:{matched_code}')
         return 1
     fi
 
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api || true
-    fi
+    ensure_xray_api_healthy
 
     manifest_commit
     log "✔ Relay '$matched_code' успешно переключен на домен '$new_sni' (режим: $new_sec)!"

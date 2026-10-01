@@ -154,6 +154,7 @@ from bot.texts.user.white_internet import (
     WL_WEB_PENDING,
     WL_WEB_TOO_MANY_REQUESTS,
     WL_WEB_UNSYNCED,
+    WL_ANNOUNCE_MAINTENANCE,
 )
 
 
@@ -300,4 +301,5 @@ __all__ = [
     "WL_WEB_PENDING",
     "WL_WEB_TOO_MANY_REQUESTS",
     "WL_WEB_UNSYNCED",
+    "WL_ANNOUNCE_MAINTENANCE",
 ]
