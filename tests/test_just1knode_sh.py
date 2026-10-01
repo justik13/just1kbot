@@ -1450,7 +1450,7 @@ run_doctor
         hook_content = hook_file.read_text(encoding="utf-8")
         self.assertIn("systemctl reload nginx", hook_content)
         self.assertIn("systemctl restart xray", hook_content)
-        self.assertIn("systemctl restart xray-api", hook_content)
+        self.assertIn("systemctl start xray-api", hook_content)
 
     def test_heal_and_update_origin_config_with_relays(self):
         self._prepare_base_env()
