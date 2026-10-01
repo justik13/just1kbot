@@ -96,23 +96,30 @@ class CleanChatMiddleware(BaseMiddleware):
             ):
                 return await handler(event, data)
 
-            state = data.get("raw_state") or data.get("state")
-            if state:
-                try:
-                    if await state.get_state() is not None:
-                        return await handler(event, data)
-                except Exception:
-                    # FSM storage is unreachable. Deleting the message here would
-                    # destroy user data because of an infrastructure blip, so fail
-                    # open and let the handler process it.
-                    logger.warning(
-                        "CleanChat FSM state lookup failed; leaving message %s "
-                        "in chat %s undeleted",
-                        event.message_id,
-                        event.chat.id,
-                        exc_info=True,
-                    )
+            raw_state = data.get("raw_state")
+            if raw_state is not None:
+                return await handler(event, data)
+
+            state = data.get("state")
+            if state is not None:
+                if isinstance(state, str):
                     return await handler(event, data)
+                if hasattr(state, "get_state"):
+                    try:
+                        if await state.get_state() is not None:
+                            return await handler(event, data)
+                    except Exception:
+                        # FSM storage is unreachable. Deleting the message here would
+                        # destroy user data because of an infrastructure blip, so fail
+                        # open and let the handler process it.
+                        logger.warning(
+                            "CleanChat FSM state lookup failed; leaving message %s "
+                            "in chat %s undeleted",
+                            event.message_id,
+                            event.chat.id,
+                            exc_info=True,
+                        )
+                        return await handler(event, data)
 
             _ensure_worker_started()
             try:

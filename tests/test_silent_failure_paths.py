@@ -112,6 +112,62 @@ class TestCleanChatFailsOpenOnFsmError(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "handled")
         ensure.assert_not_called()
 
+    async def test_raw_state_string_short_circuits_without_attribute_error_or_warning(self):
+        middleware = CleanChatMiddleware()
+        handler = AsyncMock(return_value="handled")
+
+        state = MagicMock()
+        state.get_state = AsyncMock(return_value="AdminStates:waiting_badge")
+
+        with patch("bot.middlewares.clean_chat._ensure_worker_started") as ensure, \
+             patch("bot.middlewares.clean_chat.logger") as log:
+            result = await middleware(
+                handler,
+                self._message(),
+                {"state": state, "raw_state": "AdminStates:waiting_badge"},
+            )
+
+        self.assertEqual(result, "handled")
+        ensure.assert_not_called()
+        log.warning.assert_not_called()
+        state.get_state.assert_not_called()
+
+    async def test_state_as_string_short_circuits_without_attribute_error(self):
+        middleware = CleanChatMiddleware()
+        handler = AsyncMock(return_value="handled")
+
+        with patch("bot.middlewares.clean_chat._ensure_worker_started") as ensure, \
+             patch("bot.middlewares.clean_chat.logger") as log:
+            result = await middleware(
+                handler,
+                self._message(),
+                {"state": "AdminStates:waiting_badge"},
+            )
+
+        self.assertEqual(result, "handled")
+        ensure.assert_not_called()
+        log.warning.assert_not_called()
+
+    async def test_raw_state_none_with_active_fsm_context_short_circuits(self):
+        middleware = CleanChatMiddleware()
+        handler = AsyncMock(return_value="handled")
+
+        state = MagicMock()
+        state.get_state = AsyncMock(return_value="SomeState")
+
+        with patch("bot.middlewares.clean_chat._ensure_worker_started") as ensure, \
+             patch("bot.middlewares.clean_chat.logger") as log:
+            result = await middleware(
+                handler,
+                self._message(),
+                {"state": state, "raw_state": None},
+            )
+
+        self.assertEqual(result, "handled")
+        ensure.assert_not_called()
+        log.warning.assert_not_called()
+        state.get_state.assert_awaited_once()
+
     async def test_no_state_still_queues_deletion(self):
         middleware = CleanChatMiddleware()
         handler = AsyncMock(return_value="handled")
@@ -131,3 +187,4 @@ class TestCleanChatFailsOpenOnFsmError(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
