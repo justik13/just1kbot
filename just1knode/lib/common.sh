@@ -204,17 +204,7 @@ validate_ip() {
 
 ensure_xray_api_healthy() {
     # Функция вызывается на узлах, где установлен агент xray-api (Origin / Dual).
-    local has_unit=0
-    if [[ -f /etc/systemd/system/xray-api.service || -f /lib/systemd/system/xray-api.service ]]; then
-        has_unit=1
-    fi
-    if [[ $has_unit -eq 0 ]]; then
-        local role
-        role="$(get_state_val "role" "relay" 2>/dev/null || echo "relay")"
-        if [[ "$role" == "origin" || "$role" == "dual" ]]; then
-            warn "Служба xray-api.service не найдена на узле роли $role!"
-            return 1
-        fi
+    if [[ ! -f /etc/systemd/system/xray-api.service && ! -f /lib/systemd/system/xray-api.service ]]; then
         return 0
     fi
 
