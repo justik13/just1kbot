@@ -957,7 +957,7 @@ EOF
     fi
 
     local icmp_curr
-    icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "1")"
+    icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     if [[ "$icmp_curr" != "1" ]]; then
         warn "Параметр net.ipv4.icmp_echo_ignore_all не применился в ядре (проверьте права или ограничения контейнера)."
     fi
@@ -1066,6 +1066,7 @@ cmd_update() {
             force_rebuild="n"
         fi
         if [[ ! "$force_rebuild" =~ ^[Yy]$ ]]; then
+            apply_sysctl_hardening
             log "Обновление завершено (код уже актуален)."
             if [ "$did_stash" = "true" ]; then
                 echo ""
@@ -1751,14 +1752,21 @@ cmd_doctor() {
             warn "vm.overcommit_memory=$overcommit. Рекомендуется установить 'sysctl vm.overcommit_memory=1' для предотвращения сбоев Redis BGSAVE."
         fi
     fi
+    local sysctl_file="${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}"
+    local icmp_ignore="0"
     if [[ -f /proc/sys/net/ipv4/icmp_echo_ignore_all ]]; then
-        local icmp_ignore
         icmp_ignore="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo '0')"
-        if [[ "$icmp_ignore" == "1" ]]; then
-            log "Параметр ядра net.ipv4.icmp_echo_ignore_all=1 активен (стелс-режим ICMP)."
-        else
-            info "net.ipv4.icmp_echo_ignore_all=$icmp_ignore (ICMP ping активен)."
-        fi
+    fi
+    local icmp_persisted=0
+    if [[ -f "$sysctl_file" ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null; then
+        icmp_persisted=1
+    fi
+    if [[ "$icmp_ignore" == "1" && "$icmp_persisted" -eq 1 ]]; then
+        log "Параметр ядра net.ipv4.icmp_echo_ignore_all=1 активен (стелс-режим сохранен в $sysctl_file)."
+    elif [[ "$icmp_ignore" == "1" ]]; then
+        warn "net.ipv4.icmp_echo_ignore_all=1 активен в ядре, но не зафиксирован в $sysctl_file (до перезагрузки)."
+    else
+        info "net.ipv4.icmp_echo_ignore_all=$icmp_ignore (ICMP ping активен)."
     fi
 
     # 1. Docker демон и сокет
@@ -2067,16 +2075,12 @@ cmd_uninstall() {
     # 5. Sysctl cleanup
     info "4/8. Удаление системной конфигурации sysctl и восстановление параметров сети..."
     local sysctl_file="${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}"
-    local sysctl_main="${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}"
     if [[ -f "$sysctl_file" ]]; then
         if ! (run_privileged rm -f "$sysctl_file" 2>/dev/null); then
             cleanup_errors+=("Не удалось удалить файл конфигурации $sysctl_file")
         else
             log "Конфигурация $sysctl_file удалена."
         fi
-    fi
-    if [[ -f "$sysctl_main" ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=' "$sysctl_main" 2>/dev/null; then
-        run_privileged sed -i -E '/^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=/d' "$sysctl_main" 2>/dev/null || true
     fi
     if command -v sysctl >/dev/null 2>&1; then
         run_privileged sysctl -w net.ipv4.icmp_echo_ignore_all=0 >/dev/null 2>&1 || true

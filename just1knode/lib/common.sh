@@ -263,7 +263,7 @@ EOF
         sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
     fi
     local icmp_curr
-    icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "1")"
+    icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     if [[ "$icmp_curr" != "1" ]]; then
         warn "Параметр net.ipv4.icmp_echo_ignore_all не применился в ядре ноды (проверьте права или ограничения контейнера)."
     fi

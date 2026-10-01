@@ -763,8 +763,6 @@ if os.path.exists(rf):
     local icmp_persisted=0
     if [[ -f "$sysctl_conf" ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_conf" 2>/dev/null; then
         icmp_persisted=1
-    elif [[ -f /etc/sysctl.d/99-just1knode-icmp.conf ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' /etc/sysctl.d/99-just1knode-icmp.conf 2>/dev/null; then
-        icmp_persisted=1
     fi
 
     if [[ "$icmp_val" == "1" && "$icmp_persisted" -eq 1 ]]; then
@@ -1023,14 +1021,9 @@ uninstall_node() {
 
     info "8/11. Удаление конфигурации ядра sysctl и восстановление параметров сети..."
     local sysctl_ipv6_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
-    local sysctl_icmp_conf="${JUST1KNODE_SYSCTL_ICMP_CONF:-/etc/sysctl.d/99-just1knode-icmp.conf}"
     local sysctl_cleaned=0
     if [[ -f "$sysctl_ipv6_conf" ]]; then
         rm -f "$sysctl_ipv6_conf" 2>/dev/null || true
-        sysctl_cleaned=1
-    fi
-    if [[ -f "$sysctl_icmp_conf" ]]; then
-        rm -f "$sysctl_icmp_conf" 2>/dev/null || true
         sysctl_cleaned=1
     fi
     if command -v sysctl >/dev/null 2>&1; then
