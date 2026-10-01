@@ -563,68 +563,131 @@ select_relay_domain_interactive() {
         [[ -n "$c" ]] && candidates+=("$c")
     done < <(detect_relay_domain_candidates "$my_ip")
 
+    local has_cur_sni=0
+    local cur_sni_idx=-1
+    if [[ -n "$cur_sni" ]]; then
+        for idx in "${!candidates[@]}"; do
+            if [[ "${candidates[$idx]}" == "$cur_sni" ]]; then
+                has_cur_sni=1
+                cur_sni_idx=$idx
+                break
+            fi
+        done
+    fi
+
+    # СЦЕНАРИЙ 1: Неинтерактивный режим (скрипты / unattended cron)
+    if [[ ! -t 0 ]]; then
+        if [[ $has_cur_sni -eq 1 ]]; then
+            # Если текущий SNI валиден — сохраняем его без изменений
+            echo "$cur_sni"
+            return 0
+        elif [[ ${#candidates[@]} -gt 0 ]]; then
+            # Текущий SNI невалиден/отсутствует — берем наиболее актуальный валидный
+            log "✔ Неинтерактивный режим: текущий домен не валиден, выбран кандидат '${candidates[0]}'." >&2
+            echo "${candidates[0]}"
+            return 0
+        else
+            echo ""
+            return 0
+        fi
+    fi
+
+    # СЦЕНАРИЙ 2: Интерактивный режим (оператор в терминале)
+
+    # 2.1 Кандидатов нет вообще
     if [[ ${#candidates[@]} -eq 0 ]]; then
         echo ""
         return 0
     fi
 
+    # 2.2 Ровно 1 кандидат
     if [[ ${#candidates[@]} -eq 1 ]]; then
-        echo "${candidates[0]}"
-        return 0
-    fi
-
-    # Если кандидатов несколько:
-    # Если текущий cur_sni совпадает с самым свежим кандидатом — коллизий нет
-    if [[ -n "$cur_sni" && "$cur_sni" == "${candidates[0]}" ]]; then
-        echo "${candidates[0]}"
-        return 0
-    fi
-
-    # Обнаружена нестыковка (несколько доменов, и текущий отличается от самого свежего)
-    if [[ -t 0 ]]; then
-        warn "ВНИМАНИЕ: На сервере обнаружено несколько SSL-сертификатов, привязанных к IP ($my_ip):" >&2
-        for idx in "${!candidates[@]}"; do
-            local num=$((idx + 1))
-            local cand="${candidates[$idx]}"
-            local tag=""
-            [[ $idx -eq 0 ]] && tag=" (самый свежий)"
-            [[ "$cand" == "$cur_sni" ]] && tag="${tag} [текущий в конфигурации]"
-            echo -e "  [${num}] ${CYAN}${cand}${NC}${tag}" >&2
-        done
-        echo -e "  [0] Ввести другой домен вручную" >&2
-
-        local chosen_domain=""
+        if [[ -z "$cur_sni" || "$cur_sni" == "${candidates[0]}" ]]; then
+            echo "${candidates[0]}"
+            return 0
+        fi
+        # Нестыковка: текущий SNI отличается от единственного валидного кандидата
+        warn "ВНИМАНИЕ: Текущий домен '$cur_sni' отличается от найденного валидного сертификата '${candidates[0]}'." >&2
+        local ans=""
+        read -rp "Использовать '${candidates[0]}' для Relay? [Y/n]: " ans
+        if [[ -z "$ans" || "$ans" =~ ^[YyДд] ]]; then
+            echo "${candidates[0]}"
+            return 0
+        fi
+        # Оператор отказался переключаться — запрашиваем ручной ввод
         while true; do
-            local choice=""
-            read -rp "Какой домен использовать для Relay? [Enter = 1 (${candidates[0]})]: " choice
-            if [[ -z "$choice" || "$choice" == "1" ]]; then
-                chosen_domain="${candidates[0]}"
-                break
-            elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#candidates[@]} )); then
-                chosen_domain="${candidates[$((choice - 1))]}"
-                break
-            elif [[ "$choice" == "0" ]]; then
-                local manual_domain=""
-                read -rp "Введите домен вручную: " manual_domain
-                manual_domain="$(echo "$manual_domain" | tr -d '[:space:]')"
-                if [[ -n "$manual_domain" ]]; then
-                    if validate_relay_dns "$manual_domain" "$my_ip"; then
-                        chosen_domain="$manual_domain"
-                        break
-                    else
-                        warn "Введённый домен '$manual_domain' не резолвится на IP '$my_ip'. Попробуйте снова." >&2
-                    fi
-                fi
+            local manual_domain=""
+            read -rp "Введите домен вручную (или Enter для сохранения '$cur_sni'): " manual_domain
+            manual_domain="$(echo "$manual_domain" | tr -d '[:space:]')"
+            if [[ -z "$manual_domain" ]]; then
+                echo "$cur_sni"
+                return 0
+            fi
+            if validate_relay_dns "$manual_domain" "$my_ip"; then
+                echo "$manual_domain"
+                return 0
             else
-                warn "Неверный выбор '$choice'. Введите число от 0 до ${#candidates[@]}." >&2
+                warn "Введённый домен '$manual_domain' не резолвится на IP '$my_ip'. Попробуйте снова." >&2
             fi
         done
-        echo "$chosen_domain"
-    else
-        # В неинтерактивном режиме выбираем самый свежий сертификат
-        log "✔ Неинтерактивный режим: обнаружено несколько сертификатов, выбран самый свежий '${candidates[0]}'." >&2
-        echo "${candidates[0]}"
     fi
+
+    # 2.3 Несколько кандидатов (> 1)
+    # Если текущий SNI уже является самым свежим — коллизий нет
+    if [[ $has_cur_sni -eq 1 && "$cur_sni" == "${candidates[0]}" ]]; then
+        echo "$cur_sni"
+        return 0
+    fi
+
+    # Обнаружена нестыковка: несколько доменов, и текущий отличается от самого свежего
+    warn "ВНИМАНИЕ: На сервере обнаружено несколько SSL-сертификатов, привязанных к IP ($my_ip):" >&2
+    for idx in "${!candidates[@]}"; do
+        local num=$((idx + 1))
+        local cand="${candidates[$idx]}"
+        local tag=""
+        [[ $idx -eq 0 ]] && tag=" (самый свежий)"
+        [[ "$cand" == "$cur_sni" ]] && tag="${tag} [текущий в конфигурации]"
+        echo -e "  [${num}] ${CYAN}${cand}${NC}${tag}" >&2
+    done
+    echo -e "  [0] Ввести другой домен вручную" >&2
+
+    local default_idx=1
+    local default_domain="${candidates[0]}"
+    if [[ $has_cur_sni -eq 1 ]]; then
+        default_idx=$((cur_sni_idx + 1))
+        default_domain="$cur_sni"
+    fi
+
+    local chosen_domain=""
+    while true; do
+        local choice=""
+        read -rp "Какой домен использовать для Relay? [Enter = ${default_idx} (${default_domain})]: " choice
+        if [[ -z "$choice" ]]; then
+            chosen_domain="$default_domain"
+            break
+        elif [[ "$choice" == "$default_idx" ]]; then
+            chosen_domain="$default_domain"
+            break
+        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#candidates[@]} )); then
+            chosen_domain="${candidates[$((choice - 1))]}"
+            break
+        elif [[ "$choice" == "0" ]]; then
+            local manual_domain=""
+            read -rp "Введите домен вручную: " manual_domain
+            manual_domain="$(echo "$manual_domain" | tr -d '[:space:]')"
+            if [[ -n "$manual_domain" ]]; then
+                if validate_relay_dns "$manual_domain" "$my_ip"; then
+                    chosen_domain="$manual_domain"
+                    break
+                else
+                    warn "Введённый домен '$manual_domain' не резолвится на IP '$my_ip'. Попробуйте снова." >&2
+                fi
+            fi
+        else
+            warn "Неверный выбор '$choice'. Введите число от 0 до ${#candidates[@]}." >&2
+        fi
+    done
+    echo "$chosen_domain"
 }
 
 setup_relay_domain() {
@@ -865,6 +928,14 @@ heal_and_update_relay_config() {
     local le_domain=""
 
     le_domain="$(select_relay_domain_interactive "$my_ip" "$cur_sni")"
+
+    # Если le_domain пустой (кандидатов нет), но cur_sni задан и его DNS указывает на my_ip:
+    if [[ -z "$le_domain" && -n "$cur_sni" && "$cur_sni" != *"google.com"* ]]; then
+        if validate_relay_dns "$cur_sni" "$my_ip" 2>/dev/null; then
+            log "✔ Текущий домен '$cur_sni' подтверждён через DNS (требуется выпуск/продление сертификата)..."
+            le_domain="$cur_sni"
+        fi
+    fi
 
     local cert_issued=0
     if [[ -n "$le_domain" ]]; then

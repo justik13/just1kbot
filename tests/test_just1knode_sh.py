@@ -2626,6 +2626,31 @@ remove_traffic_watchdog_timer
         self.assertIn("Какой домен использовать для Relay?", relay_sh)
         self.assertIn("-checkend", relay_sh)
         self.assertIn("validate_relay_dns", relay_sh)
+        self.assertIn("has_cur_sni", relay_sh)
+        self.assertIn("Неинтерактивный режим", relay_sh)
+        self.assertIn("Использовать '${candidates[0]}' для Relay? [Y/n]", relay_sh)
+
+    def test_select_relay_domain_non_interactive_preserves_valid_cur_sni(self):
+        """Verify non-interactive domain selection preserves cur_sni if valid, and falls back if invalid."""
+        def select_non_interactive(candidates, cur_sni):
+            has_cur_sni = cur_sni in candidates if cur_sni else False
+            if has_cur_sni:
+                return cur_sni
+            elif candidates:
+                return candidates[0]
+            else:
+                return ""
+
+        # Case 1: cur_sni is among candidates (even if not the newest) -> keep cur_sni!
+        candidates = ["new.example.com", "old.example.com"]
+        self.assertEqual(select_non_interactive(candidates, "old.example.com"), "old.example.com")
+
+        # Case 2: cur_sni is invalid/missing -> fallback to newest
+        self.assertEqual(select_non_interactive(candidates, "dead.example.com"), "new.example.com")
+        self.assertEqual(select_non_interactive(candidates, ""), "new.example.com")
+
+        # Case 3: no candidates -> empty
+        self.assertEqual(select_non_interactive([], "any.example.com"), "")
 
     def test_update_node_post_reexec_invariants(self):
         """Verify update_node re-execs with update-post to eliminate in-memory stale functions."""
