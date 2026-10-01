@@ -1249,7 +1249,9 @@ try:
         code, path = r.get('code'), r.get('path')
         if not code or not path: continue
 
-        in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code}'
+        code_s = str(code).strip()
+        code_lower = code_s.lower()
+        in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
 
         # Приоритет локального порта:
         # 1. Реальный порт инбаунда из config.json (например, 8007, 8008)
@@ -1262,8 +1264,9 @@ try:
                 port = int(saved_in)
         if not port:
             for t, p in xray_inbound_ports.items():
-                if t.endswith(f'-{code}') and p != 10443:
+                if t.lower().endswith(f'-{code_lower}') and p != 10443:
                     port = p
+                    in_tag = t
                     break
 
         if not port:
@@ -1271,6 +1274,9 @@ try:
 
         if r.get('inbound_port') != port:
             r['inbound_port'] = port
+            relays_modified = True
+        if r.get('inbound_tag') != in_tag:
+            r['inbound_tag'] = in_tag
             relays_modified = True
 
         cf_path = os.path.join(nginx_dir, f'{code}.conf')

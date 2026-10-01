@@ -2201,6 +2201,7 @@ remove_traffic_watchdog_timer
         common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
         self.assertIn("iptables-persistent netfilter-persistent", common_sh)
         self.assertIn("export DEBIAN_FRONTEND=noninteractive", common_sh)
+        self.assertIn("debconf-set-selections", common_sh)
 
     def test_amnezia_migration_and_rollback_invariants(self):
         """Verify Amnezia node migration path, legacy env discovery, and rollback handling."""

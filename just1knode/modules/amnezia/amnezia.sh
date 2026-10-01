@@ -116,7 +116,6 @@ EOF
 
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl enable just1knode-antiabuse.service >/dev/null 2>&1 || true
-    systemctl start just1knode-antiabuse.service >/dev/null 2>&1 || true
 }
 
 apply_amnezia_abuse_protection() {
@@ -177,6 +176,10 @@ apply_amnezia_abuse_protection() {
     # Сохранение правил iptables для переживания перезагрузки
     if ! command -v netfilter-persistent >/dev/null 2>&1; then
         export DEBIAN_FRONTEND=noninteractive
+        if command -v debconf-set-selections >/dev/null 2>&1; then
+            echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | debconf-set-selections 2>/dev/null || true
+            echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections 2>/dev/null || true
+        fi
         apt-get update -qq >/dev/null 2>&1 || true
         apt-get install -y -qq iptables-persistent netfilter-persistent >/dev/null 2>&1 || true
     fi

@@ -82,6 +82,10 @@ get_arch() {
 install_base_deps() {
     log "Проверка и установка системных пакетов..."
     export DEBIAN_FRONTEND=noninteractive
+    if command -v debconf-set-selections >/dev/null 2>&1; then
+        echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | debconf-set-selections 2>/dev/null || true
+        echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections 2>/dev/null || true
+    fi
     apt-get update -qq
     apt-get install -y -qq curl wget unzip jq python3 python3-pip python3-venv ufw openssl ca-certificates iptables iptables-persistent netfilter-persistent
 }
