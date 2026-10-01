@@ -513,11 +513,12 @@ detect_relay_domain_candidates() {
     local my_ip="${1:-}"
     local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
     [[ -d "${le_dir}/live" ]] || return 0
+    [[ -n "$my_ip" ]] || return 0
 
     python3 -c "
-import os, glob, socket, sys
+import os, glob, socket, subprocess, sys
 le_dir = sys.argv[1]
-my_ip = sys.argv[2] if len(sys.argv) > 2 else ''
+my_ip = sys.argv[2]
 
 candidates = []
 for d in glob.glob(os.path.join(le_dir, 'live', '*')):
@@ -528,17 +529,23 @@ for d in glob.glob(os.path.join(le_dir, 'live', '*')):
     pk = os.path.join(d, 'privkey.pem')
     if not (os.path.isfile(fc) and os.path.isfile(pk)): continue
     try:
+        rc = subprocess.run(['openssl', 'x509', '-checkend', '86400', '-noout', '-in', fc],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+        if rc != 0:
+            continue
+    except Exception:
+        continue
+    try:
         mtime = os.path.getmtime(fc)
     except Exception:
         mtime = 0
-    if my_ip:
-        try:
-            ai = socket.getaddrinfo(domain, None, socket.AF_INET)
-            ips = {x[4][0] for x in ai if x[4]}
-            if my_ip not in ips:
-                continue
-        except Exception:
+    try:
+        ai = socket.getaddrinfo(domain, None, socket.AF_INET)
+        ips = {x[4][0] for x in ai if x[4]}
+        if my_ip not in ips:
             continue
+    except Exception:
+        continue
     candidates.append((mtime, domain))
 
 candidates.sort(key=lambda x: x[0], reverse=True)
@@ -585,19 +592,33 @@ select_relay_domain_interactive() {
             echo -e "  [${num}] ${CYAN}${cand}${NC}${tag}" >&2
         done
         echo -e "  [0] Ввести другой домен вручную" >&2
-        local choice
-        read -rp "Какой домен использовать для Relay? [Enter = 1 (${candidates[0]})]: " choice
+
         local chosen_domain=""
-        if [[ -z "$choice" || "$choice" == "1" ]]; then
-            chosen_domain="${candidates[0]}"
-        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#candidates[@]} )); then
-            chosen_domain="${candidates[$((choice - 1))]}"
-        elif [[ "$choice" == "0" ]]; then
-            read -rp "Введите домен вручную: " manual_domain
-            chosen_domain="$(echo "$manual_domain" | tr -d '[:space:]')"
-        else
-            chosen_domain="${candidates[0]}"
-        fi
+        while true; do
+            local choice=""
+            read -rp "Какой домен использовать для Relay? [Enter = 1 (${candidates[0]})]: " choice
+            if [[ -z "$choice" || "$choice" == "1" ]]; then
+                chosen_domain="${candidates[0]}"
+                break
+            elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#candidates[@]} )); then
+                chosen_domain="${candidates[$((choice - 1))]}"
+                break
+            elif [[ "$choice" == "0" ]]; then
+                local manual_domain=""
+                read -rp "Введите домен вручную: " manual_domain
+                manual_domain="$(echo "$manual_domain" | tr -d '[:space:]')"
+                if [[ -n "$manual_domain" ]]; then
+                    if validate_relay_dns "$manual_domain" "$my_ip"; then
+                        chosen_domain="$manual_domain"
+                        break
+                    else
+                        warn "Введённый домен '$manual_domain' не резолвится на IP '$my_ip'. Попробуйте снова." >&2
+                    fi
+                fi
+            else
+                warn "Неверный выбор '$choice'. Введите число от 0 до ${#candidates[@]}." >&2
+            fi
+        done
         echo "$chosen_domain"
     else
         # В неинтерактивном режиме выбираем самый свежий сертификат
@@ -849,7 +870,7 @@ heal_and_update_relay_config() {
     if [[ -n "$le_domain" ]]; then
         local cur_sec
         cur_sec="$(get_state_val "security" "")"
-        if [[ "$cur_sec" != "tls" || "$cur_sni" != "$le_domain" || ! -f "${xray_tls_dir}/fullchain.pem" ]]; then
+        if [[ "$cur_sec" != "tls" || "$cur_sni" != "$le_domain" || ! -f "${xray_tls_dir}/fullchain.pem" ]] || ! openssl x509 -checkend 86400 -noout -in "${xray_tls_dir}/fullchain.pem" 2>/dev/null; then
             log "✔ Обнаружен действующий сертификат Let's Encrypt для '$le_domain'."
             log "Автоматический перевод входящего туннеля Relay на VLESS + TLS (Zero-Manual-Commands)..."
             if issue_relay_tls_cert "$le_domain"; then

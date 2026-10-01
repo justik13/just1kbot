@@ -1407,6 +1407,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 remove_amnezia_abuse_protection
                 ;;
             update-post)
+                check_root
                 shift
                 update_node_post "${1:-all}" "${2:-0}"
                 ;;

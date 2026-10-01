@@ -2624,6 +2624,8 @@ remove_traffic_watchdog_timer
         self.assertIn("select_relay_domain_interactive", relay_sh)
         self.assertIn("candidates.sort(key=lambda x: x[0], reverse=True)", relay_sh)
         self.assertIn("Какой домен использовать для Relay?", relay_sh)
+        self.assertIn("-checkend", relay_sh)
+        self.assertIn("validate_relay_dns", relay_sh)
 
     def test_update_node_post_reexec_invariants(self):
         """Verify update_node re-execs with update-post to eliminate in-memory stale functions."""
@@ -2631,9 +2633,59 @@ remove_traffic_watchdog_timer
         main_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
 
         self.assertIn('exec "$bin_path" update-post "$target"', core_sh)
+        self.assertNotIn('export JUST1KNODE_POST_UPDATE', core_sh)
         self.assertIn('update_node_post() {', core_sh)
+        self.assertIn('check_root', core_sh)
         self.assertIn('update-post)', main_sh)
         self.assertIn('update_node_post "${1:-all}"', main_sh)
+
+    def test_detect_relay_domain_candidates_filter_and_sort_logic(self):
+        """Verify the candidate filter and sort algorithm prioritizes newest valid certs and excludes non-domains."""
+        import glob
+        import tempfile
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp_le:
+            live_dir = Path(tmp_le) / "live"
+            live_dir.mkdir()
+
+            # Domain 1: older cert
+            d1 = live_dir / "old.example.com"
+            d1.mkdir()
+            (d1 / "privkey.pem").write_text("key1", encoding="utf-8")
+            fc1 = d1 / "fullchain.pem"
+            fc1.write_text("cert1", encoding="utf-8")
+            os.utime(fc1, (time.time() - 100, time.time() - 100))
+
+            # Domain 2: newer cert
+            d2 = live_dir / "new.example.com"
+            d2.mkdir()
+            (d2 / "privkey.pem").write_text("key2", encoding="utf-8")
+            fc2 = d2 / "fullchain.pem"
+            fc2.write_text("cert2", encoding="utf-8")
+            os.utime(fc2, (time.time(), time.time()))
+
+            # Non-candidate dir (e.g. README)
+            (live_dir / "README").write_text("ignore", encoding="utf-8")
+
+            candidates = []
+            for d in glob.glob(os.path.join(str(live_dir), "*")):
+                if not os.path.isdir(d):
+                    continue
+                domain = os.path.basename(d)
+                if domain in ("README", "*"):
+                    continue
+                fc = os.path.join(d, "fullchain.pem")
+                pk = os.path.join(d, "privkey.pem")
+                if not (os.path.isfile(fc) and os.path.isfile(pk)):
+                    continue
+                mtime = os.path.getmtime(fc)
+                candidates.append((mtime, domain))
+
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            sorted_domains = [c[1] for c in candidates]
+            self.assertEqual(sorted_domains, ["new.example.com", "old.example.com"])
+
 
     def test_origin_nginx_reconciliation_behavior_isolated_and_strict(self):
         """Behavioral test: Origin reconciliation isolates failures, rejects stale ports, and prunes stale/orphan configs."""
