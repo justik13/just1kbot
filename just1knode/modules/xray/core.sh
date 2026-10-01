@@ -476,6 +476,36 @@ update_node() {
         rm -rf "$tmp_tar" "$tmp_dir"
     fi
 
+    # Если модули утилиты были обновлены на диске, перезапускаем второй этап из новой версии,
+    # чтобы гарантированно исключить выполнение устаревших функций из памяти Bash
+    local node_dir="${INSTALL_DIR:-/opt/just1knode}"
+    local bin_path="${node_dir}/just1knode.sh"
+    [[ -x "$bin_path" ]] || bin_path="/usr/local/bin/just1knode"
+    if [[ -x "$bin_path" && "${JUST1KNODE_POST_UPDATE:-0}" != "1" ]]; then
+        release_just1knode_lock 2>/dev/null || true
+        trap - RETURN EXIT
+        export JUST1KNODE_POST_UPDATE=1
+        exec "$bin_path" update-post "$target" "$is_menu"
+    fi
+
+    # Защитный fallback (если exec недоступен): повторная загрузка модулей с диска
+    if [[ -d "$node_dir" ]]; then
+        source "${node_dir}/lib/common.sh" 2>/dev/null || true
+        source "${node_dir}/modules/xray/origin.sh" 2>/dev/null || true
+        source "${node_dir}/modules/xray/relay.sh" 2>/dev/null || true
+        source "${node_dir}/modules/amnezia/amnezia.sh" 2>/dev/null || true
+    fi
+
+    update_node_post "$target" "$is_menu"
+}
+
+update_node_post() {
+    local target="${1:-all}"
+    local is_menu="${2:-0}"
+
+    acquire_just1knode_lock
+    trap release_just1knode_lock RETURN EXIT
+
     # Автоматическая оптимизация конфигурации в зависимости от роли сервера
     local role
     role="$(get_state_val "role")"
@@ -503,5 +533,13 @@ update_node() {
 
     release_just1knode_lock
     trap - RETURN EXIT
+
+    local node_dir="${INSTALL_DIR:-/opt/just1knode}"
+    local bin_path="${node_dir}/just1knode.sh"
+    [[ -x "$bin_path" ]] || bin_path="/usr/local/bin/just1knode"
+    if [[ "$is_menu" == "1" && -x "$bin_path" && -t 0 ]]; then
+        read -rp "Нажмите Enter для возврата в меню..."
+        exec "$bin_path"
+    fi
 }
 

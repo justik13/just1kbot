@@ -504,6 +504,104 @@ EOF
     echo -e "${BOLD}Команда для добавления этого Relay на вашем Origin-сервере:${NC}"
     echo -e "${GREEN}just1knode relay add \"${detected_country}\" ${my_ip} ${relay_port} ${tunnel_uuid} \"${detected_code}\" \"tls\" \"-\" \"-\" \"${dest_server}\"${NC}\n"
     echo -e "${YELLOW}Примечание: вы можете заменить название \"${detected_country}\" на любое удобное вам.${NC}\n"
+# =============================================================================
+# Определение и интерактивный выбор доменов Let's Encrypt для Relay
+# =============================================================================
+detect_relay_domain_candidates() {
+    local my_ip="${1:-}"
+    local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
+    [[ -d "${le_dir}/live" ]] || return 0
+
+    python3 -c "
+import os, glob, socket, sys
+le_dir = sys.argv[1]
+my_ip = sys.argv[2] if len(sys.argv) > 2 else ''
+
+candidates = []
+for d in glob.glob(os.path.join(le_dir, 'live', '*')):
+    if not os.path.isdir(d): continue
+    b = os.path.basename(d)
+    if b in ('README', '*'): continue
+    fc = os.path.join(d, 'fullchain.pem')
+    pk = os.path.join(d, 'privkey.pem')
+    if not (os.path.isfile(fc) and os.path.isfile(pk)): continue
+    try:
+        mtime = os.path.getmtime(fc)
+    except Exception:
+        mtime = 0
+    if my_ip:
+        try:
+            ai = socket.getaddrinfo(b, None, socket.AF_INET)
+            ips = {x[4][0] for x in ai if x[4]}
+            if my_ip not in ips:
+                continue
+        except Exception:
+            continue
+    candidates.append((mtime, b))
+
+candidates.sort(key=lambda x: x[0], reverse=True)
+for _, c in candidates:
+    print(c)
+" "$le_dir" "$my_ip" 2>/dev/null || true
+}
+
+select_relay_domain_interactive() {
+    local my_ip="${1:-}"
+    local cur_sni="${2:-}"
+
+    local candidates=()
+    while IFS= read -r c; do
+        [[ -n "$c" ]] && candidates+=("$c")
+    done < <(detect_relay_domain_candidates "$my_ip")
+
+    if [[ ${#candidates[@]} -eq 0 ]]; then
+        echo ""
+        return 0
+    fi
+
+    if [[ ${#candidates[@]} -eq 1 ]]; then
+        echo "${candidates[0]}"
+        return 0
+    fi
+
+    # Если кандидатов несколько:
+    # Если текущий cur_sni совпадает с самым свежим кандидатом — коллизий нет
+    if [[ -n "$cur_sni" && "$cur_sni" == "${candidates[0]}" ]]; then
+        echo "${candidates[0]}"
+        return 0
+    fi
+
+    # Обнаружена нестыковка (несколько доменов, и текущий отличается от самого свежего)
+    if [[ -t 0 ]]; then
+        warn "ВНИМАНИЕ: На сервере обнаружено несколько SSL-сертификатов, привязанных к IP ($my_ip):" >&2
+        for idx in "${!candidates[@]}"; do
+            local num=$((idx + 1))
+            local cand="${candidates[$idx]}"
+            local tag=""
+            [[ $idx -eq 0 ]] && tag=" (самый свежий)"
+            [[ "$cand" == "$cur_sni" ]] && tag="${tag} [текущий в конфигурации]"
+            echo -e "  [${num}] ${CYAN}${cand}${NC}${tag}" >&2
+        done
+        echo -e "  [0] Ввести другой домен вручную" >&2
+        local choice
+        read -rp "Какой домен использовать для Relay? [Enter = 1 (${candidates[0]})]: " choice
+        local chosen_domain=""
+        if [[ -z "$choice" || "$choice" == "1" ]]; then
+            chosen_domain="${candidates[0]}"
+        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#candidates[@]} )); then
+            chosen_domain="${candidates[$((choice - 1))]}"
+        elif [[ "$choice" == "0" ]]; then
+            read -rp "Введите домен вручную: " manual_domain
+            chosen_domain="$(echo "$manual_domain" | tr -d '[:space:]')"
+        else
+            chosen_domain="${candidates[0]}"
+        fi
+        echo "$chosen_domain"
+    else
+        # В неинтерактивном режиме выбираем самый свежий сертификат
+        log "✔ Неинтерактивный режим: обнаружено несколько сертификатов, выбран самый свежий '${candidates[0]}'." >&2
+        echo "${candidates[0]}"
+    fi
 }
 
 setup_relay_domain() {
@@ -552,83 +650,19 @@ print('')
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
 
-    # Авто-определение уже существующего сертификата Let's Encrypt на сервере (приоритет affinity текущего SNI и валидному DNS)
-    local auto_domain=""
     local cur_sni
     cur_sni="$(get_state_val "sni" "")"
-    local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
-
-    if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && -f "${le_dir}/live/${cur_sni}/fullchain.pem" ]]; then
-        if openssl x509 -checkend 86400 -noout -in "${le_dir}/live/${cur_sni}/fullchain.pem" 2>/dev/null; then
-            local cur_sni_match="NO"
-            if [[ -n "$my_ip" ]]; then
-                cur_sni_match=$(python3 -c "
-import socket, sys
-domain, exp_ip = sys.argv[1], sys.argv[2]
-try:
-    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
-    ips = {x[4][0] for x in ai if x[4]}
-    print('YES' if exp_ip in ips else 'NO')
-except Exception:
-    print('NO')
-" "$cur_sni" "$my_ip" 2>/dev/null || echo "NO")
-            fi
-            if [[ "$cur_sni_match" == "YES" ]]; then
-                auto_domain="$cur_sni"
-            fi
-        fi
-    fi
-
-    if [[ -z "$auto_domain" && -d "${le_dir}/live" ]]; then
-        local cert_dirs=()
-        while IFS= read -r d; do
-            [[ -n "$d" && -d "$d" ]] && cert_dirs+=("$d")
-        done < <(python3 -c "
-import os, glob
-dirs = [d for d in glob.glob('${le_dir}/live/*') if os.path.isdir(d) and os.path.basename(d) not in ('README', '*')]
-dirs.sort(key=lambda d: os.path.getmtime(os.path.join(d, 'fullchain.pem')) if os.path.isfile(os.path.join(d, 'fullchain.pem')) else os.path.getmtime(d), reverse=True)
-for d in dirs: print(d)
-" 2>/dev/null || true)
-
-        for c_dir in "${cert_dirs[@]}"; do
-            if [[ -f "${c_dir}/fullchain.pem" ]]; then
-                local cand
-                cand="$(basename "$c_dir")"
-                if [[ "$cand" != "README" && "$cand" != "*" ]]; then
-                    if openssl x509 -checkend 86400 -noout -in "${c_dir}/fullchain.pem" 2>/dev/null; then
-                        if [[ -n "$my_ip" ]]; then
-                            local is_match
-                            is_match=$(python3 -c "
-import socket, sys
-domain, exp_ip = sys.argv[1], sys.argv[2]
-try:
-    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
-    ips = {x[4][0] for x in ai if x[4]}
-    print('YES' if exp_ip in ips else 'NO')
-except Exception:
-    print('NO')
-" "$cand" "$my_ip" 2>/dev/null || echo "NO")
-                            if [[ "$is_match" == "YES" ]]; then
-                                auto_domain="$cand"
-                                break
-                            fi
-                        fi
-                    fi
-                fi
-            fi
-        done
-    fi
 
     local domain="${1:-}"
     if [[ -z "$domain" ]]; then
-        echo -e "\n${BOLD}=== НАСТРОЙКА ДОМЕНА RELAY ДЛЯ ЗАЩИТЫ ОТ ТСПУ ===${NC}"
-        echo -e "Для устранения сигнатуры nDPI NDPI_UNRESOLVED_HOSTNAME (сверка SNI ➔ DNS)"
-        echo -e "релей настраивается на вашем персональном домене с чистым сертификатом Let's Encrypt."
+        local auto_domain
+        auto_domain="$(select_relay_domain_interactive "$my_ip" "$cur_sni")"
         if [[ -n "$auto_domain" ]]; then
-            echo -e "${GREEN}✔ Обнаружен готовый сертификат Let's Encrypt для домена:${NC} ${BOLD}${auto_domain}${NC}"
-            read -rp "Использовать этот домен [Enter = ${auto_domain}]: " domain_in
-            domain="${domain_in:-$auto_domain}"
+            domain="$auto_domain"
         else
+            echo -e "\n${BOLD}=== НАСТРОЙКА ДОМЕНА RELAY ДЛЯ ЗАЩИТЫ ОТ ТСПУ ===${NC}"
+            echo -e "Для устранения сигнатуры nDPI NDPI_UNRESOLVED_HOSTNAME (сверка SNI ➔ DNS)"
+            echo -e "релей настраивается на вашем персональном домене с чистым сертификатом Let's Encrypt."
             echo -e "Создайте DNS A-запись (DNS-Only / без Cloudflare Proxy):"
             echo -e "  ${CYAN}your-relay.yourdomain.com ➔ ${my_ip}${NC}\n"
             read -rp "Введите персональный домен для этого Relay (например: your-relay.yourdomain.com): " domain_in
@@ -799,77 +833,15 @@ heal_and_update_relay_config() {
     manifest_begin
 
     # 1. Автоматический перевод Relay на VLESS+TLS, если на хосте уже есть сертификат Let's Encrypt
-    local le_domain=""
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
     local cur_sni
     cur_sni="$(get_state_val "sni" "")"
     local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
     local xray_tls_dir="${XRAY_TLS_DIR:-/usr/local/etc/xray/tls}"
+    local le_domain=""
 
-    # Приоритет 1 (Strict Affinity): Текущий настроенный SNI, если его сертификат существует, валиден и подтверждён DNS на my_ip
-    if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && -f "${le_dir}/live/${cur_sni}/fullchain.pem" && -f "${le_dir}/live/${cur_sni}/privkey.pem" ]]; then
-        if openssl x509 -checkend 86400 -noout -in "${le_dir}/live/${cur_sni}/fullchain.pem" 2>/dev/null; then
-            local cur_sni_match="NO"
-            if [[ -n "$my_ip" ]]; then
-                cur_sni_match=$(python3 -c "
-import socket, sys
-domain, exp_ip = sys.argv[1], sys.argv[2]
-try:
-    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
-    ips = {x[4][0] for x in ai if x[4]}
-    print('YES' if exp_ip in ips else 'NO')
-except Exception:
-    print('NO')
-" "$cur_sni" "$my_ip" 2>/dev/null || echo "NO")
-            fi
-            if [[ "$cur_sni_match" == "YES" ]]; then
-                le_domain="$cur_sni"
-            fi
-        fi
-    fi
-
-    # Приоритет 2: Поиск среди других сертификатов, подтверждённых через DNS на local my_ip, по свежести (mtime)
-    if [[ -z "$le_domain" && -d "${le_dir}/live" ]]; then
-        local cert_dirs=()
-        while IFS= read -r d; do
-            [[ -n "$d" && -d "$d" ]] && cert_dirs+=("$d")
-        done < <(python3 -c "
-import os, glob
-dirs = [d for d in glob.glob('${le_dir}/live/*') if os.path.isdir(d) and os.path.basename(d) not in ('README', '*')]
-dirs.sort(key=lambda d: os.path.getmtime(os.path.join(d, 'fullchain.pem')) if os.path.isfile(os.path.join(d, 'fullchain.pem')) else os.path.getmtime(d), reverse=True)
-for d in dirs: print(d)
-" 2>/dev/null || true)
-
-        for c_dir in "${cert_dirs[@]}"; do
-            if [[ -f "${c_dir}/fullchain.pem" && -f "${c_dir}/privkey.pem" ]]; then
-                local cand
-                cand="$(basename "$c_dir")"
-                if [[ "$cand" != "README" && "$cand" != "*" ]]; then
-                    if openssl x509 -checkend 86400 -noout -in "${c_dir}/fullchain.pem" 2>/dev/null; then
-                        if [[ -n "$my_ip" ]]; then
-                            # Бесшумная проверка DNS без интерактивного зависания
-                            local is_match
-                            is_match=$(python3 -c "
-import socket, sys
-domain, exp_ip = sys.argv[1], sys.argv[2]
-try:
-    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
-    ips = {x[4][0] for x in ai if x[4]}
-    print('YES' if exp_ip in ips else 'NO')
-except Exception:
-    print('NO')
-" "$cand" "$my_ip" 2>/dev/null || echo "NO")
-                            if [[ "$is_match" == "YES" ]]; then
-                                le_domain="$cand"
-                                break
-                            fi
-                        fi
-                    fi
-                fi
-            fi
-        done
-    fi
+    le_domain="$(select_relay_domain_interactive "$my_ip" "$cur_sni")"
 
     local cert_issued=0
     if [[ -n "$le_domain" ]]; then

@@ -2618,10 +2618,22 @@ remove_traffic_watchdog_timer
         self.assertIn("\"$next_port\"", relays_manage_sh)
 
     def test_relay_cert_detection_orders_by_mtime_descending(self):
-        """Verify relay.sh sorts Let's Encrypt live certs newest first."""
+        """Verify relay.sh sorts Let's Encrypt live certs newest first and supports interactive resolution."""
         relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
-        self.assertIn("dirs.sort(key=lambda d: os.path.getmtime(os.path.join(d, 'fullchain.pem'))", relay_sh)
-        self.assertIn("# Приоритет 1 (Strict Affinity): Текущий настроенный SNI", relay_sh)
+        self.assertIn("detect_relay_domain_candidates", relay_sh)
+        self.assertIn("select_relay_domain_interactive", relay_sh)
+        self.assertIn("candidates.sort(key=lambda x: x[0], reverse=True)", relay_sh)
+        self.assertIn("Какой домен использовать для Relay?", relay_sh)
+
+    def test_update_node_post_reexec_invariants(self):
+        """Verify update_node re-execs with update-post to eliminate in-memory stale functions."""
+        core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
+        main_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+
+        self.assertIn('exec "$bin_path" update-post "$target"', core_sh)
+        self.assertIn('update_node_post() {', core_sh)
+        self.assertIn('update-post)', main_sh)
+        self.assertIn('update_node_post "${1:-all}"', main_sh)
 
     def test_origin_nginx_reconciliation_behavior_isolated_and_strict(self):
         """Behavioral test: Origin reconciliation isolates failures, rejects stale ports, and prunes stale/orphan configs."""
