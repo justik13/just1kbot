@@ -81,6 +81,7 @@ get_arch() {
 
 install_base_deps() {
     log "Проверка и установка системных пакетов..."
+    export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
     apt-get install -y -qq curl wget unzip jq python3 python3-pip python3-venv ufw openssl ca-certificates
 }

@@ -456,12 +456,6 @@ EOF
     ufw allow from "$origin_ip" to any port "$relay_port" proto tcp || true
     log "Порт туннеля ${relay_port}/tcp открыт строго для ${origin_ip}."
 
-    if [[ "$prev_role" == "awg" || "$prev_role" == "dual" ]]; then
-        set_state_val "role" "dual"
-        log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"
-    else
-        set_state_val "role" "relay"
-    fi
     set_state_val "relay_port" "$relay_port"
     set_state_val "origin_ip" "$origin_ip"
     set_state_val "tunnel_uuid" "$tunnel_uuid"
@@ -469,6 +463,14 @@ EOF
     set_state_val "public_key" "-"
     set_state_val "short_id" "-"
     set_state_val "sni" "$dest_server"
+
+    if [[ "$prev_role" == "awg" || "$prev_role" == "dual" ]]; then
+        set_state_val "role" "dual"
+        log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"
+        apply_amnezia_abuse_protection
+    else
+        set_state_val "role" "relay"
+    fi
 
     local detected_country="Зарубежный шлюз"
     local detected_code="exit"
@@ -550,20 +552,72 @@ print('')
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
 
-    # Авто-определение уже существующего сертификата Let's Encrypt на сервере
+    # Авто-определение уже существующего сертификата Let's Encrypt на сервере (приоритет affinity текущего SNI и валидному DNS)
     local auto_domain=""
+    local cur_sni
+    cur_sni="$(get_state_val "sni" "")"
     local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
-    local cert_dirs=("${le_dir}"/live/*)
-    for c_dir in "${cert_dirs[@]}"; do
-        if [[ -f "${c_dir}/fullchain.pem" ]]; then
-            local cand
-            cand="$(basename "$c_dir")"
-            if [[ "$cand" != "README" && "$cand" != "*" ]]; then
-                auto_domain="$cand"
-                break
+
+    if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && -f "${le_dir}/live/${cur_sni}/fullchain.pem" ]]; then
+        if openssl x509 -checkend 86400 -noout -in "${le_dir}/live/${cur_sni}/fullchain.pem" 2>/dev/null; then
+            local cur_sni_match="NO"
+            if [[ -n "$my_ip" ]]; then
+                cur_sni_match=$(python3 -c "
+import socket, sys
+domain, exp_ip = sys.argv[1], sys.argv[2]
+try:
+    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
+    ips = {x[4][0] for x in ai if x[4]}
+    print('YES' if exp_ip in ips else 'NO')
+except Exception:
+    print('NO')
+" "$cur_sni" "$my_ip" 2>/dev/null || echo "NO")
+            fi
+            if [[ "$cur_sni_match" == "YES" ]]; then
+                auto_domain="$cur_sni"
             fi
         fi
-    done
+    fi
+
+    if [[ -z "$auto_domain" && -d "${le_dir}/live" ]]; then
+        local cert_dirs=()
+        while IFS= read -r d; do
+            [[ -n "$d" && -d "$d" ]] && cert_dirs+=("$d")
+        done < <(python3 -c "
+import os, glob
+dirs = [d for d in glob.glob('${le_dir}/live/*') if os.path.isdir(d) and os.path.basename(d) not in ('README', '*')]
+dirs.sort(key=lambda d: os.path.getmtime(os.path.join(d, 'fullchain.pem')) if os.path.isfile(os.path.join(d, 'fullchain.pem')) else os.path.getmtime(d), reverse=True)
+for d in dirs: print(d)
+" 2>/dev/null || true)
+
+        for c_dir in "${cert_dirs[@]}"; do
+            if [[ -f "${c_dir}/fullchain.pem" ]]; then
+                local cand
+                cand="$(basename "$c_dir")"
+                if [[ "$cand" != "README" && "$cand" != "*" ]]; then
+                    if openssl x509 -checkend 86400 -noout -in "${c_dir}/fullchain.pem" 2>/dev/null; then
+                        if [[ -n "$my_ip" ]]; then
+                            local is_match
+                            is_match=$(python3 -c "
+import socket, sys
+domain, exp_ip = sys.argv[1], sys.argv[2]
+try:
+    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
+    ips = {x[4][0] for x in ai if x[4]}
+    print('YES' if exp_ip in ips else 'NO')
+except Exception:
+    print('NO')
+" "$cand" "$my_ip" 2>/dev/null || echo "NO")
+                            if [[ "$is_match" == "YES" ]]; then
+                                auto_domain="$cand"
+                                break
+                            fi
+                        fi
+                    fi
+                fi
+            fi
+        done
+    fi
 
     local domain="${1:-}"
     if [[ -z "$domain" ]]; then
@@ -752,20 +806,51 @@ heal_and_update_relay_config() {
     cur_sni="$(get_state_val "sni" "")"
     local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
     local xray_tls_dir="${XRAY_TLS_DIR:-/usr/local/etc/xray/tls}"
-    local cert_dirs=("${le_dir}"/live/*)
-    for c_dir in "${cert_dirs[@]}"; do
-        if [[ -f "${c_dir}/fullchain.pem" && -f "${c_dir}/privkey.pem" ]]; then
-            local cand
-            cand="$(basename "$c_dir")"
-            if [[ "$cand" != "README" && "$cand" != "*" ]]; then
-                if openssl x509 -checkend 86400 -noout -in "${c_dir}/fullchain.pem" 2>/dev/null; then
-                    if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && "$cur_sni" == "$cand" ]]; then
-                        le_domain="$cand"
-                        break
-                    elif [[ -n "$my_ip" ]]; then
-                        # Бесшумная проверка DNS без интерактивного зависания
-                        local is_match
-                        is_match=$(python3 -c "
+
+    # Приоритет 1 (Strict Affinity): Текущий настроенный SNI, если его сертификат существует, валиден и подтверждён DNS на my_ip
+    if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && -f "${le_dir}/live/${cur_sni}/fullchain.pem" && -f "${le_dir}/live/${cur_sni}/privkey.pem" ]]; then
+        if openssl x509 -checkend 86400 -noout -in "${le_dir}/live/${cur_sni}/fullchain.pem" 2>/dev/null; then
+            local cur_sni_match="NO"
+            if [[ -n "$my_ip" ]]; then
+                cur_sni_match=$(python3 -c "
+import socket, sys
+domain, exp_ip = sys.argv[1], sys.argv[2]
+try:
+    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
+    ips = {x[4][0] for x in ai if x[4]}
+    print('YES' if exp_ip in ips else 'NO')
+except Exception:
+    print('NO')
+" "$cur_sni" "$my_ip" 2>/dev/null || echo "NO")
+            fi
+            if [[ "$cur_sni_match" == "YES" ]]; then
+                le_domain="$cur_sni"
+            fi
+        fi
+    fi
+
+    # Приоритет 2: Поиск среди других сертификатов, подтверждённых через DNS на local my_ip, по свежести (mtime)
+    if [[ -z "$le_domain" && -d "${le_dir}/live" ]]; then
+        local cert_dirs=()
+        while IFS= read -r d; do
+            [[ -n "$d" && -d "$d" ]] && cert_dirs+=("$d")
+        done < <(python3 -c "
+import os, glob
+dirs = [d for d in glob.glob('${le_dir}/live/*') if os.path.isdir(d) and os.path.basename(d) not in ('README', '*')]
+dirs.sort(key=lambda d: os.path.getmtime(os.path.join(d, 'fullchain.pem')) if os.path.isfile(os.path.join(d, 'fullchain.pem')) else os.path.getmtime(d), reverse=True)
+for d in dirs: print(d)
+" 2>/dev/null || true)
+
+        for c_dir in "${cert_dirs[@]}"; do
+            if [[ -f "${c_dir}/fullchain.pem" && -f "${c_dir}/privkey.pem" ]]; then
+                local cand
+                cand="$(basename "$c_dir")"
+                if [[ "$cand" != "README" && "$cand" != "*" ]]; then
+                    if openssl x509 -checkend 86400 -noout -in "${c_dir}/fullchain.pem" 2>/dev/null; then
+                        if [[ -n "$my_ip" ]]; then
+                            # Бесшумная проверка DNS без интерактивного зависания
+                            local is_match
+                            is_match=$(python3 -c "
 import socket, sys
 domain, exp_ip = sys.argv[1], sys.argv[2]
 try:
@@ -775,15 +860,16 @@ try:
 except Exception:
     print('NO')
 " "$cand" "$my_ip" 2>/dev/null || echo "NO")
-                        if [[ "$is_match" == "YES" ]]; then
-                            le_domain="$cand"
-                            break
+                            if [[ "$is_match" == "YES" ]]; then
+                                le_domain="$cand"
+                                break
+                            fi
                         fi
                     fi
                 fi
             fi
-        fi
-    done
+        done
+    fi
 
     local cert_issued=0
     if [[ -n "$le_domain" ]]; then

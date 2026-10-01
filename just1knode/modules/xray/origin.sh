@@ -1224,18 +1224,70 @@ print('[+] Xray Origin config успешно согласован с этало�
         mkdir -p "$NGINX_RELAYS_DIR"
         python3 -c "
 import json, sys, os
-rf, nginx_dir = sys.argv[1], sys.argv[2]
+rf, nginx_dir, cfg_file = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
     with open(rf, 'r', encoding='utf-8') as f:
         relays = json.load(f)
+
+    # Источник истины для локальных портов — секция inbounds в config.json
+    xray_inbound_ports = {}
+    if os.path.exists(cfg_file):
+        try:
+            with open(cfg_file, 'r', encoding='utf-8') as cf_f:
+                x_cfg = json.load(cf_f)
+                for ib in x_cfg.get('inbounds', []):
+                    t = ib.get('tag')
+                    p = ib.get('port')
+                    if t and p:
+                        xray_inbound_ports[t] = int(p)
+        except Exception:
+            pass
+
+    relays_modified = False
+    active_configs = set()
     for r in relays:
-        if not isinstance(r, dict): continue
-        code, path = r.get('code'), r.get('path')
-        port = r.get('inbound_port') or r.get('port')
-        if not code or not path or not port: continue
-        cf_path = os.path.join(nginx_dir, f'{code}.conf')
-        cf_base = path.rstrip('/')
-        desired_conf = f'''# Relay location for {code}
+        try:
+            if not isinstance(r, dict): continue
+            code, path = r.get('code'), r.get('path')
+            if not code or not path: continue
+
+            code_s = str(code).strip()
+            code_lower = code_s.lower()
+            cf_name = f'{code}.conf'
+            cf_path = os.path.join(nginx_dir, cf_name)
+            in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
+
+            # Строгий источник истины: локальный порт ДОЛЖЕН слушаться в Xray config.json
+            # Категорически запрещено использовать внешний порт 10443 или устаревший порт без инбаунда!
+            port = xray_inbound_ports.get(in_tag)
+            if not port:
+                for t, p in xray_inbound_ports.items():
+                    if t.lower() == f'just1k-wl-inbound-{code_lower}':
+                        port = p
+                        in_tag = t
+                        break
+
+            if not port:
+                # Если у релея нет активного локального инбаунда в Xray, удаляем старый конфиг Nginx во избежание 502
+                if os.path.exists(cf_path):
+                    try:
+                        os.remove(cf_path)
+                        print(f'[-] Удален устаревший Nginx конфиг для релея {code} (инбаунд Xray не найден)')
+                    except Exception:
+                        pass
+                continue
+
+            active_configs.add(cf_name)
+
+            if r.get('inbound_port') != port:
+                r['inbound_port'] = port
+                relays_modified = True
+            if r.get('inbound_tag') != in_tag:
+                r['inbound_tag'] = in_tag
+                relays_modified = True
+
+            cf_base = path.rstrip('/')
+            desired_conf = f'''# Relay location for {code}
 location = {cf_base} {{
     return 404;
 }}
@@ -1264,25 +1316,58 @@ location ^~ {path} {{
     add_header Accept-Ranges none always;
 }}
 '''
-        needs_write = True
-        if os.path.exists(cf_path):
-            try:
-                with open(cf_path, 'r', encoding='utf-8') as cf_cur:
-                    cur_text = cf_cur.read()
-                if (f'location = {cf_base}' in cur_text and
-                    'CDN-Cache-Control' in cur_text and
-                    'xhttp_proxy_method' in cur_text and
-                    f'proxy_pass http://127.0.0.1:{port}' in cur_text):
-                    needs_write = False
-            except Exception:
-                needs_write = True
-        if needs_write:
-            with open(cf_path, 'w', encoding='utf-8') as cf:
-                cf.write(desired_conf)
-            print(f'[+] Согласован Nginx конфиг для релея {code}')
+            needs_write = True
+            if os.path.exists(cf_path):
+                try:
+                    with open(cf_path, 'r', encoding='utf-8') as cf_cur:
+                        cur_text = cf_cur.read()
+                    if (f'location = {cf_base}' in cur_text and
+                        'CDN-Cache-Control' in cur_text and
+                        'xhttp_proxy_method' in cur_text and
+                        f'proxy_pass http://127.0.0.1:{port};' in cur_text):
+                        needs_write = False
+                except Exception:
+                    needs_write = True
+            if needs_write:
+                with open(cf_path, 'w', encoding='utf-8') as cf:
+                    cf.write(desired_conf)
+                print(f'[+] Согласован Nginx конфиг для релея {code} (локальный порт {port})')
+        except Exception:
+            continue
+
+    # Удаление любых осиротевших конфигов релеев, которых нет в реестре
+    # Исключаются системные конфигурации Origin (default.conf и sub-wl.conf)
+    system_origin_configs = {'default.conf', 'sub-wl.conf'}
+    if os.path.isdir(nginx_dir):
+        try:
+            for item in os.listdir(nginx_dir):
+                if item.endswith('.conf') and item not in active_configs and item not in system_origin_configs:
+                    try:
+                        os.remove(os.path.join(nginx_dir, item))
+                        print(f'[-] Удален осиротевший Nginx конфиг релея: {item}')
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    if relays_modified:
+        import tempfile
+        d_r = os.path.dirname(os.path.abspath(rf))
+        r_fd, r_path = tempfile.mkstemp(dir=d_r, suffix='.tmp')
+        with os.fdopen(r_fd, 'w', encoding='utf-8') as rf_out:
+            json.dump(relays, rf_out, ensure_ascii=False, indent=2)
+            rf_out.flush()
+            os.fsync(rf_out.fileno())
+        os.replace(r_path, rf)
+        try:
+            import shutil
+            shutil.chown(rf, user='root', group='xrayapi')
+            os.chmod(rf, 0o660)
+        except Exception:
+            pass
 except Exception:
     pass
-" "$RELAYS_FILE" "$NGINX_RELAYS_DIR" 2>/dev/null || true
+" "$RELAYS_FILE" "$NGINX_RELAYS_DIR" "$XRAY_CONFIG" 2>/dev/null || true
     fi
 
     # Авто-восстановление Nginx-проксирования подписок Белого Интернета

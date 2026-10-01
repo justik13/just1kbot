@@ -71,7 +71,7 @@ if not relays and os.path.exists(cfg_file):
                 in_tag = f'just1k-wl-inbound-{code}'
                 in_ib = next((ib for ib in cfg.get('inbounds', []) if ib.get('tag') == in_tag), None)
                 path = in_ib.get('streamSettings', {}).get('xhttpSettings', {}).get('path', f'/stream/{code}') if in_ib else f'/stream/{code}'
-                in_port = in_ib.get('port', 8004) if in_ib else port
+                in_port = in_ib.get('port') if in_ib else None
                 name = known_names.get(code.lower(), f'Релей {code.upper()}')
                 reconstructed.append({
                     'name': name,
@@ -567,12 +567,13 @@ code = safe_arg(sys.argv[2]).strip()
 name = safe_arg(sys.argv[3]).strip()
 ip = sys.argv[4]
 port = int(sys.argv[5])
-in_path = sys.argv[6]
-in_tag = sys.argv[7]
-out_tag = sys.argv[8]
-sec = sys.argv[9]
-sni = sys.argv[10]
-badge = safe_arg(sys.argv[11]).strip() if len(sys.argv) > 11 else ''
+in_port = int(sys.argv[6])
+in_path = sys.argv[7]
+in_tag = sys.argv[8]
+out_tag = sys.argv[9]
+sec = sys.argv[10]
+sni = sys.argv[11]
+badge = safe_arg(sys.argv[12]).strip() if len(sys.argv) > 12 else ''
 
 relays = []
 if os.path.exists(rf):
@@ -590,6 +591,7 @@ new_entry = {
     'code': code,
     'ip': ip,
     'port': port,
+    'inbound_port': in_port,
     'path': in_path,
     'inbound_tag': in_tag,
     'outbound_tag': out_tag,
@@ -615,7 +617,7 @@ try:
     os.chmod(rf, 0o660)
 except Exception:
     pass
-" "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni" "$badge"
+" "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$next_port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni" "$badge"
 
     nginx -t && systemctl reload nginx
     set +e

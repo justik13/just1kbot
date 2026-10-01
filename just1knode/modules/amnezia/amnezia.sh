@@ -50,10 +50,138 @@ is_amnezia_container_running() {
 # 1. Блокировка исходящего SMTP (порт 25) с tcp-reset
 # 2. Блокировка BitTorrent L7 хэндшейка и DHT пакетов через xt_string
 # =============================================================================
+sync_ufw_before_rules_antiabuse() {
+    local before_rules="/etc/ufw/before.rules"
+    if [[ -f "$before_rules" ]]; then
+        python3 -c "
+import re, sys
+bf = sys.argv[1]
+with open(bf, 'r', encoding='utf-8') as f:
+    content = f.read()
+
+content = re.sub(r'# START JUST1KNODE ANTI-ABUSE.*?# END JUST1KNODE ANTI-ABUSE\n?', '', content, flags=re.DOTALL)
+
+block = '''# START JUST1KNODE ANTI-ABUSE
+-A ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset
+-A ufw-before-forward -p tcp -m string --string \"BitTorrent protocol\" --algo bm -j DROP
+-A ufw-before-forward -p udp -m string --string \"BitTorrent protocol\" --algo bm -j DROP
+-A ufw-before-forward -p udp -m string --string \"d1:ad2:id20:\" --algo bm -j DROP
+# END JUST1KNODE ANTI-ABUSE
+'''
+
+if ':ufw-before-forward' in content:
+    content = re.sub(r'(:\s*ufw-before-forward\s+-\s+\[0:0\]\n)', r'\1' + block, content, count=1)
+elif '*filter' in content:
+    content = content.replace('*filter\n', '*filter\n' + block, 1)
+else:
+    sys.exit(1)
+
+with open(bf, 'w', encoding='utf-8') as f:
+    f.write(content)
+" "$before_rules" 2>/dev/null || return 1
+    else
+        if command -v ufw >/dev/null 2>&1; then
+            return 1
+        fi
+    fi
+    return 0
+}
+
+remove_ufw_before_rules_antiabuse() {
+    local before_rules="/etc/ufw/before.rules"
+    if [[ -f "$before_rules" ]]; then
+        python3 -c "
+import re, sys
+bf = sys.argv[1]
+try:
+    with open(bf, 'r', encoding='utf-8') as f:
+        content = f.read()
+    new_content = re.sub(r'# START JUST1KNODE ANTI-ABUSE.*?# END JUST1KNODE ANTI-ABUSE\n?', '', content, flags=re.DOTALL)
+    if new_content != content:
+        with open(bf, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+except Exception:
+    pass
+" "$before_rules" 2>/dev/null || true
+    fi
+}
+
+check_amnezia_abuse_rules() {
+    # Проверка 4 обязательных инвариантов сетевой защиты:
+    # 1. SMTP:25 REJECT
+    # 2. BitTorrent L7 TCP DROP
+    # 3. BitTorrent L7 UDP uTP DROP
+    # 4. BitTorrent L7 UDP DHT DROP
+    local missing=0
+
+    # 1. SMTP:25
+    if ! iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null && \
+       ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null); then
+        missing=$((missing + 1))
+    fi
+
+    # 2. BitTorrent TCP
+    if ! iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null && \
+       ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null); then
+        missing=$((missing + 1))
+    fi
+
+    # 3. BitTorrent UDP
+    if ! iptables -C FORWARD -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null && \
+       ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null); then
+        missing=$((missing + 1))
+    fi
+
+    # 4. BitTorrent UDP DHT
+    if ! iptables -C FORWARD -p udp -m string --string "d1:ad2:id20:" --algo bm -j DROP 2>/dev/null && \
+       ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p udp -m string --string "d1:ad2:id20:" --algo bm -j DROP 2>/dev/null); then
+        missing=$((missing + 1))
+    fi
+
+    # 5. Проверка сохранения всех 4 правил в persistent источнике /etc/ufw/before.rules (при наличии UFW)
+    local before_rules="/etc/ufw/before.rules"
+    if [[ -f "$before_rules" ]]; then
+        if ! grep -q -- "-A ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset" "$before_rules" 2>/dev/null || \
+           ! grep -q -- "-A ufw-before-forward -p tcp -m string --string \"BitTorrent protocol\" --algo bm -j DROP" "$before_rules" 2>/dev/null || \
+           ! grep -q -- "-A ufw-before-forward -p udp -m string --string \"BitTorrent protocol\" --algo bm -j DROP" "$before_rules" 2>/dev/null || \
+           ! grep -q -- "-A ufw-before-forward -p udp -m string --string \"d1:ad2:id20:\" --algo bm -j DROP" "$before_rules" 2>/dev/null; then
+            missing=$((missing + 1))
+        fi
+    elif command -v ufw >/dev/null 2>&1; then
+        missing=$((missing + 1))
+    fi
+
+    if [[ $missing -eq 0 ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 apply_amnezia_abuse_protection() {
     log "Настройка сетевой защиты (Anti-Abuse: SMTP 25 + BitTorrent L7)..."
 
-    # Блокировка SMTP порт 25 (защита от почтового спама)
+    # 1. Автозагрузка модуля ядра xt_string для L7 фильтрации
+    modprobe xt_string 2>/dev/null || true
+    mkdir -p /etc/modules-load.d 2>/dev/null || true
+    if ! grep -q "^xt_string" /etc/modules-load.d/just1knode.conf 2>/dev/null; then
+        echo "xt_string" >> /etc/modules-load.d/just1knode.conf 2>/dev/null || true
+    fi
+
+    # 2. Персистентность в UFW (переживает ufw reload и перезагрузку ОС)
+    if ! sync_ufw_before_rules_antiabuse; then
+        warn "Сбой сохранения правил в /etc/ufw/before.rules!"
+        return 1
+    fi
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
+        if ! ufw reload >/dev/null 2>&1; then
+            warn "Сбой перезагрузки конфигурации UFW (ufw reload)!"
+            return 1
+        fi
+    fi
+
+    # 3. Применение правил в активный FORWARD и DOCKER-USER (немедленная защита без ожидания перезагрузки)
+    # SMTP:25 reject
     if ! iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null; then
         iptables -I FORWARD 1 -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null || true
     fi
@@ -63,23 +191,18 @@ apply_amnezia_abuse_protection() {
         fi
     fi
 
-    # Блокировка BitTorrent L7 (xt_string)
-    modprobe xt_string 2>/dev/null || true
+    # BitTorrent L7
     if iptables -m string --help 2>&1 | grep -q "\-\-algo"; then
-        # TCP BitTorrent handshake
         if ! iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null; then
             iptables -I FORWARD 2 -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null || true
         fi
-        # UDP uTP BitTorrent handshake
         if ! iptables -C FORWARD -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null; then
             iptables -I FORWARD 3 -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null || true
         fi
-        # UDP DHT announce
         if ! iptables -C FORWARD -p udp -m string --string "d1:ad2:id20:" --algo bm -j DROP 2>/dev/null; then
             iptables -I FORWARD 4 -p udp -m string --string "d1:ad2:id20:" --algo bm -j DROP 2>/dev/null || true
         fi
 
-        # DOCKER-USER chain
         if iptables -L DOCKER-USER >/dev/null 2>&1; then
             if ! iptables -C DOCKER-USER -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null; then
                 iptables -I DOCKER-USER 2 -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null || true
@@ -87,18 +210,29 @@ apply_amnezia_abuse_protection() {
             if ! iptables -C DOCKER-USER -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null; then
                 iptables -I DOCKER-USER 3 -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null || true
             fi
+            if ! iptables -C DOCKER-USER -p udp -m string --string "d1:ad2:id20:" --algo bm -j DROP 2>/dev/null; then
+                iptables -I DOCKER-USER 4 -p udp -m string --string "d1:ad2:id20:" --algo bm -j DROP 2>/dev/null || true
+            fi
         fi
-        log "✔ Правила фильтрации BitTorrent и блокировки SMTP:25 активированы."
-    else
-        warn "Модуль ядра xt_string недоступен. Блокировка SMTP:25 установлена, BitTorrent L7 пропущен."
     fi
 
-    # Сохранение правил iptables для переживания перезагрузки
-    if command -v netfilter-persistent >/dev/null 2>&1; then
-        netfilter-persistent save >/dev/null 2>&1 || true
-    fi
-    if [[ -d /etc/iptables ]]; then
-        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    # 4. Итоговая проверка соблюдения инвариантов (Fail-Closed)
+    if check_amnezia_abuse_rules; then
+        # Очистка устаревших артефактов (legacy hooks/services) только после успешной проверки новых правил
+        if [[ -f /etc/ufw/after.init ]]; then
+            sed -i '/# START JUST1KNODE ANTI-ABUSE HOOK/,/# END JUST1KNODE ANTI-ABUSE HOOK/d' /etc/ufw/after.init 2>/dev/null || true
+        fi
+        if systemctl is-enabled --quiet just1knode-antiabuse.service 2>/dev/null; then
+            systemctl disable --now just1knode-antiabuse.service >/dev/null 2>&1 || true
+        fi
+        rm -f /etc/systemd/system/just1knode-antiabuse.service 2>/dev/null || true
+
+        log "✔ Правила сетевой защиты Anti-Abuse (SMTP:25 + BitTorrent L7 TCP/UDP/DHT) успешно активированы."
+        set_state_val "abuse_protection" "enabled"
+        return 0
+    else
+        warn "Не удалось активировать полный набор правил Anti-Abuse (проверьте модуль ядра xt_string)!"
+        return 1
     fi
 }
 
@@ -114,14 +248,30 @@ remove_amnezia_abuse_protection() {
     if iptables -L DOCKER-USER >/dev/null 2>&1; then
         iptables -D DOCKER-USER -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null || true
         iptables -D DOCKER-USER -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null || true
+        iptables -D DOCKER-USER -p udp -m string --string "d1:ad2:id20:" --algo bm -j DROP 2>/dev/null || true
     fi
 
-    if command -v netfilter-persistent >/dev/null 2>&1; then
-        netfilter-persistent save >/dev/null 2>&1 || true
+    # Удаление из /etc/ufw/before.rules
+    remove_ufw_before_rules_antiabuse
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
+        ufw reload >/dev/null 2>&1 || true
     fi
-    if [[ -d /etc/iptables ]]; then
-        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+
+    # Очистка legacy хуков и сервисов
+    if [[ -f /etc/ufw/after.init ]]; then
+        sed -i '/# START JUST1KNODE ANTI-ABUSE HOOK/,/# END JUST1KNODE ANTI-ABUSE HOOK/d' /etc/ufw/after.init 2>/dev/null || true
     fi
+    if systemctl is-enabled --quiet just1knode-antiabuse.service 2>/dev/null; then
+        systemctl disable --now just1knode-antiabuse.service >/dev/null 2>&1 || true
+    fi
+    rm -f /etc/systemd/system/just1knode-antiabuse.service 2>/dev/null || true
+
+    # Удаление xt_string из автозагрузки при удалении
+    if [[ -f /etc/modules-load.d/just1knode.conf ]]; then
+        sed -i '/^xt_string$/d' /etc/modules-load.d/just1knode.conf 2>/dev/null || true
+    fi
+
+    set_state_val "abuse_protection" "disabled"
 }
 
 # Обнаружение Docker-контейнера, слушающего хостовый TCP-порт 80
@@ -285,14 +435,6 @@ install_amnezia_node() {
         fi
     fi
 
-    local enable_abuse="Y"
-    if [[ -t 0 ]]; then
-        read -rp "Активировать защиту от спама и торрентов (SMTP:25 + BitTorrent L7)? [Y/n]: " abuse_in || true
-        abuse_in="${abuse_in:-Y}"
-        if [[ "$abuse_in" =~ ^[Nn] ]]; then
-            enable_abuse="N"
-        fi
-    fi
 
     # 4. Проверка доступности публичного порта
     if ss -tlnp 2>/dev/null | grep -q ":${public_port} "; then
@@ -803,12 +945,9 @@ EOF
         fi
     fi
 
-    # 11. Активация защиты от абуза (SMTP 25 + BitTorrent)
-    if [[ "$enable_abuse" == "Y" ]]; then
-        apply_amnezia_abuse_protection
-    else
-        log "Защита от абуза (SMTP 25 / BitTorrent) пропущена по выбору пользователя"
-    fi
+    # 11. Активация защиты от абуза (SMTP 25 + BitTorrent L7)
+    apply_amnezia_abuse_protection
+    set_state_val "abuse_protection" "enabled"
 
     # 12. Обновление состояния и определение мультироли (Coexistence)
     if [[ "$prev_role" == "relay" || "$prev_role" == "dual" ]]; then
@@ -922,15 +1061,11 @@ show_amnezia_status() {
     fi
 
     echo -e "\n  Сетевая защита (Anti-Abuse):"
-    if iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null; then
+    if check_amnezia_abuse_rules; then
         echo -e "    Блокировка SMTP:25:   ${GREEN}✔ Включена (tcp-reset)${NC}"
+        echo -e "    Фильтрация BitTorrent:${GREEN}✔ Включена (xt_string L7 TCP/UDP/DHT)${NC}\n"
     else
-        echo -e "    Блокировка SMTP:25:   ${YELLOW}! Не найдена${NC}"
-    fi
-    if iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null; then
-        echo -e "    Фильтрация BitTorrent:${GREEN}✔ Включена (xt_string L7)${NC}\n"
-    else
-        echo -e "    Фильтрация BitTorrent:${YELLOW}! Не найдена${NC}\n"
+        echo -e "    Статус защиты:        ${YELLOW}! Не найдена или неполная (запустите 'just1knode doctor')${NC}\n"
     fi
 }
 
