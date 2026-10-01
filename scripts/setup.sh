@@ -123,6 +123,14 @@ ensure_overcommit_persistence() {
     local custom_conf="${1:-}"
     normalize_sysctl_dropin "${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}" || return 1
     normalize_overcommit_file "${custom_conf:-${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}}" || return 1
+    local ufw_conf="${JUST1KBOT_UFW_SYSCTL_CONF:-/etc/ufw/sysctl.conf}"
+    if [[ -f "$ufw_conf" ]]; then
+        if grep -Eq '^[#[:space:]]*net/ipv4/icmp_echo_ignore_all=' "$ufw_conf" 2>/dev/null; then
+            sed -i -E 's/^[#[:space:]]*net\/ipv4\/icmp_echo_ignore_all=.*/net\/ipv4\/icmp_echo_ignore_all=1/' "$ufw_conf" 2>/dev/null || true
+        else
+            echo "net/ipv4/icmp_echo_ignore_all=1" >> "$ufw_conf" 2>/dev/null || true
+        fi
+    fi
     return 0
 }
 

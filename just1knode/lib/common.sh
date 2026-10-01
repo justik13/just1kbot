@@ -208,6 +208,13 @@ ensure_xray_api_healthy() {
         return 0
     fi
 
+    # На узлах Relay или AWG служба xray-api не используется и не должна запускаться
+    local role
+    role="$(get_state_val "role" "")"
+    if [[ "$role" != "origin" ]] && ! systemctl is-enabled --quiet xray-api 2>/dev/null && ! systemctl is-active --quiet xray-api 2>/dev/null; then
+        return 0
+    fi
+
     # 1. Если служба уже активна (systemd автоматически перезапустил её через PartOf=xray.service),
     # повторный restart категорически не вызываем, чтобы не провоцировать start-limit-hit.
     if systemctl is-active --quiet xray-api 2>/dev/null; then
@@ -255,6 +262,16 @@ net.ipv6.conf.lo.disable_ipv6 = 1
 net.ipv4.icmp_echo_ignore_all = 1
 EOF
     chmod 644 "$conf_path" 2>/dev/null || true
+
+    local ufw_conf="${JUST1KNODE_UFW_SYSCTL_CONF:-/etc/ufw/sysctl.conf}"
+    if [[ -f "$ufw_conf" ]]; then
+        if grep -Eq '^[#[:space:]]*net/ipv4/icmp_echo_ignore_all=' "$ufw_conf" 2>/dev/null; then
+            sed -i -E 's/^[#[:space:]]*net\/ipv4\/icmp_echo_ignore_all=.*/net\/ipv4\/icmp_echo_ignore_all=1/' "$ufw_conf" 2>/dev/null || true
+        else
+            echo "net/ipv4/icmp_echo_ignore_all=1" >> "$ufw_conf" 2>/dev/null || true
+        fi
+    fi
+
     if command -v sysctl >/dev/null 2>&1; then
         sysctl -p "$conf_path" >/dev/null 2>&1 || true
         sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true

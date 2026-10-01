@@ -1814,11 +1814,21 @@ echo "CADDY_OK=$caddy_ok"
             encoding="utf-8",
         )
 
+        ufw_dir = self.project_dir / "etc" / "ufw"
+        ufw_dir.mkdir(parents=True, exist_ok=True)
+        ufw_conf = ufw_dir / "sysctl.conf"
+        ufw_conf.write_text(
+            "# UFW sysctl configuration\n"
+            "#net/ipv4/icmp_echo_ignore_all=0\n",
+            encoding="utf-8",
+        )
+
         script = """
 export PROJECT_DIR="."
 export JUST1KBOT_DIR="."
 export JUST1KBOT_NO_SUDO="1"
 export JUST1KBOT_SYSCTL_D_CONF="./sysctl.d/99-just1kbot.conf"
+export JUST1KBOT_UFW_SYSCTL_CONF="./etc/ufw/sysctl.conf"
 source "./scripts/cli.sh"
 
 apply_sysctl_hardening
@@ -1838,6 +1848,10 @@ apply_sysctl_hardening
         self.assertIn("vm.overcommit_memory = 1", content)
         self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", content)
         self.assertNotIn("vm.overcommit_memory = 0", content)
+
+        ufw_content = ufw_conf.read_text(encoding="utf-8")
+        self.assertIn("net/ipv4/icmp_echo_ignore_all=1", ufw_content)
+        self.assertNotIn("net/ipv4/icmp_echo_ignore_all=0", ufw_content)
 
     # -------------------------------------------------------------------------
     # 8. Safe Complete Uninstallation Lifecycle Tests
