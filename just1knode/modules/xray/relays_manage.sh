@@ -114,9 +114,7 @@ if relays is not None:
 
     if echo "$heal_out" | grep -q "HEALED"; then
         echo -e "${GREEN}✔${NC} ${heal_out//HEALED/}"
-        if systemctl is-active --quiet xray-api 2>/dev/null; then
-            systemctl restart xray-api 2>/dev/null || true
-        fi
+        ensure_xray_api_healthy
     fi
 }
 
@@ -628,9 +626,7 @@ except Exception:
         manifest_rollback
         error "Xray не запустился после добавления релея $name ($code). Выполнен полный откат."
     fi
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api || true
-    fi
+    ensure_xray_api_healthy
     manifest_commit
 
     log "Relay '${name}' (код: ${code}) успешно добавлен и подключен к шлюзу Origin!"
@@ -781,9 +777,7 @@ except Exception:
         manifest_rollback
         error "Xray не запустился после удаления релея $target. Выполнен полный откат."
     fi
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api || true
-    fi
+    ensure_xray_api_healthy
     manifest_commit
 
     log "Relay '${target}' (код: ${code}) успешно удален."
@@ -1165,9 +1159,7 @@ print(f'OK:{matched_code}')
         return 1
     fi
 
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api || true
-    fi
+    ensure_xray_api_healthy
 
     manifest_commit
     log "✔ Relay '$matched_code' успешно переключен на домен '$new_sni' (режим: $new_sec)!"

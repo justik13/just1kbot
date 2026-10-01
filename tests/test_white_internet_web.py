@@ -14,7 +14,7 @@ from aiohttp.test_utils import AioHTTPTestCase
 from bot import texts
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
 from config.constants import XRAY_PROTOCOL
-from config.enums import ServerHealthState, WhiteInternetStatus
+from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.models import Server, User, WhiteInternetSubscription
 
 
@@ -630,3 +630,58 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.status, 200)
                     body = await resp.text()
                     self.assertTrue(len(body) > 0)
+
+    async def test_active_sub_graceful_degradation_during_server_maintenance(self):
+        """Verify active subscription receives config and maintenance banner when server is inactive."""
+        now = datetime.now(timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=42,
+            user_id=10,
+            origin_node_id=1,
+            token="active-sub-token-maintenance-12345",
+            status=WhiteInternetStatus.ACTIVE,
+            provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
+            expires_at=now + timedelta(days=15),
+            base_traffic_bytes=50 * 1024 * 1024 * 1024,
+            traffic_used_bytes=1024,
+            traffic_uplink_bytes=500,
+            traffic_downlink_bytes=500,
+            desired_version=1,
+            actual_version=1,
+            device_limit=1,
+            active_hwids={},
+        )
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=False,  # Server disabled for maintenance!
+            health_state=ServerHealthState.MANUAL_DISABLED,
+            extra_data={"cdn_domain": "cdn.just1k.online"},
+        )
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                resp = await self.client.get(
+                    "/sub/wl/active-sub-token-maintenance-12345",
+                    headers={"X-Hwid": "test-device-hwid"},
+                )
+                self.assertEqual(resp.status, 200)
+                body = await resp.text()
+                self.assertTrue(len(body) > 0)
+                announce_header = resp.headers.get("Announce", "")
+                self.assertTrue(announce_header.startswith("base64:"))
+                decoded_announce = base64.b64decode(announce_header.replace("base64:", "")).decode("utf-8")
+                self.assertIn("техническом обслуживании", decoded_announce)
+

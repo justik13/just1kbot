@@ -107,9 +107,7 @@ update_xray_core() {
         set -e
 
         if [[ $restart_rc -eq 0 ]] && systemctl is-active --quiet xray; then
-            if systemctl is-active --quiet xray-api 2>/dev/null; then
-                systemctl restart xray-api 2>/dev/null || true
-            fi
+            ensure_xray_api_healthy
             log "Обновление завершено успешно! Версия: $($XRAY_BIN version | head -n 1)"
         else
             warn "Xray не запустился после обновления! Выполняем откат на предыдущую версию..."
@@ -415,6 +413,7 @@ update_node() {
                     systemctl daemon-reload 2>/dev/null || true
                 fi
                 if [[ "$api_was_active" == "true" ]]; then
+                    systemctl reset-failed xray-api 2>/dev/null || true
                     if ! systemctl restart xray-api 2>/dev/null || ! systemctl is-active --quiet xray-api 2>/dev/null; then
                         rollback_node_components || true
                         rm -rf "$tmp_tar" "$tmp_dir"

@@ -1572,9 +1572,8 @@ EOF
         error "Откат выполнен: служба Xray не смогла запуститься с новой конфигурацией."
     fi
 
-    if systemctl is-active --quiet xray-api; then
-        systemctl restart xray-api 2>/dev/null || true
-    fi
+    # systemd автоматически перезапускает xray-api благодаря PartOf=xray.service
+    ensure_xray_api_healthy
 
     manifest_commit
     log "Оптимизация и восстановление конфигурации Origin завершены успешно!"

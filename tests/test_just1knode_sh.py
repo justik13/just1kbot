@@ -2586,15 +2586,34 @@ remove_traffic_watchdog_timer
         self.assertIn("r['outboundTag'] = 'just1k-wl-direct'", relays_manage_sh)
 
     def test_xray_api_service_unit_has_partof_and_update_node_syncs_it(self):
-        """Verify xray-api.service has PartOf=xray.service and core.sh update_node syncs the unit."""
+        """Verify xray-api.service has PartOf=xray.service, start limit resilience, and ensure_xray_api_healthy."""
         service_file = (REPO_ROOT / "scripts" / "xray_api" / "xray-api.service").read_text(encoding="utf-8")
         core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
         api_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "api.sh").read_text(encoding="utf-8")
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
 
         self.assertIn("PartOf=xray.service", service_file)
+        self.assertIn("StartLimitIntervalSec=30", service_file)
+        self.assertIn("StartLimitBurst=15", service_file)
+
         self.assertIn("PartOf=xray.service", api_sh)
+        self.assertIn("StartLimitIntervalSec=30", api_sh)
+        self.assertIn("StartLimitBurst=15", api_sh)
+
         self.assertIn("cp \"${api_dir}/xray-api.service\" /etc/systemd/system/xray-api.service", core_sh)
         self.assertIn("systemctl daemon-reload", core_sh)
+
+        # Invariant: ensure_xray_api_healthy avoids duplicate restarts after Xray restart
+        self.assertIn("ensure_xray_api_healthy()", common_sh)
+        self.assertIn("ensure_xray_api_healthy", origin_sh)
+        self.assertIn("ensure_xray_api_healthy", core_sh)
+        self.assertIn("ensure_xray_api_healthy", relays_manage_sh)
+
+        # Invariant: Doctor automatically recovers units stuck in failed state
+        self.assertIn("systemctl reset-failed \"$srv\"", just1knode_sh)
 
     def test_xray_api_app_discovers_default_inbound_on_origin_fallback(self):
         """Verify app.py target inbounds discovery prioritizes just1k-wl-default on Origin nodes."""
