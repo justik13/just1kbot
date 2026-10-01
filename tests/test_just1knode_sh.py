@@ -530,6 +530,30 @@ exit 0
         self.assertIn('echo -e "  ${RED}✗${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf', just1knode_sh)
         self.assertIn('failed=$((failed + 1))', just1knode_sh)
 
+    def test_update_node_declares_is_menu_and_survives_set_u(self):
+        """Verify update_node initializes local is_menu to prevent unbound variable under set -u."""
+        core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
+        self.assertIn('local is_menu="${2:-0}"', core_sh)
+        self.assertIn('exec "$bin_path" update-post "$target" "${is_menu:-0}"', core_sh)
+        self.assertIn('update_node_post "$target" "${is_menu:-0}"', core_sh)
+
+    def test_ensure_xray_api_healthy_guards_relay_nodes(self):
+        """Verify ensure_xray_api_healthy strictly returns 0 on non-origin nodes."""
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn('role="$(get_state_val "role" "")"', common_sh)
+        self.assertIn('if [[ "$role" != "origin" ]]; then\n        return 0\n    fi', common_sh)
+
+    def test_apply_node_sysctl_hardening_updates_ufw_sysctl_conf(self):
+        """Verify apply_node_sysctl_hardening updates /etc/ufw/sysctl.conf and uninstall cleans it up."""
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn('local ufw_conf="${JUST1KNODE_UFW_SYSCTL_CONF:-/etc/ufw/sysctl.conf}"', common_sh)
+        self.assertIn('net/ipv4/icmp_echo_ignore_all=1', common_sh)
+        self.assertIn('sed -i -E \'/^[#[:space:]]*net\\/ipv4\\/icmp_echo_ignore_all[[:space:]]*=/d\' "$ufw_conf"', common_sh)
+
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('local ufw_conf="${JUST1KNODE_UFW_SYSCTL_CONF:-/etc/ufw/sysctl.conf}"', just1knode_sh)
+        self.assertIn('sed -i -E \'/^[#[:space:]]*net\\/ipv4\\/icmp_echo_ignore_all[[:space:]]*=/d\' "$ufw_conf"', just1knode_sh)
+
     def test_heal_reconstructs_missing_invariants(self):
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:

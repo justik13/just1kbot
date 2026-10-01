@@ -955,6 +955,23 @@ apply_sysctl_hardening() {
         rm -f "$tmp_sysctl" 2>/dev/null || true
     fi
 
+    local ufw_conf="${JUST1KBOT_UFW_SYSCTL_CONF:-/etc/ufw/sysctl.conf}"
+    if [[ -f "$ufw_conf" ]]; then
+        local tmp_ufw
+        tmp_ufw="$(mktemp /tmp/ufw_sysctl_just1k.XXXXXX 2>/dev/null)" || true
+        if [[ -n "$tmp_ufw" ]]; then
+            if cp -a "$ufw_conf" "$tmp_ufw" 2>/dev/null || run_privileged cp -a "$ufw_conf" "$tmp_ufw" 2>/dev/null; then
+                if grep -Eq '^[#[:space:]]*net/ipv4/icmp_echo_ignore_all[[:space:]]*=' "$tmp_ufw" 2>/dev/null; then
+                    sed -i -E '/^[#[:space:]]*net\/ipv4\/icmp_echo_ignore_all[[:space:]]*=/d' "$tmp_ufw" 2>/dev/null || true
+                fi
+                echo "net/ipv4/icmp_echo_ignore_all=1" >> "$tmp_ufw"
+                run_privileged cp "$tmp_ufw" "$ufw_conf" 2>/dev/null || true
+                run_privileged chmod 644 "$ufw_conf" 2>/dev/null || true
+            fi
+            rm -f "$tmp_ufw" 2>/dev/null || true
+        fi
+    fi
+
     if command -v sysctl >/dev/null 2>&1; then
         run_privileged sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1 || true
         run_privileged sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
@@ -2088,6 +2105,10 @@ cmd_uninstall() {
         else
             log "Конфигурация $sysctl_file удалена."
         fi
+    fi
+    local ufw_conf="${JUST1KBOT_UFW_SYSCTL_CONF:-/etc/ufw/sysctl.conf}"
+    if [[ -f "$ufw_conf" ]]; then
+        run_privileged sed -i -E '/^[#[:space:]]*net\/ipv4\/icmp_echo_ignore_all[[:space:]]*=/d' "$ufw_conf" 2>/dev/null || true
     fi
     if command -v sysctl >/dev/null 2>&1; then
         run_privileged sysctl -w net.ipv4.icmp_echo_ignore_all=0 >/dev/null 2>&1 || true

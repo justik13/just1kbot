@@ -1027,6 +1027,10 @@ uninstall_node() {
         rm -f "$sysctl_ipv6_conf" 2>/dev/null || true
         sysctl_cleaned=1
     fi
+    local ufw_conf="${JUST1KNODE_UFW_SYSCTL_CONF:-/etc/ufw/sysctl.conf}"
+    if [[ -f "$ufw_conf" ]]; then
+        sed -i -E '/^[#[:space:]]*net\/ipv4\/icmp_echo_ignore_all[[:space:]]*=/d' "$ufw_conf" 2>/dev/null || true
+    fi
     if command -v sysctl >/dev/null 2>&1; then
         sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
         sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1 || true

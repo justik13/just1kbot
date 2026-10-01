@@ -107,7 +107,9 @@ update_xray_core() {
         set -e
 
         if [[ $restart_rc -eq 0 ]] && systemctl is-active --quiet xray; then
-            ensure_xray_api_healthy
+            if ! ensure_xray_api_healthy; then
+                warn "Внимание: служба xray-api не смогла запуститься после перезапуска Xray!"
+            fi
             log "Обновление завершено успешно! Версия: $($XRAY_BIN version | head -n 1)"
         else
             warn "Xray не запустился после обновления! Выполняем откат на предыдущую версию..."
@@ -140,6 +142,7 @@ update_node() {
     trap release_just1knode_lock RETURN EXIT
 
     local target="${1:-all}"
+    local is_menu="${2:-0}"
 
     if [[ "$target" == "core" ]]; then
         update_xray_core
@@ -483,7 +486,7 @@ update_node() {
     if [[ -x "$bin_path" ]]; then
         release_just1knode_lock 2>/dev/null || true
         trap - RETURN EXIT
-        exec "$bin_path" update-post "$target" "$is_menu"
+        exec "$bin_path" update-post "$target" "${is_menu:-0}"
     fi
 
     # Защитный fallback (если exec недоступен): повторная загрузка модулей с диска
@@ -495,7 +498,7 @@ update_node() {
         source "${node_dir}/modules/amnezia/amnezia.sh" 2>/dev/null || true
     fi
 
-    update_node_post "$target" "$is_menu"
+    update_node_post "$target" "${is_menu:-0}"
 }
 
 update_node_post() {
