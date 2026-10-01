@@ -113,9 +113,6 @@ async def show_extended_filter_menu(
                 .order_by(Tariff.device_limit, Tariff.id)
             )
         ).all()
-        if not rows:
-            await callback.answer(texts.ADMIN_USERS_LIST_TARIFOV_NET, show_alert=True)
-            return
         from bot.formatters import get_tariff_group_name
         seen_limits = set()
         for tariff in rows:

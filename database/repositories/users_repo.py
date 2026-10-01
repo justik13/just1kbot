@@ -662,6 +662,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
                             WhiteInternetStatus.PENDING,
                             WhiteInternetStatus.EXHAUSTED,
                         ]),
+                        WhiteInternetSubscription.expires_at > now,
                         WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
                     )
                 )

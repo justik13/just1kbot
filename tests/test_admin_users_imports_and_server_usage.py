@@ -143,17 +143,47 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         buttons = [btn for row in reply_markup.inline_keyboard for btn in row]
         button_texts = [btn.text for btn in buttons]
         callback_datas = [btn.callback_data for btn in buttons]
+        executed_stmt = session.scalars.call_args.args[0]
+        self.assertIn("tariffs.service_type = :service_type_1", str(executed_stmt))
 
         self.assertIn("💎 📱 Базовый (2 устр.)", button_texts)
         self.assertIn("💎 👨‍👩‍👧‍👦 Семейный (5 устр.)", button_texts)
         self.assertIn("💎 🚀 Pro (10 устр.)", button_texts)
         self.assertIn("💎 🌐 Белый Интернет", button_texts)
         self.assertEqual(button_texts.count("💎 📱 Базовый (2 устр.)"), 1)
+        self.assertEqual(len(buttons), 5)  # 3 AWG groups + White Internet + Back
 
         self.assertIn("admin_users_filter:tariff:2:1", callback_datas)
         self.assertIn("admin_users_filter:tariff:5:1", callback_datas)
         self.assertIn("admin_users_filter:tariff:10:1", callback_datas)
         self.assertIn("admin_users_filter:tariff:white_internet:1", callback_datas)
+
+    async def test_show_extended_filter_menu_renders_white_internet_even_without_awg_tariffs(self):
+        from bot.handlers.admin.users.list_routes import show_extended_filter_menu
+
+        callback = SimpleNamespace(
+            data="admin_users_filter_menu:tariff",
+            from_user=SimpleNamespace(id=123456789),
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = []
+        session = AsyncMock()
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        with patch("bot.handlers.admin.users.list_routes.is_admin", return_value=True):
+            await show_extended_filter_menu(callback, session)
+
+        call_args = callback.message.edit_text.call_args
+        _, reply_markup = call_args.args[0], call_args.kwargs["reply_markup"]
+        buttons = [btn for row in reply_markup.inline_keyboard for btn in row]
+        button_texts = [btn.text for btn in buttons]
+        callback_datas = [btn.callback_data for btn in buttons]
+
+        self.assertIn("💎 🌐 Белый Интернет", button_texts)
+        self.assertIn("admin_users_filter:tariff:white_internet:1", callback_datas)
+        self.assertEqual(len(buttons), 2)  # White Internet + Back
 
     async def test_users_keyboard_profile_count_excludes_all_non_visible_statuses(self):
         from bot.handlers.admin.users.common import _build_users_list_text_and_kb
@@ -214,6 +244,8 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         stmt_wi = _apply_user_filters(select(User), "tariff", "white_internet")
         sql_wi = str(stmt_wi)
         self.assertIn("white_internet_subscriptions", sql_wi)
+        self.assertIn("white_internet_subscriptions.expires_at > :expires_at_1", sql_wi)
+        self.assertIn("white_internet_subscriptions.provisioning_status !=", sql_wi)
 
     async def test_users_filter_pagination_accepts_white_internet(self):
         from bot.handlers.admin.users.list_routes import users_filter_pagination
@@ -227,15 +259,26 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         state = AsyncMock()
         session = AsyncMock()
 
+        mock_count = AsyncMock(return_value=0)
+        mock_paginated = AsyncMock(return_value=[])
+
         with patch("bot.handlers.admin.users.list_routes.is_admin", return_value=True), \
-             patch("bot.handlers.admin.users.list_routes.get_filtered_users_count", new=AsyncMock(return_value=0)), \
-             patch("bot.handlers.admin.users.list_routes.get_filtered_users_paginated", new=AsyncMock(return_value=[])), \
+             patch("bot.handlers.admin.users.list_routes.get_filtered_users_count", new=mock_count), \
+             patch("bot.handlers.admin.users.list_routes.get_filtered_users_paginated", new=mock_paginated), \
              patch("database.repositories.users_repo.get_user_filter_counts", new=AsyncMock(return_value={})):
             await users_filter_pagination(callback, state, session)
 
         callback.answer.assert_awaited()
         # Should not reject with invalid parameter error
         self.assertNotIn("Некорректный параметр", str(callback.answer.call_args))
+        mock_count.assert_awaited_once_with(session, filter_type="tariff", filter_param="white_internet")
+        mock_paginated.assert_awaited_once_with(
+            session,
+            filter_type="tariff",
+            filter_param="white_internet",
+            page=1,
+            per_page=10,
+        )
 
     async def test_build_users_list_breadcrumbs_for_white_internet_tariff(self):
         from bot.handlers.admin.users.common import _build_users_list_text_and_kb
