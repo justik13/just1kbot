@@ -184,22 +184,26 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
 
+        # Invariants of protocol and credential convergence MUST hold unconditionally
+        if (
+            server_proto != XRAY_PROTOCOL
+            or sub.actual_version != sub.desired_version
+            or sub.last_reconciled_node_epoch != server.xray_instance_epoch
+        ):
+            headers = dict(common_headers)
+            headers["Retry-After"] = "5"
+            return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
+
         is_sub_already_active = (
             getattr(sub, "provisioning_status", None) == WhiteInternetProvisioningStatus.ACTIVE
             and (getattr(sub, "actual_version", 0) or 0) > 0
         )
 
-        if not is_sub_already_active:
-            if (
-                not server.is_active
-                or server_proto != XRAY_PROTOCOL
-                or server.health_state != ServerHealthState.ONLINE
-                or sub.actual_version != sub.desired_version
-                or sub.last_reconciled_node_epoch != server.xray_instance_epoch
-            ):
-                headers = dict(common_headers)
-                headers["Retry-After"] = "5"
-                return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
+        is_server_available = bool(server.is_active and server.health_state == ServerHealthState.ONLINE)
+        if not is_server_available and not is_sub_already_active:
+            headers = dict(common_headers)
+            headers["Retry-After"] = "5"
+            return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
 
         extra = server.extra_data if isinstance(getattr(server, "extra_data", None), dict) else {}
         cdn_domain = normalize_public_domain(extra.get("cdn_domain") or os.getenv("WHITE_INTERNET_CDN_DOMAIN"))
@@ -356,7 +360,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         )
 
         announce = extra.get("announce")
-        if not announce and (not server.is_active or server.health_state == ServerHealthState.MANUAL_DISABLED):
+        if not announce and not is_server_available:
             announce = texts.WL_ANNOUNCE_MAINTENANCE
 
         if announce and str(announce).strip():

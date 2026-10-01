@@ -2594,6 +2594,8 @@ remove_traffic_watchdog_timer
         origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
         relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
         just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        ssl_sh = (REPO_ROOT / "just1knode" / "lib" / "ssl.sh").read_text(encoding="utf-8")
+        traffic_watchdog_sh = (REPO_ROOT / "just1knode" / "lib" / "traffic_watchdog.sh").read_text(encoding="utf-8")
 
         self.assertIn("PartOf=xray.service", service_file)
         self.assertIn("StartLimitIntervalSec=30", service_file)
@@ -2606,14 +2608,23 @@ remove_traffic_watchdog_timer
         self.assertIn("cp \"${api_dir}/xray-api.service\" /etc/systemd/system/xray-api.service", core_sh)
         self.assertIn("systemctl daemon-reload", core_sh)
 
-        # Invariant: ensure_xray_api_healthy avoids duplicate restarts after Xray restart
+        # Invariant: ensure_xray_api_healthy avoids duplicate restarts and returns non-zero on failure
         self.assertIn("ensure_xray_api_healthy()", common_sh)
+        self.assertIn("return 1", common_sh)
         self.assertIn("ensure_xray_api_healthy", origin_sh)
         self.assertIn("ensure_xray_api_healthy", core_sh)
         self.assertIn("ensure_xray_api_healthy", relays_manage_sh)
 
-        # Invariant: Doctor automatically recovers units stuck in failed state
-        self.assertIn("systemctl reset-failed \"$srv\"", just1knode_sh)
+        # Invariant: certbot deploy hook does not execute blind duplicate restart of xray-api
+        self.assertNotIn("systemctl restart xray\nsystemctl restart xray-api", ssl_sh.replace(" ", "").replace("2>/dev/null||true", ""))
+        self.assertIn("systemctl start xray-api", ssl_sh)
+
+        # Invariant: traffic watchdog resume restarts xray-api when present
+        self.assertIn("systemctl start xray-api", traffic_watchdog_sh)
+
+        # Invariant: Doctor reports FAILED status on services without hidden side-effects
+        self.assertIn("systemctl is-failed", just1knode_sh)
+        self.assertIn("FAILED", just1knode_sh)
 
     def test_xray_api_app_discovers_default_inbound_on_origin_fallback(self):
         """Verify app.py target inbounds discovery prioritizes just1k-wl-default on Origin nodes."""

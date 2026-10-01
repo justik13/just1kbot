@@ -204,30 +204,55 @@ validate_ip() {
 
 ensure_xray_api_healthy() {
     # Функция вызывается на узлах, где установлен агент xray-api (Origin / Dual).
-    # На Relay/AWG узлах служба отсутствует — мгновенный возврат 0.
-    if [[ ! -f /etc/systemd/system/xray-api.service && ! -f /lib/systemd/system/xray-api.service ]]; then
+    local has_unit=0
+    if [[ -f /etc/systemd/system/xray-api.service || -f /lib/systemd/system/xray-api.service ]]; then
+        has_unit=1
+    fi
+    if [[ $has_unit -eq 0 ]]; then
+        local role
+        role="$(get_state_val "role" "relay" 2>/dev/null || echo "relay")"
+        if [[ "$role" == "origin" || "$role" == "dual" ]]; then
+            warn "Служба xray-api.service не найдена на узле роли $role!"
+            return 1
+        fi
         return 0
     fi
 
-    # Если служба уже активна (systemd автоматически перезапустил её через PartOf=xray.service),
+    # 1. Если служба уже активна (systemd автоматически перезапустил её через PartOf=xray.service),
     # повторный restart категорически не вызываем, чтобы не провоцировать start-limit-hit.
     if systemctl is-active --quiet xray-api 2>/dev/null; then
         return 0
     fi
 
-    # Даем до 2 секунд на завершение автоматического старта через systemd PartOf
-    local attempts=4
+    # 2. Если служба в процессе запуска (activating), даем до 2.5 секунд на завершение
+    local attempts=5
     while [[ $attempts -gt 0 ]]; do
         if systemctl is-active --quiet xray-api 2>/dev/null; then
             return 0
+        fi
+        local state
+        state="$(systemctl is-active xray-api 2>/dev/null || true)"
+        if [[ "$state" != "activating" ]]; then
+            break
         fi
         sleep 0.5
         attempts=$((attempts - 1))
     done
 
-    # Если служба упала или зависла в start-limit-hit: сбрасываем счетчик ошибок и стартуем
-    systemctl reset-failed xray-api 2>/dev/null || true
-    systemctl restart xray-api 2>/dev/null || true
+    # 3. Если служба в статусе failed (например start-limit-hit) — сбрасываем лимит ошибок
+    if systemctl is-failed --quiet xray-api 2>/dev/null; then
+        systemctl reset-failed xray-api 2>/dev/null || true
+    fi
+
+    # 4. Выполняем контролируемый старт службы
+    systemctl start xray-api 2>/dev/null || true
+    sleep 0.5
+
+    # 5. Проверяем финальный статус: функция возвращает 0 только при реальной активности службы
+    if systemctl is-active --quiet xray-api 2>/dev/null; then
+        return 0
+    fi
+    return 1
 }
 
 

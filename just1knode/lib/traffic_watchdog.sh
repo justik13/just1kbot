@@ -122,6 +122,9 @@ check_traffic_limit() {
             else
                 systemctl start xray 2>/dev/null || true
             fi
+            if [[ -f /etc/systemd/system/xray-api.service || -f /lib/systemd/system/xray-api.service ]]; then
+                systemctl start xray-api 2>/dev/null || true
+            fi
             local resume_msg="✅ <b>Лимит трафика сброшен / обновлен</b>
 
 Сервер: <code>$(hostname)</code>

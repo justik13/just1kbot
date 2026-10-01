@@ -412,18 +412,12 @@ run_doctor() {
         if systemctl is-active --quiet "$srv" 2>/dev/null; then
             echo -e "  ${GREEN}✔${NC} Служба $srv активна"
         else
-            # Авто-восстановление: если служба в статусе failed (например start-limit-hit), сбрасываем лимит и запускаем
             if systemctl is-failed --quiet "$srv" 2>/dev/null; then
-                systemctl reset-failed "$srv" 2>/dev/null || true
-                systemctl start "$srv" 2>/dev/null || true
-                sleep 0.5
-            fi
-            if systemctl is-active --quiet "$srv" 2>/dev/null; then
-                echo -e "  ${GREEN}✔${NC} Служба $srv восстановлена и активна"
+                echo -e "  ${RED}✗${NC} Служба $srv в состоянии FAILED (ошибка запуска или start-limit-hit)"
             else
                 echo -e "  ${RED}✗${NC} Служба $srv не активна"
-                failed=$((failed + 1))
             fi
+            failed=$((failed + 1))
         fi
     done
 
