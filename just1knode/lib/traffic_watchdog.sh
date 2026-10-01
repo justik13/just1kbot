@@ -112,18 +112,22 @@ check_traffic_limit() {
             set_state_val "traffic_cutoff_triggered" "false"
             warn "Лимит трафика восстановлен / начат новый биллинговый период. Запуск службы Xray..."
             local xray_bin="${XRAY_BIN:-/usr/local/bin/xray}"
-            local xray_cfg="${XRAY_CONFIG:-/usr/local/etc/xray/config.json}"
+            local xray_started=0
             if [[ -f "$xray_cfg" && -x "$xray_bin" ]]; then
                 if "$xray_bin" run -test -config "$xray_cfg" >/dev/null 2>&1; then
-                    systemctl start xray 2>/dev/null || true
+                    if systemctl start xray 2>/dev/null; then
+                        xray_started=1
+                    fi
                 else
                     warn "Конфигурация Xray некорректна при проверке run -test, автоматический запуск отменен."
                 fi
             else
-                systemctl start xray 2>/dev/null || true
+                if systemctl start xray 2>/dev/null; then
+                    xray_started=1
+                fi
             fi
-            if [[ -f /etc/systemd/system/xray-api.service || -f /lib/systemd/system/xray-api.service ]]; then
-                systemctl start xray-api 2>/dev/null || true
+            if [[ $xray_started -eq 1 ]]; then
+                ensure_xray_api_healthy || true
             fi
             local resume_msg="✅ <b>Лимит трафика сброшен / обновлен</b>
 

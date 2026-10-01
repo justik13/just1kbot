@@ -2625,12 +2625,22 @@ remove_traffic_watchdog_timer
         self.assertNotIn("systemctl restart xray\nsystemctl restart xray-api", ssl_sh.replace(" ", "").replace("2>/dev/null||true", ""))
         self.assertIn("systemctl start xray-api", ssl_sh)
 
-        # Invariant: traffic watchdog resume restarts xray-api when present
-        self.assertIn("systemctl start xray-api", traffic_watchdog_sh)
+        # Invariant: traffic watchdog resume calls ensure_xray_api_healthy strictly after successful xray start
+        self.assertIn("if [[ $xray_started -eq 1 ]]; then", traffic_watchdog_sh)
+        self.assertIn("ensure_xray_api_healthy", traffic_watchdog_sh)
 
         # Invariant: Doctor reports FAILED status on services without hidden side-effects
         self.assertIn("systemctl is-failed", just1knode_sh)
         self.assertIn("FAILED", just1knode_sh)
+
+    def test_traffic_watchdog_resume_guards_xray_api_start_when_xray_config_invalid(self):
+        """Verify watchdog resume does not attempt to start xray-api if xray config test fails."""
+        watchdog_sh = (REPO_ROOT / "just1knode" / "lib" / "traffic_watchdog.sh").read_text(encoding="utf-8")
+        self.assertIn("local xray_started=0", watchdog_sh)
+        self.assertIn("xray_started=1", watchdog_sh)
+        self.assertIn("if [[ $xray_started -eq 1 ]]; then", watchdog_sh)
+        self.assertIn("ensure_xray_api_healthy || true", watchdog_sh)
+        self.assertNotIn("systemctl start xray-api", watchdog_sh)
 
     def test_xray_api_app_discovers_default_inbound_on_origin_fallback(self):
         """Verify app.py target inbounds discovery prioritizes just1k-wl-default on Origin nodes."""
