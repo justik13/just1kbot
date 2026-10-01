@@ -1819,7 +1819,8 @@ echo "CADDY_OK=$caddy_ok"
         ufw_conf = ufw_dir / "sysctl.conf"
         ufw_conf.write_text(
             "# UFW sysctl configuration\n"
-            "#net/ipv4/icmp_echo_ignore_all=0\n",
+            "# net/ipv4/icmp_echo_ignore_all = 0\n"
+            "net/ipv4/icmp_echo_ignore_all = 0\n",
             encoding="utf-8",
         )
 
@@ -1850,7 +1851,8 @@ apply_sysctl_hardening
         self.assertNotIn("vm.overcommit_memory = 0", content)
 
         ufw_content = ufw_conf.read_text(encoding="utf-8")
-        self.assertIn("net/ipv4/icmp_echo_ignore_all=1", ufw_content)
+        self.assertEqual(ufw_content.count("net/ipv4/icmp_echo_ignore_all=1"), 1)
+        self.assertNotIn("net/ipv4/icmp_echo_ignore_all = 0", ufw_content)
         self.assertNotIn("net/ipv4/icmp_echo_ignore_all=0", ufw_content)
 
     # -------------------------------------------------------------------------
@@ -1946,6 +1948,12 @@ class SafeUninstallationBehaviouralTests(unittest.TestCase):
         fake_sysctl = sysctl_dir / "99-just1kbot.conf"
         fake_sysctl.write_text("vm.overcommit_memory = 1\n", encoding="utf-8")
 
+        # 1b. Prepare fake ufw sysctl file
+        ufw_dir = self.root / "etc" / "ufw"
+        ufw_dir.mkdir(parents=True, exist_ok=True)
+        fake_ufw = ufw_dir / "sysctl.conf"
+        fake_ufw.write_text("net/ipv4/icmp_echo_ignore_all=1\n", encoding="utf-8")
+
         # 2. Prepare fake wrapper
         fake_bin_dir = self.root / "usr" / "local" / "bin"
         fake_bin_dir.mkdir(parents=True, exist_ok=True)
@@ -2010,6 +2018,7 @@ export PROJECT_DIR="{self.project_dir.as_posix()}"
 export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
 export JUST1KBOT_NO_SUDO="1"
 export JUST1KBOT_SYSCTL_D_CONF="{fake_sysctl.as_posix()}"
+export JUST1KBOT_UFW_SYSCTL_CONF="{fake_ufw.as_posix()}"
 export JUST1KBOT_GLOBAL_WRAPPER="{fake_wrapper.as_posix()}"
 export PATH="{self.bin_dir.as_posix()}:$PATH"
 source "{self.project_dir.as_posix()}/scripts/cli.sh"
@@ -2028,6 +2037,7 @@ cmd_uninstall --confirm=DELETE
         self.assertIn("Just1kBot успешно и полностью удален с сервера без остатков", proc.stdout)
         self.assertFalse(self.project_dir.exists(), "PROJECT_DIR must be deleted completely")
         self.assertFalse(fake_sysctl.exists(), "sysctl configuration must be deleted")
+        self.assertNotIn("net/ipv4/icmp_echo_ignore_all", fake_ufw.read_text(encoding="utf-8"))
         self.assertFalse(fake_wrapper.exists(), "global wrapper must be deleted by cmd_uninstall")
         if cron_log.exists():
             remaining_cron = cron_log.read_text(encoding="utf-8")

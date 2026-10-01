@@ -107,7 +107,9 @@ update_xray_core() {
         set -e
 
         if [[ $restart_rc -eq 0 ]] && systemctl is-active --quiet xray; then
-            ensure_xray_api_healthy || true
+            if ! ensure_xray_api_healthy; then
+                warn "Внимание: служба xray-api не смогла запуститься после перезапуска Xray!"
+            fi
             log "Обновление завершено успешно! Версия: $($XRAY_BIN version | head -n 1)"
         else
             warn "Xray не запустился после обновления! Выполняем откат на предыдущую версию..."

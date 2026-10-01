@@ -208,10 +208,10 @@ ensure_xray_api_healthy() {
         return 0
     fi
 
-    # На узлах Relay или AWG служба xray-api не используется и не должна запускаться
+    # На узлах Relay, AWG или Dual служба xray-api не используется и не должна запускаться
     local role
     role="$(get_state_val "role" "")"
-    if [[ "$role" != "origin" ]] && ! systemctl is-enabled --quiet xray-api 2>/dev/null && ! systemctl is-active --quiet xray-api 2>/dev/null; then
+    if [[ "$role" != "origin" ]]; then
         return 0
     fi
 
@@ -265,11 +265,10 @@ EOF
 
     local ufw_conf="${JUST1KNODE_UFW_SYSCTL_CONF:-/etc/ufw/sysctl.conf}"
     if [[ -f "$ufw_conf" ]]; then
-        if grep -Eq '^[#[:space:]]*net/ipv4/icmp_echo_ignore_all=' "$ufw_conf" 2>/dev/null; then
-            sed -i -E 's/^[#[:space:]]*net\/ipv4\/icmp_echo_ignore_all=.*/net\/ipv4\/icmp_echo_ignore_all=1/' "$ufw_conf" 2>/dev/null || true
-        else
-            echo "net/ipv4/icmp_echo_ignore_all=1" >> "$ufw_conf" 2>/dev/null || true
+        if grep -Eq '^[#[:space:]]*net/ipv4/icmp_echo_ignore_all[[:space:]]*=' "$ufw_conf" 2>/dev/null; then
+            sed -i -E '/^[#[:space:]]*net\/ipv4\/icmp_echo_ignore_all[[:space:]]*=/d' "$ufw_conf" 2>/dev/null || true
         fi
+        echo "net/ipv4/icmp_echo_ignore_all=1" >> "$ufw_conf" 2>/dev/null || true
     fi
 
     if command -v sysctl >/dev/null 2>&1; then
