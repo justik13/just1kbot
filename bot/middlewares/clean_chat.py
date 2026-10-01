@@ -96,10 +96,19 @@ class CleanChatMiddleware(BaseMiddleware):
             ):
                 return await handler(event, data)
 
-            state = data.get("raw_state") or data.get("state")
-            if state:
+            raw_state = data.get("raw_state")
+            if raw_state is not None:
+                return await handler(event, data)
+
+            state = data.get("state")
+            if state is not None:
+                get_state = getattr(state, "get_state", None)
+                if not callable(get_state):
+                    # Unexpected or non-FSMContext state object: fail open to avoid
+                    # deleting user input on state handling anomalies.
+                    return await handler(event, data)
                 try:
-                    if await state.get_state() is not None:
+                    if await get_state() is not None:
                         return await handler(event, data)
                 except Exception:
                     # FSM storage is unreachable. Deleting the message here would
