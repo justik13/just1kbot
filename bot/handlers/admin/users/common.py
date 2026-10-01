@@ -257,9 +257,12 @@ async def _build_users_list_text_and_kb(
     else:
         cur_filter_name = raw_label
 
-    if filter_type == "tariff" and filter_param != "none" and str(filter_param).isdigit():
-        from bot.formatters import get_tariff_group_name
-        cur_filter_name = get_tariff_group_name(int(filter_param))
+    if filter_type == "tariff" and filter_param != "none":
+        if filter_param == "white_internet":
+            cur_filter_name = texts.ADMIN_BTN_SUB_WI
+        elif str(filter_param).isdigit():
+            from bot.formatters import get_tariff_group_name
+            cur_filter_name = get_tariff_group_name(int(filter_param))
     header = format_admin_breadcrumbs(texts.BTN_USERS, texts.COMMON_FILTR.format(f_name=cur_filter_name))
 
     rendered = (
