@@ -1244,6 +1244,7 @@ try:
             pass
 
     relays_modified = False
+    active_configs = set()
     for r in relays:
         try:
             if not isinstance(r, dict): continue
@@ -1252,6 +1253,8 @@ try:
 
             code_s = str(code).strip()
             code_lower = code_s.lower()
+            cf_name = f'{code}.conf'
+            cf_path = os.path.join(nginx_dir, cf_name)
             in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
 
             # Строгий источник истины: локальный порт ДОЛЖЕН слушаться в Xray config.json
@@ -1265,7 +1268,16 @@ try:
                         break
 
             if not port:
+                # Если у релея нет активного локального инбаунда в Xray, удаляем старый конфиг Nginx во избежание 502
+                if os.path.exists(cf_path):
+                    try:
+                        os.remove(cf_path)
+                        print(f'[-] Удален устаревший Nginx конфиг для релея {code} (инбаунд Xray не найден)')
+                    except Exception:
+                        pass
                 continue
+
+            active_configs.add(cf_name)
 
             if r.get('inbound_port') != port:
                 r['inbound_port'] = port
@@ -1274,7 +1286,6 @@ try:
                 r['inbound_tag'] = in_tag
                 relays_modified = True
 
-            cf_path = os.path.join(nginx_dir, f'{code}.conf')
             cf_base = path.rstrip('/')
             desired_conf = f'''# Relay location for {code}
 location = {cf_base} {{
@@ -1323,6 +1334,19 @@ location ^~ {path} {{
                 print(f'[+] Согласован Nginx конфиг для релея {code} (локальный порт {port})')
         except Exception:
             continue
+
+    # Удаление любых осиротевших конфигов релеев, которых нет в реестре
+    if os.path.isdir(nginx_dir):
+        try:
+            for item in os.listdir(nginx_dir):
+                if item.endswith('.conf') and item not in active_configs:
+                    try:
+                        os.remove(os.path.join(nginx_dir, item))
+                        print(f'[-] Удален осиротевший Nginx конфиг релея: {item}')
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     if relays_modified:
         import tempfile

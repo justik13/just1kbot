@@ -164,6 +164,7 @@ manifest_begin() {
     if [[ -d "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" ]]; then
         while IFS= read -r -d '' conf_file; do
             targets+=("$conf_file")
+            echo "$conf_file" >> "$TXN_DIR/initial_nginx_relays.txt"
         done < <(find "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" -type f -name "*.conf" -print0 2>/dev/null)
     fi
 
@@ -250,6 +251,16 @@ manifest_rollback() {
             log "Удален файл, созданный во время транзакции: $target"
         fi
     done < "$MANIFEST_LOG"
+
+    # Удаление любых новых файлов в NGINX_RELAYS_DIR, созданных во время транзакции
+    if [[ -d "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" ]]; then
+        while IFS= read -r -d '' cur_conf; do
+            if [[ ! -f "$TXN_DIR/initial_nginx_relays.txt" ]] || ! grep -Fxq "$cur_conf" "$TXN_DIR/initial_nginx_relays.txt" 2>/dev/null; then
+                rm -f "$cur_conf" 2>/dev/null || true
+                log "Удален новый Nginx конфиг, созданный во время транзакции: $cur_conf"
+            fi
+        done < <(find "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" -type f -name "*.conf" -print0 2>/dev/null)
+    fi
 
     rm -rf "${TXN_DIR:-}"
     MANIFEST_LOG=""

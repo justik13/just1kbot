@@ -2624,7 +2624,7 @@ remove_traffic_watchdog_timer
         self.assertIn("# Приоритет 1 (Strict Affinity): Текущий настроенный SNI", relay_sh)
 
     def test_origin_nginx_reconciliation_behavior_isolated_and_strict(self):
-        """Behavioral test: Origin reconciliation isolates failures and rejects stale ports without Xray inbound."""
+        """Behavioral test: Origin reconciliation isolates failures, rejects stale ports, and prunes stale/orphan configs."""
         import json
         import shutil
         import tempfile
@@ -2635,6 +2635,12 @@ remove_traffic_watchdog_timer
             nginx_dir = os.path.join(tmp_dir, "relays_d")
             os.makedirs(nginx_dir, exist_ok=True)
             cfg_file = os.path.join(tmp_dir, "config.json")
+
+            # Pre-create a stale nl.conf and an orphaned old.conf
+            with open(os.path.join(nginx_dir, "nl.conf"), "w", encoding="utf-8") as f:
+                f.write("proxy_pass http://127.0.0.1:8008;")
+            with open(os.path.join(nginx_dir, "old.conf"), "w", encoding="utf-8") as f:
+                f.write("proxy_pass http://127.0.0.1:8005;")
 
             # Xray config only has inbounds for 'pl' (port 8007)
             x_cfg = {
@@ -2647,7 +2653,7 @@ remove_traffic_watchdog_timer
 
             # Relays registry:
             # 1. pl: valid inbound
-            # 2. nl: stale inbound_port=8008, but NOT in Xray config (must be skipped!)
+            # 2. nl: stale inbound_port=8008, but NOT in Xray config (must be pruned!)
             # 3. bad: corrupt entry (must not break pl)
             relays_data = [
                 {"code": "pl", "path": "/stream/pl", "inbound_port": 8007, "inbound_tag": "just1k-wl-inbound-pl"},
@@ -2670,6 +2676,7 @@ remove_traffic_watchdog_timer
                     if t and p and int(p) != 10443:
                         xray_inbound_ports[t] = int(p)
 
+            active_configs = set()
             for r in relays:
                 try:
                     if not isinstance(r, dict):
@@ -2678,6 +2685,8 @@ remove_traffic_watchdog_timer
                     if not code or not path:
                         continue
                     code_lower = str(code).strip().lower()
+                    cf_name = f"{code}.conf"
+                    cf_path = os.path.join(nginx_dir, cf_name)
                     in_tag = r.get("inbound_tag") or f"just1k-wl-inbound-{code_lower}"
                     port = xray_inbound_ports.get(in_tag)
                     if not port:
@@ -2686,20 +2695,31 @@ remove_traffic_watchdog_timer
                                 port = p
                                 break
                     if not port:
+                        if os.path.exists(cf_path):
+                            os.remove(cf_path)
                         continue
 
-                    cf_path = os.path.join(nginx_dir, f"{code}.conf")
+                    active_configs.add(cf_name)
+
                     with open(cf_path, "w", encoding="utf-8") as cf:
                         cf.write(f"proxy_pass http://127.0.0.1:{port};")
                 except Exception:
                     continue
 
+            # Prune orphaned configs
+            for item in os.listdir(nginx_dir):
+                if item.endswith(".conf") and item not in active_configs:
+                    os.remove(os.path.join(nginx_dir, item))
+
             # Invariant: pl.conf was created with local port 8007
             self.assertTrue(os.path.exists(os.path.join(nginx_dir, "pl.conf")))
             self.assertIn("127.0.0.1:8007", open(os.path.join(nginx_dir, "pl.conf")).read())
 
-            # Invariant: nl.conf was NOT created because Xray does not listen on 8008
+            # Invariant: stale nl.conf was explicitly DELETED because Xray does not listen on 8008
             self.assertFalse(os.path.exists(os.path.join(nginx_dir, "nl.conf")))
+
+            # Invariant: orphaned old.conf was explicitly DELETED
+            self.assertFalse(os.path.exists(os.path.join(nginx_dir, "old.conf")))
 
             # Invariant: bad relay did not crash reconciliation
             self.assertFalse(os.path.exists(os.path.join(nginx_dir, "bad.conf")))
@@ -2757,6 +2777,12 @@ COMMIT
         removed = remove_rules(synced)
         self.assertNotIn("# START JUST1KNODE ANTI-ABUSE", removed)
         self.assertEqual(removed.strip(), sample_ufw.strip())
+
+    def test_amnezia_status_uses_unified_check(self):
+        """Verify show_amnezia_status and check_amnezia_abuse_rules share the exact same check."""
+        amnezia_sh = (REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
+        self.assertIn("if check_amnezia_abuse_rules; then", amnezia_sh)
+        self.assertIn('grep -q "# START JUST1KNODE ANTI-ABUSE" "$before_rules"', amnezia_sh)
 
 
 if __name__ == "__main__":

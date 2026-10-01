@@ -56,13 +56,12 @@ sync_ufw_before_rules_antiabuse() {
         python3 -c "
 import re, sys
 bf = sys.argv[1]
-try:
-    with open(bf, 'r', encoding='utf-8') as f:
-        content = f.read()
+with open(bf, 'r', encoding='utf-8') as f:
+    content = f.read()
 
-    content = re.sub(r'# START JUST1KNODE ANTI-ABUSE.*?# END JUST1KNODE ANTI-ABUSE\n?', '', content, flags=re.DOTALL)
+content = re.sub(r'# START JUST1KNODE ANTI-ABUSE.*?# END JUST1KNODE ANTI-ABUSE\n?', '', content, flags=re.DOTALL)
 
-    block = '''# START JUST1KNODE ANTI-ABUSE
+block = '''# START JUST1KNODE ANTI-ABUSE
 -A ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset
 -A ufw-before-forward -p tcp -m string --string \"BitTorrent protocol\" --algo bm -j DROP
 -A ufw-before-forward -p udp -m string --string \"BitTorrent protocol\" --algo bm -j DROP
@@ -70,17 +69,18 @@ try:
 # END JUST1KNODE ANTI-ABUSE
 '''
 
-    if ':ufw-before-forward' in content:
-        content = re.sub(r'(:\s*ufw-before-forward\s+-\s+\[0:0\]\n)', r'\1' + block, content, count=1)
-    elif '*filter' in content:
-        content = content.replace('*filter\n', '*filter\n' + block, 1)
+if ':ufw-before-forward' in content:
+    content = re.sub(r'(:\s*ufw-before-forward\s+-\s+\[0:0\]\n)', r'\1' + block, content, count=1)
+elif '*filter' in content:
+    content = content.replace('*filter\n', '*filter\n' + block, 1)
+else:
+    sys.exit(1)
 
-    with open(bf, 'w', encoding='utf-8') as f:
-        f.write(content)
-except Exception:
-    pass
-" "$before_rules" 2>/dev/null || true
+with open(bf, 'w', encoding='utf-8') as f:
+    f.write(content)
+" "$before_rules" 2>/dev/null || return 1
     fi
+    return 0
 }
 
 remove_ufw_before_rules_antiabuse() {
@@ -134,6 +134,14 @@ check_amnezia_abuse_rules() {
         missing=$((missing + 1))
     fi
 
+    # 5. Проверка сохранения в persistent источнике /etc/ufw/before.rules (при наличии UFW)
+    local before_rules="/etc/ufw/before.rules"
+    if [[ -f "$before_rules" ]]; then
+        if ! grep -q "# START JUST1KNODE ANTI-ABUSE" "$before_rules" 2>/dev/null; then
+            missing=$((missing + 1))
+        fi
+    fi
+
     if [[ $missing -eq 0 ]]; then
         return 0
     else
@@ -152,7 +160,10 @@ apply_amnezia_abuse_protection() {
     fi
 
     # 2. Персистентность в UFW (переживает ufw reload и перезагрузку ОС)
-    sync_ufw_before_rules_antiabuse
+    if ! sync_ufw_before_rules_antiabuse; then
+        warn "Сбой сохранения правил в /etc/ufw/before.rules!"
+        return 1
+    fi
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
         ufw reload >/dev/null 2>&1 || true
     fi
@@ -1038,15 +1049,11 @@ show_amnezia_status() {
     fi
 
     echo -e "\n  Сетевая защита (Anti-Abuse):"
-    if iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null; then
+    if check_amnezia_abuse_rules; then
         echo -e "    Блокировка SMTP:25:   ${GREEN}✔ Включена (tcp-reset)${NC}"
+        echo -e "    Фильтрация BitTorrent:${GREEN}✔ Включена (xt_string L7 TCP/UDP/DHT)${NC}\n"
     else
-        echo -e "    Блокировка SMTP:25:   ${YELLOW}! Не найдена${NC}"
-    fi
-    if iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null; then
-        echo -e "    Фильтрация BitTorrent:${GREEN}✔ Включена (xt_string L7)${NC}\n"
-    else
-        echo -e "    Фильтрация BitTorrent:${YELLOW}! Не найдена${NC}\n"
+        echo -e "    Статус защиты:        ${YELLOW}! Не найдена или неполная (запустите 'just1knode doctor')${NC}\n"
     fi
 }
 
