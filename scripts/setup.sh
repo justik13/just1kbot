@@ -108,22 +108,35 @@ normalize_overcommit_file() {
     return 0
 }
 
+normalize_sysctl_dropin() {
+    local file="$1"
+    mkdir -p "$(dirname "$file")" 2>/dev/null || return 1
+    normalize_overcommit_file "$file" || return 1
+    if grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=' "$file" 2>/dev/null; then
+        sed -i -E '/^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=/d' "$file" || return 1
+    fi
+    echo "net.ipv4.icmp_echo_ignore_all = 1" >> "$file" 2>/dev/null || return 1
+    return 0
+}
+
 ensure_overcommit_persistence() {
     local custom_conf="${1:-}"
-    normalize_overcommit_file "${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}" || return 1
+    normalize_sysctl_dropin "${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}" || return 1
     normalize_overcommit_file "${custom_conf:-${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}}" || return 1
     return 0
 }
 
-# --- Гарантия настройки vm.overcommit_memory=1 (runtime + persistence) ---
+# --- Гарантия настройки vm.overcommit_memory=1 и net.ipv4.icmp_echo_ignore_all=1 ---
 # Persistence проверяется и чинится ВСЕГДА, независимо от текущего runtime:
 # сценарий «runtime=1 (например, установлен вручную до запуска установщика),
 # persistent=0» иначе пережил бы установку и откатился после перезагрузки.
 # Пути переопределяются для тестируемости:
 #   JUST1KBOT_PROC_OVERCOMMIT - stub /proc/sys/vm/overcommit_memory
+#   JUST1KBOT_PROC_ICMP_IGNORE - stub /proc/sys/net/ipv4/icmp_echo_ignore_all
 #   JUST1KBOT_SYSCTL_CONF     - stub /etc/sysctl.conf
 configure_overcommit_memory() {
     local runtime_file="${JUST1KBOT_PROC_OVERCOMMIT:-/proc/sys/vm/overcommit_memory}"
+    local icmp_runtime_file="${JUST1KBOT_PROC_ICMP_IGNORE:-/proc/sys/net/ipv4/icmp_echo_ignore_all}"
     local conf_file="${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}"
     [[ -f "$runtime_file" ]] || return 0
 
@@ -135,6 +148,21 @@ configure_overcommit_memory() {
         # Redis BGSAVE fail under memory pressure after install.
         if ! sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1; then
             error "Не удалось применить 'sysctl -w vm.overcommit_memory=1' (проверьте права root и ограничения хоста). Настройте параметр вручную и запустите установщик снова."
+        fi
+    fi
+
+    # Stealth hardening: disable ICMP ping responses from external scanners
+    if [[ -f "$icmp_runtime_file" ]]; then
+        local current_icmp
+        current_icmp="$(cat "$icmp_runtime_file" 2>/dev/null || echo "0")"
+        if [[ "$current_icmp" != "1" ]]; then
+            info "Включение net.ipv4.icmp_echo_ignore_all=1 (защита от сканирования ICMP)..."
+            sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+        fi
+        local applied_icmp
+        applied_icmp="$(cat "$icmp_runtime_file" 2>/dev/null || echo "0")"
+        if [[ "$applied_icmp" != "1" ]]; then
+            warn "Внимание: net.ipv4.icmp_echo_ignore_all=1 не применился к runtime (проверьте права или ограничения контейнера)."
         fi
     fi
 
@@ -151,7 +179,7 @@ configure_overcommit_memory() {
         error "vm.overcommit_memory=1 не применилось к runtime — проверьте 'sysctl -w vm.overcommit_memory=1' вручную и запустите установщик снова."
     fi
 
-    log "Параметр vm.overcommit_memory=1 настроен (runtime + persistence)."
+    log "Параметры ядра vm.overcommit_memory=1 и net.ipv4.icmp_echo_ignore_all=1 настроены (runtime + persistence)."
 }
 
 # --- Очистка временных ресурсов при сбое ---

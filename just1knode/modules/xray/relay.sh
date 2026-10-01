@@ -416,15 +416,7 @@ EOF
     chown root:root "$XRAY_CONFIG"
     chmod 640 "$XRAY_CONFIG"
 
-    if [[ $EUID -eq 0 ]]; then
-        mkdir -p /etc/sysctl.d 2>/dev/null || true
-        cat > /etc/sysctl.d/99-disable-ipv6.conf <<EOF 2>/dev/null || true
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-EOF
-        sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
-    fi
+    apply_node_sysctl_hardening
 
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
         error "Ошибка тестирования сгенерированной конфигурации Xray на Relay узле. Изменения не применены."
@@ -1054,15 +1046,7 @@ print('[+] Xray Relay config успешно оптимизирован (UseIPv4 
 
     chmod 640 "$XRAY_CONFIG" 2>/dev/null || true
 
-    if [[ $EUID -eq 0 ]]; then
-        mkdir -p /etc/sysctl.d 2>/dev/null || true
-        cat > /etc/sysctl.d/99-disable-ipv6.conf <<EOF 2>/dev/null || true
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-EOF
-        sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
-    fi
+    apply_node_sysctl_hardening
 
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
         manifest_rollback

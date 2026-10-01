@@ -464,15 +464,7 @@ with open(config_file, 'w', encoding='utf-8') as f:
     chmod 640 "$XRAY_CONFIG" 2>/dev/null || true
     chmod 755 "$(dirname "$XRAY_CONFIG")" 2>/dev/null || true
 
-    if [[ $EUID -eq 0 ]]; then
-        mkdir -p /etc/sysctl.d 2>/dev/null || true
-        cat > /etc/sysctl.d/99-disable-ipv6.conf <<EOF 2>/dev/null || true
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-EOF
-        sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
-    fi
+    apply_node_sysctl_hardening
 
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
         error "Ошибка тестирования сгенерированной конфигурации Xray на Origin узле. Изменения не применены."
@@ -1528,16 +1520,8 @@ except Exception:
         rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
 
-    # Системное отключение IPv6
-    if [[ $EUID -eq 0 ]]; then
-        mkdir -p /etc/sysctl.d 2>/dev/null || true
-        cat > /etc/sysctl.d/99-disable-ipv6.conf <<EOF 2>/dev/null || true
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-EOF
-        sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
-    fi
+    # Системное отключение IPv6 и ICMP Echo (стелс от сканеров)
+    apply_node_sysctl_hardening
 
     # Фаервол: принудительное приведение портов к desired state (8444 для BOT_IP, удаление 8443)
     local heal_bot_ip

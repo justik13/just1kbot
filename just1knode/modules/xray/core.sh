@@ -506,9 +506,12 @@ update_node_post() {
     acquire_just1knode_lock
     trap release_just1knode_lock RETURN EXIT
 
+    apply_node_sysctl_hardening
+
     # Автоматическая оптимизация конфигурации в зависимости от роли сервера
     local role
     role="$(get_state_val "role")"
+
     if [[ "$role" == "origin" ]]; then
         heal_and_update_origin_config
     elif [[ "$role" == "relay" ]]; then
