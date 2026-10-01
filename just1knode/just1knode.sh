@@ -1208,7 +1208,7 @@ main_menu() {
                 4) show_bot_credentials; read -rp "Нажмите Enter для продолжения...";;
                 5) set_origin_bot_ip; read -rp "Нажмите Enter для продолжения...";;
                 6) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
-                7) update_node; read -rp "Нажмите Enter для продолжения...";;
+                7) update_node "all" "1"; read -rp "Нажмите Enter для продолжения...";;
                 8) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
                 9) reset_node; read -rp "Нажмите Enter для продолжения...";;
                 10) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
@@ -1247,7 +1247,7 @@ main_menu() {
                 4) install_amnezia_node; read -rp "Нажмите Enter для продолжения...";;
                 5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
                 6) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                7) update_node; read -rp "Нажмите Enter для продолжения...";;
+                7) update_node "all" "1"; read -rp "Нажмите Enter для продолжения...";;
                 8) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
                 9) reset_node; read -rp "Нажмите Enter для продолжения...";;
                 10) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
@@ -1282,7 +1282,7 @@ main_menu() {
                 4) install_xray_relay_node; read -rp "Нажмите Enter для продолжения...";;
                 5) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
                 6) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                7) update_node; read -rp "Нажмите Enter для продолжения...";;
+                7) update_node "all" "1"; read -rp "Нажмите Enter для продолжения...";;
                 8) reset_node; read -rp "Нажмите Enter для продолжения...";;
                 9) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
                 0) echo -e "\n${GREEN}До свидания!${NC}\n"; exit 0;;
@@ -1322,7 +1322,7 @@ main_menu() {
                 5) show_status; read -rp "Нажмите Enter для продолжения...";;
                 6) manage_traffic_limit_menu; read -rp "Нажмите Enter для продолжения...";;
                 7) run_doctor; read -rp "Нажмите Enter для продолжения...";;
-                8) update_node; read -rp "Нажмите Enter для продолжения...";;
+                8) update_node "all" "1"; read -rp "Нажмите Enter для продолжения...";;
                 9) update_xray_core; read -rp "Нажмите Enter для продолжения...";;
                 10) reset_node; read -rp "Нажмите Enter для продолжения...";;
                 11) uninstall_node; read -rp "Нажмите Enter для продолжения...";;
@@ -1405,6 +1405,11 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
             remove-anti-abuse|remove-antiabuse|disable-anti-abuse)
                 check_root
                 remove_amnezia_abuse_protection
+                ;;
+            update-post)
+                check_root
+                shift
+                update_node_post "${1:-all}" "${2:-0}"
                 ;;
             update)
                 case "${2:-}" in
