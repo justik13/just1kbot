@@ -921,6 +921,39 @@ _rollback_services_after_db_failure() {
     fi
 }
 
+# --- Настройка системных параметров ядра (Redis + ICMP Stealth) ---
+apply_sysctl_hardening() {
+    local sysctl_file="${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}"
+    local needs_update=0
+    if [[ ! -f "$sysctl_file" ]]; then
+        needs_update=1
+    elif ! grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null; then
+        needs_update=1
+    fi
+
+    if [[ $needs_update -eq 1 ]]; then
+        local tmp_sysctl
+        tmp_sysctl="$(mktemp /tmp/sysctl_just1k.XXXXXX 2>/dev/null || echo "/tmp/99-just1kbot.conf")"
+        cat << 'EOF' > "$tmp_sysctl"
+vm.overcommit_memory = 1
+net.ipv4.icmp_echo_ignore_all = 1
+EOF
+        run_privileged mkdir -p "$(dirname "$sysctl_file")" 2>/dev/null || true
+        run_privileged cp "$tmp_sysctl" "$sysctl_file" 2>/dev/null || true
+        run_privileged chmod 644 "$sysctl_file" 2>/dev/null || true
+        rm -f "$tmp_sysctl" 2>/dev/null || true
+    fi
+
+    if command -v sysctl >/dev/null 2>&1; then
+        run_privileged sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+        if [[ -f "$sysctl_file" ]]; then
+            run_privileged sysctl -p "$sysctl_file" >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
 # --- 3. Безопасное обновление ---
 cmd_update() {
     echo -e "\n${BOLD}${BLUE}=== 🔄 БЕЗОПАСНОЕ ОБНОВЛЕНИЕ JUST1KBOT ===${NC}\n"
@@ -1243,6 +1276,7 @@ cmd_update() {
         # Закрепление безопасных прав доступа на хосте
         chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
         chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
+        apply_sysctl_hardening
 
         if [ "$did_stash" = "true" ]; then
             echo ""
@@ -1698,7 +1732,7 @@ cmd_doctor() {
         info "Версия ядра Linux: $kernel_ver"
     fi
 
-    # 0.1 Проверка памяти ядра для Redis
+    # 0.1 Проверка памяти ядра для Redis и защиты от сканирования (ICMP)
     if [[ -f /proc/sys/vm/overcommit_memory ]]; then
         local overcommit
         overcommit="$(cat /proc/sys/vm/overcommit_memory 2>/dev/null || echo '0')"
@@ -1706,6 +1740,15 @@ cmd_doctor() {
             log "Параметр ядра vm.overcommit_memory=1 активен (Redis BGSAVE защищен)."
         else
             warn "vm.overcommit_memory=$overcommit. Рекомендуется установить 'sysctl vm.overcommit_memory=1' для предотвращения сбоев Redis BGSAVE."
+        fi
+    fi
+    if [[ -f /proc/sys/net/ipv4/icmp_echo_ignore_all ]]; then
+        local icmp_ignore
+        icmp_ignore="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo '0')"
+        if [[ "$icmp_ignore" == "1" ]]; then
+            log "Параметр ядра net.ipv4.icmp_echo_ignore_all=1 активен (стелс-режим ICMP)."
+        else
+            info "net.ipv4.icmp_echo_ignore_all=$icmp_ignore (ICMP ping активен)."
         fi
     fi
 
@@ -2013,13 +2056,17 @@ cmd_uninstall() {
     fi
 
     # 5. Sysctl cleanup
-    info "4/8. Удаление системной конфигурации sysctl..."
+    info "4/8. Удаление системной конфигурации sysctl и восстановление параметров сети..."
     local sysctl_file="${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}"
     if [[ -f "$sysctl_file" ]]; then
         if ! (run_privileged rm -f "$sysctl_file" 2>/dev/null); then
             cleanup_errors+=("Не удалось удалить файл конфигурации $sysctl_file")
         else
             log "Конфигурация $sysctl_file удалена."
+        fi
+        if command -v sysctl >/dev/null 2>&1; then
+            run_privileged sysctl -w net.ipv4.icmp_echo_ignore_all=0 >/dev/null 2>&1 || true
+            run_privileged sysctl --system >/dev/null 2>&1 || true
         fi
     fi
 

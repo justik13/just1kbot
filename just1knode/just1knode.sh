@@ -754,6 +754,17 @@ if os.path.exists(rf):
         fi
     fi
 
+    log "11. Проверка сетевого стелс-режима (ICMP Echo)..."
+    if [[ -f /proc/sys/net/ipv4/icmp_echo_ignore_all ]]; then
+        local icmp_val
+        icmp_val="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
+        if [[ "$icmp_val" == "1" ]]; then
+            echo -e "  ${GREEN}✔${NC} ICMP Echo отключен (стелс-режим от сканеров ТСПУ/Shodan)"
+        else
+            echo -e "  ${YELLOW}!${NC} ICMP Echo активен (рекомендуется стелс: just1knode update)"
+        fi
+    fi
+
     if [[ $failed -eq 0 ]]; then
         echo -e "\n${BOLD}${GREEN}Все проверки пройдены успешно! Узел полностью здоров.${NC}\n"
     else
@@ -999,7 +1010,7 @@ uninstall_node() {
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/stop-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/start-port80-docker.sh" 2>/dev/null || true
 
-    info "8/11. Удаление конфигурации ядра sysctl и восстановление IPv6..."
+    info "8/11. Удаление конфигурации ядра sysctl и восстановление параметров сети..."
     local sysctl_ipv6_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
     if [[ -f "$sysctl_ipv6_conf" ]]; then
         rm -f "$sysctl_ipv6_conf" 2>/dev/null || true
@@ -1007,6 +1018,7 @@ uninstall_node() {
             sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
             sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1 || true
             sysctl -w net.ipv6.conf.lo.disable_ipv6=0 >/dev/null 2>&1 || true
+            sysctl -w net.ipv4.icmp_echo_ignore_all=0 >/dev/null 2>&1 || true
             sysctl --system >/dev/null 2>&1 || true
         fi
     fi

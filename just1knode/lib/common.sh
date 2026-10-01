@@ -245,4 +245,24 @@ ensure_xray_api_healthy() {
     return 1
 }
 
+apply_node_sysctl_hardening() {
+    local conf_path="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
+    mkdir -p "$(dirname "$conf_path")" 2>/dev/null || true
+    cat > "$conf_path" <<EOF 2>/dev/null || true
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+net.ipv4.icmp_echo_ignore_all = 1
+EOF
+    chmod 644 "$conf_path" 2>/dev/null || true
+    if command -v sysctl >/dev/null 2>&1; then
+        sysctl -p "$conf_path" >/dev/null 2>&1 || true
+        sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+        sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+        sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
+        sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1 || true
+    fi
+}
+
+
 

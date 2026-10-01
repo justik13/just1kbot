@@ -160,6 +160,7 @@ check_amnezia_abuse_rules() {
 
 apply_amnezia_abuse_protection() {
     log "Настройка сетевой защиты (Anti-Abuse: SMTP 25 + BitTorrent L7)..."
+    apply_node_sysctl_hardening
 
     # 1. Автозагрузка модуля ядра xt_string для L7 фильтрации
     modprobe xt_string 2>/dev/null || true
@@ -306,6 +307,7 @@ install_amnezia_node() {
     check_root
     init_state_dir
     install_base_deps
+    apply_node_sysctl_hardening
 
     local prev_role
     prev_role="$(get_node_status)"
