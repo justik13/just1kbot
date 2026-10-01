@@ -147,11 +147,13 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         self.assertIn("💎 📱 Базовый (2 устр.)", button_texts)
         self.assertIn("💎 👨‍👩‍👧‍👦 Семейный (5 устр.)", button_texts)
         self.assertIn("💎 🚀 Pro (10 устр.)", button_texts)
+        self.assertIn("💎 🌐 Белый Интернет", button_texts)
         self.assertEqual(button_texts.count("💎 📱 Базовый (2 устр.)"), 1)
 
         self.assertIn("admin_users_filter:tariff:2:1", callback_datas)
         self.assertIn("admin_users_filter:tariff:5:1", callback_datas)
         self.assertIn("admin_users_filter:tariff:10:1", callback_datas)
+        self.assertIn("admin_users_filter:tariff:white_internet:1", callback_datas)
 
     async def test_users_keyboard_profile_count_excludes_all_non_visible_statuses(self):
         from bot.handlers.admin.users.common import _build_users_list_text_and_kb
@@ -196,6 +198,57 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         self.assertIn("3 устр.", user_button.text)
         self.assertNotIn("6 устр.", user_button.text)
         self.assertNotIn("2 устр.", user_button.text)
+
+    async def test_apply_user_filters_tariff_awg_and_white_internet(self):
+        from database.models import User
+        from database.repositories.users_repo import _apply_user_filters
+
+        # AWG tariff filter: checks device_limit and service_type == 'awg', not Tariff.id
+        stmt_awg = _apply_user_filters(select(User), "tariff", "2")
+        sql_awg = str(stmt_awg)
+        self.assertIn("tariffs.device_limit = :device_limit_1", sql_awg)
+        self.assertIn("tariffs.service_type = :service_type_1", sql_awg)
+        self.assertNotIn("tariffs.id =", sql_awg)
+
+        # White Internet filter: checks WhiteInternetSubscription
+        stmt_wi = _apply_user_filters(select(User), "tariff", "white_internet")
+        sql_wi = str(stmt_wi)
+        self.assertIn("white_internet_subscriptions", sql_wi)
+
+    async def test_users_filter_pagination_accepts_white_internet(self):
+        from bot.handlers.admin.users.list_routes import users_filter_pagination
+
+        callback = SimpleNamespace(
+            data="admin_users_filter:tariff:white_internet:1",
+            from_user=SimpleNamespace(id=1),
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with patch("bot.handlers.admin.users.list_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.list_routes.get_filtered_users_count", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.admin.users.list_routes.get_filtered_users_paginated", new=AsyncMock(return_value=[])), \
+             patch("database.repositories.users_repo.get_user_filter_counts", new=AsyncMock(return_value={})):
+            await users_filter_pagination(callback, state, session)
+
+        callback.answer.assert_awaited()
+        # Should not reject with invalid parameter error
+        self.assertNotIn("Некорректный параметр", str(callback.answer.call_args))
+
+    async def test_build_users_list_breadcrumbs_for_white_internet_tariff(self):
+        from bot.handlers.admin.users.common import _build_users_list_text_and_kb
+
+        rendered, _ = await _build_users_list_text_and_kb(
+            [],
+            page=1,
+            total_pages=1,
+            total=0,
+            filter_type="tariff",
+            filter_param="white_internet",
+        )
+        self.assertIn("Белый Интернет", rendered)
 
 
 if __name__ == "__main__":

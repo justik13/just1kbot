@@ -106,7 +106,13 @@ async def show_extended_filter_menu(
             )
         title = texts.ADMIN_USERS_LIST_SELECT_STRANU
     elif filter_type == "tariff":
-        rows = (await session.scalars(select(Tariff).where(Tariff.is_active.is_(True)).order_by(Tariff.device_limit, Tariff.id))).all()
+        rows = (
+            await session.scalars(
+                select(Tariff)
+                .where(Tariff.is_active.is_(True), Tariff.service_type == "awg")
+                .order_by(Tariff.device_limit, Tariff.id)
+            )
+        ).all()
         if not rows:
             await callback.answer(texts.ADMIN_USERS_LIST_TARIFOV_NET, show_alert=True)
             return
@@ -122,6 +128,10 @@ async def show_extended_filter_menu(
                 text=texts.ADMIN_USERS_FILTER_TARIFF_BUTTON.format(tariff_group=label),
                 callback_data=f"admin_users_filter:tariff:{limit}:1",
             )
+        builder.button(
+            text=texts.ADMIN_USERS_FILTER_TARIFF_BUTTON.format(tariff_group=texts.ADMIN_BTN_SUB_WI),
+            callback_data="admin_users_filter:tariff:white_internet:1",
+        )
         title = texts.ADMIN_USERS_LIST_SELECT_TARIFF
     else:
         await callback.answer(texts.ADMIN_USERS_LIST_NEIZVESTNYY_FILTR, show_alert=True)
@@ -167,9 +177,13 @@ async def users_filter_pagination(
         page = 1
 
     param_val = None if filter_param == "none" else filter_param
-    if filter_type in {"server", "tariff"} and param_val is not None and not str(param_val).isdigit():
-        await callback.answer(texts.ADMIN_USERS_LIST_NEKORREKTNYY_PARAMETR_FILTRA, show_alert=True)
-        return
+    if param_val is not None:
+        if filter_type == "server" and not str(param_val).isdigit():
+            await callback.answer(texts.ADMIN_USERS_LIST_NEKORREKTNYY_PARAMETR_FILTRA, show_alert=True)
+            return
+        if filter_type == "tariff" and param_val != "white_internet" and not str(param_val).isdigit():
+            await callback.answer(texts.ADMIN_USERS_LIST_NEKORREKTNYY_PARAMETR_FILTRA, show_alert=True)
+            return
 
     total_users = await get_filtered_users_count(
         session, filter_type=filter_type, filter_param=param_val

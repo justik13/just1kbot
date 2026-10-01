@@ -653,16 +653,36 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     elif filter_type == "country" and filter_param:
         stmt = stmt.where(User.profiles.any(VPNProfile.server.has(Server.country_flag == str(filter_param))))
     elif filter_type == "tariff" and filter_param is not None:
-        try:
-            val = int(filter_param)
-        except (ValueError, TypeError):
-            return stmt.where(false())
-        if not (1 <= val <= MAX_INT32):
-            return stmt.where(false())
-        matching_tariff_ids = select(Tariff.id).where(
-            (Tariff.device_limit == val) | (Tariff.id == val)
-        )
-        stmt = stmt.where(User.current_tariff_id.in_(matching_tariff_ids))
+        if filter_param == "white_internet":
+            stmt = stmt.where(
+                User.id.in_(
+                    select(WhiteInternetSubscription.user_id).where(
+                        WhiteInternetSubscription.status.in_([
+                            WhiteInternetStatus.ACTIVE,
+                            WhiteInternetStatus.PENDING,
+                            WhiteInternetStatus.EXHAUSTED,
+                        ]),
+                        WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+                    )
+                )
+            )
+        else:
+            try:
+                val = int(filter_param)
+            except (ValueError, TypeError):
+                return stmt.where(false())
+            if not (1 <= val <= MAX_INT32):
+                return stmt.where(false())
+            matching_tariff_ids = select(Tariff.id).where(
+                Tariff.service_type == "awg",
+                Tariff.device_limit == val,
+            )
+            stmt = stmt.where(
+                or_(
+                    User.current_tariff_id.in_(matching_tariff_ids),
+                    and_(User.current_tariff_id.is_(None), User.device_limit == val),
+                )
+            )
     return stmt
 
 
