@@ -247,6 +247,24 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         self.assertIn("white_internet_subscriptions.expires_at > :expires_at_1", sql_wi)
         self.assertIn("white_internet_subscriptions.provisioning_status !=", sql_wi)
 
+        from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+        import datetime
+
+        params_wi = stmt_wi.compile().params
+        self.assertEqual(
+            params_wi["status_1"],
+            [WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING, WhiteInternetStatus.EXHAUSTED],
+        )
+        self.assertEqual(
+            params_wi["provisioning_status_1"],
+            WhiteInternetProvisioningStatus.PENDING_DELETE,
+        )
+        self.assertIsInstance(params_wi["expires_at_1"], datetime.datetime)
+
+        params_awg = stmt_awg.compile().params
+        self.assertEqual(params_awg["service_type_1"], "awg")
+        self.assertEqual(params_awg["device_limit_1"], 2)
+
     async def test_users_filter_pagination_accepts_white_internet(self):
         from bot.handlers.admin.users.list_routes import users_filter_pagination
 
