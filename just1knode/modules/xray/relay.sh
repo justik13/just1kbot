@@ -560,7 +560,7 @@ print('')
 
     if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && -f "${le_dir}/live/${cur_sni}/fullchain.pem" ]]; then
         if openssl x509 -checkend 86400 -noout -in "${le_dir}/live/${cur_sni}/fullchain.pem" 2>/dev/null; then
-            local cur_sni_match="YES"
+            local cur_sni_match="NO"
             if [[ -n "$my_ip" ]]; then
                 cur_sni_match=$(python3 -c "
 import socket, sys
@@ -612,9 +612,6 @@ except Exception:
                                 auto_domain="$cand"
                                 break
                             fi
-                        else
-                            auto_domain="$cand"
-                            break
                         fi
                     fi
                 fi
@@ -813,7 +810,7 @@ heal_and_update_relay_config() {
     # Приоритет 1 (Strict Affinity): Текущий настроенный SNI, если его сертификат существует, валиден и подтверждён DNS на my_ip
     if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && -f "${le_dir}/live/${cur_sni}/fullchain.pem" && -f "${le_dir}/live/${cur_sni}/privkey.pem" ]]; then
         if openssl x509 -checkend 86400 -noout -in "${le_dir}/live/${cur_sni}/fullchain.pem" 2>/dev/null; then
-            local cur_sni_match="YES"
+            local cur_sni_match="NO"
             if [[ -n "$my_ip" ]]; then
                 cur_sni_match=$(python3 -c "
 import socket, sys

@@ -2679,7 +2679,7 @@ remove_traffic_watchdog_timer
                 for ib in x_c.get("inbounds", []):
                     t = ib.get("tag")
                     p = ib.get("port")
-                    if t and p and int(p) != 10443:
+                    if t and p:
                         xray_inbound_ports[t] = int(p)
 
             active_configs = set()
