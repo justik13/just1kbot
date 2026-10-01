@@ -50,6 +50,75 @@ is_amnezia_container_running() {
 # 1. Блокировка исходящего SMTP (порт 25) с tcp-reset
 # 2. Блокировка BitTorrent L7 хэндшейка и DHT пакетов через xt_string
 # =============================================================================
+deploy_ufw_after_init_hook() {
+    if [[ -d /etc/ufw ]]; then
+        local ufw_hook="/etc/ufw/after.init"
+        local bin_path="${INSTALL_DIR:-/opt/just1knode}/just1knode.sh"
+        if [[ ! -f "$bin_path" ]]; then
+            bin_path="/usr/local/bin/just1knode"
+        fi
+
+        if [[ -f "$ufw_hook" ]]; then
+            if ! grep -q "JUST1KNODE ANTI-ABUSE HOOK" "$ufw_hook" 2>/dev/null; then
+                cat >> "$ufw_hook" <<EOF
+
+# START JUST1KNODE ANTI-ABUSE HOOK
+case "\$1" in
+start|reload|restart)
+    if [ -x "${bin_path}" ]; then
+        "${bin_path}" anti-abuse >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+# END JUST1KNODE ANTI-ABUSE HOOK
+EOF
+            fi
+        else
+            cat > "$ufw_hook" <<EOF
+#!/bin/sh
+# START JUST1KNODE ANTI-ABUSE HOOK
+case "\$1" in
+start|reload|restart)
+    if [ -x "${bin_path}" ]; then
+        "${bin_path}" anti-abuse >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+# END JUST1KNODE ANTI-ABUSE HOOK
+EOF
+        fi
+        chmod +x "$ufw_hook" 2>/dev/null || true
+    fi
+}
+
+deploy_antiabuse_systemd_service() {
+    local svc_file="/etc/systemd/system/just1knode-antiabuse.service"
+    local bin_path="${INSTALL_DIR:-/opt/just1knode}/just1knode.sh"
+    if [[ ! -f "$bin_path" ]]; then
+        bin_path="/usr/local/bin/just1knode"
+    fi
+
+    cat > "$svc_file" <<EOF
+[Unit]
+Description=Just1kNode Anti-Abuse Protection (SMTP 25 + BitTorrent L7)
+After=network.target network-online.target ufw.service docker.service
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${bin_path} anti-abuse
+ExecReload=${bin_path} anti-abuse
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable just1knode-antiabuse.service >/dev/null 2>&1 || true
+    systemctl start just1knode-antiabuse.service >/dev/null 2>&1 || true
+}
+
 apply_amnezia_abuse_protection() {
     log "Настройка сетевой защиты (Anti-Abuse: SMTP 25 + BitTorrent L7)..."
 
@@ -63,8 +132,14 @@ apply_amnezia_abuse_protection() {
         fi
     fi
 
-    # Блокировка BitTorrent L7 (xt_string)
+    # Автозагрузка модуля xt_string для L7 фильтрации BitTorrent
     modprobe xt_string 2>/dev/null || true
+    mkdir -p /etc/modules-load.d 2>/dev/null || true
+    if ! grep -q "^xt_string" /etc/modules-load.d/just1knode.conf 2>/dev/null; then
+        echo "xt_string" >> /etc/modules-load.d/just1knode.conf 2>/dev/null || true
+    fi
+
+    # Блокировка BitTorrent L7 (xt_string)
     if iptables -m string --help 2>&1 | grep -q "\-\-algo"; then
         # TCP BitTorrent handshake
         if ! iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null; then
@@ -93,13 +168,24 @@ apply_amnezia_abuse_protection() {
         warn "Модуль ядра xt_string недоступен. Блокировка SMTP:25 установлена, BitTorrent L7 пропущен."
     fi
 
+    # UFW hook: перезапуск/перезагрузка фаервола восстанавливает правила
+    deploy_ufw_after_init_hook
+
+    # systemd unit: переживание перезагрузки хоста
+    deploy_antiabuse_systemd_service
+
     # Сохранение правил iptables для переживания перезагрузки
+    if ! command -v netfilter-persistent >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq >/dev/null 2>&1 || true
+        apt-get install -y -qq iptables-persistent netfilter-persistent >/dev/null 2>&1 || true
+    fi
+
     if command -v netfilter-persistent >/dev/null 2>&1; then
         netfilter-persistent save >/dev/null 2>&1 || true
     fi
-    if [[ -d /etc/iptables ]]; then
-        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
-    fi
+    mkdir -p /etc/iptables 2>/dev/null || true
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
 }
 
 remove_amnezia_abuse_protection() {
@@ -114,6 +200,16 @@ remove_amnezia_abuse_protection() {
     if iptables -L DOCKER-USER >/dev/null 2>&1; then
         iptables -D DOCKER-USER -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null || true
         iptables -D DOCKER-USER -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null || true
+    fi
+
+    if systemctl is-enabled --quiet just1knode-antiabuse.service 2>/dev/null; then
+        systemctl disable --now just1knode-antiabuse.service >/dev/null 2>&1 || true
+    fi
+    rm -f /etc/systemd/system/just1knode-antiabuse.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
+
+    if [[ -f /etc/ufw/after.init ]]; then
+        sed -i '/# START JUST1KNODE ANTI-ABUSE HOOK/,/# END JUST1KNODE ANTI-ABUSE HOOK/d' /etc/ufw/after.init 2>/dev/null || true
     fi
 
     if command -v netfilter-persistent >/dev/null 2>&1; then
@@ -806,8 +902,10 @@ EOF
     # 11. Активация защиты от абуза (SMTP 25 + BitTorrent)
     if [[ "$enable_abuse" == "Y" ]]; then
         apply_amnezia_abuse_protection
+        set_state_val "abuse_protection" "enabled"
     else
         log "Защита от абуза (SMTP 25 / BitTorrent) пропущена по выбору пользователя"
+        set_state_val "abuse_protection" "disabled"
     fi
 
     # 12. Обновление состояния и определение мультироли (Coexistence)

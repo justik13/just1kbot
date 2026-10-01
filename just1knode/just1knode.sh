@@ -736,15 +736,44 @@ if os.path.exists(rf):
 
     if [[ "$role" == "awg" || "$role" == "dual" ]]; then
         log "10. Проверка правил сетевой защиты Anti-Abuse..."
-        if iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null; then
-            echo -e "  ${GREEN}✔${NC} Блокировка SMTP:25 активна (tcp-reset)"
-        else
+        local abuse_ok=1
+        if ! iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null && \
+           ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null); then
+            abuse_ok=0
             echo -e "  ${YELLOW}!${NC} Блокировка SMTP:25 не найдена в iptables"
-        fi
-        if iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null; then
-            echo -e "  ${GREEN}✔${NC} Фильтрация BitTorrent L7 активна (xt_string)"
         else
+            echo -e "  ${GREEN}✔${NC} Блокировка SMTP:25 активна (tcp-reset)"
+        fi
+        if ! iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null && \
+           ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null); then
+            abuse_ok=0
             echo -e "  ${YELLOW}!${NC} Фильтрация BitTorrent L7 не найдена в iptables"
+        else
+            echo -e "  ${GREEN}✔${NC} Фильтрация BitTorrent L7 активна (xt_string)"
+        fi
+
+        if [[ $abuse_ok -eq 0 ]]; then
+            warn "ВНИМАНИЕ: Сетевая защита Anti-Abuse не активна! Запуск автоматического восстановления (Auto-Heal)..."
+            if apply_amnezia_abuse_protection; then
+                local recheck_ok=1
+                if ! iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null && \
+                   ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null); then
+                    recheck_ok=0
+                fi
+                if ! iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null && \
+                   ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null); then
+                    recheck_ok=0
+                fi
+                if [[ $recheck_ok -eq 1 ]]; then
+                    echo -e "  ${GREEN}✔${NC} Правила сетевой защиты Anti-Abuse успешно восстановлены и активны."
+                else
+                    echo -e "  ${RED}✗${NC} ОШИБКА: Не удалось восстановить правила Anti-Abuse (проверьте модуль ядра xt_string)!"
+                    failed=$((failed + 1))
+                fi
+            else
+                echo -e "  ${RED}✗${NC} ОШИБКА: Сбой выполнения функции apply_amnezia_abuse_protection!"
+                failed=$((failed + 1))
+            fi
         fi
     fi
 
@@ -1396,6 +1425,12 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
             set-bot-ip|bot-ip)
                 set_origin_bot_ip "${2:-}"
                 ;;
+            anti-abuse|antiabuse|apply-abuse-protection)
+                apply_amnezia_abuse_protection
+                ;;
+            remove-anti-abuse|remove-antiabuse)
+                remove_amnezia_abuse_protection
+                ;;
             update)
                 case "${2:-}" in
                     core|xray) update_xray_core ;;
@@ -1403,8 +1438,14 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                         role="$(get_state_val "role")"
                         if [[ "$role" == "origin" ]]; then
                             heal_and_update_origin_config
-                        elif [[ "$role" == "relay" || "$role" == "dual" ]]; then
+                        elif [[ "$role" == "relay" ]]; then
                             heal_and_update_relay_config
+                        elif [[ "$role" == "dual" ]]; then
+                            heal_and_update_relay_config
+                            apply_amnezia_abuse_protection
+                        elif [[ "$role" == "awg" ]]; then
+                            apply_amnezia_abuse_protection
+                            log "Сетевая защита AmneziaWG актуализирована."
                         else
                             error "Узел не настроен."
                         fi

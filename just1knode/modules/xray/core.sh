@@ -481,10 +481,14 @@ update_node() {
     role="$(get_state_val "role")"
     if [[ "$role" == "origin" ]]; then
         heal_and_update_origin_config
-    elif [[ "$role" == "relay" || "$role" == "dual" ]]; then
+    elif [[ "$role" == "relay" ]]; then
         heal_and_update_relay_config
+    elif [[ "$role" == "dual" ]]; then
+        heal_and_update_relay_config
+        apply_amnezia_abuse_protection
     elif [[ "$role" == "awg" ]]; then
-        info "Узел настроен как AWG. Конфигурация ядра актуальна."
+        apply_amnezia_abuse_protection
+        info "Узел настроен как AWG. Конфигурация ядра и сетевая защита актуализированы."
     else
         warn "Узел не настроен (роль не определена). Автоматическая оптимизация конфига пропущена."
     fi

@@ -2175,6 +2175,32 @@ remove_traffic_watchdog_timer
         self.assertIn("apply_amnezia_abuse_protection", content)
         self.assertIn("--dport 25 -j REJECT --reject-with tcp-reset", content)
         self.assertIn('--string "BitTorrent protocol" --algo bm', content)
+        self.assertIn("deploy_ufw_after_init_hook", content)
+        self.assertIn("deploy_antiabuse_systemd_service", content)
+        self.assertIn("just1knode-antiabuse.service", content)
+        self.assertIn("/etc/modules-load.d/just1knode.conf", content)
+        self.assertIn("iptables-persistent netfilter-persistent", content)
+
+    def test_amnezia_antiabuse_persistence_and_doctor_invariants(self):
+        """Verify anti-abuse persistence, update_node integration, and doctor auto-heal invariants."""
+        core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
+        self.assertIn('elif [[ "$role" == "dual" ]]; then', core_sh)
+        self.assertIn('heal_and_update_relay_config\n        apply_amnezia_abuse_protection', core_sh)
+        self.assertIn('elif [[ "$role" == "awg" ]]; then\n        apply_amnezia_abuse_protection', core_sh)
+
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn('log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"\n        apply_amnezia_abuse_protection', relay_sh)
+
+        main_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn("anti-abuse|antiabuse|apply-abuse-protection)", main_sh)
+        self.assertIn("remove-anti-abuse|remove-antiabuse)", main_sh)
+        self.assertIn("Запуск автоматического восстановления (Auto-Heal)...", main_sh)
+        self.assertIn("apply_amnezia_abuse_protection", main_sh)
+        self.assertIn("failed=$((failed + 1))", main_sh)
+
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn("iptables-persistent netfilter-persistent", common_sh)
+        self.assertIn("export DEBIAN_FRONTEND=noninteractive", common_sh)
 
     def test_amnezia_migration_and_rollback_invariants(self):
         """Verify Amnezia node migration path, legacy env discovery, and rollback handling."""
@@ -2576,6 +2602,27 @@ remove_traffic_watchdog_timer
         self.assertIn("discovered_tags.insert(0, \"just1k-wl-default\")", app_py)
 
 
+    def test_origin_nginx_reconciliation_uses_xray_inbound_port(self):
+        """Verify origin.sh extracts local inbound port from Xray config and avoids remote 10443 port."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        self.assertIn("xray_inbound_ports = {}", origin_sh)
+        self.assertIn("port = xray_inbound_ports.get(in_tag)", origin_sh)
+        self.assertIn("r['inbound_port'] = port", origin_sh)
+        self.assertNotIn("port = r.get('inbound_port') or r.get('port')", origin_sh)
+
+    def test_add_relay_node_records_inbound_port_in_relays_json(self):
+        """Verify relays_manage.sh add_relay_node passes and stores next_port as inbound_port."""
+        relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
+        self.assertIn("'inbound_port': in_port", relays_manage_sh)
+        self.assertIn("\"$next_port\"", relays_manage_sh)
+
+    def test_relay_cert_detection_orders_by_mtime_descending(self):
+        """Verify relay.sh sorts Let's Encrypt live certs newest first."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn("dirs.sort(key=lambda d: os.path.getmtime(os.path.join(d, 'fullchain.pem'))", relay_sh)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

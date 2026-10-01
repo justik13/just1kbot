@@ -459,6 +459,7 @@ EOF
     if [[ "$prev_role" == "awg" || "$prev_role" == "dual" ]]; then
         set_state_val "role" "dual"
         log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"
+        apply_amnezia_abuse_protection
     else
         set_state_val "role" "relay"
     fi
@@ -550,10 +551,23 @@ print('')
     local my_ip
     my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
 
-    # Авто-определение уже существующего сертификата Let's Encrypt на сервере
+    # Авто-определение уже существующего сертификата Let's Encrypt на сервере (приоритет свежим сертификатам)
     local auto_domain=""
     local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
-    local cert_dirs=("${le_dir}"/live/*)
+    local cert_dirs=()
+    if [[ -d "${le_dir}/live" ]]; then
+        while IFS= read -r d; do
+            [[ -n "$d" && -d "$d" ]] && cert_dirs+=("$d")
+        done < <(python3 -c "
+import os, glob
+dirs = [d for d in glob.glob('${le_dir}/live/*') if os.path.isdir(d) and os.path.basename(d) not in ('README', '*')]
+dirs.sort(key=lambda d: os.path.getmtime(os.path.join(d, 'fullchain.pem')) if os.path.isfile(os.path.join(d, 'fullchain.pem')) else os.path.getmtime(d), reverse=True)
+for d in dirs: print(d)
+" 2>/dev/null || true)
+    fi
+    if [[ ${#cert_dirs[@]} -eq 0 ]]; then
+        cert_dirs=("${le_dir}"/live/*)
+    fi
     for c_dir in "${cert_dirs[@]}"; do
         if [[ -f "${c_dir}/fullchain.pem" ]]; then
             local cand
@@ -752,7 +766,20 @@ heal_and_update_relay_config() {
     cur_sni="$(get_state_val "sni" "")"
     local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
     local xray_tls_dir="${XRAY_TLS_DIR:-/usr/local/etc/xray/tls}"
-    local cert_dirs=("${le_dir}"/live/*)
+    local cert_dirs=()
+    if [[ -d "${le_dir}/live" ]]; then
+        while IFS= read -r d; do
+            [[ -n "$d" && -d "$d" ]] && cert_dirs+=("$d")
+        done < <(python3 -c "
+import os, glob
+dirs = [d for d in glob.glob('${le_dir}/live/*') if os.path.isdir(d) and os.path.basename(d) not in ('README', '*')]
+dirs.sort(key=lambda d: os.path.getmtime(os.path.join(d, 'fullchain.pem')) if os.path.isfile(os.path.join(d, 'fullchain.pem')) else os.path.getmtime(d), reverse=True)
+for d in dirs: print(d)
+" 2>/dev/null || true)
+    fi
+    if [[ ${#cert_dirs[@]} -eq 0 ]]; then
+        cert_dirs=("${le_dir}"/live/*)
+    fi
     for c_dir in "${cert_dirs[@]}"; do
         if [[ -f "${c_dir}/fullchain.pem" && -f "${c_dir}/privkey.pem" ]]; then
             local cand
