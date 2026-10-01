@@ -456,13 +456,6 @@ EOF
     ufw allow from "$origin_ip" to any port "$relay_port" proto tcp || true
     log "Порт туннеля ${relay_port}/tcp открыт строго для ${origin_ip}."
 
-    if [[ "$prev_role" == "awg" || "$prev_role" == "dual" ]]; then
-        set_state_val "role" "dual"
-        log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"
-        apply_amnezia_abuse_protection
-    else
-        set_state_val "role" "relay"
-    fi
     set_state_val "relay_port" "$relay_port"
     set_state_val "origin_ip" "$origin_ip"
     set_state_val "tunnel_uuid" "$tunnel_uuid"
@@ -470,6 +463,14 @@ EOF
     set_state_val "public_key" "-"
     set_state_val "short_id" "-"
     set_state_val "sni" "$dest_server"
+
+    if [[ "$prev_role" == "awg" || "$prev_role" == "dual" ]]; then
+        set_state_val "role" "dual"
+        log "Режим узла обновлен до: DUAL (Совмещенный Relay + AmneziaWG)"
+        apply_amnezia_abuse_protection
+    else
+        set_state_val "role" "relay"
+    fi
 
     local detected_country="Зарубежный шлюз"
     local detected_code="exit"
@@ -559,7 +560,22 @@ print('')
 
     if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && -f "${le_dir}/live/${cur_sni}/fullchain.pem" ]]; then
         if openssl x509 -checkend 86400 -noout -in "${le_dir}/live/${cur_sni}/fullchain.pem" 2>/dev/null; then
-            auto_domain="$cur_sni"
+            local cur_sni_match="YES"
+            if [[ -n "$my_ip" ]]; then
+                cur_sni_match=$(python3 -c "
+import socket, sys
+domain, exp_ip = sys.argv[1], sys.argv[2]
+try:
+    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
+    ips = {x[4][0] for x in ai if x[4]}
+    print('YES' if exp_ip in ips else 'NO')
+except Exception:
+    print('NO')
+" "$cur_sni" "$my_ip" 2>/dev/null || echo "NO")
+            fi
+            if [[ "$cur_sni_match" == "YES" ]]; then
+                auto_domain="$cur_sni"
+            fi
         fi
     fi
 
@@ -794,10 +810,25 @@ heal_and_update_relay_config() {
     local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
     local xray_tls_dir="${XRAY_TLS_DIR:-/usr/local/etc/xray/tls}"
 
-    # Приоритет 1 (Strict Affinity): Текущий настроенный SNI, если его сертификат существует и валиден
+    # Приоритет 1 (Strict Affinity): Текущий настроенный SNI, если его сертификат существует, валиден и подтверждён DNS на my_ip
     if [[ -n "$cur_sni" && "$cur_sni" != *"google.com"* && -f "${le_dir}/live/${cur_sni}/fullchain.pem" && -f "${le_dir}/live/${cur_sni}/privkey.pem" ]]; then
         if openssl x509 -checkend 86400 -noout -in "${le_dir}/live/${cur_sni}/fullchain.pem" 2>/dev/null; then
-            le_domain="$cur_sni"
+            local cur_sni_match="YES"
+            if [[ -n "$my_ip" ]]; then
+                cur_sni_match=$(python3 -c "
+import socket, sys
+domain, exp_ip = sys.argv[1], sys.argv[2]
+try:
+    ai = socket.getaddrinfo(domain, None, socket.AF_INET)
+    ips = {x[4][0] for x in ai if x[4]}
+    print('YES' if exp_ip in ips else 'NO')
+except Exception:
+    print('NO')
+" "$cur_sni" "$my_ip" 2>/dev/null || echo "NO")
+            fi
+            if [[ "$cur_sni_match" == "YES" ]]; then
+                le_domain="$cur_sni"
+            fi
         fi
     fi
 

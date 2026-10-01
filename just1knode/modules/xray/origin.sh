@@ -1262,7 +1262,7 @@ try:
             port = xray_inbound_ports.get(in_tag)
             if not port:
                 for t, p in xray_inbound_ports.items():
-                    if t.lower().endswith(f'-{code_lower}'):
+                    if t.lower() == f'just1k-wl-inbound-{code_lower}':
                         port = p
                         in_tag = t
                         break
@@ -1336,10 +1336,12 @@ location ^~ {path} {{
             continue
 
     # Удаление любых осиротевших конфигов релеев, которых нет в реестре
+    # Исключаются системные конфигурации Origin (default.conf и sub-wl.conf)
+    system_origin_configs = {'default.conf', 'sub-wl.conf'}
     if os.path.isdir(nginx_dir):
         try:
             for item in os.listdir(nginx_dir):
-                if item.endswith('.conf') and item not in active_configs:
+                if item.endswith('.conf') and item not in active_configs and item not in system_origin_configs:
                     try:
                         os.remove(os.path.join(nginx_dir, item))
                         print(f'[-] Удален осиротевший Nginx конфиг релея: {item}')

@@ -2636,6 +2636,12 @@ remove_traffic_watchdog_timer
             os.makedirs(nginx_dir, exist_ok=True)
             cfg_file = os.path.join(tmp_dir, "config.json")
 
+            # Pre-create system configs (must NEVER be deleted)
+            with open(os.path.join(nginx_dir, "default.conf"), "w", encoding="utf-8") as f:
+                f.write("proxy_pass http://127.0.0.1:8003;")
+            with open(os.path.join(nginx_dir, "sub-wl.conf"), "w", encoding="utf-8") as f:
+                f.write("proxy_pass https://bot.example.com;")
+
             # Pre-create a stale nl.conf and an orphaned old.conf
             with open(os.path.join(nginx_dir, "nl.conf"), "w", encoding="utf-8") as f:
                 f.write("proxy_pass http://127.0.0.1:8008;")
@@ -2691,7 +2697,7 @@ remove_traffic_watchdog_timer
                     port = xray_inbound_ports.get(in_tag)
                     if not port:
                         for t, p in xray_inbound_ports.items():
-                            if t.lower().endswith(f"-{code_lower}"):
+                            if t.lower() == f"just1k-wl-inbound-{code_lower}":
                                 port = p
                                 break
                     if not port:
@@ -2706,10 +2712,15 @@ remove_traffic_watchdog_timer
                 except Exception:
                     continue
 
-            # Prune orphaned configs
+            # Prune orphaned configs protecting system origin configs
+            system_origin_configs = {"default.conf", "sub-wl.conf"}
             for item in os.listdir(nginx_dir):
-                if item.endswith(".conf") and item not in active_configs:
+                if item.endswith(".conf") and item not in active_configs and item not in system_origin_configs:
                     os.remove(os.path.join(nginx_dir, item))
+
+            # Invariant: default.conf and sub-wl.conf were PRESERVED and NOT deleted!
+            self.assertTrue(os.path.exists(os.path.join(nginx_dir, "default.conf")))
+            self.assertTrue(os.path.exists(os.path.join(nginx_dir, "sub-wl.conf")))
 
             # Invariant: pl.conf was created with local port 8007
             self.assertTrue(os.path.exists(os.path.join(nginx_dir, "pl.conf")))
@@ -2782,7 +2793,8 @@ COMMIT
         """Verify show_amnezia_status and check_amnezia_abuse_rules share the exact same check."""
         amnezia_sh = (REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
         self.assertIn("if check_amnezia_abuse_rules; then", amnezia_sh)
-        self.assertIn('grep -q "# START JUST1KNODE ANTI-ABUSE" "$before_rules"', amnezia_sh)
+        self.assertIn('dport 25 -j REJECT --reject-with tcp-reset', amnezia_sh)
+        self.assertIn('string \\"BitTorrent protocol\\"', amnezia_sh)
 
 
 if __name__ == "__main__":

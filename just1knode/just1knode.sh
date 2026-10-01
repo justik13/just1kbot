@@ -1402,6 +1402,10 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 check_root
                 apply_amnezia_abuse_protection
                 ;;
+            remove-anti-abuse|remove-antiabuse|disable-anti-abuse)
+                check_root
+                remove_amnezia_abuse_protection
+                ;;
             update)
                 case "${2:-}" in
                     core|xray) update_xray_core ;;

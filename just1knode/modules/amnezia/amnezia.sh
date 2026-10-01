@@ -79,6 +79,10 @@ else:
 with open(bf, 'w', encoding='utf-8') as f:
     f.write(content)
 " "$before_rules" 2>/dev/null || return 1
+    else
+        if command -v ufw >/dev/null 2>&1; then
+            return 1
+        fi
     fi
     return 0
 }
@@ -134,12 +138,17 @@ check_amnezia_abuse_rules() {
         missing=$((missing + 1))
     fi
 
-    # 5. Проверка сохранения в persistent источнике /etc/ufw/before.rules (при наличии UFW)
+    # 5. Проверка сохранения всех 4 правил в persistent источнике /etc/ufw/before.rules (при наличии UFW)
     local before_rules="/etc/ufw/before.rules"
     if [[ -f "$before_rules" ]]; then
-        if ! grep -q "# START JUST1KNODE ANTI-ABUSE" "$before_rules" 2>/dev/null; then
+        if ! grep -q -- "-A ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset" "$before_rules" 2>/dev/null || \
+           ! grep -q -- "-A ufw-before-forward -p tcp -m string --string \"BitTorrent protocol\" --algo bm -j DROP" "$before_rules" 2>/dev/null || \
+           ! grep -q -- "-A ufw-before-forward -p udp -m string --string \"BitTorrent protocol\" --algo bm -j DROP" "$before_rules" 2>/dev/null || \
+           ! grep -q -- "-A ufw-before-forward -p udp -m string --string \"d1:ad2:id20:\" --algo bm -j DROP" "$before_rules" 2>/dev/null; then
             missing=$((missing + 1))
         fi
+    elif command -v ufw >/dev/null 2>&1; then
+        missing=$((missing + 1))
     fi
 
     if [[ $missing -eq 0 ]]; then
@@ -165,7 +174,10 @@ apply_amnezia_abuse_protection() {
         return 1
     fi
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
-        ufw reload >/dev/null 2>&1 || true
+        if ! ufw reload >/dev/null 2>&1; then
+            warn "Сбой перезагрузки конфигурации UFW (ufw reload)!"
+            return 1
+        fi
     fi
 
     # 3. Применение правил в активный FORWARD и DOCKER-USER (немедленная защита без ожидания перезагрузки)
@@ -204,17 +216,17 @@ apply_amnezia_abuse_protection() {
         fi
     fi
 
-    # 4. Очистка устаревших артефактов (legacy hooks/services)
-    if [[ -f /etc/ufw/after.init ]]; then
-        sed -i '/# START JUST1KNODE ANTI-ABUSE HOOK/,/# END JUST1KNODE ANTI-ABUSE HOOK/d' /etc/ufw/after.init 2>/dev/null || true
-    fi
-    if systemctl is-enabled --quiet just1knode-antiabuse.service 2>/dev/null; then
-        systemctl disable --now just1knode-antiabuse.service >/dev/null 2>&1 || true
-    fi
-    rm -f /etc/systemd/system/just1knode-antiabuse.service 2>/dev/null || true
-
-    # 5. Итоговая проверка соблюдения инвариантов (Fail-Closed)
+    # 4. Итоговая проверка соблюдения инвариантов (Fail-Closed)
     if check_amnezia_abuse_rules; then
+        # Очистка устаревших артефактов (legacy hooks/services) только после успешной проверки новых правил
+        if [[ -f /etc/ufw/after.init ]]; then
+            sed -i '/# START JUST1KNODE ANTI-ABUSE HOOK/,/# END JUST1KNODE ANTI-ABUSE HOOK/d' /etc/ufw/after.init 2>/dev/null || true
+        fi
+        if systemctl is-enabled --quiet just1knode-antiabuse.service 2>/dev/null; then
+            systemctl disable --now just1knode-antiabuse.service >/dev/null 2>&1 || true
+        fi
+        rm -f /etc/systemd/system/just1knode-antiabuse.service 2>/dev/null || true
+
         log "✔ Правила сетевой защиты Anti-Abuse (SMTP:25 + BitTorrent L7 TCP/UDP/DHT) успешно активированы."
         set_state_val "abuse_protection" "enabled"
         return 0
