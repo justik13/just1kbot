@@ -523,6 +523,13 @@ exit 0
         self.assertIn("net.ipv6.conf.lo.disable_ipv6 = 1", content)
         self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", content)
 
+    def test_doctor_icmp_stealth_fails_closed_when_dropin_missing(self):
+        """Verify doctor ICMP stealth check fails closed if runtime=1 but drop-in is missing."""
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('icmp_persisted=0', just1knode_sh)
+        self.assertIn('echo -e "  ${RED}✗${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf', just1knode_sh)
+        self.assertIn('failed=$((failed + 1))', just1knode_sh)
+
     def test_heal_reconstructs_missing_invariants(self):
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:

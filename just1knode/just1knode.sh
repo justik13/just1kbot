@@ -768,7 +768,8 @@ if os.path.exists(rf):
     if [[ "$icmp_val" == "1" && "$icmp_persisted" -eq 1 ]]; then
         echo -e "  ${GREEN}✔${NC} ICMP Echo отключен (стелс-режим активен в ядре и сохранен в drop-in)"
     elif [[ "$icmp_val" == "1" ]]; then
-        echo -e "  ${YELLOW}!${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf (до перезагрузки)"
+        echo -e "  ${RED}✗${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf (до перезагрузки, выполните: just1knode update)"
+        failed=$((failed + 1))
     else
         echo -e "  ${RED}✗${NC} ICMP Echo активен (стелс-режим выключен, выполните: just1knode update)"
         failed=$((failed + 1))

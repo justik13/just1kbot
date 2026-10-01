@@ -938,10 +938,17 @@ apply_sysctl_hardening() {
             warn "Не удалось создать временный файл для применения параметров sysctl."
             return 1
         }
-        cat << 'EOF' > "$tmp_sysctl"
-vm.overcommit_memory = 1
-net.ipv4.icmp_echo_ignore_all = 1
-EOF
+        if [[ -f "$sysctl_file" ]]; then
+            cat "$sysctl_file" > "$tmp_sysctl" 2>/dev/null || true
+            if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=' "$tmp_sysctl" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*vm\.overcommit_memory[[:space:]]*=/d' "$tmp_sysctl" 2>/dev/null || true
+            fi
+            if grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=' "$tmp_sysctl" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=/d' "$tmp_sysctl" 2>/dev/null || true
+            fi
+        fi
+        echo "vm.overcommit_memory = 1" >> "$tmp_sysctl"
+        echo "net.ipv4.icmp_echo_ignore_all = 1" >> "$tmp_sysctl"
         run_privileged mkdir -p "$(dirname "$sysctl_file")" 2>/dev/null || true
         run_privileged cp "$tmp_sysctl" "$sysctl_file" 2>/dev/null || true
         run_privileged chmod 644 "$sysctl_file" 2>/dev/null || true

@@ -1801,6 +1801,44 @@ echo "CADDY_OK=$caddy_ok"
         self.assertEqual(proc.returncode, 0)
         self.assertIn("CADDY_OK=false", proc.stdout)
 
+    def test_apply_sysctl_hardening_preserves_custom_settings(self):
+        """apply_sysctl_hardening must preserve custom settings in sysctl drop-in
+        while pinning vm.overcommit_memory and net.ipv4.icmp_echo_ignore_all to 1."""
+        sysctl_dir = self.project_dir / "sysctl.d"
+        sysctl_dir.mkdir(parents=True, exist_ok=True)
+        conf_file = sysctl_dir / "99-just1kbot.conf"
+        conf_file.write_text(
+            "# Custom operator configuration\n"
+            "custom.security_param = 42\n"
+            "vm.overcommit_memory = 0\n",
+            encoding="utf-8",
+        )
+
+        script = """
+export PROJECT_DIR="."
+export JUST1KBOT_DIR="."
+export JUST1KBOT_NO_SUDO="1"
+export JUST1KBOT_SYSCTL_D_CONF="./sysctl.d/99-just1kbot.conf"
+source "./scripts/cli.sh"
+
+apply_sysctl_hardening
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}")
+        content = conf_file.read_text(encoding="utf-8")
+        self.assertIn("custom.security_param = 42", content)
+        self.assertIn("# Custom operator configuration", content)
+        self.assertIn("vm.overcommit_memory = 1", content)
+        self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", content)
+        self.assertNotIn("vm.overcommit_memory = 0", content)
+
     # -------------------------------------------------------------------------
     # 8. Safe Complete Uninstallation Lifecycle Tests
     # -------------------------------------------------------------------------
