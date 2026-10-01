@@ -126,6 +126,7 @@ EOF
 Description=Just1kBot Xray API Agent
 After=network.target xray.service
 Wants=xray.service
+PartOf=xray.service
 
 [Service]
 Type=simple

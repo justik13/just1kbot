@@ -1081,7 +1081,7 @@ class WhiteInternetService:
         ALREADY_NEWER against runtime inventory. Anything unconfirmed stays
         PENDING_CREATE for the background worker to converge.
         """
-        expected_inbound_tags: set[str] = set()
+        expected_inbound_tags: set[str] = {"just1k-wl-default"}
         for relay in (origin_node.extra_data or {}).get("relays", []) or []:
             if isinstance(relay, dict):
                 code = relay.get("code")
@@ -1091,8 +1091,6 @@ class WhiteInternetService:
                 code = None
             if code:
                 expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
-        if not expected_inbound_tags:
-            expected_inbound_tags.add("just1k-wl-default")
         target_version = sub.desired_version or 1
         try:
             async with XrayNodeClient(timeout=4.0) as xray_client:

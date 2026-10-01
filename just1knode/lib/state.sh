@@ -197,7 +197,7 @@ manifest_begin() {
             hash_orig="$(sha256sum "$tgt" | awk '{print $1}')"
             local backup_path
             backup_path="$TXN_DIR/files/$(basename "$tgt")_$$_${RANDOM}"
-            cp "$tgt" "$backup_path"
+            cp -p "$tgt" "$backup_path" 2>/dev/null || cp "$tgt" "$backup_path"
             echo -e "${tgt}\tpresent\t${hash_orig}\t${backup_path}" >> "$MANIFEST_LOG"
         else
             echo -e "${tgt}\tabsent\t-\t-" >> "$MANIFEST_LOG"
@@ -242,7 +242,7 @@ manifest_rollback() {
     while IFS=$'\t' read -r target status _orig_hash backup_path; do
         if [[ "$status" == "present" ]]; then
             if [[ -f "$backup_path" ]]; then
-                cp "$backup_path" "$target"
+                cp -p "$backup_path" "$target" 2>/dev/null || cp "$backup_path" "$target"
                 log "Восстановлен исходный файл: $target"
             fi
         elif [[ "$status" == "absent" ]]; then
@@ -253,6 +253,8 @@ manifest_rollback() {
 
     rm -rf "${TXN_DIR:-}"
     MANIFEST_LOG=""
+
+    ensure_xray_config_permissions "${XRAY_CONFIG:-/usr/local/etc/xray/config.json}"
 
     # Восстановление рабочего состояния сервисов
     if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
@@ -269,4 +271,15 @@ manifest_rollback() {
     fi
 
     log "Откат транзакции завершен."
+}
+
+ensure_xray_config_permissions() {
+    local cfg="${1:-${XRAY_CONFIG:-/usr/local/etc/xray/config.json}}"
+    local cfg_dir
+    cfg_dir="$(dirname "$cfg")"
+    chmod 755 "$cfg_dir" 2>/dev/null || true
+    if [[ -f "$cfg" ]]; then
+        chown root:xrayapi "$cfg" 2>/dev/null || true
+        chmod 640 "$cfg" 2>/dev/null || true
+    fi
 }

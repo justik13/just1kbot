@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -9,7 +10,7 @@ from config.enums import ServerHealthState, ServerLifecycleStatus, WhiteInternet
 from database.models import Server, User, WhiteInternetSubscription
 from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
 from services.workers.white_internet_traffic import WhiteInternetTrafficWorker
-from services.xray_node_client import SyncResult, XrayNodeClient
+from services.xray_node_client import SyncResponse, SyncResult, XrayNodeClient
 
 
 class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
@@ -48,7 +49,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 12345})
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-100",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
@@ -111,7 +116,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         mock_client = AsyncMock(spec=XrayNodeClient)
         # Node returns NEW epoch (Xray restarted!)
         mock_client.check_health.return_value = (True, "epoch-200", {"boot_id": "boot-1", "starttime": 2000})
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-200",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
         mock_session = AsyncMock()
@@ -178,7 +187,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         mock_client = AsyncMock()
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 1000})
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-100",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
@@ -236,7 +249,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 12345})
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-100",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
@@ -433,7 +450,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 max_concurrent_observed = active_concurrent
             await asyncio.sleep(0.01)
             active_concurrent -= 1
-            return SyncResult.APPLIED, None
+            return SyncResponse(
+                SyncResult.APPLIED,
+                verified_epoch="epoch-100",
+                verified_inbounds=["just1k-wl-default"],
+            )
 
         mock_client = AsyncMock(spec=XrayNodeClient)
         mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 1000})
@@ -510,7 +531,11 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
             id=3, server_id=7, client_uuid="orphan-uuid-1", desired_version=4, status="pending"
         )
         mock_client = AsyncMock(spec=XrayNodeClient)
-        mock_client.sync_client.return_value = (SyncResult.APPLIED, None)
+        mock_client.sync_client.return_value = SyncResponse(
+            SyncResult.APPLIED,
+            verified_epoch="epoch-5",
+            verified_inbounds=["just1k-wl-default"],
+        )
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
         sess = AsyncMock()
@@ -562,6 +587,64 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(swept, 1)
         mock_done.assert_awaited_once_with(sess, 4)
         mock_client.sync_client.assert_not_called()
+
+    async def test_reconciliation_verifies_default_inbound_and_fails_closed(self):
+        """Verify reconciliation strictly checks inbound coverage and fails closed on empty verified_inbounds."""
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+
+        task = {
+            "sub_id": 1,
+            "uuid": "test-uuid-1",
+            "desired_active": True,
+            "target_version": 2,
+            "expected_relays": [{"code": "nl"}, {"code": "pl"}],
+        }
+
+        mock_session = AsyncMock()
+        sub = MagicMock(
+            id=1,
+            actual_version=1,
+            desired_version=2,
+            last_reconciled_node_epoch="epoch-99",
+            provisioning_status=WhiteInternetProvisioningStatus.PENDING_UPDATE,
+        )
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def sf():
+            yield mock_session
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+            # Case 1: verified_inbounds missing one relay -> MUST fail closed and not advance actual_version
+            mock_client.sync_client.return_value = MagicMock(
+                result=SyncResult.APPLIED,
+                verified_epoch="epoch-100",
+                verified_inbounds=["just1k-wl-default", "just1k-wl-inbound-nl"],
+            )
+            res1 = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
+            self.assertFalse(res1, "Sync must fail closed when relay inbound is missing")
+            self.assertNotEqual(sub.actual_version, 2, "Subscription must not advance when inbounds are unverified")
+
+            # Case 2: verified_inbounds missing default inbound -> MUST fail closed
+            mock_client.sync_client.return_value = MagicMock(
+                result=SyncResult.APPLIED,
+                verified_epoch="epoch-100",
+                verified_inbounds=["just1k-wl-inbound-nl", "just1k-wl-inbound-pl"],
+            )
+            res2 = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
+            self.assertFalse(res2, "Sync must not succeed if just1k-wl-default is missing from verified_inbounds")
+            self.assertNotEqual(sub.actual_version, 2)
+
+            # Case 3: verified_inbounds includes default AND all relays -> MUST succeed
+            mock_client.sync_client.return_value = MagicMock(
+                result=SyncResult.APPLIED,
+                verified_epoch="epoch-100",
+                verified_inbounds=["just1k-wl-default", "just1k-wl-inbound-nl", "just1k-wl-inbound-pl"],
+            )
+            res3 = await worker._reconcile_single_subscription(1, "http://api", "key", "epoch-100", task, sf)
+            self.assertTrue(res3, "Sync must succeed when all inbounds including just1k-wl-default are verified")
+            self.assertEqual(sub.actual_version, 2)
 
 
 class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
@@ -1277,3 +1360,4 @@ class TestReconciliationQueryRegression(unittest.IsolatedAsyncioTestCase):
         query_sql = str(stmt_subs.compile())
         self.assertIn("white_internet_subscriptions.expires_at <=", query_sql)
         self.assertIn("white_internet_subscriptions.status IN", query_sql)
+

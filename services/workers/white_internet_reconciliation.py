@@ -93,15 +93,11 @@ class WhiteInternetReconciliationWorker:
         desired_active = task["desired_active"]
         target_version = task["target_version"]
         expected_relays = task.get("expected_relays") or []
-
-        expected_inbound_tags = set()
-        if expected_relays:
-            for r in expected_relays:
-                code = r.get("code")
-                if code:
-                    expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
-        else:
-            expected_inbound_tags.add("just1k-wl-default")
+        expected_inbound_tags = {"just1k-wl-default"}
+        for r in expected_relays:
+            code = r.get("code") if isinstance(r, dict) else r
+            if code:
+                expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
 
         notify_user_id: int | None = None
         async with self._get_sub_lock(sub_id):
@@ -138,7 +134,7 @@ class WhiteInternetReconciliationWorker:
                         sync_result = resp.result if hasattr(resp, "result") else resp[0]
                         err_msg = resp.error if hasattr(resp, "error") else resp[1]
                         verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
-                        verified_inbounds = getattr(resp, "verified_inbounds", None) or []
+                        verified_inbounds = set(getattr(resp, "verified_inbounds", None) or [])
 
                         sub = await white_internet_repo.get_subscription_with_lock(lock_session, sub_id)
                         if sub is None:
@@ -146,13 +142,14 @@ class WhiteInternetReconciliationWorker:
 
                         if sync_result == SyncResult.APPLIED and sub.desired_version == target_version:
                             # Postcondition verification: check all required inbounds were verified
-                            if verified_inbounds and not expected_inbound_tags.issubset(set(verified_inbounds)):
-                                missing = expected_inbound_tags - set(verified_inbounds)
+                            if verified_inbounds and not expected_inbound_tags.issubset(verified_inbounds):
+                                missing = expected_inbound_tags - verified_inbounds
                                 logger.warning(
-                                    "Inbound coverage incomplete for sub_id=%d on server %d: missing %s. Keeping PENDING_UPDATE.",
+                                    "Inbound coverage incomplete for sub_id=%d on server %d: missing %s (verified=%s). Keeping PENDING_UPDATE.",
                                     sub_id,
                                     server_id,
                                     missing,
+                                    verified_inbounds,
                                 )
                                 sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                                 sub.last_sync_error = f"missing_inbounds:{','.join(sorted(missing))}"
@@ -361,6 +358,7 @@ class WhiteInternetReconciliationWorker:
                     s.xray_instance_boot_id,
                     s.xray_instance_starttime,
                     (s.extra_data or {}).get("relays", []),
+                    bool((s.extra_data or {}).get("origin_hidden", False)),
                 )
                 for s in servers
                 if (
@@ -373,8 +371,8 @@ class WhiteInternetReconciliationWorker:
             ]
 
         # Check health outside DB transaction
-        active_server_targets: list[tuple[int, str, str, str, list]] = []  # (id, api_url, api_key, epoch, relays)
-        for server_id, _name, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime, relays in server_list:
+        active_server_targets: list[tuple[int, str, str, str, list, bool]] = []  # (id, api_url, api_key, epoch, relays, origin_hidden)
+        for server_id, _name, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime, relays, origin_hidden in server_list:
             is_healthy, node_epoch, health_data = await self.client.check_health(api_url, api_key)
             if is_healthy and node_epoch and health_data:
                 boot_id = health_data.get("boot_id")
@@ -402,10 +400,10 @@ class WhiteInternetReconciliationWorker:
                             fresh_server = await sess.scalar(select(Server).where(Server.id == server_id))
                             target_node_epoch = fresh_server.xray_instance_epoch if fresh_server else None
 
-                active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch, relays))
+                active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch, relays, origin_hidden))
 
         synced_count = 0
-        for server_id, api_url, api_key, target_epoch, relays in active_server_targets:
+        for server_id, api_url, api_key, target_epoch, relays, origin_hidden in active_server_targets:
             if not target_epoch:
                 continue
 
@@ -464,6 +462,7 @@ class WhiteInternetReconciliationWorker:
                         "desired_active": desired_active,
                         "target_version": sub.desired_version,
                         "expected_relays": relays,
+                        "origin_hidden": origin_hidden,
                     })
 
             # Bounded concurrent execution outside DB transaction

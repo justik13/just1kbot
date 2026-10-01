@@ -491,10 +491,18 @@ cfg['dns'] = dns_conf
 
 with open(cfg_file, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
+try:
+    import shutil
+    shutil.chown(cfg_file, user='root', group='xrayapi')
+    os.chmod(cfg_file, 0o640)
+    os.chmod(os.path.dirname(os.path.abspath(cfg_file)), 0o755)
+except Exception:
+    pass
 " "$XRAY_CONFIG" "$code" "$relay_inbound_tag" "$relay_outbound_tag" "$relay_inbound_path" "$next_port" "$ip" "$port" "$uuid" "$security_type" "$pubkey" "$shortid" "$sni"; then
         manifest_rollback
         error "Ошибка генерации конфигурации Xray для релея."
     fi
+    ensure_xray_config_permissions "$XRAY_CONFIG"
 
     # Генерация Nginx Location для этого релея
     mkdir -p "$NGINX_RELAYS_DIR"
@@ -689,20 +697,25 @@ if 'routing' in cfg and 'rules' in cfg['routing']:
             if isinstance(existing_ib, list) and in_tag in existing_ib:
                 r['inboundTag'] = [t for t in existing_ib if t != in_tag]
 
-# Если остались другие релеи, переключаем дефолтный маршрут на следующий релей, иначе на блок
-remaining = []
-if os.path.exists(rf):
-    try:
-        with open(rf) as f_r: remaining = [r for r in json.load(f_r) if r.get('code') != code]
-    except: pass
-
-new_def_out = f\"just1k-wl-outbound-{remaining[0]['code']}\" if remaining else 'just1k-wl-block'
+# Default inbound traffic for Russia always routes directly via Moscow IP
+default_rule_found = False
 for r in cfg.get('routing', {}).get('rules', []):
-    if r.get('inboundTag') == ['just1k-wl-default'] and 'domain' not in r and 'ip' not in r:
-        r['outboundTag'] = new_def_out
+    if (r.get('inboundTag') == ['just1k-wl-default'] or 'just1k-wl-default' in r.get('inboundTag', [])) and 'domain' not in r and 'ip' not in r:
+        r['inboundTag'] = ['just1k-wl-default']
+        r['outboundTag'] = 'just1k-wl-direct'
+        default_rule_found = True
+        break
+if not default_rule_found:
+    cfg.setdefault('routing', {}).setdefault('rules', []).append({
+        'type': 'field',
+        'inboundTag': ['just1k-wl-default'],
+        'outboundTag': 'just1k-wl-direct'
+    })
 
-with open(cfg_file, 'w') as f: json.dump(cfg, f, indent=2)
+with open(cfg_file, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2)
 "
+    ensure_xray_config_permissions "$XRAY_CONFIG"
 
     # Удаление Nginx конфига
     rm -f "${NGINX_RELAYS_DIR}/${code}.conf"
@@ -1068,10 +1081,7 @@ with os.fdopen(t_fd, 'w', encoding='utf-8') as fp:
     fp.flush()
     os.fsync(fp.fileno())
 os.replace(t_path, cfg_file)
-try:
-    os.chmod(cfg_file, 0o640)
-except Exception:
-    pass
+
 
 # Сохраняем обновленный relays.json
 if relays:
@@ -1097,6 +1107,7 @@ print(f'OK:{matched_code}')
         error "Ошибка обновления релея: ${update_res:-Неизвестная ошибка}."
         return 1
     fi
+    ensure_xray_config_permissions "$XRAY_CONFIG"
 
     if echo "$update_res" | grep -q "WARN_DNS_"; then
         local dns_warn
