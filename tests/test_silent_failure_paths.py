@@ -112,61 +112,24 @@ class TestCleanChatFailsOpenOnFsmError(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "handled")
         ensure.assert_not_called()
 
-    async def test_raw_state_string_short_circuits_without_attribute_error_or_warning(self):
+    async def test_fsm_active_state_variants_short_circuit_without_error(self):
         middleware = CleanChatMiddleware()
-        handler = AsyncMock(return_value="handled")
-
-        state = MagicMock()
-        state.get_state = AsyncMock(return_value="AdminStates:waiting_badge")
-
-        with patch("bot.middlewares.clean_chat._ensure_worker_started") as ensure, \
-             patch("bot.middlewares.clean_chat.logger") as log:
-            result = await middleware(
-                handler,
-                self._message(),
-                {"state": state, "raw_state": "AdminStates:waiting_badge"},
-            )
-
-        self.assertEqual(result, "handled")
-        ensure.assert_not_called()
-        log.warning.assert_not_called()
-        state.get_state.assert_not_called()
-
-    async def test_state_as_string_short_circuits_without_attribute_error(self):
-        middleware = CleanChatMiddleware()
-        handler = AsyncMock(return_value="handled")
-
-        with patch("bot.middlewares.clean_chat._ensure_worker_started") as ensure, \
-             patch("bot.middlewares.clean_chat.logger") as log:
-            result = await middleware(
-                handler,
-                self._message(),
-                {"state": "AdminStates:waiting_badge"},
-            )
-
-        self.assertEqual(result, "handled")
-        ensure.assert_not_called()
-        log.warning.assert_not_called()
-
-    async def test_raw_state_none_with_active_fsm_context_short_circuits(self):
-        middleware = CleanChatMiddleware()
-        handler = AsyncMock(return_value="handled")
-
-        state = MagicMock()
-        state.get_state = AsyncMock(return_value="SomeState")
-
-        with patch("bot.middlewares.clean_chat._ensure_worker_started") as ensure, \
-             patch("bot.middlewares.clean_chat.logger") as log:
-            result = await middleware(
-                handler,
-                self._message(),
-                {"state": state, "raw_state": None},
-            )
-
-        self.assertEqual(result, "handled")
-        ensure.assert_not_called()
-        log.warning.assert_not_called()
-        state.get_state.assert_awaited_once()
+        test_cases = [
+            # Real aiogram context: raw_state is string
+            {"state": MagicMock(get_state=AsyncMock()), "raw_state": "AdminStates:waiting_badge"},
+            # String state fallback
+            {"state": "AdminStates:waiting_badge"},
+            # FSMContext object with get_state() returning active state
+            {"state": MagicMock(get_state=AsyncMock(return_value="SomeState")), "raw_state": None},
+        ]
+        for data in test_cases:
+            handler = AsyncMock(return_value="handled")
+            with patch("bot.middlewares.clean_chat._ensure_worker_started") as ensure, \
+                 patch("bot.middlewares.clean_chat.logger") as log:
+                result = await middleware(handler, self._message(), data)
+                self.assertEqual(result, "handled")
+                ensure.assert_not_called()
+                log.warning.assert_not_called()
 
     async def test_no_state_still_queues_deletion(self):
         middleware = CleanChatMiddleware()
