@@ -755,14 +755,23 @@ if os.path.exists(rf):
     fi
 
     log "11. Проверка сетевого стелс-режима (ICMP Echo)..."
+    local icmp_val="0"
     if [[ -f /proc/sys/net/ipv4/icmp_echo_ignore_all ]]; then
-        local icmp_val
         icmp_val="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
-        if [[ "$icmp_val" == "1" ]]; then
-            echo -e "  ${GREEN}✔${NC} ICMP Echo отключен (стелс-режим от сканеров ТСПУ/Shodan)"
-        else
-            echo -e "  ${YELLOW}!${NC} ICMP Echo активен (рекомендуется стелс: just1knode update)"
-        fi
+    fi
+    local icmp_conf="${JUST1KNODE_SYSCTL_ICMP_CONF:-/etc/sysctl.d/99-just1knode-icmp.conf}"
+    local icmp_persisted=0
+    if [[ -f "$icmp_conf" ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$icmp_conf" 2>/dev/null; then
+        icmp_persisted=1
+    fi
+
+    if [[ "$icmp_val" == "1" && "$icmp_persisted" -eq 1 ]]; then
+        echo -e "  ${GREEN}✔${NC} ICMP Echo отключен (стелс-режим активен в ядре и сохранен в drop-in)"
+    elif [[ "$icmp_val" == "1" ]]; then
+        echo -e "  ${YELLOW}!${NC} ICMP Echo отключен в ядре, но не зафиксирован в $icmp_conf (до перезагрузки)"
+    else
+        echo -e "  ${RED}✗${NC} ICMP Echo активен (стелс-режим выключен, выполните: just1knode update)"
+        failed=$((failed + 1))
     fi
 
     if [[ $failed -eq 0 ]]; then
@@ -1012,13 +1021,22 @@ uninstall_node() {
 
     info "8/11. Удаление конфигурации ядра sysctl и восстановление параметров сети..."
     local sysctl_ipv6_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
+    local sysctl_icmp_conf="${JUST1KNODE_SYSCTL_ICMP_CONF:-/etc/sysctl.d/99-just1knode-icmp.conf}"
+    local sysctl_cleaned=0
     if [[ -f "$sysctl_ipv6_conf" ]]; then
         rm -f "$sysctl_ipv6_conf" 2>/dev/null || true
-        if command -v sysctl >/dev/null 2>&1; then
-            sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
-            sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1 || true
-            sysctl -w net.ipv6.conf.lo.disable_ipv6=0 >/dev/null 2>&1 || true
-            sysctl -w net.ipv4.icmp_echo_ignore_all=0 >/dev/null 2>&1 || true
+        sysctl_cleaned=1
+    fi
+    if [[ -f "$sysctl_icmp_conf" ]]; then
+        rm -f "$sysctl_icmp_conf" 2>/dev/null || true
+        sysctl_cleaned=1
+    fi
+    if command -v sysctl >/dev/null 2>&1; then
+        sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
+        sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1 || true
+        sysctl -w net.ipv6.conf.lo.disable_ipv6=0 >/dev/null 2>&1 || true
+        sysctl -w net.ipv4.icmp_echo_ignore_all=0 >/dev/null 2>&1 || true
+        if [[ $sysctl_cleaned -eq 1 ]]; then
             sysctl --system >/dev/null 2>&1 || true
         fi
     fi

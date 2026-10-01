@@ -105,6 +105,13 @@ normalize_overcommit_file() {
         sed -i -E '/^[[:space:]]*vm\.overcommit_memory[[:space:]]*=/d' "$file" || return 1
     fi
     echo "vm.overcommit_memory = 1" >> "$file" 2>/dev/null || return 1
+    return 0
+}
+
+normalize_sysctl_dropin() {
+    local file="$1"
+    mkdir -p "$(dirname "$file")" 2>/dev/null || return 1
+    normalize_overcommit_file "$file" || return 1
     if grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=' "$file" 2>/dev/null; then
         sed -i -E '/^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=/d' "$file" || return 1
     fi
@@ -114,7 +121,7 @@ normalize_overcommit_file() {
 
 ensure_overcommit_persistence() {
     local custom_conf="${1:-}"
-    normalize_overcommit_file "${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}" || return 1
+    normalize_sysctl_dropin "${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}" || return 1
     normalize_overcommit_file "${custom_conf:-${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}}" || return 1
     return 0
 }
@@ -151,6 +158,11 @@ configure_overcommit_memory() {
         if [[ "$current_icmp" != "1" ]]; then
             info "Включение net.ipv4.icmp_echo_ignore_all=1 (защита от сканирования ICMP)..."
             sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+        fi
+        local applied_icmp
+        applied_icmp="$(cat "$icmp_runtime_file" 2>/dev/null || echo "0")"
+        if [[ "$applied_icmp" != "1" ]]; then
+            warn "Внимание: net.ipv4.icmp_echo_ignore_all=1 не применился к runtime (проверьте права или ограничения контейнера)."
         fi
     fi
 

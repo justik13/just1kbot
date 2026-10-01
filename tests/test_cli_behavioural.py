@@ -1494,6 +1494,8 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
         shutil.copy(repo_script, Path(workdir) / "setup.sh")
         proc_stub = Path(workdir) / "proc_overcommit"
         proc_stub.write_text(runtime_content, encoding="utf-8")
+        proc_icmp_stub = Path(workdir) / "proc_icmp"
+        proc_icmp_stub.write_text("1\n", encoding="utf-8")
         conf = Path(workdir) / "sysctl.conf"
         conf.write_text(initial_conf, encoding="utf-8")
 
@@ -1518,12 +1520,14 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
                 f"{path_prefix}"
                 ". './setup.sh'; "
                 f"JUST1KBOT_PROC_OVERCOMMIT='./proc_overcommit' "
+                f"JUST1KBOT_PROC_ICMP_IGNORE='./proc_icmp' "
                 f"JUST1KBOT_SYSCTL_D_CONF='./sysctl.d/99-just1kbot.conf' "
                 f"JUST1KBOT_SYSCTL_CONF='./sysctl.conf' "
                 "configure_overcommit_memory",
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=workdir,
             check=False,
         )
@@ -1543,6 +1547,9 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
         self.assertNotIn("= 0", content.replace("vm.overcommit_memory = 1", ""))
         # systemd boot source: /etc/sysctl.d/99-just1kbot.conf pinned to 1.
         self.assertIn("vm.overcommit_memory = 1", d_content)
+        self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", d_content)
+        # main sysctl.conf must only manage overcommit, not icmp
+        self.assertNotIn("net.ipv4.icmp_echo_ignore_all", content)
         # runtime already 1 → no provider-side sysctl apply attempted.
         self.assertFalse(sysctl_invoked)
 

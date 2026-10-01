@@ -61,6 +61,7 @@ class TestJust1kNodeScript(unittest.TestCase):
         self.sysctl_d = Path(self.temp_dir) / "etc" / "sysctl.d"
         self.sysctl_d.mkdir(parents=True, exist_ok=True)
         self.sysctl_conf = self.sysctl_d / "99-disable-ipv6.conf"
+        self.sysctl_icmp_conf = self.sysctl_d / "99-just1knode-icmp.conf"
         self.bin_dir = Path(self.temp_dir) / "bin"
         self.bin_dir.mkdir(parents=True, exist_ok=True)
 
@@ -165,6 +166,7 @@ exit 0
         env["WWW_HTML_DIR"] = str(self.www_html_dir)
         env["INSTALL_DIR"] = str(self.install_dir)
         env["JUST1KNODE_SYSCTL_IPV6_CONF"] = str(self.sysctl_conf)
+        env["JUST1KNODE_SYSCTL_ICMP_CONF"] = str(self.sysctl_icmp_conf)
         if extra_env:
             env.update(extra_env)
 
@@ -198,6 +200,7 @@ export XRAY_TLS_DIR='{_bp(self.xray_config_dir / "tls")}'
 export WWW_HTML_DIR='{_bp(self.www_html_dir)}'
 export INSTALL_DIR='{_bp(self.install_dir)}'
 export JUST1KNODE_SYSCTL_IPV6_CONF='{_bp(self.sysctl_conf)}'
+export JUST1KNODE_SYSCTL_ICMP_CONF='{_bp(self.sysctl_icmp_conf)}'
 
 source '{_bp(JUST1KNODE_SH)}'
 
@@ -521,7 +524,9 @@ exit 0
         self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", content)
         self.assertIn("net.ipv6.conf.default.disable_ipv6 = 1", content)
         self.assertIn("net.ipv6.conf.lo.disable_ipv6 = 1", content)
-        self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", content)
+        self.assertTrue(self.sysctl_icmp_conf.exists(), "99-just1knode-icmp.conf must be created")
+        icmp_content = self.sysctl_icmp_conf.read_text(encoding="utf-8")
+        self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", icmp_content)
 
     def test_heal_reconstructs_missing_invariants(self):
         self._prepare_base_env()
@@ -1971,7 +1976,8 @@ ensure_xrayapi_user
         self._create_mock_script("pkill", "#!/bin/sh\nexit 0\n")
 
         # Fake sysctl conf
-        self.sysctl_conf.write_text("net.ipv4.icmp_echo_ignore_all = 1\n", encoding="utf-8")
+        self.sysctl_conf.write_text("net.ipv6.conf.all.disable_ipv6 = 1\n", encoding="utf-8")
+        self.sysctl_icmp_conf.write_text("net.ipv4.icmp_echo_ignore_all = 1\n", encoding="utf-8")
 
         extra_env = {
             "INSTALL_DIR": str(fake_install_dir),
@@ -1985,7 +1991,8 @@ ensure_xrayapi_user
         self.assertIn("just1knode успешно и полностью удален с сервера без остатков", res.stdout)
 
         # Assertions
-        self.assertFalse(self.sysctl_conf.exists(), "sysctl configuration must be removed on uninstall")
+        self.assertFalse(self.sysctl_conf.exists(), "ipv6 sysctl configuration must be removed on uninstall")
+        self.assertFalse(self.sysctl_icmp_conf.exists(), "icmp sysctl configuration must be removed on uninstall")
         self.assertFalse((self.systemd_dir / "xray.service").exists(), "xray.service must be removed")
         self.assertFalse((self.systemd_dir / "xray-api.service").exists(), "xray-api.service must be removed")
         self.assertFalse(self.xray_config_dir.exists(), "xray config dir must be removed")
