@@ -522,8 +522,8 @@ my_ip = sys.argv[2] if len(sys.argv) > 2 else ''
 candidates = []
 for d in glob.glob(os.path.join(le_dir, 'live', '*')):
     if not os.path.isdir(d): continue
-    b = os.path.basename(d)
-    if b in ('README', '*'): continue
+    domain = os.path.basename(d)
+    if domain in ('README', '*'): continue
     fc = os.path.join(d, 'fullchain.pem')
     pk = os.path.join(d, 'privkey.pem')
     if not (os.path.isfile(fc) and os.path.isfile(pk)): continue
@@ -533,13 +533,13 @@ for d in glob.glob(os.path.join(le_dir, 'live', '*')):
         mtime = 0
     if my_ip:
         try:
-            ai = socket.getaddrinfo(b, None, socket.AF_INET)
+            ai = socket.getaddrinfo(domain, None, socket.AF_INET)
             ips = {x[4][0] for x in ai if x[4]}
             if my_ip not in ips:
                 continue
         except Exception:
             continue
-    candidates.append((mtime, b))
+    candidates.append((mtime, domain))
 
 candidates.sort(key=lambda x: x[0], reverse=True)
 for _, c in candidates:
