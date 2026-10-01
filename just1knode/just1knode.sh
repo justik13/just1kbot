@@ -759,16 +759,18 @@ if os.path.exists(rf):
     if [[ -f /proc/sys/net/ipv4/icmp_echo_ignore_all ]]; then
         icmp_val="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     fi
-    local icmp_conf="${JUST1KNODE_SYSCTL_ICMP_CONF:-/etc/sysctl.d/99-just1knode-icmp.conf}"
+    local sysctl_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
     local icmp_persisted=0
-    if [[ -f "$icmp_conf" ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$icmp_conf" 2>/dev/null; then
+    if [[ -f "$sysctl_conf" ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_conf" 2>/dev/null; then
+        icmp_persisted=1
+    elif [[ -f /etc/sysctl.d/99-just1knode-icmp.conf ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' /etc/sysctl.d/99-just1knode-icmp.conf 2>/dev/null; then
         icmp_persisted=1
     fi
 
     if [[ "$icmp_val" == "1" && "$icmp_persisted" -eq 1 ]]; then
         echo -e "  ${GREEN}✔${NC} ICMP Echo отключен (стелс-режим активен в ядре и сохранен в drop-in)"
     elif [[ "$icmp_val" == "1" ]]; then
-        echo -e "  ${YELLOW}!${NC} ICMP Echo отключен в ядре, но не зафиксирован в $icmp_conf (до перезагрузки)"
+        echo -e "  ${YELLOW}!${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf (до перезагрузки)"
     else
         echo -e "  ${RED}✗${NC} ICMP Echo активен (стелс-режим выключен, выполните: just1knode update)"
         failed=$((failed + 1))

@@ -524,9 +524,7 @@ exit 0
         self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", content)
         self.assertIn("net.ipv6.conf.default.disable_ipv6 = 1", content)
         self.assertIn("net.ipv6.conf.lo.disable_ipv6 = 1", content)
-        self.assertTrue(self.sysctl_icmp_conf.exists(), "99-just1knode-icmp.conf must be created")
-        icmp_content = self.sysctl_icmp_conf.read_text(encoding="utf-8")
-        self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", icmp_content)
+        self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", content)
 
     def test_heal_reconstructs_missing_invariants(self):
         self._prepare_base_env()
