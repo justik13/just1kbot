@@ -736,42 +736,15 @@ if os.path.exists(rf):
 
     if [[ "$role" == "awg" || "$role" == "dual" ]]; then
         log "10. Проверка правил сетевой защиты Anti-Abuse..."
-        local abuse_ok=1
-        if ! iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null && \
-           ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null); then
-            abuse_ok=0
-            echo -e "  ${YELLOW}!${NC} Блокировка SMTP:25 не найдена в iptables"
+        if check_amnezia_abuse_rules; then
+            echo -e "  ${GREEN}✔${NC} Сетевая защита Anti-Abuse активна (SMTP:25 + BitTorrent L7 TCP/UDP/DHT)"
         else
-            echo -e "  ${GREEN}✔${NC} Блокировка SMTP:25 активна (tcp-reset)"
-        fi
-        if ! iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null && \
-           ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null); then
-            abuse_ok=0
-            echo -e "  ${YELLOW}!${NC} Фильтрация BitTorrent L7 не найдена в iptables"
-        else
-            echo -e "  ${GREEN}✔${NC} Фильтрация BitTorrent L7 активна (xt_string)"
-        fi
-
-        if [[ $abuse_ok -eq 0 ]]; then
+            echo -e "  ${YELLOW}!${NC} Сетевая защита Anti-Abuse неполная или отсутствует в iptables"
             warn "ВНИМАНИЕ: Сетевая защита Anti-Abuse не активна! Запуск автоматического восстановления (Auto-Heal)..."
-            if apply_amnezia_abuse_protection; then
-                local recheck_ok=1
-                if ! iptables -C FORWARD -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null && \
-                   ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset 2>/dev/null); then
-                    recheck_ok=0
-                fi
-                if ! iptables -C FORWARD -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null && \
-                   ! (iptables -L ufw-before-forward >/dev/null 2>&1 && iptables -C ufw-before-forward -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP 2>/dev/null); then
-                    recheck_ok=0
-                fi
-                if [[ $recheck_ok -eq 1 ]]; then
-                    echo -e "  ${GREEN}✔${NC} Правила сетевой защиты Anti-Abuse успешно восстановлены и активны."
-                else
-                    echo -e "  ${RED}✗${NC} ОШИБКА: Не удалось восстановить правила Anti-Abuse (проверьте модуль ядра xt_string)!"
-                    failed=$((failed + 1))
-                fi
+            if apply_amnezia_abuse_protection && check_amnezia_abuse_rules; then
+                echo -e "  ${GREEN}✔${NC} Правила сетевой защиты Anti-Abuse успешно восстановлены и активны."
             else
-                echo -e "  ${RED}✗${NC} ОШИБКА: Сбой выполнения функции apply_amnezia_abuse_protection!"
+                echo -e "  ${RED}✗${NC} ОШИБКА: Не удалось восстановить правила Anti-Abuse (проверьте модуль ядра xt_string)!"
                 failed=$((failed + 1))
             fi
         fi
@@ -1426,10 +1399,8 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                 set_origin_bot_ip "${2:-}"
                 ;;
             anti-abuse|antiabuse|apply-abuse-protection)
+                check_root
                 apply_amnezia_abuse_protection
-                ;;
-            remove-anti-abuse|remove-antiabuse)
-                remove_amnezia_abuse_protection
                 ;;
             update)
                 case "${2:-}" in

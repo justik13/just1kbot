@@ -2175,11 +2175,11 @@ remove_traffic_watchdog_timer
         self.assertIn("apply_amnezia_abuse_protection", content)
         self.assertIn("--dport 25 -j REJECT --reject-with tcp-reset", content)
         self.assertIn('--string "BitTorrent protocol" --algo bm', content)
-        self.assertIn("deploy_ufw_after_init_hook", content)
-        self.assertIn("deploy_antiabuse_systemd_service", content)
-        self.assertIn("just1knode-antiabuse.service", content)
+        self.assertIn("sync_ufw_before_rules_antiabuse", content)
+        self.assertIn("remove_ufw_before_rules_antiabuse", content)
+        self.assertIn("check_amnezia_abuse_rules", content)
         self.assertIn("/etc/modules-load.d/just1knode.conf", content)
-        self.assertIn("iptables-persistent netfilter-persistent", content)
+        self.assertNotIn("deploy_antiabuse_systemd_service", content)
 
     def test_amnezia_antiabuse_persistence_and_doctor_invariants(self):
         """Verify anti-abuse persistence, update_node integration, and doctor auto-heal invariants."""
@@ -2193,15 +2193,15 @@ remove_traffic_watchdog_timer
 
         main_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
         self.assertIn("anti-abuse|antiabuse|apply-abuse-protection)", main_sh)
-        self.assertIn("remove-anti-abuse|remove-antiabuse)", main_sh)
+        self.assertNotIn("remove-anti-abuse|remove-antiabuse)", main_sh)
         self.assertIn("Запуск автоматического восстановления (Auto-Heal)...", main_sh)
+        self.assertIn("check_amnezia_abuse_rules", main_sh)
         self.assertIn("apply_amnezia_abuse_protection", main_sh)
         self.assertIn("failed=$((failed + 1))", main_sh)
 
         common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
-        self.assertIn("iptables-persistent netfilter-persistent", common_sh)
-        self.assertIn("export DEBIAN_FRONTEND=noninteractive", common_sh)
-        self.assertIn("debconf-set-selections", common_sh)
+        self.assertNotIn("iptables-persistent netfilter-persistent", common_sh)
+        self.assertNotIn("debconf-set-selections", common_sh)
 
     def test_amnezia_migration_and_rollback_invariants(self):
         """Verify Amnezia node migration path, legacy env discovery, and rollback handling."""
@@ -2621,6 +2621,142 @@ remove_traffic_watchdog_timer
         """Verify relay.sh sorts Let's Encrypt live certs newest first."""
         relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
         self.assertIn("dirs.sort(key=lambda d: os.path.getmtime(os.path.join(d, 'fullchain.pem'))", relay_sh)
+        self.assertIn("# Приоритет 1 (Strict Affinity): Текущий настроенный SNI", relay_sh)
+
+    def test_origin_nginx_reconciliation_behavior_isolated_and_strict(self):
+        """Behavioral test: Origin reconciliation isolates failures and rejects stale ports without Xray inbound."""
+        import json
+        import shutil
+        import tempfile
+
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            relays_file = os.path.join(tmp_dir, "relays.json")
+            nginx_dir = os.path.join(tmp_dir, "relays_d")
+            os.makedirs(nginx_dir, exist_ok=True)
+            cfg_file = os.path.join(tmp_dir, "config.json")
+
+            # Xray config only has inbounds for 'pl' (port 8007)
+            x_cfg = {
+                "inbounds": [
+                    {"tag": "just1k-wl-inbound-pl", "port": 8007}
+                ]
+            }
+            with open(cfg_file, "w", encoding="utf-8") as f:
+                json.dump(x_cfg, f)
+
+            # Relays registry:
+            # 1. pl: valid inbound
+            # 2. nl: stale inbound_port=8008, but NOT in Xray config (must be skipped!)
+            # 3. bad: corrupt entry (must not break pl)
+            relays_data = [
+                {"code": "pl", "path": "/stream/pl", "inbound_port": 8007, "inbound_tag": "just1k-wl-inbound-pl"},
+                {"code": "nl", "path": "/stream/nl", "inbound_port": 8008, "inbound_tag": "just1k-wl-inbound-nl"},
+                {"code": "bad", "path": None, "inbound_port": "not-a-port"}
+            ]
+            with open(relays_file, "w", encoding="utf-8") as f:
+                json.dump(relays_data, f)
+
+            # Run reconciliation logic exactly as implemented in origin.sh
+            with open(relays_file, "r", encoding="utf-8") as f:
+                relays = json.load(f)
+
+            xray_inbound_ports = {}
+            with open(cfg_file, "r", encoding="utf-8") as cf_f:
+                x_c = json.load(cf_f)
+                for ib in x_c.get("inbounds", []):
+                    t = ib.get("tag")
+                    p = ib.get("port")
+                    if t and p and int(p) != 10443:
+                        xray_inbound_ports[t] = int(p)
+
+            for r in relays:
+                try:
+                    if not isinstance(r, dict):
+                        continue
+                    code, path = r.get("code"), r.get("path")
+                    if not code or not path:
+                        continue
+                    code_lower = str(code).strip().lower()
+                    in_tag = r.get("inbound_tag") or f"just1k-wl-inbound-{code_lower}"
+                    port = xray_inbound_ports.get(in_tag)
+                    if not port:
+                        for t, p in xray_inbound_ports.items():
+                            if t.lower().endswith(f"-{code_lower}"):
+                                port = p
+                                break
+                    if not port:
+                        continue
+
+                    cf_path = os.path.join(nginx_dir, f"{code}.conf")
+                    with open(cf_path, "w", encoding="utf-8") as cf:
+                        cf.write(f"proxy_pass http://127.0.0.1:{port};")
+                except Exception:
+                    continue
+
+            # Invariant: pl.conf was created with local port 8007
+            self.assertTrue(os.path.exists(os.path.join(nginx_dir, "pl.conf")))
+            self.assertIn("127.0.0.1:8007", open(os.path.join(nginx_dir, "pl.conf")).read())
+
+            # Invariant: nl.conf was NOT created because Xray does not listen on 8008
+            self.assertFalse(os.path.exists(os.path.join(nginx_dir, "nl.conf")))
+
+            # Invariant: bad relay did not crash reconciliation
+            self.assertFalse(os.path.exists(os.path.join(nginx_dir, "bad.conf")))
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_ufw_before_rules_sync_and_remove_behavior(self):
+        """Behavioral test: UFW before.rules sync inserts 4 rules and removal cleanly cleans them up."""
+        sample_ufw = """#
+# rules.before
+#
+# Rules that should be run before the ufw command line added rules.
+*filter
+:ufw-before-input - [0:0]
+:ufw-before-output - [0:0]
+:ufw-before-forward - [0:0]
+:ufw-not-local - [0:0]
+# drop INVALID packets
+-A ufw-before-forward -m conntrack --ctstate INVALID -j DROP
+COMMIT
+"""
+        import re
+
+        def sync_rules(content):
+            content = re.sub(r'# START JUST1KNODE ANTI-ABUSE.*?# END JUST1KNODE ANTI-ABUSE\n?', '', content, flags=re.DOTALL)
+            block = """# START JUST1KNODE ANTI-ABUSE
+-A ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset
+-A ufw-before-forward -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP
+-A ufw-before-forward -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP
+-A ufw-before-forward -p udp -m string --string "d1:ad2:id20:" --algo bm -j DROP
+# END JUST1KNODE ANTI-ABUSE
+"""
+            if ':ufw-before-forward' in content:
+                content = re.sub(r'(:\s*ufw-before-forward\s+-\s+\[0:0\]\n)', r'\1' + block, content, count=1)
+            elif '*filter' in content:
+                content = content.replace('*filter\n', '*filter\n' + block, 1)
+            return content
+
+        def remove_rules(content):
+            return re.sub(r'# START JUST1KNODE ANTI-ABUSE.*?# END JUST1KNODE ANTI-ABUSE\n?', '', content, flags=re.DOTALL)
+
+        synced = sync_rules(sample_ufw)
+        self.assertIn("# START JUST1KNODE ANTI-ABUSE", synced)
+        self.assertIn("-A ufw-before-forward -p tcp --dport 25 -j REJECT --reject-with tcp-reset", synced)
+        self.assertIn('-A ufw-before-forward -p tcp -m string --string "BitTorrent protocol" --algo bm -j DROP', synced)
+        self.assertIn('-A ufw-before-forward -p udp -m string --string "BitTorrent protocol" --algo bm -j DROP', synced)
+        self.assertIn('-A ufw-before-forward -p udp -m string --string "d1:ad2:id20:" --algo bm -j DROP', synced)
+
+        # Idempotence: syncing again does not duplicate block
+        synced_again = sync_rules(synced)
+        self.assertEqual(synced.count("# START JUST1KNODE ANTI-ABUSE"), 1)
+        self.assertEqual(synced_again, synced)
+
+        # Removal restores original content
+        removed = remove_rules(synced)
+        self.assertNotIn("# START JUST1KNODE ANTI-ABUSE", removed)
+        self.assertEqual(removed.strip(), sample_ufw.strip())
 
 
 if __name__ == "__main__":

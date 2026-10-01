@@ -1245,43 +1245,38 @@ try:
 
     relays_modified = False
     for r in relays:
-        if not isinstance(r, dict): continue
-        code, path = r.get('code'), r.get('path')
-        if not code or not path: continue
+        try:
+            if not isinstance(r, dict): continue
+            code, path = r.get('code'), r.get('path')
+            if not code or not path: continue
 
-        code_s = str(code).strip()
-        code_lower = code_s.lower()
-        in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
+            code_s = str(code).strip()
+            code_lower = code_s.lower()
+            in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
 
-        # Приоритет локального порта:
-        # 1. Реальный порт инбаунда из config.json (например, 8007, 8008)
-        # 2. inbound_port из relays.json (если != 10443)
-        # Категорически запрещено использовать r.get('port') (это внешний порт 10443)!
-        port = xray_inbound_ports.get(in_tag)
-        if not port:
-            saved_in = r.get('inbound_port')
-            if saved_in and int(saved_in) != 10443:
-                port = int(saved_in)
-        if not port:
-            for t, p in xray_inbound_ports.items():
-                if t.lower().endswith(f'-{code_lower}') and p != 10443:
-                    port = p
-                    in_tag = t
-                    break
+            # Строгий источник истины: локальный порт ДОЛЖЕН слушаться в Xray config.json
+            # Категорически запрещено использовать внешний порт 10443 или устаревший порт без инбаунда!
+            port = xray_inbound_ports.get(in_tag)
+            if not port:
+                for t, p in xray_inbound_ports.items():
+                    if t.lower().endswith(f'-{code_lower}'):
+                        port = p
+                        in_tag = t
+                        break
 
-        if not port:
-            continue
+            if not port:
+                continue
 
-        if r.get('inbound_port') != port:
-            r['inbound_port'] = port
-            relays_modified = True
-        if r.get('inbound_tag') != in_tag:
-            r['inbound_tag'] = in_tag
-            relays_modified = True
+            if r.get('inbound_port') != port:
+                r['inbound_port'] = port
+                relays_modified = True
+            if r.get('inbound_tag') != in_tag:
+                r['inbound_tag'] = in_tag
+                relays_modified = True
 
-        cf_path = os.path.join(nginx_dir, f'{code}.conf')
-        cf_base = path.rstrip('/')
-        desired_conf = f'''# Relay location for {code}
+            cf_path = os.path.join(nginx_dir, f'{code}.conf')
+            cf_base = path.rstrip('/')
+            desired_conf = f'''# Relay location for {code}
 location = {cf_base} {{
     return 404;
 }}
@@ -1310,22 +1305,24 @@ location ^~ {path} {{
     add_header Accept-Ranges none always;
 }}
 '''
-        needs_write = True
-        if os.path.exists(cf_path):
-            try:
-                with open(cf_path, 'r', encoding='utf-8') as cf_cur:
-                    cur_text = cf_cur.read()
-                if (f'location = {cf_base}' in cur_text and
-                    'CDN-Cache-Control' in cur_text and
-                    'xhttp_proxy_method' in cur_text and
-                    f'proxy_pass http://127.0.0.1:{port};' in cur_text):
-                    needs_write = False
-            except Exception:
-                needs_write = True
-        if needs_write:
-            with open(cf_path, 'w', encoding='utf-8') as cf:
-                cf.write(desired_conf)
-            print(f'[+] Согласован Nginx конфиг для релея {code} (локальный порт {port})')
+            needs_write = True
+            if os.path.exists(cf_path):
+                try:
+                    with open(cf_path, 'r', encoding='utf-8') as cf_cur:
+                        cur_text = cf_cur.read()
+                    if (f'location = {cf_base}' in cur_text and
+                        'CDN-Cache-Control' in cur_text and
+                        'xhttp_proxy_method' in cur_text and
+                        f'proxy_pass http://127.0.0.1:{port};' in cur_text):
+                        needs_write = False
+                except Exception:
+                    needs_write = True
+            if needs_write:
+                with open(cf_path, 'w', encoding='utf-8') as cf:
+                    cf.write(desired_conf)
+                print(f'[+] Согласован Nginx конфиг для релея {code} (локальный порт {port})')
+        except Exception:
+            continue
 
     if relays_modified:
         import tempfile
