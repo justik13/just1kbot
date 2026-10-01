@@ -171,7 +171,7 @@ async def _build_connections_screen(
 
     builder.button(
         text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,
-        url="https://stats.uptimerobot.com/de5q3DNc95",
+        url="https://status.just1k.pro/status/just1kbot",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
