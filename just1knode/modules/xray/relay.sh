@@ -495,7 +495,12 @@ EOF
     if ufw allow from "$origin_ip" to any port "$relay_port" proto tcp >/dev/null 2>&1; then
         log "Порт туннеля ${relay_port}/tcp открыт строго для ${origin_ip}."
     else
-        warn "Предупреждение: Не удалось добавить правило UFW для порта туннеля ${relay_port}/tcp от ${origin_ip}."
+        if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
+            error "КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть порт туннеля ${relay_port}/tcp для ${origin_ip} в активном фаерволе UFW!"
+            return 1
+        else
+            warn "Предупреждение: Не удалось добавить правило UFW для порта туннеля ${relay_port}/tcp от ${origin_ip}."
+        fi
     fi
 
     deploy_xray_systemd_service

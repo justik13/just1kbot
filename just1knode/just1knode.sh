@@ -843,8 +843,8 @@ reset_node() {
     if [[ -d /etc/letsencrypt/renewal ]]; then
         for rconf in /etc/letsencrypt/renewal/*.conf; do
             [[ -f "$rconf" ]] || continue
-            if grep -Eq "(just1knode|20-just1knode)" "$rconf" 2>/dev/null; then
-                sed -i -E '/^[[:space:]]*(pre_hook|post_hook)[[:space:]]*=.*just1knode.*/d' "$rconf" 2>/dev/null || true
+            if grep -Eq "(/run/just1knode|20-just1knode)" "$rconf" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*(pre_hook|post_hook)[[:space:]]*=.*(\/run\/just1knode|20-just1knode).*/d' "$rconf" 2>/dev/null || true
             fi
         done
     fi
@@ -1076,8 +1076,8 @@ uninstall_node() {
     if [[ -d "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal" ]]; then
         for rconf in "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal"/*.conf; do
             [[ -f "$rconf" ]] || continue
-            if grep -Eq "(just1knode|20-just1knode)" "$rconf" 2>/dev/null; then
-                sed -i -E '/^[[:space:]]*(pre_hook|post_hook)[[:space:]]*=.*just1knode.*/d' "$rconf" 2>/dev/null || true
+            if grep -Eq "(/run/just1knode|20-just1knode)" "$rconf" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*(pre_hook|post_hook)[[:space:]]*=.*(\/run\/just1knode|20-just1knode).*/d' "$rconf" 2>/dev/null || true
             fi
         done
     fi

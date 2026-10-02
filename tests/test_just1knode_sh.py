@@ -597,6 +597,13 @@ exit 0
         self.assertIn('if echo "y" | ufw enable >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then', common_sh)
         self.assertIn('warn "Внимание: не удалось активировать фаервол UFW."', common_sh)
 
+    def test_relay_setup_fails_closed_when_active_ufw_rejects_tunnel_rule(self):
+        """Verify relay setup fails closed (returns 1) if UFW is active and cannot open the tunnel port."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn('ufw status 2>/dev/null | grep -qi "Status: active"', relay_sh)
+        self.assertIn('Не удалось открыть порт туннеля', relay_sh)
+        self.assertIn('return 1', relay_sh)
+
     def test_state_lock_file_uses_o_nofollow(self):
         """Verify set_state_val opens lock file with O_NOFOLLOW to mitigate symlink races."""
         state_sh = (REPO_ROOT / "just1knode" / "lib" / "state.sh").read_text(encoding="utf-8")
@@ -2062,7 +2069,11 @@ ensure_xrayapi_user
         renewal_conf_dir = self.letsencrypt_dir / "renewal"
         renewal_conf_dir.mkdir(parents=True, exist_ok=True)
         (renewal_conf_dir / "relay.example.com.conf").write_text(
-            "[renewalparams]\npre_hook = sh -c '... just1knode ...'\npost_hook = sh -c '... just1knode ...'\naccount = abc123\n",
+            "[renewalparams]\npre_hook = sh -c '... /run/just1knode_caddy_was_paused ...'\npost_hook = sh -c '... 20-just1knode-restart-xray.sh ...'\naccount = abc123\n",
+            encoding="utf-8",
+        )
+        (renewal_conf_dir / "other.example.com.conf").write_text(
+            "[renewalparams]\npre_hook = /usr/local/bin/my-just1knode-monitor\naccount = other456\n",
             encoding="utf-8",
         )
 
@@ -2115,6 +2126,8 @@ ensure_xrayapi_user
         self.assertNotIn("pre_hook", conf_after, "inline pre_hook must be purged from renewal conf")
         self.assertNotIn("post_hook", conf_after, "inline post_hook must be purged from renewal conf")
         self.assertIn("account = abc123", conf_after, "other renewal parameters must be preserved")
+        other_after = (renewal_conf_dir / "other.example.com.conf").read_text(encoding="utf-8")
+        self.assertIn("pre_hook = /usr/local/bin/my-just1knode-monitor", other_after, "third-party custom hook must NOT be removed")
         self.assertFalse(fake_install_dir.exists(), "INSTALL_DIR must be removed")
         self.assertFalse(fake_global_bin.exists(), "JUST1KNODE_GLOBAL_BIN must be removed")
         self.assertFalse(self.backup_dir.exists(), "BACKUP_DIR must be removed when --purge-backups is passed")
