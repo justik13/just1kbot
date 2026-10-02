@@ -250,12 +250,28 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
         operation.locked_at = operation.locked_by = None
         operation.last_error_code = "delete_requeued"
         operation.last_error = (audit_reason or "repeat delete")[:2000]
+        if api_url_snapshot is not None:
+            operation.api_url_snapshot = api_url_snapshot
+        if api_key_snapshot is not None:
+            operation.api_key_snapshot = api_key_snapshot
+        if server_name_snapshot is not None:
+            operation.server_name_snapshot = server_name_snapshot
+        if server_id is not None:
+            operation.server_id = server_id
     elif operation.status == "succeeded" and profile_id and await session.get(VPNProfile, profile_id):
         operation.status = "retry"
         operation.attempts = 0
         operation.completed_at = None
         operation.next_attempt_at = next_attempt_at or func.now()
         operation.last_error_code = "delete_profile_discrepancy"
+        if api_url_snapshot is not None:
+            operation.api_url_snapshot = api_url_snapshot
+        if api_key_snapshot is not None:
+            operation.api_key_snapshot = api_key_snapshot
+        if server_name_snapshot is not None:
+            operation.server_name_snapshot = server_name_snapshot
+        if server_id is not None:
+            operation.server_id = server_id
 
     if protocol and isinstance(operation.payload, dict) and "protocol" not in operation.payload:
         new_payload = dict(operation.payload)
@@ -270,12 +286,17 @@ async def resolve_profile_endpoint_snapshot(
 ) -> tuple[int | None, str | None, str | None, str | None]:
     """Resolve (server_id, server_name_snapshot, api_url_snapshot, api_key_snapshot) for a profile.
 
-    1. First check if the profile has an immutable historical snapshot from previous operations.
-       This guarantees that even if the Server row's api_url/api_key was edited later by an admin,
-       the lifecycle operations for this specific peer will target the exact endpoint where the
-       peer was actually provisioned.
-    2. If no historical snapshot exists, fallback to the current Server row in the database.
+    1. First check the active Server row in the database. If the server exists and is configured,
+       its current endpoint is the primary source of truth, matching executor identity checks.
+    2. If the Server row was deleted or missing, fallback to the historical snapshot from previous
+       operations for this profile to allow graceful cleanup of legacy peers.
     """
+    server = None
+    if profile.server_id is not None:
+        server = await session.get(Server, profile.server_id)
+    if server is not None and server.api_url and server.api_key:
+        return server.id, server.name, server.api_url, server.api_key
+
     if profile.id is not None:
         prev_op = (
             await session.execute(
@@ -297,9 +318,6 @@ async def resolve_profile_endpoint_snapshot(
                 getattr(prev_op, "api_key_snapshot", None),
             )
 
-    server = None
-    if profile.server_id is not None:
-        server = await session.get(Server, profile.server_id)
     if server is not None:
         return server.id, server.name, server.api_url, server.api_key
 
@@ -392,6 +410,21 @@ async def claim_api_operations(
                 operation.updated_at = now
                 operation.last_error_code = "max_attempts_exhausted"
                 operation.locked_at = operation.locked_by = None
+                try:
+                    from services.workers.api_operations import notify_dead_operation
+
+                    await notify_dead_operation(
+                        operation_id=operation.id,
+                        operation_type=operation.operation_type,
+                        server_id=operation.server_id,
+                        server_name=operation.server_name_snapshot,
+                        profile_id=operation.profile_id,
+                        client_name=operation.client_name,
+                        error_code=operation.last_error_code,
+                        error_message="max attempts exhausted",
+                    )
+                except Exception:
+                    pass
         operations = (
             await session.execute(
                 select(APIOperation)

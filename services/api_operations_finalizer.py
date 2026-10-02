@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -15,6 +16,8 @@ from services.api_operations_queue import (
     calculate_retry_delay,
     enqueue_api_operation,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CreateCompensationRequired(Exception):
@@ -319,6 +322,24 @@ async def finalize_operation_failure(
                     profile.provisioning_status = "update_failed"
                 elif operation.operation_type == "delete_peer":
                     profile.provisioning_status = "delete_failed"
+
+        if not should_retry:
+            try:
+                from services.workers.api_operations import notify_dead_operation
+
+                await notify_dead_operation(
+                    operation_id=operation.id,
+                    operation_type=operation.operation_type,
+                    server_id=operation.server_id,
+                    server_name=operation.server_name_snapshot,
+                    profile_id=operation.profile_id,
+                    client_name=operation.client_name,
+                    error_code=operation.last_error_code,
+                    error_message=operation.last_error or error_message,
+                )
+            except Exception:
+                logger.exception("Failed to dispatch dead operation alert for op_id=%s", operation.id)
+
         return operation.status
 
 

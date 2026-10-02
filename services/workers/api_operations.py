@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -10,11 +12,83 @@ from services.api_operations_queue import (
     recover_stale_api_operations,
 )
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from aiogram import Bot
+
 logger = logging.getLogger(__name__)
 PROCESS_ID = uuid.uuid4()
 MAX_CONCURRENCY = 5
 
 _wake_event: asyncio.Event | None = None
+_bot: Bot | None = None
+_alerted_dead_ops: set[int] = set()
+
+
+def set_api_operations_bot(bot: Bot | None) -> None:
+    global _bot
+    _bot = bot
+
+
+def get_api_operations_bot() -> Bot | None:
+    return _bot
+
+
+def clear_alerted_dead_ops() -> None:
+    _alerted_dead_ops.clear()
+
+
+async def notify_dead_operation(
+    *,
+    operation_id: int,
+    operation_type: str,
+    server_id: int | None,
+    server_name: str | None,
+    profile_id: int | None,
+    client_name: str | None,
+    error_code: str,
+    error_message: str,
+) -> None:
+    """Notify administrators via Telegram when an API operation permanently fails (dead-lettered)."""
+    if operation_id in _alerted_dead_ops:
+        return
+    bot = get_api_operations_bot()
+    if not bot:
+        return
+    try:
+        from bot.texts.runtime.alerts import ALERT_API_OPERATION_DEAD
+        from config.settings import get_settings
+        from utils.telegram import safe, safe_send_message
+
+        settings = get_settings()
+        admin_ids = getattr(settings, "ADMIN_IDS", None)
+        if not admin_ids:
+            return
+
+        text = ALERT_API_OPERATION_DEAD.format(
+            server_name=safe(server_name or "Неизвестный сервер"),
+            server_id=server_id or "—",
+            op_type=safe(operation_type),
+            op_id=operation_id,
+            profile_id=profile_id or "—",
+            client_name=safe(client_name or "без имени"),
+            error_code=safe(error_code or "unknown"),
+            error_details=safe((error_message or "нет описания")[:300]),
+        )
+
+        for admin_id in admin_ids:
+            try:
+                await safe_send_message(bot, chat_id=admin_id, text=text, parse_mode="HTML")
+            except Exception:
+                logger.exception("Failed to send dead operation alert to admin %s", admin_id)
+
+        _alerted_dead_ops.add(operation_id)
+        if len(_alerted_dead_ops) > 1000:
+            for old_id in list(_alerted_dead_ops)[:500]:
+                _alerted_dead_ops.discard(old_id)
+    except Exception:
+        logger.exception("Unexpected error in notify_dead_operation for op_id=%s", operation_id)
 
 
 def get_wake_event() -> asyncio.Event:
@@ -29,7 +103,9 @@ def notify_api_operation_enqueued() -> None:
     event.set()
 
 
-async def api_operations_loop(shutdown_event: asyncio.Event) -> None:
+async def api_operations_loop(shutdown_event: asyncio.Event, bot: Bot | None = None) -> None:
+    if bot is not None:
+        set_api_operations_bot(bot)
     worker_id = f"api-operations-{PROCESS_ID}"
     in_flight: set[asyncio.Task] = set()
     async def run(operation):

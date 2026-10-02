@@ -54,6 +54,16 @@ ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоно�
 
 ALERT_TITLE_WORKER_FAILED = "Фоновый воркер упал"
 
+ALERT_API_OPERATION_DEAD = """🚨 <b>Сбой фоновой операции сервера</b>
+
+🌍 <b>Сервер:</b> {server_name} (ID: {server_id})
+⚙️ <b>Операция:</b> <code>{op_type}</code> (ID: #{op_id})
+🔑 <b>Профиль ID:</b> {profile_id} ({client_name})
+⚠️ <b>Код ошибки:</b> <code>{error_code}</code>
+📝 <b>Детали:</b> <code>{error_details}</code>
+
+ℹ️ <i>Операция переведена в статус dead. Требуется внимание администратора.</i>"""
+
 ALERT_TRAFFIC_OVERUSAGE = """⚠️ <b>Fair Usage Policy: Превышение квоты трафика!</b>
 ━━━━━━━━━━━━━━━━━━━━
 👤 <b>Пользователь:</b> <code>{telegram_id}</code>
