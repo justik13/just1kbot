@@ -308,11 +308,7 @@ ensure_status_ingress_network() {
 }
 
 dc_up() {
-    local scale_args=()
-    if is_external_nginx_enabled; then
-        scale_args=(--scale caddy=0)
-    fi
-    docker compose up -d "${scale_args[@]}" "$@"
+    docker compose up -d "$@"
     ensure_status_ingress_network
 }
 
