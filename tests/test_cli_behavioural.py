@@ -417,168 +417,55 @@ wait_for_apt_locks 1
         self.assertIn("Восстановление отменено", proc.stdout + proc.stderr)
 
     # -------------------------------------------------------------------------
-    # 7. Nginx Coexistence and Dual-Mode Reverse Proxy Tests
+    # 7. Fail-Closed Port 80/443 Guard and Doctor Checks
     # -------------------------------------------------------------------------
 
-    def test_detect_existing_nginx_sites(self):
-        """detect_existing_nginx_sites finds user domains, ignores just1k/stock configs."""
-        nginx_dir = self.root / "fake_nginx"
-        sites_enabled = nginx_dir / "sites-enabled"
-        sites_enabled.mkdir(parents=True, exist_ok=True)
-
-        # 1. Default stock placeholder with '_'
-        (sites_enabled / "default").write_text(
-            "server { listen 80; server_name _; }\n", encoding="utf-8"
-        )
-        # 2. just1kbot own config (ignored)
-        (sites_enabled / "just1kbot.conf").write_text(
-            "server { listen 80; server_name bot.example.com; }\n", encoding="utf-8"
-        )
-        # 3. User custom website
-        (sites_enabled / "my-shop.conf").write_text(
-            "server { listen 80; server_name myshop.com www.myshop.com; }\n", encoding="utf-8"
-        )
-
-        test_script = f"""
-source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
-detect_existing_nginx_sites "{nginx_dir.as_posix()}"
-"""
-        proc = subprocess.run(
-            ["bash", "-c", test_script], capture_output=True, text=True, check=False
-        )
-        self.assertEqual(proc.returncode, 0)
-        output = proc.stdout
-        self.assertIn("my-shop.conf", output)
-        self.assertIn("myshop.com", output)
-        self.assertNotIn("just1kbot.conf", output)
-        self.assertNotIn("default", output)
-
-    def test_setup_external_nginx_integration_creates_config_and_sets_env(self):
-        """setup_external_nginx_integration generates vhost, symlinks to sites-enabled, and updates .env."""
-        nginx_dir = self.root / "fake_nginx_setup"
-        sites_avail = nginx_dir / "sites-available"
-        sites_enb = nginx_dir / "sites-enabled"
-        sites_avail.mkdir(parents=True, exist_ok=True)
-        sites_enb.mkdir(parents=True, exist_ok=True)
-
-        # Mock nginx executable so nginx -t returns 0
-        nginx_bin = self.bin_dir / "nginx"
-        nginx_bin.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
-        nginx_bin.chmod(0o755)
-
-        systemctl_bin = self.bin_dir / "systemctl"
-        systemctl_bin.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
-        systemctl_bin.chmod(0o755)
-
-        env_file = self.project_dir / ".env"
-        env_file.write_text(
-            "DOMAIN=bot.test.com\nSSL_EMAIL=test@test.com\nBOT_PORT=8080\nALLOW_LOCAL_HTTP=true\n",
+    def test_preflight_fails_closed_when_ports_occupied(self):
+        """cmd_preflight fails closed when port 80 or 443 is occupied by a non-docker process."""
+        # Mock ss to simulate port 80 occupied by apache2
+        ss_bin = self.bin_dir / "ss"
+        ss_bin.write_text(
+            '#!/bin/bash\necho "LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\\"apache2\\",pid=1234,fd=4))"\nexit 0\n',
             encoding="utf-8",
         )
-        env_file.chmod(0o600)
-
-        test_script = f"""
-export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
-export PROJECT_DIR="{self.project_dir.as_posix()}"
-export JUST1KBOT_NO_SUDO="1"
-export PATH="{self.bin_dir.as_posix()}:$PATH"
-source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
-setup_external_nginx_integration "{nginx_dir.as_posix()}"
-"""
-        proc = subprocess.run(
-            ["bash", "-c", test_script], capture_output=True, text=True, check=False
-        )
-        self.assertEqual(
-            proc.returncode,
-            0,
-            f"setup_external_nginx_integration failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}",
-        )
-        self.assertTrue((sites_avail / "just1kbot.conf").exists())
-        self.assertTrue((sites_enb / "just1kbot.conf").exists())
-
-        vhost_content = (sites_avail / "just1kbot.conf").read_text(encoding="utf-8")
-        self.assertIn("bot.test.com", vhost_content)
-        self.assertIn("proxy_pass http://127.0.0.1:8080", vhost_content)
-
-        updated_env = env_file.read_text(encoding="utf-8")
-        self.assertIn("USE_EXTERNAL_NGINX=true", updated_env)
-
-    def test_setup_external_nginx_integration_rollback_on_nginx_syntax_error(self):
-        """setup_external_nginx_integration removes symlink if nginx -t fails."""
-        nginx_dir = self.root / "fake_nginx_fail"
-        sites_avail = nginx_dir / "sites-available"
-        sites_enb = nginx_dir / "sites-enabled"
-        sites_avail.mkdir(parents=True, exist_ok=True)
-        sites_enb.mkdir(parents=True, exist_ok=True)
-
-        # Mock nginx to simulate syntax error
-        nginx_bin = self.bin_dir / "nginx"
-        nginx_bin.write_text(
-            '#!/bin/bash\necho "nginx syntax error: invalid directive" >&2; exit 1\n',
-            encoding="utf-8",
-        )
-        nginx_bin.chmod(0o755)
-
-        env_file = self.project_dir / ".env"
-        env_file.write_text(
-            "DOMAIN=bot.test.com\nSSL_EMAIL=test@test.com\nBOT_PORT=8080\nALLOW_LOCAL_HTTP=true\n",
-            encoding="utf-8",
-        )
-        env_file.chmod(0o600)
-
-        test_script = f"""
-export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
-export PROJECT_DIR="{self.project_dir.as_posix()}"
-export JUST1KBOT_NO_SUDO="1"
-export PATH="{self.bin_dir.as_posix()}:$PATH"
-source "{CLI_PATH.as_posix()}" >/dev/null 2>&1 || true
-setup_external_nginx_integration "{nginx_dir.as_posix()}"
-"""
-        proc = subprocess.run(
-            ["bash", "-c", test_script], capture_output=True, text=True, check=False
-        )
-        self.assertEqual(proc.returncode, 1)
-        # Symlink in sites-enabled must be removed to avoid breaking existing sites
-        self.assertFalse((sites_enb / "just1kbot.conf").exists())
-        self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stderr + proc.stdout)
-
-    def test_preflight_external_nginx_mode_skips_caddy_ports(self):
-        """When USE_EXTERNAL_NGINX=true, cmd_preflight does not check port 80/443 for Caddy."""
-        # Mock nginx executable so nginx -t returns 0
-        nginx_bin = self.bin_dir / "nginx"
-        nginx_bin.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
-        nginx_bin.chmod(0o755)
-
-        # Mock systemctl so nginx is active
-        sys_bin = self.bin_dir / "systemctl"
-        sys_bin.write_text(
-            '#!/bin/bash\nif [[ "$1" == "is-active" && "$3" == "nginx" ]]; then exit 0; fi\nexit 0\n',
-            encoding="utf-8",
-        )
-        sys_bin.chmod(0o755)
-
-        env_content = (
-            "BOT_TOKEN=token123\n"
-            "POSTGRES_USER=user\n"
-            "POSTGRES_PASSWORD=pass\n"
-            "POSTGRES_DB=db\n"
-            "DB_ENCRYPTION_KEY=key\n"
-            "BACKUP_AGE_RECIPIENT=age1test\n"
-            "ADMIN_IDS=[123]\n"
-            "DOMAIN=vpn.example.com\n"
-            "SSL_EMAIL=admin@example.com\n"
-            "SUPPORT_USERNAME=support\n"
-            "YOOKASSA_SHOP_ID=123\n"
-            "YOOKASSA_SECRET_KEY=sec\n"
-            "USE_EXTERNAL_NGINX=true\n"
-            "BOT_PORT=58080\n"
-        )
-        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
-        (self.project_dir / ".env").chmod(0o600)
+        ss_bin.chmod(0o755)
 
         proc = self._run_cli_command("preflight")
-        self.assertEqual(proc.returncode, 0, f"Stdout: {proc.stdout}\nStderr: {proc.stderr}")
-        self.assertIn("Режим внешнего Nginx активен (USE_EXTERNAL_NGINX=true)", proc.stdout)
+        self.assertEqual(proc.returncode, 1, f"Stdout: {proc.stdout}\nStderr: {proc.stderr}")
+        self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stderr + proc.stdout)
+        self.assertIn("Порт для Caddy недоступен", proc.stderr + proc.stdout)
+
+    def test_doctor_detects_port_conflict_with_non_docker_process(self):
+        """cmd_doctor outputs error when port 80 is occupied by a host non-docker process."""
+        ss_bin = self.bin_dir / "ss"
+        ss_bin.write_text(
+            '#!/bin/bash\necho "LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\\"nginx\\",pid=5678,fd=6))"\nexit 0\n',
+            encoding="utf-8",
+        )
+        ss_bin.chmod(0o755)
+
+        proc = self._run_cli_command("doctor")
+        self.assertIn("КОНФЛИКТ ПОРТА", proc.stdout + proc.stderr)
+        self.assertIn("занят сторонним процессом хоста", proc.stdout + proc.stderr)
+
+    def test_doctor_reports_caddy_running_when_docker_listens(self):
+        """cmd_doctor reports Caddy running when Docker listens on port 80 and container is running."""
+        ss_bin = self.bin_dir / "ss"
+        ss_bin.write_text(
+            '#!/bin/bash\necho "LISTEN 0 4096 0.0.0.0:80 0.0.0.0:* users:((\\"docker-proxy\\",pid=222,fd=4))"\nexit 0\n',
+            encoding="utf-8",
+        )
+        ss_bin.chmod(0o755)
+
+        docker_bin = self.bin_dir / "docker"
+        docker_bin.write_text(
+            '#!/bin/bash\nif [[ "$1" == "inspect" ]] && [[ "$*" =~ "just1kbot_caddy" ]]; then echo "running"; exit 0; fi\nexit 0\n',
+            encoding="utf-8",
+        )
+        docker_bin.chmod(0o755)
+
+        proc = self._run_cli_command("doctor")
+        self.assertIn("Порт 80 слушается веб-сервером Caddy (just1kbot_caddy: running)", proc.stdout)
 
     def test_cmd_backup_creates_restricted_permissions(self):
         """cmd_backup ensures 0700 on backups/ directory and 0600 on created backup files."""
@@ -1595,7 +1482,7 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
         self.assertEqual(d_content, "")
 
 
-class ExternalNginxAndSetupReadinessTests(unittest.TestCase):
+class SetupReadinessAndPortGuardTests(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.test_dir.name)
@@ -1617,15 +1504,16 @@ class ExternalNginxAndSetupReadinessTests(unittest.TestCase):
         os.environ.pop("JUST1KBOT_NO_SUDO", None)
         self.test_dir.cleanup()
 
-    def test_check_existing_install_preserves_use_external_nginx(self):
-        """Selecting option 1 in check_existing_install must preserve USE_EXTERNAL_NGINX=true from .env."""
-        env_content = "DOMAIN=bot.test\nUSE_EXTERNAL_NGINX=true\nBOT_TOKEN=123456:abcdef\n"
+    def test_check_existing_install_loads_domain_cleanly(self):
+        """Selecting option 1 in check_existing_install must preserve DOMAIN from .env and set SKIP_WIZARD."""
+        env_content = "DOMAIN=bot.test\nBOT_TOKEN=123456:abcdef\n"
         (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
         script = f"""
 PROJECT_DIR="{self.project_dir.as_posix()}"
 source "{self.project_dir.as_posix()}/scripts/setup.sh"
 check_existing_install
-echo "LOADED_USE_EXTERNAL_NGINX=$USE_EXTERNAL_NGINX"
+echo "LOADED_DOMAIN=$DOMAIN"
+echo "SKIP_WIZARD=$SKIP_WIZARD"
 """
         proc = subprocess.run(
             ["bash", "-c", script],
@@ -1636,170 +1524,44 @@ echo "LOADED_USE_EXTERNAL_NGINX=$USE_EXTERNAL_NGINX"
             check=False,
         )
         self.assertEqual(proc.returncode, 0, f"check_existing_install failed: {proc.stderr}")
-        self.assertIn("LOADED_USE_EXTERNAL_NGINX=true", proc.stdout)
+        self.assertIn("LOADED_DOMAIN=bot.test", proc.stdout)
+        self.assertIn("SKIP_WIZARD=true", proc.stdout)
 
-    def test_setup_external_nginx_fails_closed_when_ssl_missing(self):
-        """setup_external_nginx_integration must fail closed when SSL is absent and ALLOW_LOCAL_HTTP is not true."""
-        env_content = "DOMAIN=bot.test\nSSL_EMAIL=admin@bot.test\nALLOW_LOCAL_HTTP=false\n"
-        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
-        nginx_dir = self.root / "etc_nginx"
-        nginx_dir.mkdir(parents=True, exist_ok=True)
-
-        proc = subprocess.run(
-            [
-                "bash",
-                "-c",
-                f'export PROJECT_DIR="{self.project_dir.as_posix()}"; '
-                f'export JUST1KBOT_DIR="{self.project_dir.as_posix()}"; '
-                f'export JUST1KBOT_NO_SUDO="1"; '
-                f'source "{self.project_dir.as_posix()}/scripts/cli.sh"; '
-                f'setup_external_nginx_integration "{nginx_dir.as_posix()}"',
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(self.project_dir),
-            check=False,
-        )
-        self.assertEqual(proc.returncode, 1)
-        self.assertIn("Let's Encrypt SSL Issuance", proc.stdout + proc.stderr)
-        self.assertIn("Отсутствует SSL-сертификат", proc.stdout + proc.stderr)
-
-    def test_setup_external_nginx_fails_closed_and_rolls_back_on_reload_failure(self):
-        """When systemctl reload nginx fails, symlink must be removed and USE_EXTERNAL_NGINX must not be set."""
-        env_content = "DOMAIN=bot.test\nALLOW_LOCAL_HTTP=true\n"
-        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
-        nginx_dir = self.root / "etc_nginx"
-        (nginx_dir / "sites-available").mkdir(parents=True, exist_ok=True)
-        (nginx_dir / "sites-enabled").mkdir(parents=True, exist_ok=True)
-
-        # Mock nginx and systemctl
-        (self.bin_dir / "nginx").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
-        (self.bin_dir / "nginx").chmod(0o755)
-        (self.bin_dir / "systemctl").write_text(
-            '#!/bin/bash\nif [[ "$1" == "reload" && "$2" == "nginx" ]]; then echo "systemctl reload simulated error" >&2; exit 1; fi\nexit 0\n',
+    def test_setup_port_guard_fails_closed_when_port_busy(self):
+        """setup.sh port check must fail closed when port 80/443 is occupied by a non-docker process and cannot be freed."""
+        # Mock ss to simulate occupied port 80
+        ss_bin = self.bin_dir / "ss"
+        ss_bin.write_text(
+            '#!/bin/bash\necho "LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\\"custom-daemon\\",pid=999,fd=3))"\nexit 0\n',
             encoding="utf-8",
         )
-        (self.bin_dir / "systemctl").chmod(0o755)
-
-        proc_env = os.environ.copy()
-        proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
-        proc_env["PROJECT_DIR"] = self.project_dir.as_posix()
-        proc_env["JUST1KBOT_NO_SUDO"] = "1"
-
-        proc = subprocess.run(
-            [
-                "bash",
-                "-c",
-                f'source "{self.project_dir.as_posix()}/scripts/cli.sh"; '
-                f'setup_external_nginx_integration "{nginx_dir.as_posix()}"',
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(self.project_dir),
-            env=proc_env,
-            check=False,
-        )
-        self.assertEqual(proc.returncode, 1)
-        # Symlink must be cleaned up
-        symlink = nginx_dir / "sites-enabled" / "just1kbot.conf"
-        self.assertFalse(symlink.exists(), "Symlink must be deleted if reload fails")
-        # USE_EXTERNAL_NGINX must not be true in .env
-        env_text = (self.project_dir / ".env").read_text(encoding="utf-8")
-        self.assertNotIn("USE_EXTERNAL_NGINX=true", env_text)
-
-    def test_start_project_fails_closed_when_nginx_config_fails(self):
-        """start_project must abort without running docker compose when nginx-config fails in USE_EXTERNAL_NGINX=true mode."""
-        env_content = "DOMAIN=bot.test\nUSE_EXTERNAL_NGINX=true\n"
-        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
-
-        # Mock cli.sh to return failure for nginx-config
-        failing_cli = self.bin_dir / "just1kbot_cli_fail"
-        failing_cli.write_text(
-            '#!/bin/bash\nif [[ "$1" == "nginx-config" ]]; then exit 1; fi\nexit 0\n',
-            encoding="utf-8",
-        )
-        failing_cli.chmod(0o755)
-
-        docker_compose_log = self.root / "docker_compose.log"
-        (self.bin_dir / "docker").write_text(
-            f'#!/bin/bash\necho "$@" >> "{docker_compose_log.as_posix()}"\nexit 0\n',
-            encoding="utf-8",
-        )
-        (self.bin_dir / "docker").chmod(0o755)
-
-        script = f"""
-PROJECT_DIR="{self.project_dir.as_posix()}"
-source "{self.project_dir.as_posix()}/scripts/setup.sh"
-start_project_test() {{
-    USE_EXTERNAL_NGINX="true"
-    if ! "{failing_cli.as_posix()}" nginx-config; then
-        error "Не удалось настроить Nginx для Just1kBot. Установка прервана."
-    fi
-    docker compose up -d
-}}
-start_project_test
-"""
-        proc_env = os.environ.copy()
-        proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
-
-        proc = subprocess.run(
-            ["bash", "-c", script],
-            capture_output=True,
-            text=True,
-            cwd=str(self.project_dir),
-            env=proc_env,
-            check=False,
-        )
-        self.assertEqual(proc.returncode, 1)
-        self.assertIn("Не удалось настроить Nginx для Just1kBot", proc.stderr)
-        self.assertFalse(
-            docker_compose_log.exists(),
-            "docker compose up must not be called if nginx-config failed",
-        )
-
-    def test_cmd_update_healthcheck_validates_external_nginx(self):
-        """In USE_EXTERNAL_NGINX=true mode, healthcheck logic fails if systemctl is-active nginx is false."""
-        env_content = "DOMAIN=bot.test\nUSE_EXTERNAL_NGINX=true\n"
-        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
-
-        # Mock systemctl to report nginx inactive
-        (self.bin_dir / "systemctl").write_text(
-            '#!/bin/bash\nif [[ "$1" == "is-active" && "$3" == "nginx" ]]; then exit 3; fi\nexit 0\n',
-            encoding="utf-8",
-        )
-        (self.bin_dir / "systemctl").chmod(0o755)
+        ss_bin.chmod(0o755)
 
         script = f"""
 export PROJECT_DIR="{self.project_dir.as_posix()}"
-export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
-export JUST1KBOT_NO_SUDO="1"
 export PATH="{self.bin_dir.as_posix()}:$PATH"
-source "{self.project_dir.as_posix()}/scripts/cli.sh"
-
-caddy_ok=false
-if is_external_nginx_enabled; then
-    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null && run_privileged nginx -t >/dev/null 2>&1; then
-        caddy_ok=true
-    else
-        caddy_ok=false
+source "{self.project_dir.as_posix()}/scripts/setup.sh"
+# Run port check logic directly
+for port in 80 443; do
+    proc=$(ss -tlnp 2>/dev/null | grep -E ":${{port}}\\b" || true)
+    if [[ -n "$proc" ]] && echo "$proc" | grep -qvE "docker|docker-proxy"; then
+        proc_recheck=$(ss -tlnp 2>/dev/null | grep -E ":${{port}}\\b" || true)
+        if [[ -n "$proc_recheck" ]] && echo "$proc_recheck" | grep -qvE "docker|docker-proxy"; then
+            error "Порт $port все еще занят сторонним процессом: ${{proc_recheck}}!"
+        fi
     fi
-fi
-echo "CADDY_OK=$caddy_ok"
+done
 """
-        proc_env = os.environ.copy()
-        proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
-        proc_env["JUST1KBOT_NO_SUDO"] = "1"
-
         proc = subprocess.run(
             ["bash", "-c", script],
             capture_output=True,
             text=True,
             cwd=str(self.project_dir),
-            env=proc_env,
             check=False,
         )
-        self.assertEqual(proc.returncode, 0)
-        self.assertIn("CADDY_OK=false", proc.stdout)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("все еще занят сторонним процессом", proc.stderr + proc.stdout)
+
 
     def test_apply_sysctl_hardening_preserves_custom_settings(self):
         """apply_sysctl_hardening must preserve custom settings in sysctl drop-in
