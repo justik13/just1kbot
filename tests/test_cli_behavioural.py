@@ -422,6 +422,23 @@ wait_for_apt_locks 1
 
     def test_preflight_fails_closed_when_ports_occupied(self):
         """cmd_preflight fails closed when port 80 or 443 is occupied by a non-docker process."""
+        env_content = (
+            "BOT_TOKEN=token123\n"
+            "POSTGRES_USER=user\n"
+            "POSTGRES_PASSWORD=pass\n"
+            "POSTGRES_DB=db\n"
+            "DB_ENCRYPTION_KEY=key\n"
+            "BACKUP_AGE_RECIPIENT=age1test\n"
+            "ADMIN_IDS=[123]\n"
+            "DOMAIN=vpn.example.com\n"
+            "SSL_EMAIL=admin@example.com\n"
+            "SUPPORT_USERNAME=support\n"
+            "YOOKASSA_SHOP_ID=123\n"
+            "YOOKASSA_SECRET_KEY=sec\n"
+        )
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        (self.project_dir / ".env").chmod(0o600)
+
         # Mock ss to simulate port 80 occupied by apache2
         ss_bin = self.bin_dir / "ss"
         ss_bin.write_text(
