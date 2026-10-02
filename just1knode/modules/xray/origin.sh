@@ -537,7 +537,7 @@ EOF
         log "Настройка Origin узла выполняется в изолированном виртуальном хосте (just1k-origin.conf). Ваши существующие сайты продолжат работать параллельно."
     fi
 
-    rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" "${NGINX_CONF_DIR}/conf.d/just1k-origin.conf" "${NGINX_CONF_DIR}/conf.d/origin.conf" 2>/dev/null || true
+    rm -f "${NGINX_CONF_DIR}/conf.d/just1k-bootstrap.conf" "${NGINX_CONF_DIR}/conf.d/just1k-origin.conf" 2>/dev/null || true
     local default_was_linked_origin=0
     if [[ -f "${NGINX_CONF_DIR}/sites-enabled/default" ]]; then
         default_was_linked_origin=1

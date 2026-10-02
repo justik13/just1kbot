@@ -55,17 +55,26 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
             archive_url="${JUST1KBOT_REPO_URL}/archive/refs/heads/${JUST1KBOT_REF}.tar.gz"
         fi
         
-        tmp_tar="/tmp/just1knode_boot_$$.tar.gz"
-        tmp_extract="/tmp/just1knode_extract_$$"
-        rm -rf "$tmp_tar" "$tmp_extract"
-        mkdir -p "$tmp_extract"
+        tmp_tar="$(mktemp /tmp/just1knode_boot.XXXXXX.tar.gz 2>/dev/null || mktemp)"
+        tmp_extract="$(mktemp -d /tmp/just1knode_extract.XXXXXX 2>/dev/null || mktemp -d)"
         
+        download_ok=0
         if command -v curl >/dev/null 2>&1; then
-            curl -fsSL "$archive_url" -o "$tmp_tar"
+            if curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar"; then
+                download_ok=1
+            fi
         elif command -v wget >/dev/null 2>&1; then
-            wget -qO "$tmp_tar" "$archive_url"
+            if wget -q --timeout=120 --tries=2 -O "$tmp_tar" "$archive_url"; then
+                download_ok=1
+            fi
         else
             echo "Ошибка: для установки требуется curl или wget." >&2
+            exit 1
+        fi
+        
+        if [[ $download_ok -ne 1 || ! -f "$tmp_tar" ]]; then
+            rm -rf "$tmp_tar" "$tmp_extract"
+            echo "Ошибка: не удалось скачать архив репозитория ($archive_url)." >&2
             exit 1
         fi
         
@@ -754,12 +763,43 @@ if os.path.exists(rf):
         fi
     fi
 
-    log "11. Проверка сетевого стелс-режима (ICMP Echo)..."
+    log "11. Проверка отключения IPv6 (защита от утечек трафика)..."
+    local ipv6_val="0"
+    local ipv6_supported=1
+    if [[ -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ]]; then
+        ipv6_val="$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")"
+    else
+        if ! command -v ip >/dev/null 2>&1 || ! ip -6 route show >/dev/null 2>&1; then
+            ipv6_supported=0
+        fi
+        ipv6_val="1"
+    fi
+    local sysctl_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
+    local ipv6_persisted=0
+    if [[ -f "$sysctl_conf" ]] && grep -Eq '^[[:space:]]*net\.ipv6\.conf\.all\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_conf" 2>/dev/null; then
+        ipv6_persisted=1
+    fi
+
+    if [[ $ipv6_supported -eq 0 ]]; then
+        echo -e "  ${GREEN}✔${NC} IPv6 отключен на уровне ядра/гипервизора (стек IPv6 не поддерживается)"
+    elif [[ "$ipv6_val" == "1" && "$ipv6_persisted" -eq 1 ]]; then
+        echo -e "  ${GREEN}✔${NC} IPv6 отключен (защита активна в ядре и сохранена в drop-in)"
+    elif [[ "$ipv6_val" == "1" ]]; then
+        echo -e "  ${RED}✗${NC} IPv6 отключен в ядре, но не зафиксирован в $sysctl_conf (до перезагрузки, выполните: just1knode update)"
+        failed=$((failed + 1))
+    elif [[ "$ipv6_persisted" -eq 1 ]]; then
+        echo -e "  ${RED}✗${NC} Рассинхронизация: IPv6 отключен в $sysctl_conf, но активен в ядре (выполните: just1knode update)"
+        failed=$((failed + 1))
+    else
+        echo -e "  ${RED}✗${NC} IPv6 активен (защита от утечек трафика выключена, выполните: just1knode update)"
+        failed=$((failed + 1))
+    fi
+
+    log "12. Проверка сетевого стелс-режима (ICMP Echo)..."
     local icmp_val="0"
     if [[ -f /proc/sys/net/ipv4/icmp_echo_ignore_all ]]; then
         icmp_val="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     fi
-    local sysctl_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
     local icmp_persisted=0
     if [[ -f "$sysctl_conf" ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_conf" 2>/dev/null; then
         icmp_persisted=1
@@ -769,6 +809,9 @@ if os.path.exists(rf):
         echo -e "  ${GREEN}✔${NC} ICMP Echo отключен (стелс-режим активен в ядре и сохранен в drop-in)"
     elif [[ "$icmp_val" == "1" ]]; then
         echo -e "  ${RED}✗${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf (до перезагрузки, выполните: just1knode update)"
+        failed=$((failed + 1))
+    elif [[ "$icmp_persisted" -eq 1 ]]; then
+        echo -e "  ${RED}✗${NC} Рассинхронизация: ICMP Echo отключен в $sysctl_conf, но активен в ядре (выполните: just1knode update)"
         failed=$((failed + 1))
     else
         echo -e "  ${RED}✗${NC} ICMP Echo активен (стелс-режим выключен, выполните: just1knode update)"
@@ -796,7 +839,15 @@ reset_node() {
     systemctl disable xray xray-api amnezia-api 2>/dev/null || true
     remove_traffic_watchdog_timer
     remove_amnezia_abuse_protection 2>/dev/null || true
-    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh /etc/letsencrypt/renewal-hooks/pre/01-stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/01-start-port80-docker.sh /etc/letsencrypt/renewal-hooks/pre/stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/start-port80-docker.sh 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh /etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh /etc/letsencrypt/renewal-hooks/post/05-just1knode-nginx.sh /etc/letsencrypt/renewal-hooks/pre/01-stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/01-start-port80-docker.sh /etc/letsencrypt/renewal-hooks/pre/stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/start-port80-docker.sh 2>/dev/null || true
+    if [[ -d /etc/letsencrypt/renewal ]]; then
+        for rconf in /etc/letsencrypt/renewal/*.conf; do
+            [[ -f "$rconf" ]] || continue
+            if grep -Eq "(/run/just1knode|20-just1knode)" "$rconf" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*(pre_hook|post_hook)[[:space:]]*=.*(\/run\/just1knode|20-just1knode).*/d' "$rconf" 2>/dev/null || true
+            fi
+        done
+    fi
     rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api /etc/amnezia-api /opt/amnezia-api /etc/ssl/just1k_amnezia 2>/dev/null || true
     if [[ ! -e /etc/nginx/sites-enabled/default ]]; then
         if [[ -f /etc/nginx/sites-available/default.user.bak ]]; then
@@ -977,7 +1028,6 @@ uninstall_node() {
     rm -f "${nginx_conf_dir}/sites-enabled/just1k-amnezia.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/sites-available/just1k-amnezia.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/just1k-origin.conf" 2>/dev/null || true
-    rm -f "${nginx_conf_dir}/conf.d/origin.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/just1k-bootstrap.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/xhttp-map.conf" 2>/dev/null || true
     rm -rf "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" 2>/dev/null || true
@@ -1013,12 +1063,24 @@ uninstall_node() {
     if [[ -d "$certbot_dir" ]] && [[ -z "$(ls -A "$certbot_dir" 2>/dev/null)" ]]; then
         rmdir "$certbot_dir" 2>/dev/null || true
     fi
-    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" \
+    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/20-just1knode-restart-xray.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/05-just1knode-nginx.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/05-just1knode-nginx.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/01-stop-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/01-start-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/stop-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/start-port80-docker.sh" 2>/dev/null || true
+    if [[ -d "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal" ]]; then
+        for rconf in "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal"/*.conf; do
+            [[ -f "$rconf" ]] || continue
+            if grep -Eq "(/run/just1knode|20-just1knode)" "$rconf" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*(pre_hook|post_hook)[[:space:]]*=.*(\/run\/just1knode|20-just1knode).*/d' "$rconf" 2>/dev/null || true
+            fi
+        done
+    fi
 
     info "8/11. Удаление конфигурации ядра sysctl и восстановление параметров сети..."
     local sysctl_ipv6_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"

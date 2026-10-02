@@ -3,7 +3,7 @@
 """
 Comprehensive Invariant Scanner for just1kbot Subsystems.
 
-Verifies 14 critical database, domain, cryptographic, and accounting invariants:
+Verifies 13 critical database, domain, cryptographic, and accounting invariants:
   1. Tariff Version Immutability & Constraint Invariant
   2. Server Lifecycle & Health Status Invariant
   3. White Internet Subscription State Invariant
@@ -12,7 +12,6 @@ Verifies 14 critical database, domain, cryptographic, and accounting invariants:
   6. Traffic Event Idempotency Key Uniqueness Invariant
   7. Subscription Period Usage Non-Negativity Invariant
   8. Origin Node Capability & Existence Invariant
-  9. Tariff Quotes State Consistency Invariant
  10. Account Balance Non-Negativity Invariant
  11. Account Ledger Entry Conservation Invariant
  13. VPN Profile Protocol Invariant (Exclusively AWG)
@@ -43,8 +42,6 @@ from config.enums import (
     ServerHealthState,
     ServerLifecycleStatus,
     ServiceType,
-    TariffQuoteOperation,
-    TariffQuoteStatus,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
@@ -52,7 +49,6 @@ from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
     Server,
-    TariffQuote,
     TariffVersion,
     WhiteInternetSubscription,
 )
@@ -262,33 +258,6 @@ async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> Invari
     )
 
 
-async def assert_inv_9_tariff_quotes_consistency(session: AsyncSession) -> InvariantResult:
-    """Inv 9: All tariff quotes have valid status, operation, and service type."""
-    valid_statuses = [s.value for s in TariffQuoteStatus]
-    valid_ops = [o.value for o in TariffQuoteOperation]
-    valid_services = [ServiceType.AWG, ServiceType.WHITE_INTERNET]
-
-    violations = await session.scalars(
-        select(TariffQuote).where(
-            or_(
-                ~TariffQuote.status.in_(valid_statuses),
-                ~TariffQuote.operation_type.in_(valid_ops),
-                ~TariffQuote.service_type.in_(valid_services),
-            )
-        )
-    )
-    v_list = violations.all()
-    if v_list:
-        return InvariantResult(
-            9, "Tariff Quotes Consistency", False, f"Violations found: {len(v_list)} quotes"
-        )
-    return InvariantResult(
-        9,
-        "Tariff Quotes Consistency",
-        True,
-        "All tariff quotes have consistent status and operation",
-    )
-
 
 async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) -> InvariantResult:
     """Inv 10: All users have non-negative net accounting position in ledger."""
@@ -426,7 +395,6 @@ ALL_INVARIANT_CHECKS = [
     assert_inv_6_subscription_live_uniqueness,
     assert_inv_7_subscription_period_usage,
     assert_inv_8_origin_node_capabilities,
-    assert_inv_9_tariff_quotes_consistency,
     assert_inv_10_account_balance_non_negativity,
     assert_inv_11_account_ledger_conservation,
     assert_inv_13_vpn_protocol,

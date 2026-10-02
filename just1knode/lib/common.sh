@@ -103,6 +103,16 @@ install_nginx_if_missing() {
     fi
 }
 
+# Обнаружение Docker-контейнера, слушающего хостовый TCP-порт 80
+detect_host_port80_container() {
+    command -v docker >/dev/null 2>&1 || return 0
+    local matched
+    matched="$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -E '(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp' | head -n 1 || true)"
+    if [[ -n "$matched" ]]; then
+        echo "$matched" | awk -F'\t' '{print $1}'
+    fi
+}
+
 # Безопасная настройка UFW с детекцией SSH
 configure_safe_ufw() {
     local ports=("$@")
@@ -121,16 +131,51 @@ configure_safe_ufw() {
         ssh_port="$detected"
     fi
 
-    ufw allow "$ssh_port/tcp" >/dev/null 2>&1 || true
+    if ! ufw allow "$ssh_port/tcp" >/dev/null 2>&1; then
+        error "КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть SSH-порт $ssh_port/tcp в UFW! Активация фаервола отменена во избежание потери доступа."
+        return 1
+    fi
 
     for p in "${ports[@]}"; do
         ufw allow "$p" >/dev/null 2>&1 || true
     done
 
+    # Автодетекция веб-портов 80 и 443 (защита Caddy бота и вебхуков эквайринга при ко-локации)
+    local has_port80=0
+    local has_port443=0
+    if [[ -n "$(detect_host_port80_container 2>/dev/null || true)" ]] || (command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "just1kbot_caddy"); then
+        has_port80=1
+    fi
+    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Ports}} {{.Names}}' 2>/dev/null | grep -qE '(:443->|just1kbot_caddy)'; then
+        has_port443=1
+    fi
+
+    if [[ $has_port80 -eq 1 ]]; then
+        if ! ufw status 2>/dev/null | grep -qE "(^|[[:space:]])80/tcp[[:space:]]+ALLOW"; then
+            if ufw allow 80/tcp comment "http web service" >/dev/null 2>&1; then
+                log "Фаервол UFW: автоматически разрешен порт 80/tcp для активного веб-сервиса (Caddy)."
+            else
+                warn "Предупреждение: Не удалось добавить правило UFW для порта 80/tcp."
+            fi
+        fi
+    fi
+    if [[ $has_port443 -eq 1 ]]; then
+        if ! ufw status 2>/dev/null | grep -qE "(^|[[:space:]])443/tcp[[:space:]]+ALLOW"; then
+            if ufw allow 443/tcp comment "https web service" >/dev/null 2>&1; then
+                log "Фаервол UFW: автоматически разрешен порт 443/tcp для активного веб-сервиса (Caddy)."
+            else
+                warn "Предупреждение: Не удалось добавить правило UFW для порта 443/tcp."
+            fi
+        fi
+    fi
+
     # Включаем UFW, если он отключен
     if ! ufw status | grep -q "Status: active"; then
-        echo "y" | ufw enable >/dev/null 2>&1 || true
-        log "Фаервол UFW успешно активирован (SSH порт ${ssh_port} защищен от блокировки)."
+        if echo "y" | ufw enable >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+            log "Фаервол UFW успешно активирован (SSH порт ${ssh_port} защищен от блокировки)."
+        else
+            warn "Внимание: не удалось активировать фаервол UFW."
+        fi
     fi
 }
 
@@ -277,6 +322,11 @@ EOF
         sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
         sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1 || true
         sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+    fi
+    local ipv6_curr
+    ipv6_curr="$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")"
+    if [[ "$ipv6_curr" != "1" ]]; then
+        warn "Параметр net.ipv6.conf.all.disable_ipv6 не применился в ядре ноды (проверьте права или ограничения контейнера)."
     fi
     local icmp_curr
     icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"

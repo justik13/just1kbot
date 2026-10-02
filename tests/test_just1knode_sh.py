@@ -530,6 +530,85 @@ exit 0
         self.assertIn('echo -e "  ${RED}✗${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf', just1knode_sh)
         self.assertIn('failed=$((failed + 1))', just1knode_sh)
 
+    def test_doctor_ipv6_fails_closed_when_dropin_missing(self):
+        """Verify doctor IPv6 check fails closed if runtime=1 but drop-in is missing."""
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('11. Проверка отключения IPv6 (защита от утечек трафика)...', just1knode_sh)
+        self.assertIn('ipv6_persisted=0', just1knode_sh)
+        self.assertIn('echo -e "  ${RED}✗${NC} IPv6 отключен в ядре, но не зафиксирован в $sysctl_conf', just1knode_sh)
+        self.assertIn('net.ipv6.conf.all.disable_ipv6', just1knode_sh)
+
+    def test_configure_safe_ufw_fails_closed_on_ssh_port_error(self):
+        """Verify configure_safe_ufw fails closed if SSH port rule cannot be applied."""
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn('if ! ufw allow "$ssh_port/tcp" >/dev/null 2>&1; then', common_sh)
+        self.assertIn('return 1', common_sh)
+
+    def test_state_json_corruption_backup_preservation(self):
+        """Verify set_state_val preserves corrupted state file to .corrupted.bak without wiping."""
+        self._prepare_base_env()
+        state_file = self.state_dir / "state.json"
+        bak_file = self.state_dir / "state.json.corrupted.bak"
+
+        # Case 1: Corrupted non-JSON file
+        state_file.write_text("INVALID_JSON_CONTENT{{{", encoding="utf-8")
+        state_sh = (REPO_ROOT / "just1knode" / "lib" / "state.sh").read_text(encoding="utf-8")
+        py_match = re.search(r'python3 -c "(.*?)" "\$STATE_FILE"', state_sh, re.DOTALL)
+        self.assertIsNotNone(py_match, "python script inside set_state_val must be found")
+        py_code = py_match.group(1)
+
+        res = subprocess.run(
+            [sys.executable, "-c", py_code, str(state_file), "test_key", "test_val"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(res.returncode, 1, "Must exit with code 1 on corrupted state")
+        self.assertTrue(bak_file.exists(), "Backup .corrupted.bak must be created")
+        self.assertEqual(bak_file.read_text(encoding="utf-8"), "INVALID_JSON_CONTENT{{{")
+        self.assertEqual(state_file.read_text(encoding="utf-8"), "INVALID_JSON_CONTENT{{{")
+
+        # Case 2: 0-byte file must also be treated as corrupted (not wiped with {new_key: new_val})
+        bak_file.unlink(missing_ok=True)
+        state_file.write_text("", encoding="utf-8")
+        res0 = subprocess.run(
+            [sys.executable, "-c", py_code, str(state_file), "new_key", "new_val"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(res0.returncode, 1, "Must exit with code 1 on 0-byte state")
+        self.assertTrue(bak_file.exists(), "Backup .corrupted.bak must be created for 0-byte state")
+        self.assertEqual(state_file.read_text(encoding="utf-8"), "")
+        self.assertIn("Резервная копия сохранена в", res.stderr)
+        self.assertIn("Резервная копия сохранена в", res0.stderr)
+
+    def test_update_xray_core_uses_isolated_mktemp_directory(self):
+        """Verify update_xray_core avoids static /tmp paths and uses mktemp directory with cleanup."""
+        core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
+        self.assertIn('tmp_dir="$(mktemp -d /tmp/xray_update.XXXXXX', core_sh)
+        self.assertIn('rm -rf "$tmp_dir"', core_sh)
+        self.assertNotIn('/tmp/xray_update.zip', core_sh)
+        self.assertNotIn('/tmp/xray_new', core_sh)
+
+    def test_configure_safe_ufw_verifies_status_active(self):
+        """Verify configure_safe_ufw checks ufw status active before logging successful activation."""
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn('if echo "y" | ufw enable >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then', common_sh)
+        self.assertIn('warn "Внимание: не удалось активировать фаервол UFW."', common_sh)
+
+    def test_relay_setup_fails_closed_when_active_ufw_rejects_tunnel_rule(self):
+        """Verify relay setup fails closed (returns 1) if UFW is active and cannot open the tunnel port."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        self.assertIn('ufw status 2>/dev/null | grep -qi "Status: active"', relay_sh)
+        self.assertIn('Не удалось открыть порт туннеля', relay_sh)
+        self.assertIn('return 1', relay_sh)
+
+    def test_state_lock_file_uses_o_nofollow(self):
+        """Verify set_state_val opens lock file with O_NOFOLLOW to mitigate symlink races."""
+        state_sh = (REPO_ROOT / "just1knode" / "lib" / "state.sh").read_text(encoding="utf-8")
+        self.assertIn("getattr(os, 'O_NOFOLLOW', 0)", state_sh)
+
     def test_update_node_declares_is_menu_and_survives_set_u(self):
         """Verify update_node initializes local is_menu to prevent unbound variable under set -u."""
         core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
@@ -1982,10 +2061,21 @@ ensure_xrayapi_user
         # Fake camouflage site
         (self.www_html_dir / "index.html").write_text("<h1>Cloud Ingress Network Node</h1>", encoding="utf-8")
 
-        # Fake certbot hook
+        # Fake certbot hook & renewal conf
         hook_dir = self.letsencrypt_dir / "renewal-hooks" / "deploy"
         hook_dir.mkdir(parents=True, exist_ok=True)
         (hook_dir / "restart-xray-nginx.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (hook_dir / "20-just1knode-restart-xray.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        renewal_conf_dir = self.letsencrypt_dir / "renewal"
+        renewal_conf_dir.mkdir(parents=True, exist_ok=True)
+        (renewal_conf_dir / "relay.example.com.conf").write_text(
+            "[renewalparams]\npre_hook = sh -c '... /run/just1knode_caddy_was_paused ...'\npost_hook = sh -c '... 20-just1knode-restart-xray.sh ...'\naccount = abc123\n",
+            encoding="utf-8",
+        )
+        (renewal_conf_dir / "other.example.com.conf").write_text(
+            "[renewalparams]\npre_hook = /usr/local/bin/my-just1knode-monitor\naccount = other456\n",
+            encoding="utf-8",
+        )
 
         # Fake install dir & global bin
         fake_install_dir = Path(self.temp_dir) / "opt" / "just1knode"
@@ -2031,6 +2121,13 @@ ensure_xrayapi_user
         self.assertFalse((nginx_sites_avail / "default.user.bak").exists(), "default.user.bak must be removed after restore")
         self.assertFalse((self.www_html_dir / "index.html").exists(), "camouflage index.html must be removed")
         self.assertFalse((hook_dir / "restart-xray-nginx.sh").exists(), "certbot hook must be removed")
+        self.assertFalse((hook_dir / "20-just1knode-restart-xray.sh").exists(), "deploy hook 20-just1knode-restart-xray.sh must be removed")
+        conf_after = (renewal_conf_dir / "relay.example.com.conf").read_text(encoding="utf-8")
+        self.assertNotIn("pre_hook", conf_after, "inline pre_hook must be purged from renewal conf")
+        self.assertNotIn("post_hook", conf_after, "inline post_hook must be purged from renewal conf")
+        self.assertIn("account = abc123", conf_after, "other renewal parameters must be preserved")
+        other_after = (renewal_conf_dir / "other.example.com.conf").read_text(encoding="utf-8")
+        self.assertIn("pre_hook = /usr/local/bin/my-just1knode-monitor", other_after, "third-party custom hook must NOT be removed")
         self.assertFalse(fake_install_dir.exists(), "INSTALL_DIR must be removed")
         self.assertFalse(fake_global_bin.exists(), "JUST1KNODE_GLOBAL_BIN must be removed")
         self.assertFalse(self.backup_dir.exists(), "BACKUP_DIR must be removed when --purge-backups is passed")
@@ -2312,7 +2409,10 @@ remove_traffic_watchdog_timer
         self.assertIn('ufw delete allow 80/tcp', content)
 
         # 3. Dynamic container detection on host port 80 with fail-closed non-interactive mode and trap
-        self.assertIn("detect_host_port80_container()", content)
+        common_sh = REPO_ROOT / "just1knode" / "lib" / "common.sh"
+        common_content = common_sh.read_text(encoding="utf-8")
+        self.assertIn("detect_host_port80_container()", common_content)
+        self.assertIn("detect_host_port80_container", content)
         self.assertIn('pause_ans="N"', content)
         self.assertIn('read -rp', content)
         self.assertIn("trap 'if [[ -n", content)
@@ -2334,11 +2434,11 @@ remove_traffic_watchdog_timer
         self.assertIsNotNone(hook_match)
         self.assertNotIn('systemctl restart amnezia-api', hook_match.group(1))
 
-        # 7. Common lib installer purges default site immediately after apt install with cp -L
-        common_sh = REPO_ROOT / "just1knode" / "lib" / "common.sh"
-        common_content = common_sh.read_text(encoding="utf-8")
+        # 7. Common lib installer purges default site immediately after apt install with cp -L and protects web ports in UFW
         self.assertIn('cp -L "$def_site" "${NGINX_CONF_DIR:-/etc/nginx}/sites-available/default.user.bak"', common_content)
         self.assertIn('rm -f "$def_site"', common_content)
+        self.assertIn('ufw allow 80/tcp comment "http web service"', common_content)
+        self.assertIn('ufw allow 443/tcp comment "https web service"', common_content)
 
         # 8. Protocol version detection and display (differentiating awg2, awg3, awg3.1)
         self.assertIn("detect_awg_protocol_version()", content)
@@ -2590,6 +2690,13 @@ remove_traffic_watchdog_timer
         self.assertIn('--post-hook "$post_hook_cmd"', relay_sh)
         self.assertIn("openssl x509 -checkend 86400", relay_sh)
         self.assertIn("port80_was_open", relay_sh)
+        self.assertIn("detect_host_port80_container", relay_sh)
+        self.assertIn("/run/just1knode_caddy_was_paused", relay_sh)
+        self.assertIn('docker stop "$port80_container"', relay_sh)
+        self.assertIn(r'docker start \"\$c80\" >/dev/null 2>&1 && rm -f /run/just1knode_caddy_was_paused', relay_sh)
+        self.assertIn(r'grep -q \"^just1kbot_caddy\b\"', relay_sh)
+        self.assertIn(r'echo \"just1kbot_caddy\" > /run/just1knode_caddy_was_paused', relay_sh)
+        self.assertIn(r'(:80->|just1kbot_caddy)', relay_sh)
         # Ensure deploy hook checks RENEWED_LINEAGE against RELAY_SNI
         self.assertIn('[ "$(basename "$RENEWED_LINEAGE")" = "$RELAY_SNI" ]', relay_sh)
 

@@ -13,6 +13,12 @@ init_state_dir() {
     chown root:xrayapi "$STATE_DIR" 2>/dev/null || true
     chmod 2770 "$STATE_DIR" 2>/dev/null || true
 
+    for f in "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE"; do
+        if [[ -L "$f" ]]; then
+            rm -f "$f"
+        fi
+    done
+
     if [[ ! -f "$STATE_FILE" ]]; then
         echo "{}" > "$STATE_FILE"
     fi
@@ -23,10 +29,10 @@ init_state_dir() {
         echo "[]" > "$RELAYS_FILE"
     fi
 
-    chown root:xrayapi "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
+    chown -h root:xrayapi "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
     chmod 660 "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
-    find "$STATE_DIR" -name "*.lock" -exec chown root:xrayapi {} + 2>/dev/null || true
-    find "$STATE_DIR" -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
+    find "$STATE_DIR" -maxdepth 1 -name "*.lock" -exec chown -h root:xrayapi {} + 2>/dev/null || true
+    find "$STATE_DIR" -maxdepth 1 -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
 }
 
 set_state_val() {
@@ -52,7 +58,8 @@ def safe_arg(val):
 
 f, k, v = sys.argv[1], safe_arg(sys.argv[2]), safe_arg(sys.argv[3])
 lock_file = f + '.lock'
-lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o660)
+open_flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0)
+lock_fd = os.open(lock_file, open_flags, 0o660)
 try:
     import shutil
     shutil.chown(lock_file, user='root', group='xrayapi')
@@ -65,10 +72,33 @@ try:
     data = {}
     if os.path.exists(f):
         try:
+            if os.path.getsize(f) == 0:
+                raise ValueError('State file ' + str(f) + ' is empty (0 bytes)')
             with open(f, 'r', encoding='utf-8', errors='replace') as fp:
                 data = json.load(fp)
-        except Exception:
-            data = {}
+                if not isinstance(data, dict):
+                    raise ValueError('State file ' + str(f) + ' root must be a JSON object')
+        except Exception as e:
+            bak = f + '.corrupted.bak'
+            bak_saved = False
+            try:
+                if os.path.islink(bak) or os.path.lexists(bak):
+                    os.unlink(bak)
+                open_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
+                bak_fd = os.open(bak, open_flags, 0o600)
+                try:
+                    with open(f, 'rb') as src_fp, os.fdopen(bak_fd, 'wb') as dst_fp:
+                        dst_fp.write(src_fp.read())
+                    bak_saved = True
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            if bak_saved:
+                print('ОШИБКА: Поврежден файл состояния ' + str(f) + ' (' + str(e) + '). Резервная копия сохранена в ' + str(bak) + '. Запись прервана во избежание потери данных.', file=sys.stderr)
+            else:
+                print('ОШИБКА: Поврежден файл состояния ' + str(f) + ' (' + str(e) + '). Не удалось сохранить резервную копию. Запись прервана во избежание потери данных.', file=sys.stderr)
+            sys.exit(1)
     data[k] = v
     tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(f), suffix='.tmp')
     with os.fdopen(tmp_fd, 'w', encoding='utf-8', errors='replace') as fp:
@@ -148,9 +178,7 @@ get_node_status() {
 # Транзакционный манифест
 manifest_begin() {
     local extra_targets=("$@")
-    local txn_id="txn_$$"
-    TXN_DIR="/tmp/just1knode_${txn_id}"
-    rm -rf "$TXN_DIR"
+    TXN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/just1knode_txn_XXXXXX")"
     mkdir -p "$TXN_DIR/files"
     MANIFEST_LOG="$TXN_DIR/manifest.tsv"
     : > "$MANIFEST_LOG"
