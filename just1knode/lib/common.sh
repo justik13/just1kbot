@@ -103,6 +103,16 @@ install_nginx_if_missing() {
     fi
 }
 
+# Обнаружение Docker-контейнера, слушающего хостовый TCP-порт 80
+detect_host_port80_container() {
+    command -v docker >/dev/null 2>&1 || return 0
+    local matched
+    matched="$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -E '(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp' | head -n 1 || true)"
+    if [[ -n "$matched" ]]; then
+        echo "$matched" | awk -F'\t' '{print $1}'
+    fi
+}
+
 # Безопасная настройка UFW с детекцией SSH
 configure_safe_ufw() {
     local ports=("$@")
@@ -129,6 +139,29 @@ configure_safe_ufw() {
     for p in "${ports[@]}"; do
         ufw allow "$p" >/dev/null 2>&1 || true
     done
+
+    # Автодетекция веб-портов 80 и 443 (защита Caddy бота и вебхуков эквайринга при ко-локации)
+    local has_port80=0
+    local has_port443=0
+    if [[ -n "$(detect_host_port80_container 2>/dev/null || true)" ]] || (command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "just1kbot_caddy"); then
+        has_port80=1
+    fi
+    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Ports}} {{.Names}}' 2>/dev/null | grep -qE '(:443->|just1kbot_caddy)'; then
+        has_port443=1
+    fi
+
+    if [[ $has_port80 -eq 1 ]]; then
+        if ! ufw status 2>/dev/null | grep -qE "(^|[[:space:]])80/tcp[[:space:]]+ALLOW"; then
+            ufw allow 80/tcp comment "http web service" >/dev/null 2>&1 || true
+            log "Фаервол UFW: автоматически разрешен порт 80/tcp для активного веб-сервиса (Caddy)."
+        fi
+    fi
+    if [[ $has_port443 -eq 1 ]]; then
+        if ! ufw status 2>/dev/null | grep -qE "(^|[[:space:]])443/tcp[[:space:]]+ALLOW"; then
+            ufw allow 443/tcp comment "https web service" >/dev/null 2>&1 || true
+            log "Фаервол UFW: автоматически разрешен порт 443/tcp для активного веб-сервиса (Caddy)."
+        fi
+    fi
 
     # Включаем UFW, если он отключен
     if ! ufw status | grep -q "Status: active"; then

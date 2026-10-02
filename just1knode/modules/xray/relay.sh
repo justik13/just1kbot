@@ -124,8 +124,8 @@ fi
 EOF
     chmod 755 "${le_dir}/renewal-hooks/deploy/20-just1knode-restart-xray.sh"
 
-    local pre_hook_cmd="sh -c 'if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then touch /run/just1knode_nginx_was_active && systemctl stop nginx 2>/dev/null || true; fi; if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi \"Status: active\"; then if ! ufw status 2>/dev/null | grep -E \"(^|[[:space:]])80(/tcp)?[[:space:]]+ALLOW\" -q; then touch /run/just1knode_ufw_opened_80 && ufw allow 80/tcp comment \"just1knode certbot verification\" >/dev/null 2>&1 || true; fi; fi'"
-    local post_hook_cmd="sh -c 'if [ -f /run/just1knode_nginx_was_active ]; then rm -f /run/just1knode_nginx_was_active; command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true; fi; if [ -f /run/just1knode_ufw_opened_80 ]; then rm -f /run/just1knode_ufw_opened_80; ufw delete allow 80/tcp >/dev/null 2>&1 || true; ufw delete allow 80 >/dev/null 2>&1 || true; fi'"
+    local pre_hook_cmd="sh -c 'if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then touch /run/just1knode_nginx_was_active && systemctl stop nginx 2>/dev/null || true; fi; if command -v docker >/dev/null 2>&1; then c80=\$(docker ps --format \"{{.Names}}\t{{.Ports}}\" 2>/dev/null | grep -E \"(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp\" | head -n 1 | cut -f1 || true); if [ -n \"\$c80\" ]; then echo \"\$c80\" > /run/just1knode_caddy_was_paused && docker stop \"\$c80\" >/dev/null 2>&1 || true; fi; fi; if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi \"Status: active\"; then if ! ufw status 2>/dev/null | grep -E \"(^|[[:space:]])80(/tcp)?[[:space:]]+ALLOW\" -q; then touch /run/just1knode_ufw_opened_80 && ufw allow 80/tcp comment \"just1knode certbot verification\" >/dev/null 2>&1 || true; fi; fi'"
+    local post_hook_cmd="sh -c 'if [ -f /run/just1knode_nginx_was_active ]; then rm -f /run/just1knode_nginx_was_active; command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true; fi; if [ -f /run/just1knode_caddy_was_paused ]; then c80=\$(cat /run/just1knode_caddy_was_paused 2>/dev/null || true); rm -f /run/just1knode_caddy_was_paused; if [ -n \"\$c80\" ] && command -v docker >/dev/null 2>&1; then docker start \"\$c80\" >/dev/null 2>&1 || true; fi; fi; if [ -f /run/just1knode_ufw_opened_80 ]; then rm -f /run/just1knode_ufw_opened_80; ufw delete allow 80/tcp >/dev/null 2>&1 || true; ufw delete allow 80 >/dev/null 2>&1 || true; fi'"
 
     # 2. Если действующий сертификат для этого домена УЖЕ существует на хосте — используем его!
     if [[ -f "${le_dir}/live/${domain}/fullchain.pem" && -f "${le_dir}/live/${domain}/privkey.pem" ]]; then
@@ -192,6 +192,34 @@ except Exception:
         fi
     fi
 
+    # Обнаружение Docker-контейнера на порту 80 (например, Caddy бота)
+    local port80_container=""
+    local stopped_container=""
+    port80_container="$(detect_host_port80_container || true)"
+
+    if [[ -n "$port80_container" ]]; then
+        warn "Хостовый порт 80/tcp занят Docker-контейнером '${port80_container}'."
+        local pause_ans="N"
+        if [[ -t 0 ]]; then
+            read -rp "Временно приостановить контейнер '${port80_container}' на 10 сек для выпуска SSL? [y/N]: " pause_ans || true
+        else
+            log "Скрипт запущен в неинтерактивном режиме: автоматическая временная приостановка '${port80_container}' на время ACME-челленджа."
+            pause_ans="Y"
+        fi
+        if [[ "$pause_ans" =~ ^[Yy] ]]; then
+            log "Временная приостановка контейнера '${port80_container}'..."
+            if docker stop "$port80_container" >/dev/null 2>&1; then
+                stopped_container="$port80_container"
+                # Транзакционный trap для гарантированного запуска контейнера при сбое/прерывании
+                trap 'if [[ -n "'"$stopped_container"'" ]]; then docker start "'"$stopped_container"'" >/dev/null 2>&1 || true; fi' EXIT INT TERM
+            else
+                warn "Не удалось остановить контейнер '${port80_container}'. Standalone выпуск может завершиться ошибкой."
+            fi
+        else
+            warn "Остановка контейнера пропущена по выбору администратора. Standalone выпуск может завершиться ошибкой."
+        fi
+    fi
+
     local was_nginx_active=0
     if systemctl is-active --quiet nginx 2>/dev/null; then
         was_nginx_active=1
@@ -208,10 +236,22 @@ except Exception:
         systemctl start nginx 2>/dev/null || true
     fi
 
+    # Гарантированное возобновление работы контейнера сразу после попытки Certbot
+    if [[ -n "$stopped_container" ]]; then
+        log "Возобновление работы контейнера '${stopped_container}'..."
+        trap - EXIT INT TERM
+        if ! docker start "$stopped_container" >/dev/null 2>&1; then
+            error "КРИТИЧЕСКИЙ СБОЙ: Не удалось запустить Docker-контейнер '${stopped_container}'. Запустите его вручную: docker start ${stopped_container}"
+        fi
+    fi
+
     if [[ -f /run/just1knode_ufw_opened_80 ]]; then
         rm -f /run/just1knode_ufw_opened_80
-        ufw delete allow 80/tcp >/dev/null 2>&1 || true
-        ufw delete allow 80 >/dev/null 2>&1 || true
+        # Не удаляем правило 80/tcp, если на сервере работает веб-контейнер (например, Caddy бота)
+        if [[ -z "$(detect_host_port80_container 2>/dev/null || true)" ]] && ! (command -v docker >/dev/null 2>&1 && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "just1kbot_caddy"); then
+            ufw delete allow 80/tcp >/dev/null 2>&1 || true
+            ufw delete allow 80 >/dev/null 2>&1 || true
+        fi
     fi
 
     if [[ $cert_rc -ne 0 || ! -f "${le_dir}/live/${domain}/fullchain.pem" ]]; then

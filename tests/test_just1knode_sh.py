@@ -2384,7 +2384,10 @@ remove_traffic_watchdog_timer
         self.assertIn('ufw delete allow 80/tcp', content)
 
         # 3. Dynamic container detection on host port 80 with fail-closed non-interactive mode and trap
-        self.assertIn("detect_host_port80_container()", content)
+        common_sh = REPO_ROOT / "just1knode" / "lib" / "common.sh"
+        common_content = common_sh.read_text(encoding="utf-8")
+        self.assertIn("detect_host_port80_container()", common_content)
+        self.assertIn("detect_host_port80_container", content)
         self.assertIn('pause_ans="N"', content)
         self.assertIn('read -rp', content)
         self.assertIn("trap 'if [[ -n", content)
@@ -2406,11 +2409,11 @@ remove_traffic_watchdog_timer
         self.assertIsNotNone(hook_match)
         self.assertNotIn('systemctl restart amnezia-api', hook_match.group(1))
 
-        # 7. Common lib installer purges default site immediately after apt install with cp -L
-        common_sh = REPO_ROOT / "just1knode" / "lib" / "common.sh"
-        common_content = common_sh.read_text(encoding="utf-8")
+        # 7. Common lib installer purges default site immediately after apt install with cp -L and protects web ports in UFW
         self.assertIn('cp -L "$def_site" "${NGINX_CONF_DIR:-/etc/nginx}/sites-available/default.user.bak"', common_content)
         self.assertIn('rm -f "$def_site"', common_content)
+        self.assertIn('ufw allow 80/tcp comment "http web service"', common_content)
+        self.assertIn('ufw allow 443/tcp comment "https web service"', common_content)
 
         # 8. Protocol version detection and display (differentiating awg2, awg3, awg3.1)
         self.assertIn("detect_awg_protocol_version()", content)
@@ -2662,6 +2665,10 @@ remove_traffic_watchdog_timer
         self.assertIn('--post-hook "$post_hook_cmd"', relay_sh)
         self.assertIn("openssl x509 -checkend 86400", relay_sh)
         self.assertIn("port80_was_open", relay_sh)
+        self.assertIn("detect_host_port80_container", relay_sh)
+        self.assertIn("/run/just1knode_caddy_was_paused", relay_sh)
+        self.assertIn('docker stop "$port80_container"', relay_sh)
+        self.assertIn('docker start "$stopped_container"', relay_sh)
         # Ensure deploy hook checks RENEWED_LINEAGE against RELAY_SNI
         self.assertIn('[ "$(basename "$RENEWED_LINEAGE")" = "$RELAY_SNI" ]', relay_sh)
 
