@@ -1,28 +1,16 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from database.models import APIOperation, Server, VPNProfile
 from services.api_operations_queue import (
     ensure_delete_operation,
     resolve_profile_endpoint_snapshot,
 )
-from services.workers.api_operations import (
-    clear_alerted_dead_ops,
-    notify_dead_operation,
-    set_api_operations_bot,
-)
 
 
 class TestApiOperationsEndpointAndAlerts(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        clear_alerted_dead_ops()
-        set_api_operations_bot(None)
-
-    def tearDown(self):
-        clear_alerted_dead_ops()
-        set_api_operations_bot(None)
 
     async def test_resolve_profile_endpoint_snapshot_prefers_active_server_over_history(self):
         """Active Server row in DB is primary source of truth, ignoring stale historical snapshot."""
@@ -123,85 +111,3 @@ class TestApiOperationsEndpointAndAlerts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.api_url_snapshot, "https://nl.just1k.pro:8443")
         self.assertEqual(result.api_key_snapshot, "new-key")
 
-    async def test_notify_dead_operation_sends_telegram_alert_to_admins(self):
-        """Permanent operation failure dispatches formatted alert to all configured ADMIN_IDS."""
-        fake_bot = MagicMock()
-        set_api_operations_bot(fake_bot)
-
-        with patch("config.settings.get_settings") as mock_settings, patch(
-            "utils.telegram.safe_send_message", new_callable=AsyncMock
-        ) as mock_send:
-            mock_settings.return_value = MagicMock(ADMIN_IDS=[111, 222])
-
-            await notify_dead_operation(
-                operation_id=285,
-                operation_type="delete_peer",
-                server_id=2,
-                server_name="Нидерланды",
-                profile_id=104,
-                client_name="tg_100_p104_n2",
-                error_code="server_endpoint_changed",
-                error_message="endpoint snapshot mismatch",
-            )
-
-            self.assertEqual(mock_send.await_count, 2)
-            first_call_args = mock_send.await_args_list[0]
-            self.assertEqual(first_call_args.kwargs["chat_id"], 111)
-            msg_text = first_call_args.kwargs["text"]
-            self.assertIn("Сбой фоновой операции сервера", msg_text)
-            self.assertIn("Нидерланды", msg_text)
-            self.assertIn("delete_peer", msg_text)
-            self.assertIn("#285", msg_text)
-            self.assertIn("server_endpoint_changed", msg_text)
-
-    async def test_notify_dead_operation_deduplicates_alerts(self):
-        """Second alert for same operation_id is suppressed to avoid admin spam."""
-        fake_bot = MagicMock()
-        set_api_operations_bot(fake_bot)
-
-        with patch("config.settings.get_settings") as mock_settings, patch(
-            "utils.telegram.safe_send_message", new_callable=AsyncMock
-        ) as mock_send:
-            mock_settings.return_value = MagicMock(ADMIN_IDS=[111])
-
-            # Call 1: should send
-            await notify_dead_operation(
-                operation_id=285,
-                operation_type="delete_peer",
-                server_id=2,
-                server_name="Нидерланды",
-                profile_id=104,
-                client_name="tg_100_p104_n2",
-                error_code="server_endpoint_changed",
-                error_message="mismatch",
-            )
-            self.assertEqual(mock_send.await_count, 1)
-
-            # Call 2: duplicate op_id, must not send
-            await notify_dead_operation(
-                operation_id=285,
-                operation_type="delete_peer",
-                server_id=2,
-                server_name="Нидерланды",
-                profile_id=104,
-                client_name="tg_100_p104_n2",
-                error_code="server_endpoint_changed",
-                error_message="mismatch",
-            )
-            self.assertEqual(mock_send.await_count, 1)
-
-    async def test_notify_dead_operation_noop_when_no_bot(self):
-        """Without a running bot instance, notify_dead_operation exits cleanly."""
-        set_api_operations_bot(None)
-        with patch("utils.telegram.safe_send_message", new_callable=AsyncMock) as mock_send:
-            await notify_dead_operation(
-                operation_id=999,
-                operation_type="create_peer",
-                server_id=1,
-                server_name="DE",
-                profile_id=10,
-                client_name="test",
-                error_code="fatal",
-                error_message="fatal",
-            )
-            mock_send.assert_not_called()

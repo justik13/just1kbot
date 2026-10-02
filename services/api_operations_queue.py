@@ -410,21 +410,6 @@ async def claim_api_operations(
                 operation.updated_at = now
                 operation.last_error_code = "max_attempts_exhausted"
                 operation.locked_at = operation.locked_by = None
-                try:
-                    from services.workers.api_operations import notify_dead_operation
-
-                    await notify_dead_operation(
-                        operation_id=operation.id,
-                        operation_type=operation.operation_type,
-                        server_id=operation.server_id,
-                        server_name=operation.server_name_snapshot,
-                        profile_id=operation.profile_id,
-                        client_name=operation.client_name,
-                        error_code=operation.last_error_code,
-                        error_message="max attempts exhausted",
-                    )
-                except Exception:
-                    pass
         operations = (
             await session.execute(
                 select(APIOperation)

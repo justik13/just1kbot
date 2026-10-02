@@ -54,15 +54,22 @@ ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоно�
 
 ALERT_TITLE_WORKER_FAILED = "Фоновый воркер упал"
 
-ALERT_API_OPERATION_DEAD = """🚨 <b>Сбой фоновой операции сервера</b>
+ALERT_SYSTEM_ERROR_LOG = """🚨 <b>Ошибка в логах системы</b>
 
-🌍 <b>Сервер:</b> {server_name} (ID: {server_id})
-⚙️ <b>Операция:</b> <code>{op_type}</code> (ID: #{op_id})
-🔑 <b>Профиль ID:</b> {profile_id} ({client_name})
-⚠️ <b>Код ошибки:</b> <code>{error_code}</code>
-📝 <b>Детали:</b> <code>{error_details}</code>
+📍 <b>Уровень:</b> <code>{level}</code>
+🧩 <b>Модуль:</b> <code>{module}</code>
+📄 <b>Файл:</b> <code>{location}</code>{request_id_block}
 
-ℹ️ <i>Операция переведена в статус dead. Требуется внимание администратора.</i>"""
+⚠️ <b>Сообщение:</b>
+<code>{message}</code>{traceback_block}"""
+
+ALERT_LOG_REQUEST_ID_LINE = """
+🆔 <b>Request ID:</b> <code>{request_id}</code>"""
+
+ALERT_LOG_TRACEBACK_BLOCK = """
+
+🔍 <b>Стек вызова:</b>
+<pre>{traceback}</pre>"""
 
 ALERT_TRAFFIC_OVERUSAGE = """⚠️ <b>Fair Usage Policy: Превышение квоты трафика!</b>
 ━━━━━━━━━━━━━━━━━━━━
