@@ -56,7 +56,7 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
     """Test device slot purchase (tier upgrade) business logic and ledger invariants."""
 
     def setUp(self):
-        self.now = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+        self.now = datetime.now(timezone.utc)
         self.user = User(id=42, telegram_id=111222, is_banned=False, is_deleted=False)
         self.sub = WhiteInternetSubscription(
             id=1,
@@ -293,7 +293,7 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
     """Test renewal with preserved device limits, dynamic pricing, and quota caps."""
 
     def setUp(self):
-        self.now = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+        self.now = datetime.now(timezone.utc)
         self.user = User(id=42, telegram_id=111222, is_banned=False, is_deleted=False)
         self.server = Server(
             id=10,
@@ -513,7 +513,7 @@ class TestWhiteInternetAdminAndCooldown(unittest.IsolatedAsyncioTestCase):
 
     async def test_reset_devices_cooldown_enforcement(self):
         mock_session = AsyncMock()
-        now = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         sub = WhiteInternetSubscription(
             id=1,
             user_id=42,
