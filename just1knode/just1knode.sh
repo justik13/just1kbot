@@ -55,17 +55,30 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
             archive_url="${JUST1KBOT_REPO_URL}/archive/refs/heads/${JUST1KBOT_REF}.tar.gz"
         fi
         
-        tmp_tar="/tmp/just1knode_boot_$$.tar.gz"
-        tmp_extract="/tmp/just1knode_extract_$$"
+        local tmp_tar
+        tmp_tar="$(mktemp /tmp/just1knode_boot.XXXXXX.tar.gz 2>/dev/null || mktemp)"
+        local tmp_extract
+        tmp_extract="$(mktemp -d /tmp/just1knode_extract.XXXXXX 2>/dev/null || mktemp -d)"
         rm -rf "$tmp_tar" "$tmp_extract"
         mkdir -p "$tmp_extract"
         
+        local download_ok=0
         if command -v curl >/dev/null 2>&1; then
-            curl -fsSL "$archive_url" -o "$tmp_tar"
+            if curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar"; then
+                download_ok=1
+            fi
         elif command -v wget >/dev/null 2>&1; then
-            wget -qO "$tmp_tar" "$archive_url"
+            if wget -q --timeout=120 --tries=2 -O "$tmp_tar" "$archive_url"; then
+                download_ok=1
+            fi
         else
             echo "Ошибка: для установки требуется curl или wget." >&2
+            exit 1
+        fi
+        
+        if [[ $download_ok -ne 1 || ! -f "$tmp_tar" ]]; then
+            rm -rf "$tmp_tar" "$tmp_extract"
+            echo "Ошибка: не удалось скачать архив репозитория ($archive_url)." >&2
             exit 1
         fi
         
@@ -769,6 +782,9 @@ if os.path.exists(rf):
         echo -e "  ${GREEN}✔${NC} ICMP Echo отключен (стелс-режим активен в ядре и сохранен в drop-in)"
     elif [[ "$icmp_val" == "1" ]]; then
         echo -e "  ${RED}✗${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf (до перезагрузки, выполните: just1knode update)"
+        failed=$((failed + 1))
+    elif [[ "$icmp_persisted" -eq 1 ]]; then
+        echo -e "  ${RED}✗${NC} Рассинхронизация: ICMP Echo отключен в $sysctl_conf, но активен в ядре (выполните: just1knode update)"
         failed=$((failed + 1))
     else
         echo -e "  ${YELLOW}i${NC} ICMP Echo активен (стандартный режим ответа на ping; для включения стелс-режима выполните: just1knode update)"

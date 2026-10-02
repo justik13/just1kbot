@@ -148,7 +148,7 @@ just1kbot config               # Открыть .env в редакторе с п
 just1kbot nginx-config         # Настроить конфигурацию для внешнего Nginx (Reverse Proxy)
 just1kbot doctor               # Проверить сеть, DNS, SSL-сертификаты и доступ к Telegram API
 just1kbot preflight            # Проверить корректность переменных в .env
-just1kbot clean                # Удалить неиспользуемые Docker-образы и кэш сборщика
+just1kbot clean                # Удалить неиспользуемые Docker-образы проекта
 just1kbot uninstall            # Полное удаление проекта с подтверждением и очисткой томов
 ```
 

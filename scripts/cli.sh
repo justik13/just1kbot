@@ -15,7 +15,7 @@
 #   just1kbot start         - Запустить все контейнеры
 #   just1kbot stop          - Остановить сервисы
 #   just1kbot doctor        - Диагностика сети, SSL, портов и Telegram API
-#   just1kbot clean         - Очистить старые слои Docker
+#   just1kbot clean         - Очистить неиспользуемые Docker-образы
 #   just1kbot uninstall     - Полное безопасное удаление Just1kBot с сервера
 #
 # =============================================================================
@@ -506,8 +506,11 @@ cmd_nginx_config() {
         warn "По умолчанию Just1kBot использует автоматический Caddy со встроенным SSL."
         warn "Настройка Nginx требуется ТОЛЬКО если на сервере уже работает внешний Nginx для других сайтов."
         echo -n "Переключить Just1kBot с Caddy на системный Nginx? (y/N): "
-        local answer
-        read -r answer
+        local answer=""
+        if ! read -r answer; then
+            info "Операция отменена: нет интерактивного ввода."
+            return 0
+        fi
         if [[ "$answer" != "y" && "$answer" != "Y" && "$answer" != "yes" && "$answer" != "YES" ]]; then
             info "Операция отменена. Бот продолжает работать через Caddy."
             return 0
@@ -1870,20 +1873,13 @@ cmd_doctor() {
 
 # --- 9. Очистка диска ---
 cmd_clean() {
-    echo -e "\n${BOLD}${BLUE}=== 🧹 ОЧИСТКА ДИСКА И КЭША JUST1KBOT ===${NC}\n"
+    echo -e "\n${BOLD}${BLUE}=== 🧹 ОЧИСТКА НЕИСПОЛЬЗУЕМЫХ ОБРАЗОВ DOCKER ===${NC}\n"
     info "Удаление неиспользуемых образов Docker..."
-    docker image prune -f
-    info "Очистка кэша сборщика Docker (BuildKit)..."
-    docker builder prune -af --filter "until=24h" 2>/dev/null || docker builder prune -f 2>/dev/null || true
-    if command -v journalctl >/dev/null 2>&1; then
-        info "Сжатие системных журналов systemd journal (до 150M)..."
-        run_privileged journalctl --vacuum-size=150M 2>/dev/null || true
+    if ! docker image prune -f; then
+        error "Не удалось удалить неиспользуемые образы Docker."
+        return 1
     fi
-    if command -v apt-get >/dev/null 2>&1; then
-        info "Очистка кэша пакетов apt-get..."
-        run_privileged apt-get clean 2>/dev/null || true
-    fi
-    log "Дисковое пространство успешно оптимизировано."
+    log "Неиспользуемые образы Docker успешно удалены."
 }
 
 # --- 10. Полное удаление проекта (Uninstall) ---
@@ -2221,13 +2217,11 @@ interactive_menu() {
         echo -e "  [${BOLD}5${NC}] ⚡ ${BOLD}Перезапуск сервисов${NC} (Restart Bot / Restart All)"
         echo -e "  [${BOLD}6${NC}] 🔑 ${BOLD}Конфигурация${NC} (Редактировать .env файл с reload)"
         echo -e "  [${BOLD}7${NC}] 🩺 ${BOLD}Диагностика (Doctor)${NC} (Проверка DNS, SSL, портов и Telegram API)"
-        echo -e "  [${BOLD}8${NC}] 🧹 ${BOLD}Очистить дисковый кэш${NC} (Docker builder, images, journalctl, apt)"
-        echo -e "  [${BOLD}9${NC}] 🌐 ${BOLD}Интеграция с Nginx${NC} (Переключить с Caddy на системный Nginx)"
-        echo -e "  [${BOLD}10${NC}] 🗑️  ${BOLD}Полное удаление${NC} (Uninstall Just1kBot с сервера)"
+        echo -e "  [${BOLD}8${NC}] 🗑️  ${BOLD}Полное удаление${NC} (Uninstall Just1kBot с сервера)"
         echo -e "  [${BOLD}0${NC}] ❌ ${BOLD}Выход${NC}"
         echo ""
         echo -e "${CYAN}────────────────────────────────────────────────────────────────────────────────${NC}"
-        read -r -p "Выберите действие [0-10]: " choice
+        read -r -p "Выберите действие [0-8]: " choice
 
         case "$choice" in
             1)
@@ -2295,15 +2289,7 @@ interactive_menu() {
                 fi
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
-            8)
-                cmd_clean || true
-                read -r -p "Нажмите Enter для возврата в меню..."
-                ;;
-            9)
-                cmd_nginx_config || true
-                read -r -p "Нажмите Enter для возврата в меню..."
-                ;;
-            10|uninstall)
+            8|10|uninstall)
                 if ! cmd_uninstall; then
                     warn "Операция удаления отменена или завершилась с ошибкой."
                 fi

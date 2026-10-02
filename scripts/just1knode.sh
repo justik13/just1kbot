@@ -38,18 +38,23 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
     else
         archive_url="${JUST1KBOT_REPO_URL}/archive/refs/heads/${JUST1KBOT_REF}.tar.gz"
     fi
-    tmp_tar="/tmp/just1knode_boot_$$.tar.gz"
-    tmp_extract="/tmp/just1knode_extract_$$"
+    tmp_tar="$(mktemp /tmp/just1knode_boot.XXXXXX.tar.gz 2>/dev/null || mktemp)"
+    tmp_extract="$(mktemp -d /tmp/just1knode_extract.XXXXXX 2>/dev/null || mktemp -d)"
     rm -rf "$tmp_tar" "$tmp_extract"
     mkdir -p "$tmp_extract"
     echo -e "\033[0;36m[i]\033[0m Модули just1knode не обнаружены в /opt/just1knode."
     echo -e "\033[0;36m[i]\033[0m Загрузка и распаковка компонентов с GitHub (${JUST1KBOT_REF})..."
+    local download_ok=0
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$archive_url" -o "$tmp_tar"
+        if curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar"; then
+            download_ok=1
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$tmp_tar" "$archive_url"
+        if wget -q --timeout=120 --tries=2 -O "$tmp_tar" "$archive_url"; then
+            download_ok=1
+        fi
     fi
-    if [[ -f "$tmp_tar" ]]; then
+    if [[ $download_ok -eq 1 && -f "$tmp_tar" ]]; then
         tar -xzf "$tmp_tar" -C "$tmp_extract" --strip-components=1
         cp -r "$tmp_extract/just1knode"/* "$INSTALL_DIR/"
         if [[ -d "$tmp_extract/scripts" ]]; then

@@ -39,7 +39,8 @@ download_and_verify_xray() {
 }
 
 install_xray_binaries() {
-    local tmp_zip="/tmp/xray_install.zip"
+    local tmp_zip
+    tmp_zip="$(mktemp /tmp/xray_install.XXXXXX.zip 2>/dev/null || mktemp)"
     download_and_verify_xray "$tmp_zip"
 
     mkdir -p "$XRAY_CONFIG_DIR" "$XRAY_SHARE_DIR" "$(dirname "$XRAY_BIN")"
@@ -154,8 +155,10 @@ update_node() {
     log "Загрузка и обновление модулей just1knode из репозитория GitHub..."
     local repo_url="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
     local ref="${JUST1KBOT_REF:-main}"
-    local tmp_tar="/tmp/just1knode_update_$$.tar.gz"
-    local tmp_dir="/tmp/just1knode_update_dir_$$"
+    local tmp_tar
+    tmp_tar="$(mktemp /tmp/just1knode_update.XXXXXX.tar.gz 2>/dev/null || mktemp)"
+    local tmp_dir
+    tmp_dir="$(mktemp -d /tmp/just1knode_update_dir.XXXXXX 2>/dev/null || mktemp -d)"
 
     rm -rf "$tmp_tar" "$tmp_dir"
     mkdir -p "$tmp_dir"
@@ -168,7 +171,7 @@ update_node() {
     fi
 
     local download_ok=0
-    if curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar" 2>/dev/null || wget -q --timeout=120 -O "$tmp_tar" "$archive_url" 2>/dev/null; then
+    if curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar" 2>/dev/null || wget -q --timeout=120 --tries=2 -O "$tmp_tar" "$archive_url" 2>/dev/null; then
         download_ok=1
     fi
 
