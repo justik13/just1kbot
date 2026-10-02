@@ -400,9 +400,18 @@ cmd_preflight() {
 
     local caddy_running
     caddy_running=$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo "")
-    if [[ "$caddy_running" != "running" ]] && command -v python3 >/dev/null 2>&1; then
-        local port_conflict
-        port_conflict=$(python3 -c "
+    if [[ "$caddy_running" != "running" ]]; then
+        local port_conflict=""
+        for p in 80 443; do
+            local p_proc
+            p_proc=$(ss -tlnp 2>/dev/null | grep -E ":${p}\b" || netstat -tlnp 2>/dev/null | grep -E ":${p}\b" || true)
+            if [[ -n "$p_proc" ]] && echo "$p_proc" | grep -qvE "docker|docker-proxy"; then
+                port_conflict="${p}:Занят сторонним процессом хоста: ${p_proc}"
+                break
+            fi
+        done
+        if [[ -z "$port_conflict" ]] && command -v python3 >/dev/null 2>&1; then
+            port_conflict=$(python3 -c "
 import socket, errno
 
 for p in [80, 443]:
@@ -432,6 +441,8 @@ for p in [80, 443]:
         except Exception:
             pass
 " 2>/dev/null || echo "")
+        fi
+
         if [[ -n "$port_conflict" ]]; then
             print_ai_diagnostic_report \
                 "Ports 80/443" \
