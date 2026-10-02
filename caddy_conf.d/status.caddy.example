@@ -1,0 +1,21 @@
+# Пример подключения страницы статуса (Uptime Kuma) через Caddy
+# Для активации:
+# 1. Скопируйте этот файл: cp status.caddy.example status.caddy
+# 2. Замените status.example.com на ваш реальный домен страницы статуса
+# 3. Примените изменения: docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile
+
+http://status.example.com {
+	redir https://{host}{uri} permanent
+}
+
+status.example.com {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		-Server
+	}
+	reverse_proxy uptime-kuma:3001
+}

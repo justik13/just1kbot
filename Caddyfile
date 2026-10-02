@@ -7,7 +7,7 @@
 }
 
 http:// {
-	@domain host {$DOMAIN} {$STATUS_DOMAIN:status.just1k.pro}
+	@domain host {$DOMAIN}
 	redir @domain https://{host}{uri} permanent
 	abort
 }
@@ -71,13 +71,5 @@ http:// {
 	}
 }
 
-{$STATUS_DOMAIN:status.just1k.pro} {
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "no-referrer"
-		-Server
-	}
-	reverse_proxy uptime-kuma:3001
-}
+import conf.d/*.caddy
 

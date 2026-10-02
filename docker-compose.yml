@@ -161,9 +161,9 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
-      STATUS_DOMAIN: ${STATUS_DOMAIN:-status.just1k.pro}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy_conf.d:/etc/caddy/conf.d:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

@@ -85,22 +85,26 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("http:// {", caddyfile)
         self.assertIn("abort", caddyfile)
 
-    def test_caddy_status_domain_ingress_and_zero_signature(self):
+    def test_caddy_modular_conf_d_and_uptime_kuma_integration(self):
         root = Path(__file__).parents[1]
         caddyfile = (root / "Caddyfile").read_text(encoding="utf-8")
         compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
         cli_sh = (root / "scripts" / "cli.sh").read_text(encoding="utf-8")
+        example_caddy = (root / "caddy_conf.d" / "status.caddy.example").read_text(encoding="utf-8")
 
-        # 1. Caddyfile ingress and upstream
-        self.assertIn("{$STATUS_DOMAIN:status.just1k.pro}", caddyfile)
-        self.assertIn("reverse_proxy uptime-kuma:3001", caddyfile)
-        self.assertIn("-Server", caddyfile)
+        # 1. Caddyfile modular import
+        self.assertIn("import conf.d/*.caddy", caddyfile)
 
-        # 2. docker-compose environment pass-through
-        self.assertIn("STATUS_DOMAIN: ${STATUS_DOMAIN:-status.just1k.pro}", compose)
+        # 2. docker-compose mounts caddy_conf.d into /etc/caddy/conf.d
+        self.assertIn("./caddy_conf.d:/etc/caddy/conf.d:ro", compose)
 
         # 3. scripts/cli.sh auto-connects uptime-kuma to frontend_net
         self.assertIn("docker network connect just1kbot_frontend_net uptime-kuma", cli_sh)
+
+        # 4. Example configuration contains security headers and upstream
+        self.assertIn("reverse_proxy uptime-kuma:3001", example_caddy)
+        self.assertIn("-Server", example_caddy)
+        self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive"', example_caddy)
 
     def test_just1knode_origin_bot_ip_cli_support(self):
         root = Path(__file__).parents[1]
