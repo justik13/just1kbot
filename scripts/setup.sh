@@ -306,11 +306,13 @@ install_dependencies() {
         info "Docker не обнаружен. Начинаем автоматическую установку Docker Engine..."
         wait_for_apt_locks
         local installed_docker=0
-        if curl -fsSL https://get.docker.com -o /tmp/get-docker.sh 2>/dev/null; then
-            if sh /tmp/get-docker.sh >/dev/null 2>&1; then
+        local tmp_get_docker
+        tmp_get_docker="$(mktemp /tmp/get-docker.XXXXXX.sh 2>/dev/null || mktemp)"
+        if curl -fsSL https://get.docker.com -o "$tmp_get_docker" 2>/dev/null; then
+            if sh "$tmp_get_docker" >/dev/null 2>&1; then
                 installed_docker=1
             fi
-            rm -f /tmp/get-docker.sh
+            rm -f "$tmp_get_docker"
         fi
         if (( installed_docker == 0 )); then
             info "Установка Docker через стандартный репозиторий системы..."
@@ -371,11 +373,25 @@ install_dependencies() {
 # --- Проверка портов 80 и 443 для Caddy (Fail-Closed) ---
 check_ports_available() {
     for port in 80 443; do
+        # 1. Если порт уже слушается нашим собственным Caddy — это штатное состояние при повторной установке
+        local is_our_caddy=0
+        if command -v docker >/dev/null 2>&1; then
+            local caddy_cid
+            caddy_cid=$(docker ps -q -f name=^just1kbot_caddy$ 2>/dev/null | head -n 1 || true)
+            if [[ -n "$caddy_cid" ]] && docker port "$caddy_cid" "$port" 2>/dev/null | grep -q .; then
+                is_our_caddy=1
+            fi
+        fi
+        if [[ $is_our_caddy -eq 1 ]]; then
+            log "Порт $port слушается собственным веб-сервером Caddy (just1kbot_caddy: running)."
+            continue
+        fi
+
         local is_occupied=0
         local proc=""
         proc=$(ss -tlnp 2>/dev/null | grep -E ":${port}\b" || netstat -tlnp 2>/dev/null | grep -E ":${port}\b" || true)
 
-        if [[ -n "$proc" ]] && echo "$proc" | grep -qvE "docker|docker-proxy"; then
+        if [[ -n "$proc" ]]; then
             is_occupied=1
         elif command -v python3 >/dev/null 2>&1; then
             if ! python3 -c "
@@ -399,15 +415,18 @@ finally:
             local found_srv=""
             for srv in nginx apache2 lighttpd caddy; do
                 if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$srv" 2>/dev/null; then
-                    found_srv="$srv"
-                    warn "Обнаружена активная системная служба '$srv', занимающая порт $port."
-                    read -r -p "Остановить и отключить системную службу '$srv' для работы Just1kBot Caddy? (y/N): " confirm_stop
-                    if [[ "$confirm_stop" =~ ^[Yy]$ ]]; then
-                        systemctl stop "$srv" 2>/dev/null || true
-                        systemctl disable "$srv" 2>/dev/null || true
-                        log "Служба $srv остановлена."
+                    # Предлагаем остановить службу только если она действительно упоминается в ss proc
+                    if [[ -n "$proc" ]] && echo "$proc" | grep -qiE "\b${srv}\b"; then
+                        found_srv="$srv"
+                        warn "Обнаружена активная системная служба '$srv', занимающая порт $port."
+                        read -r -p "Остановить и отключить системную службу '$srv' для работы Just1kBot Caddy? (y/N): " confirm_stop
+                        if [[ "$confirm_stop" =~ ^[Yy]$ ]]; then
+                            systemctl stop "$srv" 2>/dev/null || true
+                            systemctl disable "$srv" 2>/dev/null || true
+                            log "Служба $srv остановлена."
+                        fi
+                        break
                     fi
-                    break
                 fi
             done
 
@@ -415,7 +434,7 @@ finally:
             local still_busy=0
             local proc_recheck=""
             proc_recheck=$(ss -tlnp 2>/dev/null | grep -E ":${port}\b" || netstat -tlnp 2>/dev/null | grep -E ":${port}\b" || true)
-            if [[ -n "$proc_recheck" ]] && echo "$proc_recheck" | grep -qvE "docker|docker-proxy"; then
+            if [[ -n "$proc_recheck" ]]; then
                 still_busy=1
             elif command -v python3 >/dev/null 2>&1; then
                 if ! python3 -c "

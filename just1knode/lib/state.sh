@@ -52,7 +52,8 @@ def safe_arg(val):
 
 f, k, v = sys.argv[1], safe_arg(sys.argv[2]), safe_arg(sys.argv[3])
 lock_file = f + '.lock'
-lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o660)
+open_flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0)
+lock_fd = os.open(lock_file, open_flags, 0o660)
 try:
     import shutil
     shutil.chown(lock_file, user='root', group='xrayapi')
@@ -73,6 +74,7 @@ try:
                     raise ValueError('State file ' + str(f) + ' root must be a JSON object')
         except Exception as e:
             bak = f + '.corrupted.bak'
+            bak_saved = False
             try:
                 if os.path.islink(bak) or os.path.lexists(bak):
                     os.unlink(bak)
@@ -81,11 +83,15 @@ try:
                 try:
                     with open(f, 'rb') as src_fp, os.fdopen(bak_fd, 'wb') as dst_fp:
                         dst_fp.write(src_fp.read())
+                    bak_saved = True
                 except Exception:
                     pass
             except Exception:
                 pass
-            print('ОШИБКА: Поврежден файл состояния ' + str(f) + ' (' + str(e) + '). Резервная копия сохранена в ' + str(bak) + '. Запись прервана во избежание потери данных.', file=sys.stderr)
+            if bak_saved:
+                print('ОШИБКА: Поврежден файл состояния ' + str(f) + ' (' + str(e) + '). Резервная копия сохранена в ' + str(bak) + '. Запись прервана во избежание потери данных.', file=sys.stderr)
+            else:
+                print('ОШИБКА: Поврежден файл состояния ' + str(f) + ' (' + str(e) + '). Не удалось сохранить резервную копию. Запись прервана во избежание потери данных.', file=sys.stderr)
             sys.exit(1)
     data[k] = v
     tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(f), suffix='.tmp')

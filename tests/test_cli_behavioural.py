@@ -1593,6 +1593,70 @@ check_ports_available
         self.assertEqual(proc.returncode, 1)
         self.assertIn("все еще занят сторонним процессом", proc.stderr + proc.stdout)
 
+    def test_setup_port_guard_accepts_own_caddy_container(self):
+        """check_ports_available must succeed without error when ports 80/443 are bound by just1kbot_caddy container."""
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            '#!/bin/bash\n'
+            'if [[ "$1" == "ps" && "$*" =~ "name=^just1kbot_caddy$" ]]; then echo "caddy_cid_123"; exit 0; fi\n'
+            'if [[ "$1" == "port" && "$2" == "caddy_cid_123" ]]; then echo "0.0.0.0:$3"; exit 0; fi\n'
+            'exit 0\n',
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/setup.sh"
+check_ports_available
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"Failed: {proc.stderr}\n{proc.stdout}")
+        self.assertIn("слушается собственным веб-сервером Caddy (just1kbot_caddy: running)", proc.stdout)
+
+    def test_setup_port_guard_does_not_prompt_stopping_unrelated_service(self):
+        """check_ports_available must not prompt to stop an unrelated active systemd service when ss shows a different daemon."""
+        ss_bin = self.bin_dir / "ss"
+        ss_bin.write_text(
+            '#!/bin/bash\necho "LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\\"unrelated-app\\",pid=555,fd=3))"\nexit 0\n',
+            encoding="utf-8",
+        )
+        ss_bin.chmod(0o755)
+
+        # Mock systemctl as if nginx is active
+        systemctl_bin = self.bin_dir / "systemctl"
+        systemctl_bin.write_text(
+            '#!/bin/bash\n'
+            'if [[ "$1" == "is-active" && "$3" == "nginx" ]]; then exit 0; fi\n'
+            'if [[ "$1" == "stop" ]]; then echo "STOP_CALLED" >> /tmp/systemctl_stop.log; exit 0; fi\n'
+            'exit 1\n',
+            encoding="utf-8",
+        )
+        systemctl_bin.chmod(0o755)
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/setup.sh"
+check_ports_available
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertNotIn("Остановить и отключить системную службу 'nginx'", proc.stdout + proc.stderr)
+        self.assertIn("все еще занят сторонним процессом", proc.stderr + proc.stdout)
 
     def test_apply_sysctl_hardening_preserves_custom_settings(self):
         """apply_sysctl_hardening must preserve custom settings in sysctl drop-in

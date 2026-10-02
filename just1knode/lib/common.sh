@@ -132,8 +132,11 @@ configure_safe_ufw() {
 
     # Включаем UFW, если он отключен
     if ! ufw status | grep -q "Status: active"; then
-        echo "y" | ufw enable >/dev/null 2>&1 || true
-        log "Фаервол UFW успешно активирован (SSH порт ${ssh_port} защищен от блокировки)."
+        if echo "y" | ufw enable >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+            log "Фаервол UFW успешно активирован (SSH порт ${ssh_port} защищен от блокировки)."
+        else
+            warn "Внимание: не удалось активировать фаервол UFW."
+        fi
     fi
 }
 

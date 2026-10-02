@@ -580,6 +580,27 @@ exit 0
         self.assertEqual(res0.returncode, 1, "Must exit with code 1 on 0-byte state")
         self.assertTrue(bak_file.exists(), "Backup .corrupted.bak must be created for 0-byte state")
         self.assertEqual(state_file.read_text(encoding="utf-8"), "")
+        self.assertIn("Резервная копия сохранена в", res.stderr)
+        self.assertIn("Резервная копия сохранена в", res0.stderr)
+
+    def test_update_xray_core_uses_isolated_mktemp_directory(self):
+        """Verify update_xray_core avoids static /tmp paths and uses mktemp directory with cleanup."""
+        core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
+        self.assertIn('tmp_dir="$(mktemp -d /tmp/xray_update.XXXXXX', core_sh)
+        self.assertIn('rm -rf "$tmp_dir"', core_sh)
+        self.assertNotIn('/tmp/xray_update.zip', core_sh)
+        self.assertNotIn('/tmp/xray_new', core_sh)
+
+    def test_configure_safe_ufw_verifies_status_active(self):
+        """Verify configure_safe_ufw checks ufw status active before logging successful activation."""
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn('if echo "y" | ufw enable >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then', common_sh)
+        self.assertIn('warn "Внимание: не удалось активировать фаервол UFW."', common_sh)
+
+    def test_state_lock_file_uses_o_nofollow(self):
+        """Verify set_state_val opens lock file with O_NOFOLLOW to mitigate symlink races."""
+        state_sh = (REPO_ROOT / "just1knode" / "lib" / "state.sh").read_text(encoding="utf-8")
+        self.assertIn("getattr(os, 'O_NOFOLLOW', 0)", state_sh)
 
     def test_update_node_declares_is_menu_and_survives_set_u(self):
         """Verify update_node initializes local is_menu to prevent unbound variable under set -u."""

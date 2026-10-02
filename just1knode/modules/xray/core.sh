@@ -83,15 +83,18 @@ update_xray_core() {
     init_state_dir
     log "Текущая версия Xray: $($XRAY_BIN version 2>/dev/null | head -n 1 || echo 'не установлена')"
 
-    local tmp_zip="/tmp/xray_update.zip"
+    local tmp_dir
+    tmp_dir="$(mktemp -d /tmp/xray_update.XXXXXX 2>/dev/null || mktemp -d)"
+    local tmp_zip="${tmp_dir}/xray.zip"
+    local tmp_extract="${tmp_dir}/extract"
+    mkdir -p "$tmp_extract"
     download_and_verify_xray "$tmp_zip"
 
-    mkdir -p /tmp/xray_new
-    unzip -q -o "$tmp_zip" xray -d /tmp/xray_new/
-    chmod +x /tmp/xray_new/xray
+    unzip -q -o "$tmp_zip" xray -d "${tmp_extract}/"
+    chmod +x "${tmp_extract}/xray"
 
     log "Проверка текущей конфигурации новым бинарником..."
-    if /tmp/xray_new/xray run -test -config "$XRAY_CONFIG"; then
+    if "${tmp_extract}/xray" run -test -config "$XRAY_CONFIG"; then
         log "Тест пройден успешно. Создание резервной копии старого бинарника..."
         mkdir -p "$BACKUP_DIR"
         local backup_bin
@@ -101,7 +104,7 @@ update_xray_core() {
         fi
 
         log "Применение обновления..."
-        install -m 755 /tmp/xray_new/xray "$XRAY_BIN"
+        install -m 755 "${tmp_extract}/xray" "$XRAY_BIN"
         set +e
         systemctl restart xray
         local restart_rc=$?
@@ -125,14 +128,14 @@ update_xray_core() {
             if [[ "$xray_rb_ok" != "true" ]]; then
                 warn "Служба Xray не смогла перезапуститься после отката на резервную копию!"
             fi
-            rm -rf "$tmp_zip" /tmp/xray_new
+            rm -rf "$tmp_dir"
             error "Обновление прервано из-за сбоя запуска службы."
         fi
     else
-        rm -rf "$tmp_zip" /tmp/xray_new
+        rm -rf "$tmp_dir"
         error "Тест новой версии провалился. Обновление отменено."
     fi
-    rm -rf "$tmp_zip" /tmp/xray_new
+    rm -rf "$tmp_dir"
 }
 
 update_node() {
