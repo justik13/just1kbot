@@ -57,8 +57,6 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
         
         tmp_tar="$(mktemp /tmp/just1knode_boot.XXXXXX.tar.gz 2>/dev/null || mktemp)"
         tmp_extract="$(mktemp -d /tmp/just1knode_extract.XXXXXX 2>/dev/null || mktemp -d)"
-        rm -rf "$tmp_tar" "$tmp_extract"
-        mkdir -p "$tmp_extract"
         
         download_ok=0
         if command -v curl >/dev/null 2>&1; then
@@ -767,9 +765,13 @@ if os.path.exists(rf):
 
     log "11. Проверка отключения IPv6 (защита от утечек трафика)..."
     local ipv6_val="0"
+    local ipv6_supported=1
     if [[ -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ]]; then
         ipv6_val="$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")"
     else
+        if ! command -v ip >/dev/null 2>&1 || ! ip -6 route show >/dev/null 2>&1; then
+            ipv6_supported=0
+        fi
         ipv6_val="1"
     fi
     local sysctl_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
@@ -778,7 +780,9 @@ if os.path.exists(rf):
         ipv6_persisted=1
     fi
 
-    if [[ "$ipv6_val" == "1" && "$ipv6_persisted" -eq 1 ]]; then
+    if [[ $ipv6_supported -eq 0 ]]; then
+        echo -e "  ${GREEN}✔${NC} IPv6 отключен на уровне ядра/гипервизора (стек IPv6 не поддерживается)"
+    elif [[ "$ipv6_val" == "1" && "$ipv6_persisted" -eq 1 ]]; then
         echo -e "  ${GREEN}✔${NC} IPv6 отключен (защита активна в ядре и сохранена в drop-in)"
     elif [[ "$ipv6_val" == "1" ]]; then
         echo -e "  ${RED}✗${NC} IPv6 отключен в ядре, но не зафиксирован в $sysctl_conf (до перезагрузки, выполните: just1knode update)"
@@ -787,7 +791,8 @@ if os.path.exists(rf):
         echo -e "  ${RED}✗${NC} Рассинхронизация: IPv6 отключен в $sysctl_conf, но активен в ядре (выполните: just1knode update)"
         failed=$((failed + 1))
     else
-        echo -e "  ${YELLOW}i${NC} IPv6 активен (для включения защиты выполните: just1knode update)"
+        echo -e "  ${RED}✗${NC} IPv6 активен (защита от утечек трафика выключена, выполните: just1knode update)"
+        failed=$((failed + 1))
     fi
 
     log "12. Проверка сетевого стелс-режима (ICMP Echo)..."
@@ -809,7 +814,8 @@ if os.path.exists(rf):
         echo -e "  ${RED}✗${NC} Рассинхронизация: ICMP Echo отключен в $sysctl_conf, но активен в ядре (выполните: just1knode update)"
         failed=$((failed + 1))
     else
-        echo -e "  ${YELLOW}i${NC} ICMP Echo активен (стандартный режим ответа на ping; для включения стелс-режима выполните: just1knode update)"
+        echo -e "  ${RED}✗${NC} ICMP Echo активен (стелс-режим выключен, выполните: just1knode update)"
+        failed=$((failed + 1))
     fi
 
     if [[ $failed -eq 0 ]]; then

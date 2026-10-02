@@ -160,9 +160,6 @@ update_node() {
     local tmp_dir
     tmp_dir="$(mktemp -d /tmp/just1knode_update_dir.XXXXXX 2>/dev/null || mktemp -d)"
 
-    rm -rf "$tmp_tar" "$tmp_dir"
-    mkdir -p "$tmp_dir"
-
     local archive_url
     if [[ "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
         archive_url="${repo_url}/archive/${ref}.tar.gz"

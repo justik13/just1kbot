@@ -546,10 +546,40 @@ exit 0
 
     def test_state_json_corruption_backup_preservation(self):
         """Verify set_state_val preserves corrupted state file to .corrupted.bak without wiping."""
+        self._prepare_base_env()
+        state_file = self.state_dir / "state.json"
+        bak_file = self.state_dir / "state.json.corrupted.bak"
+
+        # Case 1: Corrupted non-JSON file
+        state_file.write_text("INVALID_JSON_CONTENT{{{", encoding="utf-8")
         state_sh = (REPO_ROOT / "just1knode" / "lib" / "state.sh").read_text(encoding="utf-8")
-        self.assertIn("bak = f + '.corrupted.bak'", state_sh)
-        self.assertIn("shutil.copy2(f, bak)", state_sh)
-        self.assertIn("sys.exit(1)", state_sh)
+        py_match = re.search(r'python3 -c "(.*?)" "\$STATE_FILE"', state_sh, re.DOTALL)
+        self.assertIsNotNone(py_match, "python script inside set_state_val must be found")
+        py_code = py_match.group(1)
+
+        res = subprocess.run(
+            [sys.executable, "-c", py_code, str(state_file), "test_key", "test_val"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(res.returncode, 1, "Must exit with code 1 on corrupted state")
+        self.assertTrue(bak_file.exists(), "Backup .corrupted.bak must be created")
+        self.assertEqual(bak_file.read_text(encoding="utf-8"), "INVALID_JSON_CONTENT{{{")
+        self.assertEqual(state_file.read_text(encoding="utf-8"), "INVALID_JSON_CONTENT{{{")
+
+        # Case 2: 0-byte file must also be treated as corrupted (not wiped with {new_key: new_val})
+        bak_file.unlink(missing_ok=True)
+        state_file.write_text("", encoding="utf-8")
+        res0 = subprocess.run(
+            [sys.executable, "-c", py_code, str(state_file), "new_key", "new_val"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(res0.returncode, 1, "Must exit with code 1 on 0-byte state")
+        self.assertTrue(bak_file.exists(), "Backup .corrupted.bak must be created for 0-byte state")
+        self.assertEqual(state_file.read_text(encoding="utf-8"), "")
 
     def test_update_node_declares_is_menu_and_survives_set_u(self):
         """Verify update_node initializes local is_menu to prevent unbound variable under set -u."""

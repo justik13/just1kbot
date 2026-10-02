@@ -298,8 +298,8 @@ install_dependencies() {
     wait_for_apt_locks
     log "Обновление списков пакетов и установка системных утилит..."
     apt-get update -qq
-    apt-get install -y -qq curl openssl age dnsutils cron git ca-certificates gnupg python3 psmisc >/dev/null 2>&1
-    log "Системные утилиты установлены (curl, openssl, age, dnsutils, cron, git, python3, psmisc)."
+    apt-get install -y -qq curl openssl age dnsutils cron git ca-certificates gnupg python3 psmisc iproute2 >/dev/null 2>&1
+    log "Системные утилиты установлены (curl, openssl, age, dnsutils, cron, git, python3, psmisc, iproute2)."
 
     # Проверка / установка Docker
     if ! command -v docker >/dev/null 2>&1; then
@@ -365,13 +365,36 @@ install_dependencies() {
     # Настройка ядра для Redis (overcommit_memory)
     configure_overcommit_memory
 
-    # Проверка занятости портов 80 и 443 сторонними процессами (Fail-Closed)
+    check_ports_available
+}
+
+# --- Проверка портов 80 и 443 для Caddy (Fail-Closed) ---
+check_ports_available() {
     for port in 80 443; do
+        local is_occupied=0
         local proc=""
         proc=$(ss -tlnp 2>/dev/null | grep -E ":${port}\b" || netstat -tlnp 2>/dev/null | grep -E ":${port}\b" || true)
+
         if [[ -n "$proc" ]] && echo "$proc" | grep -qvE "docker|docker-proxy"; then
+            is_occupied=1
+        elif command -v python3 >/dev/null 2>&1; then
+            if ! python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    s.bind(('0.0.0.0', int(sys.argv[1])))
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+" "$port" 2>/dev/null; then
+                is_occupied=1
+            fi
+        fi
+
+        if [[ $is_occupied -eq 1 ]]; then
             warn "Порт $port занят сторонним процессом хоста:"
-            echo -e "    ${BOLD}${proc}${NC}"
+            [[ -n "$proc" ]] && echo -e "    ${BOLD}${proc}${NC}"
 
             local found_srv=""
             for srv in nginx apache2 lighttpd caddy; do
@@ -388,18 +411,29 @@ install_dependencies() {
                 fi
             done
 
-            if [[ -z "$found_srv" ]]; then
-                read -r -p "Попытаться остановить известные конфликтующие службы (nginx, apache2, lighttpd)? (y/N): " confirm_generic
-                if [[ "$confirm_generic" =~ ^[Yy]$ ]]; then
-                    systemctl stop nginx apache2 lighttpd 2>/dev/null || true
-                fi
-            fi
-
             # Обязательная повторная проверка (Fail-Closed)
+            local still_busy=0
             local proc_recheck=""
             proc_recheck=$(ss -tlnp 2>/dev/null | grep -E ":${port}\b" || netstat -tlnp 2>/dev/null | grep -E ":${port}\b" || true)
             if [[ -n "$proc_recheck" ]] && echo "$proc_recheck" | grep -qvE "docker|docker-proxy"; then
-                error "Порт $port все еще занят сторонним процессом: ${proc_recheck}! Caddy не сможет запуститься. Освободите порты 80/443 перед установкой."
+                still_busy=1
+            elif command -v python3 >/dev/null 2>&1; then
+                if ! python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    s.bind(('0.0.0.0', int(sys.argv[1])))
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+" "$port" 2>/dev/null; then
+                    still_busy=1
+                fi
+            fi
+
+            if [[ $still_busy -eq 1 ]]; then
+                error "Порт $port все еще занят сторонним процессом: ${proc_recheck:-активный listener}! Caddy не сможет запуститься. Освободите порты 80/443 перед установкой."
             fi
             log "Порт $port свободен для веб-сервера Caddy."
         fi

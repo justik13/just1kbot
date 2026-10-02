@@ -452,6 +452,31 @@ wait_for_apt_locks 1
         self.assertIn("JUST1KBOT INFRASTRUCTURE DIAGNOSTIC REPORT", proc.stderr + proc.stdout)
         self.assertIn("Порт для Caddy недоступен", proc.stderr + proc.stdout)
 
+    def test_preflight_fails_closed_when_use_external_nginx_enabled(self):
+        """cmd_preflight fails closed with explicit migration error when USE_EXTERNAL_NGINX=true."""
+        env_content = (
+            "BOT_TOKEN=token123\n"
+            "POSTGRES_USER=user\n"
+            "POSTGRES_PASSWORD=pass\n"
+            "POSTGRES_DB=db\n"
+            "DB_ENCRYPTION_KEY=key\n"
+            "BACKUP_AGE_RECIPIENT=age1test\n"
+            "ADMIN_IDS=[123]\n"
+            "DOMAIN=vpn.example.com\n"
+            "SSL_EMAIL=admin@example.com\n"
+            "SUPPORT_USERNAME=support\n"
+            "YOOKASSA_SHOP_ID=123\n"
+            "YOOKASSA_SECRET_KEY=sec\n"
+            "USE_EXTERNAL_NGINX=true\n"
+        )
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        (self.project_dir / ".env").chmod(0o600)
+
+        proc = self._run_cli_command("preflight")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("USE_EXTERNAL_NGINX=true", proc.stderr + proc.stdout)
+        self.assertIn("Поддержка внешнего Nginx в боте прекращена", proc.stderr + proc.stdout)
+
     def test_doctor_detects_port_conflict_with_non_docker_process(self):
         """cmd_doctor outputs error when port 80 is occupied by a host non-docker process."""
         ss_bin = self.bin_dir / "ss"
@@ -1552,22 +1577,11 @@ echo "SKIP_WIZARD=$SKIP_WIZARD"
             '#!/bin/bash\necho "LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\\"custom-daemon\\",pid=999,fd=3))"\nexit 0\n',
             encoding="utf-8",
         )
-        ss_bin.chmod(0o755)
-
         script = f"""
 export PROJECT_DIR="{self.project_dir.as_posix()}"
 export PATH="{self.bin_dir.as_posix()}:$PATH"
 source "{self.project_dir.as_posix()}/scripts/setup.sh"
-# Run port check logic directly
-for port in 80 443; do
-    proc=$(ss -tlnp 2>/dev/null | grep -E ":${{port}}\\b" || true)
-    if [[ -n "$proc" ]] && echo "$proc" | grep -qvE "docker|docker-proxy"; then
-        proc_recheck=$(ss -tlnp 2>/dev/null | grep -E ":${{port}}\\b" || true)
-        if [[ -n "$proc_recheck" ]] && echo "$proc_recheck" | grep -qvE "docker|docker-proxy"; then
-            error "Порт $port все еще занят сторонним процессом: ${{proc_recheck}}!"
-        fi
-    fi
-done
+check_ports_available
 """
         proc = subprocess.run(
             ["bash", "-c", script],

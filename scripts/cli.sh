@@ -373,30 +373,10 @@ cmd_preflight() {
     fi
 
     # 9. Проверка портов 80 и 443 для веб-сервера Caddy (Fail-Closed)
-    local host_webservers=(nginx apache2 lighttpd)
-    for svc in "${host_webservers[@]}"; do
-        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$svc" 2>/dev/null; then
-            warn "Обнаружена активная системная служба '$svc' на хосте, которая блокирует порты 80/443 для Just1kBot Caddy!"
-            if [[ -t 0 ]]; then
-                read -r -p "Остановить и отключить системную службу '$svc' для нормальной работы Just1kBot? (Y/n): " confirm_svc
-                if [[ ! "$confirm_svc" =~ ^[Nn]$ ]]; then
-                    run_privileged systemctl stop "$svc" 2>/dev/null || true
-                    run_privileged systemctl disable "$svc" 2>/dev/null || true
-                    log "Служба $svc успешно остановлена и отключена."
-                else
-                    error "Служба '$svc' продолжает занимать порт 80/443. Запуск не может быть продолжен."
-                    has_errors=true
-                fi
-            else
-                run_privileged systemctl stop "$svc" 2>/dev/null || true
-                run_privileged systemctl disable "$svc" 2>/dev/null || true
-                if systemctl is-active --quiet "$svc" 2>/dev/null; then
-                    error "Служба '$svc' активна на хосте и занимает порт 80/443. Остановите её: sudo systemctl stop $svc"
-                    has_errors=true
-                fi
-            fi
-        fi
-    done
+    if grep -Eq '^[[:space:]]*USE_EXTERNAL_NGINX[[:space:]]*=[[:space:]]*(true|1)' "${PROJECT_DIR}/.env" 2>/dev/null; then
+        error "Обнаружена устаревшая конфигурация USE_EXTERNAL_NGINX=true в .env! Поддержка внешнего Nginx в боте прекращена: веб-сервер Caddy теперь является единственным шлюзом. Удалите переменную из .env и освободите порты 80/443 для Caddy."
+        has_errors=true
+    fi
 
     local caddy_running
     caddy_running=$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo "")
@@ -404,7 +384,7 @@ cmd_preflight() {
         local port_conflict=""
         for p in 80 443; do
             local p_proc
-            p_proc=$(ss -tlnp 2>/dev/null | grep -E ":${p}\b" || netstat -tlnp 2>/dev/null | grep -E ":${p}\b" || true)
+            p_proc=$(run_privileged ss -tlnp 2>/dev/null | grep -E ":${p}\b" || netstat -tlnp 2>/dev/null | grep -E ":${p}\b" || true)
             if [[ -n "$p_proc" ]] && echo "$p_proc" | grep -qvE "docker|docker-proxy"; then
                 port_conflict="${p}:Занят сторонним процессом хоста: ${p_proc}"
                 break
@@ -1367,7 +1347,7 @@ cmd_doctor() {
     caddy_running=$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo "")
     for port in 80 443; do
         local proc=""
-        proc=$(ss -tlnp 2>/dev/null | grep -E ":${port}\b" || netstat -tlnp 2>/dev/null | grep -E ":${port}\b" || true)
+        proc=$(run_privileged ss -tlnp 2>/dev/null | grep -E ":${port}\b" || netstat -tlnp 2>/dev/null | grep -E ":${port}\b" || true)
         if [[ -n "$proc" ]]; then
             if echo "$proc" | grep -qE "docker|docker-proxy"; then
                 if [ "$caddy_running" = "running" ]; then

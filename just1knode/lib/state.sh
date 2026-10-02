@@ -63,8 +63,10 @@ if fcntl:
     fcntl.flock(lock_fd, fcntl.LOCK_EX)
 try:
     data = {}
-    if os.path.exists(f) and os.path.getsize(f) > 0:
+    if os.path.exists(f):
         try:
+            if os.path.getsize(f) == 0:
+                raise ValueError('State file ' + str(f) + ' is empty (0 bytes)')
             with open(f, 'r', encoding='utf-8', errors='replace') as fp:
                 data = json.load(fp)
                 if not isinstance(data, dict):
@@ -72,8 +74,15 @@ try:
         except Exception as e:
             bak = f + '.corrupted.bak'
             try:
-                import shutil
-                shutil.copy2(f, bak)
+                if os.path.islink(bak) or os.path.lexists(bak):
+                    os.unlink(bak)
+                open_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
+                bak_fd = os.open(bak, open_flags, 0o600)
+                try:
+                    with open(f, 'rb') as src_fp, os.fdopen(bak_fd, 'wb') as dst_fp:
+                        dst_fp.write(src_fp.read())
+                except Exception:
+                    pass
             except Exception:
                 pass
             print('ОШИБКА: Поврежден файл состояния ' + str(f) + ' (' + str(e) + '). Резервная копия сохранена в ' + str(bak) + '. Запись прервана во избежание потери данных.', file=sys.stderr)

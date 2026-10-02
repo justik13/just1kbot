@@ -40,8 +40,6 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
     fi
     tmp_tar="$(mktemp /tmp/just1knode_boot.XXXXXX.tar.gz 2>/dev/null || mktemp)"
     tmp_extract="$(mktemp -d /tmp/just1knode_extract.XXXXXX 2>/dev/null || mktemp -d)"
-    rm -rf "$tmp_tar" "$tmp_extract"
-    mkdir -p "$tmp_extract"
     echo -e "\033[0;36m[i]\033[0m Модули just1knode не обнаружены в /opt/just1knode."
     echo -e "\033[0;36m[i]\033[0m Загрузка и распаковка компонентов с GitHub (${JUST1KBOT_REF})..."
     download_ok=0
