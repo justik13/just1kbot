@@ -278,6 +278,9 @@ dc_up() {
         scale_args=(--scale caddy=0)
     fi
     docker compose up -d "${scale_args[@]}" "$@"
+    if docker ps -q -f name=^uptime-kuma$ 2>/dev/null | grep -q .; then
+        docker network connect just1kbot_frontend_net uptime-kuma 2>/dev/null || true
+    fi
 }
 
 setup_external_nginx_integration() {
@@ -1311,6 +1314,9 @@ cmd_update() {
         chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
         chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
         apply_sysctl_hardening
+        if docker ps -q -f name=^uptime-kuma$ 2>/dev/null | grep -q .; then
+            docker network connect just1kbot_frontend_net uptime-kuma 2>/dev/null || true
+        fi
 
         if [ "$did_stash" = "true" ]; then
             echo ""

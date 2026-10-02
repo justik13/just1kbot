@@ -85,6 +85,23 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("http:// {", caddyfile)
         self.assertIn("abort", caddyfile)
 
+    def test_caddy_status_domain_ingress_and_zero_signature(self):
+        root = Path(__file__).parents[1]
+        caddyfile = (root / "Caddyfile").read_text(encoding="utf-8")
+        compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+        cli_sh = (root / "scripts" / "cli.sh").read_text(encoding="utf-8")
+
+        # 1. Caddyfile ingress and upstream
+        self.assertIn("{$STATUS_DOMAIN:status.just1k.pro}", caddyfile)
+        self.assertIn("reverse_proxy uptime-kuma:3001", caddyfile)
+        self.assertIn("-Server", caddyfile)
+
+        # 2. docker-compose environment pass-through
+        self.assertIn("STATUS_DOMAIN: ${STATUS_DOMAIN:-status.just1k.pro}", compose)
+
+        # 3. scripts/cli.sh auto-connects uptime-kuma to frontend_net
+        self.assertIn("docker network connect just1kbot_frontend_net uptime-kuma", cli_sh)
+
     def test_just1knode_origin_bot_ip_cli_support(self):
         root = Path(__file__).parents[1]
         just1knode_sh = (root / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
