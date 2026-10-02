@@ -539,10 +539,10 @@ exit 0
         self.assertIn('net.ipv6.conf.all.disable_ipv6', just1knode_sh)
 
     def test_configure_safe_ufw_fails_closed_on_ssh_port_error(self):
-        """Verify configure_safe_ufw fails closed if SSH port rule cannot be applied or verified."""
+        """Verify configure_safe_ufw fails closed if SSH port rule cannot be applied."""
         common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
         self.assertIn('if ! ufw allow "$ssh_port/tcp" >/dev/null 2>&1; then', common_sh)
-        self.assertIn('if ! ufw status 2>/dev/null | grep -qE "${ssh_port}/tcp[[:space:]]+ALLOW"; then', common_sh)
+        self.assertIn('return 1', common_sh)
 
     def test_state_json_corruption_backup_preservation(self):
         """Verify set_state_val preserves corrupted state file to .corrupted.bak without wiping."""

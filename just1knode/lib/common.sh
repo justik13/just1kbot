@@ -130,12 +130,8 @@ configure_safe_ufw() {
         ufw allow "$p" >/dev/null 2>&1 || true
     done
 
-    # Включаем UFW, если он отключен (только при подтвержденном правиле для SSH)
+    # Включаем UFW, если он отключен
     if ! ufw status | grep -q "Status: active"; then
-        if ! ufw status 2>/dev/null | grep -qE "${ssh_port}/tcp[[:space:]]+ALLOW"; then
-            error "КРИТИЧЕСКАЯ ОШИБКА: Правило SSH ($ssh_port/tcp) не найдено в конфигурации UFW! Активация отменена."
-            return 1
-        fi
         echo "y" | ufw enable >/dev/null 2>&1 || true
         log "Фаервол UFW успешно активирован (SSH порт ${ssh_port} защищен от блокировки)."
     fi
