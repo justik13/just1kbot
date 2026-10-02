@@ -54,23 +54,6 @@ ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоно�
 
 ALERT_TITLE_WORKER_FAILED = "Фоновый воркер упал"
 
-ALERT_SYSTEM_ERROR_LOG = """🚨 <b>Ошибка в логах системы</b>
-
-📍 <b>Уровень:</b> <code>{level}</code>
-🧩 <b>Модуль:</b> <code>{module}</code>
-📄 <b>Файл:</b> <code>{location}</code>{request_id_block}
-
-⚠️ <b>Сообщение:</b>
-<code>{message}</code>{traceback_block}"""
-
-ALERT_LOG_REQUEST_ID_LINE = """
-🆔 <b>Request ID:</b> <code>{request_id}</code>"""
-
-ALERT_LOG_TRACEBACK_BLOCK = """
-
-🔍 <b>Стек вызова:</b>
-<pre>{traceback}</pre>"""
-
 ALERT_TRAFFIC_OVERUSAGE = """⚠️ <b>Fair Usage Policy: Превышение квоты трафика!</b>
 ━━━━━━━━━━━━━━━━━━━━
 👤 <b>Пользователь:</b> <code>{telegram_id}</code>

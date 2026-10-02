@@ -58,10 +58,6 @@ from utils.logging_security import (
     sanitize_short,
     sanitize_text,
 )
-from bot.logging_handler import (
-    TelegramErrorLogHandler,
-    install_telegram_error_logger,
-)
 
 def _resolve_log_level() -> str:
     """LOG_LEVEL from env first, then Settings (picks up .env), then INFO.
@@ -96,7 +92,6 @@ logging.basicConfig(
 root_logger = logging.getLogger()
 install_sensitive_data_filter(root_logger)
 root_logger.addFilter(CorrelationFilter())
-install_telegram_error_logger(root_logger)
 for handler in root_logger.handlers:
     handler.addFilter(CorrelationFilter())
 
@@ -503,7 +498,6 @@ async def main():
         )
 
         bot, dp = await setup_bot()
-        TelegramErrorLogHandler.set_bot(bot)
 
         webhook_runner = await start_webhook_server(
             settings.YOOKASSA_WEBHOOK_PORT,
@@ -606,7 +600,6 @@ async def main():
                 logger.error("Failed to close dispatcher storage: %s", e)
 
         if bot is not None:
-            TelegramErrorLogHandler.set_bot(None)
             try:
                 await bot.session.close()
             except Exception as e:

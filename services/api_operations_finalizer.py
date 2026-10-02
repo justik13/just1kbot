@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -16,8 +15,6 @@ from services.api_operations_queue import (
     calculate_retry_delay,
     enqueue_api_operation,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class CreateCompensationRequired(Exception):
@@ -322,7 +319,6 @@ async def finalize_operation_failure(
                     profile.provisioning_status = "update_failed"
                 elif operation.operation_type == "delete_peer":
                     profile.provisioning_status = "delete_failed"
-
         return operation.status
 
 
