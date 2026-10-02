@@ -67,14 +67,14 @@ async def notify_dead_operation(
             return
 
         text = ALERT_API_OPERATION_DEAD.format(
-            server_name=safe(server_name or "Неизвестный сервер"),
+            server_name=safe(server_name or "—"),
             server_id=server_id or "—",
             op_type=safe(operation_type),
             op_id=operation_id,
             profile_id=profile_id or "—",
-            client_name=safe(client_name or "без имени"),
+            client_name=safe(client_name or "—"),
             error_code=safe(error_code or "unknown"),
-            error_details=safe((error_message or "нет описания")[:300]),
+            error_details=safe((error_message or "—")[:300]),
         )
 
         for admin_id in admin_ids:

@@ -18,6 +18,7 @@ from bot.texts.runtime.alerts import (
     ALERT_TITLE_WORKER_FAILED,
     ALERT_TRAFFIC_OVERUSAGE,
     ALERT_WORKER_CRASH,
+    ALERT_API_OPERATION_DEAD,
 )
 
 from bot.texts.runtime.notifications import (
@@ -59,6 +60,7 @@ __all__ = [
     "ALERT_TITLE_WORKER_FAILED",
     "ALERT_TRAFFIC_OVERUSAGE",
     "ALERT_WORKER_CRASH",
+    "ALERT_API_OPERATION_DEAD",
     "BALANCE_TOPUP_CREDITED",
     "BALANCE_TOPUP_RESUME_HINT",
     "BALANCE_TOPUP_WELCOME_BONUS",
