@@ -44,7 +44,7 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
     mkdir -p "$tmp_extract"
     echo -e "\033[0;36m[i]\033[0m Модули just1knode не обнаружены в /opt/just1knode."
     echo -e "\033[0;36m[i]\033[0m Загрузка и распаковка компонентов с GitHub (${JUST1KBOT_REF})..."
-    local download_ok=0
+    download_ok=0
     if command -v curl >/dev/null 2>&1; then
         if curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar"; then
             download_ok=1

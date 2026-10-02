@@ -55,14 +55,12 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
             archive_url="${JUST1KBOT_REPO_URL}/archive/refs/heads/${JUST1KBOT_REF}.tar.gz"
         fi
         
-        local tmp_tar
         tmp_tar="$(mktemp /tmp/just1knode_boot.XXXXXX.tar.gz 2>/dev/null || mktemp)"
-        local tmp_extract
         tmp_extract="$(mktemp -d /tmp/just1knode_extract.XXXXXX 2>/dev/null || mktemp -d)"
         rm -rf "$tmp_tar" "$tmp_extract"
         mkdir -p "$tmp_extract"
         
-        local download_ok=0
+        download_ok=0
         if command -v curl >/dev/null 2>&1; then
             if curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar"; then
                 download_ok=1
