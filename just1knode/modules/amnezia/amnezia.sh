@@ -275,16 +275,6 @@ remove_amnezia_abuse_protection() {
     set_state_val "abuse_protection" "disabled"
 }
 
-# Обнаружение Docker-контейнера, слушающего хостовый TCP-порт 80
-detect_host_port80_container() {
-    command -v docker >/dev/null 2>&1 || return 0
-    local matched
-    matched="$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -E '(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp' | head -n 1 || true)"
-    if [[ -n "$matched" ]]; then
-        echo "$matched" | awk -F'\t' '{print $1}'
-    fi
-}
-
 deploy_amnezia_certbot_renewal_hook() {
     local base_hook_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks"
     mkdir -p "${base_hook_dir}/deploy"

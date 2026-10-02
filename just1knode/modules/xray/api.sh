@@ -43,24 +43,35 @@ deploy_xray_api_sources() {
         cp -r /app/scripts/xray_api/* "${XRAY_API_DIR}/"
     else
         log "Автономная загрузка модулей xray-api (ref: $JUST1KBOT_REF)..."
-        local tmp_tar="/tmp/just1k_repo_$$.tar.gz"
-        rm -rf "$tmp_tar" /tmp/just1k_extracted_$$
+        local tmp_tar
+        tmp_tar="$(mktemp /tmp/just1k_repo.XXXXXX.tar.gz 2>/dev/null || mktemp)"
+        local tmp_extracted
+        tmp_extracted="$(mktemp -d /tmp/just1k_extracted.XXXXXX 2>/dev/null || mktemp -d)"
         local archive_url
         if [[ "$JUST1KBOT_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
             archive_url="${JUST1KBOT_REPO_URL}/archive/${JUST1KBOT_REF}.tar.gz"
         else
             archive_url="${JUST1KBOT_REPO_URL}/archive/refs/heads/${JUST1KBOT_REF}.tar.gz"
         fi
-        curl -fsSL "$archive_url" -o "$tmp_tar" 2>/dev/null || true
-
-        if [[ -f "$tmp_tar" ]]; then
-            mkdir -p /tmp/just1k_extracted_$$
-            tar -xzf "$tmp_tar" -C /tmp/just1k_extracted_$$ --strip-components=1 2>/dev/null || true
-            if [[ -d "/tmp/just1k_extracted_$$/scripts/xray_api" ]]; then
-                cp -r /tmp/just1k_extracted_$$/scripts/xray_api/* "${XRAY_API_DIR}/"
-            fi
-            rm -rf "$tmp_tar" /tmp/just1k_extracted_$$
+        if ! curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar" 2>/dev/null; then
+            rm -rf "$tmp_tar" "$tmp_extracted"
+            error "Не удалось загрузить архив репозитория для развертывания xray-api ($archive_url)."
+            return 1
         fi
+
+        if ! tar -xzf "$tmp_tar" -C "$tmp_extracted" --strip-components=1 2>/dev/null; then
+            rm -rf "$tmp_tar" "$tmp_extracted"
+            error "Не удалось распаковать архив репозитория для xray-api."
+            return 1
+        fi
+        if [[ -d "${tmp_extracted}/scripts/xray_api" ]]; then
+            cp -r "${tmp_extracted}/scripts/xray_api"/* "${XRAY_API_DIR}/"
+        fi
+        rm -rf "$tmp_tar" "$tmp_extracted"
+    fi
+    if [[ ! -f "${XRAY_API_DIR}/app.py" ]]; then
+        error "Исходный файл ${XRAY_API_DIR}/app.py не найден после установки xray-api."
+        return 1
     fi
     chown -R root:xrayapi "${XRAY_API_DIR}" 2>/dev/null || true
     chmod -R 750 "${XRAY_API_DIR}" 2>/dev/null || true
