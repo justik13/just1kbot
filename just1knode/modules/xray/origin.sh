@@ -683,10 +683,10 @@ EOF
 
     # Фаервол: порт 8444 открывается СТРОГО для BOT_IP
     configure_safe_ufw "80/tcp" "443/tcp"
-    ufw delete allow 8444/tcp 2>/dev/null || true
-    ufw delete allow 8444 2>/dev/null || true
-    ufw delete allow 8443/tcp 2>/dev/null || true
-    ufw delete allow 8443 2>/dev/null || true
+    ufw delete allow 8444/tcp >/dev/null 2>&1 || true
+    ufw delete allow 8444 >/dev/null 2>&1 || true
+    ufw delete allow 8443/tcp >/dev/null 2>&1 || true
+    ufw delete allow 8443 >/dev/null 2>&1 || true
     if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]]; then
         ufw allow from "$bot_ip" to any port 8444 proto tcp || true
     else
@@ -774,11 +774,11 @@ set_origin_bot_ip() {
 
     # Проверка no-op (если IP совпадает и правило уже активно)
     if [[ "$new_bot_ip" == "$old_bot_ip" ]] && ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "$target_port"; then
-        ufw delete allow "${target_port}/tcp" 2>/dev/null || true
-        ufw delete allow "${target_port}" 2>/dev/null || true
+        ufw delete allow "${target_port}/tcp" >/dev/null 2>&1 || true
+        ufw delete allow "${target_port}" >/dev/null 2>&1 || true
         if [[ "$role" == "origin" ]]; then
-            ufw delete allow 8443/tcp 2>/dev/null || true
-            ufw delete allow 8443 2>/dev/null || true
+            ufw delete allow 8443/tcp >/dev/null 2>&1 || true
+            ufw delete allow 8443 >/dev/null 2>&1 || true
         fi
         log "BOT_IP ($new_bot_ip) уже установлен и подтвержден в UFW. Изменений не требуется."
         release_just1knode_lock
@@ -795,7 +795,7 @@ set_origin_bot_ip() {
 
     # Шаг 2: Верифицируем, что правило реально появилось в UFW
     if ! ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "$target_port"; then
-        ufw delete allow from "$new_bot_ip" to any port "$target_port" proto tcp 2>/dev/null || true
+        ufw delete allow from "$new_bot_ip" to any port "$target_port" proto tcp >/dev/null 2>&1 || true
         release_just1knode_lock
         error "Верификация не пройдена: правило для $new_bot_ip на порт $target_port отсутствует в UFW. Изменение откатано."
         return 1
@@ -803,7 +803,7 @@ set_origin_bot_ip() {
 
     # Шаг 3: Атомарно фиксируем новый IP в state.json перед удалением старых правил
     if ! set_state_val "bot_ip" "$new_bot_ip"; then
-        ufw delete allow from "$new_bot_ip" to any port "$target_port" proto tcp 2>/dev/null || true
+        ufw delete allow from "$new_bot_ip" to any port "$target_port" proto tcp >/dev/null 2>&1 || true
         release_just1knode_lock
         error "Сбой сохранения bot_ip в state.json. Новое правило для $new_bot_ip откатано, старый доступ сохранен."
         return 1
@@ -811,13 +811,13 @@ set_origin_bot_ip() {
 
     # Шаг 4: Только после успешной фиксации состояния удаляем старое и широкие правила
     if [[ -n "$old_bot_ip" && "$old_bot_ip" != "$new_bot_ip" && "$old_bot_ip" != "any" && "$old_bot_ip" != "-" ]]; then
-        ufw delete allow from "$old_bot_ip" to any port "$target_port" proto tcp 2>/dev/null || true
+        ufw delete allow from "$old_bot_ip" to any port "$target_port" proto tcp >/dev/null 2>&1 || true
     fi
-    ufw delete allow "${target_port}/tcp" 2>/dev/null || true
-    ufw delete allow "${target_port}" 2>/dev/null || true
+    ufw delete allow "${target_port}/tcp" >/dev/null 2>&1 || true
+    ufw delete allow "${target_port}" >/dev/null 2>&1 || true
     if [[ "$role" == "origin" ]]; then
-        ufw delete allow 8443/tcp 2>/dev/null || true
-        ufw delete allow 8443 2>/dev/null || true
+        ufw delete allow 8443/tcp >/dev/null 2>&1 || true
+        ufw delete allow 8443 >/dev/null 2>&1 || true
     fi
 
     log "BOT_IP успешно обновлен и зафиксирован в state.json: ${old_bot_ip:-не был задан} -> ${new_bot_ip}"
@@ -1529,14 +1529,14 @@ except Exception:
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
         # 1. Удаление глобальных уязвимых правил (ALLOW Anywhere на 8444)
         if ufw status 2>/dev/null | grep -E "8444(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
-            ufw delete allow 8444/tcp 2>/dev/null || true
-            ufw delete allow 8444 2>/dev/null || true
+            ufw delete allow 8444/tcp >/dev/null 2>&1 || true
+            ufw delete allow 8444 >/dev/null 2>&1 || true
             warn "Фаервол UFW: устранена уязвимость — удалено глобальное правило на порт 8444."
         fi
         # 2. Удаление устаревших правил на порт 8443
         if ufw status 2>/dev/null | grep -E "8443(/tcp)?\s+ALLOW" -q; then
-            ufw delete allow 8443/tcp 2>/dev/null || true
-            ufw delete allow 8443 2>/dev/null || true
+            ufw delete allow 8443/tcp >/dev/null 2>&1 || true
+            ufw delete allow 8443 >/dev/null 2>&1 || true
             warn "Фаервол UFW: устранена уязвимость — удалено устаревшее правило на порт 8443."
         fi
         # 3. Обеспечение точного правила для текущего BOT_IP

@@ -61,9 +61,18 @@ lock_file = f + '.lock'
 open_flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0)
 lock_fd = os.open(lock_file, open_flags, 0o660)
 try:
-    import shutil
-    shutil.chown(lock_file, user='root', group='xrayapi')
-    os.chmod(lock_file, 0o660)
+    if hasattr(os, 'fchmod'):
+        os.fchmod(lock_fd, 0o660)
+    else:
+        os.chmod(lock_file, 0o660)
+    try:
+        import grp
+        gid = grp.getgrnam('xrayapi').gr_gid
+        if hasattr(os, 'fchown'):
+            os.fchown(lock_fd, 0, gid)
+    except Exception:
+        import shutil
+        shutil.chown(lock_file, user='root', group='xrayapi')
 except Exception:
     pass
 if fcntl:

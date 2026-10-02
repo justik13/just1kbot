@@ -59,7 +59,7 @@ deploy_xray_api_sources() {
             return 1
         fi
 
-        if ! tar -xzf "$tmp_tar" -C "$tmp_extracted" --strip-components=1 2>/dev/null; then
+        if ! tar -xzf "$tmp_tar" -C "$tmp_extracted" --strip-components=1 --no-same-owner 2>/dev/null; then
             rm -rf "$tmp_tar" "$tmp_extracted"
             error "Не удалось распаковать архив репозитория для xray-api."
             return 1
