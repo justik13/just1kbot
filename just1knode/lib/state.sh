@@ -68,7 +68,7 @@ try:
             with open(f, 'r', encoding='utf-8', errors='replace') as fp:
                 data = json.load(fp)
                 if not isinstance(data, dict):
-                    raise ValueError(f"State file {f} root must be a JSON object")
+                    raise ValueError('State file ' + str(f) + ' root must be a JSON object')
         except Exception as e:
             bak = f + '.corrupted.bak'
             try:
@@ -76,7 +76,7 @@ try:
                 shutil.copy2(f, bak)
             except Exception:
                 pass
-            print(f"ОШИБКА: Поврежден файл состояния {f} ({e}). Резервная копия сохранена в {bak}. Запись прервана во избежание потери данных.", file=sys.stderr)
+            print('ОШИБКА: Поврежден файл состояния ' + str(f) + ' (' + str(e) + '). Резервная копия сохранена в ' + str(bak) + '. Запись прервана во избежание потери данных.', file=sys.stderr)
             sys.exit(1)
     data[k] = v
     tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(f), suffix='.tmp')
