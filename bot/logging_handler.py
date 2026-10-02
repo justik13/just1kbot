@@ -25,7 +25,7 @@ _IGNORED_LOGGER_PREFIXES: tuple[str, ...] = (
     "aiogram",
     "aiohttp",
     "utils.telegram",
-    "utils.telegram_logging",
+    "bot.logging_handler",
 )
 
 

@@ -7,7 +7,7 @@ import logging
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from utils.telegram_logging import (
+from bot.logging_handler import (
     TelegramErrorLogHandler,
     install_telegram_error_logger,
 )

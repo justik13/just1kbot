@@ -58,7 +58,7 @@ from utils.logging_security import (
     sanitize_short,
     sanitize_text,
 )
-from utils.telegram_logging import (
+from bot.logging_handler import (
     TelegramErrorLogHandler,
     install_telegram_error_logger,
 )
