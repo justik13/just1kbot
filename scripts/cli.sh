@@ -502,6 +502,17 @@ EOF
 
 cmd_nginx_config() {
     echo -e "\n${BOLD}${BLUE}=== 🌐 НАСТРОЙКА ИНТЕГРАЦИИ С СИСТЕМНЫМ NGINX ===${NC}\n"
+    if ! is_external_nginx_enabled; then
+        warn "По умолчанию Just1kBot использует автоматический Caddy со встроенным SSL."
+        warn "Настройка Nginx требуется ТОЛЬКО если на сервере уже работает внешний Nginx для других сайтов."
+        echo -n "Переключить Just1kBot с Caddy на системный Nginx? (y/N): "
+        local answer
+        read -r answer
+        if [[ "$answer" != "y" && "$answer" != "Y" && "$answer" != "yes" && "$answer" != "YES" ]]; then
+            info "Операция отменена. Бот продолжает работать через Caddy."
+            return 0
+        fi
+    fi
     if setup_external_nginx_integration; then
         log "Конфигурация Nginx для Just1kBot успешно настроена."
         info "Перезапуск контейнеров с отключением Caddy (dc_up)..."
@@ -1859,9 +1870,20 @@ cmd_doctor() {
 
 # --- 9. Очистка диска ---
 cmd_clean() {
-    echo -e "\n${BOLD}${BLUE}=== 🧹 ОЧИСТКА СТАРЫХ ОБРАЗОВ DOCKER ===${NC}\n"
+    echo -e "\n${BOLD}${BLUE}=== 🧹 ОЧИСТКА ДИСКА И КЭША JUST1KBOT ===${NC}\n"
+    info "Удаление неиспользуемых образов Docker..."
     docker image prune -f
-    log "Неиспользуемые образы и слои Docker успешно удалены."
+    info "Очистка кэша сборщика Docker (BuildKit)..."
+    docker builder prune -af --filter "until=24h" 2>/dev/null || docker builder prune -f 2>/dev/null || true
+    if command -v journalctl >/dev/null 2>&1; then
+        info "Сжатие системных журналов systemd journal (до 150M)..."
+        run_privileged journalctl --vacuum-size=150M 2>/dev/null || true
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        info "Очистка кэша пакетов apt-get..."
+        run_privileged apt-get clean 2>/dev/null || true
+    fi
+    log "Дисковое пространство успешно оптимизировано."
 }
 
 # --- 10. Полное удаление проекта (Uninstall) ---
@@ -2199,8 +2221,8 @@ interactive_menu() {
         echo -e "  [${BOLD}5${NC}] ⚡ ${BOLD}Перезапуск сервисов${NC} (Restart Bot / Restart All)"
         echo -e "  [${BOLD}6${NC}] 🔑 ${BOLD}Конфигурация${NC} (Редактировать .env файл с reload)"
         echo -e "  [${BOLD}7${NC}] 🩺 ${BOLD}Диагностика (Doctor)${NC} (Проверка DNS, SSL, портов и Telegram API)"
-        echo -e "  [${BOLD}8${NC}] 🧹 ${BOLD}Очистить дисковый кэш${NC} (Docker image prune)"
-        echo -e "  [${BOLD}9${NC}] 🌐 ${BOLD}Интеграция с Nginx${NC} (Настроить совместную работу / Reverse Proxy)"
+        echo -e "  [${BOLD}8${NC}] 🧹 ${BOLD}Очистить дисковый кэш${NC} (Docker builder, images, journalctl, apt)"
+        echo -e "  [${BOLD}9${NC}] 🌐 ${BOLD}Интеграция с Nginx${NC} (Переключить с Caddy на системный Nginx)"
         echo -e "  [${BOLD}10${NC}] 🗑️  ${BOLD}Полное удаление${NC} (Uninstall Just1kBot с сервера)"
         echo -e "  [${BOLD}0${NC}] ❌ ${BOLD}Выход${NC}"
         echo ""

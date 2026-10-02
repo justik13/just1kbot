@@ -24,7 +24,7 @@ download_and_verify_xray() {
     fi
 
     log "Скачивание Xray-core v${XRAY_VERSION_PINNED} (${arch})..."
-    if ! curl -sSL -f "$url" -o "$target_zip"; then
+    if ! curl -fsSL --connect-timeout 15 --max-time 120 "$url" -o "$target_zip"; then
         error "Не удалось скачать Xray-core по адресу: $url"
     fi
 
@@ -168,7 +168,7 @@ update_node() {
     fi
 
     local download_ok=0
-    if curl -fsSL "$archive_url" -o "$tmp_tar" 2>/dev/null || wget -qO "$tmp_tar" "$archive_url" 2>/dev/null; then
+    if curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar" 2>/dev/null || wget -q --timeout=120 -O "$tmp_tar" "$archive_url" 2>/dev/null; then
         download_ok=1
     fi
 

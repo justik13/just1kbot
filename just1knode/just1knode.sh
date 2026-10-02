@@ -771,8 +771,7 @@ if os.path.exists(rf):
         echo -e "  ${RED}✗${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf (до перезагрузки, выполните: just1knode update)"
         failed=$((failed + 1))
     else
-        echo -e "  ${RED}✗${NC} ICMP Echo активен (стелс-режим выключен, выполните: just1knode update)"
-        failed=$((failed + 1))
+        echo -e "  ${YELLOW}i${NC} ICMP Echo активен (стандартный режим ответа на ping; для включения стелс-режима выполните: just1knode update)"
     fi
 
     if [[ $failed -eq 0 ]]; then
