@@ -20,6 +20,10 @@ networks:
     driver: bridge
     driver_opts:
       com.docker.network.driver.mtu: "1440"
+  status_net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1440"
 
 services:
   db:
@@ -155,6 +159,7 @@ services:
     logging: *default-logging
     networks:
       - frontend_net
+      - status_net
     ports:
       - "80:80"
       - "443:443"
