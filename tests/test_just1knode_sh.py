@@ -2671,7 +2671,7 @@ remove_traffic_watchdog_timer
         self.assertIn("/run/just1knode_caddy_was_paused", relay_sh)
         self.assertIn('docker stop "$port80_container"', relay_sh)
         self.assertIn('docker start "$stopped_container"', relay_sh)
-        self.assertIn('docker start "\\$c80" >/dev/null 2>&1 && rm -f /run/just1knode_caddy_was_paused', relay_sh)
+        self.assertIn(r'docker start \"\$c80\" >/dev/null 2>&1 && rm -f /run/just1knode_caddy_was_paused', relay_sh)
         # Ensure deploy hook checks RENEWED_LINEAGE against RELAY_SNI
         self.assertIn('[ "$(basename "$RENEWED_LINEAGE")" = "$RELAY_SNI" ]', relay_sh)
 
