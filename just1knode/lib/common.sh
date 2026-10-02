@@ -121,14 +121,21 @@ configure_safe_ufw() {
         ssh_port="$detected"
     fi
 
-    ufw allow "$ssh_port/tcp" >/dev/null 2>&1 || true
+    if ! ufw allow "$ssh_port/tcp" >/dev/null 2>&1; then
+        error "КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть SSH-порт $ssh_port/tcp в UFW! Активация фаервола отменена во избежание потери доступа."
+        return 1
+    fi
 
     for p in "${ports[@]}"; do
         ufw allow "$p" >/dev/null 2>&1 || true
     done
 
-    # Включаем UFW, если он отключен
+    # Включаем UFW, если он отключен (только при подтвержденном правиле для SSH)
     if ! ufw status | grep -q "Status: active"; then
+        if ! ufw status 2>/dev/null | grep -qE "${ssh_port}/tcp[[:space:]]+ALLOW"; then
+            error "КРИТИЧЕСКАЯ ОШИБКА: Правило SSH ($ssh_port/tcp) не найдено в конфигурации UFW! Активация отменена."
+            return 1
+        fi
         echo "y" | ufw enable >/dev/null 2>&1 || true
         log "Фаервол UFW успешно активирован (SSH порт ${ssh_port} защищен от блокировки)."
     fi
@@ -277,6 +284,11 @@ EOF
         sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
         sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1 || true
         sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+    fi
+    local ipv6_curr
+    ipv6_curr="$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")"
+    if [[ "$ipv6_curr" != "1" ]]; then
+        warn "Параметр net.ipv6.conf.all.disable_ipv6 не применился в ядре ноды (проверьте права или ограничения контейнера)."
     fi
     local icmp_curr
     icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"

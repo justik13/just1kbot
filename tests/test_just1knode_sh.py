@@ -530,6 +530,27 @@ exit 0
         self.assertIn('echo -e "  ${RED}✗${NC} ICMP Echo отключен в ядре, но не зафиксирован в $sysctl_conf', just1knode_sh)
         self.assertIn('failed=$((failed + 1))', just1knode_sh)
 
+    def test_doctor_ipv6_fails_closed_when_dropin_missing(self):
+        """Verify doctor IPv6 check fails closed if runtime=1 but drop-in is missing."""
+        just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+        self.assertIn('11. Проверка отключения IPv6 (защита от утечек трафика)...', just1knode_sh)
+        self.assertIn('ipv6_persisted=0', just1knode_sh)
+        self.assertIn('echo -e "  ${RED}✗${NC} IPv6 отключен в ядре, но не зафиксирован в $sysctl_conf', just1knode_sh)
+        self.assertIn('net.ipv6.conf.all.disable_ipv6', just1knode_sh)
+
+    def test_configure_safe_ufw_fails_closed_on_ssh_port_error(self):
+        """Verify configure_safe_ufw fails closed if SSH port rule cannot be applied or verified."""
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn('if ! ufw allow "$ssh_port/tcp" >/dev/null 2>&1; then', common_sh)
+        self.assertIn('if ! ufw status 2>/dev/null | grep -qE "${ssh_port}/tcp[[:space:]]+ALLOW"; then', common_sh)
+
+    def test_state_json_corruption_backup_preservation(self):
+        """Verify set_state_val preserves corrupted state file to .corrupted.bak without wiping."""
+        state_sh = (REPO_ROOT / "just1knode" / "lib" / "state.sh").read_text(encoding="utf-8")
+        self.assertIn("bak = f + '.corrupted.bak'", state_sh)
+        self.assertIn("shutil.copy2(f, bak)", state_sh)
+        self.assertIn("sys.exit(1)", state_sh)
+
     def test_update_node_declares_is_menu_and_survives_set_u(self):
         """Verify update_node initializes local is_menu to prevent unbound variable under set -u."""
         core_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")

@@ -63,12 +63,21 @@ if fcntl:
     fcntl.flock(lock_fd, fcntl.LOCK_EX)
 try:
     data = {}
-    if os.path.exists(f):
+    if os.path.exists(f) and os.path.getsize(f) > 0:
         try:
             with open(f, 'r', encoding='utf-8', errors='replace') as fp:
                 data = json.load(fp)
-        except Exception:
-            data = {}
+                if not isinstance(data, dict):
+                    raise ValueError(f"State file {f} root must be a JSON object")
+        except Exception as e:
+            bak = f + '.corrupted.bak'
+            try:
+                import shutil
+                shutil.copy2(f, bak)
+            except Exception:
+                pass
+            print(f"ОШИБКА: Поврежден файл состояния {f} ({e}). Резервная копия сохранена в {bak}. Запись прервана во избежание потери данных.", file=sys.stderr)
+            sys.exit(1)
     data[k] = v
     tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(f), suffix='.tmp')
     with os.fdopen(tmp_fd, 'w', encoding='utf-8', errors='replace') as fp:

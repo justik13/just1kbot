@@ -765,12 +765,36 @@ if os.path.exists(rf):
         fi
     fi
 
-    log "11. Проверка сетевого стелс-режима (ICMP Echo)..."
+    log "11. Проверка отключения IPv6 (защита от утечек трафика)..."
+    local ipv6_val="0"
+    if [[ -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ]]; then
+        ipv6_val="$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")"
+    else
+        ipv6_val="1"
+    fi
+    local sysctl_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
+    local ipv6_persisted=0
+    if [[ -f "$sysctl_conf" ]] && grep -Eq '^[[:space:]]*net\.ipv6\.conf\.all\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_conf" 2>/dev/null; then
+        ipv6_persisted=1
+    fi
+
+    if [[ "$ipv6_val" == "1" && "$ipv6_persisted" -eq 1 ]]; then
+        echo -e "  ${GREEN}✔${NC} IPv6 отключен (защита активна в ядре и сохранена в drop-in)"
+    elif [[ "$ipv6_val" == "1" ]]; then
+        echo -e "  ${RED}✗${NC} IPv6 отключен в ядре, но не зафиксирован в $sysctl_conf (до перезагрузки, выполните: just1knode update)"
+        failed=$((failed + 1))
+    elif [[ "$ipv6_persisted" -eq 1 ]]; then
+        echo -e "  ${RED}✗${NC} Рассинхронизация: IPv6 отключен в $sysctl_conf, но активен в ядре (выполните: just1knode update)"
+        failed=$((failed + 1))
+    else
+        echo -e "  ${YELLOW}i${NC} IPv6 активен (для включения защиты выполните: just1knode update)"
+    fi
+
+    log "12. Проверка сетевого стелс-режима (ICMP Echo)..."
     local icmp_val="0"
     if [[ -f /proc/sys/net/ipv4/icmp_echo_ignore_all ]]; then
         icmp_val="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     fi
-    local sysctl_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"
     local icmp_persisted=0
     if [[ -f "$sysctl_conf" ]] && grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_conf" 2>/dev/null; then
         icmp_persisted=1
@@ -990,7 +1014,6 @@ uninstall_node() {
     rm -f "${nginx_conf_dir}/sites-enabled/just1k-amnezia.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/sites-available/just1k-amnezia.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/just1k-origin.conf" 2>/dev/null || true
-    rm -f "${nginx_conf_dir}/conf.d/origin.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/just1k-bootstrap.conf" 2>/dev/null || true
     rm -f "${nginx_conf_dir}/conf.d/xhttp-map.conf" 2>/dev/null || true
     rm -rf "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" 2>/dev/null || true
