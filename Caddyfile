@@ -70,3 +70,6 @@ http:// {
 		}
 	}
 }
+
+import conf.d/*.caddy
+

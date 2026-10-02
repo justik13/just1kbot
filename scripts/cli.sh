@@ -220,8 +220,44 @@ check_bot_update_on_entry() {
     return 0
 }
 
+ensure_status_ingress_network() {
+    local status_caddy="${PROJECT_DIR}/caddy_conf.d/status.caddy"
+    if [[ ! -f "$status_caddy" ]]; then
+        return 0
+    fi
+
+    local project_basename
+    project_basename=$(basename "$PROJECT_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+    local target_net=""
+    local candidate_nets=(
+        "${COMPOSE_PROJECT_NAME:-${project_basename}}_status_net"
+        "${project_basename}_status_net"
+        "just1kbot_status_net"
+    )
+    for net in "${candidate_nets[@]}"; do
+        if docker network inspect "$net" >/dev/null 2>&1; then
+            target_net="$net"
+            break
+        fi
+    done
+
+    if [[ -z "$target_net" ]]; then
+        return 0
+    fi
+
+    local kuma_cid
+    kuma_cid=$(docker ps -q -f name=^uptime-kuma$ 2>/dev/null | head -n 1 || true)
+    if [[ -n "$kuma_cid" ]]; then
+        if ! docker network inspect "$target_net" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | grep -qw "uptime-kuma"; then
+            info "Подключение Uptime Kuma к изолированной сети ${target_net}..."
+            docker network connect "$target_net" "$kuma_cid" 2>/dev/null || true
+        fi
+    fi
+}
+
 dc_up() {
     docker compose up -d "$@"
+    ensure_status_ingress_network
 }
 
 
@@ -880,6 +916,10 @@ cmd_update() {
         chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
         chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
         apply_sysctl_hardening
+        if docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
+            info "Применение актуальной конфигурации Caddy (reload)..."
+            docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+        fi
 
         if [ "$did_stash" = "true" ]; then
             echo ""
@@ -1583,11 +1623,14 @@ cmd_uninstall() {
             fi
         done
         local networks=(
-            "${project_basename}_backend_net" "${project_basename}_frontend_net" "${project_basename}_default"
-            just1kbot_backend_net just1kbot_frontend_net
+            "${project_basename}_backend_net" "${project_basename}_frontend_net" "${project_basename}_status_net" "${project_basename}_default"
+            just1kbot_backend_net just1kbot_frontend_net just1kbot_status_net
         )
         for n in "${networks[@]}"; do
             if docker network inspect "$n" >/dev/null 2>&1; then
+                for ep in $(docker network inspect "$n" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null || true); do
+                    docker network disconnect -f "$n" "$ep" 2>/dev/null || true
+                done
                 docker network rm "$n" 2>/dev/null || cleanup_errors+=("Не удалось удалить Docker network: $n")
             fi
         done

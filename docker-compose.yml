@@ -20,6 +20,10 @@ networks:
     driver: bridge
     driver_opts:
       com.docker.network.driver.mtu: "1440"
+  status_net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1440"
 
 services:
   db:
@@ -155,6 +159,7 @@ services:
     logging: *default-logging
     networks:
       - frontend_net
+      - status_net
     ports:
       - "80:80"
       - "443:443"
@@ -163,6 +168,7 @@ services:
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy_conf.d:/etc/caddy/conf.d:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

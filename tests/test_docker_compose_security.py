@@ -85,6 +85,37 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("http:// {", caddyfile)
         self.assertIn("abort", caddyfile)
 
+    def test_caddy_modular_conf_d_and_uptime_kuma_integration(self):
+        root = Path(__file__).parents[1]
+        caddyfile = (root / "Caddyfile").read_text(encoding="utf-8")
+        compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+        cli_sh = (root / "scripts" / "cli.sh").read_text(encoding="utf-8")
+        example_caddy = (root / "caddy_conf.d" / "status.caddy.example").read_text(encoding="utf-8")
+
+        # 1. Caddyfile modular import
+        self.assertIn("import conf.d/*.caddy", caddyfile)
+
+        # 2. docker-compose mounts caddy_conf.d into /etc/caddy/conf.d and isolates status_net
+        self.assertIn("./caddy_conf.d:/etc/caddy/conf.d:ro", compose)
+        self.assertIn("status_net:", compose)
+
+        # 3. scripts/cli.sh connects uptime-kuma to isolated status_net only when status.caddy is present
+        self.assertIn("ensure_status_ingress_network", cli_sh)
+        self.assertIn("caddy_conf.d/status.caddy", cli_sh)
+        self.assertIn("status_net", cli_sh)
+        self.assertNotIn("docker network connect just1kbot_frontend_net uptime-kuma", cli_sh)
+
+        # 4. Uninstall cleans up status_net safely disconnecting endpoints
+        self.assertIn("${project_basename}_status_net", cli_sh)
+        self.assertIn("just1kbot_status_net", cli_sh)
+        self.assertIn("docker network disconnect -f", cli_sh)
+
+        # 5. Example configuration contains security headers and upstream
+        self.assertIn("reverse_proxy uptime-kuma:3001", example_caddy)
+        self.assertIn("-Server", example_caddy)
+        self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive"', example_caddy)
+        self.assertIn('Permissions-Policy "camera=(), microphone=(), geolocation=()"', example_caddy)
+
     def test_just1knode_origin_bot_ip_cli_support(self):
         root = Path(__file__).parents[1]
         just1knode_sh = (root / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")

@@ -513,7 +513,7 @@ class TestWhiteInternetAdminAndCooldown(unittest.IsolatedAsyncioTestCase):
 
     async def test_reset_devices_cooldown_enforcement(self):
         mock_session = AsyncMock()
-        now = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         sub = WhiteInternetSubscription(
             id=1,
             user_id=42,
