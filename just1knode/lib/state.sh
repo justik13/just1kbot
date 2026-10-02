@@ -13,6 +13,12 @@ init_state_dir() {
     chown root:xrayapi "$STATE_DIR" 2>/dev/null || true
     chmod 2770 "$STATE_DIR" 2>/dev/null || true
 
+    for f in "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE"; do
+        if [[ -L "$f" ]]; then
+            rm -f "$f"
+        fi
+    done
+
     if [[ ! -f "$STATE_FILE" ]]; then
         echo "{}" > "$STATE_FILE"
     fi
@@ -23,10 +29,10 @@ init_state_dir() {
         echo "[]" > "$RELAYS_FILE"
     fi
 
-    chown root:xrayapi "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
+    chown -h root:xrayapi "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
     chmod 660 "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
-    find "$STATE_DIR" -name "*.lock" -exec chown root:xrayapi {} + 2>/dev/null || true
-    find "$STATE_DIR" -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
+    find "$STATE_DIR" -maxdepth 1 -name "*.lock" -exec chown -h root:xrayapi {} + 2>/dev/null || true
+    find "$STATE_DIR" -maxdepth 1 -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
 }
 
 set_state_val() {
@@ -172,9 +178,7 @@ get_node_status() {
 # Транзакционный манифест
 manifest_begin() {
     local extra_targets=("$@")
-    local txn_id="txn_$$"
-    TXN_DIR="/tmp/just1knode_${txn_id}"
-    rm -rf "$TXN_DIR"
+    TXN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/just1knode_txn_XXXXXX")"
     mkdir -p "$TXN_DIR/files"
     MANIFEST_LOG="$TXN_DIR/manifest.tsv"
     : > "$MANIFEST_LOG"

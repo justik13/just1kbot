@@ -378,7 +378,7 @@ check_ports_available() {
         if command -v docker >/dev/null 2>&1; then
             local caddy_cid
             caddy_cid=$(docker ps -q -f name=^just1kbot_caddy$ 2>/dev/null | head -n 1 || true)
-            if [[ -n "$caddy_cid" ]] && docker port "$caddy_cid" "$port" 2>/dev/null | grep -q .; then
+            if [[ -n "$caddy_cid" ]] && docker port "$caddy_cid" "$port" 2>/dev/null | grep -qE ":${port}$"; then
                 is_our_caddy=1
             fi
         fi
@@ -419,7 +419,10 @@ finally:
                     if [[ -n "$proc" ]] && echo "$proc" | grep -qiE "\b${srv}\b"; then
                         found_srv="$srv"
                         warn "Обнаружена активная системная служба '$srv', занимающая порт $port."
-                        read -r -p "Остановить и отключить системную службу '$srv' для работы Just1kBot Caddy? (y/N): " confirm_stop
+                        local confirm_stop="n"
+                        if [[ -t 0 ]]; then
+                            read -r -p "Остановить и отключить системную службу '$srv' для работы Just1kBot Caddy? (y/N): " confirm_stop || true
+                        fi
                         if [[ "$confirm_stop" =~ ^[Yy]$ ]]; then
                             systemctl stop "$srv" 2>/dev/null || true
                             systemctl disable "$srv" 2>/dev/null || true

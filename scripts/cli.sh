@@ -373,7 +373,7 @@ cmd_preflight() {
     fi
 
     # 9. Проверка портов 80 и 443 для веб-сервера Caddy (Fail-Closed)
-    if grep -Eq '^[[:space:]]*USE_EXTERNAL_NGINX[[:space:]]*=[[:space:]]*(true|1)' "${PROJECT_DIR}/.env" 2>/dev/null; then
+    if grep -Eq '^[[:space:]]*USE_EXTERNAL_NGINX[[:space:]]*=[[:space:]]*["'\''"]?(true|1)["'\''"]?' "${PROJECT_DIR}/.env" 2>/dev/null; then
         error "Обнаружена устаревшая конфигурация USE_EXTERNAL_NGINX=true в .env! Поддержка внешнего Nginx в боте прекращена: веб-сервер Caddy теперь является единственным шлюзом. Удалите переменную из .env и освободите порты 80/443 для Caddy."
         has_errors=true
     fi

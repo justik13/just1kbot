@@ -477,6 +477,30 @@ wait_for_apt_locks 1
         self.assertIn("USE_EXTERNAL_NGINX=true", proc.stderr + proc.stdout)
         self.assertIn("Поддержка внешнего Nginx в боте прекращена", proc.stderr + proc.stdout)
 
+    def test_preflight_fails_closed_when_use_external_nginx_quoted(self):
+        """cmd_preflight fails closed when USE_EXTERNAL_NGINX is quoted in .env."""
+        env_content = (
+            "BOT_TOKEN=token123\n"
+            "POSTGRES_USER=user\n"
+            "POSTGRES_PASSWORD=pass\n"
+            "POSTGRES_DB=db\n"
+            "DB_ENCRYPTION_KEY=key\n"
+            "BACKUP_AGE_RECIPIENT=age1test\n"
+            "ADMIN_IDS=[123]\n"
+            "DOMAIN=vpn.example.com\n"
+            "SSL_EMAIL=admin@example.com\n"
+            "SUPPORT_USERNAME=support\n"
+            "YOOKASSA_SHOP_ID=123\n"
+            "YOOKASSA_SECRET_KEY=sec\n"
+            'USE_EXTERNAL_NGINX="true"\n'
+        )
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        (self.project_dir / ".env").chmod(0o600)
+
+        proc = self._run_cli_command("preflight")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Поддержка внешнего Nginx в боте прекращена", proc.stderr + proc.stdout)
+
     def test_doctor_detects_port_conflict_with_non_docker_process(self):
         """cmd_doctor outputs error when port 80 is occupied by a host non-docker process."""
         ss_bin = self.bin_dir / "ss"

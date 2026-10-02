@@ -839,7 +839,7 @@ reset_node() {
     systemctl disable xray xray-api amnezia-api 2>/dev/null || true
     remove_traffic_watchdog_timer
     remove_amnezia_abuse_protection 2>/dev/null || true
-    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh /etc/letsencrypt/renewal-hooks/pre/01-stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/01-start-port80-docker.sh /etc/letsencrypt/renewal-hooks/pre/stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/start-port80-docker.sh 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh /etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh /etc/letsencrypt/renewal-hooks/post/05-just1knode-nginx.sh /etc/letsencrypt/renewal-hooks/pre/01-stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/01-start-port80-docker.sh /etc/letsencrypt/renewal-hooks/pre/stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/start-port80-docker.sh 2>/dev/null || true
     rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api /etc/amnezia-api /opt/amnezia-api /etc/ssl/just1k_amnezia 2>/dev/null || true
     if [[ ! -e /etc/nginx/sites-enabled/default ]]; then
         if [[ -f /etc/nginx/sites-available/default.user.bak ]]; then
@@ -1055,8 +1055,12 @@ uninstall_node() {
     if [[ -d "$certbot_dir" ]] && [[ -z "$(ls -A "$certbot_dir" 2>/dev/null)" ]]; then
         rmdir "$certbot_dir" 2>/dev/null || true
     fi
-    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" \
+    rm -f "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/20-just1knode-restart-xray.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-xray-nginx.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/deploy/restart-amnezia-nginx.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/05-just1knode-nginx.sh" \
+          "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/05-just1knode-nginx.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/01-stop-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/01-start-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/stop-port80-docker.sh" \

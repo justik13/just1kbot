@@ -152,14 +152,20 @@ configure_safe_ufw() {
 
     if [[ $has_port80 -eq 1 ]]; then
         if ! ufw status 2>/dev/null | grep -qE "(^|[[:space:]])80/tcp[[:space:]]+ALLOW"; then
-            ufw allow 80/tcp comment "http web service" >/dev/null 2>&1 || true
-            log "Фаервол UFW: автоматически разрешен порт 80/tcp для активного веб-сервиса (Caddy)."
+            if ufw allow 80/tcp comment "http web service" >/dev/null 2>&1; then
+                log "Фаервол UFW: автоматически разрешен порт 80/tcp для активного веб-сервиса (Caddy)."
+            else
+                warn "Предупреждение: Не удалось добавить правило UFW для порта 80/tcp."
+            fi
         fi
     fi
     if [[ $has_port443 -eq 1 ]]; then
         if ! ufw status 2>/dev/null | grep -qE "(^|[[:space:]])443/tcp[[:space:]]+ALLOW"; then
-            ufw allow 443/tcp comment "https web service" >/dev/null 2>&1 || true
-            log "Фаервол UFW: автоматически разрешен порт 443/tcp для активного веб-сервиса (Caddy)."
+            if ufw allow 443/tcp comment "https web service" >/dev/null 2>&1; then
+                log "Фаервол UFW: автоматически разрешен порт 443/tcp для активного веб-сервиса (Caddy)."
+            else
+                warn "Предупреждение: Не удалось добавить правило UFW для порта 443/tcp."
+            fi
         fi
     fi
 
