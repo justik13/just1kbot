@@ -840,6 +840,14 @@ reset_node() {
     remove_traffic_watchdog_timer
     remove_amnezia_abuse_protection 2>/dev/null || true
     rm -f /etc/nginx/sites-enabled/just1k-origin.conf /etc/nginx/sites-available/just1k-origin.conf /etc/nginx/sites-enabled/just1k-amnezia.conf /etc/nginx/sites-available/just1k-amnezia.conf /etc/nginx/conf.d/xhttp-map.conf /etc/letsencrypt/renewal-hooks/deploy/20-just1knode-restart-xray.sh /etc/letsencrypt/renewal-hooks/deploy/restart-xray.sh /etc/letsencrypt/renewal-hooks/deploy/restart-xray-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/restart-amnezia-nginx.sh /etc/letsencrypt/renewal-hooks/pre/05-just1knode-nginx.sh /etc/letsencrypt/renewal-hooks/post/05-just1knode-nginx.sh /etc/letsencrypt/renewal-hooks/pre/01-stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/01-start-port80-docker.sh /etc/letsencrypt/renewal-hooks/pre/stop-port80-docker.sh /etc/letsencrypt/renewal-hooks/post/start-port80-docker.sh 2>/dev/null || true
+    if [[ -d /etc/letsencrypt/renewal ]]; then
+        for rconf in /etc/letsencrypt/renewal/*.conf; do
+            [[ -f "$rconf" ]] || continue
+            if grep -Eq "(just1knode|20-just1knode)" "$rconf" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*(pre_hook|post_hook)[[:space:]]*=.*just1knode.*/d' "$rconf" 2>/dev/null || true
+            fi
+        done
+    fi
     rm -rf /etc/nginx/just1k_relays.d /etc/just1knode /etc/xray-api /etc/amnezia-api /opt/amnezia-api /etc/ssl/just1k_amnezia 2>/dev/null || true
     if [[ ! -e /etc/nginx/sites-enabled/default ]]; then
         if [[ -f /etc/nginx/sites-available/default.user.bak ]]; then
@@ -1065,6 +1073,14 @@ uninstall_node() {
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/01-start-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/pre/stop-port80-docker.sh" \
           "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal-hooks/post/start-port80-docker.sh" 2>/dev/null || true
+    if [[ -d "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal" ]]; then
+        for rconf in "${LETSENCRYPT_DIR:-/etc/letsencrypt}/renewal"/*.conf; do
+            [[ -f "$rconf" ]] || continue
+            if grep -Eq "(just1knode|20-just1knode)" "$rconf" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*(pre_hook|post_hook)[[:space:]]*=.*just1knode.*/d' "$rconf" 2>/dev/null || true
+            fi
+        done
+    fi
 
     info "8/11. Удаление конфигурации ядра sysctl и восстановление параметров сети..."
     local sysctl_ipv6_conf="${JUST1KNODE_SYSCTL_IPV6_CONF:-/etc/sysctl.d/99-disable-ipv6.conf}"

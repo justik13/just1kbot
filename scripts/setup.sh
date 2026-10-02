@@ -152,7 +152,7 @@ cleanup_on_exit() {
     local exit_code=$?
     if (( exit_code != 0 )); then
         warn "Скрипт установки завершился с ошибкой (код $exit_code)."
-        rm -f /tmp/get-docker.sh 2>/dev/null || true
+        rm -f /tmp/get-docker.*.sh /tmp/get-docker.sh 2>/dev/null || true
         (exit "$exit_code")
     fi
 }
@@ -170,6 +170,9 @@ check_root() {
 # --- Проверка повторной установки (Idempotency) ---
 check_existing_install() {
     if [[ -f "${PROJECT_DIR}/.env" ]]; then
+        if grep -Eq '^[[:space:]]*USE_EXTERNAL_NGINX[[:space:]]*=[[:space:]]*["'\''"]?(true|1)["'\''"]?' "${PROJECT_DIR}/.env" 2>/dev/null; then
+            error "Обнаружена устаревшая конфигурация USE_EXTERNAL_NGINX=true в .env! Поддержка внешнего Nginx в боте прекращена: веб-сервер Caddy теперь является единственным шлюзом. Удалите переменную из .env и освободите порты 80/443 для Caddy."
+        fi
         warn "Обнаружен существующий файл конфигурации ${PROJECT_DIR}/.env."
         echo -e "Выберите действие:"
         echo -e "  ${BOLD}[1] Использовать существующий .env и продолжить запуск контейнеров (Рекомендуется)${NC}"
@@ -312,8 +315,8 @@ install_dependencies() {
             if sh "$tmp_get_docker" >/dev/null 2>&1; then
                 installed_docker=1
             fi
-            rm -f "$tmp_get_docker"
         fi
+        rm -f "$tmp_get_docker"
         if (( installed_docker == 0 )); then
             info "Установка Docker через стандартный репозиторий системы..."
             apt-get update -qq

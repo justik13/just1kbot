@@ -2054,11 +2054,17 @@ ensure_xrayapi_user
         # Fake camouflage site
         (self.www_html_dir / "index.html").write_text("<h1>Cloud Ingress Network Node</h1>", encoding="utf-8")
 
-        # Fake certbot hook
+        # Fake certbot hook & renewal conf
         hook_dir = self.letsencrypt_dir / "renewal-hooks" / "deploy"
         hook_dir.mkdir(parents=True, exist_ok=True)
         (hook_dir / "restart-xray-nginx.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         (hook_dir / "20-just1knode-restart-xray.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        renewal_conf_dir = self.letsencrypt_dir / "renewal"
+        renewal_conf_dir.mkdir(parents=True, exist_ok=True)
+        (renewal_conf_dir / "relay.example.com.conf").write_text(
+            "[renewalparams]\npre_hook = sh -c '... just1knode ...'\npost_hook = sh -c '... just1knode ...'\naccount = abc123\n",
+            encoding="utf-8",
+        )
 
         # Fake install dir & global bin
         fake_install_dir = Path(self.temp_dir) / "opt" / "just1knode"
@@ -2105,6 +2111,10 @@ ensure_xrayapi_user
         self.assertFalse((self.www_html_dir / "index.html").exists(), "camouflage index.html must be removed")
         self.assertFalse((hook_dir / "restart-xray-nginx.sh").exists(), "certbot hook must be removed")
         self.assertFalse((hook_dir / "20-just1knode-restart-xray.sh").exists(), "deploy hook 20-just1knode-restart-xray.sh must be removed")
+        conf_after = (renewal_conf_dir / "relay.example.com.conf").read_text(encoding="utf-8")
+        self.assertNotIn("pre_hook", conf_after, "inline pre_hook must be purged from renewal conf")
+        self.assertNotIn("post_hook", conf_after, "inline post_hook must be purged from renewal conf")
+        self.assertIn("account = abc123", conf_after, "other renewal parameters must be preserved")
         self.assertFalse(fake_install_dir.exists(), "INSTALL_DIR must be removed")
         self.assertFalse(fake_global_bin.exists(), "JUST1KNODE_GLOBAL_BIN must be removed")
         self.assertFalse(self.backup_dir.exists(), "BACKUP_DIR must be removed when --purge-backups is passed")
@@ -2670,8 +2680,10 @@ remove_traffic_watchdog_timer
         self.assertIn("detect_host_port80_container", relay_sh)
         self.assertIn("/run/just1knode_caddy_was_paused", relay_sh)
         self.assertIn('docker stop "$port80_container"', relay_sh)
-        self.assertIn('docker start "$stopped_container"', relay_sh)
         self.assertIn(r'docker start \"\$c80\" >/dev/null 2>&1 && rm -f /run/just1knode_caddy_was_paused', relay_sh)
+        self.assertIn(r'grep -q \"^just1kbot_caddy\b\"', relay_sh)
+        self.assertIn(r'echo \"just1kbot_caddy\" > /run/just1knode_caddy_was_paused', relay_sh)
+        self.assertIn(r'(:80->|just1kbot_caddy)', relay_sh)
         # Ensure deploy hook checks RENEWED_LINEAGE against RELAY_SNI
         self.assertIn('[ "$(basename "$RENEWED_LINEAGE")" = "$RELAY_SNI" ]', relay_sh)
 

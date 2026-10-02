@@ -40,6 +40,7 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
     fi
     tmp_tar="$(mktemp /tmp/just1knode_boot.XXXXXX.tar.gz 2>/dev/null || mktemp)"
     tmp_extract="$(mktemp -d /tmp/just1knode_extract.XXXXXX 2>/dev/null || mktemp -d)"
+    trap 'rm -rf "$tmp_tar" "$tmp_extract"' EXIT INT TERM
     echo -e "\033[0;36m[i]\033[0m Модули just1knode не обнаружены в /opt/just1knode."
     echo -e "\033[0;36m[i]\033[0m Загрузка и распаковка компонентов с GitHub (${JUST1KBOT_REF})..."
     download_ok=0
@@ -68,9 +69,15 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
             cp -r "$tmp_extract/scripts/amnezia_api"/* /opt/amnezia-api/
         fi
         rm -rf "$tmp_tar" "$tmp_extract"
+        trap - EXIT INT TERM
         chmod +x "$INSTALL_DIR/just1knode.sh"
         ln -sf "$INSTALL_DIR/just1knode.sh" /usr/local/bin/just1knode
         TARGET="$INSTALL_DIR/just1knode.sh"
+    else
+        rm -rf "$tmp_tar" "$tmp_extract"
+        trap - EXIT INT TERM
+        echo -e "\033[0;31m[✗]\033[0m Ошибка: не удалось скачать архив репозитория ($archive_url)." >&2
+        exit 1
     fi
 fi
 

@@ -1593,6 +1593,26 @@ echo "SKIP_WIZARD=$SKIP_WIZARD"
         self.assertIn("LOADED_DOMAIN=bot.test", proc.stdout)
         self.assertIn("SKIP_WIZARD=true", proc.stdout)
 
+    def test_check_existing_install_fails_closed_when_use_external_nginx(self):
+        """check_existing_install must fail closed with error when USE_EXTERNAL_NGINX=true is in existing .env."""
+        env_content = "DOMAIN=bot.test\nBOT_TOKEN=123456:abcdef\nUSE_EXTERNAL_NGINX=true\n"
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        script = f"""
+PROJECT_DIR="{self.project_dir.as_posix()}"
+source "{self.project_dir.as_posix()}/scripts/setup.sh"
+check_existing_install
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            input="1\n",
+            text=True,
+            capture_output=True,
+            cwd=str(self.project_dir),
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Поддержка внешнего Nginx в боте прекращена", proc.stderr + proc.stdout)
+
     def test_setup_port_guard_fails_closed_when_port_busy(self):
         """setup.sh port check must fail closed when port 80/443 is occupied by a non-docker process and cannot be freed."""
         # Mock ss to simulate occupied port 80

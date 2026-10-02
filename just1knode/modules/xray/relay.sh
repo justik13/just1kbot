@@ -124,8 +124,8 @@ fi
 EOF
     chmod 755 "${le_dir}/renewal-hooks/deploy/20-just1knode-restart-xray.sh"
 
-    local pre_hook_cmd="sh -c 'if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then touch /run/just1knode_nginx_was_active && systemctl stop nginx 2>/dev/null || true; fi; if command -v docker >/dev/null 2>&1; then c80=\$(docker ps --format \"{{.Names}}\t{{.Ports}}\" 2>/dev/null | grep -E \"(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp\" | head -n 1 | cut -f1 || true); if [ -n \"\$c80\" ]; then echo \"\$c80\" > /run/just1knode_caddy_was_paused && docker stop \"\$c80\" >/dev/null 2>&1 || true; fi; fi; if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi \"Status: active\"; then if ! ufw status 2>/dev/null | grep -E \"(^|[[:space:]])80(/tcp)?[[:space:]]+ALLOW\" -q; then touch /run/just1knode_ufw_opened_80 && ufw allow 80/tcp comment \"just1knode certbot verification\" >/dev/null 2>&1 || true; fi; fi'"
-    local post_hook_cmd="sh -c 'if [ -f /run/just1knode_nginx_was_active ]; then rm -f /run/just1knode_nginx_was_active; command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true; fi; if [ -f /run/just1knode_caddy_was_paused ]; then c80=\$(cat /run/just1knode_caddy_was_paused 2>/dev/null || true); if [ -n \"\$c80\" ] && command -v docker >/dev/null 2>&1; then docker start \"\$c80\" >/dev/null 2>&1 && rm -f /run/just1knode_caddy_was_paused; else rm -f /run/just1knode_caddy_was_paused; fi; fi; if [ -f /run/just1knode_ufw_opened_80 ]; then rm -f /run/just1knode_ufw_opened_80; ufw delete allow 80/tcp >/dev/null 2>&1 || true; ufw delete allow 80 >/dev/null 2>&1 || true; fi'"
+    local pre_hook_cmd="sh -c 'if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then touch /run/just1knode_nginx_was_active && systemctl stop nginx 2>/dev/null || true; fi; if command -v docker >/dev/null 2>&1; then if docker ps --format \"{{.Names}}\t{{.Ports}}\" 2>/dev/null | grep -E \"(^|[[:space:],])([0-9\.:]+|\[::\]|:::):80->[0-9]+/tcp\" | grep -q \"^just1kbot_caddy\b\"; then if docker stop just1kbot_caddy >/dev/null 2>&1; then echo \"just1kbot_caddy\" > /run/just1knode_caddy_was_paused; fi; fi; fi; if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi \"Status: active\"; then if ! ufw status 2>/dev/null | grep -E \"(^|[[:space:]])80(/tcp)?[[:space:]]+ALLOW\" -q; then touch /run/just1knode_ufw_opened_80 && ufw allow 80/tcp comment \"just1knode certbot verification\" >/dev/null 2>&1 || true; fi; fi'"
+    local post_hook_cmd="sh -c 'if [ -f /run/just1knode_nginx_was_active ]; then rm -f /run/just1knode_nginx_was_active; command -v systemctl >/dev/null 2>&1 && systemctl start nginx 2>/dev/null || true; fi; if [ -f /run/just1knode_caddy_was_paused ]; then c80=\$(cat /run/just1knode_caddy_was_paused 2>/dev/null || true); if [ -n \"\$c80\" ] && command -v docker >/dev/null 2>&1; then docker start \"\$c80\" >/dev/null 2>&1 && rm -f /run/just1knode_caddy_was_paused; else rm -f /run/just1knode_caddy_was_paused; fi; fi; if [ -f /run/just1knode_ufw_opened_80 ]; then rm -f /run/just1knode_ufw_opened_80; if ! (command -v docker >/dev/null 2>&1 && docker ps --format \"{{.Ports}} {{.Names}}\" 2>/dev/null | grep -qE \"(:80->|just1kbot_caddy)\"); then ufw delete allow 80/tcp >/dev/null 2>&1 || true; ufw delete allow 80 >/dev/null 2>&1 || true; fi; fi'"
 
     # 2. Если действующий сертификат для этого домена УЖЕ существует на хосте — используем его!
     if [[ -f "${le_dir}/live/${domain}/fullchain.pem" && -f "${le_dir}/live/${domain}/privkey.pem" ]]; then
@@ -468,9 +468,6 @@ EOF
         return 1
     fi
 
-    deploy_xray_systemd_service
-    systemctl restart xray
-
     # Защита порта туннеля через UFW (с сохранением порта Amnezia API при Dual-режиме)
     local extra_ufw_ports=()
     local existing_awg_port
@@ -500,6 +497,9 @@ EOF
     else
         warn "Предупреждение: Не удалось добавить правило UFW для порта туннеля ${relay_port}/tcp от ${origin_ip}."
     fi
+
+    deploy_xray_systemd_service
+    systemctl restart xray
 
     set_state_val "relay_port" "$relay_port"
     set_state_val "origin_ip" "$origin_ip"
