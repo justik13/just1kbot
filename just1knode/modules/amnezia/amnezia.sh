@@ -508,7 +508,7 @@ install_amnezia_node() {
            wget -q --timeout=60 -O "$tmp_dl" "$archive_url" 2>/dev/null; then
             local extract_dir="${tmp_extract}/src"
             mkdir -p "$extract_dir"
-            if tar -xzf "$tmp_dl" -C "$extract_dir" --strip-components=1 2>/dev/null; then
+            if tar -xzf "$tmp_dl" -C "$extract_dir" --strip-components=1 --no-same-owner 2>/dev/null; then
                 local found_scripts="${extract_dir}/scripts/amnezia_api"
                 if is_amnezia_api_valid "$found_scripts"; then
                     cp -a "${found_scripts}/." "$AMNEZIA_API_DIR/" 2>/dev/null || true

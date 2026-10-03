@@ -486,8 +486,8 @@ EOF
     configure_safe_ufw "${extra_ufw_ports[@]}"
     if [[ "$prev_role" == "awg" || "$prev_role" == "dual" || -f "/etc/nginx/sites-available/just1k-amnezia.conf" ]]; then
         if [[ -n "$saved_bot_ip" && "$saved_bot_ip" != "any" && "$saved_bot_ip" != "0.0.0.0/0" ]] && validate_ip "$saved_bot_ip"; then
-            ufw delete allow "${existing_awg_port}/tcp" 2>/dev/null || true
-            ufw delete allow "${existing_awg_port}" 2>/dev/null || true
+            ufw delete allow "${existing_awg_port}/tcp" >/dev/null 2>&1 || true
+            ufw delete allow "${existing_awg_port}" >/dev/null 2>&1 || true
             ufw allow from "$saved_bot_ip" to any port "$existing_awg_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1 || true
             log "Фаервол UFW: подтвержден доступ к порту ${existing_awg_port} строго для BOT_IP (${saved_bot_ip})"
         fi

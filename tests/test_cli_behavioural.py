@@ -2118,19 +2118,52 @@ cmd_uninstall --confirm=DELETE --keep-backups
         self.assertIn("требуется явное подтверждение: --confirm=DELETE", proc.stdout + proc.stderr)
 
     def test_read_commands_do_not_redirect_stderr_to_devnull(self):
-        """Invariant: No read -p command in cli.sh or setup.sh may redirect stderr to /dev/null, which silences prompts."""
-        for script_name in ["cli.sh", "setup.sh"]:
-            script_path = CLI_PATH.parent / script_name
-            with open(script_path, "r", encoding="utf-8") as f:
-                for idx, line in enumerate(f, 1):
-                    stripped = line.strip()
-                    if stripped.startswith("#"):
-                        continue
-                    if "read " in stripped and "2>/dev/null" in stripped:
-                        self.fail(
-                            f"Silent prompt anti-pattern found in {script_name}:{idx}: '{stripped}'. "
-                            f"Bash 'read -p' writes prompts to stderr; '2>/dev/null' silences the prompt completely."
-                        )
+        """Invariant: No read -p command in any shell script may redirect stderr to /dev/null, which silences prompts."""
+        repo_root = CLI_PATH.parent.parent
+        target_dirs = [repo_root / "scripts", repo_root / "just1knode"]
+        for target_dir in target_dirs:
+            for script_path in target_dir.rglob("*.sh"):
+                with open(script_path, "r", encoding="utf-8", errors="replace") as f:
+                    for idx, line in enumerate(f, 1):
+                        stripped = line.strip()
+                        if stripped.startswith("#"):
+                            continue
+                        if "read " in stripped and "2>/dev/null" in stripped:
+                            rel_path = script_path.relative_to(repo_root)
+                            self.fail(
+                                f"Silent prompt anti-pattern found in {rel_path}:{idx}: '{stripped}'. "
+                                f"Bash 'read -p' writes prompts to stderr; '2>/dev/null' silences the prompt completely."
+                            )
+
+    def test_ufw_delete_redirects_both_stdout_and_stderr(self):
+        """Invariant: ufw delete commands must redirect both stdout and stderr (>/dev/null 2>&1), not only 2>/dev/null."""
+        repo_root = CLI_PATH.parent.parent
+        for target_dir in [repo_root / "scripts", repo_root / "just1knode"]:
+            for script_path in target_dir.rglob("*.sh"):
+                with open(script_path, "r", encoding="utf-8", errors="replace") as f:
+                    for idx, line in enumerate(f, 1):
+                        stripped = line.strip()
+                        if stripped.startswith("#"):
+                            continue
+                        if "ufw delete" in stripped and "2>/dev/null" in stripped and ">/dev/null" not in stripped:
+                            rel_path = script_path.relative_to(repo_root)
+                            self.fail(
+                                f"Incomplete ufw delete redirection in {rel_path}:{idx}: '{stripped}'. "
+                                f"Must redirect both stdout and stderr (>/dev/null 2>&1) to avoid leaking status text."
+                            )
+
+    def test_state_and_watchdog_locks_use_o_nofollow_and_fchmod(self):
+        """Invariant: state.sh, traffic_watchdog.sh and traffic_watchdog.py must use O_NOFOLLOW and fd-based fchmod."""
+        repo_root = CLI_PATH.parent.parent
+        targets = [
+            repo_root / "just1knode" / "lib" / "state.sh",
+            repo_root / "just1knode" / "lib" / "traffic_watchdog.sh",
+            repo_root / "just1knode" / "lib" / "traffic_watchdog.py",
+        ]
+        for path in targets:
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("O_NOFOLLOW", content, f"Missing O_NOFOLLOW in {path.name}")
+            self.assertIn("fchmod", content, f"Missing fchmod in {path.name}")
 
 
 if __name__ == "__main__":

@@ -78,7 +78,7 @@ if [[ -z "$SCRIPT_DIR" || ! -f "${SCRIPT_DIR}/lib/common.sh" ]]; then
             exit 1
         fi
         
-        tar -xzf "$tmp_tar" -C "$tmp_extract" --strip-components=1
+        tar -xzf "$tmp_tar" -C "$tmp_extract" --strip-components=1 --no-same-owner
         cp -a "$tmp_extract/just1knode/." "$INSTALL_DIR/"
         if [[ -d "$tmp_extract/scripts/xray_api" ]]; then
             mkdir -p "${XRAY_API_DIR:-/opt/xray-api}"
@@ -943,7 +943,8 @@ uninstall_node() {
     else
         # Confirmation step 1
         local c1="n"
-        if ! read -r -t 60 -p "Вы действительно хотите начать процедуру полного удаления just1knode? [y/N]: " c1 2>/dev/null; then
+        if ! read -r -t 60 -p "Вы действительно хотите начать процедуру полного удаления just1knode? [y/N]: " c1; then
+            echo ""
             error "В неинтерактивном режиме для удаления требуется явный флаг: --confirm=DELETE (или --confirm=УДАЛИТЬ). Процедура прервана (Fail-Closed)."
             return 1
         fi
@@ -956,7 +957,8 @@ uninstall_node() {
         echo ""
         echo -e "${BOLD}${RED}ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ! Это действие необратимо.${NC}"
         local c2=""
-        if ! read -r -t 60 -p "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2 2>/dev/null; then
+        if ! read -r -t 60 -p "Для подтверждения введите заглавными буквами слово 'УДАЛИТЬ' или 'DELETE': " c2; then
+            echo ""
             c2=""
         fi
         if [[ "$c2" != "DELETE" && "$c2" != "УДАЛИТЬ" ]]; then
@@ -1114,22 +1116,22 @@ uninstall_node() {
 
         if [[ -n "$st_relay_port" ]]; then
             if [[ -n "$st_origin_ip" ]]; then
-                ufw delete allow from "$st_origin_ip" to any port "$st_relay_port" proto tcp 2>/dev/null || true
+                ufw delete allow from "$st_origin_ip" to any port "$st_relay_port" proto tcp >/dev/null 2>&1 || true
             fi
-            ufw delete allow "$st_relay_port"/tcp 2>/dev/null || true
-            ufw delete allow "$st_relay_port" 2>/dev/null || true
+            ufw delete allow "$st_relay_port"/tcp >/dev/null 2>&1 || true
+            ufw delete allow "$st_relay_port" >/dev/null 2>&1 || true
         fi
         if [[ -n "$st_bot_ip" ]]; then
-            ufw delete allow from "$st_bot_ip" to any port 8444 proto tcp 2>/dev/null || true
+            ufw delete allow from "$st_bot_ip" to any port 8444 proto tcp >/dev/null 2>&1 || true
             if [[ -n "$st_awg_port" ]]; then
-                ufw delete allow from "$st_bot_ip" to any port "$st_awg_port" proto tcp 2>/dev/null || true
+                ufw delete allow from "$st_bot_ip" to any port "$st_awg_port" proto tcp >/dev/null 2>&1 || true
             fi
         fi
-        ufw delete allow 8444/tcp 2>/dev/null || true
-        ufw delete allow 8444 2>/dev/null || true
+        ufw delete allow 8444/tcp >/dev/null 2>&1 || true
+        ufw delete allow 8444 >/dev/null 2>&1 || true
         if [[ -n "$st_awg_port" ]]; then
-            ufw delete allow "${st_awg_port}/tcp" 2>/dev/null || true
-            ufw delete allow "${st_awg_port}" 2>/dev/null || true
+            ufw delete allow "${st_awg_port}/tcp" >/dev/null 2>&1 || true
+            ufw delete allow "${st_awg_port}" >/dev/null 2>&1 || true
         fi
     fi
 

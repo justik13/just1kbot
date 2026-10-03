@@ -348,7 +348,9 @@ install_dependencies() {
             case "$arch" in
                 x86_64) arch="x86_64" ;;
                 aarch64|arm64) arch="aarch64" ;;
-                *) arch="x86_64" ;;
+                *)
+                    error "Архитектура '$arch' не поддерживается для прямой загрузки docker-compose. Установите docker-compose вручную."
+                    ;;
             esac
             curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${arch}" -o "${compose_dir}/docker-compose" 2>/dev/null || true
             chmod +x "${compose_dir}/docker-compose" 2>/dev/null || true

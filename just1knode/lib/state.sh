@@ -31,8 +31,8 @@ init_state_dir() {
 
     chown -h root:xrayapi "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
     chmod 660 "$STATE_FILE" "$CLIENTS_FILE" "$RELAYS_FILE" 2>/dev/null || true
-    find "$STATE_DIR" -maxdepth 1 -name "*.lock" -exec chown -h root:xrayapi {} + 2>/dev/null || true
-    find "$STATE_DIR" -maxdepth 1 -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
+    find "$STATE_DIR" -maxdepth 1 -type f -name "*.lock" -exec chown -h root:xrayapi {} + 2>/dev/null || true
+    find "$STATE_DIR" -maxdepth 1 -type f -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
 }
 
 set_state_val() {
@@ -61,9 +61,18 @@ lock_file = f + '.lock'
 open_flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0)
 lock_fd = os.open(lock_file, open_flags, 0o660)
 try:
-    import shutil
-    shutil.chown(lock_file, user='root', group='xrayapi')
-    os.chmod(lock_file, 0o660)
+    if hasattr(os, 'fchmod'):
+        os.fchmod(lock_fd, 0o660)
+    else:
+        os.chmod(lock_file, 0o660)
+    try:
+        import grp
+        gid = grp.getgrnam('xrayapi').gr_gid
+        if hasattr(os, 'fchown'):
+            os.fchown(lock_fd, 0, gid)
+    except Exception:
+        import shutil
+        shutil.chown(lock_file, user='root', group='xrayapi')
 except Exception:
     pass
 if fcntl:
@@ -101,16 +110,19 @@ try:
             sys.exit(1)
     data[k] = v
     tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(f), suffix='.tmp')
+    try:
+        if hasattr(os, 'fchmod'):
+            os.fchmod(tmp_fd, 0o660)
+        import grp
+        gid = grp.getgrnam('xrayapi').gr_gid
+        if hasattr(os, 'fchown'):
+            os.fchown(tmp_fd, 0, gid)
+    except Exception:
+        pass
     with os.fdopen(tmp_fd, 'w', encoding='utf-8', errors='replace') as fp:
         json.dump(data, fp, indent=2, ensure_ascii=False)
         fp.flush()
     os.replace(tmp_path, f)
-    try:
-        import shutil
-        shutil.chown(f, user='root', group='xrayapi')
-        os.chmod(f, 0o660)
-    except Exception:
-        pass
 finally:
     if fcntl:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)

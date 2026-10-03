@@ -46,8 +46,23 @@ if not os.path.exists(sf):
 
 lock_file = sf + '.lock'
 d = os.path.dirname(os.path.abspath(sf))
-os.makedirs(d, exist_ok=True)
-lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o660)
+open_flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0)
+lock_fd = os.open(lock_file, open_flags, 0o660)
+try:
+    if hasattr(os, 'fchmod'):
+        os.fchmod(lock_fd, 0o660)
+    else:
+        os.chmod(lock_file, 0o660)
+    try:
+        import grp
+        gid = grp.getgrnam('xrayapi').gr_gid
+        if hasattr(os, 'fchown'):
+            os.fchown(lock_fd, 0, gid)
+    except Exception:
+        import shutil
+        shutil.chown(lock_file, user='root', group='xrayapi')
+except Exception:
+    pass
 if fcntl:
     fcntl.flock(lock_fd, fcntl.LOCK_EX)
 try:
@@ -56,16 +71,19 @@ try:
     if isinstance(data, dict):
         data[k] = True
         t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+        try:
+            if hasattr(os, 'fchmod'):
+                os.fchmod(t_fd, 0o640)
+            import grp
+            gid = grp.getgrnam('xrayapi').gr_gid
+            if hasattr(os, 'fchown'):
+                os.fchown(t_fd, 0, gid)
+        except Exception:
+            pass
         with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
             json.dump(data, fp, indent=2)
             fp.flush()
         os.replace(t_path, sf)
-        try:
-            import shutil
-            shutil.chown(sf, user='root', group='xrayapi')
-            os.chmod(sf, 0o640)
-        except Exception:
-            pass
 finally:
     if fcntl:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)

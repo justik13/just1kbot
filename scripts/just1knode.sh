@@ -54,7 +54,7 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
         fi
     fi
     if [[ $download_ok -eq 1 && -f "$tmp_tar" ]]; then
-        tar -xzf "$tmp_tar" -C "$tmp_extract" --strip-components=1
+        tar -xzf "$tmp_tar" -C "$tmp_extract" --strip-components=1 --no-same-owner
         cp -r "$tmp_extract/just1knode"/* "$INSTALL_DIR/"
         if [[ -d "$tmp_extract/scripts" ]]; then
             mkdir -p "$INSTALL_DIR/scripts"
