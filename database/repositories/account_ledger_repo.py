@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,6 @@ from database.models import (
     TariffQuote,
     User,
 )
-from database.repositories.tariff_quotes_repo import lock_checkout_user
 from utils.datetime_helpers import now_utc
 
 ZERO = Decimal(0)
@@ -66,6 +65,14 @@ def whole_rubles(value: object, *, allow_zero: bool = False) -> Decimal:
     if amount < 0 or (amount == 0 and not allow_zero):
         raise ValueError("amount must be positive")
     return amount.quantize(Decimal("1.00"))
+
+
+async def lock_checkout_user(session: AsyncSession, user_id: int) -> User | None:
+    """The sole per-user checkout lock; callers derive state only afterwards."""
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": -user_id})
+    return await session.scalar(
+        select(User).where(User.id == user_id).with_for_update()
+    )
 
 
 async def lock_account_user(

@@ -737,6 +737,7 @@ class Order(Base):
     )
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user = relationship("User", back_populates="orders", foreign_keys=[user_id])
     tariff = relationship("Tariff", foreign_keys=[tariff_id])

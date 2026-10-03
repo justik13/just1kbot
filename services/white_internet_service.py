@@ -43,15 +43,17 @@ from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
-from database.models import Server, Tariff, TariffQuote, User, WhiteInternetSubscription
+from database.models import Order, Server, Tariff, TariffQuote, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     AccountLedgerConflictError,
     AccountLedgerError,
     AccountLedgerInvariantError,
     InsufficientAccountBalanceError,
+    create_order_debit,
     create_purchase_debit,
     get_account_balance,
+    whole_rubles,
 )
 from database.repositories.tariff_quotes_repo import (
     get_or_create_current_version,
@@ -282,6 +284,92 @@ class WhiteInternetService:
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
         return None
+
+    @classmethod
+    async def _checkout_wallet_order(
+        cls,
+        session: AsyncSession,
+        *,
+        user: User,
+        service_type: str,
+        tariff_id: int | None,
+        amount_due: object,
+        duration_days: int,
+        traffic_bytes: int = 0,
+        device_limit: int | None = None,
+        operation: str,
+        order_metadata: dict | None = None,
+        insufficient_text: str,
+        **extra_message_kwargs,
+    ) -> tuple[Order | None, tuple[bool, str, None] | None]:
+        """Create a pending wallet order, debit FIFO, mark paid. Single checkout seam.
+
+        Mirrors the retired quote checkout contract (15-minute TTL, bonus-first
+        debit, identical failure tuples) without quote machinery.
+        """
+        now = now_utc()
+        amount = whole_rubles(amount_due, allow_zero=True)
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            service_type=service_type,
+            tariff_id=tariff_id,
+            amount_rub=amount,
+            duration_days=duration_days,
+            traffic_bytes=traffic_bytes,
+            device_limit=device_limit,
+            payment_method="wallet",
+            status="pending",
+            expires_at=now + timedelta(minutes=15),
+            metadata_={"operation": operation, **(order_metadata or {})},
+        )
+        session.add(order)
+        await session.flush()
+        if order.expires_at is not None and order.expires_at <= now_utc():
+            raise LookupError("purchase_order_expired")
+        if amount == 0:
+            order.status = "paid"
+            order.paid_at = now_utc()
+            await session.flush()
+            return order, None
+        snapshot = await get_account_balance(
+            session, user_id=user.id, for_update=False, locked_user=user
+        )
+        if snapshot.available < amount:
+            order.status = "canceled"
+            await session.flush()
+            balance_snap = await get_account_balance(session, user_id=user.id)
+            # Coerce once: shortage arithmetic must not depend on the input type.
+            return (
+                False,
+                insufficient_text.format(
+                    price=int(amount),
+                    balance=balance_snap.available,
+                    shortage=max(amount - balance_snap.available, Decimal(0)),
+                    **extra_message_kwargs,
+                ),
+                None,
+            )
+        try:
+            await create_order_debit(
+                session,
+                user_id=user.id,
+                amount_rub=amount,
+                order_id=order.id,
+                metadata={"operation": operation},
+            )
+        except (AccountLedgerInvariantError, AccountLedgerConflictError):
+            order.status = "canceled"
+            await session.flush()
+            raise
+        except AccountLedgerError as exc:
+            order.status = "canceled"
+            await session.flush()
+            return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+        order.status = "paid"
+        order.paid_at = now_utc()
+        await session.flush()
+        return order, None
 
     @classmethod
     async def purchase_subscription(
