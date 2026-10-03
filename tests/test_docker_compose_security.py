@@ -169,3 +169,32 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn('8444(/tcp)?\\s+ALLOW\\s+(Anywhere|0\\.0\\.0\\.0/0|::/0)', origin_sh)
         self.assertIn('ufw delete allow 8444/tcp', origin_sh)
 
+    def test_node_firewall_and_stealth_ssot_invariants(self):
+        root = Path(__file__).parents[1]
+        common_sh = (root / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        relay_sh = (root / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        core_sh = (root / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
+        amnezia_sh = (root / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
+        cli_sh = (root / "scripts" / "cli.sh").read_text(encoding="utf-8")
+        setup_sh = (root / "scripts" / "setup.sh").read_text(encoding="utf-8")
+
+        # 1. common.sh defines heal_node_firewall_and_stealth
+        self.assertIn("heal_node_firewall_and_stealth()", common_sh)
+        self.assertIn("ufw delete allow 80/tcp", common_sh)
+        self.assertIn("ufw delete allow 22/tcp", common_sh)
+
+        # 2. relay.sh never adds awg_port to public extra_ufw_ports
+        self.assertNotIn('extra_ufw_ports+=("${existing_awg_port}/tcp")', relay_sh)
+        self.assertIn("heal_node_firewall_and_stealth", relay_sh)
+
+        # 3. core.sh invokes heal_node_firewall_and_stealth during update_node_post
+        self.assertIn("heal_node_firewall_and_stealth", core_sh)
+
+        # 4. amnezia.sh fails closed if bot_ip is missing and invokes heal
+        self.assertNotIn('ufw allow "${public_port}/tcp" comment "just1knode amnezia api"', amnezia_sh)
+        self.assertIn("heal_node_firewall_and_stealth", amnezia_sh)
+
+        # 5. cli.sh and setup.sh include IPv6 leak protection sysctl
+        self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", cli_sh)
+        self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", setup_sh)
+

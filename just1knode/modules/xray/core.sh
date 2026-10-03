@@ -512,7 +512,7 @@ update_node_post() {
     acquire_just1knode_lock
     trap release_just1knode_lock RETURN EXIT
 
-    apply_node_sysctl_hardening
+    heal_node_firewall_and_stealth
 
     # Автоматическая оптимизация конфигурации в зависимости от роли сервера
     local role
@@ -527,6 +527,7 @@ update_node_post() {
         apply_amnezia_abuse_protection
     elif [[ "$role" == "awg" ]]; then
         apply_amnezia_abuse_protection
+        heal_node_firewall_and_stealth
         info "Узел настроен как AWG. Конфигурация ядра и сетевая защита актуализированы."
     else
         warn "Узел не настроен (роль не определена). Автоматическая оптимизация конфига пропущена."

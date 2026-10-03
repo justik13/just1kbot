@@ -1520,8 +1520,8 @@ except Exception:
         rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
 
-    # Системное отключение IPv6 и ICMP Echo (стелс от сканеров)
-    apply_node_sysctl_hardening
+    # Системное отключение IPv6, ICMP Echo и зачистка периметра (стелс от сканеров)
+    heal_node_firewall_and_stealth
 
     # Фаервол: принудительное приведение портов к desired state (8444 для BOT_IP, удаление 8443)
     local heal_bot_ip

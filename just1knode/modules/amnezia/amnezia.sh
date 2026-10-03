@@ -931,10 +931,10 @@ EOF
             ufw allow from "$bot_ip" to any port "$public_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1 || true
             log "Фаервол UFW: доступ к API AmneziaWG (порт ${public_port}) открыт строго для BOT_IP (${bot_ip})"
         else
-            ufw allow "${public_port}/tcp" comment "just1knode amnezia api" >/dev/null 2>&1 || true
-            warn "Фаервол UFW: BOT_IP не указан. Порт ${public_port}/tcp открыт для всех IP."
+            warn "Фаервол UFW: BOT_IP не указан. Публичный доступ к порту ${public_port}/tcp закрыт ради безопасности."
         fi
     fi
+    heal_node_firewall_and_stealth
 
     # 11. Активация защиты от абуза (SMTP 25 + BitTorrent L7)
     apply_amnezia_abuse_protection

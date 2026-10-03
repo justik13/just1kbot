@@ -1749,6 +1749,9 @@ apply_sysctl_hardening
         self.assertIn("# Custom operator configuration", content)
         self.assertIn("vm.overcommit_memory = 1", content)
         self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", content)
+        self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", content)
+        self.assertIn("net.ipv6.conf.default.disable_ipv6 = 1", content)
+        self.assertIn("net.ipv6.conf.lo.disable_ipv6 = 1", content)
         self.assertNotIn("vm.overcommit_memory = 0", content)
 
         ufw_content = ufw_conf.read_text(encoding="utf-8")

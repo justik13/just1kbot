@@ -74,6 +74,12 @@ normalize_sysctl_dropin() {
         sed -i -E '/^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=/d' "$file" || return 1
     fi
     echo "net.ipv4.icmp_echo_ignore_all = 1" >> "$file" 2>/dev/null || return 1
+    if grep -Eq '^[[:space:]]*net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6[[:space:]]*=' "$file" 2>/dev/null; then
+        sed -i -E '/^[[:space:]]*net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6[[:space:]]*=/d' "$file" || return 1
+    fi
+    echo "net.ipv6.conf.all.disable_ipv6 = 1" >> "$file" 2>/dev/null || return 1
+    echo "net.ipv6.conf.default.disable_ipv6 = 1" >> "$file" 2>/dev/null || return 1
+    echo "net.ipv6.conf.lo.disable_ipv6 = 1" >> "$file" 2>/dev/null || return 1
     return 0
 }
 
@@ -130,6 +136,11 @@ configure_overcommit_memory() {
             warn "Внимание: net.ipv4.icmp_echo_ignore_all=1 не применился к runtime (проверьте права или ограничения контейнера)."
         fi
     fi
+
+    # Stealth hardening: disable IPv6 leaks
+    sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1 || true
 
     # Persistence must pin the VALUE 1 unconditionally: a pre-existing `= 0`
     # entry must be replaced, not merely detected, and this must happen even

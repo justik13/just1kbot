@@ -335,5 +335,154 @@ EOF
     fi
 }
 
+# Автоматическое приведение периметра UFW и системных настроек к эталонному закрытому состоянию (Stealth)
+heal_node_firewall_and_stealth() {
+    # 1. Применяем системное скрытие (IPv6 leak protection + ICMP stealth)
+    apply_node_sysctl_hardening
+
+    if ! command -v ufw >/dev/null 2>&1 || ! ufw status 2>/dev/null | grep -qi "Status: active"; then
+        return 0
+    fi
+
+    local role
+    role="$(get_state_val "role" "")"
+
+    # 2. Очистка неиспользуемого порта 80, если на сервере нет веб-сервисов (Caddy / Nginx / др.), слушающих порт 80
+    if ufw status 2>/dev/null | grep -E "(^|[[:space:]])80(/tcp)?[[:space:]]+ALLOW" -q; then
+        local has_active_port80=0
+        if [[ -f /run/just1knode_ufw_opened_80 ]]; then
+            has_active_port80=1
+        elif [[ -n "$(detect_host_port80_container 2>/dev/null || true)" ]] || (command -v docker >/dev/null 2>&1 && docker ps --format '{{.Ports}} {{.Names}}' 2>/dev/null | grep -qE '(:80->|just1kbot_caddy)'); then
+            has_active_port80=1
+        elif command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -qE "(:80 |\[::\]:80 )"; then
+            has_active_port80=1
+        fi
+
+        if [[ $has_active_port80 -eq 0 ]]; then
+            ufw delete allow 80/tcp >/dev/null 2>&1 || true
+            ufw delete allow 80 >/dev/null 2>&1 || true
+            log "Фаервол UFW: неиспользуемый порт 80/tcp удален из разрешенных правил (нет локальных слушающих процессов)."
+        fi
+    fi
+
+    # 3. Очистка мусорного порта SSH (22), если SSH слушает нестандартный порт
+    local ssh_port=22
+    local detected_ssh
+    detected_ssh="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
+    if [[ -z "$detected_ssh" ]]; then
+        detected_ssh="$(grep -E -h "^Port " /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
+    fi
+    [[ -n "$detected_ssh" ]] && ssh_port="$detected_ssh"
+
+    if [[ "$ssh_port" != "22" ]]; then
+        if ! (command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -qE "(:22 |\[::\]:22 )"); then
+            if ufw status 2>/dev/null | grep -E "(^|[[:space:]])22(/tcp)?[[:space:]]+ALLOW" -q; then
+                ufw delete allow 22/tcp >/dev/null 2>&1 || true
+                ufw delete allow 22 >/dev/null 2>&1 || true
+                log "Фаервол UFW: неиспользуемый порт SSH (22/tcp) удален (SSH активен на порту ${ssh_port})."
+            fi
+        fi
+    fi
+
+    # 4. Очистка паразитных сторонних портов (например TeamSpeak 9987, 30033), если на них нет слушателей
+    local junk_p
+    for junk_p in 9987 30033; do
+        if ! (command -v ss >/dev/null 2>&1 && ss -tuln 2>/dev/null | grep -qE "(:${junk_p} |\[::\]:${junk_p} )"); then
+            if ufw status 2>/dev/null | grep -E "(^|[[:space:]])${junk_p}(/(tcp|udp))?[[:space:]]+ALLOW" -q; then
+                ufw delete allow "${junk_p}/tcp" >/dev/null 2>&1 || true
+                ufw delete allow "${junk_p}/udp" >/dev/null 2>&1 || true
+                ufw delete allow "${junk_p}" >/dev/null 2>&1 || true
+                log "Фаервол UFW: удалено неиспользуемое стороннее правило для порта ${junk_p}."
+            fi
+        fi
+    done
+
+    # 5. AmneziaWG API (порты для ролей awg, dual, либо при наличии конфига amnezia)
+    local is_awg_node=0
+    if [[ "$role" == "awg" || "$role" == "dual" || -f "/etc/nginx/sites-available/just1k-amnezia.conf" ]]; then
+        is_awg_node=1
+    fi
+
+    if [[ $is_awg_node -eq 1 ]]; then
+        local awg_port
+        awg_port="$(get_state_val "awg_port" "8443")"
+        [[ -z "$awg_port" || "$awg_port" == "-" ]] && awg_port="8443"
+
+        # Устраняем уязвимость: удаляем публичный доступ к порту Amnezia API
+        if ufw status 2>/dev/null | grep -E "${awg_port}(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+            ufw delete allow "${awg_port}/tcp" >/dev/null 2>&1 || true
+            ufw delete allow "${awg_port}" >/dev/null 2>&1 || true
+            warn "Фаервол UFW: устранена уязвимость — удалено публичное правило для порта API AmneziaWG (${awg_port})."
+        fi
+
+        # Динамический поиск IP Telegram-бота
+        local bot_ip
+        bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+        if [[ -z "$bot_ip" || "$bot_ip" == "any" || "$bot_ip" == "0.0.0.0/0" || "$bot_ip" == "-" ]] || ! validate_ipv4 "$bot_ip"; then
+            local detected_ip=""
+            if command -v ss >/dev/null 2>&1; then
+                detected_ip="$(ss -tn "( sport = :${awg_port} )" 2>/dev/null | awk 'NR>1 {print $4}' | rev | cut -d: -f2- | rev | tr -d '[]' | grep -vE '^(127\.|0\.|::)' | head -n1 || true)"
+            fi
+            if [[ -z "$detected_ip" ]] && [[ -f "/var/log/nginx/access.log" ]]; then
+                detected_ip="$(awk '$9 ~ /^2/ {print $1}' /var/log/nginx/access.log 2>/dev/null | tail -n 20 | sort | uniq -c | sort -nr | awk '{print $2}' | head -n1 || true)"
+            fi
+            if [[ -n "$detected_ip" ]] && validate_ipv4 "$detected_ip"; then
+                bot_ip="$detected_ip"
+                set_state_val "bot_ip" "$bot_ip"
+                log "Фаервол UFW: динамически обнаружен IP бота (${bot_ip}) из активных сетевых соединений."
+            fi
+        fi
+
+        # Если валидный IP бота известен — гарантируем наличие точечного правила в UFW
+        if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" && "$bot_ip" != "-" ]] && validate_ipv4 "$bot_ip"; then
+            if ! ufw status 2>/dev/null | grep -F "$bot_ip" | grep -q "$awg_port"; then
+                if ufw allow from "$bot_ip" to any port "$awg_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1; then
+                    log "Фаервол UFW: подтвержден доступ к порту ${awg_port} строго для BOT_IP (${bot_ip})"
+                fi
+            fi
+        fi
+    fi
+
+    # 6. Origin API (роль origin)
+    if [[ "$role" == "origin" ]]; then
+        local origin_bot_ip
+        origin_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+
+        # Удаление глобальных уязвимых правил (ALLOW Anywhere на 8444)
+        if ufw status 2>/dev/null | grep -E "8444(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+            ufw delete allow 8444/tcp >/dev/null 2>&1 || true
+            ufw delete allow 8444 >/dev/null 2>&1 || true
+            warn "Фаервол UFW: устранена уязвимость — удалено глобальное правило на порт 8444."
+        fi
+        # Удаление устаревших правил на порт 8443
+        if ufw status 2>/dev/null | grep -E "8443(/tcp)?[[:space:]]+ALLOW" -q; then
+            ufw delete allow 8443/tcp >/dev/null 2>&1 || true
+            ufw delete allow 8443 >/dev/null 2>&1 || true
+            warn "Фаервол UFW: устранена уязвимость — удалено устаревшее правило на порт 8443."
+        fi
+
+        # Если bot_ip не задан, пробуем динамический детект
+        if [[ -z "$origin_bot_ip" || "$origin_bot_ip" == "any" || "$origin_bot_ip" == "-" ]] || ! validate_ipv4 "$origin_bot_ip"; then
+            local detected_orig_ip=""
+            if command -v ss >/dev/null 2>&1; then
+                detected_orig_ip="$(ss -tn "( sport = :8444 )" 2>/dev/null | awk 'NR>1 {print $4}' | rev | cut -d: -f2- | rev | tr -d '[]' | grep -vE '^(127\.|0\.|::)' | head -n1 || true)"
+            fi
+            if [[ -n "$detected_orig_ip" ]] && validate_ipv4 "$detected_orig_ip"; then
+                origin_bot_ip="$detected_orig_ip"
+                set_state_val "bot_ip" "$origin_bot_ip"
+                log "Фаервол UFW: динамически обнаружен IP бота (${origin_bot_ip}) из активных сетевых соединений."
+            fi
+        fi
+
+        if [[ -n "$origin_bot_ip" && "$origin_bot_ip" != "any" && "$origin_bot_ip" != "-" ]] && validate_ipv4 "$origin_bot_ip"; then
+            if ! ufw status 2>/dev/null | grep -F "$origin_bot_ip" | grep -q "8444"; then
+                if ufw allow from "$origin_bot_ip" to any port 8444 proto tcp >/dev/null 2>&1; then
+                    log "Фаервол UFW: подтвержден доступ к порту 8444 для BOT_IP (${origin_bot_ip})"
+                fi
+            fi
+        fi
+    fi
+}
+
 
 

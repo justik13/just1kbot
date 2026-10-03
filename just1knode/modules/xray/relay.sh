@@ -468,30 +468,10 @@ EOF
         return 1
     fi
 
-    # Защита порта туннеля через UFW (с сохранением порта Amnezia API при Dual-режиме)
+    # Защита портов через UFW (строго без открытия Amnezia API всему миру)
     local extra_ufw_ports=()
-    local existing_awg_port
-    existing_awg_port="$(get_state_val "awg_port" 2>/dev/null || true)"
-    [[ -z "$existing_awg_port" ]] && existing_awg_port="8443"
-    local saved_bot_ip
-    saved_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
-
-    if [[ "$prev_role" == "awg" || "$prev_role" == "dual" || -f "/etc/nginx/sites-available/just1k-amnezia.conf" ]]; then
-        if [[ -n "$saved_bot_ip" && "$saved_bot_ip" != "any" && "$saved_bot_ip" != "0.0.0.0/0" ]] && validate_ip "$saved_bot_ip"; then
-            : # Не открываем awg_port глобально через configure_safe_ufw, добавим точечное правило для BOT_IP ниже
-        else
-            extra_ufw_ports+=("${existing_awg_port}/tcp")
-        fi
-    fi
     configure_safe_ufw "${extra_ufw_ports[@]}"
-    if [[ "$prev_role" == "awg" || "$prev_role" == "dual" || -f "/etc/nginx/sites-available/just1k-amnezia.conf" ]]; then
-        if [[ -n "$saved_bot_ip" && "$saved_bot_ip" != "any" && "$saved_bot_ip" != "0.0.0.0/0" ]] && validate_ip "$saved_bot_ip"; then
-            ufw delete allow "${existing_awg_port}/tcp" >/dev/null 2>&1 || true
-            ufw delete allow "${existing_awg_port}" >/dev/null 2>&1 || true
-            ufw allow from "$saved_bot_ip" to any port "$existing_awg_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1 || true
-            log "Фаервол UFW: подтвержден доступ к порту ${existing_awg_port} строго для BOT_IP (${saved_bot_ip})"
-        fi
-    fi
+    heal_node_firewall_and_stealth
     if ufw allow from "$origin_ip" to any port "$relay_port" proto tcp >/dev/null 2>&1; then
         log "Порт туннеля ${relay_port}/tcp открыт строго для ${origin_ip}."
     else
@@ -1125,6 +1105,8 @@ print('[+] Xray Relay config успешно оптимизирован (UseIPv4 
         set_state_val "public_key" "-"
         set_state_val "short_id" "-"
     fi
+
+    heal_node_firewall_and_stealth
 
     log "Оптимизация и обновление конфигурации Relay завершены успешно!"
 }

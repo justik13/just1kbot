@@ -532,14 +532,17 @@ _rollback_services_after_db_failure() {
     fi
 }
 
-# --- Настройка системных параметров ядра (Redis + ICMP Stealth) ---
+# --- Настройка системных параметров ядра (Redis + ICMP Stealth + IPv6 Leak Protection) ---
 apply_sysctl_hardening() {
     local sysctl_file="${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}"
     local needs_update=0
     if [[ ! -f "$sysctl_file" ]]; then
         needs_update=1
     elif ! grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
-         ! grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null; then
+         ! grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv6\.conf\.all\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv6\.conf\.default\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv6\.conf\.lo\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null; then
         needs_update=1
     fi
 
@@ -557,9 +560,15 @@ apply_sysctl_hardening() {
             if grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=' "$tmp_sysctl" 2>/dev/null; then
                 sed -i -E '/^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=/d' "$tmp_sysctl" 2>/dev/null || true
             fi
+            if grep -Eq '^[[:space:]]*net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6[[:space:]]*=' "$tmp_sysctl" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6[[:space:]]*=/d' "$tmp_sysctl" 2>/dev/null || true
+            fi
         fi
         echo "vm.overcommit_memory = 1" >> "$tmp_sysctl"
         echo "net.ipv4.icmp_echo_ignore_all = 1" >> "$tmp_sysctl"
+        echo "net.ipv6.conf.all.disable_ipv6 = 1" >> "$tmp_sysctl"
+        echo "net.ipv6.conf.default.disable_ipv6 = 1" >> "$tmp_sysctl"
+        echo "net.ipv6.conf.lo.disable_ipv6 = 1" >> "$tmp_sysctl"
         run_privileged mkdir -p "$(dirname "$sysctl_file")" 2>/dev/null || true
         run_privileged cp "$tmp_sysctl" "$sysctl_file" 2>/dev/null || true
         run_privileged chmod 644 "$sysctl_file" 2>/dev/null || true
@@ -586,6 +595,9 @@ apply_sysctl_hardening() {
     if command -v sysctl >/dev/null 2>&1; then
         run_privileged sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1 || true
         run_privileged sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1 || true
         if [[ -f "$sysctl_file" ]]; then
             run_privileged sysctl -p "$sysctl_file" >/dev/null 2>&1 || true
         fi
@@ -595,6 +607,11 @@ apply_sysctl_hardening() {
     icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     if [[ "$icmp_curr" != "1" ]]; then
         warn "Параметр net.ipv4.icmp_echo_ignore_all не применился в ядре (проверьте права или ограничения контейнера)."
+    fi
+    local ipv6_curr
+    ipv6_curr="$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")"
+    if [[ "$ipv6_curr" != "1" ]]; then
+        warn "Параметр net.ipv6.conf.all.disable_ipv6 не применился в ядре (проверьте права или ограничения контейнера)."
     fi
 }
 

@@ -1523,6 +1523,7 @@ if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" || -z "${BASH_SOURCE[0]:-}" ]]; then
                             apply_amnezia_abuse_protection
                         elif [[ "$role" == "awg" ]]; then
                             apply_amnezia_abuse_protection
+                            heal_node_firewall_and_stealth
                             log "Сетевая защита AmneziaWG актуализирована."
                         else
                             error "Узел не настроен."
