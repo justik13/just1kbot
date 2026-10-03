@@ -1578,9 +1578,9 @@ cmd_doctor() {
     # 3. Чтение .env параметров
     if [[ -f "${PROJECT_DIR}/.env" ]]; then
         local domain
-        domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" | cut -d'=' -f2 | tr -d " '\"")
+        domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
         local bot_token
-        bot_token=$(grep -E "^BOT_TOKEN=" "${PROJECT_DIR}/.env" | cut -d'=' -f2 | tr -d " '\"")
+        bot_token=$(grep -E "^BOT_TOKEN=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
 
         # 4. Проверка DNS домена
         if [[ -n "$domain" ]]; then
@@ -1654,7 +1654,9 @@ cmd_doctor() {
 
     # 6. Проверка здоровья контейнеров
     echo ""
-    docker compose ps
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
+        docker compose ps || true
+    fi
     echo ""
 }
 
