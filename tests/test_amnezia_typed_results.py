@@ -505,6 +505,43 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream_response.content.chunks_read, 161)
 
 
+class AmneziaClientTlsDefaultsTests(unittest.TestCase):
+    """Fail-secure TLS defaults: verify on, explicit opt-out only."""
+
+    def test_ip_endpoint_defaults_to_verify_on(self):
+        with patch.object(module, "_allow_ip_without_tls_verify", return_value=False):
+            client = AmneziaClient("https://192.0.2.10:8443", "test-key")
+        self.assertIsNone(client._ssl)
+
+    def test_domain_endpoint_ignores_ip_opt_out(self):
+        with patch.object(module, "_allow_ip_without_tls_verify", return_value=True):
+            client = AmneziaClient("https://node.example.com:8443", "test-key")
+        self.assertIsNone(client._ssl)
+
+    def test_env_opt_out_applies_only_to_ip_endpoints(self):
+        with patch.object(module, "_allow_ip_without_tls_verify", return_value=True):
+            with self.assertLogs(module.logger, level="WARNING"):
+                insecure = AmneziaClient("https://192.0.2.10:8443", "test-key")
+                explicit = AmneziaClient(
+                    "https://192.0.2.10:8443", "test-key", ssl_verify=False
+                )
+        self.assertIs(insecure._ssl, False)
+        self.assertIs(explicit._ssl, False)
+
+    def test_explicit_verify_true_wins_over_env_opt_out(self):
+        with patch.object(module, "_allow_ip_without_tls_verify", return_value=True):
+            client = AmneziaClient(
+                "https://192.0.2.10:8443", "test-key", ssl_verify=True
+            )
+        self.assertTrue(client._ssl)
+
+    def test_settings_lookup_failure_stays_fail_secure(self):
+        with patch("config.settings.get_settings", side_effect=RuntimeError("no env")):
+            self.assertFalse(module._allow_ip_without_tls_verify())
+            client = AmneziaClient("https://192.0.2.10:8443", "test-key")
+        self.assertIsNone(client._ssl)
+
+
 if __name__ == "__main__":
     unittest.main()
 

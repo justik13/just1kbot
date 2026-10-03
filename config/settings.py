@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
     TRUSTED_PROXIES: str = "127.0.0.1,::1,172.16.0.0/12"
+    # Explicit operator opt-out for legacy https://IP Amnezia nodes with
+    # self-signed certs (default False = fail-secure, verify on).
+    # Prefer migrating nodes to domain + CA; enable only while migrating.
+    AMNEZIA_ALLOW_IP_WITHOUT_TLS_VERIFY: bool = False
 
     LOG_LEVEL: str = "INFO"
 

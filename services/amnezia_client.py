@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import ipaddress
 import json
 import logging
 import time
@@ -37,6 +38,28 @@ def _safe_api_target(api_url: str) -> str:
     if port:
         host = f"{host}:{port}"
     return host
+
+
+def _is_ip_endpoint(api_url: str) -> bool:
+    """True when the API host is a literal IP (self-signed fallback cert expected)."""
+    host = urlsplit(api_url or "").hostname
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+        return True
+    except ValueError:
+        return False
+
+
+def _allow_ip_without_tls_verify() -> bool:
+    """Explicit operator opt-out for legacy https://IP nodes (default False, fail-secure)."""
+    try:
+        from config.settings import get_settings
+
+        return bool(get_settings().AMNEZIA_ALLOW_IP_WITHOUT_TLS_VERIFY)
+    except Exception:
+        return False
 
 
 T = TypeVar("T")
@@ -333,6 +356,16 @@ class AmneziaClient:
                     "AmneziaClient: TLS verification explicitly disabled for %s",
                     self._log_target,
                 )
+        elif _is_ip_endpoint(self.api_url) and _allow_ip_without_tls_verify():
+            # Explicit operator opt-out for legacy https://IP nodes with
+            # self-signed certs. Default stays fail-secure (verify on);
+            # prefer migrating nodes to domain + CA.
+            self._ssl = False
+            logger.warning(
+                "AmneziaClient: TLS verification disabled for IP endpoint %s "
+                "via AMNEZIA_ALLOW_IP_WITHOUT_TLS_VERIFY",
+                self._log_target,
+            )
         else:
             self._ssl = None
 
