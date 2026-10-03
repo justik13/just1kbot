@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 import unittest
@@ -97,6 +98,25 @@ def main(argv: list[str] | None = None) -> int:
 
     runner = unittest.TextTestRunner(verbosity=2 if args.verbose else 1)
     result = runner.run(suite)
+
+    test_db_url = os.environ.get("TEST_DATABASE_URL")
+    if test_db_url:
+        try:
+            import asyncio
+            from sqlalchemy import text
+            from sqlalchemy.ext.asyncio import create_async_engine
+            from tests.db_utils import TRUNCATE_SQL
+
+            async def _cleanup():
+                engine = create_async_engine(test_db_url)
+                async with engine.begin() as conn:
+                    await conn.execute(text(TRUNCATE_SQL))
+                await engine.dispose()
+
+            asyncio.run(_cleanup())
+        except Exception:
+            pass
+
     return 0 if result.wasSuccessful() else 1
 
 

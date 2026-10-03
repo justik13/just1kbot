@@ -1,7 +1,7 @@
 """Unit tests for White Internet Free Trial mode (3 days / 10 GiB / 0 RUB).
 
 Tests cover:
-- Trial subscription creation with 0 RUB quote and 10 GiB quota
+- Trial subscription creation with 0 RUB order and 10 GiB quota
 - Synchronous Xray node sync on trial activation (Zero-Wait UX)
 - Anti-abuse: blocking repeat trial activations
 - Fallback handling if node sync times out
@@ -55,7 +55,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             extra_data={"cdn_domain": "cdn.just1k.best"},
         )
         self.tariff = MagicMock(id=5, duration_days=30)
-        self.tariff_version = MagicMock(id=15, price_rub=Decimal("0.00"))
 
     async def asyncTearDown(self):
         if self.orig_trial_env is None:
@@ -92,7 +91,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub) as mock_create_sub, \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 
@@ -175,7 +173,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 
@@ -217,7 +214,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 
@@ -265,7 +261,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 
@@ -285,14 +280,12 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
         from database.repositories.account_ledger_repo import InsufficientAccountBalanceError
 
         fake_balance = MagicMock(available=Decimal("0.00"))
-        paid_tariff = MagicMock(id=5, duration_days=30, is_active=True)
-        paid_tariff_version = MagicMock(id=15, price_rub=Decimal("150.00"), base_quota_bytes=5368709120)
+        paid_tariff = MagicMock(id=5, duration_days=30, device_limit=2, price_rub=Decimal("150.00"), is_active=True)
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=paid_tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=paid_tariff_version), \
-             patch("services.white_internet_service.create_purchase_debit", side_effect=InsufficientAccountBalanceError("Insufficient balance")), \
+             patch("services.white_internet_service.create_order_debit", side_effect=InsufficientAccountBalanceError("Insufficient balance")), \
              patch("services.white_internet_service.get_account_balance", return_value=fake_balance):
             ok, msg, sub = await WhiteInternetService.purchase_subscription(self.session, self.user.id)
             self.assertFalse(ok)
@@ -362,7 +355,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", side_effect=fake_get_sub_by_user_id), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", side_effect=fake_create_sub) as mock_create, \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 

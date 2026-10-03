@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,10 +18,8 @@ from database.models import (
     AccountLedgerAllocation,
     AccountLedgerEntry,
     Payment,
-    TariffQuote,
     User,
 )
-from database.repositories.tariff_quotes_repo import lock_checkout_user
 from utils.datetime_helpers import now_utc
 
 ZERO = Decimal(0)
@@ -66,6 +64,14 @@ def whole_rubles(value: object, *, allow_zero: bool = False) -> Decimal:
     if amount < 0 or (amount == 0 and not allow_zero):
         raise ValueError("amount must be positive")
     return amount.quantize(Decimal("1.00"))
+
+
+async def lock_checkout_user(session: AsyncSession, user_id: int) -> User | None:
+    """The sole per-user checkout lock; callers derive state only afterwards."""
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": -user_id})
+    return await session.scalar(
+        select(User).where(User.id == user_id).with_for_update()
+    )
 
 
 async def lock_account_user(
@@ -219,13 +225,31 @@ async def create_order_debit(
     session: AsyncSession,
     *,
     user_id: int,
-    amount_rub: Decimal,
+    amount_rub: object,
     order_id: object,
     metadata: dict | None = None,
-) -> tuple[AccountLedgerEntry, bool]:
-    amount = -abs(whole_rubles(amount_rub))
+) -> tuple[AccountLedgerEntry | None, bool]:
+    amount = -abs(whole_rubles(amount_rub, allow_zero=True))
+    user = await lock_account_user(session, user_id)
+    if amount == 0:
+        return None, False
+    existing = await session.scalar(
+        select(AccountLedgerEntry).where(
+            AccountLedgerEntry.entry_type == "purchase_debit",
+            AccountLedgerEntry.order_id == order_id,
+        )
+    )
+    if existing is not None:
+        if existing.user_id != user.id or existing.amount != amount:
+            raise AccountLedgerConflictError("purchase_debit_conflict")
+        return existing, False
+    snapshot = await get_account_balance(
+        session, user_id=user.id, for_update=False, locked_user=user
+    )
+    if snapshot.available < -amount:
+        raise InsufficientAccountBalanceError("insufficient_available_balance")
     values = {
-        "user_id": user_id,
+        "user_id": user.id,
         "entry_type": "purchase_debit",
         "amount": amount,
         "currency": "RUB",
@@ -236,7 +260,7 @@ async def create_order_debit(
         "idempotency_key": f"order_debit:{order_id}",
         "metadata_": metadata or {},
     }
-    return await _insert_or_get_entry(
+    debit, created = await _insert_or_get_entry(
         session,
         values=values,
         economic_lookup=(
@@ -244,6 +268,11 @@ async def create_order_debit(
             & (AccountLedgerEntry.order_id == order_id)
         ),
     )
+    if created:
+        # Mirror the retired quote-debit path: attribute the spend to credit
+        # lots FIFO (bonus lots first) so balance buckets stay exact.
+        await _allocate_fifo(session, user_id=user.id, debit=debit, amount=-amount)
+    return debit, created
 
 
 async def create_order_credit(
@@ -609,76 +638,6 @@ async def _allocate_fifo(
     if remaining:
         raise AccountLedgerInvariantError("available_balance_has_no_credit_lots")
     return created
-
-
-async def create_purchase_debit(
-    session: AsyncSession,
-    *,
-    user_id: int,
-    quote_id: int,
-    amount: object,
-) -> tuple[AccountLedgerEntry | None, bool]:
-    amount = whole_rubles(amount, allow_zero=True)
-    user = await lock_account_user(session, user_id)
-    quote = await session.scalar(
-        select(TariffQuote)
-        .where(TariffQuote.id == quote_id, TariffQuote.user_id == user.id)
-        .with_for_update()
-    )
-    if quote is None:
-        raise LookupError("purchase_quote_not_found")
-    if quote.amount_due_rub != amount:
-        raise AccountLedgerConflictError("purchase_quote_amount_mismatch")
-    if amount == 0:
-        return None, False
-    existing = await session.scalar(
-        select(AccountLedgerEntry).where(
-            AccountLedgerEntry.entry_type == "purchase_debit",
-            AccountLedgerEntry.quote_id == quote.id,
-        )
-    )
-    if existing is not None:
-        if existing.user_id != user.id or existing.amount != -amount:
-            raise AccountLedgerConflictError("purchase_debit_conflict")
-        return existing, False
-    if quote.status != "active":
-        raise LookupError(f"purchase_quote_inactive:{quote.status}")
-    if quote.expires_at is not None and quote.expires_at <= now_utc():
-        raise LookupError("purchase_quote_expired")
-    snapshot = await get_account_balance(
-        session, user_id=user.id, for_update=False, locked_user=user
-    )
-    if snapshot.available < amount:
-        raise InsufficientAccountBalanceError("insufficient_available_balance")
-    values = {
-        "user_id": user.id,
-        "entry_type": "purchase_debit",
-        "amount": -amount,
-        "currency": "RUB",
-        "payment_id": None,
-        "quote_id": quote.id,
-        "reversal_of_id": None,
-        "idempotency_key": f"purchase-debit:{quote.id}",
-        "metadata_": {"operation_type": quote.operation_type},
-    }
-    debit, created = await _insert_or_get_entry(
-        session,
-        values=values,
-        economic_lookup=(
-            (AccountLedgerEntry.entry_type == "purchase_debit")
-            & (AccountLedgerEntry.quote_id == quote.id)
-        ),
-    )
-    if created:
-        # A committed economic debit must never leave its immutable checkout
-        # quote active. Higher-level settlement runs in the same transaction,
-        # so any later failure rolls this transition back with the debit.
-        quote.status = "consumed"
-        quote.consumed_at = quote.consumed_at or now_utc()
-        await _allocate_fifo(
-            session, user_id=user.id, debit=debit, amount=amount
-        )
-    return debit, created
 
 
 async def get_payment_refundable_amount(

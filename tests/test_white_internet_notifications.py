@@ -324,7 +324,7 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         """Converting trial -> paid resets all 5 notification flags to False and allows 3d reminder."""
         from decimal import Decimal
         from config.enums import ServerHealthState, ServerLifecycleStatus
-        from database.models import Tariff, TariffVersion, Server
+        from database.models import Tariff, Server
         from services.white_internet_service import WhiteInternetService
 
         now = datetime.now(timezone.utc)
@@ -361,12 +361,9 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         server.extra_data = {"relays": ["r1"]}
 
         tariff = MagicMock(spec=Tariff)
+        tariff.id = 1
         tariff.duration_days = 30
-        tariff_ver = MagicMock(spec=TariffVersion)
-        tariff_ver.id = 1
-        tariff_ver.base_quota_bytes = 50 * 1024 * 1024 * 1024
-        tariff_ver.price_rub = Decimal("250")
-        tariff_ver.duration_hours = 720
+        tariff.price_rub = Decimal("250")
 
         mock_session = AsyncMock()
         mock_session.add = MagicMock()
@@ -377,8 +374,7 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
             patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub),
             patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub),
             patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=tariff),
-            patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_ver),
-            patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock),
+            patch.object(WhiteInternetService, "_checkout_wallet_order", new_callable=AsyncMock, return_value=(MagicMock(), None)),
             patch.object(WhiteInternetService, "_try_inline_sync", new_callable=AsyncMock),
         ):
             ok, msg, converted_sub = await WhiteInternetService.convert_trial_to_paid(mock_session, 500)

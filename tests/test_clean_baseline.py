@@ -74,5 +74,44 @@ class CleanBaselineTests(unittest.TestCase):
                 self.assertIn(table, source)
 
 
+    def test_quote_drop_migration_backfills_and_drops(self):
+        """Migration 0034 must backfill consumed quotes into orders, re-link
+        ledger debits, and drop the quote/version tables without recreating.
+
+        Regression guard for the White Internet billing port: dropping the
+        tables without backfill would orphan purchase history and trial
+        checks that now read Orders.
+        """
+        source = (VERSIONS / "0034_drop_tariff_quotes.py").read_text(encoding="utf-8")
+        self.assertEqual(
+            (VERSIONS / "0034_drop_tariff_quotes.py").exists(), True
+        )
+        for table in ("tariff_quotes", "tariff_versions"):
+            self.assertIn(table, source)
+        self.assertIn("migrated_from_quote", source)
+        self.assertIn("DROP TABLE IF EXISTS public.tariff_quotes", source)
+        self.assertIn("DROP TABLE IF EXISTS public.tariff_versions", source)
+        # Fail-closed: abort instead of dropping with dangling ledger links.
+        self.assertIn("quote_id IS NOT NULL", source)
+
+    def test_quote_drop_downgrades_tolerate_dropped_tables(self):
+        """Downgrades touching quotes/versions must skip themselves when gone.
+
+        Migration 0034 drops the tables without recreating them, so every
+        older downgrade that names one must check to_regclass first —
+        otherwise `alembic downgrade base` aborts mid-chain.
+        """
+        for filename, table in (
+            ("0016_white_internet_subscriptions.py", "tariff_quotes"),
+            ("0017_white_internet_durations.py", "tariff_versions"),
+            ("0018_simplify_wi_traffic.py", "tariff_quotes"),
+            ("0026_wi_trial_semantics.py", "tariff_quotes"),
+        ):
+            with self.subTest(migration=filename):
+                source = (VERSIONS / filename).read_text(encoding="utf-8")
+                self.assertIn("to_regclass", source)
+                self.assertIn(table, source)
+
+
 if __name__ == "__main__":
     unittest.main()

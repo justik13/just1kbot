@@ -164,7 +164,7 @@ class APIOperationSchemaTests(unittest.TestCase):
     def test_alembic_graph_has_one_head(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         self.assertEqual(len(scripts.get_heads()), 1)
-        self.assertEqual(scripts.get_heads(), ["0032_drop_banking_residue"])
+        self.assertEqual(scripts.get_heads(), ["0034_drop_tariff_quotes"])
         self.assertEqual(scripts.get_bases(), ["0001_clean_baseline"])
 
 

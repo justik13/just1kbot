@@ -140,13 +140,20 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
     ),
 )
 
+VALID_POSTFLIGHT_HEADS = (
+    "0032_drop_banking_residue",
+    "0033_wi_order_checkout",
+    "0034_drop_tariff_quotes",
+)
+_HEADS_LIST = ",".join(f"'{h}'" for h in VALID_POSTFLIGHT_HEADS)
+
 # Post-flight statements: run AFTER applying migration 0032.
 # Verifies expected head revision, 8 dropped tables gone, and clean functions without stale references.
 POSTFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
     (
         "1_MIGRATION_HEAD",
-        "SELECT '1_MIGRATION_HEAD' AS block, CASE WHEN (SELECT version_num FROM alembic_version) = "
-        f"'{EXPECTED_HEAD}' THEN 'OK' ELSE 'FAIL: MISMATCH have=' || "
+        "SELECT '1_MIGRATION_HEAD' AS block, CASE WHEN (SELECT version_num FROM alembic_version) IN "
+        f"({_HEADS_LIST}) THEN 'OK' ELSE 'FAIL: MISMATCH have=' || "
         "(SELECT version_num FROM alembic_version) END AS verdict",
     ),
     (

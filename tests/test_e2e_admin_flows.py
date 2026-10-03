@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from bot.main import setup_bot
-from database.models import Tariff, TariffVersion
+from database.models import Tariff
 from database.models import User as DBUser
 from tests.test_e2e_user_flows import MockedSession
 
@@ -43,17 +43,6 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 is_active=True,
             )
             session.add_all((self.admin_user_db, self.target_user_db, self.tariff))
-            await session.flush()
-            version = TariffVersion(
-                tariff_id=self.tariff.id,
-                version_number=1,
-                name_snapshot=self.tariff.name,
-                duration_hours=720,
-                device_limit=2,
-                price_rub=150,
-                currency="RUB",
-            )
-            session.add(version)
             await session.commit()
 
         self.env_patcher = patch.dict(

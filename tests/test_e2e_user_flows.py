@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from bot.main import setup_bot
-from database.models import Tariff, TariffVersion
+from database.models import Tariff
 
 DB = os.getenv("TEST_DATABASE_URL")
 
@@ -89,17 +89,6 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 is_active=True,
             )
             session.add(self.tariff)
-            await session.flush()
-            version = TariffVersion(
-                tariff_id=self.tariff.id,
-                version_number=1,
-                name_snapshot=self.tariff.name,
-                duration_hours=720,
-                device_limit=2,
-                price_rub=150,
-                currency="RUB",
-            )
-            session.add(version)
             await session.commit()
             
         # Patch config

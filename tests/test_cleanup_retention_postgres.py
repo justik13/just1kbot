@@ -4,13 +4,11 @@ import os
 import unittest
 import uuid
 from datetime import timedelta
-from decimal import Decimal
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import (
-    TariffQuote,
     User,
     WebhookInbox,
 )
@@ -35,23 +33,6 @@ class TestCleanupRetentionPostgres(unittest.IsolatedAsyncioTestCase):
             from db_utils import TRUNCATE_SQL
         async with self.sessions.begin() as session:
             await session.execute(text(TRUNCATE_SQL))
-            tariff_id = (
-                await session.execute(
-                    text(
-                        "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) "
-                        "VALUES('test_plan',30,2,90,true,1,NOW()) RETURNING id"
-                    )
-                )
-            ).scalar_one()
-            self.version_id = (
-                await session.execute(
-                    text(
-                        "INSERT INTO tariff_versions(tariff_id,version_number,name_snapshot,duration_hours,"
-                        "device_limit,price_rub,currency) VALUES(:t,1,'test_plan',720,2,90,'RUB') RETURNING id"
-                    ),
-                    {"t": tariff_id},
-                )
-            ).scalar_one()
             user = User(telegram_id=uuid.uuid4().int % 10**12)
             session.add(user)
             await session.flush()
@@ -187,43 +168,6 @@ class TestCleanupRetentionPostgres(unittest.IsolatedAsyncioTestCase):
             # Assert all non-matching records (pending/processing/retry/fresh) are preserved
             for wh_id in preserved_wh_ids:
                 self.assertIn(wh_id, wh_remaining, f"Webhook {wh_id} must be preserved")
-
-    async def test_tariff_quote_deletion_is_forbidden_by_trigger(self):
-        """Verify PostgreSQL database trigger reject_quote_economic_change strictly blocks quote deletions."""
-        now = now_utc()
-        async with self.sessions.begin() as session:
-            quote = TariffQuote(
-                public_id=uuid.uuid4(),
-                user_id=self.user_id,
-                operation_type="purchase",
-                target_tariff_version_id=self.version_id,
-                current_paid_hours=0,
-                current_paid_value_rub=Decimal("0.00"),
-                bonus_hours=0,
-                amount_due_rub=Decimal("90.00"),
-                resulting_paid_hours=720,
-                resulting_paid_value_rub=Decimal("90.00"),
-                resulting_bonus_hours=0,
-                rounding_loss_hours=Decimal("0.0"),
-                rounding_loss_value_rub=Decimal("0.00"),
-                currency="RUB",
-                status="expired",
-                expires_at=now + timedelta(hours=1),
-                created_at=now,
-                consumed_at=None,
-            )
-            session.add(quote)
-            await session.flush()
-            quote_id = quote.id
-
-        async with self.sessions.begin() as session:
-            with self.assertRaises(Exception) as ctx:
-                await session.execute(
-                    text("DELETE FROM tariff_quotes WHERE id = :id"),
-                    {"id": quote_id},
-                )
-                await session.flush()
-            self.assertIn("quote deletion is forbidden", str(ctx.exception))
 
 
 if __name__ == "__main__":

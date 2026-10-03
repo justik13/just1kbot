@@ -1,4 +1,4 @@
-"""Focused coverage for the single White Internet debit boundary."""
+"""Focused coverage for the single White Internet wallet-checkout boundary."""
 
 import unittest
 from decimal import Decimal
@@ -11,14 +11,6 @@ from database.repositories.account_ledger_repo import (
     InsufficientAccountBalanceError,
 )
 from services.white_internet_service import WhiteInternetService
-
-
-def _quote(amount=Decimal("150.00")):
-    quote = MagicMock()
-    quote.id = 77
-    quote.amount_due_rub = amount
-    quote.status = "active"
-    return quote
 
 
 def _user():
@@ -35,145 +27,184 @@ def _session():
     return session
 
 
-class DebitForQuoteTests(unittest.IsolatedAsyncioTestCase):
-    async def test_success_returns_none_and_keeps_quote_active(self):
+class CheckoutWalletOrderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_success_returns_paid_order(self):
         session = _session()
-        quote = _quote()
         with patch(
-            "services.white_internet_service.create_purchase_debit", new=AsyncMock()
+            "services.white_internet_service.create_order_debit",
+            new=AsyncMock(return_value=(MagicMock(), True)),
         ) as debit:
-            result = await WhiteInternetService._debit_for_quote(
+            order, failure = await WhiteInternetService._checkout_wallet_order(
                 session,
                 user=_user(),
-                quote=quote,
-                price=Decimal("150.00"),
-                insufficient_text="Недостаточно средств: {price} / {balance} / {shortage}",
+                service_type="white_internet",
+                tariff_id=7,
+                amount_due=Decimal("150.00"),
+                duration_days=30,
+                operation="purchase",
+                insufficient_text="unused",
             )
 
-        self.assertIsNone(result)
+        self.assertIsNone(failure)
+        self.assertIsNotNone(order)
+        self.assertEqual(order.status, "paid")
+        self.assertIsNotNone(order.paid_at)
+        self.assertIsNotNone(order.expires_at)
+        self.assertEqual(order.payment_method, "wallet")
         debit.assert_awaited_once()
-        # On success the helper leaves the status to the caller (which marks it
-        # consumed); it must not touch it here.
-        self.assertEqual(quote.status, "active")
-        session.add.assert_called_once_with(quote)
+        session.add.assert_called_once_with(order)
 
-    async def test_insufficient_balance_cancels_quote_and_formats_shortage(self):
+    async def test_zero_amount_skips_debit_and_marks_paid(self):
         session = _session()
-        quote = _quote()
+        with patch(
+            "services.white_internet_service.create_order_debit",
+            new=AsyncMock(),
+        ) as debit:
+            order, failure = await WhiteInternetService._checkout_wallet_order(
+                session,
+                user=_user(),
+                service_type="white_internet",
+                tariff_id=7,
+                amount_due=Decimal("0.00"),
+                duration_days=3,
+                operation="trial",
+                order_metadata={"is_trial": True},
+                insufficient_text="unused",
+            )
+
+        self.assertIsNone(failure)
+        self.assertEqual(order.status, "paid")
+        self.assertEqual(order.metadata_, {"operation": "trial", "is_trial": True})
+        debit.assert_not_awaited()
+
+    async def test_insufficient_balance_cancels_order_and_formats_shortage(self):
+        session = _session()
         snapshot = MagicMock(available=Decimal("40.00"))
         with patch(
-            "services.white_internet_service.create_purchase_debit",
+            "services.white_internet_service.create_order_debit",
             new=AsyncMock(side_effect=InsufficientAccountBalanceError("nope")),
         ), patch(
             "services.white_internet_service.get_account_balance",
             new=AsyncMock(return_value=snapshot),
         ):
-            result = await WhiteInternetService._debit_for_quote(
+            order, failure = await WhiteInternetService._checkout_wallet_order(
                 session,
                 user=_user(),
-                quote=quote,
-                price=Decimal("150.00"),
+                service_type="white_internet",
+                tariff_id=7,
+                amount_due=Decimal("150.00"),
+                duration_days=30,
+                operation="purchase",
                 insufficient_text="Недостаточно средств: {price} / {balance} / {shortage}",
             )
 
-        self.assertIsNotNone(result)
-        ok, message, subscription = result
+        self.assertIsNotNone(order)
+        self.assertIsNotNone(failure)
+        ok, message, subscription = failure
         self.assertFalse(ok)
         self.assertIsNone(subscription)
         self.assertIn("150", message)
         self.assertIn("40", message)
         self.assertIn("110", message)
-        self.assertEqual(quote.status, "cancelled")
+        self.assertEqual(order.status, "canceled")
 
     async def test_extra_message_kwargs_are_passed_through(self):
         """The top-up path formats the pack size alongside the money fields."""
         session = _session()
-        quote = _quote(Decimal("200.00"))
         snapshot = MagicMock(available=Decimal("0.00"))
         template = "Не хватает {gb} ГБ: нужно {price}, есть {balance}, не хватает {shortage}"
         with patch(
-            "services.white_internet_service.create_purchase_debit",
+            "services.white_internet_service.create_order_debit",
             new=AsyncMock(side_effect=InsufficientAccountBalanceError("nope")),
         ), patch(
             "services.white_internet_service.get_account_balance",
             new=AsyncMock(return_value=snapshot),
         ):
-            _, message, _ = await WhiteInternetService._debit_for_quote(
+            _, failure = await WhiteInternetService._checkout_wallet_order(
                 session,
                 user=_user(),
-                quote=quote,
-                price=Decimal("200.00"),
+                service_type="white_internet",
+                tariff_id=7,
+                amount_due=Decimal("200.00"),
+                duration_days=0,
+                traffic_bytes=10 * 1024**3,
+                operation="purchase",
                 insufficient_text=template,
                 gb=10,
             )
 
+        self.assertIsNotNone(failure)
+        _, message, _ = failure
         self.assertIn("10", message)
         self.assertIn("200", message)
         self.assertIn("200", message)  # shortage equals the full price at zero balance
 
-    async def test_ledger_error_cancels_quote_without_balance_lookup(self):
+    async def test_ledger_error_cancels_order_without_balance_lookup(self):
         session = _session()
-        quote = _quote()
         with patch(
-            "services.white_internet_service.create_purchase_debit",
+            "services.white_internet_service.create_order_debit",
             new=AsyncMock(side_effect=AccountLedgerError("generic ledger failure")),
         ), patch(
             "services.white_internet_service.get_account_balance",
             new=AsyncMock(),
         ) as balance:
-            result = await WhiteInternetService._debit_for_quote(
+            order, failure = await WhiteInternetService._checkout_wallet_order(
                 session,
                 user=_user(),
-                quote=quote,
-                price=Decimal("150.00"),
+                service_type="white_internet",
+                tariff_id=7,
+                amount_due=Decimal("150.00"),
+                duration_days=30,
+                operation="purchase",
                 insufficient_text="unused {price} {balance} {shortage}",
             )
 
-        ok, message, subscription = result
+        self.assertIsNotNone(order)
+        ok, message, subscription = failure
         self.assertFalse(ok)
         self.assertIsNone(subscription)
         self.assertIn("generic ledger failure", message)
-        self.assertEqual(quote.status, "cancelled")
+        self.assertEqual(order.status, "canceled")
         balance.assert_not_awaited()
 
-    async def test_invariant_error_cancels_quote_and_raises(self):
+    async def test_invariant_error_cancels_order_and_raises(self):
         session = _session()
-        quote = _quote()
         with patch(
-            "services.white_internet_service.create_purchase_debit",
+            "services.white_internet_service.create_order_debit",
             new=AsyncMock(side_effect=AccountLedgerInvariantError("invariant broken")),
         ):
             with self.assertRaises(AccountLedgerInvariantError):
-                await WhiteInternetService._debit_for_quote(
+                await WhiteInternetService._checkout_wallet_order(
                     session,
                     user=_user(),
-                    quote=quote,
-                    price=Decimal("150.00"),
+                    service_type="white_internet",
+                    tariff_id=7,
+                    amount_due=Decimal("150.00"),
+                    duration_days=30,
+                    operation="purchase",
                     insufficient_text="unused",
                 )
-        self.assertEqual(quote.status, "cancelled")
-        self.assertEqual(session.flush.await_count, 2)
 
-    async def test_conflict_error_cancels_quote_and_raises(self):
+    async def test_conflict_error_cancels_order_and_raises(self):
         session = _session()
-        quote = _quote()
         with patch(
-            "services.white_internet_service.create_purchase_debit",
+            "services.white_internet_service.create_order_debit",
             new=AsyncMock(side_effect=AccountLedgerConflictError("concurrent collision")),
         ):
             with self.assertRaises(AccountLedgerConflictError):
-                await WhiteInternetService._debit_for_quote(
+                await WhiteInternetService._checkout_wallet_order(
                     session,
                     user=_user(),
-                    quote=quote,
-                    price=Decimal("150.00"),
+                    service_type="white_internet",
+                    tariff_id=7,
+                    amount_due=Decimal("150.00"),
+                    duration_days=30,
+                    operation="purchase",
                     insufficient_text="unused",
                 )
-        self.assertEqual(quote.status, "cancelled")
-        self.assertEqual(session.flush.await_count, 2)
 
-    async def test_subscriber_module_has_single_debit_boundary(self):
-        """Guard against the boundary being copied back into individual paths."""
+    async def test_subscriber_module_has_single_checkout_boundary(self):
+        """Guard against the checkout being copied back into individual paths."""
         import inspect
 
         source = inspect.getsource(
@@ -182,9 +213,9 @@ class DebitForQuoteTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertEqual(
-            source.count("await create_purchase_debit("),
+            source.count("await create_order_debit("),
             1,
-            "create_purchase_debit must be called from exactly one place",
+            "create_order_debit must be called from exactly one place",
         )
 
 

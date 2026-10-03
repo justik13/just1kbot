@@ -7,8 +7,6 @@ from bot.keyboards.device import get_device_keyboard
 from database.models import (
     AuditLog,
     Tariff,
-    TariffQuote,
-    TariffVersion,
     User,
 )
 from database.repositories.purchases_repo import (
@@ -97,32 +95,21 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
             price_rub=Decimal("199.00"),
             is_active=True,
         )
-        ver = TariffVersion(
-            id=1,
-            tariff_id=1,
-            version_number=1,
-            name_snapshot="Test Tariff 30d",
-            duration_hours=720,
-            device_limit=2,
-            price_rub=Decimal("199.00"),
-            tariff=tariff,
-        )
-
         import uuid
         now = now_utc()
-        quote = TariffQuote(
-            id=100,
-            public_id=uuid.uuid4(),
-            user_id=10,
-            user=user,
-            operation_type="purchase",
-            target_tariff_version_id=1,
-            target_tariff_version=ver,
-            amount_due_rub=Decimal("199.00"),
-            status="consumed",
-            consumed_at=now,
-            created_at=now,
-        )
+        order = MagicMock()
+        order.id = uuid.uuid4()
+        order.user_id = 10
+        order.user = user
+        order.service_type = "white_internet"
+        order.tariff = tariff
+        order.metadata_ = {"operation": "purchase"}
+        order.amount_rub = Decimal("199.00")
+        order.status = "paid"
+        order.device_limit = 2
+        order.duration_days = 30
+        order.paid_at = now
+        order.created_at = now
 
         audit_log = AuditLog(
             id=200,
@@ -135,10 +122,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         )
 
         res_orders = MagicMock()
-        res_orders.scalars().all.return_value = []
-
-        res_quote = MagicMock()
-        res_quote.scalars().all.return_value = [quote]
+        res_orders.scalars().all.return_value = [order]
 
         res_audit = MagicMock()
         res_audit.scalars().all.return_value = [audit_log]
@@ -146,12 +130,12 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         res_users = MagicMock()
         res_users.all.return_value = [user]
 
-        session.execute.side_effect = [res_orders, res_quote, res_audit]
+        session.execute.side_effect = [res_orders, res_audit]
         session.scalars.return_value = res_users
 
         entries, total = await get_purchase_logs_paginated(session, page=1, per_page=10)
         self.assertEqual(total, 2)
-        self.assertEqual(entries[0].id, "quote_100")
+        self.assertEqual(entries[0].id, f"order_{order.id}")
         self.assertEqual(entries[0].amount_rub, Decimal("199.00"))
         self.assertEqual(entries[0].tariff_name, "Test Tariff 30d")
         # List view carries no funds split (see purchase card).
@@ -173,37 +157,28 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
             price_rub=Decimal("199.00"),
             is_active=True,
         )
-        ver = TariffVersion(
-            id=1,
-            tariff_id=1,
-            version_number=1,
-            name_snapshot="Test Tariff 30d",
-            duration_hours=720,
-            device_limit=2,
-            price_rub=Decimal("199.00"),
-            tariff=tariff,
-        )
-        quote = TariffQuote(
-            id=100,
-            public_id=uuid.uuid4(),
-            user_id=10,
-            user=user,
-            operation_type="purchase",
-            target_tariff_version_id=1,
-            target_tariff_version=ver,
-            amount_due_rub=Decimal("199.00"),
-            status="consumed",
-            consumed_at=now,
-            created_at=now,
-        )
+        order_id = uuid.uuid4()
+        order = MagicMock()
+        order.id = order_id
+        order.user_id = 10
+        order.user = user
+        order.service_type = "white_internet"
+        order.tariff = tariff
+        order.metadata_ = {"operation": "purchase"}
+        order.amount_rub = Decimal("199.00")
+        order.status = "paid"
+        order.device_limit = 2
+        order.duration_days = 30
+        order.paid_at = now
+        order.created_at = now
 
-        res_quote = MagicMock()
-        res_quote.scalar_one_or_none.return_value = quote
+        res_order = MagicMock()
+        res_order.scalar_one_or_none.return_value = order
 
         debit = MagicMock()
         debit.id = 7
-        debit.quote_id = 100
-        debit.order_id = None
+        debit.quote_id = None
+        debit.order_id = order_id
         res_debits = MagicMock()
         res_debits.scalars().all.return_value = [debit]
 
@@ -213,9 +188,9 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
             (7, "admin_adjustment", Decimal("99.00")),
         ]
 
-        session.execute.side_effect = [res_quote, res_debits, res_alloc]
+        session.execute.side_effect = [res_order, res_debits, res_alloc]
 
-        entry = await get_purchase_log_by_id(session, "quote_100")
+        entry = await get_purchase_log_by_id(session, f"order_{order_id}")
         self.assertIsNotNone(entry)
         self.assertEqual(entry.real_amount_rub, Decimal("100.00"))
         self.assertEqual(entry.bonus_amount_rub, Decimal("99.00"))

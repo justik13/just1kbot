@@ -33,7 +33,6 @@ from config.settings import get_settings
 from database.models import Server, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import get_account_balance
-from database.repositories.tariff_quotes_repo import get_or_create_current_version
 from database.repositories.users_repo import get_user_by_telegram_id
 from database.repositories.white_internet_repo import (
     WhiteInternetResetCooldownError,
@@ -240,15 +239,11 @@ async def _get_effective_tariff_info(
     base_quota_bytes = WHITE_INTERNET_BASE_TRAFFIC_BYTES
     try:
         tariff = await WhiteInternetService.get_or_create_white_internet_tariff(session)
-        tariff_version = await get_or_create_current_version(session, tariff)
-        price_val = getattr(tariff_version, "price_rub", None)
+        price_val = getattr(tariff, "price_rub", None)
         if isinstance(price_val, (int, float, str, Decimal)):
             base_price = Decimal(str(price_val))
         if isinstance(getattr(tariff, "duration_days", None), int):
             duration_days = tariff.duration_days
-        quota_val = getattr(tariff_version, "base_quota_bytes", None)
-        if isinstance(quota_val, int) and quota_val > 0:
-            base_quota_bytes = quota_val
     except Exception:
         # Falling back to the env defaults is intentional so the menu still renders,
         # but it must never be silent: a wrong price is a money-path defect.

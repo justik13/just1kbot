@@ -21,6 +21,7 @@ from config.constants import (
     DEFAULT_WHITE_INTERNET_PATH,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
+    WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
     WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
@@ -38,24 +39,20 @@ from config.constants import (
 from config.enums import (
     ServerHealthState,
     ServerLifecycleStatus,
-    TariffQuoteOperation,
-    TariffQuoteStatus,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
-from database.models import Server, Tariff, TariffQuote, User, WhiteInternetSubscription
+from database.models import Order, Server, Tariff, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     AccountLedgerConflictError,
     AccountLedgerError,
     AccountLedgerInvariantError,
     InsufficientAccountBalanceError,
-    create_purchase_debit,
+    create_order_debit,
     get_account_balance,
-)
-from database.repositories.tariff_quotes_repo import (
-    get_or_create_current_version,
     lock_checkout_user,
+    whole_rubles,
 )
 from services.xray_node_client import SyncResult, XrayNodeClient, _sanitize_url
 from utils.admin import is_admin
@@ -196,74 +193,69 @@ class WhiteInternetService:
             )
         return server
 
-    @staticmethod
-    def _new_quote(
-        *,
-        user_id: int,
-        operation_type: str,
-        target_version_id: int,
-        amount_due: Decimal,
-        expires_at,
-        resulting_paid_hours: int = 0,
-        resulting_paid_value: Decimal = Decimal("0"),
-        source_version_id: int | None = None,
-    ) -> TariffQuote:
-        return TariffQuote(
-            public_id=uuid.uuid4(),
-            user_id=user_id,
-            service_type=WHITE_INTERNET_SERVICE_TYPE,
-            operation_type=operation_type,
-            source_tariff_version_id=source_version_id,
-            target_tariff_version_id=target_version_id,
-            current_paid_hours=0,
-            current_paid_value_rub=Decimal("0"),
-            bonus_hours=0,
-            amount_due_rub=amount_due,
-            resulting_paid_hours=resulting_paid_hours,
-            resulting_paid_value_rub=resulting_paid_value,
-            resulting_bonus_hours=0,
-            rounding_loss_hours=Decimal("0"),
-            rounding_loss_value_rub=Decimal("0"),
-            currency="RUB",
-            status=TariffQuoteStatus.ACTIVE,
-            expires_at=expires_at,
-            purchase_notified_at=now_utc(),
-        )
-
     @classmethod
-    async def _debit_for_quote(
+    async def _checkout_wallet_order(
         cls,
         session: AsyncSession,
         *,
         user: User,
-        quote: TariffQuote,
-        price: Decimal,
-        insufficient_text: str,
+        service_type: str,
+        tariff_id: int | None,
+        amount_due: object,
+        duration_days: int,
+        traffic_bytes: int = 0,
+        device_limit: int | None = None,
+        operation: str,
+        order_metadata: dict | None = None,
+        insufficient_text: str = "",
         **extra_message_kwargs,
-    ) -> tuple[bool, str, None] | None:
-        """Persist the quote and debit the wallet, cancelling the quote on failure.
+    ) -> tuple[Order | None, tuple[bool, str, None] | None]:
+        """Create a pending wallet order, debit FIFO, mark paid. Single checkout seam.
 
-        Returns ``None`` when the debit succeeded. On failure it returns the exact
-        ``(False, message, None)`` tuple the callers hand back, so every White
-        Internet purchase path (subscription, trial conversion, renewal, device
-        slot, traffic top-up) reports an identical outcome for the same financial
-        fault. This is the single debit boundary for the subsystem.
+        Returns ``(order, None)`` on success and ``(order, (False, message,
+        None))`` on wallet failure. Mirrors the retired quote checkout
+        contract (15-minute TTL, bonus-first debit, identical failure
+        messages) without quote machinery.
         """
-        session.add(quote)
+        now = now_utc()
+        amount = whole_rubles(amount_due, allow_zero=True)
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            service_type=service_type,
+            tariff_id=tariff_id,
+            amount_rub=amount,
+            duration_days=duration_days,
+            traffic_bytes=traffic_bytes,
+            device_limit=device_limit,
+            payment_method="wallet",
+            status="pending",
+            expires_at=now + timedelta(minutes=15),
+            metadata_={"operation": operation, **(order_metadata or {})},
+        )
+        session.add(order)
         await session.flush()
+        if order.expires_at is not None and order.expires_at <= now_utc():
+            raise LookupError("purchase_order_expired")
+        if amount == 0:
+            order.status = "paid"
+            order.paid_at = now_utc()
+            await session.flush()
+            return order, None
         try:
-            await create_purchase_debit(
-                session, user_id=user.id, quote_id=quote.id, amount=quote.amount_due_rub
+            await create_order_debit(
+                session,
+                user_id=user.id,
+                amount_rub=amount,
+                order_id=order.id,
+                metadata={"operation": operation},
             )
         except InsufficientAccountBalanceError:
-            quote.status = TariffQuoteStatus.CANCELLED
+            order.status = "canceled"
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
-            # Coerce once: the callers pass tariff_version.price_rub, tier_price,
-            # price or pack_price, and the shortage arithmetic must not depend on
-            # which of them happens to arrive as a Decimal.
-            amount = Decimal(price)
-            return (
+            # Coerce once: shortage arithmetic must not depend on the input type.
+            return order, (
                 False,
                 insufficient_text.format(
                     price=int(amount),
@@ -274,14 +266,17 @@ class WhiteInternetService:
                 None,
             )
         except (AccountLedgerInvariantError, AccountLedgerConflictError):
-            quote.status = TariffQuoteStatus.CANCELLED
+            order.status = "canceled"
             await session.flush()
             raise
         except AccountLedgerError as exc:
-            quote.status = TariffQuoteStatus.CANCELLED
+            order.status = "canceled"
             await session.flush()
-            return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
-        return None
+            return order, (False, f"{texts.WL_DEBIT_FAILED}: {exc}", None)
+        order.status = "paid"
+        order.paid_at = now_utc()
+        await session.flush()
+        return order, None
 
     @classmethod
     async def purchase_subscription(
@@ -317,12 +312,11 @@ class WhiteInternetService:
             )
 
         tariff = await cls.get_or_create_white_internet_tariff(session)
-        tariff_version = await get_or_create_current_version(session, tariff)
 
         # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
-        if not tariff_version.base_quota_bytes or tariff_version.base_quota_bytes <= 0:
+        if not WHITE_INTERNET_BASE_TRAFFIC_BYTES or WHITE_INTERNET_BASE_TRAFFIC_BYTES <= 0:
             raise ValueError(
-                f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes"
+                "White Internet tariff missing mandatory base_quota_bytes"
             )
 
         try:
@@ -331,29 +325,20 @@ class WhiteInternetService:
             logger.warning("No available origin node for white internet purchase: %s", exc)
             return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
-        quote_id: int = 0
         if debit_balance:
-            quote = cls._new_quote(
-                user_id=user.id,
-                operation_type=TariffQuoteOperation.PURCHASE,
-                target_version_id=tariff_version.id,
-                amount_due=Decimal(tariff_version.price_rub),
-                expires_at=now + timedelta(minutes=15),
-                resulting_paid_hours=tariff_version.duration_hours,
-                resulting_paid_value=Decimal(tariff_version.price_rub),
-            )
-            debit_failure = await cls._debit_for_quote(
+            _, checkout_failure = await cls._checkout_wallet_order(
                 session,
                 user=user,
-                quote=quote,
-                price=tariff_version.price_rub,
+                service_type=WHITE_INTERNET_SERVICE_TYPE,
+                tariff_id=tariff.id,
+                amount_due=Decimal(tariff.price_rub),
+                duration_days=tariff.duration_days,
+                device_limit=tariff.device_limit,
+                operation="purchase",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
             )
-            if debit_failure is not None:
-                return debit_failure
-
-            quote.status = TariffQuoteStatus.CONSUMED
-            quote_id = quote.id
+            if checkout_failure is not None:
+                return checkout_failure
 
         sub = await white_internet_repo.create_white_internet_subscription(
             session,
@@ -361,13 +346,12 @@ class WhiteInternetService:
             origin_node_id=origin_node.id,
             token=secrets.token_hex(32),
             uuid=str(uuid.uuid4()),
-            quote_id=quote_id,
-            price_rub=Decimal(tariff_version.price_rub),
+            price_rub=Decimal(tariff.price_rub),
             duration_days=tariff.duration_days,
-            base_bytes=tariff_version.base_quota_bytes,
+            base_bytes=WHITE_INTERNET_BASE_TRAFFIC_BYTES,
         )
         # Commit DB state before executing external network sync.
-        # This durably persists user debit, quote, and subscription in PostgreSQL
+        # This durably persists user debit, order, and subscription in PostgreSQL
         # and releases all SELECT FOR UPDATE row locks (Server, User) so concurrent
         # operations are not blocked during external network I/O.
         # If commit fails, we fail-closed immediately WITHOUT mutating Xray.
@@ -430,41 +414,32 @@ class WhiteInternetService:
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         tariff = await cls.get_or_create_white_internet_tariff(session)
-        tariff_version = await get_or_create_current_version(session, tariff)
 
         # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
-        if not tariff_version.base_quota_bytes or tariff_version.base_quota_bytes <= 0:
+        if not WHITE_INTERNET_BASE_TRAFFIC_BYTES or WHITE_INTERNET_BASE_TRAFFIC_BYTES <= 0:
             raise ValueError(
-                f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes"
+                "White Internet tariff missing mandatory base_quota_bytes"
             )
 
         now = now_utc()
         sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-        tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff_version.price_rub))
-        tier_base_bytes = sub_device_limit * tariff_version.base_quota_bytes
+        tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff.price_rub))
+        tier_base_bytes = sub_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
 
         if debit_balance:
-            quote = cls._new_quote(
-                user_id=user.id,
-                operation_type=TariffQuoteOperation.PURCHASE,
-                target_version_id=tariff_version.id,
-                source_version_id=tariff_version.id,
-                amount_due=tier_price,
-                expires_at=now + timedelta(minutes=15),
-                resulting_paid_hours=tariff_version.duration_hours,
-                resulting_paid_value=tier_price,
-            )
-            debit_failure = await cls._debit_for_quote(
+            _, checkout_failure = await cls._checkout_wallet_order(
                 session,
                 user=user,
-                quote=quote,
-                price=tier_price,
+                service_type=WHITE_INTERNET_SERVICE_TYPE,
+                tariff_id=tariff.id,
+                amount_due=tier_price,
+                duration_days=tariff.duration_days,
+                device_limit=sub_device_limit,
+                operation="purchase",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
             )
-            if debit_failure is not None:
-                return debit_failure
-            quote.status = TariffQuoteStatus.CONSUMED
-            quote.consumed_at = now_utc()
+            if checkout_failure is not None:
+                return checkout_failure
 
         old_origin_for_cleanup: Server | None = None
         if needs_migration and new_origin_server is not None:
@@ -579,12 +554,11 @@ class WhiteInternetService:
             return False, texts.WL_DEACTIVATION_PENDING, None
 
         tariff = await cls.get_or_create_white_internet_tariff(session)
-        tariff_version = await get_or_create_current_version(session, tariff)
 
         # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
-        if not tariff_version.base_quota_bytes or tariff_version.base_quota_bytes <= 0:
+        if not WHITE_INTERNET_BASE_TRAFFIC_BYTES or WHITE_INTERNET_BASE_TRAFFIC_BYTES <= 0:
             raise ValueError(
-                f"Tariff version {tariff_version.id} missing mandatory immutable base_quota_bytes"
+                "White Internet tariff missing mandatory base_quota_bytes"
             )
 
         if needs_migration:
@@ -602,33 +576,23 @@ class WhiteInternetService:
             return False, texts.WL_RENEWAL_HORIZON_EXCEEDED, None
 
         sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-        tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff_version.price_rub))
-        tier_base_bytes = sub_device_limit * tariff_version.base_quota_bytes
+        tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff.price_rub))
+        tier_base_bytes = sub_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
 
-        quote_id: int = 0
         if debit_balance:
-            quote = cls._new_quote(
-                user_id=user.id,
-                operation_type=TariffQuoteOperation.RENEW,
-                target_version_id=tariff_version.id,
-                source_version_id=tariff_version.id,
-                amount_due=tier_price,
-                expires_at=now + timedelta(minutes=15),
-                resulting_paid_hours=tariff_version.duration_hours,
-                resulting_paid_value=tier_price,
-            )
-            debit_failure = await cls._debit_for_quote(
+            _, checkout_failure = await cls._checkout_wallet_order(
                 session,
                 user=user,
-                quote=quote,
-                price=tier_price,
+                service_type=WHITE_INTERNET_SERVICE_TYPE,
+                tariff_id=tariff.id,
+                amount_due=tier_price,
+                duration_days=tariff.duration_days,
+                device_limit=sub_device_limit,
+                operation="renew",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_RENEW,
             )
-            if debit_failure is not None:
-                return debit_failure
-            quote.status = TariffQuoteStatus.CONSUMED
-            quote.consumed_at = now_utc()
-            quote_id = quote.id
+            if checkout_failure is not None:
+                return checkout_failure
 
         # Apply node migration ONLY after successful financial debit
         old_origin_for_cleanup: Server | None = None
@@ -646,7 +610,6 @@ class WhiteInternetService:
         renewed = await white_internet_repo.renew_subscription_atomic(
             session,
             subscription_id=sub.id,
-            quote_id=quote_id,
             price_rub=tier_price,
             duration_days=tariff.duration_days,
             base_bytes=tier_base_bytes,
@@ -758,26 +721,22 @@ class WhiteInternetService:
 
         price = WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
         tariff = await cls.get_or_create_white_internet_tariff(session)
-        tariff_version = await get_or_create_current_version(session, tariff)
 
-        quote: TariffQuote | None = None
         if debit_balance:
-            quote = cls._new_quote(
-                user_id=user.id,
-                operation_type=TariffQuoteOperation.PURCHASE,
-                target_version_id=tariff_version.id,
-                amount_due=price,
-                expires_at=now + timedelta(minutes=15),
-            )
-            debit_failure = await cls._debit_for_quote(
+            _, checkout_failure = await cls._checkout_wallet_order(
                 session,
                 user=user,
-                quote=quote,
-                price=price,
+                service_type=WHITE_INTERNET_SERVICE_TYPE,
+                tariff_id=tariff.id,
+                amount_due=price,
+                duration_days=tariff.duration_days,
+                traffic_bytes=WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+                device_limit=new_device_limit,
+                operation="purchase",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
             )
-            if debit_failure is not None:
-                return debit_failure
+            if checkout_failure is not None:
+                return checkout_failure
 
         # Apply node migration ONLY after successful financial debit
         old_origin_for_cleanup: Server | None = None
@@ -797,9 +756,6 @@ class WhiteInternetService:
             subscription_id=sub.id,
             extra_bytes=WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
         )
-        if debit_balance and quote is not None:
-            quote.status = TariffQuoteStatus.CONSUMED
-            quote.consumed_at = now_utc()
 
         if old_origin_for_cleanup:
             await white_internet_repo.enqueue_orphan_cleanup(
@@ -899,30 +855,23 @@ class WhiteInternetService:
             )
 
         tariff = await cls.get_or_create_white_internet_tariff(session)
-        tariff_version = await get_or_create_current_version(session, tariff)
 
-        quote_id: int = 0
-        quote: TariffQuote | None = None
         if debit_balance:
-            quote = cls._new_quote(
-                user_id=user.id,
-                operation_type=TariffQuoteOperation.PURCHASE,
-                target_version_id=tariff_version.id,
-                amount_due=pack_price,
-                expires_at=now + timedelta(minutes=15),
-            )
-            debit_failure = await cls._debit_for_quote(
+            _, checkout_failure = await cls._checkout_wallet_order(
                 session,
                 user=user,
-                quote=quote,
-                price=pack_price,
+                service_type=WHITE_INTERNET_SERVICE_TYPE,
+                tariff_id=tariff.id,
+                amount_due=pack_price,
+                duration_days=0,
+                traffic_bytes=pack_bytes,
+                device_limit=_effective_device_limit(sub),
+                operation="purchase",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_TOPUP,
                 gb=pack_gb,
             )
-            if debit_failure is not None:
-                return debit_failure
-            quote.status = TariffQuoteStatus.CONSUMED
-            quote_id = quote.id
+            if checkout_failure is not None:
+                return checkout_failure
 
         # Apply node migration ONLY after successful financial debit
         old_origin_for_cleanup: Server | None = None
@@ -940,13 +889,9 @@ class WhiteInternetService:
         grant = await white_internet_repo.topup_quota_atomic(
             session,
             subscription_id=sub.id,
-            quote_id=quote_id,
             pack_gb=pack_gb,
             price_rub=pack_price,
         )
-        if debit_balance and quote is not None:
-            quote.status = TariffQuoteStatus.CONSUMED
-            quote.consumed_at = now_utc()
 
         if old_origin_for_cleanup:
             await white_internet_repo.enqueue_orphan_cleanup(
@@ -1012,23 +957,19 @@ class WhiteInternetService:
             logger.warning("No available origin node for white internet trial: %s", exc)
             return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
-        now = now_utc()
         tariff = await cls.get_or_create_white_internet_tariff(session)
-        tariff_version = await get_or_create_current_version(session, tariff)
 
-        quote = cls._new_quote(
-            user_id=user.id,
-            operation_type=TariffQuoteOperation.TRIAL,
-            target_version_id=tariff_version.id,
+        _, _ = await cls._checkout_wallet_order(
+            session,
+            user=user,
+            service_type=WHITE_INTERNET_SERVICE_TYPE,
+            tariff_id=tariff.id,
             amount_due=Decimal("0.00"),
-            expires_at=now + timedelta(minutes=15),
-            resulting_paid_hours=WHITE_INTERNET_TRIAL_DURATION_DAYS * 24,
-            resulting_paid_value=Decimal("0.00"),
+            duration_days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
+            device_limit=1,
+            operation="trial",
+            order_metadata={"is_trial": True},
         )
-        quote.status = TariffQuoteStatus.CONSUMED
-        quote.consumed_at = now
-        session.add(quote)
-        await session.flush()
 
         sub_token = secrets.token_hex(32)
         sub_uuid = str(uuid.uuid4())
@@ -1039,7 +980,6 @@ class WhiteInternetService:
             origin_node_id=origin_node.id,
             token=sub_token,
             uuid=sub_uuid,
-            quote_id=quote.id,
             price_rub=Decimal("0.00"),
             duration_days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
             base_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
@@ -1047,7 +987,7 @@ class WhiteInternetService:
         )
 
         # Commit DB state before executing external network sync.
-        # This durably persists quote and trial subscription in PostgreSQL
+        # This durably persists order and trial subscription in PostgreSQL
         # and releases all SELECT FOR UPDATE row locks (Server, User) so concurrent
         # operations are not blocked during external network I/O.
         # If commit fails, we fail-closed immediately WITHOUT mutating Xray.

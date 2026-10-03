@@ -38,12 +38,10 @@ from config.enums import (
 )
 from database.models import (
     Server,
-    Tariff,
-    TariffVersion,
     VPNProfile,
     WhiteInternetSubscription,
 )
-from database.repositories import servers_repo, tariff_quotes_repo, white_internet_repo
+from database.repositories import servers_repo, white_internet_repo
 from database.repositories.servers_repo import (
     capacity_consuming_wl_condition,
     update_server_xray_epoch_cas,
@@ -117,23 +115,9 @@ class TestGroupBSQLAlchemyModelsAndConstraints(unittest.TestCase):
         ix_names = [i.name for i in Server.__table__.indexes]
         self.assertIn("ix_servers_lifecycle_status", ix_names)
 
-    def test_tariff_version_model_white_internet_fields(self):
-        st_col = TariffVersion.__table__.columns["service_type"]
-        self.assertFalse(st_col.nullable)
-        self.assertEqual(st_col.type.length, 30)
-
-        bq_col = TariffVersion.__table__.columns["base_quota_bytes"]
-        self.assertTrue(bq_col.nullable)
-
-        ck_names = [c.name for c in TariffVersion.__table__.constraints if hasattr(c, "name")]
-        self.assertIn("ck_tariff_versions_service_type", ck_names)
-        self.assertIn("ck_tariff_versions_base_quota_positive", ck_names)
-
-    def test_tariff_version_duration_days_property(self):
-        tv = TariffVersion(duration_hours=720)
-        self.assertEqual(tv.duration_days, 30)
-        tv.duration_hours = 24
-        self.assertEqual(tv.duration_days, 1)
+    def test_tariff_version_model_retired(self):
+        import database.models as models
+        self.assertFalse(hasattr(models, "TariffVersion"))
 
 
 class TestGroupCAlembicMigration0017(unittest.TestCase):
@@ -142,7 +126,13 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0032_drop_banking_residue"])
+        self.assertEqual(heads, ["0034_drop_tariff_quotes"])
+        rev = scripts.get_revision("0034_drop_tariff_quotes")
+        self.assertEqual(rev.down_revision, "0033_wi_order_checkout")
+        rev = scripts.get_revision("0033_wi_order_checkout")
+        self.assertEqual(rev.down_revision, "0032_drop_banking_residue")
+        rev = scripts.get_revision("0032_drop_banking_residue")
+        self.assertEqual(rev.down_revision, "0031_awg_persistent_traffic")
         rev = scripts.get_revision("0031_awg_persistent_traffic")
         self.assertEqual(rev.down_revision, "0030_simple_billing")
         rev = scripts.get_revision("0030_simple_billing")
@@ -182,36 +172,12 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
         self.assertIn("reject_tariff_version_history_change", content)
 
 
-class TestGroupDTariffQuotesRepoSnapshotting(unittest.IsolatedAsyncioTestCase):
-    """Group D: Tariff Quotes Repository Snapshotting."""
+class TestGroupDTariffQuotesRepoRetired(unittest.TestCase):
+    """Group D: Tariff Quotes Repository Retirement."""
 
-    async def test_get_or_create_current_version_snapshots_fields(self):
-        tariff = Tariff(
-            id=10,
-            name="Белый Интернет 30 дней",
-            service_type=ServiceType.WHITE_INTERNET,
-            duration_days=30,
-            device_limit=1,
-            price_rub=250,
-            is_active=True,
-        )
-        session = AsyncMock(spec=AsyncSession)
-        session.scalar.return_value = None
-
-        created_version = None
-
-        def mock_add(obj):
-            nonlocal created_version
-            if isinstance(obj, TariffVersion):
-                created_version = obj
-
-        session.add.side_effect = mock_add
-
-        await tariff_quotes_repo.get_or_create_current_version(session, tariff)
-        self.assertIsNotNone(created_version)
-        self.assertEqual(created_version.service_type, ServiceType.WHITE_INTERNET)
-        self.assertEqual(created_version.base_quota_bytes, WHITE_INTERNET_BASE_TRAFFIC_BYTES)
-        self.assertEqual(created_version.duration_hours, 720)
+    def test_tariff_quotes_repo_retired(self):
+        import database.repositories as repos
+        self.assertFalse(hasattr(repos, "tariff_quotes_repo"))
 
 
 class TestGroupEServersRepoCapacityCondition(unittest.TestCase):
@@ -533,7 +499,7 @@ class TestGroupIWhiteInternetRepoGrantConservation(unittest.IsolatedAsyncioTestC
         ):
             with self.assertRaises(WhiteInternetQuotaCapExceededError):
                 await white_internet_repo.topup_quota_atomic(
-                    session, subscription_id=1, quote_id=1, pack_gb=25, price_rub=Decimal("100.00")
+                    session, subscription_id=1, pack_gb=25, price_rub=Decimal("100.00")
                 )
 
     async def test_topup_quota_resets_notified_90p_when_below_threshold(self):
@@ -552,7 +518,7 @@ class TestGroupIWhiteInternetRepoGrantConservation(unittest.IsolatedAsyncioTestC
             "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
         ):
             await white_internet_repo.topup_quota_atomic(
-                session, subscription_id=1, quote_id=1, pack_gb=50, price_rub=Decimal("250.00")
+                session, subscription_id=1, pack_gb=50, price_rub=Decimal("250.00")
             )
             self.assertFalse(sub.notified_90p)
 
@@ -767,14 +733,14 @@ class TestGroupRAtomicTraffic90pEmitsWithoutPrematureFlag(unittest.IsolatedAsync
             # 2 devices -> max extra is 2 * 150 = 300 GiB.
             # Currently extra is 100 GiB. Adding 50 GiB -> 150 GiB total extra (succeeds).
             pack_bytes = await white_internet_repo.topup_quota_atomic(
-                mock_session, subscription_id=1, quote_id=1, pack_gb=50, price_rub=Decimal("200.00")
+                mock_session, subscription_id=1, pack_gb=50, price_rub=Decimal("200.00")
             )
             self.assertEqual(pack_bytes, 50 * 1024 * 1024 * 1024)
             self.assertEqual(sub.extra_traffic_bytes, 150 * 1024 * 1024 * 1024)
 
             # Adding another 50 GiB -> 200 GiB total extra (succeeds, exceeds 150 GiB single device limit!).
             pack_bytes2 = await white_internet_repo.topup_quota_atomic(
-                mock_session, subscription_id=1, quote_id=2, pack_gb=50, price_rub=Decimal("200.00")
+                mock_session, subscription_id=1, pack_gb=50, price_rub=Decimal("200.00")
             )
             self.assertEqual(pack_bytes2, 50 * 1024 * 1024 * 1024)
             self.assertEqual(sub.extra_traffic_bytes, 200 * 1024 * 1024 * 1024)
@@ -782,7 +748,7 @@ class TestGroupRAtomicTraffic90pEmitsWithoutPrematureFlag(unittest.IsolatedAsync
             # Trying to add 150 GiB more -> 200 + 150 = 350 GiB > 300 GiB (cap exceeded for 2 devices).
             with self.assertRaises(WhiteInternetQuotaCapExceededError):
                 await white_internet_repo.topup_quota_atomic(
-                    mock_session, subscription_id=1, quote_id=3, pack_gb=150, price_rub=Decimal("600.00")
+                    mock_session, subscription_id=1, pack_gb=150, price_rub=Decimal("600.00")
                 )
 
             # Adding 3rd device slot: scales cap to 3 * 150 = 450 GiB

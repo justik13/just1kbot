@@ -97,7 +97,6 @@ from database.models import (
     Base,
     Server,
     Tariff,
-    TariffVersion,
 )
 from scripts.simulate import service_mocks  # noqa: F401 (applies mock patching on import)
 from scripts.simulate.db_shims import UTCDateTime
@@ -245,32 +244,6 @@ async def run_simulation(args: argparse.Namespace):
                     is_active=True,
                 )
                 session.add(t)
-                await session.flush()
-                tv = TariffVersion(
-                    tariff_id=t.id,
-                    version_number=1,
-                    name_snapshot=t.name,
-                    duration_hours=t.duration_days * 24,
-                    device_limit=t.device_limit,
-                    price_rub=Decimal(t.price_rub),
-                    currency="RUB",
-                )
-                session.add(tv)
-            else:
-                existing_tv = await session.scalar(
-                    select(TariffVersion).where(TariffVersion.tariff_id == existing.id)
-                )
-                if not existing_tv:
-                    tv = TariffVersion(
-                        tariff_id=existing.id,
-                        version_number=1,
-                        name_snapshot=existing.name,
-                        duration_hours=existing.duration_days * 24,
-                        device_limit=existing.device_limit,
-                        price_rub=Decimal(existing.price_rub),
-                        currency="RUB",
-                    )
-                    session.add(tv)
         await session.commit()
 
         servers = [

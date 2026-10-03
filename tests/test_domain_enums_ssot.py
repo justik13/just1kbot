@@ -1,5 +1,4 @@
 import re
-from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 import unittest
@@ -81,18 +80,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.VPNProvisioningStatus),
         )
 
-        # 2. TariffQuote operation & status
-        self.assertEqual(
-            _extract_check_constraint_in(models.TariffQuote.__table__, "ck_tariff_quotes_operation"),
-            set(config.enums.TariffQuoteOperation),
-        )
-        self.assertEqual(
-            _extract_check_constraint_in(models.TariffQuote.__table__, "ck_tariff_quotes_status"),
-            set(config.enums.TariffQuoteStatus),
-        )
-
-
-        # 3. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
+        # 2. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
         self.assertEqual(
             _extract_check_constraint_in(models.Payment.__table__, "ck_payments_provider_status"),
             set(config.enums.PaymentProviderStatus),
@@ -151,10 +139,6 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertEqual(config.enums.PaymentProviderStatus.CANCELED, "canceled")
         self.assertEqual(config.enums.PaymentProviderStatus("canceled"), config.enums.PaymentProviderStatus.CANCELED)
 
-        # Quotes use 'cancelled' (double 'l')
-        self.assertEqual(config.enums.TariffQuoteStatus.CANCELLED, "cancelled")
-        self.assertEqual(config.enums.TariffQuoteStatus("cancelled"), config.enums.TariffQuoteStatus.CANCELLED)
-
         # ApiOperation and PaymentQueue use 'cancelled' (double 'l')
         self.assertEqual(config.enums.ApiOperationStatus.CANCELLED, "cancelled")
 
@@ -180,29 +164,15 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             self.assertIn("price_rub", seed)
             self.assertIn("sort_order", seed)
 
-    def test_tariff_version_duration_days_property(self):
-        """TariffVersion duration_days property returns duration_hours // 24."""
-        version = models.TariffVersion(
+    def test_tariff_model_has_duration_days(self):
+        """Tariff model stores duration_days directly."""
+        tariff = models.Tariff(
             id=1,
-            tariff_id=10,
-            version_number=1,
-            name_snapshot="Basic",
-            duration_hours=720,
+            duration_days=30,
             device_limit=2,
-            price_rub=Decimal("300.00"),
+            price_rub=300,
         )
-        self.assertEqual(version.duration_days, 30)
-
-        version_half = models.TariffVersion(
-            id=2,
-            tariff_id=10,
-            version_number=2,
-            name_snapshot="Basic 15d",
-            duration_hours=360,
-            device_limit=2,
-            price_rub=Decimal("150.00"),
-        )
-        self.assertEqual(version_half.duration_days, 15)
+        self.assertEqual(tariff.duration_days, 30)
 
     def test_support_urls_in_texts_ssot(self):
         """Amnezia support URLs are correctly exposed via bot.texts."""
@@ -222,14 +192,14 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         from database.models import sql_enum_in
 
         # Valid identifier
-        sql = sql_enum_in("status", config.enums.TariffQuoteStatus)
+        sql = sql_enum_in("status", config.enums.PaymentProviderStatus)
         self.assertTrue(sql.startswith("status IN ("))
 
         # Invalid identifiers
         with self.assertRaises(ValueError):
-            sql_enum_in("status; DROP TABLE users; --", config.enums.TariffQuoteStatus)
+            sql_enum_in("status; DROP TABLE users; --", config.enums.PaymentProviderStatus)
         with self.assertRaises(ValueError):
-            sql_enum_in("status with spaces", config.enums.TariffQuoteStatus)
+            sql_enum_in("status with spaces", config.enums.PaymentProviderStatus)
 
     def test_purchases_repo_audit_mapping_ssot(self):
         """All purchase audit actions map to non-empty Russian labels without empty fallbacks."""
