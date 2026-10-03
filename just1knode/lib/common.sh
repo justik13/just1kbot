@@ -120,10 +120,15 @@ configure_safe_ufw() {
         apt-get install -y -qq ufw
     fi
 
-    # Детектируем порт SSH (Zero-Lockout гарантия)
+    # Детектируем порт SSH (Zero-Lockout гарантия: живые сокеты ядра ss -> sshd -T -> sshd_config)
     local ssh_port=22
     local detected
-    detected="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
+    if command -v ss >/dev/null 2>&1; then
+        detected="$(ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"' | awk '{print $4}' | rev | cut -d: -f1 | rev | grep -E '^[0-9]+$' | head -n 1 || true)"
+    fi
+    if [[ -z "$detected" ]] && command -v sshd >/dev/null 2>&1; then
+        detected="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
+    fi
     if [[ -z "$detected" ]]; then
         detected="$(grep -E -h "^Port " /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
     fi
@@ -134,6 +139,15 @@ configure_safe_ufw() {
     if ! ufw allow "$ssh_port/tcp" >/dev/null 2>&1; then
         error "КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть SSH-порт $ssh_port/tcp в UFW! Активация фаервола отменена во избежание потери доступа."
         return 1
+    fi
+
+    # Дополнительно гарантируем открытие всех портов, на которых слушает sshd
+    if command -v ss >/dev/null 2>&1; then
+        while read -r extra_p; do
+            if [[ -n "$extra_p" && "$extra_p" =~ ^[0-9]+$ && "$extra_p" != "$ssh_port" ]]; then
+                ufw allow "$extra_p/tcp" >/dev/null 2>&1 || true
+            fi
+        done < <(ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"' | awk '{print $4}' | rev | cut -d: -f1 | rev | sort -u)
     fi
 
     for p in "${ports[@]}"; do
@@ -347,15 +361,28 @@ heal_node_firewall_and_stealth() {
     local role
     role="$(get_state_val "role" "")"
 
-    # 2. Гарантия защиты SSH (Zero-Lockout стандарт: подтверждаем активный порт SSH, правила доступа к SSH никогда не удаляются)
+    # 2. Гарантия защиты SSH (Zero-Lockout стандарт: подтверждаем все активные сокеты SSH, правила SSH никогда не удаляются)
     local ssh_port=22
     local detected_ssh
-    detected_ssh="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
+    if command -v ss >/dev/null 2>&1; then
+        detected_ssh="$(ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"' | awk '{print $4}' | rev | cut -d: -f1 | rev | grep -E '^[0-9]+$' | head -n 1 || true)"
+    fi
+    if [[ -z "$detected_ssh" ]] && command -v sshd >/dev/null 2>&1; then
+        detected_ssh="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
+    fi
     if [[ -z "$detected_ssh" ]]; then
         detected_ssh="$(grep -E -h "^Port " /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
     fi
     [[ -n "$detected_ssh" ]] && ssh_port="$detected_ssh"
     ufw allow "$ssh_port/tcp" >/dev/null 2>&1 || true
+
+    if command -v ss >/dev/null 2>&1; then
+        while read -r extra_ssh; do
+            if [[ -n "$extra_ssh" && "$extra_ssh" =~ ^[0-9]+$ && "$extra_ssh" != "$ssh_port" ]]; then
+                ufw allow "$extra_ssh/tcp" >/dev/null 2>&1 || true
+            fi
+        done < <(ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"' | awk '{print $4}' | rev | cut -d: -f1 | rev | sort -u)
+    fi
 
     # 5. AmneziaWG API (порты для ролей awg, dual, либо при наличии конфига amnezia)
     local is_awg_node=0
