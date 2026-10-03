@@ -935,7 +935,9 @@ cmd_update() {
         apply_sysctl_hardening
         if docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
             info "Применение актуальной конфигурации Caddy (reload)..."
-            docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || docker restart just1kbot_caddy 2>/dev/null || true
+            if ! docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null; then
+                warn "Не удалось применить новую конфигурацию Caddy (активная конфигурация сохранена без простоя сервиса)."
+            fi
         fi
 
         if [ "$did_stash" = "true" ]; then

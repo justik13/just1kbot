@@ -135,6 +135,29 @@ class WebhookIPValidationTests(unittest.TestCase):
             log_msg = mock_log_warn.call_args[0][0]
             self.assertIn("YOOKASSA_EXTRA_IPS in .env", log_msg)
 
+    def test_yookassa_extra_ips_validator(self):
+        from config.settings import Settings
+
+        # Valid IP and CIDR
+        res = Settings.validate_yookassa_extra_ips("198.51.100.5, 203.0.113.0/24")
+        self.assertEqual(res, "198.51.100.5/32 203.0.113.0/24")
+
+        # Empty / whitespace
+        self.assertEqual(Settings.validate_yookassa_extra_ips(""), "")
+        self.assertEqual(Settings.validate_yookassa_extra_ips("   "), "")
+
+        # Wildcard 0.0.0.0/0 rejected
+        with self.assertRaisesRegex(ValueError, "wildcard allow-all"):
+            Settings.validate_yookassa_extra_ips("0.0.0.0/0")
+
+        # Wildcard ::/0 rejected
+        with self.assertRaisesRegex(ValueError, "wildcard allow-all"):
+            Settings.validate_yookassa_extra_ips("::/0")
+
+        # Invalid IP rejected
+        with self.assertRaisesRegex(ValueError, "invalid IP or CIDR"):
+            Settings.validate_yookassa_extra_ips("not-an-ip")
+
 
 if __name__ == "__main__":
     unittest.main()

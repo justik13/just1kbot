@@ -141,9 +141,9 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive"', example_caddy)
         self.assertIn('Permissions-Policy "camera=(), microphone=(), geolocation=()"', example_caddy)
 
-        # 6. Update applies Caddy configuration via reload with restart fallback
+        # 6. Update applies Caddy configuration via zero-downtime safe reload
         self.assertIn("caddy reload --config /etc/caddy/Caddyfile", cli_sh)
-        self.assertIn("docker restart just1kbot_caddy", cli_sh)
+        self.assertIn("Не удалось применить новую конфигурацию Caddy", cli_sh)
 
     def test_just1knode_origin_bot_ip_cli_support(self):
         root = Path(__file__).parents[1]
@@ -170,9 +170,10 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertGreater(verify_pos, new_allow_pos)
         self.assertGreater(del_old_pos, verify_pos)
 
-        # 4. Heal desired-state removes broad rules
-        self.assertIn('8444(/tcp)?\\s+ALLOW\\s+(Anywhere|0\\.0\\.0\\.0/0|::/0)', origin_sh)
-        self.assertIn('ufw delete allow 8444/tcp', origin_sh)
+        # 4. Heal desired-state in common_sh removes broad rules and origin_sh invokes it
+        self.assertIn("heal_node_firewall_and_stealth", origin_sh)
+        self.assertIn('8444(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\\.0\\.0\\.0/0|::/0)', common_sh)
+        self.assertIn('ufw delete allow 8444/tcp', common_sh)
 
     def test_node_firewall_and_stealth_ssot_invariants(self):
         root = Path(__file__).parents[1]
@@ -186,6 +187,11 @@ class DockerComposeSecurityTests(unittest.TestCase):
         # 1. common.sh defines heal_node_firewall_and_stealth and protects SSH access
         self.assertIn("heal_node_firewall_and_stealth()", common_sh)
         self.assertIn('ufw allow "$ssh_port/tcp"', common_sh)
+        self.assertIn("is_ssh_port", common_sh)
+        self.assertIn("all_ssh_ports", common_sh)
+        # Ensure no heuristic TCP/access.log sniffing remains
+        self.assertNotIn("detected_orig_ip", common_sh)
+        self.assertNotIn("detected_ip=\"$(ss -tn", common_sh)
 
         # 2. relay.sh never adds awg_port to public extra_ufw_ports
         self.assertNotIn('extra_ufw_ports+=("${existing_awg_port}/tcp")', relay_sh)
@@ -198,7 +204,9 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertNotIn('ufw allow "${public_port}/tcp" comment "just1knode amnezia api"', amnezia_sh)
         self.assertIn("heal_node_firewall_and_stealth", amnezia_sh)
 
-        # 5. cli.sh and setup.sh include IPv6 leak protection sysctl
+        # 5. cli.sh and setup.sh include IPv6 leak protection sysctl and safe caddy reload
         self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", cli_sh)
         self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", setup_sh)
+        self.assertIn("caddy reload --config /etc/caddy/Caddyfile", cli_sh)
+        self.assertNotIn("caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || docker restart", cli_sh)
 

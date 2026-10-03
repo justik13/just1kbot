@@ -1523,32 +1523,6 @@ except Exception:
     # Системное отключение IPv6, ICMP Echo и зачистка периметра (стелс от сканеров)
     heal_node_firewall_and_stealth
 
-    # Фаервол: принудительное приведение портов к desired state (8444 для BOT_IP, удаление 8443)
-    local heal_bot_ip
-    heal_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
-        # 1. Удаление глобальных уязвимых правил (ALLOW Anywhere на 8444)
-        if ufw status 2>/dev/null | grep -E "8444(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
-            ufw delete allow 8444/tcp >/dev/null 2>&1 || true
-            ufw delete allow 8444 >/dev/null 2>&1 || true
-            warn "Фаервол UFW: устранена уязвимость — удалено глобальное правило на порт 8444."
-        fi
-        # 2. Удаление устаревших правил на порт 8443
-        if ufw status 2>/dev/null | grep -E "8443(/tcp)?\s+ALLOW" -q; then
-            ufw delete allow 8443/tcp >/dev/null 2>&1 || true
-            ufw delete allow 8443 >/dev/null 2>&1 || true
-            warn "Фаервол UFW: устранена уязвимость — удалено устаревшее правило на порт 8443."
-        fi
-        # 3. Обеспечение точного правила для текущего BOT_IP
-        if [[ -n "$heal_bot_ip" && "$heal_bot_ip" != "any" && "$heal_bot_ip" != "-" ]] && validate_ipv4 "$heal_bot_ip"; then
-            if ! ufw status 2>/dev/null | grep -F "$heal_bot_ip" | grep -q "8444"; then
-                if ufw allow from "$heal_bot_ip" to any port 8444 proto tcp 2>/dev/null; then
-                    log "Фаервол UFW: подтвержден доступ к порту 8444 для BOT_IP ($heal_bot_ip)"
-                fi
-            fi
-        fi
-    fi
-
     # Валидация Xray и Nginx
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
         manifest_rollback

@@ -295,6 +295,41 @@ class Settings(BaseSettings):
             raise ValueError("SUPPORT_USERNAME must be a real Telegram username")
         return username
 
+    @field_validator("YOOKASSA_EXTRA_IPS", mode="before")
+    @classmethod
+    def validate_yookassa_extra_ips(cls, value: Any) -> str:
+        if not value or not isinstance(value, str):
+            return ""
+        normalized = value.strip().strip("'").strip('"')
+        if not normalized:
+            return ""
+        import ipaddress
+
+        tokens = [
+            token.strip()
+            for token in re.split(r"[,;\s]+", normalized)
+            if token.strip()
+        ]
+        valid_ranges: list[str] = []
+        for token in tokens:
+            try:
+                net = ipaddress.ip_network(token, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"YOOKASSA_EXTRA_IPS contains invalid IP or CIDR '{token}': {exc}"
+                ) from exc
+
+            # Strict security: deny wildcard / allow-all subnets
+            if (net.version == 4 and net.prefixlen == 0) or (
+                net.version == 6 and net.prefixlen == 0
+            ):
+                raise ValueError(
+                    f"YOOKASSA_EXTRA_IPS cannot contain wildcard allow-all network '{token}'"
+                )
+            valid_ranges.append(str(net))
+
+        return " ".join(valid_ranges)
+
     @property
     def yookassa_allowed_ip_ranges(self) -> tuple[str, ...]:
         from config.constants import YOOKASSA_IP_RANGES
@@ -303,7 +338,7 @@ class Settings(BaseSettings):
             return YOOKASSA_IP_RANGES
         extra = [
             item.strip()
-            for item in re.split(r"[,;\s]+", self.YOOKASSA_EXTRA_IPS)
+            for item in self.YOOKASSA_EXTRA_IPS.split()
             if item.strip()
         ]
         return YOOKASSA_IP_RANGES + tuple(extra)

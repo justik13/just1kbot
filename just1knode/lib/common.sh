@@ -361,6 +361,10 @@ heal_node_firewall_and_stealth() {
     local role
     role="$(get_state_val "role" "")"
 
+    # Гарантия базовой политики фаервола: запрет входящих по умолчанию
+    ufw default deny incoming >/dev/null 2>&1 || true
+    ufw default allow outgoing >/dev/null 2>&1 || true
+
     # 2. Гарантия защиты SSH (Zero-Lockout стандарт: подтверждаем все активные сокеты SSH, правила SSH никогда не удаляются)
     local ssh_port=22
     local detected_ssh
@@ -374,19 +378,38 @@ heal_node_firewall_and_stealth() {
         detected_ssh="$(grep -E -h "^Port " /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
     fi
     [[ -n "$detected_ssh" ]] && ssh_port="$detected_ssh"
-    ufw allow "$ssh_port/tcp" >/dev/null 2>&1 || true
 
+    if ! ufw allow "$ssh_port/tcp" >/dev/null 2>&1; then
+        error "КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть SSH-порт $ssh_port/tcp в UFW! Зачистка фаервола отменена во избежание потери доступа."
+        return 1
+    fi
+
+    # Сбор всех активных портов SSH демона в список для защиты от случайного удаления
+    local all_ssh_ports=("$ssh_port")
     if command -v ss >/dev/null 2>&1; then
         while read -r extra_ssh; do
             if [[ -n "$extra_ssh" && "$extra_ssh" =~ ^[0-9]+$ && "$extra_ssh" != "$ssh_port" ]]; then
-                ufw allow "$extra_ssh/tcp" >/dev/null 2>&1 || true
+                if ! ufw allow "$extra_ssh/tcp" >/dev/null 2>&1; then
+                    error "КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть дополнительный SSH-порт $extra_ssh/tcp в UFW! Отмена во избежание потери доступа."
+                    return 1
+                fi
+                all_ssh_ports+=("$extra_ssh")
             fi
         done < <(ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"' | awk '{print $4}' | rev | cut -d: -f1 | rev | sort -u)
     fi
 
-    # 5. AmneziaWG API (порты для ролей awg, dual, либо при наличии конфига amnezia)
+    # Вспомогательная проверка: используется ли порт демоном SSH
+    is_ssh_port() {
+        local check_p="$1"
+        for sp in "${all_ssh_ports[@]}"; do
+            [[ "$sp" == "$check_p" ]] && return 0
+        done
+        return 1
+    }
+
+    # 3. AmneziaWG API (порты для ролей awg, dual, либо при наличии активного конфига amnezia)
     local is_awg_node=0
-    if [[ "$role" == "awg" || "$role" == "dual" || -f "/etc/nginx/sites-available/just1k-amnezia.conf" ]]; then
+    if [[ "$role" == "awg" || "$role" == "dual" || -f "/etc/nginx/sites-enabled/just1k-amnezia.conf" ]]; then
         is_awg_node=1
     fi
 
@@ -395,78 +418,60 @@ heal_node_firewall_and_stealth() {
         awg_port="$(get_state_val "awg_port" "8443")"
         [[ -z "$awg_port" || "$awg_port" == "-" ]] && awg_port="8443"
 
-        # Устраняем уязвимость: удаляем публичный доступ к порту Amnezia API
-        if ufw status 2>/dev/null | grep -E "${awg_port}(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
-            ufw delete allow "${awg_port}/tcp" >/dev/null 2>&1 || true
-            ufw delete allow "${awg_port}" >/dev/null 2>&1 || true
-            warn "Фаервол UFW: устранена уязвимость — удалено публичное правило для порта API AmneziaWG (${awg_port})."
+        # Zero-Lockout: никогда не удаляем порт, если на нем слушает SSH
+        if ! is_ssh_port "$awg_port"; then
+            # Устраняем уязвимость: удаляем публичный доступ к порту Amnezia API
+            if ufw status 2>/dev/null | grep -E "${awg_port}(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                ufw delete allow "${awg_port}/tcp" >/dev/null 2>&1 || true
+                ufw delete allow "${awg_port}" >/dev/null 2>&1 || true
+                warn "Фаервол UFW: устранена уязвимость — удалено публичное правило для порта API AmneziaWG (${awg_port})."
+            fi
         fi
 
-        # Динамический поиск IP Telegram-бота
+        # Проверка доверенного BOT_IP из state.json (Fail-Closed, без эвристического угадывания)
         local bot_ip
         bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
-        if [[ -z "$bot_ip" || "$bot_ip" == "any" || "$bot_ip" == "0.0.0.0/0" || "$bot_ip" == "-" ]] || ! validate_ipv4 "$bot_ip"; then
-            local detected_ip=""
-            if command -v ss >/dev/null 2>&1; then
-                detected_ip="$(ss -tn "( sport = :${awg_port} )" 2>/dev/null | awk 'NR>1 {print $4}' | rev | cut -d: -f2- | rev | tr -d '[]' | grep -vE '^(127\.|0\.|::)' | head -n1 || true)"
-            fi
-            if [[ -z "$detected_ip" ]] && [[ -f "/var/log/nginx/access.log" ]]; then
-                detected_ip="$(awk '$9 ~ /^2/ {print $1}' /var/log/nginx/access.log 2>/dev/null | tail -n 20 | sort | uniq -c | sort -nr | awk '{print $2}' | head -n1 || true)"
-            fi
-            if [[ -n "$detected_ip" ]] && validate_ipv4 "$detected_ip"; then
-                bot_ip="$detected_ip"
-                set_state_val "bot_ip" "$bot_ip"
-                log "Фаервол UFW: динамически обнаружен IP бота (${bot_ip}) из активных сетевых соединений."
-            fi
-        fi
-
-        # Если валидный IP бота известен — гарантируем наличие точечного правила в UFW
         if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" && "$bot_ip" != "-" ]] && validate_ipv4 "$bot_ip"; then
             if ! ufw status 2>/dev/null | grep -F "$bot_ip" | grep -q "$awg_port"; then
                 if ufw allow from "$bot_ip" to any port "$awg_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1; then
                     log "Фаервол UFW: подтвержден доступ к порту ${awg_port} строго для BOT_IP (${bot_ip})"
                 fi
             fi
+        else
+            warn "BOT_IP не задан в state.json. Порт Amnezia API (${awg_port}) закрыт от мира (Fail-Closed)."
         fi
     fi
 
-    # 6. Origin API (роль origin)
+    # 4. Origin API (роль origin)
     if [[ "$role" == "origin" ]]; then
         local origin_bot_ip
         origin_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
 
-        # Удаление глобальных уязвимых правил (ALLOW Anywhere на 8444)
-        if ufw status 2>/dev/null | grep -E "8444(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
-            ufw delete allow 8444/tcp >/dev/null 2>&1 || true
-            ufw delete allow 8444 >/dev/null 2>&1 || true
-            warn "Фаервол UFW: устранена уязвимость — удалено глобальное правило на порт 8444."
-        fi
-        # Удаление устаревших правил на порт 8443
-        if ufw status 2>/dev/null | grep -E "8443(/tcp)?[[:space:]]+ALLOW" -q; then
-            ufw delete allow 8443/tcp >/dev/null 2>&1 || true
-            ufw delete allow 8443 >/dev/null 2>&1 || true
-            warn "Фаервол UFW: устранена уязвимость — удалено устаревшее правило на порт 8443."
-        fi
-
-        # Если bot_ip не задан, пробуем динамический детект
-        if [[ -z "$origin_bot_ip" || "$origin_bot_ip" == "any" || "$origin_bot_ip" == "-" ]] || ! validate_ipv4 "$origin_bot_ip"; then
-            local detected_orig_ip=""
-            if command -v ss >/dev/null 2>&1; then
-                detected_orig_ip="$(ss -tn "( sport = :8444 )" 2>/dev/null | awk 'NR>1 {print $4}' | rev | cut -d: -f2- | rev | tr -d '[]' | grep -vE '^(127\.|0\.|::)' | head -n1 || true)"
+        # Zero-Lockout: не удаляем 8444 или 8443, если на них слушает SSH
+        if ! is_ssh_port "8444"; then
+            if ufw status 2>/dev/null | grep -E "8444(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                ufw delete allow 8444/tcp >/dev/null 2>&1 || true
+                ufw delete allow 8444 >/dev/null 2>&1 || true
+                warn "Фаервол UFW: устранена уязвимость — удалено глобальное правило на порт 8444."
             fi
-            if [[ -n "$detected_orig_ip" ]] && validate_ipv4 "$detected_orig_ip"; then
-                origin_bot_ip="$detected_orig_ip"
-                set_state_val "bot_ip" "$origin_bot_ip"
-                log "Фаервол UFW: динамически обнаружен IP бота (${origin_bot_ip}) из активных сетевых соединений."
+        fi
+        if ! is_ssh_port "8443"; then
+            if ufw status 2>/dev/null | grep -E "8443(/tcp)?[[:space:]]+ALLOW" -q; then
+                ufw delete allow 8443/tcp >/dev/null 2>&1 || true
+                ufw delete allow 8443 >/dev/null 2>&1 || true
+                warn "Фаервол UFW: устранена уязвимость — удалено устаревшее правило на порт 8443."
             fi
         fi
 
+        # Проверка доверенного BOT_IP из state.json (Fail-Closed)
         if [[ -n "$origin_bot_ip" && "$origin_bot_ip" != "any" && "$origin_bot_ip" != "-" ]] && validate_ipv4 "$origin_bot_ip"; then
             if ! ufw status 2>/dev/null | grep -F "$origin_bot_ip" | grep -q "8444"; then
                 if ufw allow from "$origin_bot_ip" to any port 8444 proto tcp >/dev/null 2>&1; then
                     log "Фаервол UFW: подтвержден доступ к порту 8444 для BOT_IP (${origin_bot_ip})"
                 fi
             fi
+        else
+            warn "BOT_IP не задан в state.json. Порт Origin API (8444) закрыт от мира (Fail-Closed)."
         fi
     fi
 }
