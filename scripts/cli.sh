@@ -783,7 +783,7 @@ cmd_update() {
     fi
 
     info "Шаг 4/6. Сборка образов, валидация конфигурации и применение миграций..."
-    if ! docker compose build; then
+    if ! docker compose build || ! docker compose --profile tools build backup; then
         error "Ошибка при сборке Docker-образов новой версии!"
         if [[ -n "$rollback_commit" ]]; then
             warn "🚨 Выполняем автоматический откат исходного кода к коммиту $rollback_commit..."
@@ -1445,23 +1445,30 @@ cmd_doctor() {
         local gdrive_check_enabled
         gdrive_check_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "false")
         if [[ "$gdrive_check_enabled" == "true" ]]; then
-            local gd_folder gd_sa_b64 gd_sa
+            local gd_folder gd_token_b64 gd_sa_b64 gd_sa rclone_conf
             gd_folder=$(grep -E "^GDRIVE_FOLDER_ID=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+            gd_token_b64=$(grep -E "^GDRIVE_TOKEN_BASE64=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
             gd_sa_b64=$(grep -E "^GDRIVE_SA_BASE64=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
             gd_sa=$(grep -E "^GDRIVE_SA_FILE=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "backups/gdrive_sa.json")
+            rclone_conf="${PROJECT_DIR}/backups/rclone.conf"
             if [[ "$gd_sa" != /* ]]; then
                 gd_sa="${PROJECT_DIR}/${gd_sa}"
             fi
+
             if [[ -z "$gd_folder" ]]; then
                 warn "Google Drive бэкап включен, но GDRIVE_FOLDER_ID не задан в .env."
-            elif [[ -z "$gd_sa_b64" && ! -f "$gd_sa" ]]; then
-                warn "Google Drive бэкап включен, но не задан GDRIVE_SA_BASE64 в .env и не найден файл $gd_sa"
-            else
-                local key_desc="в .env (Base64)"
+            elif [[ -f "$rclone_conf" ]]; then
+                log "Google Drive бэкап: настроен (папка ID: $gd_folder, конфиг: backups/rclone.conf) (OK)"
+            elif [[ -n "$gd_token_b64" ]]; then
+                log "Google Drive бэкап: настроен (папка ID: $gd_folder, OAuth токен: в .env) (OK)"
+            elif [[ -n "$gd_sa_b64" || -f "$gd_sa" ]]; then
+                local sa_desc="Service Account в .env"
                 if [[ -z "$gd_sa_b64" ]]; then
-                    key_desc="файл $(basename "$gd_sa")"
+                    sa_desc="файл $(basename "$gd_sa")"
                 fi
-                log "Google Drive бэкап: настроен (папка ID: $gd_folder, ключ: $key_desc) (OK)"
+                log "Google Drive бэкап: настроен (папка ID: $gd_folder, $sa_desc) (OK)"
+            else
+                warn "Google Drive бэкап включен, но не найдена авторизация (backups/rclone.conf или GDRIVE_TOKEN_BASE64 в .env)."
             fi
         fi
     fi

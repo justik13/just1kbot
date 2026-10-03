@@ -56,48 +56,104 @@ if [ -n "${BACKUP_REMOTE_URI:-}" ]; then
     echo "Remote backup upload завершён."
 fi
 
-# Optional automated upload to Google Drive via rclone (Google Service Account).
+# Optional automated upload to Google Drive via rclone.
+# Supports User OAuth token (Personal Google Drive / Pro) or Service Account.
 # The encrypted artifact is uploaded; plaintext never leaves this container.
 GDRIVE_ENABLED="${GDRIVE_BACKUP_ENABLED:-false}"
-if [[ "$GDRIVE_ENABLED" == "true" ]] || [[ -n "${GDRIVE_FOLDER_ID:-}" && (-n "${GDRIVE_SA_BASE64:-}" || -f "${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}") ]]; then
-    GDRIVE_SA=""
-    if [[ -n "${GDRIVE_SA_BASE64:-}" ]]; then
-        echo "$GDRIVE_SA_BASE64" | tr -d '\r\n ' | base64 -d > /tmp/gdrive_sa.json 2>/dev/null || true
-        chmod 600 /tmp/gdrive_sa.json 2>/dev/null || true
-        if [[ -s /tmp/gdrive_sa.json ]]; then
-            GDRIVE_SA="/tmp/gdrive_sa.json"
-        fi
-    fi
+if [[ "$GDRIVE_ENABLED" == "true" ]]; then
+    RCLONE_CONF="/tmp/rclone.conf"
+    UPLOAD_FAILED=false
 
-    if [[ -z "$GDRIVE_SA" ]]; then
-        GDRIVE_SA="${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}"
-        if [[ ! -f "$GDRIVE_SA" && -f "/backups/$(basename "$GDRIVE_SA")" ]]; then
-            GDRIVE_SA="/backups/$(basename "$GDRIVE_SA")"
+    # Case 1: Existing rclone.conf in /backups/ (isolated only to this container)
+    if [[ -f "/backups/rclone.conf" ]]; then
+        RCLONE_CONF="/backups/rclone.conf"
+    # Case 2: OAuth token passed via GDRIVE_TOKEN_BASE64 (or GDRIVE_TOKEN)
+    elif [[ -n "${GDRIVE_TOKEN_BASE64:-}" || -n "${GDRIVE_TOKEN:-}" ]]; then
+        TOKEN_JSON=""
+        if [[ -n "${GDRIVE_TOKEN_BASE64:-}" ]]; then
+            TOKEN_JSON=$(echo "$GDRIVE_TOKEN_BASE64" | tr -d '\r\n ' | base64 -d 2>/dev/null || true)
+        else
+            TOKEN_JSON="$GDRIVE_TOKEN"
         fi
-    fi
 
-    if [[ -n "$GDRIVE_SA" && -f "$GDRIVE_SA" && -n "${GDRIVE_FOLDER_ID:-}" ]]; then
-        echo "Загрузка encrypted backup в Google Drive (rclone)..."
-        cat <<EOF > /tmp/rclone.conf
+        if [[ -z "$TOKEN_JSON" ]] || ! echo "$TOKEN_JSON" | grep -q "refresh_token"; then
+            echo "ERROR: Некорректный Google Drive OAuth токен (отсутствует refresh_token)." >&2
+            UPLOAD_FAILED=true
+        else
+            cat <<EOF > /tmp/rclone.conf
 [gdrive]
 type = drive
-scope = drive.file
-service_account_file = ${GDRIVE_SA}
-root_folder_id = ${GDRIVE_FOLDER_ID}
+scope = drive
+token = ${TOKEN_JSON}
+root_folder_id = ${GDRIVE_FOLDER_ID:-}
 EOF
-        chmod 600 /tmp/rclone.conf
-
-        if rclone --config /tmp/rclone.conf copy "$ENCRYPTED_FILE" gdrive: --retries 3 --retries-sleep 2s --stats 0; then
-            echo "Google Drive upload завершён: $(basename "$ENCRYPTED_FILE")"
-            RETENTION="${GDRIVE_RETENTION_DAYS:-14}"
-            echo "Очистка устаревших бэкапов в Google Drive (старше ${RETENTION} дн.)..."
-            rclone --config /tmp/rclone.conf delete --min-age "${RETENTION}d" gdrive: --quiet || true
-        else
-            echo "ПРЕДУПРЕЖДЕНИЕ: Ошибка загрузки бэкапа в Google Drive." >&2
+            chmod 600 /tmp/rclone.conf
         fi
-        rm -f /tmp/rclone.conf /tmp/gdrive_sa.json
+    # Case 3: Service Account (Base64 or file, for Workspace Shared Drives)
+    elif [[ -n "${GDRIVE_SA_BASE64:-}" || -f "${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}" ]]; then
+        GDRIVE_SA=""
+        if [[ -n "${GDRIVE_SA_BASE64:-}" ]]; then
+            echo "$GDRIVE_SA_BASE64" | tr -d '\r\n ' | base64 -d > /tmp/gdrive_sa.json 2>/dev/null || true
+            chmod 600 /tmp/gdrive_sa.json 2>/dev/null || true
+            if [[ -s /tmp/gdrive_sa.json ]] && grep -q '"type": *"service_account"' /tmp/gdrive_sa.json; then
+                GDRIVE_SA="/tmp/gdrive_sa.json"
+            else
+                echo "ERROR: Некорректный GDRIVE_SA_BASE64 (не является JSON сервисного аккаунта)." >&2
+                UPLOAD_FAILED=true
+            fi
+        fi
+
+        if [[ -z "$GDRIVE_SA" && "$UPLOAD_FAILED" != "true" ]]; then
+            GDRIVE_SA="${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}"
+            if [[ ! -f "$GDRIVE_SA" && -f "/backups/$(basename "$GDRIVE_SA")" ]]; then
+                GDRIVE_SA="/backups/$(basename "$GDRIVE_SA")"
+            fi
+        fi
+
+        if [[ -n "$GDRIVE_SA" && -f "$GDRIVE_SA" ]]; then
+            cat <<EOF > /tmp/rclone.conf
+[gdrive]
+type = drive
+scope = drive
+service_account_file = ${GDRIVE_SA}
+root_folder_id = ${GDRIVE_FOLDER_ID:-}
+EOF
+            chmod 600 /tmp/rclone.conf
+        fi
     else
-        echo "ПРЕДУПРЕЖДЕНИЕ: Google Drive включен, но не задан ключ Service Account (GDRIVE_SA_BASE64 или файл) либо GDRIVE_FOLDER_ID." >&2
+        echo "ERROR: Google Drive бэкап включен, но не найдена конфигурация (/backups/rclone.conf, GDRIVE_TOKEN_BASE64 или Service Account)." >&2
+        UPLOAD_FAILED=true
+    fi
+
+    if [[ "$UPLOAD_FAILED" != "true" && -f "$RCLONE_CONF" ]]; then
+        echo "Загрузка encrypted backup в Google Drive (rclone)..."
+        if rclone --config "$RCLONE_CONF" copy "$ENCRYPTED_FILE" gdrive: --retries 3 --retries-sleep 2s --stats 0; then
+            echo "Google Drive upload успешно завершён: $(basename "$ENCRYPTED_FILE")"
+
+            # Валидация retention
+            RETENTION="${GDRIVE_RETENTION_DAYS:-14}"
+            if ! [[ "$RETENTION" =~ ^[0-9]+$ ]] || [ "$RETENTION" -le 0 ]; then
+                echo "WARNING: Некорректное значение GDRIVE_RETENTION_DAYS='$RETENTION', используется 14." >&2
+                RETENTION=14
+            fi
+
+            echo "Очистка устаревших бэкапов в Google Drive (старше ${RETENTION} дн.)..."
+            if ! rclone --config "$RCLONE_CONF" delete --include "just1kbot_*.sql.gz.age" --min-age "${RETENTION}d" gdrive: --quiet; then
+                echo "WARNING: Не удалось завершить очистку устаревших копий в Google Drive." >&2
+            fi
+        else
+            echo "ERROR: Ошибка выгрузки бэкапа в Google Drive!" >&2
+            UPLOAD_FAILED=true
+        fi
+    fi
+
+    # Очистка временных конфигов
+    rm -f /tmp/rclone.conf /tmp/gdrive_sa.json 2>/dev/null || true
+
+    # Fail-closed при ошибке облачного бэкапа
+    if [[ "$UPLOAD_FAILED" == "true" ]]; then
+        echo "ERROR: Локальный зашифрованный бэкап сохранен ($ENCRYPTED_FILE), но выгрузка в Google Drive завершилась с ошибкой!" >&2
+        exit 1
     fi
 fi
 
