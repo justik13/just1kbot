@@ -103,5 +103,9 @@ def get_text(key: str, default=None, **kwargs):
 
 
 def reload_texts() -> None:
-    """No-op backwards compatibility helper for static text catalogue."""
-    return None
+    """Rebuild the derived `_TEXTS` cache from current module globals.
+
+    The catalogue itself is static; this only re-syncs the cache so test
+    monkeypatching of existing keys is picked up via `get_text`.
+    """
+    _TEXTS.update({name: globals()[name] for name in _TEXT_KEYS if name in globals()})

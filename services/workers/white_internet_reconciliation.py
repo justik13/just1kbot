@@ -545,10 +545,11 @@ class WhiteInternetReconciliationWorker:
                         )
                     )
                     if isinstance(reassigned_sub, (int, str)):
+                        cred_hash = hashlib.sha256(row.client_uuid.encode()).hexdigest()[:12]
                         logger.info(
-                            "Orphan cleanup %d cancelled: client %s is currently active/placed on origin %d (sub_id=%s).",
+                            "Orphan cleanup %d cancelled: credential sha256:%s... is currently active/placed on origin %d (sub_id=%s).",
                             row.id,
-                            row.client_uuid,
+                            cred_hash,
                             row.server_id,
                             reassigned_sub,
                         )

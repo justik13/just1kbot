@@ -175,6 +175,18 @@ class TestTextsLayout(unittest.TestCase):
         # _TEXTS is a derived lookup cache for _TEXT_KEYS, not a text constant.
         self.assertLessEqual(assigned_names, {"_TEXT_KEYS", "_TEXTS"})
 
+    def test_reload_texts_resyncs_cache_after_monkeypatch(self):
+        key = next(iter(texts._TEXT_KEYS))
+        original = texts.get_text(key)
+        try:
+            texts.__dict__[key] = "TEST_ONLY_RELOAD_PROBE"
+            texts.reload_texts()
+            self.assertEqual(texts.get_text(key), "TEST_ONLY_RELOAD_PROBE")
+        finally:
+            texts.__dict__[key] = original
+            texts.reload_texts()
+        self.assertEqual(texts.get_text(key), original)
+
     def test_every_canonical_text_is_reachable_through_facade(self):
         for py_file in TEXTS_DIR.rglob("*.py"):
             if py_file.name == "__init__.py":
