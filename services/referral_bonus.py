@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import (
@@ -186,19 +186,29 @@ async def _has_other_qualifying_topup(
     exclude_order_id: str | uuid.UUID | None,
     exclude_payment_id: int | None,
 ) -> bool:
-    """True if the user has any qualifying top-up besides the current operation.
+    """True if the user has any qualifying paid activity besides the current operation.
 
     Used to decide whether the current top-up newly activates the referral:
     the tier rate must be computed from the active count *before* this
-    activation, so a first qualifying top-up must not boost its own rate.
+    activation, so the very first qualifying activity must not boost its own rate.
+
+    Mirrors the exact same qualifying condition as
+    ``get_user_active_referrals_count`` / ``_referral_paid_activity_condition``
+    in users_repo: real-money paid order with amount ≥ threshold *and* either a
+    balance top-up (service_type == 'topup') or a direct external-gateway
+    purchase (payment_method != 'wallet').  Wallet-funded non-topup orders are
+    intentionally excluded because they may represent gifted balance.
     """
     from database.models import Order, Payment
 
     order_conds = [
         Order.user_id == user_id,
-        Order.service_type == "topup",
         Order.status == "paid",
         Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+        or_(
+            Order.service_type == "topup",
+            Order.payment_method != "wallet",
+        ),
     ]
     if exclude_order_id is not None:
         try:
@@ -291,10 +301,10 @@ async def grant_referral_bonus_for_topup(
     from database.repositories.users_repo import get_user_active_referrals_count
 
     active_count = await get_user_active_referrals_count(session, referrer.telegram_id)
-    # Tier is earned by referrals activated BEFORE this top-up: a first
-    # qualifying top-up must not boost its own rate (0-4 -> 15% for the 5th
-    # payer; 20% starts from their NEXT top-up). Repeat top-ups keep the
-    # full count. Dust top-ups (< threshold) never activate, so no decrement.
+    # Tier is earned by referrals activated BEFORE this top-up: the very
+    # first qualifying activity must not boost its own rate (0-2 -> 15% for
+    # the 3rd payer; 20% starts from their NEXT top-up). Repeat top-ups keep
+    # the full count. Dust top-ups (< threshold) never activate, so no decrement.
     first_activation = not await _has_other_qualifying_topup(
         session,
         user_id=purchaser.id,

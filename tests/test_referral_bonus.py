@@ -36,39 +36,38 @@ class TestReferralTiers(unittest.TestCase):
     def test_referral_tier_progression(self):
         from services.referral_bonus import get_referral_tier
 
-        # Tier 1: 0..4 -> 15% (Старт)
-        # Tier 1: 0..4 -> 15% (Уровень 1)
-        for cnt in (0, 1, 2, 3, 4):
+        # Tier 1: 0..2 -> 15% (Standard)
+        for cnt in (0, 1, 2):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.15")
-            assert t.name == "Уровень 1"
-            assert t.needed_for_next == (5 - cnt)
-            assert t.next_tier_name == "Уровень 2"
+            assert t.name == "Standard"
+            assert t.needed_for_next == (3 - cnt)
+            assert t.next_tier_name == "Silver"
             assert t.next_rate == Decimal("0.20")
 
-        # Tier 2: 5..9 -> 20% (Уровень 2)
-        for cnt in (5, 6, 7, 8, 9):
+        # Tier 2: 3..6 -> 20% (Silver)
+        for cnt in (3, 4, 5, 6):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.20")
-            assert t.name == "Уровень 2"
-            assert t.needed_for_next == (10 - cnt)
-            assert t.next_tier_name == "Уровень 3"
+            assert t.name == "Silver"
+            assert t.needed_for_next == (7 - cnt)
+            assert t.next_tier_name == "Gold"
             assert t.next_rate == Decimal("0.25")
 
-        # Tier 3: 10..14 -> 25% (Уровень 3)
-        for cnt in (10, 11, 12, 13, 14):
+        # Tier 3: 7..14 -> 25% (Gold)
+        for cnt in (7, 8, 9, 10, 11, 12, 13, 14):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.25")
-            assert t.name == "Уровень 3"
+            assert t.name == "Gold"
             assert t.needed_for_next == (15 - cnt)
-            assert t.next_tier_name == "Уровень 4"
+            assert t.next_tier_name == "Platinum"
             assert t.next_rate == Decimal("0.30")
 
-        # Tier 4: 15+ -> 30% (Уровень 4)
+        # Tier 4: 15+ -> 30% (Platinum)
         for cnt in (15, 20, 50, 100):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.30")
-            assert t.name == "Уровень 4"
+            assert t.name == "Platinum"
             assert t.needed_for_next is None
             assert t.next_tier_name is None
             assert t.next_rate is None
@@ -142,7 +141,7 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         assert entry.amount == Decimal(4)  # 15% of 30
         assert entry.metadata_["topup_payment_id"] == 42
         assert entry.metadata_["bonus_rate"] == "0.15"
-        assert entry.metadata_["tier_name"] == "Уровень 1"
+        assert entry.metadata_["tier_name"] == "Standard"
 
     def test_reverse_referral_bonus_for_topup(self):
         import asyncio
@@ -457,7 +456,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         assert referrer_entry.user_id == 10
         assert referrer_entry.amount == Decimal(75)  # 15% of 500
         assert referrer_entry.metadata_["bonus_rate"] == "0.15"
-        assert referrer_entry.metadata_["tier_name"] == "Уровень 1"
+        assert referrer_entry.metadata_["tier_name"] == "Standard"
 
         # Purchaser gets discount at checkout rather than bonus credit on balance
         assert res.purchaser_welcome_bonus == Decimal(0)
@@ -515,10 +514,10 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         assert referrer_entry.user_id == 10
         assert referrer_entry.amount == Decimal(200)  # 20% of 1000
         assert referrer_entry.metadata_["bonus_rate"] == "0.20"
-        assert referrer_entry.metadata_["tier_name"] == "Уровень 2"
+        assert referrer_entry.metadata_["tier_name"] == "Silver"
 
     def test_first_activation_does_not_boost_own_rate(self):
-        """5th referral's own first top-up is still paid at 15%, not 20%."""
+        """3rd referral's own first top-up is still paid at 15%, not 20%."""
         import asyncio
 
         from database.models import AccountLedgerEntry
@@ -541,9 +540,9 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
                 added_entries.append(entry)
 
         session = AsyncMock()
-        # active=5 already includes this first-time payer -> effective 4 -> 15%
+        # active=3 already includes this first-time payer -> effective 2 -> 15%
         session.scalar = AsyncMock(
-            side_effect=[purchaser, referrer, 5, None, None, None]
+            side_effect=[purchaser, referrer, 3, None, None, None]
         )
         session.add = fake_add
         session.flush = AsyncMock()
@@ -561,8 +560,78 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         referrer_entry = added_entries[0]
         assert referrer_entry.amount == Decimal(150)  # 15% of 1000, not 20%
         assert referrer_entry.metadata_["bonus_rate"] == "0.15"
-        assert referrer_entry.metadata_["active_referrals_count"] == 4
+        assert referrer_entry.metadata_["active_referrals_count"] == 2
         assert res.referrer_bonus == Decimal(150)
+
+    def test_direct_tariff_purchase_counts_as_prior_activation(self):
+        """Referral already activated via external tariff purchase, not a topup.
+
+        Scenario: referrer has 3 active referrals (one of whom was activated by
+        a direct awg/external-gateway purchase, not a topup). When that same
+        referral later does their first top-up, _has_other_qualifying_topup must
+        return True (the prior tariff purchase qualifies), so active_count must
+        NOT be decremented — effective_count stays 3 → Silver = 20%.
+
+        Regression guard for the ratchet between:
+          get_user_active_referrals_count:  counts any paid external order
+          _has_other_qualifying_topup (old): only looked at service_type=topup
+        """
+        import asyncio
+
+        from database.models import AccountLedgerEntry
+        from services.referral_bonus import grant_referral_bonus_for_topup
+
+        added_entries = []
+
+        referrer = MagicMock()
+        referrer.id = 10
+        referrer.telegram_id = 1000
+        referrer.is_banned = False
+
+        purchaser = MagicMock()
+        purchaser.id = 20
+        purchaser.telegram_id = 2000
+        purchaser.referred_by = 1000
+
+        def fake_add(entry):
+            if isinstance(entry, AccountLedgerEntry):
+                added_entries.append(entry)
+
+        session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
+        # active=3. _has_other_qualifying_topup finds a prior qualifying order
+        # (the external tariff purchase) → returns True, so effective_count = 3.
+        # 1. purchaser, 2. referrer, 3. active_referrals_count (3),
+        # 4. prior qualifying order (non-None → first_activation=False),
+        # 5. existing idempotency check (None)
+        session.scalar = AsyncMock(
+            side_effect=[purchaser, referrer, 3, "prior-external-order-id", None]
+        )
+        session.add = fake_add
+        session.flush = AsyncMock()
+
+        res = asyncio.run(
+            grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=20,
+                payment_id=105,
+                topup_amount=1000,
+            )
+        )
+
+        assert len(added_entries) == 1
+        referrer_entry = added_entries[0]
+        # effective_count must stay 3 → Silver tier → 20%, not 15%
+        assert referrer_entry.amount == Decimal(200)  # 20% of 1000
+        assert referrer_entry.metadata_["bonus_rate"] == "0.20"
+        assert referrer_entry.metadata_["tier_name"] == "Silver"
+        assert referrer_entry.metadata_["active_referrals_count"] == 3
+        assert res.referrer_bonus == Decimal(200)
+        assert_not_called = getattr(res, 'purchaser_welcome_bonus', Decimal(0))
+        assert assert_not_called == Decimal(0)
 
     def test_dust_topup_does_not_consume_tier_step(self):
         """Sub-threshold top-up keeps the full count (it never activates)."""

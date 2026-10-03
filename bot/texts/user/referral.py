@@ -11,17 +11,17 @@ def mask_telegram_id(telegram_id: int | str) -> str:
 
 BTN_REFERRAL_LEADERBOARD = "🏆 Топ-5 лидеров"
 
-REFERRAL_DISCOUNT_BADGE = "\n🎁 Скидка 25% по приглашению друга: <b>-{discount} ₽</b> (вместо <s>{original_price} ₽</s>)\n<i>Скидка действует на первый заказ тарифа. Пополнение баланса на неё не влияет. Продление будет по обычной цене ({original_price} ₽).</i>"
+REFERRAL_DISCOUNT_BADGE = "\n🎁 Скидка 25% по пригласительной ссылке: <b>-{discount} ₽</b> (вместо <s>{original_price} ₽</s>)\n<i>Скидка действует на первый заказ тарифа. Пополнение баланса на неё не влияет. Продление будет по обычной цене ({original_price} ₽).</i>"
 
 REFERRAL_LEADERBOARD_EMPTY = """<i>В топе пока пусто.
 
-Пригласите друзей по ссылке, чтобы занять первое место.</i>"""
+Пригласите пользователей по ссылке, чтобы занять первое место.</i>"""
 
 REFERRAL_LEADERBOARD_ITEM = "{pos}. {medal}{user} — <b>{count}</b> {noun}"
 
 REFERRAL_LEADERBOARD_MEDALS: dict[int, str] = {1: "🥇 ", 2: "🥈 ", 3: "🥉 "}
 
-REFERRAL_LEADERBOARD_NOT_RANKED = "\n➖➖➖➖➖➖➖➖\nВаше место: <b>вне рейтинга</b> (нет активных друзей)"
+REFERRAL_LEADERBOARD_NOT_RANKED = "\n➖➖➖➖➖➖➖➖\nВаше место: <b>вне рейтинга</b> (нет активных приглашённых)"
 
 REFERRAL_LEADERBOARD_TITLE = "🏆 <b>Топ-5 лидеров</b>\n"
 
@@ -33,7 +33,7 @@ REFERRAL_LEADERBOARD_YOUR_RANK = "\n➖➖➖➖➖➖➖➖\nВаше мест�
 
 REFERRAL_LIST_EMPTY = """<i>Список рефералов пока пуст.</i>
 
-Пригласите друзей по вашей ссылке, чтобы они появились здесь."""
+Пригласите пользователей по вашей ссылке, чтобы они появились здесь."""
 
 REFERRAL_LIST_FOOTER = """
 Всего приглашено: {count}"""
@@ -52,23 +52,23 @@ REFERRAL_SHARE_TEXT = "🎁 Приглашаю в just1kbot! Получи ски
 REFERRAL_TEXT_BALANCE = """🤝 <b>Реферальная программа</b>
 
 💰 Бонусный баланс: <b>{bonus_balance} ₽</b>
-🎖 Ваш уровень: <b>{tier_name} ({rate_pct}%)</b>{rank_line}
-👥 Активных друзей: <b>{active_count}</b> (всего приглашено: {invited_count}){tier_progress_line}
+🎖 Ваш статус: <b>{tier_name} ({rate_pct}%)</b>{rank_line}
+👥 Активных приглашённых: <b>{active_count}</b> (всего приглашено: {invited_count}){tier_progress_line}
 
 🎁 <b>Условия программы:</b>
-• Вы получаете <b>от 15% до 30%</b> с каждой оплаты приглашённых друзей на бонусный баланс.
-• <b>Лестница уровней:</b>
-  ▫️ 0–4 друга — <b>15% (Уровень 1)</b>
-  ▫️ 5–9 друзей — <b>20% (Уровень 2)</b>
-  ▫️ 10–14 друзей — <b>25% (Уровень 3)</b>
-  ▫️ 15+ друзей — <b>30% (Уровень 4)</b>
-• Друг получает <b>скидку 25%</b> на первый тариф по вашей ссылке (пополнение баланса на скидку не влияет).
+• Вы получаете <b>от 15% до 30%</b> с каждой оплаты приглашённых пользователей на бонусный баланс.
+• <b>Лестница статусов:</b>
+  ▫️ 0–2 приглашённых — <b>15% (Standard)</b>
+  ▫️ 3–6 приглашённых — <b>20% (Silver)</b>
+  ▫️ 7–14 приглашённых — <b>25% (Gold)</b>
+  ▫️ 15+ приглашённых — <b>30% (Platinum)</b>
+• Приглашённый получает <b>скидку 25%</b> на первый тариф по вашей ссылке (пополнение баланса на скидку не влияет).
 
 <i>Бонусы списываются при оплате и продлении подписки.</i>
 
 🔗 <b>Ваша ссылка для приглашения:</b>
 <code>{referral_link}</code>{inviter_line}"""
-REFERRAL_TIER_PROGRESS_NEXT = "\nДо уровня <b>{next_tier_name} ({next_rate_pct}%)</b>: ещё {needed_count}"
+REFERRAL_TIER_PROGRESS_NEXT = "\nДо статуса <b>{next_tier_name} ({next_rate_pct}%)</b>: ещё {needed_count}"
 
-REFERRAL_TIER_PROGRESS_MAX = "\n🏆 <b>Максимальный уровень</b>"
+REFERRAL_TIER_PROGRESS_MAX = "\n🏆 <b>Максимальный статус</b>"
 
