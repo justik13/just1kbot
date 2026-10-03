@@ -1,6 +1,5 @@
 import asyncio
 import collections
-import ipaddress
 import json
 import logging
 import time
@@ -326,19 +325,14 @@ class AmneziaClient:
             "Content-Type": "application/json",
         }
         self._key_error_logged = False
-        parsed = urlsplit(self.api_url)
-        self._is_ip_endpoint = False
-        if parsed.hostname:
-            try:
-                ipaddress.ip_address(parsed.hostname.strip("[]"))
-                self._is_ip_endpoint = True
-            except ValueError:
-                self._is_ip_endpoint = False
 
         if ssl_verify is not None:
             self._ssl: bool | None = ssl_verify
-        elif parsed.scheme == "https" and self._is_ip_endpoint:
-            self._ssl = False
+            if ssl_verify is False:
+                logger.warning(
+                    "AmneziaClient: TLS verification explicitly disabled for %s",
+                    self._log_target,
+                )
         else:
             self._ssl = None
 
