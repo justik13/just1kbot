@@ -995,7 +995,7 @@ show_amnezia_bot_credentials() {
     echo -e "  🔗 API URL:            ${CYAN}${api_url}${NC}"
     echo -e "  🤖 BOT IP (защита):    ${CYAN}${bot_ip}${NC}"
     echo -e "  🔑 API Ключ:           ${YELLOW}${api_key}${NC}"
-    echo -e "  🩺 Проверка API:       curl -k -H \"x-api-key: ${api_key}\" ${api_url}/healthz\n"
+    echo -e "  🩺 Проверка API:       API_KEY=<ключ> curl -k -H \"x-api-key: \$API_KEY\" ${api_url}/healthz (ключ не вставлять в командную строку)\n"
     if [[ "$bot_ip" == "-" || "$bot_ip" == "any" ]]; then
         echo -e "  ${YELLOW}💡 Рекомендация: ограничьте доступ к API только для IP бота: just1knode set-bot-ip <IP>${NC}\n"
     fi
