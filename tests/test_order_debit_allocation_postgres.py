@@ -72,8 +72,19 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.user_id = self.user.id
 
     async def asyncTearDown(self):
-        self.env_patcher.stop()
-        await self.engine.dispose()
+        from sqlalchemy import text
+        try:
+            try:
+                from tests.db_utils import TRUNCATE_SQL
+            except ImportError:
+                from db_utils import TRUNCATE_SQL
+            async with self.sessions.begin() as session:
+                await session.execute(text(TRUNCATE_SQL))
+        except Exception:
+            pass
+        finally:
+            self.env_patcher.stop()
+            await self.engine.dispose()
 
     async def _make_order(
         self,

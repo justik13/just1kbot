@@ -130,11 +130,22 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
             await session.flush()
 
     async def asyncTearDown(self):
-        from database import connection
-        connection._sessionmaker = self.old_sessionmaker
-        connection._engine = self.old_engine
-        await self.engine.dispose()
-        self.env_patcher.stop()
+        from sqlalchemy import text
+        try:
+            try:
+                from tests.db_utils import TRUNCATE_SQL
+            except ImportError:
+                from db_utils import TRUNCATE_SQL
+            async with self.sessions.begin() as session:
+                await session.execute(text(TRUNCATE_SQL))
+        except Exception:
+            pass
+        finally:
+            from database import connection
+            connection._sessionmaker = self.old_sessionmaker
+            connection._engine = self.old_engine
+            await self.engine.dispose()
+            self.env_patcher.stop()
 
     async def test_full_pipeline_against_real_postgres(self):
         """Execute complete lifecycle: Purchase -> Recon -> Traffic -> Exhaust -> Topup -> Renew."""
