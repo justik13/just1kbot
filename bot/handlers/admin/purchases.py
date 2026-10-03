@@ -167,6 +167,11 @@ async def show_purchase_card(
     header = format_admin_breadcrumbs(texts.ADMIN_PURCHASES_TAB_TITLE, texts.ADMIN_PURCHASES_DETAILS_LINK.format(entry_numeric_id=entry.numeric_id))
     amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_PURCHASES_AMOUNT_ZERO_BONUS_GRANT
     dt_str = format_datetime(entry.created_at)
+    funds_str = ""
+    if entry.real_amount_rub is not None or entry.bonus_amount_rub is not None:
+        real_str = f"{int(entry.real_amount_rub or 0)} ₽"
+        bonus_str = f"{int(entry.bonus_amount_rub or 0)} ₽"
+        funds_str = texts.ADMIN_PURCHASES_ENTRY_FUNDS_LINE.format(real_str=real_str, bonus_str=bonus_str)
 
     rendered = (
         f"{header}"+
@@ -176,6 +181,7 @@ async def show_purchase_card(
         texts.ADMIN_PURCHASES_ENTRY_DEVICE_LIMIT_LINE.format(entry_device_limit=entry.device_limit)+
         texts.ADMIN_PURCHASES_ENTRY_DURATION_LINE.format(entry_duration_days=entry.duration_days)+
         texts.ADMIN_PURCHASES_ENTRY_SUMMARY_LINE.format(amount_str=amount_str)+
+        funds_str+
         texts.ADMIN_PURCHASES_ENTRY_OPERATION_TYPE_LINE.format(safe_entry_operation_title=safe(entry.operation_title))+
         texts.ADMIN_PURCHASES_ENTRY_DATETIME_LINE.format(dt_str=dt_str)
 

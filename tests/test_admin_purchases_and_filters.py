@@ -12,6 +12,7 @@ from database.models import (
     User,
 )
 from database.repositories.purchases_repo import (
+    get_purchase_log_by_id,
     get_purchase_logs_paginated,
 )
 from utils.datetime_helpers import now_utc
@@ -153,7 +154,104 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entries[0].id, "quote_100")
         self.assertEqual(entries[0].amount_rub, Decimal("199.00"))
         self.assertEqual(entries[0].tariff_name, "Test Tariff 30d")
+        # List view carries no funds split (see purchase card).
+        self.assertIsNone(entries[0].real_amount_rub)
+        self.assertIsNone(entries[0].bonus_amount_rub)
         self.assertEqual(entries[1].id, "audit_200")
+
+    async def test_purchase_card_quote_shows_funds_split(self):
+        import uuid
+
+        session = AsyncMock()
+        now = now_utc()
+        user = User(id=10, telegram_id=3001, username="buyer_user")
+        tariff = Tariff(
+            id=1,
+            name="Test Tariff 30d",
+            duration_days=30,
+            device_limit=2,
+            price_rub=Decimal("199.00"),
+            is_active=True,
+        )
+        ver = TariffVersion(
+            id=1,
+            tariff_id=1,
+            version_number=1,
+            name_snapshot="Test Tariff 30d",
+            duration_hours=720,
+            device_limit=2,
+            price_rub=Decimal("199.00"),
+            tariff=tariff,
+        )
+        quote = TariffQuote(
+            id=100,
+            public_id=uuid.uuid4(),
+            user_id=10,
+            user=user,
+            operation_type="purchase",
+            target_tariff_version_id=1,
+            target_tariff_version=ver,
+            amount_due_rub=Decimal("199.00"),
+            status="consumed",
+            consumed_at=now,
+            created_at=now,
+        )
+
+        res_quote = MagicMock()
+        res_quote.scalar_one_or_none.return_value = quote
+
+        debit = MagicMock()
+        debit.id = 7
+        debit.quote_id = 100
+        debit.order_id = None
+        res_debits = MagicMock()
+        res_debits.scalars().all.return_value = [debit]
+
+        res_alloc = MagicMock()
+        res_alloc.all.return_value = [
+            (7, "payment_credit", Decimal("100.00")),
+            (7, "admin_adjustment", Decimal("99.00")),
+        ]
+
+        session.execute.side_effect = [res_quote, res_debits, res_alloc]
+
+        entry = await get_purchase_log_by_id(session, "quote_100")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.real_amount_rub, Decimal("100.00"))
+        self.assertEqual(entry.bonus_amount_rub, Decimal("99.00"))
+
+    async def test_purchase_card_wallet_order_without_allocations_shows_no_split(self):
+        import uuid
+
+        session = AsyncMock()
+        user = User(id=11, telegram_id=3002, username="wallet_buyer")
+
+        order = MagicMock()
+        order.id = uuid.uuid4()
+        order.service_type = "awg"
+        order.payment_method = "wallet"
+        order.tariff = None
+        order.metadata_ = {}
+        order.device_limit = 1
+        order.duration_days = 30
+        order.amount_rub = Decimal("199.00")
+        order.paid_at = now_utc()
+        order.created_at = now_utc()
+        order.user = user
+
+        res_order = MagicMock()
+        res_order.scalar_one_or_none.return_value = order
+
+        res_debits = MagicMock()
+        res_debits.scalars().all.return_value = []
+
+        session.execute.side_effect = [res_order, res_debits]
+
+        entry = await get_purchase_log_by_id(session, f"order_{order.id}")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.amount_rub, Decimal("199.00"))
+        self.assertIsNone(entry.real_amount_rub)
+        self.assertIsNone(entry.bonus_amount_rub)
 
 
 if __name__ == "__main__":
