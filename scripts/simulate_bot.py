@@ -40,7 +40,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from cryptography.fernet import Fernet
 
 _dummy_fernet = os.getenv("DB_ENCRYPTION_KEY") or Fernet.generate_key().decode()
-os.environ.setdefault("BOT_TOKEN", "123456789:AABBCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqR")
+# TEST-ONLY dummy defaults for local simulation (never production credentials).
+os.environ.setdefault("BOT_TOKEN", "123456789:TEST_ONLY_DUMMY_TOKEN_DO_NOT_USE_IN_PROD")
 os.environ.setdefault("ADMIN_IDS", "[999999999]")
 os.environ.setdefault("SUPPORT_USERNAME", "just1k_support")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -48,7 +49,7 @@ os.environ.setdefault("DB_ENCRYPTION_KEY", _dummy_fernet)
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("REDIS_PASSWORD", "sim_redis_pass_123")
 os.environ.setdefault("YOOKASSA_SHOP_ID", "mock_shop")
-os.environ.setdefault("YOOKASSA_SECRET_KEY", "live_sim_secret_key_123")
+os.environ.setdefault("YOOKASSA_SECRET_KEY", "TEST_ONLY_SIM_SECRET_KEY_123")
 os.environ.setdefault("YOOKASSA_RETURN_URL", "https://t.me/{bot_username}?start=pay_success")
 os.environ.setdefault("YOOKASSA_WEBHOOK_PORT", "8080")
 os.environ.setdefault("DOMAIN", "sim.just1k.net")
@@ -436,10 +437,12 @@ class SimulationAutoSeedMiddleware:
         real_balance: Decimal = Decimal(350),
         bonus_balance: Decimal = Decimal(150),
         enabled: bool = True,
+        allow_admin_seed: bool = False,
     ):
         self.real_balance = real_balance
         self.bonus_balance = bonus_balance
         self.enabled = enabled
+        self.allow_admin_seed = allow_admin_seed
 
     async def __call__(self, handler, event: Update, data: dict):
         if not self.enabled:
@@ -449,11 +452,13 @@ class SimulationAutoSeedMiddleware:
         if not user:
             return await handler(event, data)
 
-        # In simulation mode, dynamically grant admin rights to connecting tester
-        from config.settings import get_settings
-        sim_settings = get_settings()
-        if user.id not in sim_settings.ADMIN_IDS:
-            sim_settings.ADMIN_IDS.append(user.id)
+        # Granting admin rights is opt-in (dev backdoor otherwise): only when
+        # the simulator is started with --allow-admin-seed.
+        if self.allow_admin_seed:
+            from config.settings import get_settings
+            sim_settings = get_settings()
+            if user.id not in sim_settings.ADMIN_IDS:
+                sim_settings.ADMIN_IDS.append(user.id)
 
         async with session_scope() as session:
             db_user = await session.scalar(
@@ -666,7 +671,7 @@ async def run_simulation(args: argparse.Namespace):
         REDIS_PASSWORD="sim_redis_pass_123",
         ADMIN_IDS=admin_ids,
         YOOKASSA_SHOP_ID="mock_shop",
-        YOOKASSA_SECRET_KEY="live_sim_secret_key_123",
+        YOOKASSA_SECRET_KEY="TEST_ONLY_SIM_SECRET_KEY_123",
         YOOKASSA_RETURN_URL="https://t.me/{bot_username}?start=pay_success",
         YOOKASSA_WEBHOOK_PORT=8080,
         DOMAIN="sim.just1k.net",
@@ -928,6 +933,7 @@ async def run_simulation(args: argparse.Namespace):
         real_balance=Decimal(args.seed_balance_real),
         bonus_balance=Decimal(args.seed_balance_bonus),
         enabled=not args.no_auto_seed,
+        allow_admin_seed=args.allow_admin_seed,
     )
     dp.message.middleware(auto_seed)
     dp.callback_query.middleware(auto_seed)
@@ -1044,6 +1050,11 @@ def main():
         "--no-auto-seed",
         action="store_true",
         help="Disable automatic onboarding and seeding of new users",
+    )
+    parser.add_argument(
+        "--allow-admin-seed",
+        action="store_true",
+        help="Grant admin rights to connecting testers (dev-only, off by default)",
     )
     parser.add_argument(
         "--maintenance",
