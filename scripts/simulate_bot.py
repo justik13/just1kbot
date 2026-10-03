@@ -39,7 +39,12 @@ from cryptography.fernet import Fernet
 
 _dummy_fernet = os.getenv("DB_ENCRYPTION_KEY") or Fernet.generate_key().decode()
 # TEST-ONLY dummy defaults for local simulation (never production credentials).
-os.environ.setdefault("BOT_TOKEN", "123456789:TEST_ONLY_DUMMY_TOKEN_DO_NOT_USE_IN_PROD")
+# A user-provided token (BOT_TOKEN or TEST_BOT_TOKEN) wins over the dummy.
+_user_bot_token = os.getenv("BOT_TOKEN") or os.getenv("TEST_BOT_TOKEN")
+if _user_bot_token:
+    os.environ["BOT_TOKEN"] = _user_bot_token
+else:
+    os.environ.setdefault("BOT_TOKEN", "123456789:TEST_ONLY_DUMMY_TOKEN_DO_NOT_USE_IN_PROD")
 os.environ.setdefault("ADMIN_IDS", "[999999999]")
 os.environ.setdefault("SUPPORT_USERNAME", "just1k_support")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -96,6 +101,7 @@ from database.models import (
 )
 from scripts.simulate import service_mocks  # noqa: F401 (applies mock patching on import)
 from scripts.simulate.db_shims import UTCDateTime
+from scripts.simulate.db_targets import is_local_db_url
 from scripts.simulate.seeding import SimulationAutoSeedMiddleware
 
 # --- 5. MAIN SIMULATION RUNNER ---
@@ -503,6 +509,11 @@ def main():
         help="Database URL (default: sqlite+aiosqlite:///:memory:)",
     )
     parser.add_argument(
+        "--allow-remote-db",
+        action="store_true",
+        help="Allow a non-local DATABASE_URL (explicit acknowledgment, off by default)",
+    )
+    parser.add_argument(
         "--redis-url",
         type=str,
         default=os.getenv("REDIS_URL"),
@@ -551,6 +562,14 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+
+    if not is_local_db_url(args.db_url) and not args.allow_remote_db:
+        print(
+            "ERROR: Refusing non-local DATABASE_URL without --allow-remote-db. "
+            "The simulator writes to the database and touches Telegram state.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     try:
         asyncio.run(run_simulation(args))
