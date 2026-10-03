@@ -236,7 +236,7 @@ async def create_order_debit(
         "idempotency_key": f"order_debit:{order_id}",
         "metadata_": metadata or {},
     }
-    return await _insert_or_get_entry(
+    debit, created = await _insert_or_get_entry(
         session,
         values=values,
         economic_lookup=(
@@ -244,6 +244,11 @@ async def create_order_debit(
             & (AccountLedgerEntry.order_id == order_id)
         ),
     )
+    if created:
+        # Mirror the quote-debit path: attribute the spend to credit lots
+        # FIFO (bonus lots first) so balance buckets stay exact.
+        await _allocate_fifo(session, user_id=user_id, debit=debit, amount=-amount)
+    return debit, created
 
 
 async def create_order_credit(
