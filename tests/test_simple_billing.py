@@ -890,10 +890,9 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(free_btn.text, texts.BTN_PAYMENT_CONFIRM_FREE_CHANGE)
 
     @patch("services.white_internet_service.white_internet_repo")
-    @patch("services.white_internet_service.get_or_create_current_version")
     @patch("services.white_internet_service.lock_checkout_user")
     async def test_convert_trial_to_paid_debit_balance_false(
-        self, mock_lock_user, mock_get_ver, mock_wi_repo
+        self, mock_lock_user, mock_wi_repo
     ):
         from config.enums import ServerHealthState, ServerLifecycleStatus
         from database.models import Server, WhiteInternetSubscription
@@ -926,23 +925,14 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         )
         session.scalar.return_value = origin_node
 
-        mock_version = AsyncMock()
-        mock_version.id = 1
-        mock_version.base_quota_bytes = 10 * 1024**3
-        mock_version.price_rub = 300
-        mock_version.duration_hours = 720
-        mock_get_ver.return_value = mock_version
-
         with patch.object(
             WhiteInternetService,
             "get_or_create_white_internet_tariff",
             new_callable=AsyncMock,
             return_value=Tariff(id=1, name="WI", duration_days=30, price_rub=Decimal("300.00"), is_active=True),
         ), patch.object(
-            WhiteInternetService, "_new_quote"
-        ) as mock_new_quote, patch(
-            "services.white_internet_service.create_purchase_debit", new_callable=AsyncMock
-        ) as mock_debit, patch.object(
+            WhiteInternetService, "_checkout_wallet_order", new_callable=AsyncMock
+        ) as mock_checkout, patch.object(
             WhiteInternetService, "_try_inline_sync", new_callable=AsyncMock
         ):
             ok, msg, result_sub = await WhiteInternetService.convert_trial_to_paid(
@@ -951,8 +941,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(ok)
         self.assertFalse(result_sub.is_trial)
-        mock_new_quote.assert_not_called()
-        mock_debit.assert_not_called()
+        mock_checkout.assert_not_called()
 
     @patch("services.fulfillment_service.WhiteInternetService.purchase_subscription")
     async def test_fulfill_order_raises_on_purchase_failure(self, mock_purchase):
@@ -1055,10 +1044,9 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Renewal error", str(cm.exception))
 
     @patch("services.white_internet_service.white_internet_repo")
-    @patch("services.white_internet_service.get_or_create_current_version")
     @patch("services.white_internet_service.lock_checkout_user")
     async def test_fulfill_white_internet_device_slot_real_service_debit_balance_false(
-        self, mock_lock_user, mock_get_ver, mock_wi_repo
+        self, mock_lock_user, mock_wi_repo
     ):
         """Verify ITEM_WHITE_INTERNET_DEVICE fulfillment executes real purchase_device_slot without UnboundLocalError."""
         from config.enums import ServerHealthState, ServerLifecycleStatus
@@ -1093,11 +1081,6 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             protocol="xray",
         )
         session.scalar.return_value = origin_node
-
-        mock_version = AsyncMock()
-        mock_version.id = 1
-        mock_version.price_rub = 150
-        mock_get_ver.return_value = mock_version
 
         updated_sub = WhiteInternetSubscription(
             id=100,
@@ -1141,10 +1124,9 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated_sub.device_limit, 3)
 
     @patch("services.white_internet_service.white_internet_repo")
-    @patch("services.white_internet_service.get_or_create_current_version")
     @patch("services.white_internet_service.lock_checkout_user")
     async def test_fulfill_white_internet_quota_pack_real_service_debit_balance_false(
-        self, mock_lock_user, mock_get_ver, mock_wi_repo
+        self, mock_lock_user, mock_wi_repo
     ):
         """Verify ITEM_WHITE_INTERNET_PACK fulfillment executes real topup_quota without UnboundLocalError."""
         from config.enums import ServerHealthState, ServerLifecycleStatus
@@ -1180,11 +1162,6 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         )
         session.scalar.return_value = origin_node
 
-        mock_version = AsyncMock()
-        mock_version.id = 1
-        mock_version.price_rub = 100
-        mock_get_ver.return_value = mock_version
-
         mock_grant = MagicMock()
         mock_grant.id = 55
         mock_wi_repo.topup_quota_atomic = AsyncMock(return_value=mock_grant)
@@ -1216,7 +1193,6 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         call_kwargs = mock_wi_repo.topup_quota_atomic.call_args[1]
         self.assertEqual(call_kwargs["subscription_id"], 100)
         self.assertEqual(call_kwargs["pack_gb"], 25)
-        self.assertEqual(call_kwargs["quote_id"], 0)
 
     @patch("services.order_service.FulfillmentService.fulfill_order")
     async def test_mark_order_paid_revives_canceled_order(self, mock_fulfill):
