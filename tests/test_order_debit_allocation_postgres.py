@@ -18,9 +18,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import (
     AccountLedgerAllocation,
     AccountLedgerEntry,
+    Order,
     User,
 )
-
 try:
     from tests.db_utils import TRUNCATE_SQL
 except ImportError:
@@ -75,17 +75,40 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.env_patcher.stop()
         await self.engine.dispose()
 
+    async def _make_order(
+        self,
+        session,
+        *,
+        service_type="awg",
+        amount=Decimal("0"),
+        payment_method="wallet",
+        status="paid",
+    ):
+        order = Order(
+            user_id=self.user_id,
+            service_type=service_type,
+            amount_rub=amount,
+            payment_method=payment_method,
+            status=status,
+        )
+        session.add(order)
+        await session.flush()
+        return order
+
     async def _seed_credits(self, session, *, real=Decimal("100"), bonus=Decimal("50")):
         from database.repositories.account_ledger_repo import (
             create_admin_adjustment,
             create_order_credit,
         )
 
+        topup = await self._make_order(
+            session, service_type="topup", amount=real, payment_method="yookassa"
+        )
         await create_order_credit(
             session,
             user_id=self.user_id,
             amount_rub=real,
-            order_id=uuid.uuid4(),
+            order_id=topup.id,
             metadata={},
         )
         await create_admin_adjustment(
@@ -121,9 +144,12 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
             get_account_balance,
         )
 
-        order_id = uuid.uuid4()
         async with self.sessions.begin() as session:
             await self._seed_credits(session)
+            purchase = await self._make_order(
+                session, service_type="awg", amount=Decimal("120")
+            )
+            order_id = purchase.id
             debit, created = await create_order_debit(
                 session,
                 user_id=self.user_id,
@@ -148,9 +174,12 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def test_order_debit_idempotent_without_reallocation(self):
         from database.repositories.account_ledger_repo import create_order_debit
 
-        order_id = uuid.uuid4()
         async with self.sessions.begin() as session:
             await self._seed_credits(session)
+            purchase = await self._make_order(
+                session, service_type="awg", amount=Decimal("120")
+            )
+            order_id = purchase.id
             debit, created = await create_order_debit(
                 session,
                 user_id=self.user_id,
@@ -184,11 +213,14 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
             create_order_debit,
         )
 
-        order_id = uuid.uuid4()
         async with self.sessions.begin() as session:
             await self._seed_credits(
                 session, real=Decimal("20"), bonus=Decimal("10")
             )
+            purchase = await self._make_order(
+                session, service_type="awg", amount=Decimal("1000")
+            )
+            order_id = purchase.id
             with self.assertRaises(AccountLedgerInvariantError):
                 await create_order_debit(
                     session,
