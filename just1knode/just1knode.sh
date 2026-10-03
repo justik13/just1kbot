@@ -690,6 +690,9 @@ if os.path.exists(rf):
             echo -e "      ${YELLOW}→${NC} Nginx или вышестоящий бот зависли при обработке. Проверьте: tail -n 10 /var/log/nginx/error.log"
             failed=$((failed + 1))
         elif [[ "$sub_code" == "000" || $sub_err -ne 0 ]]; then
+            # Accepted risk: the -k probe below hits only the public /ping
+            # endpoint with no secrets, to tell "TLS broken" apart from
+            # "nginx down". Either outcome still fails this check.
             local insecure_code
             insecure_code="$(curl -k -s -o /dev/null -w "%{http_code}" --max-time 10 --resolve "${check_target}:443:127.0.0.1" "https://${check_target}${sub_prefix}/ping" 2>/dev/null || echo "000")"
             if [[ "$insecure_code" == "200" ]]; then
