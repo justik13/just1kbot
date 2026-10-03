@@ -166,6 +166,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
+      YOOKASSA_EXTRA_IPS: ${YOOKASSA_EXTRA_IPS:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy_conf.d:/etc/caddy/conf.d:ro

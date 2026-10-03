@@ -81,6 +81,11 @@ class DockerComposeSecurityTests(unittest.TestCase):
                 expected_yookassa_networks,
                 f"Mismatch between {fname} and config.constants.YOOKASSA_IP_RANGES",
             )
+            self.assertIn(
+                "{$YOOKASSA_EXTRA_IPS:127.0.0.1/32}",
+                content,
+                f"Missing YOOKASSA_EXTRA_IPS fallback token in {fname}",
+            )
 
             self.assertIn("@subscription_paths path", content)
             self.assertNotIn("@limited_body_paths path /health", content)

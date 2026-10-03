@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     YOOKASSA_WEBHOOK_PORT: int
     DOMAIN: str
     SSL_EMAIL: str
+    YOOKASSA_EXTRA_IPS: str = ""
 
     # Removed legacy and unsupported settings are declared so stale .env files fail fast.
     AMNEZIA_API_URL: str | None = None
@@ -293,6 +294,19 @@ class Settings(BaseSettings):
         ):
             raise ValueError("SUPPORT_USERNAME must be a real Telegram username")
         return username
+
+    @property
+    def yookassa_allowed_ip_ranges(self) -> tuple[str, ...]:
+        from config.constants import YOOKASSA_IP_RANGES
+
+        if not self.YOOKASSA_EXTRA_IPS:
+            return YOOKASSA_IP_RANGES
+        extra = [
+            item.strip()
+            for item in re.split(r"[,;\s]+", self.YOOKASSA_EXTRA_IPS)
+            if item.strip()
+        ]
+        return YOOKASSA_IP_RANGES + tuple(extra)
 
 
 @lru_cache
