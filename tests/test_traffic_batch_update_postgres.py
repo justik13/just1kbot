@@ -30,26 +30,14 @@ class TrafficBatchUpdatePostgresTests(unittest.IsolatedAsyncioTestCase):
 
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        from tests.db_utils import TRUNCATE_SQL
         async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_ledger_allocations, account_ledger_entries, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, "
-                    "vpn_profiles, users, servers "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await s.execute(text(TRUNCATE_SQL))
 
     async def asyncTearDown(self):
+        from tests.db_utils import TRUNCATE_SQL
         async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_ledger_allocations, account_ledger_entries, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, "
-                    "vpn_profiles, users, servers "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await s.execute(text(TRUNCATE_SQL))
         await self.engine.dispose()
         self.settings_patcher.stop()
 

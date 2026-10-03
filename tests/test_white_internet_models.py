@@ -1,16 +1,13 @@
 import unittest
-from decimal import Decimal
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import BigInteger, Integer, String
 
-from config.enums import ServerLifecycleStatus, ServiceType
+from config.enums import ServerLifecycleStatus
 from database.models import (
     Server,
     Tariff,
-    TariffQuote,
-    TariffVersion,
     WhiteInternetSubscription,
 )
 
@@ -47,7 +44,7 @@ class WhiteInternetModelsTests(unittest.TestCase):
         rev_0026 = scripts.get_revision("0026_wi_trial_semantics")
         self.assertIsNotNone(rev_0026)
         self.assertEqual(rev_0026.down_revision, "0025_admin_qol_and_idempotency")
-        self.assertEqual(scripts.get_heads(), ["0032_drop_banking_residue"])
+        self.assertEqual(scripts.get_heads(), ["0034_drop_tariff_quotes"])
 
     def test_server_lifecycle_status_field_and_constraints(self):
         self.assertEqual(ServerLifecycleStatus.ACTIVE, "ACTIVE")
@@ -72,37 +69,11 @@ class WhiteInternetModelsTests(unittest.TestCase):
         index_names = {idx.name: idx for idx in table.indexes}
         self.assertIn("ix_servers_lifecycle_status", index_names)
 
-    def test_tariff_version_white_internet_fields_and_constraints(self):
-        table = TariffVersion.__table__
-        self.assertIn("service_type", table.columns)
-        self.assertEqual(table.columns["service_type"].type.length, 30)
-        self.assertFalse(table.columns["service_type"].nullable)
-        self.assertEqual(table.columns["service_type"].default.arg, ServiceType.AWG)
-        self.assertEqual(table.columns["service_type"].server_default.arg, "awg")
-
-        self.assertIn("base_quota_bytes", table.columns)
-        self.assertTrue(table.columns["base_quota_bytes"].nullable)
-        self.assertIsInstance(table.columns["base_quota_bytes"].type, BigInteger)
-
-        constraint_names = {c.name for c in table.constraints if c.name}
-        self.assertIn("ck_tariff_versions_service_type", constraint_names)
-        self.assertIn("ck_tariff_versions_base_quota_positive", constraint_names)
-
-    def test_tariff_version_snapshot_and_duration_days(self):
-        tv = TariffVersion(
-            tariff_id=1,
-            version_number=1,
-            name_snapshot="Белый Интернет 50 ГБ",
-            service_type=ServiceType.WHITE_INTERNET,
-            duration_hours=720,
-            device_limit=1,
-            price_rub=Decimal("250.00"),
-            currency="RUB",
-            base_quota_bytes=53687091200,
-        )
-        self.assertEqual(tv.duration_days, 30)
-        self.assertEqual(tv.service_type, "white_internet")
-        self.assertEqual(tv.base_quota_bytes, 53687091200)
+    def test_tariff_quote_and_version_models_retired(self):
+        import database.models as models
+        self.assertFalse(hasattr(models, "TariffQuote"))
+        self.assertFalse(hasattr(models, "TariffVersion"))
+        self.assertIn("expires_at", models.Order.__table__.columns)
 
     def test_tariff_model_white_internet_fields_and_constraints(self):
         table = Tariff.__table__
@@ -119,24 +90,6 @@ class WhiteInternetModelsTests(unittest.TestCase):
         uq = next(c for c in table.constraints if c.name == "uq_tariffs_service_device_duration")
         col_names = [col.name for col in uq.columns]
         self.assertEqual(col_names, ["service_type", "device_limit", "duration_days"])
-
-    def test_tariff_quote_model_white_internet_fields_and_constraints(self):
-        table = TariffQuote.__table__
-        self.assertIn("service_type", table.columns)
-        self.assertEqual(table.columns["service_type"].type.length, 30)
-        self.assertFalse(table.columns["service_type"].nullable)
-        self.assertEqual(table.columns["service_type"].default.arg, "awg")
-        self.assertEqual(table.columns["service_type"].server_default.arg, "awg")
-
-        constraint_names = {c.name for c in table.constraints if c.name}
-        self.assertIn("ck_tariff_quotes_service_type", constraint_names)
-
-        index_names = {idx.name: idx for idx in table.indexes}
-        self.assertIn("uq_tariff_quotes_active_checkout", index_names)
-        idx = index_names["uq_tariff_quotes_active_checkout"]
-        self.assertTrue(idx.unique)
-        col_names = [col.name for col in idx.columns]
-        self.assertEqual(col_names, ["user_id", "service_type", "target_tariff_version_id"])
 
     def test_server_model_white_internet_capabilities_and_epoch(self):
         table = Server.__table__

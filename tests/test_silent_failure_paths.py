@@ -34,14 +34,10 @@ class TestWhiteInternetTariffFallbackIsLoud(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(quota, 0)
 
     async def test_successful_read_does_not_log_an_error(self):
-        tariff = MagicMock(duration_days=30)
-        version = MagicMock(price_rub=Decimal("555"), base_quota_bytes=1024)
+        tariff = MagicMock(duration_days=30, price_rub=Decimal("555"))
         with patch(
             "bot.handlers.white_internet.WhiteInternetService.get_or_create_white_internet_tariff",
             new=AsyncMock(return_value=tariff),
-        ), patch(
-            "bot.handlers.white_internet.get_or_create_current_version",
-            new=AsyncMock(return_value=version),
         ):
             with self.assertNoLogs("bot.handlers.white_internet", level=logging.ERROR):
                 base_price, base_price_int, duration_days, quota = (
@@ -51,7 +47,7 @@ class TestWhiteInternetTariffFallbackIsLoud(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(base_price, Decimal("555"))
         self.assertEqual(base_price_int, 555)
         self.assertEqual(duration_days, 30)
-        self.assertEqual(quota, 1024)
+        self.assertGreater(quota, 0)
 
 
 class TestCleanChatFailsOpenOnFsmError(unittest.IsolatedAsyncioTestCase):

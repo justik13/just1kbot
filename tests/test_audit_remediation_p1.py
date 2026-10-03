@@ -115,8 +115,7 @@ class AuditRemediationP1Tests(unittest.IsolatedAsyncioTestCase):
             capabilities=["xray_origin"],
             extra_data={"relays": [{"code": "de"}]},
         )
-        tariff = MagicMock(id=1, duration_days=30)
-        tariff_version = MagicMock(id=2, price_rub=Decimal("300.00"), base_quota_bytes=50 * 1024**3, duration_hours=720)
+        tariff = MagicMock(id=1, duration_days=30, price_rub=Decimal("300.00"))
 
         created_sub = WhiteInternetSubscription(
             id=10,
@@ -148,9 +147,8 @@ class AuditRemediationP1Tests(unittest.IsolatedAsyncioTestCase):
         with patch("services.white_internet_service.lock_checkout_user", return_value=user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=origin_server), \
-             patch("services.white_internet_service.create_purchase_debit", new=AsyncMock()), \
+             patch("services.white_internet_service.create_order_debit", new=AsyncMock(return_value=(MagicMock(), True))), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
              patch.object(WhiteInternetService, "_try_inline_sync", side_effect=fake_inline_sync):
 
@@ -175,8 +173,7 @@ class AuditRemediationP1Tests(unittest.IsolatedAsyncioTestCase):
             capabilities=["xray_origin"],
             extra_data={"relays": [{"code": "nl"}]},
         )
-        tariff = MagicMock(id=1, duration_days=3)
-        tariff_version = MagicMock(id=2, price_rub=Decimal("0.00"), base_quota_bytes=10 * 1024**3, duration_hours=72)
+        tariff = MagicMock(id=1, duration_days=3, price_rub=Decimal("0.00"), base_traffic_bytes=10 * 1024**3)
 
         created_sub = WhiteInternetSubscription(
             id=11,
@@ -207,7 +204,6 @@ class AuditRemediationP1Tests(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.has_ever_activated_trial", return_value=False), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=origin_server), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
              patch.object(WhiteInternetService, "_try_inline_sync", side_effect=fake_inline_sync):

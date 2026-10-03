@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 import unittest
 import uuid
-from decimal import Decimal
 from unittest.mock import ANY, AsyncMock, patch
 
 from sqlalchemy import text
@@ -25,7 +24,6 @@ from config.enums import (
 from database.models import (
     Server,
     Tariff,
-    TariffVersion,
     User,
 )
 from database.repositories import white_internet_repo
@@ -118,7 +116,7 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
             self.server_api_url = self.server.api_url
             self.server_api_key = self.server.api_key
 
-            # Tariff & TariffVersion for White Internet
+            # Tariff for White Internet
             self.tariff = Tariff(
                 name="Белый Интернет 50 ГБ",
                 service_type="white_internet",
@@ -129,18 +127,6 @@ class WhiteInternetPostgresPipelineTests(unittest.IsolatedAsyncioTestCase):
                 sort_order=0,
             )
             session.add(self.tariff)
-            await session.flush()
-
-            self.tariff_version = TariffVersion(
-                tariff_id=self.tariff.id,
-                version_number=1,
-                name_snapshot="Белый Интернет 50 ГБ",
-                duration_hours=720,
-                device_limit=1,
-                price_rub=Decimal(str(WHITE_INTERNET_BASE_PRICE_RUB)),
-                currency="RUB",
-            )
-            session.add(self.tariff_version)
             await session.flush()
 
     async def asyncTearDown(self):

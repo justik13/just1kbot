@@ -48,6 +48,7 @@ from database.repositories.account_ledger_repo import (
     AccountLedgerConflictError,
     AccountLedgerError,
     AccountLedgerInvariantError,
+    InsufficientAccountBalanceError,
     create_order_debit,
     get_account_balance,
     lock_checkout_user,
@@ -211,8 +212,10 @@ class WhiteInternetService:
     ) -> tuple[Order | None, tuple[bool, str, None] | None]:
         """Create a pending wallet order, debit FIFO, mark paid. Single checkout seam.
 
-        Mirrors the retired quote checkout contract (15-minute TTL, bonus-first
-        debit, identical failure tuples) without quote machinery.
+        Returns ``(order, None)`` on success and ``(order, (False, message,
+        None))`` on wallet failure. Mirrors the retired quote checkout
+        contract (15-minute TTL, bonus-first debit, identical failure
+        messages) without quote machinery.
         """
         now = now_utc()
         amount = whole_rubles(amount_due, allow_zero=True)
@@ -239,15 +242,20 @@ class WhiteInternetService:
             order.paid_at = now_utc()
             await session.flush()
             return order, None
-        snapshot = await get_account_balance(
-            session, user_id=user.id, for_update=False, locked_user=user
-        )
-        if snapshot.available < amount:
+        try:
+            await create_order_debit(
+                session,
+                user_id=user.id,
+                amount_rub=amount,
+                order_id=order.id,
+                metadata={"operation": operation},
+            )
+        except InsufficientAccountBalanceError:
             order.status = "canceled"
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
             # Coerce once: shortage arithmetic must not depend on the input type.
-            return (
+            return order, (
                 False,
                 insufficient_text.format(
                     price=int(amount),
@@ -257,14 +265,6 @@ class WhiteInternetService:
                 ),
                 None,
             )
-        try:
-            await create_order_debit(
-                session,
-                user_id=user.id,
-                amount_rub=amount,
-                order_id=order.id,
-                metadata={"operation": operation},
-            )
         except (AccountLedgerInvariantError, AccountLedgerConflictError):
             order.status = "canceled"
             await session.flush()
@@ -272,7 +272,7 @@ class WhiteInternetService:
         except AccountLedgerError as exc:
             order.status = "canceled"
             await session.flush()
-            return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+            return order, (False, f"{texts.WL_DEBIT_FAILED}: {exc}", None)
         order.status = "paid"
         order.paid_at = now_utc()
         await session.flush()

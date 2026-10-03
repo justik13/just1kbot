@@ -692,9 +692,7 @@ class AccountLedgerEntry(Base):
     payment_id: Mapped[int | None] = mapped_column(
         ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True
     )
-    quote_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tariff_quotes.id", ondelete="RESTRICT"), nullable=True
-    )
+    quote_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     order_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="RESTRICT"),

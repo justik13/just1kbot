@@ -23,16 +23,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from config.enums import (
     ServerHealthState,
-    TariffQuoteOperation,
-    TariffQuoteStatus,
     WhiteInternetStatus,
 )
 
 from database.models import (
     Server,
     Tariff,
-    TariffQuote,
-    TariffVersion,
     User,
     WhiteInternetSubscription,
 )
@@ -116,7 +112,7 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             session.add(self.server)
 
-            # Tariff & TariffVersion for White Internet
+            # Tariff for White Internet
             self.tariff = Tariff(
                 name="Белый Интернет 50 ГБ",
                 service_type="white_internet",
@@ -127,41 +123,6 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 sort_order=0,
             )
             session.add(self.tariff)
-            await session.flush()
-
-            self.tariff_version = TariffVersion(
-                tariff_id=self.tariff.id,
-                version_number=1,
-                name_snapshot="Белый Интернет 50 ГБ",
-                duration_hours=720,
-                device_limit=1,
-                price_rub=Decimal("250.00"),
-                currency="RUB",
-            )
-            session.add(self.tariff_version)
-            await session.flush()
-
-            # TariffQuote
-            self.quote = TariffQuote(
-                public_id=uuid.uuid4(),
-                user_id=self.user.id,
-                service_type="white_internet",
-                operation_type=TariffQuoteOperation.PURCHASE,
-                status=TariffQuoteStatus.CONSUMED,
-                consumed_at=now_utc(),
-                target_tariff_version_id=self.tariff_version.id,
-                amount_due_rub=Decimal("250.00"),
-                current_paid_hours=0,
-                current_paid_value_rub=Decimal("0.00"),
-                bonus_hours=0,
-                resulting_paid_hours=720,
-                resulting_paid_value_rub=Decimal("250.00"),
-                resulting_bonus_hours=0,
-                rounding_loss_hours=Decimal("0.00"),
-                rounding_loss_value_rub=Decimal("0.00"),
-                expires_at=now_utc() + timedelta(hours=1),
-            )
-            session.add(self.quote)
             await session.flush()
 
     async def asyncTearDown(self):
@@ -287,43 +248,15 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         # Attempt to concurrently purchase 10 packs of 50 GiB each (50 GiB base + 2*50 GiB = 150 GiB cap)
         async def try_topup(idx: int) -> bool:
             async with self.sessions.begin() as session:
-                # Create unique quote for this topup
-                q = TariffQuote(
-                    public_id=uuid.uuid4(),
-                    user_id=self.user.id,
-                    service_type="white_internet",
-                    operation_type=TariffQuoteOperation.PURCHASE,
-                    status=TariffQuoteStatus.ACTIVE,
-                    target_tariff_version_id=self.tariff_version.id,
-                    amount_due_rub=Decimal("200.00"),
-                    current_paid_hours=0,
-                    current_paid_value_rub=Decimal("0.00"),
-                    bonus_hours=0,
-                    resulting_paid_hours=0,
-                    resulting_paid_value_rub=Decimal("200.00"),
-                    resulting_bonus_hours=0,
-                    rounding_loss_hours=Decimal("0.00"),
-                    rounding_loss_value_rub=Decimal("0.00"),
-                    expires_at=now + timedelta(hours=1),
-                )
-                session.add(q)
-                await session.flush()
-
                 try:
                     await white_internet_repo.topup_quota_atomic(
                         session,
                         subscription_id=sub_id,
-                        quote_id=q.id,
                         pack_gb=50,
                         price_rub=Decimal("200.00"),
                     )
-                    q.status = TariffQuoteStatus.CONSUMED
-                    q.consumed_at = now
-                    await session.flush()
                     return True
                 except white_internet_repo.WhiteInternetQuotaCapExceededError:
-                    q.status = TariffQuoteStatus.CANCELLED
-                    await session.flush()
                     return False
 
         results = await asyncio.gather(*(try_topup(i) for i in range(10)))

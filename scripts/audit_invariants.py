@@ -49,7 +49,7 @@ from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
     Server,
-    TariffVersion,
+    Tariff,
     WhiteInternetSubscription,
 )
 from database.repositories.servers_repo import capacity_consuming_wl_condition
@@ -62,27 +62,24 @@ class InvariantResult(NamedTuple):
     details: str
 
 
-async def assert_inv_1_tariff_versions(session: AsyncSession) -> InvariantResult:
-    """Inv 1: Tariff versions have valid service_type, positive duration/price/quota."""
+async def assert_inv_1_tariffs(session: AsyncSession) -> InvariantResult:
+    """Inv 1: Tariffs have valid service_type, positive duration and price."""
     violations = await session.scalars(
-        select(TariffVersion).where(
+        select(Tariff).where(
             or_(
-                ~TariffVersion.service_type.in_([ServiceType.AWG, ServiceType.WHITE_INTERNET]),
-                TariffVersion.duration_hours <= 0,
-                TariffVersion.price_rub <= 0,
-                TariffVersion.currency != "RUB",
-                (TariffVersion.base_quota_bytes.is_not(None))
-                & (TariffVersion.base_quota_bytes <= 0),
+                ~Tariff.service_type.in_([ServiceType.AWG, ServiceType.WHITE_INTERNET]),
+                Tariff.duration_days <= 0,
+                Tariff.price_rub <= 0,
             )
         )
     )
     v_list = violations.all()
     if v_list:
         return InvariantResult(
-            1, "Tariff Version Constraints", False, f"Violations found: {len(v_list)} rows"
+            1, "Tariff Constraints", False, f"Violations found: {len(v_list)} rows"
         )
     return InvariantResult(
-        1, "Tariff Version Constraints", True, "All tariff versions satisfy schema invariants"
+        1, "Tariff Constraints", True, "All tariffs satisfy schema invariants"
     )
 
 
@@ -387,7 +384,7 @@ async def assert_inv_15_alembic_single_head(session: AsyncSession | None = None)
 
 
 ALL_INVARIANT_CHECKS = [
-    assert_inv_1_tariff_versions,
+    assert_inv_1_tariffs,
     assert_inv_2_server_lifecycle,
     assert_inv_3_white_internet_subscriptions,
     assert_inv_4_subscription_traffic_pools,

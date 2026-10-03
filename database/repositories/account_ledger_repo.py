@@ -225,13 +225,31 @@ async def create_order_debit(
     session: AsyncSession,
     *,
     user_id: int,
-    amount_rub: Decimal,
+    amount_rub: object,
     order_id: object,
     metadata: dict | None = None,
-) -> tuple[AccountLedgerEntry, bool]:
-    amount = -abs(whole_rubles(amount_rub))
+) -> tuple[AccountLedgerEntry | None, bool]:
+    amount = -abs(whole_rubles(amount_rub, allow_zero=True))
+    user = await lock_account_user(session, user_id)
+    if amount == 0:
+        return None, False
+    existing = await session.scalar(
+        select(AccountLedgerEntry).where(
+            AccountLedgerEntry.entry_type == "purchase_debit",
+            AccountLedgerEntry.order_id == order_id,
+        )
+    )
+    if existing is not None:
+        if existing.user_id != user.id or existing.amount != amount:
+            raise AccountLedgerConflictError("purchase_debit_conflict")
+        return existing, False
+    snapshot = await get_account_balance(
+        session, user_id=user.id, for_update=False, locked_user=user
+    )
+    if snapshot.available < -amount:
+        raise InsufficientAccountBalanceError("insufficient_available_balance")
     values = {
-        "user_id": user_id,
+        "user_id": user.id,
         "entry_type": "purchase_debit",
         "amount": amount,
         "currency": "RUB",
@@ -251,9 +269,9 @@ async def create_order_debit(
         ),
     )
     if created:
-        # Mirror the quote-debit path: attribute the spend to credit lots
-        # FIFO (bonus lots first) so balance buckets stay exact.
-        await _allocate_fifo(session, user_id=user_id, debit=debit, amount=-amount)
+        # Mirror the retired quote-debit path: attribute the spend to credit
+        # lots FIFO (bonus lots first) so balance buckets stay exact.
+        await _allocate_fifo(session, user_id=user.id, debit=debit, amount=-amount)
     return debit, created
 
 

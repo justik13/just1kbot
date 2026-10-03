@@ -13,7 +13,7 @@ from config.enums import (
     ServerLifecycleStatus,
     WhiteInternetStatus,
 )
-from database.models import Server, Tariff, TariffVersion, User, WhiteInternetSubscription
+from database.models import Server, Tariff, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
@@ -126,25 +126,13 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
         mock_session.scalar = AsyncMock(return_value=self.server)
 
         tariff = Tariff(id=1, service_type="white_internet", duration_days=30, price_rub=250)
-        tariff_version = TariffVersion(
-            id=1,
-            tariff_id=1,
-            version_number=1,
-            name_snapshot="Белый Интернет 50 ГБ",
-            service_type="white_internet",
-            device_limit=1,
-            price_rub=Decimal("250.00"),
-            duration_hours=720,
-            base_quota_bytes=50 * 1024**3,
-        )
 
         with patch("services.white_internet_service.is_admin", return_value=False), \
              patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=self.sub), \
              patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), debt=Decimal("0"))), \
-             patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock) as mock_debit, \
+             patch("services.white_internet_service.create_order_debit", new_callable=AsyncMock) as mock_debit, \
              patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
              patch("database.repositories.white_internet_repo.add_device_slot_atomic") as mock_add_slot:
 
             updated_sub = WhiteInternetSubscription(
@@ -164,7 +152,7 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.device_limit, 2)
             mock_debit.assert_awaited_once()
             debit_call_args = mock_debit.await_args[1]
-            self.assertEqual(debit_call_args["amount"], Decimal("200.00"))
+            self.assertEqual(debit_call_args["amount_rub"], Decimal("200.00"))
 
     async def test_purchase_device_slot_admin_success(self):
         mock_session = AsyncMock()
@@ -172,25 +160,13 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
         mock_session.scalar = AsyncMock(return_value=self.server)
 
         tariff = Tariff(id=1, service_type="white_internet", duration_days=30, price_rub=250)
-        tariff_version = TariffVersion(
-            id=1,
-            tariff_id=1,
-            version_number=1,
-            name_snapshot="Белый Интернет 50 ГБ",
-            service_type="white_internet",
-            device_limit=1,
-            price_rub=Decimal("250.00"),
-            duration_hours=720,
-            base_quota_bytes=50 * 1024**3,
-        )
 
         with patch("services.white_internet_service.is_admin", return_value=True), \
              patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=self.sub), \
              patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), debt=Decimal("0"))), \
-             patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock) as mock_debit, \
+             patch("services.white_internet_service.create_order_debit", new_callable=AsyncMock) as mock_debit, \
              patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
              patch("database.repositories.white_internet_repo.add_device_slot_atomic") as mock_add_slot:
 
             updated_sub = WhiteInternetSubscription(
@@ -211,7 +187,7 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
             # Verify debit called with exactly 200 RUB
             mock_debit.assert_awaited_once()
             debit_call_args = mock_debit.await_args[1]
-            self.assertEqual(debit_call_args["amount"], Decimal("200.00"))
+            self.assertEqual(debit_call_args["amount_rub"], Decimal("200.00"))
             # Verify add_device_slot_atomic called with 50 GiB
             mock_add_slot.assert_awaited_once_with(
                 mock_session,
@@ -245,7 +221,7 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
              patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=self.sub), \
              patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=310 * 1024**3), \
-             patch("database.repositories.account_ledger_repo.create_purchase_debit", new_callable=AsyncMock) as mock_debit:
+             patch("database.repositories.account_ledger_repo.create_order_debit", new_callable=AsyncMock) as mock_debit:
 
             ok, msg, result = await WhiteInternetService.purchase_device_slot(
                 mock_session, user_id=42, actor_telegram_id=999999
@@ -261,25 +237,13 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
         mock_session.scalar = AsyncMock(return_value=self.server)
 
         tariff = Tariff(id=1, service_type="white_internet", duration_days=30, price_rub=250)
-        tariff_version = TariffVersion(
-            id=1,
-            tariff_id=1,
-            version_number=1,
-            name_snapshot="Белый Интернет 50 ГБ",
-            service_type="white_internet",
-            device_limit=1,
-            price_rub=Decimal("250.00"),
-            duration_hours=720,
-            base_quota_bytes=50 * 1024**3,
-        )
 
         with patch("services.white_internet_service.is_admin", return_value=True), \
              patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=self.sub), \
              patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("50.00"), available=Decimal("50.00"), debt=Decimal("0"))), \
-             patch("services.white_internet_service.create_purchase_debit", side_effect=InsufficientAccountBalanceError("Insufficient funds")), \
-             patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version):
+             patch("services.white_internet_service.create_order_debit", side_effect=InsufficientAccountBalanceError("Insufficient funds")), \
+             patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff):
 
             ok, msg, result = await WhiteInternetService.purchase_device_slot(
                 mock_session, user_id=42, actor_telegram_id=999999
@@ -326,24 +290,12 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
         mock_session.scalar = AsyncMock(return_value=self.server)
 
         tariff = Tariff(id=1, service_type="white_internet", duration_days=30, price_rub=250)
-        tariff_version = TariffVersion(
-            id=1,
-            tariff_id=1,
-            version_number=1,
-            name_snapshot="Белый Интернет 50 ГБ",
-            service_type="white_internet",
-            device_limit=1,
-            price_rub=Decimal("250.00"),
-            duration_hours=720,
-            base_quota_bytes=50 * 1024**3,
-        )
 
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
              patch("services.white_internet_service.get_account_balance", return_value=AccountBalanceSnapshot(accounting_position=Decimal("1000.00"), available=Decimal("1000.00"), debt=Decimal("0"))), \
-             patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock) as mock_debit, \
+             patch("services.white_internet_service.create_order_debit", new_callable=AsyncMock) as mock_debit, \
              patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
              patch("database.repositories.white_internet_repo.renew_subscription_atomic") as mock_renew_atomic:
 
             mock_renew_atomic.return_value = sub
@@ -353,12 +305,11 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(ok)
             # Verify debit called with 450.00 RUB for 2 devices
             mock_debit.assert_awaited_once()
-            self.assertEqual(mock_debit.await_args[1]["amount"], Decimal("450.00"))
+            self.assertEqual(mock_debit.await_args[1]["amount_rub"], Decimal("450.00"))
             # Verify atomic repo call with base_bytes = 100 GiB
             mock_renew_atomic.assert_awaited_once_with(
                 mock_session,
                 subscription_id=1,
-                quote_id=mock_renew_atomic.await_args[1]["quote_id"],
                 price_rub=Decimal("450.00"),
                 duration_days=30,
                 base_bytes=100 * 1024**3,
@@ -380,24 +331,12 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         mock_session.scalar = AsyncMock(return_value=self.server)
         tariff = Tariff(id=1, service_type="white_internet", duration_days=30, price_rub=250)
-        tariff_version = TariffVersion(
-            id=1,
-            tariff_id=1,
-            version_number=1,
-            name_snapshot="Белый Интернет 50 ГБ",
-            service_type="white_internet",
-            device_limit=1,
-            price_rub=Decimal("250.00"),
-            duration_hours=720,
-            base_quota_bytes=50 * 1024**3,
-        )
 
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
              patch("services.white_internet_service.WhiteInternetService.get_or_create_white_internet_tariff", return_value=tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=tariff_version), \
              patch("services.white_internet_service.now_utc", return_value=self.now), \
-             patch("services.white_internet_service.create_purchase_debit", new_callable=AsyncMock) as mock_debit:
+             patch("services.white_internet_service.create_order_debit", new_callable=AsyncMock) as mock_debit:
 
             ok, msg, result = await WhiteInternetService.renew_subscription(mock_session, user_id=42)
 
@@ -429,7 +368,6 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
             renewed = await white_internet_repo.renew_subscription_atomic(
                 mock_session,
                 subscription_id=1,
-                quote_id=10,
                 price_rub=Decimal("450.00"),
                 duration_days=30,
                 base_bytes=100 * 1024**3,
@@ -458,7 +396,6 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
             renewed = await white_internet_repo.renew_subscription_atomic(
                 mock_session,
                 subscription_id=2,
-                quote_id=11,
                 price_rub=Decimal("650.00"),
                 duration_days=30,
                 base_bytes=150 * 1024**3,
@@ -487,7 +424,6 @@ class TestWhiteInternetRenewalTierInvariants(unittest.IsolatedAsyncioTestCase):
             renewed = await white_internet_repo.renew_subscription_atomic(
                 mock_session,
                 subscription_id=3,
-                quote_id=12,
                 price_rub=Decimal("250.00"),
                 duration_days=30,
                 base_bytes=50 * 1024**3,
@@ -737,7 +673,6 @@ class TestAuditRemediations(unittest.IsolatedAsyncioTestCase):
             added_bytes = await white_internet_repo.topup_quota_atomic(
                 mock_session,
                 subscription_id=11,
-                quote_id=999,
                 pack_gb=10,
                 price_rub=Decimal("40.00"),
             )

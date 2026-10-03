@@ -30,7 +30,6 @@ from config.constants import (
 from config.enums import (
     ServerHealthState,
     ServerLifecycleStatus,
-    TariffQuoteOperation,
     WhiteInternetStatus,
 )
 from database.models import Server, User, WhiteInternetSubscription
@@ -98,6 +97,7 @@ class TestWhiteInternetProductionFixes(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=user), \
              patch("bot.handlers.white_internet.white_internet_repo.get_subscription_by_user_id", return_value=sub), \
              patch("bot.handlers.white_internet.white_internet_repo.get_available_quota_bytes", return_value=10 * 1024**3), \
+             patch("bot.handlers.white_internet.white_internet_repo.has_ever_activated_trial", return_value=True), \
              patch("bot.handlers.white_internet._get_effective_base_price", return_value=(Decimal("100"), 100, 30)), \
              patch("bot.handlers.white_internet._get_effective_tariff_info", return_value=(Decimal("100"), 100, 30, 50 * 1024**3)), \
              patch("bot.handlers.white_internet._resolve_subscription_domain", return_value="cdn.just1k.best"):
@@ -109,17 +109,26 @@ class TestWhiteInternetProductionFixes(unittest.IsolatedAsyncioTestCase):
             # query.answer must be called with traffic up to date alert
             query.answer.assert_called_once_with(texts.WL_ALERT_TRAFFIC_UP_TO_DATE, show_alert=False)
 
-    def test_white_internet_new_quote_sets_purchase_notified_at(self):
-        """WhiteInternetService._new_quote stamps purchase_notified_at to prevent bogus balance alerts."""
-        quote = WhiteInternetService._new_quote(
-            user_id=1,
-            operation_type=TariffQuoteOperation.PURCHASE,
-            target_version_id=1,
-            amount_due=Decimal("0.00"),
-            expires_at=now_utc(),
-        )
-        self.assertEqual(quote.service_type, WHITE_INTERNET_SERVICE_TYPE)
-        self.assertIsNotNone(quote.purchase_notified_at)
+    async def test_white_internet_checkout_order_creates_wallet_order(self):
+        """WhiteInternetService._checkout_wallet_order creates a wallet order with 15m TTL."""
+        session = AsyncMock()
+        session.add = MagicMock()
+        user = MagicMock(id=1)
+        with patch("services.white_internet_service.create_order_debit", new=AsyncMock(return_value=(MagicMock(), True))):
+            order, failure = await WhiteInternetService._checkout_wallet_order(
+                session,
+                user=user,
+                service_type=WHITE_INTERNET_SERVICE_TYPE,
+                tariff_id=1,
+                amount_due=Decimal("100.00"),
+                duration_days=30,
+                operation="purchase",
+            )
+            self.assertIsNone(failure)
+            self.assertIsNotNone(order)
+            self.assertEqual(order.service_type, WHITE_INTERNET_SERVICE_TYPE)
+            self.assertEqual(order.payment_method, "wallet")
+            self.assertEqual(order.status, "paid")
 
     def test_white_internet_texts_have_correct_incy_urls(self):
         """User instructions contain official App Store, Google Play, and GitHub APK URLs."""
