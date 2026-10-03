@@ -656,8 +656,30 @@ wait_for_apt_locks 1
         ]) + "\n"
 
         proc = self._run_cli_command("gdrive", input_text=wizard_inputs)
+        self.assertEqual(proc.returncode, 0)
         self.assertIn("восстановлена из предыдущего рабочего состояния", proc.stdout + proc.stderr)
         self.assertIn("original_working_content=true", rclone_conf.read_text(encoding="utf-8"))
+
+    def test_setup_gdrive_success_without_test_backup_returns_zero(self):
+        """cmd_setup_gdrive exits with code 0 on successful setup when test backup is skipped."""
+        env_file = self.project_dir / ".env"
+        env_file.write_text("BOT_TOKEN=tok\n", encoding="utf-8")
+
+        wizard_inputs = "\n".join([
+            "y",
+            "folder_id_12345",
+            "client_id_val",
+            "client_sec_val",
+            '{"refresh_token":"sample_token"}',
+            "14",
+            "n",
+        ]) + "\n"
+
+        proc = self._run_cli_command("gdrive", input_text=wizard_inputs)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Конфигурация Google Drive успешно сохранена", proc.stdout)
+        rclone_conf = self.project_dir / "backups" / "rclone.conf"
+        self.assertTrue(rclone_conf.exists())
 
     def test_cmd_backup_creates_restricted_permissions(self):
         """cmd_backup ensures 0700 on backups/ directory and 0600 on created backup files."""
@@ -2206,6 +2228,39 @@ cmd_uninstall --confirm=DELETE --keep-backups
         self.assertFalse((saved_dir / "rclone.bak.123456").exists(), "rclone.bak must NEVER be copied to saved location!")
         self.assertFalse((saved_dir / "rclone.tmp.654321").exists(), "rclone.tmp must NEVER be copied to saved location!")
         self.assertFalse((saved_dir / "service_account.json").exists(), "service_account.json must NEVER be copied to saved location!")
+
+    def test_uninstall_aborts_fail_closed_if_nested_secret_detected(self):
+        """cmd_uninstall halts fail-closed if nested secret file is copied into safe_backup_dest."""
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        (backups_dir / "dump1.sql.gz.age").write_text("encrypted_backup_payload", encoding="utf-8")
+        nested_dir = backups_dir / "nested"
+        nested_dir.mkdir(parents=True, exist_ok=True)
+        (nested_dir / "rclone.conf").write_text("[gdrive]\ntoken=nested_secret", encoding="utf-8")
+
+        saved_dir = self.root / "saved_backups_nested"
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export JUST1KBOT_BACKUP_SAVE_DIR="{saved_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+
+cmd_uninstall --confirm=DELETE --keep-backups
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}", "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertTrue(self.project_dir.exists(), "PROJECT_DIR must NOT be deleted on fail-closed error")
+        self.assertIn("обнаружены файлы конфигурации/секретов в сохраненных бэкапах", proc.stdout + proc.stderr)
 
     def test_uninstall_empty_backups_with_keep_backups_succeeds(self):
         """cmd_uninstall --keep-backups must succeed without fail-closed error when backups/ is empty or contains dotfiles."""

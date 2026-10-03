@@ -532,14 +532,17 @@ _rollback_services_after_db_failure() {
     fi
 }
 
-# --- Настройка системных параметров ядра (Redis + ICMP Stealth) ---
+# --- Настройка системных параметров ядра (Redis + ICMP Stealth + IPv6 Leak Protection) ---
 apply_sysctl_hardening() {
     local sysctl_file="${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}"
     local needs_update=0
     if [[ ! -f "$sysctl_file" ]]; then
         needs_update=1
     elif ! grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
-         ! grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null; then
+         ! grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv6\.conf\.all\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv6\.conf\.default\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv6\.conf\.lo\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null; then
         needs_update=1
     fi
 
@@ -557,9 +560,15 @@ apply_sysctl_hardening() {
             if grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=' "$tmp_sysctl" 2>/dev/null; then
                 sed -i -E '/^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=/d' "$tmp_sysctl" 2>/dev/null || true
             fi
+            if grep -Eq '^[[:space:]]*net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6[[:space:]]*=' "$tmp_sysctl" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6[[:space:]]*=/d' "$tmp_sysctl" 2>/dev/null || true
+            fi
         fi
         echo "vm.overcommit_memory = 1" >> "$tmp_sysctl"
         echo "net.ipv4.icmp_echo_ignore_all = 1" >> "$tmp_sysctl"
+        echo "net.ipv6.conf.all.disable_ipv6 = 1" >> "$tmp_sysctl"
+        echo "net.ipv6.conf.default.disable_ipv6 = 1" >> "$tmp_sysctl"
+        echo "net.ipv6.conf.lo.disable_ipv6 = 1" >> "$tmp_sysctl"
         run_privileged mkdir -p "$(dirname "$sysctl_file")" 2>/dev/null || true
         run_privileged cp "$tmp_sysctl" "$sysctl_file" 2>/dev/null || true
         run_privileged chmod 644 "$sysctl_file" 2>/dev/null || true
@@ -586,6 +595,9 @@ apply_sysctl_hardening() {
     if command -v sysctl >/dev/null 2>&1; then
         run_privileged sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1 || true
         run_privileged sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1 || true
         if [[ -f "$sysctl_file" ]]; then
             run_privileged sysctl -p "$sysctl_file" >/dev/null 2>&1 || true
         fi
@@ -595,6 +607,11 @@ apply_sysctl_hardening() {
     icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     if [[ "$icmp_curr" != "1" ]]; then
         warn "Параметр net.ipv4.icmp_echo_ignore_all не применился в ядре (проверьте права или ограничения контейнера)."
+    fi
+    local ipv6_curr
+    ipv6_curr="$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")"
+    if [[ "$ipv6_curr" != "1" ]]; then
+        warn "Параметр net.ipv6.conf.all.disable_ipv6 не применился в ядре (проверьте права или ограничения контейнера)."
     fi
 }
 
@@ -1417,20 +1434,53 @@ cmd_setup_gdrive() {
     # Резервная копия существующей конфигурации на случай отката при неудачном тесте
     local prev_conf_backup=""
     local tmp_conf=""
+    local setup_committed=0
+    local prev_enabled="$cur_enabled"
+    local prev_retention="$cur_retention"
+
     cleanup_setup_gdrive() {
-        [[ -n "$tmp_conf" && -f "$tmp_conf" ]] && rm -f "$tmp_conf"
-        [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]] && rm -f "$prev_conf_backup"
+        [[ -n "$tmp_conf" && -f "$tmp_conf" ]] && rm -f "$tmp_conf" || true
+        if [[ "$setup_committed" -eq 0 ]]; then
+            if [[ -n "$prev_conf_backup" && -s "$prev_conf_backup" ]]; then
+                mv -f "$prev_conf_backup" "$rclone_conf" 2>/dev/null || true
+                chmod 600 "$rclone_conf" 2>/dev/null || true
+                set_env_var "GDRIVE_BACKUP_ENABLED" "$prev_enabled"
+                set_env_var "GDRIVE_RETENTION_DAYS" "$prev_retention"
+            elif [[ -n "$prev_conf_backup" ]]; then
+                rm -f "$prev_conf_backup" "$rclone_conf" 2>/dev/null || true
+            fi
+        else
+            [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]] && rm -f "$prev_conf_backup" || true
+        fi
+        return 0
     }
+
+    on_setup_interrupt() {
+        cleanup_setup_gdrive
+        exit 130
+    }
+
+    on_setup_terminate() {
+        cleanup_setup_gdrive
+        exit 143
+    }
+
     # shellcheck disable=SC2064
-    trap cleanup_setup_gdrive EXIT INT TERM
+    trap cleanup_setup_gdrive EXIT
+    trap on_setup_interrupt INT
+    trap on_setup_terminate TERM
 
     if [[ -f "$rclone_conf" ]]; then
         prev_conf_backup=$(mktemp "${PROJECT_DIR}/backups/rclone.bak.XXXXXX")
-        cp -a "$rclone_conf" "$prev_conf_backup"
+        if ! cp -a "$rclone_conf" "$prev_conf_backup"; then
+            error "Не удалось создать резервную копию существующей конфигурации $rclone_conf."
+            rm -f "$prev_conf_backup"
+            prev_conf_backup=""
+            setup_committed=1
+            return 1
+        fi
         chmod 600 "$prev_conf_backup"
     fi
-    local prev_enabled="$cur_enabled"
-    local prev_retention="$cur_retention"
 
     # Атомарное сохранение в backups/rclone.conf
     tmp_conf=$(mktemp "${PROJECT_DIR}/backups/rclone.tmp.XXXXXX")
@@ -1468,7 +1518,7 @@ EOF
             info "Проверка и сборка Docker-образа бэкапа..."
             if ! docker compose --profile tools build backup; then
                 error "Не удалось собрать Docker-образ бэкапа."
-                if [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]]; then
+                if [[ -n "$prev_conf_backup" && -s "$prev_conf_backup" ]]; then
                     mv -f "$prev_conf_backup" "$rclone_conf"
                     chmod 600 "$rclone_conf"
                     prev_conf_backup=""
@@ -1476,10 +1526,12 @@ EOF
                     set_env_var "GDRIVE_RETENTION_DAYS" "$prev_retention"
                     warn "Конфигурация Google Drive восстановлена из предыдущего рабочего состояния."
                 else
-                    rm -f "$rclone_conf"
+                    rm -f "$rclone_conf" "$prev_conf_backup"
+                    prev_conf_backup=""
                     set_env_var "GDRIVE_BACKUP_ENABLED" "false"
                     warn "Выгрузка в Google Drive отключена, временный конфиг удален."
                 fi
+                setup_committed=1
                 cleanup_setup_gdrive
                 trap - EXIT INT TERM
                 return 1
@@ -1493,7 +1545,7 @@ EOF
             read -r -p "Откатить конфигурацию Google Drive к предыдущему состоянию? [Y/n]: " rollback_choice
             rollback_choice="${rollback_choice:-y}"
             if [[ "$rollback_choice" =~ ^[Yy]$ ]]; then
-                if [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]]; then
+                if [[ -n "$prev_conf_backup" && -s "$prev_conf_backup" ]]; then
                     mv -f "$prev_conf_backup" "$rclone_conf"
                     chmod 600 "$rclone_conf"
                     prev_conf_backup=""
@@ -1501,7 +1553,8 @@ EOF
                     set_env_var "GDRIVE_RETENTION_DAYS" "$prev_retention"
                     warn "Конфигурация Google Drive восстановлена из предыдущего рабочего состояния."
                 else
-                    rm -f "$rclone_conf"
+                    rm -f "$rclone_conf" "$prev_conf_backup"
+                    prev_conf_backup=""
                     set_env_var "GDRIVE_BACKUP_ENABLED" "false"
                     warn "Выгрузка в Google Drive отключена, временный конфиг удален."
                 fi
@@ -1510,8 +1563,10 @@ EOF
     fi
 
     # Снятие trap и очистка временной копии бэкапа конфига
+    setup_committed=1
     cleanup_setup_gdrive
     trap - EXIT INT TERM
+    return 0
 }
 
 # --- 6. Управление сервисами ---
@@ -1867,10 +1922,19 @@ cmd_uninstall() {
         fi
 
         # Копируем СТРОГО без конфигов авторизации и токенов (исключение rclone и секретов до копирования)
+        local find_tmp
+        find_tmp=$(mktemp)
+        if ! find "$backups_dir" -mindepth 1 -maxdepth 1 ! -name "*rclone*" ! -name "*gdrive*.json" ! -name "*service_account*.json" -print0 > "$find_tmp" 2>/dev/null; then
+            rm -f "$find_tmp"
+            error "Ошибка сканирования каталога бэкапов $backups_dir! Процедура удаления прервана (Fail-Closed)."
+            return 1
+        fi
+
         local non_secret_files=()
         while IFS= read -r -d '' f; do
             non_secret_files+=("$f")
-        done < <(find "$backups_dir" -mindepth 1 -maxdepth 1 ! -name "*rclone*" ! -name "*gdrive*.json" ! -name "*service_account*.json" -print0 2>/dev/null)
+        done < "$find_tmp"
+        rm -f "$find_tmp"
 
         if [[ ${#non_secret_files[@]} -gt 0 ]]; then
             if ! (run_privileged cp -a "${non_secret_files[@]}" "$safe_backup_dest/" 2>/dev/null || cp -a "${non_secret_files[@]}" "$safe_backup_dest/" 2>/dev/null); then
@@ -1887,9 +1951,11 @@ cmd_uninstall() {
             return 1
         fi
 
-        # Строгая гарантия: rclone конфиги и временные файлы ни при каких условиях не должны оказаться в safe_backup_dest
-        if compgen -G "$safe_backup_dest/*rclone*" >/dev/null 2>&1; then
-            error "Критическая ошибка безопасности: обнаружен rclone конфиг в сохраненных бэкапах! Процедура удаления прервана (Fail-Closed)."
+        # Строгая гарантия: rclone конфиги и любые учетные данные ни при каких условиях не должны оказаться в safe_backup_dest (включая любые подкаталоги)
+        local leaked_secrets
+        leaked_secrets=$(find "$safe_backup_dest" \( -name "*rclone*" -o -name "*gdrive*.json" -o -name "*service_account*.json" \) 2>/dev/null || true)
+        if [[ -n "$leaked_secrets" ]]; then
+            error "Критическая ошибка безопасности: обнаружены файлы конфигурации/секретов в сохраненных бэкапах! Процедура удаления прервана (Fail-Closed)."
             return 1
         fi
 
