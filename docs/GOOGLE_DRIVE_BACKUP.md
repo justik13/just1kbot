@@ -41,20 +41,38 @@
 
 ### Шаг 2. Однократное получение OAuth токена (на вашем ПК)
 
-1. Установите или скачайте `rclone` на ваш рабочий компьютер:
-   * **Windows**: `winget install Rclone.Rclone` или скачайте с [rclone.org](https://rclone.org/downloads/).
-   * **macOS**: `brew install rclone`
-   * **Linux**: `sudo apt install rclone`
-2. Запустите авторизацию в терминале:
-   ```bash
-   rclone authorize "drive"
-   ```
-3. В браузере откроется окно входа Google ➔ войдите под своим Google Pro аккаунтом и нажмите **«Разрешить» (Allow)**.
-4. В терминале появится строка токена:
-   ```json
-   {"access_token":"ya29.a0...","token_type":"Bearer","refresh_token":"1//04...","expiry":"..."}
-   ```
-   Скопируйте этот JSON-токен целиком (вместе с фигурными скобками).
+> [!NOTE]
+> В течение 2026 года Google выводит из эксплуатации общий (shared) Client ID rclone. Создание собственного Client ID в Google Cloud Console занимает 2 минуты, гарантирует отсутствие rate limit и обеспечивает непрерывную работу бэкапов.
+
+1. **Создание Client ID в Google Cloud Console**:
+   * Перейдите в [Google Cloud Console](https://console.developers.google.com/).
+   * Создайте новый проект (например, `Just1kBot-Backup`).
+   * Перейдите в **APIs & Services** ➔ **Enabled APIs & Services** ➔ нажмите **+ ENABLE APIS AND SERVICES**.
+   * Найдите **Google Drive API** и нажмите **Enable**.
+   * В левом меню откройте **OAuth consent screen** (Экран согласия OAuth):
+     * User Type: выберите **External** ➔ нажмите **Create**.
+     * Укажите App name (`Just1kBot`), ваш email в полях поддержки и контактов разработчика ➔ нажмите **Save and Continue**.
+     * В разделе **Scopes** добавьте scope `https://www.googleapis.com/auth/drive` ➔ нажмите **Save and Continue**.
+     * В разделе **Test users** нажмите **+ ADD USERS**, укажите ваш личный Google адрес (`@gmail.com`) ➔ нажмите **Save and Continue**.
+   * В левом меню откройте **Credentials** (Учетные данные):
+     * Нажмите **+ CREATE CREDENTIALS** ➔ **OAuth client ID**.
+     * Application type: выберите **Desktop app** (Классическое приложение).
+     * Нажмите **Create**.
+     * Скопируйте полученные **Client ID** и **Client Secret**.
+
+2. **Авторизация через rclone**:
+   * Установите `rclone` на ваш компьютер (**Windows**: `winget install Rclone.Rclone`, **macOS**: `brew install rclone`, **Linux**: `sudo apt install rclone`).
+   * Запустите авторизацию в терминале с вашими ключами:
+     ```bash
+     rclone authorize "drive" "ВАШ_CLIENT_ID" "ВАШ_CLIENT_SECRET"
+     ```
+     *(Либо просто `rclone authorize "drive"`, если используете быстрый режим)*.
+   * В браузере откроется окно авторизации Google ➔ войдите под своим Google Pro аккаунтом и нажмите **«Разрешить» (Allow)**.
+   * В терминале появится строка токена:
+     ```json
+     {"access_token":"ya29.a0...","token_type":"Bearer","refresh_token":"1//04...","expiry":"..."}
+     ```
+     Скопируйте этот JSON-токен целиком (вместе с фигурными скобками).
 
 ---
 
