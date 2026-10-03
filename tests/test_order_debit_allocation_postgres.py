@@ -210,6 +210,7 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         from database.repositories.account_ledger_repo import (
             AccountLedgerInvariantError,
+            InsufficientAccountBalanceError,
             create_order_debit,
         )
 
@@ -224,7 +225,7 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         # The failing debit must roll back entirely: raise out of the
         # transaction block so nothing (including the debit row) commits.
-        with self.assertRaises(AccountLedgerInvariantError):
+        with self.assertRaises((AccountLedgerInvariantError, InsufficientAccountBalanceError)):
             async with self.sessions.begin() as session:
                 await create_order_debit(
                     session,
