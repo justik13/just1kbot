@@ -36,27 +36,26 @@ class TestReferralTiers(unittest.TestCase):
     def test_referral_tier_progression(self):
         from services.referral_bonus import get_referral_tier
 
-        # Tier 1: 0..4 -> 15% (Старт)
-        # Tier 1: 0..4 -> 15% (Уровень 1)
-        for cnt in (0, 1, 2, 3, 4):
+        # Tier 1: 0..2 -> 15% (Уровень 1)
+        for cnt in (0, 1, 2):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.15")
             assert t.name == "Уровень 1"
-            assert t.needed_for_next == (5 - cnt)
+            assert t.needed_for_next == (3 - cnt)
             assert t.next_tier_name == "Уровень 2"
             assert t.next_rate == Decimal("0.20")
 
-        # Tier 2: 5..9 -> 20% (Уровень 2)
-        for cnt in (5, 6, 7, 8, 9):
+        # Tier 2: 3..6 -> 20% (Уровень 2)
+        for cnt in (3, 4, 5, 6):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.20")
             assert t.name == "Уровень 2"
-            assert t.needed_for_next == (10 - cnt)
+            assert t.needed_for_next == (7 - cnt)
             assert t.next_tier_name == "Уровень 3"
             assert t.next_rate == Decimal("0.25")
 
-        # Tier 3: 10..14 -> 25% (Уровень 3)
-        for cnt in (10, 11, 12, 13, 14):
+        # Tier 3: 7..14 -> 25% (Уровень 3)
+        for cnt in (7, 8, 9, 10, 11, 12, 13, 14):
             t = get_referral_tier(cnt)
             assert t.rate == Decimal("0.25")
             assert t.name == "Уровень 3"
@@ -518,7 +517,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         assert referrer_entry.metadata_["tier_name"] == "Уровень 2"
 
     def test_first_activation_does_not_boost_own_rate(self):
-        """5th referral's own first top-up is still paid at 15%, not 20%."""
+        """3rd referral's own first top-up is still paid at 15%, not 20%."""
         import asyncio
 
         from database.models import AccountLedgerEntry
@@ -541,9 +540,9 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
                 added_entries.append(entry)
 
         session = AsyncMock()
-        # active=5 already includes this first-time payer -> effective 4 -> 15%
+        # active=3 already includes this first-time payer -> effective 2 -> 15%
         session.scalar = AsyncMock(
-            side_effect=[purchaser, referrer, 5, None, None, None]
+            side_effect=[purchaser, referrer, 3, None, None, None]
         )
         session.add = fake_add
         session.flush = AsyncMock()
@@ -561,7 +560,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         referrer_entry = added_entries[0]
         assert referrer_entry.amount == Decimal(150)  # 15% of 1000, not 20%
         assert referrer_entry.metadata_["bonus_rate"] == "0.15"
-        assert referrer_entry.metadata_["active_referrals_count"] == 4
+        assert referrer_entry.metadata_["active_referrals_count"] == 2
         assert res.referrer_bonus == Decimal(150)
 
     def test_dust_topup_does_not_consume_tier_step(self):
