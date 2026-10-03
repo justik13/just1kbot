@@ -28,6 +28,8 @@ ADMIN_PURCHASES_AMOUNT_ZERO_BONUS = "0 ₽ (Бонус)"
 ADMIN_PURCHASES_AMOUNT_ZERO_BONUS_GRANT = "0 ₽ (Бонус/Выдача)"
 ADMIN_PURCHASES_ENTRY_SUMMARY_LINE = """💳 <b>Сумма:</b> <b>{amount_str}</b>
 """
+ADMIN_PURCHASES_ENTRY_FUNDS_LINE = """💰 <b>Оплата:</b> реал {real_str} + бонус {bonus_str}
+"""
 ADMIN_PURCHASES_ENTRY_DATETIME_LINE = """🕒 <b>Дата и время:</b> {dt_str}
 """
 ADMIN_PURCHASES_ENTRY_DURATION_LINE = """⏳ <b>Длительность:</b> {entry_duration_days} дней
