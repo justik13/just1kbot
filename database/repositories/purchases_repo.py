@@ -178,10 +178,6 @@ async def get_purchase_logs_paginated(
         .limit(needed)
     )
     order_results = (await session.execute(order_stmt)).scalars().all()
-    _, order_splits = await _purchase_funds_splits(
-        session,
-        order_ids={o.id for o in order_results if o.service_type != "topup"},
-    )
     for ord_item in order_results:
         user = ord_item.user
         tg_id = user.telegram_id if user else 0
@@ -211,16 +207,7 @@ async def get_purchase_logs_paginated(
                     else "Тариф"
                 )
             )
-        if ord_item.service_type == "topup":
-            real_amount_rub, bonus_amount_rub = None, None
-        elif ord_item.id in order_splits:
-            real_amount_rub, bonus_amount_rub = order_splits[ord_item.id]
-        elif ord_item.payment_method == "wallet":
-            # Wallet debit without allocation rows: split genuinely unknown.
-            real_amount_rub, bonus_amount_rub = None, None
-        else:
-            # Direct external payment (card): no wallet debit behind it.
-            real_amount_rub, bonus_amount_rub = ord_item.amount_rub, Decimal(0)
+        # List view shows no funds split (see purchase card for the breakdown).
         entries.append(
             PurchaseLogEntry(
                 id=f"order_{ord_item.id}",
@@ -236,8 +223,6 @@ async def get_purchase_logs_paginated(
                 duration_days=ord_item.duration_days,
                 amount_rub=ord_item.amount_rub,
                 created_at=ord_item.paid_at or ord_item.created_at,
-                real_amount_rub=real_amount_rub,
-                bonus_amount_rub=bonus_amount_rub,
             )
         )
 
@@ -255,10 +240,6 @@ async def get_purchase_logs_paginated(
         .limit(needed)
     )
     quote_results = (await session.execute(quote_stmt)).scalars().all()
-    quote_splits, _ = await _purchase_funds_splits(
-        session,
-        quote_ids={q.id for q in quote_results},
-    )
     for quote in quote_results:
         user = quote.user
         tg_id = user.telegram_id if user else 0
@@ -276,12 +257,7 @@ async def get_purchase_logs_paginated(
             dev_limit = 1
             dur_days = 30
         op_title = get_quote_op_title(quote.operation_type)
-        quote_split = quote_splits.get(quote.id)
-        if quote_split is not None:
-            real_amount_rub, bonus_amount_rub = quote_split
-        else:
-            # No ledger debit found (should not happen): do not invent numbers.
-            real_amount_rub, bonus_amount_rub = None, None
+        # List view shows no funds split (see purchase card for the breakdown).
         entries.append(
             PurchaseLogEntry(
                 id=f"quote_{quote.id}",
@@ -297,8 +273,6 @@ async def get_purchase_logs_paginated(
                 duration_days=dur_days,
                 amount_rub=quote.amount_due_rub or Decimal(0),
                 created_at=quote.consumed_at or quote.created_at,
-                real_amount_rub=real_amount_rub,
-                bonus_amount_rub=bonus_amount_rub,
             )
         )
 

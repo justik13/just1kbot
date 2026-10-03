@@ -6,6 +6,13 @@ five files in LEGACY_ALLOWLIST are frozen history and must not be
 rewritten; every NEW migration must validate identifiers against a
 strict whitelist (e.g. ``^[a-z_][a-z0-9_]*$``) instead of interpolating
 unchecked values into ``sa.text()`` / ``op.execute()``.
+
+Scope note: this is a syntactic style guard, not taint analysis. It
+flags only f-strings passed directly into ``text()`` / ``execute()``;
+indirection through an intermediate variable is intentionally out of
+scope, and even a validated identifier in a direct f-string is still
+flagged by design. New migrations should use literal allowlisted
+identifiers; do not grow this into a dataflow analyzer.
 """
 from __future__ import annotations
 
