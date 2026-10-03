@@ -681,19 +681,6 @@ EOF
     fi
     systemctl reload nginx
 
-    # Фаервол: порт 8444 открывается СТРОГО для BOT_IP
-    configure_safe_ufw "80/tcp" "443/tcp"
-    ufw delete allow 8444/tcp >/dev/null 2>&1 || true
-    ufw delete allow 8444 >/dev/null 2>&1 || true
-    ufw delete allow 8443/tcp >/dev/null 2>&1 || true
-    ufw delete allow 8443 >/dev/null 2>&1 || true
-    if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]]; then
-        ufw allow from "$bot_ip" to any port 8444 proto tcp || true
-    else
-        ufw allow 8444/tcp || true
-        warn "BOT_IP не указан. Порт 8444 открыт для всех IP."
-    fi
-
     set_state_val "role" "origin"
     set_state_val "domain" "$domain"
     set_state_val "cdn_domain" "$cdn_domain"
@@ -702,6 +689,10 @@ EOF
     set_state_val "secret_base_path" "$secret_path"
     set_state_val "api_url" "https://${domain}:8444"
     set_state_val "api_key" "$api_key"
+
+    # Фаервол и системный стелс: единый SSOT (Fail-Closed, Zero-Lockout SSH)
+    configure_safe_ufw "80/tcp" "443/tcp"
+    heal_node_firewall_and_stealth
 
     title "УСТАНОВКА ORIGIN УЗЛА УСПЕШНО ЗАВЕРШЕНА!"
     echo -e "${BOLD}Данные для добавления Origin в Telegram-боте (/admin):${NC}"
@@ -813,9 +804,11 @@ set_origin_bot_ip() {
     if [[ -n "$old_bot_ip" && "$old_bot_ip" != "$new_bot_ip" && "$old_bot_ip" != "any" && "$old_bot_ip" != "-" ]]; then
         ufw delete allow from "$old_bot_ip" to any port "$target_port" proto tcp >/dev/null 2>&1 || true
     fi
-    ufw delete allow "${target_port}/tcp" >/dev/null 2>&1 || true
-    ufw delete allow "${target_port}" >/dev/null 2>&1 || true
-    if [[ "$role" == "origin" ]]; then
+    if ! is_ssh_port "${target_port}"; then
+        ufw delete allow "${target_port}/tcp" >/dev/null 2>&1 || true
+        ufw delete allow "${target_port}" >/dev/null 2>&1 || true
+    fi
+    if [[ "$role" == "origin" ]] && ! is_ssh_port "8443"; then
         ufw delete allow 8443/tcp >/dev/null 2>&1 || true
         ufw delete allow 8443 >/dev/null 2>&1 || true
     fi
