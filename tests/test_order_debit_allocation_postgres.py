@@ -221,7 +221,11 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 session, service_type="awg", amount=Decimal("1000")
             )
             order_id = purchase.id
-            with self.assertRaises(AccountLedgerInvariantError):
+
+        # The failing debit must roll back entirely: raise out of the
+        # transaction block so nothing (including the debit row) commits.
+        with self.assertRaises(AccountLedgerInvariantError):
+            async with self.sessions.begin() as session:
                 await create_order_debit(
                     session,
                     user_id=self.user_id,
