@@ -183,6 +183,8 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("gdrive|setup-gdrive)", cli_sh)
         self.assertIn("backups/rclone.conf", cli_sh)
         self.assertIn("safe_backup_dest", cli_sh)
+        self.assertIn("--entrypoint rclone", cli_sh)
+        self.assertIn("sys.stdin", cli_sh)
 
         # 5. .env.example documents only non-secret Google Drive flags (no tokens)
         self.assertIn("GDRIVE_BACKUP_ENABLED=false", env_example)

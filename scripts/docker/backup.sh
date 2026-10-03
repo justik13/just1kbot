@@ -107,16 +107,20 @@ if [[ "$GDRIVE_ENABLED" == "true" ]]; then
         fi
     fi
 
+    # Keep local recovery window aligned with cli.sh policy (14 days); independent
+    # remote retention is managed by the remote storage policy.
+    find "$BACKUP_DIR" -type f \( -name "just1kbot_*.sql.gz*" -o -name "*.tmp" \) -mtime +14 -delete
+    echo "Старые локальные бекапы удалены."
+
     # Fail-closed при ошибке облачного бэкапа или ротации
     if [[ "$UPLOAD_FAILED" == "true" ]]; then
         echo "ERROR: Локальный зашифрованный бэкап сохранен ($ENCRYPTED_FILE), но облачные операции в Google Drive завершились с ошибкой!" >&2
         exit 1
     fi
+else
+    # Keep local recovery window aligned with cli.sh policy (14 days)
+    find "$BACKUP_DIR" -type f \( -name "just1kbot_*.sql.gz*" -o -name "*.tmp" \) -mtime +14 -delete
+    echo "Старые локальные бекапы удалены."
 fi
 
 echo "Backup создан: ${ENCRYPTED_FILE}"
-
-# Keep local recovery window aligned with cli.sh policy (14 days); independent
-# remote retention is managed by the remote storage policy.
-find "$BACKUP_DIR" -type f \( -name "just1kbot_*.sql.gz*" -o -name "*.tmp" \) -mtime +14 -delete
-echo "Старые локальные бекапы удалены."

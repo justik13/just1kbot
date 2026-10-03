@@ -555,6 +555,80 @@ wait_for_apt_locks 1
         proc = self._run_cli_command("doctor")
         self.assertIn("Google Drive бэкап: настроен (папка ID: folder123", proc.stdout)
 
+    def test_doctor_probe_uses_rclone_entrypoint_and_does_not_invoke_backup_script(self):
+        """cmd_doctor runs probe via --entrypoint rclone and does not invoke backup.sh."""
+        env_file = self.project_dir / ".env"
+        env_file.write_text("GDRIVE_BACKUP_ENABLED=true\n", encoding="utf-8")
+
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        rclone_conf = backups_dir / "rclone.conf"
+        rclone_conf.write_text(
+            "[gdrive]\ntype = drive\nscope = drive\nclient_id = cid\nclient_secret = csec\ntoken = {\"refresh_token\":\"tok\"}\nroot_folder_id = folder123\n",
+            encoding="utf-8",
+        )
+        rclone_conf.chmod(0o600)
+
+        # Log calls to docker stub
+        docker_log = self.project_dir / "docker_calls.log"
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            f"#!/bin/bash\n"
+            f'echo "$@" >> "{docker_log.as_posix()}"\n'
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ "$1" == "compose" && "$2" == "version" ]]; then echo "Docker Compose version v2.27.0"; exit 0; fi\n'
+            'if [[ "$*" =~ "--entrypoint" ]] && [[ "$*" =~ "rclone" ]]; then exit 0; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        proc = self._run_cli_command("doctor")
+        self.assertIn("Google Drive API: связь и доступ к папке подтверждены", proc.stdout)
+
+        calls = docker_log.read_text(encoding="utf-8") if docker_log.exists() else ""
+        self.assertIn("--entrypoint rclone", calls)
+        self.assertIn("lsd gdrive:", calls)
+        self.assertNotIn("backup.sh", calls)
+
+    def test_setup_gdrive_rollback_restores_previous_working_config(self):
+        """cmd_setup_gdrive restores previous rclone.conf on test failure if user opts to rollback."""
+        env_file = self.project_dir / ".env"
+        env_file.write_text("GDRIVE_BACKUP_ENABLED=true\nGDRIVE_RETENTION_DAYS=21\n", encoding="utf-8")
+
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        rclone_conf = backups_dir / "rclone.conf"
+        rclone_conf.write_text("[gdrive]\noriginal_working_content=true\n", encoding="utf-8")
+        rclone_conf.chmod(0o600)
+
+        # Mock docker stub where backup fails
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            "#!/bin/bash\n"
+            'if [[ "$1" == "compose" && "$2" == "version" ]]; then echo "Docker Compose version v2.27.0"; exit 0; fi\n'
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ "$1" == "compose" ]] && [[ "$*" =~ "run" ]]; then exit 1; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        wizard_inputs = "\n".join([
+            "y",
+            "new_folder_id_1234567890",
+            "new_client_id",
+            "new_client_secret",
+            '{"refresh_token":"new_tok"}',
+            "14",
+            "y",
+            "y",
+        ]) + "\n"
+
+        proc = self._run_cli_command("gdrive", input_text=wizard_inputs)
+        self.assertIn("восстановлена из предыдущего рабочего состояния", proc.stdout + proc.stderr)
+        self.assertIn("original_working_content=true", rclone_conf.read_text(encoding="utf-8"))
+
     def test_cmd_backup_creates_restricted_permissions(self):
         """cmd_backup ensures 0700 on backups/ directory and 0600 on created backup files."""
         # Mock docker compose profile tools run --rm backup

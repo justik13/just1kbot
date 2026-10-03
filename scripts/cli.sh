@@ -1396,7 +1396,7 @@ cmd_setup_gdrive() {
             token_input=$(echo "$token_input" | base64 -d 2>/dev/null || echo "$token_input")
         fi
 
-        clean_token=$(python3 -c "import json, sys; d = json.loads(sys.argv[1]); assert isinstance(d, dict) and d.get('refresh_token'); print(json.dumps(d))" "$token_input" 2>/dev/null || echo "")
+        clean_token=$(printf '%s' "$token_input" | python3 -c "import json, sys; d = json.load(sys.stdin); assert isinstance(d, dict) and d.get('refresh_token'); print(json.dumps(d))" 2>/dev/null || echo "")
 
         if [[ -n "$clean_token" ]]; then
             info "OAuth токен успешно проверен и принят."
@@ -1413,6 +1413,16 @@ cmd_setup_gdrive() {
     if ! [[ "$retention_input" =~ ^[0-9]+$ ]] || [ "$retention_input" -le 0 ]; then
         retention_input="14"
     fi
+
+    # Резервная копия существующей конфигурации на случай отката при неудачном тесте
+    local prev_conf_backup=""
+    if [[ -f "$rclone_conf" ]]; then
+        prev_conf_backup=$(mktemp "${PROJECT_DIR}/backups/rclone.bak.XXXXXX")
+        cp -a "$rclone_conf" "$prev_conf_backup"
+        chmod 600 "$prev_conf_backup"
+    fi
+    local prev_enabled="$cur_enabled"
+    local prev_retention="$cur_retention"
 
     # Атомарное сохранение в backups/rclone.conf
     local tmp_conf
@@ -1445,17 +1455,37 @@ EOF
     read -r -p "Создать зашифрованный бэкап и проверить выгрузку в Google Drive прямо сейчас? [Y/n]: " test_choice
     test_choice="${test_choice:-y}"
     if [[ "$test_choice" =~ ^[Yy]$ ]]; then
+        # Гарантируем актуальную сборку backup-образа с rclone перед тестом
+        if command -v docker >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
+            info "Проверка и сборка Docker-образа бэкапа..."
+            docker compose --profile tools build backup >/dev/null 2>&1 || true
+        fi
+
         info "Запуск тестового создания и выгрузки бэкапа..."
         if ! cmd_backup; then
             warn "Тестовая выгрузка завершилась с ошибкой."
             local rollback_choice
-            read -r -p "Отключить Google Drive бэкап в .env во избежание ночных сбоев cron? [Y/n]: " rollback_choice
+            read -r -p "Откатить конфигурацию Google Drive к предыдущему состоянию? [Y/n]: " rollback_choice
             rollback_choice="${rollback_choice:-y}"
             if [[ "$rollback_choice" =~ ^[Yy]$ ]]; then
-                set_env_var "GDRIVE_BACKUP_ENABLED" "false"
-                warn "Выгрузка в Google Drive отключена (GDRIVE_BACKUP_ENABLED=false)."
+                if [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]]; then
+                    mv -f "$prev_conf_backup" "$rclone_conf"
+                    chmod 600 "$rclone_conf"
+                    set_env_var "GDRIVE_BACKUP_ENABLED" "$prev_enabled"
+                    set_env_var "GDRIVE_RETENTION_DAYS" "$prev_retention"
+                    warn "Конфигурация Google Drive восстановлена из предыдущего рабочего состояния."
+                else
+                    rm -f "$rclone_conf"
+                    set_env_var "GDRIVE_BACKUP_ENABLED" "false"
+                    warn "Выгрузка в Google Drive отключена, временный конфиг удален."
+                fi
             fi
         fi
+    fi
+
+    # Удаляем временную копию бэкапа конфига, если осталась
+    if [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]]; then
+        rm -f "$prev_conf_backup"
     fi
 }
 
@@ -1504,6 +1534,7 @@ cmd_config() {
 # --- 8. Доктор (Диагностика) ---
 cmd_doctor() {
     echo -e "\n${BOLD}${BLUE}=== 🩺 ДИАГНОСТИКА СИСТЕМЫ JUST1KBOT ===${NC}\n"
+    local has_errors=0
 
     # 0. Проверка версии ядра Linux
     local kernel_ver
@@ -1552,6 +1583,7 @@ cmd_doctor() {
         log "Docker демон активен и отвечает."
     else
         error "Docker демон недоступен (проверьте права пользователя или 'systemctl status docker')!"
+        has_errors=1
     fi
 
     # 2. Прослушивание портов
@@ -1569,6 +1601,7 @@ cmd_doctor() {
                 fi
             else
                 error "КОНФЛИКТ ПОРТА: Порт $port занят сторонним процессом хоста ($proc), а не Caddy!"
+                has_errors=1
             fi
         else
             warn "Порт $port не слушается. Проверьте статус контейнера Caddy (docker compose logs caddy)."
@@ -1605,6 +1638,7 @@ cmd_doctor() {
                 log "Связь с Telegram Bot API: @${b_user} (OK)"
             else
                 error "Связь с Telegram Bot API нарушена (неверный токен или блокировка API)."
+                has_errors=1
             fi
         fi
 
@@ -1615,6 +1649,7 @@ cmd_doctor() {
             local rclone_conf="${PROJECT_DIR}/backups/rclone.conf"
             if [[ ! -f "$rclone_conf" ]]; then
                 error "Google Drive бэкап включен, но файл backups/rclone.conf не найден! Запустите 'just1kbot gdrive' для настройки."
+                has_errors=1
             else
                 local conf_folder conf_token conf_perm conf_cid conf_csec
                 conf_folder=$(grep -E '^[[:space:]]*root_folder_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
@@ -1630,8 +1665,10 @@ cmd_doctor() {
 
                 if [[ -z "$conf_folder" ]]; then
                     error "В backups/rclone.conf не задан обязательный root_folder_id (защита корня диска)!"
+                    has_errors=1
                 elif [[ -z "$conf_token" ]] || ! echo "$conf_token" | grep -q "refresh_token"; then
                     error "В backups/rclone.conf отсутствует валидный OAuth токен (refresh_token)!"
+                    has_errors=1
                 elif [[ -z "$conf_cid" || -z "$conf_csec" ]]; then
                     warn "В backups/rclone.conf не заданы client_id/client_secret (рекомендуется для исключения сбоев обновления токенов)."
                     log "Google Drive бэкап: настроен (папка ID: $conf_folder, конфиг: backups/rclone.conf) (OK)"
@@ -1639,10 +1676,10 @@ cmd_doctor() {
                     log "Google Drive бэкап: настроен (папка ID: $conf_folder, конфиг: backups/rclone.conf, права: 0600) (OK)"
                 fi
 
-                # Автономная проверка связи Google Drive API (read-only probe)
+                # Автономная проверка связи Google Drive API (read-only probe c явным --entrypoint rclone)
                 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
                     info "Проверка связи с Google Drive API (read-only)..."
-                    if docker compose --profile tools run --rm --no-deps backup rclone --config /backups/rclone.conf lsd gdrive: --max-depth 1 >/dev/null 2>&1; then
+                    if docker compose --profile tools run --rm --no-deps --entrypoint rclone backup --config /backups/rclone.conf lsd gdrive: --max-depth 1 >/dev/null 2>&1; then
                         log "Google Drive API: связь и доступ к папке подтверждены (OK)"
                     else
                         warn "Google Drive API: проверка связи не удалась (проверьте интернет, валидность OAuth токена и доступность папки)"
@@ -1658,6 +1695,11 @@ cmd_doctor() {
         docker compose ps || true
     fi
     echo ""
+
+    if [[ "$has_errors" -ne 0 ]]; then
+        return 1
+    fi
+    return 0
 }
 
 
