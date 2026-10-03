@@ -170,6 +170,45 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entries[0].bonus_amount_rub, Decimal("99.00"))
         self.assertEqual(entries[1].id, "audit_200")
 
+    async def test_wallet_order_without_allocations_shows_no_split(self):
+        import uuid
+
+        session = AsyncMock()
+        user = User(id=11, telegram_id=3002, username="wallet_buyer")
+
+        order = MagicMock()
+        order.id = uuid.uuid4()
+        order.service_type = "awg"
+        order.payment_method = "wallet"
+        order.tariff = None
+        order.metadata_ = {}
+        order.device_limit = 1
+        order.duration_days = 30
+        order.amount_rub = Decimal("199.00")
+        order.paid_at = now_utc()
+        order.created_at = now_utc()
+        order.user = user
+
+        res_orders = MagicMock()
+        res_orders.scalars().all.return_value = [order]
+
+        res_debits = MagicMock()
+        res_debits.scalars().all.return_value = []
+
+        res_quotes = MagicMock()
+        res_quotes.scalars().all.return_value = []
+
+        res_audit = MagicMock()
+        res_audit.scalars().all.return_value = []
+
+        session.execute.side_effect = [res_orders, res_debits, res_quotes, res_audit]
+
+        entries, total = await get_purchase_logs_paginated(session, page=1, per_page=10)
+        self.assertEqual(total, 1)
+        self.assertEqual(entries[0].amount_rub, Decimal("199.00"))
+        self.assertIsNone(entries[0].real_amount_rub)
+        self.assertIsNone(entries[0].bonus_amount_rub)
+
 
 if __name__ == "__main__":
     unittest.main()

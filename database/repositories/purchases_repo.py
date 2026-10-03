@@ -215,6 +215,9 @@ async def get_purchase_logs_paginated(
             real_amount_rub, bonus_amount_rub = None, None
         elif ord_item.id in order_splits:
             real_amount_rub, bonus_amount_rub = order_splits[ord_item.id]
+        elif ord_item.payment_method == "wallet":
+            # Wallet debit without allocation rows: split genuinely unknown.
+            real_amount_rub, bonus_amount_rub = None, None
         else:
             # Direct external payment (card): no wallet debit behind it.
             real_amount_rub, bonus_amount_rub = ord_item.amount_rub, Decimal(0)
@@ -440,6 +443,8 @@ async def get_purchase_log_by_id(
             )
             if ord_item.id in single_order_splits:
                 real_amount_rub, bonus_amount_rub = single_order_splits[ord_item.id]
+            elif ord_item.payment_method == "wallet":
+                real_amount_rub, bonus_amount_rub = None, None
             else:
                 real_amount_rub, bonus_amount_rub = ord_item.amount_rub, Decimal(0)
         return PurchaseLogEntry(
