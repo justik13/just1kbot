@@ -347,25 +347,7 @@ heal_node_firewall_and_stealth() {
     local role
     role="$(get_state_val "role" "")"
 
-    # 2. Очистка неиспользуемого порта 80, если на сервере нет веб-сервисов (Caddy / Nginx / др.), слушающих порт 80
-    if ufw status 2>/dev/null | grep -E "(^|[[:space:]])80(/tcp)?[[:space:]]+ALLOW" -q; then
-        local has_active_port80=0
-        if [[ -f /run/just1knode_ufw_opened_80 ]]; then
-            has_active_port80=1
-        elif [[ -n "$(detect_host_port80_container 2>/dev/null || true)" ]] || (command -v docker >/dev/null 2>&1 && docker ps --format '{{.Ports}} {{.Names}}' 2>/dev/null | grep -qE '(:80->|just1kbot_caddy)'); then
-            has_active_port80=1
-        elif command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -qE "(:80 |\[::\]:80 )"; then
-            has_active_port80=1
-        fi
-
-        if [[ $has_active_port80 -eq 0 ]]; then
-            ufw delete allow 80/tcp >/dev/null 2>&1 || true
-            ufw delete allow 80 >/dev/null 2>&1 || true
-            log "Фаервол UFW: неиспользуемый порт 80/tcp удален из разрешенных правил (нет локальных слушающих процессов)."
-        fi
-    fi
-
-    # 3. Очистка мусорного порта SSH (22), если SSH слушает нестандартный порт
+    # 2. Гарантия защиты SSH (Zero-Lockout стандарт: подтверждаем активный порт SSH, правила доступа к SSH никогда не удаляются)
     local ssh_port=22
     local detected_ssh
     detected_ssh="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
@@ -373,29 +355,7 @@ heal_node_firewall_and_stealth() {
         detected_ssh="$(grep -E -h "^Port " /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
     fi
     [[ -n "$detected_ssh" ]] && ssh_port="$detected_ssh"
-
-    if [[ "$ssh_port" != "22" ]]; then
-        if ! (command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -qE "(:22 |\[::\]:22 )"); then
-            if ufw status 2>/dev/null | grep -E "(^|[[:space:]])22(/tcp)?[[:space:]]+ALLOW" -q; then
-                ufw delete allow 22/tcp >/dev/null 2>&1 || true
-                ufw delete allow 22 >/dev/null 2>&1 || true
-                log "Фаервол UFW: неиспользуемый порт SSH (22/tcp) удален (SSH активен на порту ${ssh_port})."
-            fi
-        fi
-    fi
-
-    # 4. Очистка паразитных сторонних портов (например TeamSpeak 9987, 30033), если на них нет слушателей
-    local junk_p
-    for junk_p in 9987 30033; do
-        if ! (command -v ss >/dev/null 2>&1 && ss -tuln 2>/dev/null | grep -qE "(:${junk_p} |\[::\]:${junk_p} )"); then
-            if ufw status 2>/dev/null | grep -E "(^|[[:space:]])${junk_p}(/(tcp|udp))?[[:space:]]+ALLOW" -q; then
-                ufw delete allow "${junk_p}/tcp" >/dev/null 2>&1 || true
-                ufw delete allow "${junk_p}/udp" >/dev/null 2>&1 || true
-                ufw delete allow "${junk_p}" >/dev/null 2>&1 || true
-                log "Фаервол UFW: удалено неиспользуемое стороннее правило для порта ${junk_p}."
-            fi
-        fi
-    done
+    ufw allow "$ssh_port/tcp" >/dev/null 2>&1 || true
 
     # 5. AmneziaWG API (порты для ролей awg, dual, либо при наличии конфига amnezia)
     local is_awg_node=0

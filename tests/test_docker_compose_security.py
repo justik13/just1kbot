@@ -178,10 +178,9 @@ class DockerComposeSecurityTests(unittest.TestCase):
         cli_sh = (root / "scripts" / "cli.sh").read_text(encoding="utf-8")
         setup_sh = (root / "scripts" / "setup.sh").read_text(encoding="utf-8")
 
-        # 1. common.sh defines heal_node_firewall_and_stealth
+        # 1. common.sh defines heal_node_firewall_and_stealth and protects SSH access
         self.assertIn("heal_node_firewall_and_stealth()", common_sh)
-        self.assertIn("ufw delete allow 80/tcp", common_sh)
-        self.assertIn("ufw delete allow 22/tcp", common_sh)
+        self.assertIn('ufw allow "$ssh_port/tcp"', common_sh)
 
         # 2. relay.sh never adds awg_port to public extra_ufw_ports
         self.assertNotIn('extra_ufw_ports+=("${existing_awg_port}/tcp")', relay_sh)
