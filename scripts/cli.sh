@@ -1767,21 +1767,16 @@ cmd_uninstall() {
             error "Не удалось создать каталог для сохранения бэкапов: $safe_backup_dest! Процедура удаления прервана (Fail-Closed)."
             return 1
         fi
-        # Копируем СТРОГО только дампы БД (whitelist), исключая rclone.conf и секреты
-        local dump_files=()
-        while IFS= read -r -d '' f; do
-            dump_files+=("$f")
-        done < <(find "$backups_dir" -maxdepth 1 -type f -name "just1kbot_*.sql.gz*" -print0 2>/dev/null)
-
-        if [[ ${#dump_files[@]} -gt 0 ]]; then
-            if ! (run_privileged cp -a "${dump_files[@]}" "$safe_backup_dest/" 2>/dev/null || cp -a "${dump_files[@]}" "$safe_backup_dest/" 2>/dev/null); then
-                error "Критическая ошибка при копировании резервных копий в $safe_backup_dest! Процедура удаления прервана (Fail-Closed) во избежание потери данных."
-                return 1
-            fi
+        if ! (run_privileged cp -a "$backups_dir/." "$safe_backup_dest/" 2>/dev/null || cp -a "$backups_dir/." "$safe_backup_dest/" 2>/dev/null); then
+            error "Критическая ошибка при копировании резервных копий в $safe_backup_dest! Процедура удаления прервана (Fail-Closed) во избежание потери данных."
+            return 1
         fi
+        # Исключаем конфигурации авторизации и токены (rclone.conf, *.json) из сохраненных бэкапов
+        run_privileged rm -f "$safe_backup_dest"/*rclone*.conf "$safe_backup_dest"/*gdrive*.json "$safe_backup_dest"/*service_account*.json 2>/dev/null || true
+
         local src_count dst_count
-        src_count=${#dump_files[@]}
-        dst_count=$(find "$safe_backup_dest" -mindepth 1 -name "just1kbot_*.sql.gz*" | wc -l)
+        src_count=$(find "$backups_dir" -mindepth 1 ! -name "*rclone*.conf" ! -name "*gdrive*.json" ! -name "*service_account*.json" 2>/dev/null | wc -l)
+        dst_count=$(find "$safe_backup_dest" -mindepth 1 2>/dev/null | wc -l)
         if [[ "$src_count" -gt "$dst_count" ]]; then
             error "Несоответствие количества сохраненных файлов резервных копий ($src_count vs $dst_count)! Процедура удаления прервана (Fail-Closed)."
             return 1
