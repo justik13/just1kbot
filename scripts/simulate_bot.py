@@ -22,14 +22,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 import logging
 import os
 from pathlib import Path
 import sys
-import uuid
 
 # Add repository root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -40,7 +38,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from cryptography.fernet import Fernet
 
 _dummy_fernet = os.getenv("DB_ENCRYPTION_KEY") or Fernet.generate_key().decode()
-os.environ.setdefault("BOT_TOKEN", "123456789:AABBCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqR")
+# TEST-ONLY dummy defaults for local simulation (never production credentials).
+# A user-provided token (BOT_TOKEN or TEST_BOT_TOKEN) wins over the dummy.
+_user_bot_token = os.getenv("BOT_TOKEN") or os.getenv("TEST_BOT_TOKEN")
+if _user_bot_token:
+    os.environ["BOT_TOKEN"] = _user_bot_token
+else:
+    os.environ.setdefault("BOT_TOKEN", "123456789:TEST_ONLY_DUMMY_TOKEN_DO_NOT_USE_IN_PROD")
 os.environ.setdefault("ADMIN_IDS", "[999999999]")
 os.environ.setdefault("SUPPORT_USERNAME", "just1k_support")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -48,7 +52,7 @@ os.environ.setdefault("DB_ENCRYPTION_KEY", _dummy_fernet)
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("REDIS_PASSWORD", "sim_redis_pass_123")
 os.environ.setdefault("YOOKASSA_SHOP_ID", "mock_shop")
-os.environ.setdefault("YOOKASSA_SECRET_KEY", "live_sim_secret_key_123")
+os.environ.setdefault("YOOKASSA_SECRET_KEY", "TEST_ONLY_SIM_SECRET_KEY_123")
 os.environ.setdefault("YOOKASSA_RETURN_URL", "https://t.me/{bot_username}?start=pay_success")
 os.environ.setdefault("YOOKASSA_WEBHOOK_PORT", "8080")
 os.environ.setdefault("DOMAIN", "sim.just1k.net")
@@ -57,32 +61,26 @@ os.environ.setdefault("CHANNEL_URL", "https://t.me/just1k_channel")
 os.environ.setdefault("RULES_URL", "https://just1k.net/rules")
 os.environ.setdefault("FAQ_URL", "https://just1k.net/faq")
 
-import aiosqlite
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     BotCommand,
     BotCommandScopeDefault,
     MenuButtonCommands,
-    Update,
 )
 from aiogram.utils.chat_action import ChatActionMiddleware
-from cryptography.fernet import Fernet
 from sqlalchemy import (
     DateTime,
     Integer,
     select,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, BIGINT, JSONB
 from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import CheckConstraint
-from sqlalchemy.types import TypeDecorator
 
 from bot import texts
 from bot.middlewares.action_lock import ActionLockMiddleware
@@ -96,528 +94,15 @@ from config.tariffs import DEFAULT_TARIFFS_SEEDS
 import database.connection as db_conn
 from database.connection import session_scope
 from database.models import (
-    AccountLedgerEntry,
     Base,
-    Payment,
     Server,
     Tariff,
-    TariffQuote,
     TariffVersion,
-    User,
-    VPNProfile,
 )
-from services.amnezia_client import (
-    AmneziaAPIResult,
-    AmneziaClient,
-    AmneziaClientCreateResponse,
-    AmneziaClientListItem,
-)
-from services.xray_node_client import (
-    SyncResponse,
-    SyncResult,
-    XrayNodeClient,
-)
-from services.yookassa_service import YooKassaResult, YooKassaService
-from utils.datetime_helpers import now_utc
-from utils.vpn_parser import encode_json_to_vpn_uri
-
-# --- 1. SQLITE COMPILER & POSTGRESQL EMULATION SHIMS ---
-
-@compiles(JSONB, "sqlite")
-def _compile_jsonb_sqlite(type_, compiler, **kw):
-    return "TEXT"
-
-@compiles(ARRAY, "sqlite")
-def _compile_array_sqlite(type_, compiler, **kw):
-    return "TEXT"
-
-@compiles(BIGINT, "sqlite")
-def _compile_bigint_sqlite(type_, compiler, **kw):
-    return "INTEGER"
-
-# Intercept aiosqlite connection creation to register PostgreSQL emulator functions
-_orig_aiosqlite_connect = aiosqlite.connect
-
-def _custom_aiosqlite_connect(*args, **kwargs):
-    kwargs["check_same_thread"] = False
-    conn = _orig_aiosqlite_connect(*args, **kwargs)
-    orig_connect_coro = conn._connect
-
-    async def patched_connect():
-        c = await orig_connect_coro()
-        await c.create_function("pg_advisory_xact_lock", 1, lambda x: 1)
-        await c.create_function("pg_advisory_xact_lock", 2, lambda x, y: 1)
-        await c.create_function("pg_advisory_lock", 1, lambda x: 1)
-        await c.create_function("pg_advisory_lock", 2, lambda x, y: 1)
-        await c.create_function("pg_advisory_unlock", 1, lambda x: 1)
-        await c.create_function("pg_advisory_unlock", 2, lambda x, y: 1)
-        await c.create_function("trunc", 1, lambda x: int(x) if x is not None else 0)
-        await c.create_function("is_nonnegative_integer_json_array", 1, lambda x: 1)
-        return c
-
-    conn._connect = patched_connect
-    return conn
-
-aiosqlite.connect = _custom_aiosqlite_connect
-
-# Force SQLite datetimes to be loaded as timezone-aware UTC objects
-class UTCDateTime(TypeDecorator):
-    impl = DateTime
-    cache_ok = True
-
-    def process_result_value(self, value, dialect):
-        if value is not None:
-            if isinstance(value, str):
-                for fmt in (
-                    "%Y-%m-%d %H:%M:%S.%f",
-                    "%Y-%m-%d %H:%M:%S",
-                    "%Y-%m-%dT%H:%M:%S.%f",
-                    "%Y-%m-%dT%H:%M:%S",
-                    "%Y-%m-%d %H:%M:%S.%f%z",
-                    "%Y-%m-%d %H:%M:%S%z",
-                ):
-                    try:
-                        value = datetime.strptime(value, fmt)
-                        break
-                    except ValueError:
-                        pass
-            if isinstance(value, datetime) and value.tzinfo is None:
-                value = value.replace(tzinfo=timezone.utc)
-        return value
-
-
-# --- 3. AMNEZIA VPN & YOOKASSA MOCK GENERATORS ---
-
-def generate_mock_amnezia_vpn_uri(
-    client_name: str,
-    peer_id: str,
-    host: str = "nl1.just1k.net",
-) -> str:
-    """Generate a realistic AmneziaWG 2.0 configuration URI with obfuscation parameters."""
-    client_priv = f"MOCK_PRIVKEY_{peer_id[:8]}=="
-    server_pub = "MOCK_PUBKEY_SERVER_NL=="
-    conf_str = (
-        f"[Interface]\n"
-        f"PrivateKey = {client_priv}\n"
-        f"Address = 10.8.0.2/32\n"
-        f"DNS = 1.1.1.1, 8.8.8.8\n"
-        f"Jc = 4\n"
-        f"Jmin = 40\n"
-        f"Jmax = 70\n"
-        f"S1 = 15\n"
-        f"S2 = 30\n"
-        f"S3 = 10\n"
-        f"S4 = 20\n"
-        f"H1 = 1\n"
-        f"H2 = 2\n"
-        f"H3 = 3\n"
-        f"H4 = 4\n\n"
-        f"[Peer]\n"
-        f"PublicKey = {server_pub}\n"
-        f"Endpoint = {host}:51820\n"
-        f"AllowedIPs = 0.0.0.0/0, ::/0\n"
-        f"PersistentKeepalive = 25\n"
-    )
-    last_cfg = {
-        "hostName": host,
-        "port": 51820,
-        "client_ip": "10.8.0.2/32",
-        "client_priv_key": client_priv,
-        "server_pub_key": server_pub,
-        "Jc": 4, "Jmin": 40, "Jmax": 70,
-        "S1": 15, "S2": 30, "S3": 10, "S4": 20,
-        "H1": 1, "H2": 2, "H3": 3, "H4": 4,
-        "config": conf_str,
-        "mtu": "1280",
-        "persistent_keep_alive": 25,
-        "allowed_ips": ["0.0.0.0/0", "::/0"],
-    }
-    data = {
-        "containers": [
-            {
-                "awg": {
-                    "last_config": json.dumps(last_cfg, ensure_ascii=False),
-                    "protocol_version": "2",
-                }
-            }
-        ],
-        "defaultContainer": "awg",
-        "description": f"just1k VPN - {client_name}",
-        "dns1": "1.1.1.1",
-        "dns2": "8.8.8.8",
-        "hostName": host,
-        "port": 51820,
-    }
-    return encode_json_to_vpn_uri(data)
-
-
-async def mock_amnezia_create_user_result(self, client_name: str, expires_at=None) -> AmneziaAPIResult:
-    logger = logging.getLogger("simulation.amnezia")
-    mock_peer_id = f"peer_{uuid.uuid4().hex[:8]}"
-    mock_vpn_uri = generate_mock_amnezia_vpn_uri(client_name, mock_peer_id)
-    logger.info("🔌 [MOCK AMNEZIA] Generated simulated VPN profile '%s' (%s)", client_name, mock_peer_id)
-    resp = AmneziaClientCreateResponse(
-        id=mock_peer_id,
-        client_name=client_name,
-        config=mock_vpn_uri,
-        raw_config=mock_vpn_uri,
-    )
-    return AmneziaAPIResult(ok=True, value=resp, error_kind=None, status_code=200, retryable=False, ambiguous=False)
-
-
-async def mock_amnezia_delete_user_result(self, client_id: str) -> AmneziaAPIResult:
-    logger = logging.getLogger("simulation.amnezia")
-    logger.info("🗑 [MOCK AMNEZIA] Deleted simulated VPN profile (%s)", client_id)
-    return AmneziaAPIResult(ok=True, value=None, error_kind=None, status_code=200, retryable=False, ambiguous=False)
-
-
-async def mock_amnezia_get_all_clients(self):
-    return [
-        AmneziaClientListItem(id="peer_sim_nl_iphone", username="iPhone 16 Pro", peer_name="iPhone 16 Pro"),
-        AmneziaClientListItem(id="peer_sim_de_macbook", username="MacBook Pro M3", peer_name="MacBook Pro M3"),
-    ]
-
-
-async def mock_yookassa_create_payment_result(cls, payload: dict, *, idempotency_key: str | None = None, **kwargs) -> YooKassaResult:
-    logger = logging.getLogger("simulation.yookassa")
-    amount_str = payload.get("amount", {}).get("value", "100.00")
-    order_id = payload.get("metadata", {}).get("order_id", str(uuid.uuid4())[:8])
-    mock_id = f"mock_pay_{order_id}"
-    logger.info("💳 [MOCK YOOKASSA] Created test invoice for %s RUB (ID: %s)", amount_str, mock_id)
-    return YooKassaResult(
-        ok=True,
-        value={
-            "id": mock_id,
-            "status": "pending",
-            "paid": False,
-            "amount": {"value": amount_str, "currency": "RUB"},
-            "confirmation": {
-                "type": "redirect",
-                "confirmation_url": f"https://t.me/just1kbot?start=pay_test_{mock_id}",
-            },
-            "created_at": now_utc().isoformat(),
-        },
-        status_code=200,
-    )
-
-
-async def mock_yookassa_get_payment_result(cls, payment_id: str, **kwargs) -> YooKassaResult:
-    logger = logging.getLogger("simulation.yookassa")
-    logger.info("✅ [MOCK YOOKASSA] Verifying payment %s -> AUTO-APPROVING AS SUCCEEDED", payment_id)
-    return YooKassaResult(
-        ok=True,
-        value={
-            "id": payment_id,
-            "status": "succeeded",
-            "paid": True,
-            "amount": {"value": "100.00", "currency": "RUB"},
-            "created_at": now_utc().isoformat(),
-            "captured_at": now_utc().isoformat(),
-        },
-        status_code=200,
-    )
-
-
-async def mock_amnezia_healthcheck(self) -> bool:
-    return True
-
-
-async def mock_amnezia_get_server_load(self, timeout: float = 10.0) -> dict | None:
-    return {
-        "cpu_percent": 12.5,
-        "ram_percent": 34.0,
-        "disk_percent": 25.0,
-        "active_peers": 3,
-    }
-
-
-# Apply monkeypatches to external service clients
-AmneziaClient.create_user_result = mock_amnezia_create_user_result
-AmneziaClient.delete_user_result = mock_amnezia_delete_user_result
-AmneziaClient.get_all_clients = mock_amnezia_get_all_clients
-AmneziaClient.healthcheck = mock_amnezia_healthcheck
-AmneziaClient.get_server_load = mock_amnezia_get_server_load
-YooKassaService.create_payment_result = classmethod(mock_yookassa_create_payment_result)
-YooKassaService.get_payment_result = classmethod(mock_yookassa_get_payment_result)
-
-
-async def mock_xray_check_health(self, api_url: str, api_key: str):
-    logger = logging.getLogger("simulation.xray")
-    logger.debug("🩺 [MOCK XRAY] Healthcheck OK (%s)", api_url)
-    return True, "sim_epoch_1", {
-        "status": "ok",
-        "xray_running": True,
-        "grpc_ok": True,
-        "node_epoch": "sim_epoch_1",
-    }
-
-
-async def mock_xray_sync_client(self, api_url: str, api_key: str, client_uuid: str, is_active: bool, **kwargs):
-    logger = logging.getLogger("simulation.xray")
-    logger.info("⚡ [MOCK XRAY] Synced client %s (active=%s)", client_uuid, is_active)
-    return SyncResponse(
-        SyncResult.APPLIED,
-        verified_epoch="sim_epoch_1",
-        verified_inbounds=[
-            "just1k-wl-default",
-            "just1k-wl-inbound-de-relay-01",
-            "just1k-wl-inbound-se-relay-01",
-        ],
-    )
-
-
-async def mock_xray_get_inventory(self, api_url: str, api_key: str, client_ids=None):
-    return True, {"clients": [], "epoch": "sim_epoch_1"}, None
-
-
-async def mock_xray_remove_client(self, api_url: str, api_key: str, client_uuid: str, version=None):
-    logger = logging.getLogger("simulation.xray")
-    logger.info("🗑 [MOCK XRAY] Removed client %s", client_uuid)
-    return SyncResult.APPLIED, None
-
-
-async def mock_xray_get_traffic_snapshot(self, api_url: str, api_key: str):
-    return "sim_epoch_1", "sim_boot_1", 1700000000, {}
-
-
-async def mock_xray_get_relays_health(self, api_url: str, api_key: str):
-    logger = logging.getLogger("simulation.xray")
-    logger.info("📡 [MOCK XRAY] Queried real-time relay health from Origin (%s)", api_url)
-    return True, {
-        "status": "ok",
-        "count": 2,
-        "all_healthy": True,
-        "relays": [
-            {
-                "code": "de-relay-01",
-                "tag": "de-relay-01",
-                "name": "Германия Релей #1",
-                "flag": "🇩🇪",
-                "ip": "185.190.140.1",
-                "port": 10443,
-                "healthy": True,
-                "status": "online",
-                "rtt_ms": 14.2,
-                "reachable": True,
-                "error": None,
-            },
-            {
-                "code": "se-relay-01",
-                "tag": "se-relay-01",
-                "name": "Швеция Релей #1",
-                "flag": "🇸🇪",
-                "ip": "194.26.229.2",
-                "port": 10443,
-                "healthy": True,
-                "status": "online",
-                "rtt_ms": 28.5,
-                "reachable": True,
-                "error": None,
-            },
-        ],
-    }, None
-
-
-XrayNodeClient.check_health = mock_xray_check_health
-XrayNodeClient.sync_client = mock_xray_sync_client
-XrayNodeClient.get_inventory = mock_xray_get_inventory
-XrayNodeClient.remove_client = mock_xray_remove_client
-XrayNodeClient.get_traffic_snapshot = mock_xray_get_traffic_snapshot
-XrayNodeClient.get_relays_health = mock_xray_get_relays_health
-
-
-# --- 4. DYNAMIC USER AUTO-SEEDING MIDDLEWARE ---
-
-class SimulationAutoSeedMiddleware:
-    """Automatically seeds newly connected Telegram users with realistic account state."""
-
-    def __init__(
-        self,
-        real_balance: Decimal = Decimal(350),
-        bonus_balance: Decimal = Decimal(150),
-        enabled: bool = True,
-    ):
-        self.real_balance = real_balance
-        self.bonus_balance = bonus_balance
-        self.enabled = enabled
-
-    async def __call__(self, handler, event: Update, data: dict):
-        if not self.enabled:
-            return await handler(event, data)
-
-        user = getattr(event, "from_user", None)
-        if not user:
-            return await handler(event, data)
-
-        # In simulation mode, dynamically grant admin rights to connecting tester
-        from config.settings import get_settings
-        sim_settings = get_settings()
-        if user.id not in sim_settings.ADMIN_IDS:
-            sim_settings.ADMIN_IDS.append(user.id)
-
-        async with session_scope() as session:
-            db_user = await session.scalar(
-                select(User).where(User.telegram_id == user.id)
-            )
-            if not db_user:
-                    tariff = await session.scalar(
-                        select(Tariff)
-                        .where(
-                            Tariff.is_active.is_(True),
-                            Tariff.service_type == "awg",
-                            Tariff.duration_days == 30,
-                        )
-                        .order_by(Tariff.device_limit.asc())
-                        .limit(1)
-                    )
-                    tariff_id = tariff.id if tariff else None
-                    device_limit = getattr(tariff, "device_limit", 2)
-                    tv = await session.scalar(
-                        select(TariffVersion).where(TariffVersion.tariff_id == tariff_id).limit(1)
-                    ) if tariff_id else None
-                    tv_id = tv.id if tv else None
-
-                    server = await session.scalar(
-                        select(Server).where(Server.is_active.is_(True)).order_by(Server.id.asc()).limit(1)
-                    )
-                    server_id = server.id if server else 1
-
-                    # Create user record
-                    db_user = User(
-                        telegram_id=user.id,
-                        username=user.username or f"user_{user.id}",
-                        first_name=user.first_name or "Tester",
-                        device_limit=device_limit,
-                        current_tariff_id=tariff_id,
-                        subscription_end=now_utc() + timedelta(days=28),
-                        created_at=now_utc() - timedelta(days=2),
-                    )
-                    session.add(db_user)
-                    await session.flush()
-
-                    # Seed initial payment & ledger entries
-                    seed_pay = Payment(
-                        user_id=db_user.id,
-                        amount=self.real_balance,
-                        currency="RUB",
-                        public_order_id=f"order_{uuid.uuid4().hex[:8]}",
-                        provider_idempotency_key=f"idem_{uuid.uuid4().hex[:12]}",
-                        provider_status="succeeded",
-                        fulfillment_status="succeeded",
-                        reconciliation_status="ok",
-                        checkout_status="active",
-                        ui_visible=True,
-                        created_at=now_utc() - timedelta(days=2),
-                        paid_at=now_utc() - timedelta(days=2),
-                        credited_at=now_utc() - timedelta(days=2),
-                        credit_notified_at=now_utc() - timedelta(days=2),
-                    )
-                    session.add(seed_pay)
-                    await session.flush()
-
-                    ts = int(now_utc().timestamp() * 1000)
-                    entry_real = AccountLedgerEntry(
-                        id=ts + 1,
-                        user_id=db_user.id,
-                        amount=self.real_balance,
-                        currency="RUB",
-                        entry_type="payment_credit",
-                        payment_id=seed_pay.id,
-                        idempotency_key=f"seed_real_{uuid.uuid4().hex}",
-                        metadata_={"note": "Initial simulation balance"},
-                        created_at=now_utc() - timedelta(days=2),
-                    )
-                    entry_bonus = AccountLedgerEntry(
-                        id=ts + 2,
-                        user_id=db_user.id,
-                        amount=self.bonus_balance,
-                        currency="RUB",
-                        entry_type="admin_adjustment",
-                        idempotency_key=f"seed_bonus_{uuid.uuid4().hex}",
-                        metadata_={
-                            "source_type": "referral_referrer_bonus",
-                            "reason": "welcome_bonus",
-                        },
-                        created_at=now_utc() - timedelta(days=2),
-                    )
-
-                    # Initial quote, entitlement and paid value ledger
-                    init_quote = TariffQuote(
-                        public_id=uuid.uuid4(),
-                        user_id=db_user.id,
-                        target_tariff_version_id=tv_id,
-                        operation_type="purchase",
-                        current_paid_hours=0,
-                        current_paid_value_rub=Decimal(0),
-                        bonus_hours=0,
-                        amount_due_rub=Decimal(180),
-                        resulting_paid_hours=720,
-                        resulting_paid_value_rub=Decimal(180),
-                        resulting_bonus_hours=0,
-                        rounding_loss_hours=Decimal(0),
-                        rounding_loss_value_rub=Decimal(0),
-                        status="consumed",
-                        consumed_at=now_utc() - timedelta(days=2),
-                        purchase_notified_at=now_utc() - timedelta(days=2),
-                        expires_at=now_utc(),
-                        created_at=now_utc() - timedelta(days=2),
-                    )
-                    session.add(init_quote)
-                    await session.flush()
-
-                    session.add_all([entry_real, entry_bonus])
-
-                    # Create 1 Active Device (iPhone)
-                    prof = VPNProfile(
-                        user_id=db_user.id,
-                        server_id=server_id,
-                        device_name="iPhone 16 Pro",
-                        client_name="iPhone 16 Pro",
-                        peer_id="peer_sim_nl_iphone",
-                        raw_config=generate_mock_amnezia_vpn_uri(
-                            "iPhone 16 Pro", "peer_sim_nl_iphone"
-                        ),
-                        provisioning_status="active",
-                        desired_version=1,
-                        is_active=True,
-                        created_at=now_utc(),
-                    )
-                    session.add(prof)
-
-                    # Seed 3 Mock Referrals for this user
-                    ref1 = User(
-                        telegram_id=user.id + 101,
-                        username=f"friend_dmitry_{user.id}",
-                        first_name="Дмитрий",
-                        referred_by=user.id,
-                        created_at=now_utc() - timedelta(days=10),
-                    )
-                    ref2 = User(
-                        telegram_id=user.id + 102,
-                        username=f"friend_elena_{user.id}",
-                        first_name="Елена",
-                        referred_by=user.id,
-                        created_at=now_utc() - timedelta(days=5),
-                    )
-                    ref3 = User(
-                        telegram_id=user.id + 103,
-                        username=f"friend_sergey_{user.id}",
-                        first_name="Сергей",
-                        referred_by=user.id,
-                        created_at=now_utc() - timedelta(days=2),
-                    )
-                    session.add_all([ref1, ref2, ref3])
-
-                    logging.getLogger("simulation.seed").info(
-                        "✨ [AUTO-SEED] Initialized user @%s (ID %s) with %s₽ real + %s₽ bonus + 1 active device + 3 referrals.",
-                        db_user.username,
-                        user.id,
-                        self.real_balance,
-                        self.bonus_balance,
-                    )
-
-        return await handler(event, data)
-
+from scripts.simulate import service_mocks  # noqa: F401 (applies mock patching on import)
+from scripts.simulate.db_shims import UTCDateTime
+from scripts.simulate.db_targets import is_local_db_url
+from scripts.simulate.seeding import SimulationAutoSeedMiddleware
 
 # --- 5. MAIN SIMULATION RUNNER ---
 
@@ -666,7 +151,7 @@ async def run_simulation(args: argparse.Namespace):
         REDIS_PASSWORD="sim_redis_pass_123",
         ADMIN_IDS=admin_ids,
         YOOKASSA_SHOP_ID="mock_shop",
-        YOOKASSA_SECRET_KEY="live_sim_secret_key_123",
+        YOOKASSA_SECRET_KEY="TEST_ONLY_SIM_SECRET_KEY_123",
         YOOKASSA_RETURN_URL="https://t.me/{bot_username}?start=pay_success",
         YOOKASSA_WEBHOOK_PORT=8080,
         DOMAIN="sim.just1k.net",
@@ -928,6 +413,7 @@ async def run_simulation(args: argparse.Namespace):
         real_balance=Decimal(args.seed_balance_real),
         bonus_balance=Decimal(args.seed_balance_bonus),
         enabled=not args.no_auto_seed,
+        allow_admin_seed=args.allow_admin_seed,
     )
     dp.message.middleware(auto_seed)
     dp.callback_query.middleware(auto_seed)
@@ -1023,6 +509,11 @@ def main():
         help="Database URL (default: sqlite+aiosqlite:///:memory:)",
     )
     parser.add_argument(
+        "--allow-remote-db",
+        action="store_true",
+        help="Allow a non-local DATABASE_URL (explicit acknowledgment, off by default)",
+    )
+    parser.add_argument(
         "--redis-url",
         type=str,
         default=os.getenv("REDIS_URL"),
@@ -1046,6 +537,11 @@ def main():
         help="Disable automatic onboarding and seeding of new users",
     )
     parser.add_argument(
+        "--allow-admin-seed",
+        action="store_true",
+        help="Grant admin rights to connecting testers (dev-only, off by default)",
+    )
+    parser.add_argument(
         "--maintenance",
         action="store_true",
         help="Enable maintenance mode on startup",
@@ -1066,6 +562,14 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+
+    if not is_local_db_url(args.db_url) and not args.allow_remote_db:
+        print(
+            "ERROR: Refusing non-local DATABASE_URL without --allow-remote-db. "
+            "The simulator writes to the database and touches Telegram state.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     try:
         asyncio.run(run_simulation(args))
