@@ -97,12 +97,11 @@ async def request_delete_server(
         )
         return
 
-    result = await session.execute(
-        select(VPNProfile.id).where(
+    profiles_count = await session.scalar(
+        select(func.count(VPNProfile.id)).where(
             VPNProfile.server_id == server.id
         ),
-    )
-    profiles_count = len(result.all())
+    ) or 0
 
     wl_subs_count = await session.scalar(
         select(func.count(WhiteInternetSubscription.id)).where(

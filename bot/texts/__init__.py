@@ -76,6 +76,8 @@ _assert_no_key_collisions()
 
 _TEXT_KEYS = frozenset(name for name, value in globals().items() if name.isupper() and isinstance(value, str))
 
+_TEXTS: dict[str, str] = {name: globals()[name] for name in _TEXT_KEYS}
+
 
 def get_all_text_keys() -> set[str]:
     """Return the set of canonical text keys exposed by the facade."""
@@ -89,7 +91,7 @@ def get_text(key: str, default=None, **kwargs):
     "probe" API. Formatting errors are surfaced loudly instead of silently
     returning the unformatted template, so placeholder typos cannot hide.
     """
-    value = globals().get(key, default)
+    value = _TEXTS.get(key, default)
     if kwargs and isinstance(value, str):
         try:
             return value.format(**kwargs)
