@@ -1610,17 +1610,17 @@ cmd_doctor() {
 
         # 5.1 Проверка настроек Google Drive бэкапа
         local gdrive_check_enabled
-        gdrive_check_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '"' || echo "false")
+        gdrive_check_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "false")
         if [[ "$gdrive_check_enabled" == "true" ]]; then
             local rclone_conf="${PROJECT_DIR}/backups/rclone.conf"
             if [[ ! -f "$rclone_conf" ]]; then
                 error "Google Drive бэкап включен, но файл backups/rclone.conf не найден! Запустите 'just1kbot gdrive' для настройки."
             else
                 local conf_folder conf_token conf_perm conf_cid conf_csec
-                conf_folder=$(grep -E '^[[:space:]]*root_folder_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '"' || echo "")
+                conf_folder=$(grep -E '^[[:space:]]*root_folder_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
                 conf_token=$(grep -E '^[[:space:]]*token[[:space:]]*=' "$rclone_conf" 2>/dev/null || echo "")
-                conf_cid=$(grep -E '^[[:space:]]*client_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '"' || echo "")
-                conf_csec=$(grep -E '^[[:space:]]*client_secret[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '"' || echo "")
+                conf_cid=$(grep -E '^[[:space:]]*client_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+                conf_csec=$(grep -E '^[[:space:]]*client_secret[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
 
                 # Проверка прав доступа файла конфига (0600)
                 conf_perm=$(stat -c "%a" "$rclone_conf" 2>/dev/null || stat -f "%Lp" "$rclone_conf" 2>/dev/null || echo "600")
