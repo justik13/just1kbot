@@ -86,5 +86,86 @@ class WebhookRouteRegistrationTests(unittest.TestCase):
         self.assertIn("/health", registered_paths)
 
 
+class WebhookIPValidationTests(unittest.TestCase):
+    def test_official_yookassa_ips_are_trusted_by_default(self):
+        from bot.handlers.webhook import _is_yookassa_ip
+
+        self.assertTrue(_is_yookassa_ip("185.71.76.5"))
+        self.assertTrue(_is_yookassa_ip("185.71.77.20"))
+        self.assertTrue(_is_yookassa_ip("77.75.153.50"))
+        self.assertTrue(_is_yookassa_ip("77.75.154.200"))
+        self.assertTrue(_is_yookassa_ip("77.75.156.11"))
+        self.assertTrue(_is_yookassa_ip("77.75.156.35"))
+        self.assertTrue(_is_yookassa_ip("2a02:5180::1"))
+
+        self.assertFalse(_is_yookassa_ip("1.2.3.4"))
+        self.assertFalse(_is_yookassa_ip("198.51.100.1"))
+        self.assertFalse(_is_yookassa_ip("invalid-ip"))
+
+    def test_yookassa_extra_ips_dynamically_expand_trusted_ranges(self):
+        from unittest.mock import patch
+        from bot.handlers.webhook import _is_yookassa_ip
+
+        with patch("bot.handlers.webhook.get_settings") as mock_settings:
+            mock_settings.return_value.yookassa_allowed_ip_ranges = (
+                "185.71.76.0/27",
+                "198.51.100.5/32",
+                "203.0.113.0/24",
+            )
+            self.assertTrue(_is_yookassa_ip("198.51.100.5"))
+            self.assertTrue(_is_yookassa_ip("203.0.113.88"))
+            self.assertTrue(_is_yookassa_ip("185.71.76.10"))
+            self.assertFalse(_is_yookassa_ip("192.0.2.1"))
+
+    def test_yookassa_rejection_logs_security_guidance(self):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+        from bot.handlers.webhook import yookassa_webhook_handler
+
+        request = MagicMock()
+        request.remote = "198.51.100.99"
+        request.headers = {}
+
+        with patch("bot.handlers.webhook._get_real_ip", return_value="198.51.100.99"), \
+             patch("bot.handlers.webhook._is_yookassa_ip", return_value=False), \
+             patch("bot.handlers.webhook.logger.warning") as mock_log_warn:
+            resp = asyncio.run(yookassa_webhook_handler(request))
+            self.assertEqual(resp.status, 404)
+            mock_log_warn.assert_called_once()
+            log_msg = mock_log_warn.call_args[0][0]
+            self.assertIn("YOOKASSA_EXTRA_IPS in .env", log_msg)
+
+    def test_yookassa_extra_ips_validator(self):
+        from config.settings import Settings
+
+        # Valid space-separated IP and CIDR
+        res = Settings.validate_yookassa_extra_ips("198.51.100.5 203.0.113.0/24")
+        self.assertEqual(res, "198.51.100.5/32 203.0.113.0/24")
+
+        # Commas rejected to prevent breaking Caddyfile parser
+        with self.assertRaisesRegex(ValueError, "space-separated IP/CIDR"):
+            Settings.validate_yookassa_extra_ips("198.51.100.5, 203.0.113.0/24")
+
+        # Semicolons rejected
+        with self.assertRaisesRegex(ValueError, "space-separated IP/CIDR"):
+            Settings.validate_yookassa_extra_ips("198.51.100.5;203.0.113.0/24")
+
+        # Empty / whitespace
+        self.assertEqual(Settings.validate_yookassa_extra_ips(""), "")
+        self.assertEqual(Settings.validate_yookassa_extra_ips("   "), "")
+
+        # Wildcard 0.0.0.0/0 rejected
+        with self.assertRaisesRegex(ValueError, "wildcard allow-all"):
+            Settings.validate_yookassa_extra_ips("0.0.0.0/0")
+
+        # Wildcard ::/0 rejected
+        with self.assertRaisesRegex(ValueError, "wildcard allow-all"):
+            Settings.validate_yookassa_extra_ips("::/0")
+
+        # Invalid IP rejected
+        with self.assertRaisesRegex(ValueError, "invalid IP or CIDR"):
+            Settings.validate_yookassa_extra_ips("not-an-ip")
+
+
 if __name__ == "__main__":
     unittest.main()

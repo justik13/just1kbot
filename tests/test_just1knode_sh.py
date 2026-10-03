@@ -2458,8 +2458,9 @@ remove_traffic_watchdog_timer
         self.assertIn("ssl_reject_handshake on;", content)
         self.assertIn("server_tokens off;", content)
 
-        # 11. Amnezia API UFW rule restricts to bot_ip
-        self.assertIn('ufw allow from "$bot_ip" to any port "$public_port" proto tcp comment "just1knode amnezia api"', content)
+        # 11. Amnezia API UFW rule restricts to bot_ip via heal_node_firewall_and_stealth
+        self.assertIn("heal_node_firewall_and_stealth", content)
+        self.assertIn('ufw allow from "$bot_ip" to any port "$awg_port" proto tcp comment "just1knode amnezia api"', common_content)
 
     def test_detect_host_port80_container_filtering_behaviour(self):
         """Verify detect_host_port80_container correctly matches host TCP :80 bindings and ignores container-only :80 or UDP :80."""

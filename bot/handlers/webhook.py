@@ -62,9 +62,16 @@ def _validate_webhook_payload(payload: object) -> tuple[str, dict, str, str]:
 def _is_yookassa_ip(ip: str) -> bool:
     try:
         client_ip = ipaddress.ip_address(ip)
-        for cidr in YOOKASSA_IP_RANGES:
-            if client_ip in ipaddress.ip_network(cidr):
-                return True
+        try:
+            allowed_ranges = get_settings().yookassa_allowed_ip_ranges
+        except Exception:
+            allowed_ranges = YOOKASSA_IP_RANGES
+        for cidr in allowed_ranges:
+            try:
+                if client_ip in ipaddress.ip_network(cidr, strict=False):
+                    return True
+            except ValueError:
+                continue
         return False
     except ValueError:
         return False
@@ -86,8 +93,13 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     set_request_id(request_id)
     peer_ip = _get_real_ip(request)
     if not peer_ip or not _is_yookassa_ip(peer_ip):
-        logger.warning("[%s] Rejected webhook from unverified IP %s", request_id, peer_ip)
-        return web.Response(status=403, text="Forbidden")
+        logger.warning(
+            "[%s] [SECURITY] Rejected YooKassa webhook from unverified IP: %s. "
+            "If YooKassa added new webhook IP ranges, configure them via YOOKASSA_EXTRA_IPS in .env.",
+            request_id,
+            peer_ip,
+        )
+        return web.Response(status=404, text="Not Found")
     if request.content_length is not None and request.content_length > 262144:
         return web.Response(status=413, text="Payload too large")
     try:

@@ -277,9 +277,11 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         caddy_content = CADDYFILE.read_text(encoding="utf-8")
         caddy_ci_content = CADDYFILE_CI.read_text(encoding="utf-8")
 
-        expected_pattern = "@allowed_paths path /webhook/* /yookassa/* {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*"
+        expected_pattern = "@subscription_paths path {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*"
         self.assertIn(expected_pattern, caddy_content)
         self.assertIn(expected_pattern, caddy_ci_content)
+        self.assertIn("@yookassa_allowed", caddy_content)
+        self.assertIn("@yookassa_allowed", caddy_ci_content)
 
     def test_dynamic_profile_title_base64_header_encoding(self) -> None:
         """Web handler must dynamically Base64 encode Profile-Title header without hardcoded literal."""

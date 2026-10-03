@@ -1,6 +1,9 @@
+import ipaddress
 import re
 import unittest
 from pathlib import Path
+
+from config.constants import YOOKASSA_IP_RANGES
 
 
 class DockerComposeSecurityTests(unittest.TestCase):
@@ -61,10 +64,32 @@ class DockerComposeSecurityTests(unittest.TestCase):
 
     def test_caddy_ingress_routes_reject_unmatched_and_restrict_backend_proxy(self):
         root = Path(__file__).parents[1]
+        expected_yookassa_networks = {
+            ipaddress.ip_network(cidr, strict=False) for cidr in YOOKASSA_IP_RANGES
+        }
         for fname in ("Caddyfile", "Caddyfile.ci"):
             content = (root / fname).read_text(encoding="utf-8")
-            self.assertIn("@allowed_paths path /webhook/* /yookassa/*", content)
-            self.assertIn("@limited_body_paths path /health", content)
+            self.assertIn("@yookassa_allowed", content)
+
+            # SSOT Check: ensure Caddyfile remote_ip ranges match config.constants.YOOKASSA_IP_RANGES exactly
+            match = re.search(r"remote_ip\s+([0-9a-fA-F:\./ ]+)", content)
+            self.assertIsNotNone(match, f"remote_ip directive not found in {fname}")
+            raw_ips = match.group(1).split()
+            caddy_networks = {ipaddress.ip_network(ip, strict=False) for ip in raw_ips}
+            self.assertEqual(
+                caddy_networks,
+                expected_yookassa_networks,
+                f"Mismatch between {fname} and config.constants.YOOKASSA_IP_RANGES",
+            )
+            self.assertIn(
+                "{$YOOKASSA_EXTRA_IPS:127.0.0.1/32}",
+                content,
+                f"Missing YOOKASSA_EXTRA_IPS fallback token in {fname}",
+            )
+
+            self.assertIn("@subscription_paths path", content)
+            self.assertNotIn("@limited_body_paths path /health", content)
+            self.assertNotIn("path /health", content)
             self.assertIn('respond "Not Found" 404', content)
             # Ensure no catch-all reverse_proxy block exists
             self.assertNotIn("handle {\n\t\treverse_proxy bot:8080", content)
@@ -116,6 +141,10 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive"', example_caddy)
         self.assertIn('Permissions-Policy "camera=(), microphone=(), geolocation=()"', example_caddy)
 
+        # 6. Update applies Caddy configuration via zero-downtime safe reload
+        self.assertIn("caddy reload --config /etc/caddy/Caddyfile", cli_sh)
+        self.assertIn("Не удалось применить новую конфигурацию Caddy", cli_sh)
+
     def test_just1knode_origin_bot_ip_cli_support(self):
         root = Path(__file__).parents[1]
         just1knode_sh = (root / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
@@ -141,9 +170,45 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertGreater(verify_pos, new_allow_pos)
         self.assertGreater(del_old_pos, verify_pos)
 
-        # 4. Heal desired-state removes broad rules
-        self.assertIn('8444(/tcp)?\\s+ALLOW\\s+(Anywhere|0\\.0\\.0\\.0/0|::/0)', origin_sh)
-        self.assertIn('ufw delete allow 8444/tcp', origin_sh)
+        # 4. Heal desired-state in common_sh removes broad rules and origin_sh invokes it
+        self.assertIn("heal_node_firewall_and_stealth", origin_sh)
+        self.assertIn('8444(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\\.0\\.0\\.0/0|::/0)', common_sh)
+        self.assertIn('ufw delete allow 8444/tcp', common_sh)
+
+    def test_node_firewall_and_stealth_ssot_invariants(self):
+        root = Path(__file__).parents[1]
+        common_sh = (root / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        relay_sh = (root / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        core_sh = (root / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
+        amnezia_sh = (root / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
+        cli_sh = (root / "scripts" / "cli.sh").read_text(encoding="utf-8")
+        setup_sh = (root / "scripts" / "setup.sh").read_text(encoding="utf-8")
+
+        # 1. common.sh defines heal_node_firewall_and_stealth and protects SSH access
+        self.assertIn("heal_node_firewall_and_stealth()", common_sh)
+        self.assertIn("detect_active_sshd_ports()", common_sh)
+        self.assertIn("is_ssh_port()", common_sh)
+        self.assertIn('comment "just1knode ssh access"', common_sh)
+        # Ensure no heuristic TCP/access.log sniffing remains
+        self.assertNotIn("detected_orig_ip", common_sh)
+        self.assertNotIn("detected_ip=\"$(ss -tn", common_sh)
+
+        # 2. relay.sh never adds awg_port to public extra_ufw_ports
+        self.assertNotIn('extra_ufw_ports+=("${existing_awg_port}/tcp")', relay_sh)
+        self.assertIn("heal_node_firewall_and_stealth", relay_sh)
+
+        # 3. core.sh invokes heal_node_firewall_and_stealth during update_node_post
+        self.assertIn("heal_node_firewall_and_stealth", core_sh)
+
+        # 4. amnezia.sh fails closed if bot_ip is missing and invokes heal
+        self.assertNotIn('ufw allow "${public_port}/tcp" comment "just1knode amnezia api"', amnezia_sh)
+        self.assertIn("heal_node_firewall_and_stealth", amnezia_sh)
+
+        # 5. cli.sh and setup.sh include IPv6 leak protection sysctl and safe caddy reload
+        self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", cli_sh)
+        self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", setup_sh)
+        self.assertIn("caddy reload --config /etc/caddy/Caddyfile", cli_sh)
+        self.assertNotIn("caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || docker restart", cli_sh)
 
     def test_backup_service_google_drive_configuration_and_isolation(self):
         root = Path(__file__).parents[1]

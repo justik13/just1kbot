@@ -934,24 +934,11 @@ EOF
         return 1
     fi
 
-    # 10. Открытие порта в UFW если фаервол активен (с привязкой к BOT_IP при наличии)
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
-        ufw delete allow "${public_port}/tcp" >/dev/null 2>&1 || true
-        ufw delete allow "${public_port}" >/dev/null 2>&1 || true
-        if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]] && validate_ip "$bot_ip"; then
-            ufw allow from "$bot_ip" to any port "$public_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1 || true
-            log "Фаервол UFW: доступ к API AmneziaWG (порт ${public_port}) открыт строго для BOT_IP (${bot_ip})"
-        else
-            ufw allow "${public_port}/tcp" comment "just1knode amnezia api" >/dev/null 2>&1 || true
-            warn "Фаервол UFW: BOT_IP не указан. Порт ${public_port}/tcp открыт для всех IP."
-        fi
-    fi
-
-    # 11. Активация защиты от абуза (SMTP 25 + BitTorrent L7)
+    # 10. Активация защиты от абуза (SMTP 25 + BitTorrent L7)
     apply_amnezia_abuse_protection
     set_state_val "abuse_protection" "enabled"
 
-    # 12. Обновление состояния и определение мультироли (Coexistence)
+    # 11. Обновление состояния и определение мультироли (Coexistence)
     if [[ "$prev_role" == "relay" || "$prev_role" == "dual" ]]; then
         set_state_val "role" "dual"
         log "Режим узла обновлен: DUAL (Совмещенный Relay + AmneziaWG)"
@@ -969,6 +956,9 @@ EOF
     if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]] && validate_ipv4 "$bot_ip"; then
         set_state_val "bot_ip" "$bot_ip"
     fi
+
+    # 12. Эталонная настройка фаервола и системного стелса (SSOT, Fail-Closed, Zero-Lockout SSH)
+    heal_node_firewall_and_stealth
 
     # Вывод карточки подключения
     show_amnezia_bot_credentials
@@ -1246,10 +1236,10 @@ uninstall_amnezia_component() {
     pub_port="$(get_state_val "awg_port" "${AMNEZIA_PUBLIC_PORT}")"
     bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
     if command -v ufw >/dev/null 2>&1; then
-        if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" && -n "$pub_port" && "$pub_port" != "-" ]]; then
-            ufw delete allow from "$bot_ip" to any port "$pub_port" proto tcp >/dev/null 2>&1 || true
-        fi
-        if [[ -n "$pub_port" && "$pub_port" != "-" ]]; then
+        if [[ -n "$pub_port" && "$pub_port" != "-" ]] && ! is_ssh_port "$pub_port"; then
+            if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]]; then
+                ufw delete allow from "$bot_ip" to any port "$pub_port" proto tcp >/dev/null 2>&1 || true
+            fi
             ufw delete allow "${pub_port}/tcp" >/dev/null 2>&1 || true
             ufw delete allow "${pub_port}" >/dev/null 2>&1 || true
         fi

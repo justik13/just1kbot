@@ -120,10 +120,15 @@ configure_safe_ufw() {
         apt-get install -y -qq ufw
     fi
 
-    # Детектируем порт SSH (Zero-Lockout гарантия)
+    # Детектируем порт SSH (Zero-Lockout гарантия: живые сокеты ядра ss -> sshd -T -> sshd_config)
     local ssh_port=22
     local detected
-    detected="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
+    if command -v ss >/dev/null 2>&1; then
+        detected="$(ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"' | awk '{print $4}' | rev | cut -d: -f1 | rev | grep -E '^[0-9]+$' | head -n 1 || true)"
+    fi
+    if [[ -z "$detected" ]] && command -v sshd >/dev/null 2>&1; then
+        detected="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
+    fi
     if [[ -z "$detected" ]]; then
         detected="$(grep -E -h "^Port " /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
     fi
@@ -134,6 +139,15 @@ configure_safe_ufw() {
     if ! ufw allow "$ssh_port/tcp" >/dev/null 2>&1; then
         error "КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть SSH-порт $ssh_port/tcp в UFW! Активация фаервола отменена во избежание потери доступа."
         return 1
+    fi
+
+    # Дополнительно гарантируем открытие всех портов, на которых слушает sshd
+    if command -v ss >/dev/null 2>&1; then
+        while read -r extra_p; do
+            if [[ -n "$extra_p" && "$extra_p" =~ ^[0-9]+$ && "$extra_p" != "$ssh_port" ]]; then
+                ufw allow "$extra_p/tcp" >/dev/null 2>&1 || true
+            fi
+        done < <(ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"' | awk '{print $4}' | rev | cut -d: -f1 | rev | sort -u)
     fi
 
     for p in "${ports[@]}"; do
@@ -332,6 +346,183 @@ EOF
     icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     if [[ "$icmp_curr" != "1" ]]; then
         warn "Параметр net.ipv4.icmp_echo_ignore_all не применился в ядре ноды (проверьте права или ограничения контейнера)."
+    fi
+}
+
+# Определение всех активных портов демона SSH (Zero-Lockout стандарт)
+# Игнорирует сокеты, слушающие исключительно loopback (127.0.0.1 или ::1)
+detect_active_sshd_ports() {
+    local ports=()
+    local p
+    if command -v ss >/dev/null 2>&1; then
+        while read -r line; do
+            # Строка вида: 0.0.0.0:22 или [::]:22
+            local laddr lport
+            laddr="$(echo "$line" | awk '{print $4}')"
+            lport="$(echo "$laddr" | rev | cut -d: -f1 | rev)"
+            if [[ -n "$lport" && "$lport" =~ ^[0-9]+$ ]]; then
+                # Пропускаем loopback-only сокеты (127.x.x.x или [::1])
+                if [[ "$laddr" =~ ^127\. || "$laddr" =~ ^\[::1\] || "$laddr" =~ ^::1 ]]; then
+                    continue
+                fi
+                ports+=("$lport")
+            fi
+        done < <(ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"')
+    fi
+
+    if [[ ${#ports[@]} -eq 0 ]] && command -v sshd >/dev/null 2>&1; then
+        p="$(sshd -T 2>/dev/null | grep -i "^port " | awk '{print $2}' | head -n 1 || true)"
+        [[ -n "$p" && "$p" =~ ^[0-9]+$ ]] && ports+=("$p")
+    fi
+
+    if [[ ${#ports[@]} -eq 0 ]]; then
+        p="$(grep -E -h "^Port " /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}' | head -n 1 || true)"
+        [[ -n "$p" && "$p" =~ ^[0-9]+$ ]] && ports+=("$p")
+    fi
+
+    [[ ${#ports[@]} -eq 0 ]] && ports+=("22")
+
+    printf "%s\n" "${ports[@]}" | sort -u
+}
+
+# Проверка: слушает ли демон SSH на указанном порту
+is_ssh_port() {
+    local check_p="$1"
+    [[ -z "$check_p" ]] && return 1
+    while read -r active_sp; do
+        [[ "$active_sp" == "$check_p" ]] && return 0
+    done < <(detect_active_sshd_ports 2>/dev/null || true)
+    return 1
+}
+
+# Автоматическое приведение периметра UFW и системных настроек к эталонному закрытому состоянию (Stealth)
+heal_node_firewall_and_stealth() {
+    # 1. Применяем системное скрытие (IPv6 leak protection + ICMP stealth)
+    apply_node_sysctl_hardening
+
+    if ! command -v ufw >/dev/null 2>&1 || ! ufw status 2>/dev/null | grep -qi "Status: active"; then
+        return 0
+    fi
+
+    local role
+    role="$(get_state_val "role" "")"
+
+    # Гарантия базовой политики фаервола: запрет входящих по умолчанию
+    if ! ufw status verbose 2>/dev/null | grep -qi "Default: deny (incoming)"; then
+        ufw default deny incoming >/dev/null 2>&1 || true
+    fi
+    ufw default allow outgoing >/dev/null 2>&1 || true
+
+    # 2. Гарантия защиты SSH (Zero-Lockout стандарт: подтверждаем все активные публичные сокеты SSH)
+    # Важно: не расширяем уже существующие restricted-правила (с привязкой к IP) до Anywhere!
+    local ssh_live_ports=()
+    while read -r sp; do
+        [[ -n "$sp" ]] && ssh_live_ports+=("$sp")
+    done < <(detect_active_sshd_ports)
+
+    for sp in "${ssh_live_ports[@]}"; do
+        # Если порт SSH уже разрешён в UFW (хоть с конкретного IP, хоть отовсюду) — НЕ создаём дублирующее Anywhere-правило!
+        if ! ufw status 2>/dev/null | grep -E "(^|[[:space:]])${sp}(/tcp)?[[:space:]]+ALLOW" -q; then
+            if ! ufw allow "$sp/tcp" comment "just1knode ssh access" >/dev/null 2>&1; then
+                error "КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть SSH-порт $sp/tcp в UFW! Зачистка фаервола отменена во избежание потери доступа."
+                return 1
+            fi
+            log "Фаервол UFW: гарантирован доступ к порту SSH ($sp/tcp)."
+        fi
+    done
+
+    # 3. AmneziaWG API (порты для ролей awg, dual, либо при наличии активного конфига amnezia)
+    local is_awg_node=0
+    if [[ "$role" == "awg" || "$role" == "dual" || -f "/etc/nginx/sites-enabled/just1k-amnezia.conf" ]]; then
+        is_awg_node=1
+    fi
+
+    if [[ $is_awg_node -eq 1 ]]; then
+        local awg_port
+        awg_port="$(get_state_val "awg_port" "8443")"
+        [[ -z "$awg_port" || "$awg_port" == "-" ]] && awg_port="8443"
+
+        # Zero-Lockout: никогда не удаляем порт, если на нем слушает SSH
+        if ! is_ssh_port "$awg_port"; then
+            # Устраняем уязвимость: удаляем публичный доступ к порту Amnezia API
+            if ufw status 2>/dev/null | grep -E "${awg_port}(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                ufw delete allow "${awg_port}/tcp" >/dev/null 2>&1 || true
+                ufw delete allow "${awg_port}" >/dev/null 2>&1 || true
+                warn "Фаервол UFW: устранена уязвимость — удалено публичное правило для порта API AmneziaWG (${awg_port})."
+            fi
+        fi
+
+        # Проверка доверенного BOT_IP из state.json (Fail-Closed, без эвристического угадывания)
+        local bot_ip
+        bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+        if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" && "$bot_ip" != "-" ]] && validate_ipv4 "$bot_ip"; then
+            if ! ufw status 2>/dev/null | grep -F "$bot_ip" | grep -q "$awg_port"; then
+                if ufw allow from "$bot_ip" to any port "$awg_port" proto tcp comment "just1knode amnezia api" >/dev/null 2>&1; then
+                    log "Фаервол UFW: подтвержден доступ к порту ${awg_port} строго для BOT_IP (${bot_ip})"
+                fi
+            fi
+        else
+            warn "BOT_IP не задан в state.json. Порт Amnezia API (${awg_port}) закрыт от мира (Fail-Closed)."
+        fi
+    fi
+
+    # 4. Origin API (роль origin)
+    if [[ "$role" == "origin" ]]; then
+        local origin_bot_ip
+        origin_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
+
+        # Zero-Lockout: не удаляем 8444 или 8443, если на них слушает SSH
+        if ! is_ssh_port "8444"; then
+            if ufw status 2>/dev/null | grep -E "8444(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                ufw delete allow 8444/tcp >/dev/null 2>&1 || true
+                ufw delete allow 8444 >/dev/null 2>&1 || true
+                warn "Фаервол UFW: устранена уязвимость — удалено глобальное правило на порт 8444."
+            fi
+        fi
+        if ! is_ssh_port "8443"; then
+            if ufw status 2>/dev/null | grep -E "8443(/tcp)?[[:space:]]+ALLOW" -q; then
+                ufw delete allow 8443/tcp >/dev/null 2>&1 || true
+                ufw delete allow 8443 >/dev/null 2>&1 || true
+                warn "Фаервол UFW: устранена уязвимость — удалено устаревшее правило на порт 8443."
+            fi
+        fi
+
+        # Проверка доверенного BOT_IP из state.json (Fail-Closed)
+        if [[ -n "$origin_bot_ip" && "$origin_bot_ip" != "any" && "$origin_bot_ip" != "-" ]] && validate_ipv4 "$origin_bot_ip"; then
+            if ! ufw status 2>/dev/null | grep -F "$origin_bot_ip" | grep -q "8444"; then
+                if ufw allow from "$origin_bot_ip" to any port 8444 proto tcp comment "just1knode origin api" >/dev/null 2>&1; then
+                    log "Фаервол UFW: подтвержден доступ к порту 8444 для BOT_IP (${origin_bot_ip})"
+                fi
+            fi
+        else
+            warn "BOT_IP не задан в state.json. Порт Origin API (8444) закрыт от мира (Fail-Closed)."
+        fi
+    fi
+
+    # 5. Relay туннель (роль relay или dual)
+    if [[ "$role" == "relay" || "$role" == "dual" ]]; then
+        local relay_port origin_ip
+        relay_port="$(get_state_val "relay_port" 2>/dev/null || true)"
+        origin_ip="$(get_state_val "origin_ip" 2>/dev/null || true)"
+
+        if [[ -n "$relay_port" && "$relay_port" =~ ^[0-9]+$ ]]; then
+            # Zero-Lockout: не удаляем правило, если на нем слушает SSH
+            if ! is_ssh_port "$relay_port"; then
+                if ufw status 2>/dev/null | grep -E "${relay_port}(/tcp)?[[:space:]]+ALLOW[[:space:]]+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
+                    ufw delete allow "${relay_port}/tcp" >/dev/null 2>&1 || true
+                    ufw delete allow "${relay_port}" >/dev/null 2>&1 || true
+                    warn "Фаервол UFW: устранена уязвимость — удалено публичное правило на порт Relay туннеля (${relay_port})."
+                fi
+            fi
+
+            if [[ -n "$origin_ip" ]] && validate_ipv4 "$origin_ip"; then
+                if ! ufw status 2>/dev/null | grep -F "$origin_ip" | grep -q "$relay_port"; then
+                    if ufw allow from "$origin_ip" to any port "$relay_port" proto tcp comment "just1knode relay tunnel" >/dev/null 2>&1; then
+                        log "Фаервол UFW: подтвержден доступ к Relay порту ${relay_port} строго для ORIGIN_IP (${origin_ip})"
+                    fi
+                fi
+            fi
+        fi
     fi
 }
 

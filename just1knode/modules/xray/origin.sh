@@ -188,13 +188,15 @@ install_xray_origin_node() {
     fi
 
     if [[ -n "$bot_domain" ]]; then
-        info "Проверка связи с ботом через эндпоинт https://${bot_domain}/health..."
+        info "Проверка связи с ботом по HTTPS (https://${bot_domain}/sub/wl/ping)..."
         local health_code
-        health_code="$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "https://${bot_domain}/health" 2>/dev/null || echo "000")"
+        health_code="$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "https://${bot_domain}/sub/wl/ping" 2>/dev/null || echo "000")"
         if [[ "$health_code" == "200" ]]; then
-            log "Эндпоинт бота https://${bot_domain}/health доступен (HTTP 200)."
+            log "Эндпоинт бота https://${bot_domain}/sub/wl/ping доступен (HTTP 200, backend и TLS валидны)."
+        elif [[ "$health_code" == "404" ]]; then
+            log "Эндпоинт бота https://${bot_domain} доступен (HTTP 404, TLS валиден)."
         else
-            warn "Эндпоинт бота https://${bot_domain}/health вернул код: $health_code (или недоступен). Проверьте DNS, валидность TLS-сертификата (редиректы запрещены) и статус бота."
+            warn "Эндпоинт бота https://${bot_domain}/sub/wl/ping вернул код: $health_code (или недоступен). Проверьте DNS, валидность TLS-сертификата (редиректы запрещены) и статус бота."
         fi
     fi
 
@@ -686,19 +688,6 @@ EOF
     fi
     systemctl reload nginx
 
-    # Фаервол: порт 8444 открывается СТРОГО для BOT_IP
-    configure_safe_ufw "80/tcp" "443/tcp"
-    ufw delete allow 8444/tcp >/dev/null 2>&1 || true
-    ufw delete allow 8444 >/dev/null 2>&1 || true
-    ufw delete allow 8443/tcp >/dev/null 2>&1 || true
-    ufw delete allow 8443 >/dev/null 2>&1 || true
-    if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]]; then
-        ufw allow from "$bot_ip" to any port 8444 proto tcp || true
-    else
-        ufw allow 8444/tcp || true
-        warn "BOT_IP не указан. Порт 8444 открыт для всех IP."
-    fi
-
     set_state_val "role" "origin"
     set_state_val "domain" "$domain"
     set_state_val "cdn_domain" "$cdn_domain"
@@ -707,6 +696,10 @@ EOF
     set_state_val "secret_base_path" "$secret_path"
     set_state_val "api_url" "https://${domain}:8444"
     set_state_val "api_key" "$api_key"
+
+    # Фаервол и системный стелс: единый SSOT (Fail-Closed, Zero-Lockout SSH)
+    configure_safe_ufw "80/tcp" "443/tcp"
+    heal_node_firewall_and_stealth
 
     title "УСТАНОВКА ORIGIN УЗЛА УСПЕШНО ЗАВЕРШЕНА!"
     echo -e "${BOLD}Данные для добавления Origin в Telegram-боте (/admin):${NC}"
@@ -779,9 +772,11 @@ set_origin_bot_ip() {
 
     # Проверка no-op (если IP совпадает и правило уже активно)
     if [[ "$new_bot_ip" == "$old_bot_ip" ]] && ufw status 2>/dev/null | grep -F "$new_bot_ip" | grep -q "$target_port"; then
-        ufw delete allow "${target_port}/tcp" >/dev/null 2>&1 || true
-        ufw delete allow "${target_port}" >/dev/null 2>&1 || true
-        if [[ "$role" == "origin" ]]; then
+        if ! is_ssh_port "${target_port}"; then
+            ufw delete allow "${target_port}/tcp" >/dev/null 2>&1 || true
+            ufw delete allow "${target_port}" >/dev/null 2>&1 || true
+        fi
+        if [[ "$role" == "origin" ]] && ! is_ssh_port "8443"; then
             ufw delete allow 8443/tcp >/dev/null 2>&1 || true
             ufw delete allow 8443 >/dev/null 2>&1 || true
         fi
@@ -792,7 +787,7 @@ set_origin_bot_ip() {
 
     log "Применение нового правила фаервола UFW для ${role_descr} ($new_bot_ip)..."
     # Шаг 1: Добавляем новое правило ПЕРВЫМ (не ломая старый доступ)
-    if ! ufw allow from "$new_bot_ip" to any port "$target_port" proto tcp; then
+    if ! ufw allow from "$new_bot_ip" to any port "$target_port" proto tcp comment "just1knode origin api"; then
         release_just1knode_lock
         error "Сбой выполнения команды 'ufw allow' для IP $new_bot_ip. Предыдущие правила сохранены."
         return 1
@@ -815,12 +810,15 @@ set_origin_bot_ip() {
     fi
 
     # Шаг 4: Только после успешной фиксации состояния удаляем старое и широкие правила
-    if [[ -n "$old_bot_ip" && "$old_bot_ip" != "$new_bot_ip" && "$old_bot_ip" != "any" && "$old_bot_ip" != "-" ]]; then
-        ufw delete allow from "$old_bot_ip" to any port "$target_port" proto tcp >/dev/null 2>&1 || true
+    # Zero-Lockout: не удаляем старое правило, если целевой порт является портом SSH
+    if ! is_ssh_port "${target_port}"; then
+        if [[ -n "$old_bot_ip" && "$old_bot_ip" != "$new_bot_ip" && "$old_bot_ip" != "any" && "$old_bot_ip" != "-" ]]; then
+            ufw delete allow from "$old_bot_ip" to any port "$target_port" proto tcp >/dev/null 2>&1 || true
+        fi
+        ufw delete allow "${target_port}/tcp" >/dev/null 2>&1 || true
+        ufw delete allow "${target_port}" >/dev/null 2>&1 || true
     fi
-    ufw delete allow "${target_port}/tcp" >/dev/null 2>&1 || true
-    ufw delete allow "${target_port}" >/dev/null 2>&1 || true
-    if [[ "$role" == "origin" ]]; then
+    if [[ "$role" == "origin" ]] && ! is_ssh_port "8443"; then
         ufw delete allow 8443/tcp >/dev/null 2>&1 || true
         ufw delete allow 8443 >/dev/null 2>&1 || true
     fi
@@ -1530,34 +1528,8 @@ except Exception:
         rm -f "${NGINX_CONF_DIR}/sites-enabled/default" 2>/dev/null || true
     fi
 
-    # Системное отключение IPv6 и ICMP Echo (стелс от сканеров)
-    apply_node_sysctl_hardening
-
-    # Фаервол: принудительное приведение портов к desired state (8444 для BOT_IP, удаление 8443)
-    local heal_bot_ip
-    heal_bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
-        # 1. Удаление глобальных уязвимых правил (ALLOW Anywhere на 8444)
-        if ufw status 2>/dev/null | grep -E "8444(/tcp)?\s+ALLOW\s+(Anywhere|0\.0\.0\.0/0|::/0)" -q; then
-            ufw delete allow 8444/tcp >/dev/null 2>&1 || true
-            ufw delete allow 8444 >/dev/null 2>&1 || true
-            warn "Фаервол UFW: устранена уязвимость — удалено глобальное правило на порт 8444."
-        fi
-        # 2. Удаление устаревших правил на порт 8443
-        if ufw status 2>/dev/null | grep -E "8443(/tcp)?\s+ALLOW" -q; then
-            ufw delete allow 8443/tcp >/dev/null 2>&1 || true
-            ufw delete allow 8443 >/dev/null 2>&1 || true
-            warn "Фаервол UFW: устранена уязвимость — удалено устаревшее правило на порт 8443."
-        fi
-        # 3. Обеспечение точного правила для текущего BOT_IP
-        if [[ -n "$heal_bot_ip" && "$heal_bot_ip" != "any" && "$heal_bot_ip" != "-" ]] && validate_ipv4 "$heal_bot_ip"; then
-            if ! ufw status 2>/dev/null | grep -F "$heal_bot_ip" | grep -q "8444"; then
-                if ufw allow from "$heal_bot_ip" to any port 8444 proto tcp 2>/dev/null; then
-                    log "Фаервол UFW: подтвержден доступ к порту 8444 для BOT_IP ($heal_bot_ip)"
-                fi
-            fi
-        fi
-    fi
+    # Системное отключение IPv6, ICMP Echo и зачистка периметра (стелс от сканеров)
+    heal_node_firewall_and_stealth
 
     # Валидация Xray и Nginx
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then

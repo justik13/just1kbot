@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     YOOKASSA_WEBHOOK_PORT: int
     DOMAIN: str
     SSL_EMAIL: str
+    YOOKASSA_EXTRA_IPS: str = ""
 
     # Removed legacy and unsupported settings are declared so stale .env files fail fast.
     AMNEZIA_API_URL: str | None = None
@@ -297,6 +298,61 @@ class Settings(BaseSettings):
         ):
             raise ValueError("SUPPORT_USERNAME must be a real Telegram username")
         return username
+
+    @field_validator("YOOKASSA_EXTRA_IPS", mode="before")
+    @classmethod
+    def validate_yookassa_extra_ips(cls, value: Any) -> str:
+        if not value or not isinstance(value, str):
+            return ""
+        normalized = value.strip().strip("'").strip('"')
+        if not normalized:
+            return ""
+        import ipaddress
+
+        # Caddy remote_ip matches arguments separated strictly by whitespace.
+        # Reject commas/semicolons explicitly so .env doesn't break Caddyfile syntax.
+        if "," in normalized or ";" in normalized:
+            raise ValueError(
+                "YOOKASSA_EXTRA_IPS must be space-separated IP/CIDR ranges without commas or semicolons (e.g. '185.71.76.0/27 77.75.153.0/25')"
+            )
+
+        tokens = [
+            token.strip()
+            for token in normalized.split()
+            if token.strip()
+        ]
+        valid_ranges: list[str] = []
+        for token in tokens:
+            try:
+                net = ipaddress.ip_network(token, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"YOOKASSA_EXTRA_IPS contains invalid IP or CIDR '{token}': {exc}"
+                ) from exc
+
+            # Strict security: deny wildcard / allow-all subnets
+            if (net.version == 4 and net.prefixlen == 0) or (
+                net.version == 6 and net.prefixlen == 0
+            ):
+                raise ValueError(
+                    f"YOOKASSA_EXTRA_IPS cannot contain wildcard allow-all network '{token}'"
+                )
+            valid_ranges.append(str(net))
+
+        return " ".join(valid_ranges)
+
+    @property
+    def yookassa_allowed_ip_ranges(self) -> tuple[str, ...]:
+        from config.constants import YOOKASSA_IP_RANGES
+
+        if not self.YOOKASSA_EXTRA_IPS:
+            return YOOKASSA_IP_RANGES
+        extra = [
+            item.strip()
+            for item in self.YOOKASSA_EXTRA_IPS.split()
+            if item.strip()
+        ]
+        return YOOKASSA_IP_RANGES + tuple(extra)
 
 
 @lru_cache
