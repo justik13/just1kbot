@@ -581,6 +581,9 @@ except Exception:
                 -subj "/CN=invalid" 2>/dev/null || true
             chmod 600 "${dummy_dir}/dummy.key" 2>/dev/null || true
         fi
+        if [[ -f "${dummy_dir}/dummy.key" ]]; then
+            chmod 600 "${dummy_dir}/dummy.key" 2>/dev/null || warn "Не удалось выставить права 0600 на ${dummy_dir}/dummy.key"
+        fi
         catchall_ssl_block="server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
@@ -1429,6 +1432,9 @@ except Exception:
                 -keyout "${heal_dummy_dir}/dummy.key" -out "${heal_dummy_dir}/dummy.crt" \
                 -subj "/CN=invalid" 2>/dev/null || true
             chmod 600 "${heal_dummy_dir}/dummy.key" 2>/dev/null || true
+        fi
+        if [[ -f "${heal_dummy_dir}/dummy.key" ]]; then
+            chmod 600 "${heal_dummy_dir}/dummy.key" 2>/dev/null || warn "Не удалось выставить права 0600 на ${heal_dummy_dir}/dummy.key"
         fi
 
         python3 -c "

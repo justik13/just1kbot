@@ -741,6 +741,9 @@ EOF
                 -subj "/CN=${api_domain}" 2>/dev/null || true
             chmod 600 "$key_file" 2>/dev/null || true
         fi
+        if [[ -f "$key_file" ]]; then
+            chmod 600 "$key_file" 2>/dev/null || warn "Не удалось выставить права 0600 на $key_file"
+        fi
     fi
 
     # Настройка зоны rate-limiting в Nginx conf.d
@@ -786,6 +789,9 @@ except Exception:
                     -keyout "${dummy_dir}/dummy.key" -out "${dummy_dir}/dummy.crt" \
                     -subj "/CN=invalid" 2>/dev/null || true
                 chmod 600 "${dummy_dir}/dummy.key" 2>/dev/null || true
+            fi
+            if [[ -f "${dummy_dir}/dummy.key" ]]; then
+                chmod 600 "${dummy_dir}/dummy.key" 2>/dev/null || warn "Не удалось выставить права 0600 на ${dummy_dir}/dummy.key"
             fi
             catchall_ssl_block="server {
     listen ${public_port} ssl default_server;
@@ -1000,7 +1006,7 @@ show_amnezia_bot_credentials() {
     echo -e "  🔗 API URL:            ${CYAN}${api_url}${NC}"
     echo -e "  🤖 BOT IP (защита):    ${CYAN}${bot_ip}${NC}"
     echo -e "  🔑 API Ключ:           ${YELLOW}${api_key}${NC}"
-    echo -e "  🩺 Проверка API:       API_KEY=<ключ> curl -k -H \"x-api-key: \$API_KEY\" ${api_url}/healthz (ключ не вставлять в командную строку)\n"
+    echo -e "  🩺 Проверка API:       export API_KEY='<вставь ключ>'; curl -k -H \"x-api-key: \$API_KEY\" ${api_url}/healthz\n"
     if [[ "$bot_ip" == "-" || "$bot_ip" == "any" ]]; then
         echo -e "  ${YELLOW}💡 Рекомендация: ограничьте доступ к API только для IP бота: just1knode set-bot-ip <IP>${NC}\n"
     fi
