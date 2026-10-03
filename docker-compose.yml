@@ -201,6 +201,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_USER: ${POSTGRES_USER:-just1kbot}
       POSTGRES_DB: ${POSTGRES_DB:-just1kbot_bot}
+      GDRIVE_BACKUP_ENABLED: ${GDRIVE_BACKUP_ENABLED:-false}
+      GDRIVE_FOLDER_ID: ${GDRIVE_FOLDER_ID:-}
+      GDRIVE_SA_FILE: ${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}
+      GDRIVE_RETENTION_DAYS: ${GDRIVE_RETENTION_DAYS:-14}
     depends_on:
       db:
         condition: service_healthy

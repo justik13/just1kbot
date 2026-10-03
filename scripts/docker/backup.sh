@@ -11,7 +11,7 @@ ENCRYPTED_FILE="${BACKUP_FILE}.age"
 mkdir -p "$BACKUP_DIR"
 
 # Plaintext and partial encrypted dumps are always removed on failure/interruption.
-trap 'rm -f "$BACKUP_FILE" "${ENCRYPTED_FILE}.tmp"' EXIT
+trap 'rm -f "$BACKUP_FILE" "${ENCRYPTED_FILE}.tmp" /tmp/rclone.conf' EXIT
 
 if [ -z "${BACKUP_AGE_RECIPIENT:-}" ]; then
     echo "ERROR: BACKUP_AGE_RECIPIENT is not set. Backup cannot be encrypted."
@@ -54,6 +54,40 @@ if [ -n "${BACKUP_REMOTE_URI:-}" ]; then
     fi
     curl "${CURL_ARGS[@]}" "$REMOTE_URL"
     echo "Remote backup upload завершён."
+fi
+
+# Optional automated upload to Google Drive via rclone (Google Service Account).
+# The encrypted artifact is uploaded; plaintext never leaves this container.
+GDRIVE_ENABLED="${GDRIVE_BACKUP_ENABLED:-false}"
+if [[ "$GDRIVE_ENABLED" == "true" ]] || [[ -n "${GDRIVE_FOLDER_ID:-}" && -f "${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}" ]]; then
+    GDRIVE_SA="${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}"
+    if [[ ! -f "$GDRIVE_SA" && -f "/backups/$(basename "$GDRIVE_SA")" ]]; then
+        GDRIVE_SA="/backups/$(basename "$GDRIVE_SA")"
+    fi
+
+    if [[ -f "$GDRIVE_SA" && -n "${GDRIVE_FOLDER_ID:-}" ]]; then
+        echo "Загрузка encrypted backup в Google Drive (rclone)..."
+        cat <<EOF > /tmp/rclone.conf
+[gdrive]
+type = drive
+scope = drive.file
+service_account_file = ${GDRIVE_SA}
+root_folder_id = ${GDRIVE_FOLDER_ID}
+EOF
+        chmod 600 /tmp/rclone.conf
+
+        if rclone --config /tmp/rclone.conf copy "$ENCRYPTED_FILE" gdrive: --retries 3 --retries-sleep 2s --stats 0; then
+            echo "Google Drive upload завершён: $(basename "$ENCRYPTED_FILE")"
+            RETENTION="${GDRIVE_RETENTION_DAYS:-14}"
+            echo "Очистка устаревших бэкапов в Google Drive (старше ${RETENTION} дн.)..."
+            rclone --config /tmp/rclone.conf delete --min-age "${RETENTION}d" gdrive: --quiet || true
+        else
+            echo "ПРЕДУПРЕЖДЕНИЕ: Ошибка загрузки бэкапа в Google Drive." >&2
+        fi
+        rm -f /tmp/rclone.conf
+    else
+        echo "ПРЕДУПРЕЖДЕНИЕ: Google Drive включен, но не найден файл SA (${GDRIVE_SA}) или не задан GDRIVE_FOLDER_ID." >&2
+    fi
 fi
 
 echo "Backup создан: ${ENCRYPTED_FILE}"

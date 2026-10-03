@@ -1042,8 +1042,13 @@ cmd_backup() {
     mkdir -p backups
     chmod 700 backups 2>/dev/null || true
 
-    # Способ 1: Прямой дамп из работающего контейнера db + шифрование age (быстро и надежно)
-    if command -v age >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/.env" ]]; then
+    # Способ 1: Прямой дамп из работающего контейнера db + шифрование age (быстро и надежно).
+    # Если настроена удаленная выгрузка (Google Drive или BACKUP_REMOTE_URI), используется Способ 2 (контейнер backup с rclone).
+    local gdrive_enabled remote_uri
+    gdrive_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    remote_uri=$(grep -E "^BACKUP_REMOTE_URI=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+
+    if [[ "$gdrive_enabled" != "true" && -z "$remote_uri" ]] && command -v age >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/.env" ]]; then
         local age_recipient
         age_recipient=$(grep -E "^BACKUP_AGE_RECIPIENT=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
         if [[ -n "$age_recipient" ]]; then
@@ -1433,6 +1438,25 @@ cmd_doctor() {
                 log "Связь с Telegram Bot API: @${b_user} (OK)"
             else
                 error "Связь с Telegram Bot API нарушена (неверный токен или блокировка API)."
+            fi
+        fi
+
+        # 5.1 Проверка настроек Google Drive бэкапа
+        local gdrive_check_enabled
+        gdrive_check_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "false")
+        if [[ "$gdrive_check_enabled" == "true" ]]; then
+            local gd_folder gd_sa
+            gd_folder=$(grep -E "^GDRIVE_FOLDER_ID=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+            gd_sa=$(grep -E "^GDRIVE_SA_FILE=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "backups/gdrive_sa.json")
+            if [[ "$gd_sa" != /* ]]; then
+                gd_sa="${PROJECT_DIR}/${gd_sa}"
+            fi
+            if [[ -z "$gd_folder" ]]; then
+                warn "Google Drive бэкап включен, но GDRIVE_FOLDER_ID не задан в .env."
+            elif [[ ! -f "$gd_sa" ]]; then
+                warn "Google Drive бэкап включен, но файл сервисного аккаунта не найден: $gd_sa"
+            else
+                log "Google Drive бэкап: настроен (папка ID: $gd_folder, ключ: $(basename "$gd_sa")) (OK)"
             fi
         fi
     fi

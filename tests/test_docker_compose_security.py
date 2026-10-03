@@ -145,3 +145,40 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn('8444(/tcp)?\\s+ALLOW\\s+(Anywhere|0\\.0\\.0\\.0/0|::/0)', origin_sh)
         self.assertIn('ufw delete allow 8444/tcp', origin_sh)
 
+    def test_backup_service_google_drive_configuration_and_isolation(self):
+        root = Path(__file__).parents[1]
+        compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+        dockerfile_backup = (root / "Dockerfile.backup").read_text(encoding="utf-8")
+        backup_sh = (root / "scripts" / "docker" / "backup.sh").read_text(encoding="utf-8")
+        cli_sh = (root / "scripts" / "cli.sh").read_text(encoding="utf-8")
+        env_example = (root / ".env.example").read_text(encoding="utf-8")
+        gitignore = (root / ".gitignore").read_text(encoding="utf-8")
+
+        # 1. Dockerfile.backup includes rclone
+        self.assertIn("rclone", dockerfile_backup)
+
+        # 2. docker-compose passes GDRIVE_* environment variables to backup service
+        self.assertIn("GDRIVE_BACKUP_ENABLED:", compose)
+        self.assertIn("GDRIVE_FOLDER_ID:", compose)
+        self.assertIn("GDRIVE_SA_FILE:", compose)
+        self.assertIn("GDRIVE_RETENTION_DAYS:", compose)
+
+        # 3. scripts/docker/backup.sh configures rclone and uploads encrypted artifact
+        self.assertIn("rclone --config /tmp/rclone.conf copy", backup_sh)
+        self.assertIn("rclone --config /tmp/rclone.conf delete", backup_sh)
+        self.assertIn("chmod 600 /tmp/rclone.conf", backup_sh)
+        self.assertIn("/tmp/rclone.conf", backup_sh)
+
+        # 4. scripts/cli.sh checks Google Drive settings in doctor
+        self.assertIn("GDRIVE_BACKUP_ENABLED", cli_sh)
+        self.assertIn("Google Drive бэкап", cli_sh)
+
+        # 5. .env.example documents Google Drive variables
+        self.assertIn("GDRIVE_BACKUP_ENABLED=false", env_example)
+        self.assertIn("GDRIVE_FOLDER_ID=''", env_example)
+
+        # 6. .gitignore protects service account keys
+        self.assertIn("*gdrive*.json", gitignore)
+        self.assertIn("*service_account*.json", gitignore)
+
+

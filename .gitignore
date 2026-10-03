@@ -51,6 +51,8 @@ backup.agekey
 *.p12
 *.cer
 *.der
+*gdrive*.json
+*service_account*.json
 
 
 # Dev scripts and local tools
