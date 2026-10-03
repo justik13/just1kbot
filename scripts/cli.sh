@@ -1416,6 +1416,14 @@ cmd_setup_gdrive() {
 
     # Резервная копия существующей конфигурации на случай отката при неудачном тесте
     local prev_conf_backup=""
+    local tmp_conf=""
+    cleanup_setup_gdrive() {
+        [[ -n "$tmp_conf" && -f "$tmp_conf" ]] && rm -f "$tmp_conf"
+        [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]] && rm -f "$prev_conf_backup"
+    }
+    # shellcheck disable=SC2064
+    trap cleanup_setup_gdrive EXIT INT TERM
+
     if [[ -f "$rclone_conf" ]]; then
         prev_conf_backup=$(mktemp "${PROJECT_DIR}/backups/rclone.bak.XXXXXX")
         cp -a "$rclone_conf" "$prev_conf_backup"
@@ -1425,7 +1433,6 @@ cmd_setup_gdrive() {
     local prev_retention="$cur_retention"
 
     # Атомарное сохранение в backups/rclone.conf
-    local tmp_conf
     tmp_conf=$(mktemp "${PROJECT_DIR}/backups/rclone.tmp.XXXXXX")
     cat <<EOF > "$tmp_conf"
 [gdrive]
@@ -1438,6 +1445,7 @@ root_folder_id = ${folder_input}
 EOF
     chmod 600 "$tmp_conf"
     mv -f "$tmp_conf" "$rclone_conf"
+    tmp_conf=""
     chmod 600 "$rclone_conf"
 
     # Сохранение флагов в .env (без хранения токенов в .env!)
@@ -1458,7 +1466,24 @@ EOF
         # Гарантируем актуальную сборку backup-образа с rclone перед тестом
         if command -v docker >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
             info "Проверка и сборка Docker-образа бэкапа..."
-            docker compose --profile tools build backup >/dev/null 2>&1 || true
+            if ! docker compose --profile tools build backup; then
+                error "Не удалось собрать Docker-образ бэкапа."
+                if [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]]; then
+                    mv -f "$prev_conf_backup" "$rclone_conf"
+                    chmod 600 "$rclone_conf"
+                    prev_conf_backup=""
+                    set_env_var "GDRIVE_BACKUP_ENABLED" "$prev_enabled"
+                    set_env_var "GDRIVE_RETENTION_DAYS" "$prev_retention"
+                    warn "Конфигурация Google Drive восстановлена из предыдущего рабочего состояния."
+                else
+                    rm -f "$rclone_conf"
+                    set_env_var "GDRIVE_BACKUP_ENABLED" "false"
+                    warn "Выгрузка в Google Drive отключена, временный конфиг удален."
+                fi
+                cleanup_setup_gdrive
+                trap - EXIT INT TERM
+                return 1
+            fi
         fi
 
         info "Запуск тестового создания и выгрузки бэкапа..."
@@ -1471,6 +1496,7 @@ EOF
                 if [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]]; then
                     mv -f "$prev_conf_backup" "$rclone_conf"
                     chmod 600 "$rclone_conf"
+                    prev_conf_backup=""
                     set_env_var "GDRIVE_BACKUP_ENABLED" "$prev_enabled"
                     set_env_var "GDRIVE_RETENTION_DAYS" "$prev_retention"
                     warn "Конфигурация Google Drive восстановлена из предыдущего рабочего состояния."
@@ -1483,10 +1509,9 @@ EOF
         fi
     fi
 
-    # Удаляем временную копию бэкапа конфига, если осталась
-    if [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]]; then
-        rm -f "$prev_conf_backup"
-    fi
+    # Снятие trap и очистка временной копии бэкапа конфига
+    cleanup_setup_gdrive
+    trap - EXIT INT TERM
 }
 
 # --- 6. Управление сервисами ---
@@ -1682,7 +1707,8 @@ cmd_doctor() {
                     if docker compose --profile tools run --rm --no-deps --entrypoint rclone backup --config /backups/rclone.conf lsd gdrive: --max-depth 1 >/dev/null 2>&1; then
                         log "Google Drive API: связь и доступ к папке подтверждены (OK)"
                     else
-                        warn "Google Drive API: проверка связи не удалась (проверьте интернет, валидность OAuth токена и доступность папки)"
+                        error "Google Drive API: проверка связи не удалась (проверьте интернет, валидность OAuth токена и доступность папки)"
+                        has_errors=1
                     fi
                 fi
             fi
@@ -1840,11 +1866,11 @@ cmd_uninstall() {
             return 1
         fi
 
-        # Копируем СТРОГО без конфигов авторизации и токенов (исключение rclone.conf и секретов до копирования)
+        # Копируем СТРОГО без конфигов авторизации и токенов (исключение rclone и секретов до копирования)
         local non_secret_files=()
         while IFS= read -r -d '' f; do
             non_secret_files+=("$f")
-        done < <(find "$backups_dir" -mindepth 1 -maxdepth 1 ! -name "*rclone*.conf" ! -name "*gdrive*.json" ! -name "*service_account*.json" -print0 2>/dev/null)
+        done < <(find "$backups_dir" -mindepth 1 -maxdepth 1 ! -name "*rclone*" ! -name "*gdrive*.json" ! -name "*service_account*.json" -print0 2>/dev/null)
 
         if [[ ${#non_secret_files[@]} -gt 0 ]]; then
             if ! (run_privileged cp -a "${non_secret_files[@]}" "$safe_backup_dest/" 2>/dev/null || cp -a "${non_secret_files[@]}" "$safe_backup_dest/" 2>/dev/null); then
@@ -1861,9 +1887,9 @@ cmd_uninstall() {
             return 1
         fi
 
-        # Строгая гарантия: rclone.conf ни при каких условиях не должен оказаться в safe_backup_dest
-        if [[ -f "$safe_backup_dest/rclone.conf" ]] || compgen -G "$safe_backup_dest/*rclone*.conf" >/dev/null 2>&1; then
-            error "Критическая ошибка безопасности: обнаружен rclone.conf в сохраненных бэкапах! Процедура удаления прервана (Fail-Closed)."
+        # Строгая гарантия: rclone конфиги и временные файлы ни при каких условиях не должны оказаться в safe_backup_dest
+        if compgen -G "$safe_backup_dest/*rclone*" >/dev/null 2>&1; then
+            error "Критическая ошибка безопасности: обнаружен rclone конфиг в сохраненных бэкапах! Процедура удаления прервана (Fail-Closed)."
             return 1
         fi
 

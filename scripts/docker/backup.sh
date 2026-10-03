@@ -97,7 +97,7 @@ if [[ "$GDRIVE_ENABLED" == "true" ]]; then
             fi
 
             echo "Очистка устаревших бэкапов в Google Drive (старше ${RETENTION} дн.)..."
-            if ! rclone --config "$RCLONE_CONF" delete --include "just1kbot_*.sql.gz.age" --min-age "${RETENTION}d" gdrive: --retries 3 --retries-sleep 2s --quiet; then
+            if ! rclone --config "$RCLONE_CONF" delete --include "just1kbot_*.sql.gz.age" --min-age "${RETENTION}d" --max-depth 1 --drive-use-trash=false gdrive: --retries 3 --retries-sleep 2s --quiet; then
                 echo "ERROR: Не удалось завершить очистку устаревших копий в Google Drive после 3 попыток!" >&2
                 UPLOAD_FAILED=true
             fi
