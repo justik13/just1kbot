@@ -157,21 +157,21 @@ class DockerComposeSecurityTests(unittest.TestCase):
         # 1. Dockerfile.backup includes rclone
         self.assertIn("rclone", dockerfile_backup)
 
-        # 2. docker-compose passes GDRIVE_* environment variables to backup service (without SA bloat)
+        # 2. docker-compose passes GDRIVE_BACKUP_ENABLED and GDRIVE_RETENTION_DAYS,
+        # but NEVER passes OAuth tokens or credentials in environment (they live exclusively in backups/rclone.conf)
         self.assertIn("GDRIVE_BACKUP_ENABLED:", compose)
-        self.assertIn("GDRIVE_FOLDER_ID:", compose)
-        self.assertIn("GDRIVE_TOKEN_BASE64:", compose)
-        self.assertNotIn("GDRIVE_SA_BASE64:", compose)
-        self.assertNotIn("GDRIVE_SA_FILE:", compose)
         self.assertIn("GDRIVE_RETENTION_DAYS:", compose)
+        self.assertNotIn("GDRIVE_TOKEN_BASE64", compose)
+        self.assertNotIn("GDRIVE_FOLDER_ID", compose)
+        self.assertNotIn("GDRIVE_SA_BASE64", compose)
+        self.assertNotIn("GDRIVE_SA_FILE", compose)
 
-        # 3. scripts/docker/backup.sh configures rclone with scope=drive, fail-closed, mandatory folder, and scoped retention
-        self.assertIn('scope = drive', backup_sh)
+        # 3. scripts/docker/backup.sh reads canonical /backups/rclone.conf, enforces fail-closed, mandatory folder, and scoped retention
+        self.assertIn('RCLONE_CONF="/backups/rclone.conf"', backup_sh)
         self.assertIn('rclone --config "$RCLONE_CONF" copy', backup_sh)
         self.assertIn('rclone --config "$RCLONE_CONF" delete --include "just1kbot_*.sql.gz.age"', backup_sh)
-        self.assertIn('chmod 600 /tmp/rclone.conf', backup_sh)
-        self.assertIn('GDRIVE_TOKEN_BASE64', backup_sh)
-        self.assertIn('GDRIVE_FOLDER_ID не задан', backup_sh)
+        self.assertIn('chmod 600 "$RCLONE_CONF"', backup_sh)
+        self.assertIn('root_folder_id', backup_sh)
         self.assertIn('exit 1', backup_sh)
         self.assertIn('if [[ "$GDRIVE_ENABLED" == "true" ]]; then', backup_sh)
 
@@ -179,18 +179,19 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("docker compose --profile tools build backup", cli_sh)
         self.assertIn("GDRIVE_BACKUP_ENABLED", cli_sh)
         self.assertIn("Google Drive бэкап", cli_sh)
-        self.assertIn("GDRIVE_TOKEN_BASE64", cli_sh)
         self.assertIn("cmd_setup_gdrive", cli_sh)
         self.assertIn("gdrive|setup-gdrive)", cli_sh)
-        self.assertIn('rm -f "$safe_backup_dest/rclone.conf"', cli_sh)
+        self.assertIn("backups/rclone.conf", cli_sh)
+        self.assertIn("safe_backup_dest", cli_sh)
 
-        # 5. .env.example documents Google Drive variables
+        # 5. .env.example documents only non-secret Google Drive flags (no tokens)
         self.assertIn("GDRIVE_BACKUP_ENABLED=false", env_example)
-        self.assertIn("GDRIVE_FOLDER_ID=''", env_example)
-        self.assertIn("GDRIVE_TOKEN_BASE64=''", env_example)
+        self.assertIn("GDRIVE_RETENTION_DAYS=14", env_example)
+        self.assertNotIn("GDRIVE_TOKEN_BASE64", env_example)
 
-        # 6. .gitignore protects credentials
+        # 6. .gitignore protects credentials and rclone.conf
         self.assertIn("*gdrive*.json", gitignore)
         self.assertIn("*service_account*.json", gitignore)
+        self.assertIn("*rclone*.conf", gitignore)
 
 

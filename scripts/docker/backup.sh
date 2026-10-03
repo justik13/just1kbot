@@ -11,7 +11,7 @@ ENCRYPTED_FILE="${BACKUP_FILE}.age"
 mkdir -p "$BACKUP_DIR"
 
 # Plaintext and partial encrypted dumps are always removed on failure/interruption.
-trap 'rm -f "$BACKUP_FILE" "${ENCRYPTED_FILE}.tmp" /tmp/rclone.conf' EXIT
+trap 'rm -f "$BACKUP_FILE" "${ENCRYPTED_FILE}.tmp"' EXIT
 
 if [ -z "${BACKUP_AGE_RECIPIENT:-}" ]; then
     echo "ERROR: BACKUP_AGE_RECIPIENT is not set. Backup cannot be encrypted."
@@ -57,50 +57,34 @@ if [ -n "${BACKUP_REMOTE_URI:-}" ]; then
 fi
 
 # Optional automated upload to Google Drive via rclone.
-# Supports User OAuth token (Personal Google Drive / Pro).
+# Uses canonical configuration in /backups/rclone.conf (isolated only to this container).
 # The encrypted artifact is uploaded; plaintext never leaves this container.
 GDRIVE_ENABLED="${GDRIVE_BACKUP_ENABLED:-false}"
 if [[ "$GDRIVE_ENABLED" == "true" ]]; then
-    RCLONE_CONF="/tmp/rclone.conf"
+    RCLONE_CONF="/backups/rclone.conf"
     UPLOAD_FAILED=false
 
-    # Case 1: Pre-existing rclone.conf in /backups/ (isolated only to this container)
-    if [[ -f "/backups/rclone.conf" ]]; then
-        RCLONE_CONF="/backups/rclone.conf"
-    # Case 2: OAuth token passed via GDRIVE_TOKEN_BASE64
+    if [[ ! -f "$RCLONE_CONF" ]]; then
+        echo "ERROR: Google Drive бэкап включен, но файл /backups/rclone.conf не найден! Запустите 'just1kbot gdrive' для настройки." >&2
+        UPLOAD_FAILED=true
     else
-        # Folder ID is strictly mandatory when GDRIVE_BACKUP_ENABLED=true and rclone.conf is not provided
-        FOLDER_ID="${GDRIVE_FOLDER_ID:-}"
-        if [[ -z "$FOLDER_ID" ]]; then
-            echo "ERROR: Google Drive бэкап включен, но GDRIVE_FOLDER_ID не задан в .env!" >&2
+        # Ensure correct secure permissions inside container mount
+        chmod 600 "$RCLONE_CONF" 2>/dev/null || true
+
+        # Mandatory folder check (Fail-Closed: protects root Google Drive from accidental upload/deletion)
+        if ! grep -Eq '^[[:space:]]*root_folder_id[[:space:]]*=[[:space:]]*[^[:space:]]+' "$RCLONE_CONF"; then
+            echo "ERROR: В /backups/rclone.conf не задан обязательный параметр root_folder_id (защита корня диска)!" >&2
             UPLOAD_FAILED=true
         fi
 
-        TOKEN_B64="${GDRIVE_TOKEN_BASE64:-}"
-        if [[ -z "$TOKEN_B64" ]]; then
-            echo "ERROR: Google Drive бэкап включен, но не найдена конфигурация (/backups/rclone.conf или GDRIVE_TOKEN_BASE64)!" >&2
+        # Mandatory token check
+        if ! grep -Eq '^[[:space:]]*token[[:space:]]*=' "$RCLONE_CONF"; then
+            echo "ERROR: В /backups/rclone.conf отсутствует параметр token!" >&2
             UPLOAD_FAILED=true
-        fi
-
-        if [[ "$UPLOAD_FAILED" != "true" ]]; then
-            TOKEN_JSON=$(echo "$TOKEN_B64" | tr -d '\r\n ' | base64 -d 2>/dev/null || true)
-            if [[ -z "$TOKEN_JSON" ]] || ! echo "$TOKEN_JSON" | grep -q "refresh_token"; then
-                echo "ERROR: Некорректный Google Drive OAuth токен (не декодируется или отсутствует refresh_token)." >&2
-                UPLOAD_FAILED=true
-            else
-                cat <<EOF > /tmp/rclone.conf
-[gdrive]
-type = drive
-scope = drive
-token = ${TOKEN_JSON}
-root_folder_id = ${FOLDER_ID}
-EOF
-                chmod 600 /tmp/rclone.conf
-            fi
         fi
     fi
 
-    if [[ "$UPLOAD_FAILED" != "true" && -f "$RCLONE_CONF" ]]; then
+    if [[ "$UPLOAD_FAILED" != "true" ]]; then
         echo "Загрузка encrypted backup в Google Drive (rclone)..."
         if rclone --config "$RCLONE_CONF" copy "$ENCRYPTED_FILE" gdrive: --retries 3 --retries-sleep 2s --stats 0; then
             echo "Google Drive upload успешно завершён: $(basename "$ENCRYPTED_FILE")"
@@ -121,9 +105,6 @@ EOF
             UPLOAD_FAILED=true
         fi
     fi
-
-    # Очистка временного конфига
-    rm -f /tmp/rclone.conf 2>/dev/null || true
 
     # Fail-closed при ошибке облачного бэкапа
     if [[ "$UPLOAD_FAILED" == "true" ]]; then
