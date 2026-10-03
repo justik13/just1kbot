@@ -186,9 +186,9 @@ class DockerComposeSecurityTests(unittest.TestCase):
 
         # 1. common.sh defines heal_node_firewall_and_stealth and protects SSH access
         self.assertIn("heal_node_firewall_and_stealth()", common_sh)
-        self.assertIn('ufw allow "$ssh_port/tcp"', common_sh)
-        self.assertIn("is_ssh_port", common_sh)
-        self.assertIn("all_ssh_ports", common_sh)
+        self.assertIn("detect_active_sshd_ports()", common_sh)
+        self.assertIn("is_ssh_port()", common_sh)
+        self.assertIn('comment "just1knode ssh access"', common_sh)
         # Ensure no heuristic TCP/access.log sniffing remains
         self.assertNotIn("detected_orig_ip", common_sh)
         self.assertNotIn("detected_ip=\"$(ss -tn", common_sh)

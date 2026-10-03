@@ -1114,22 +1114,24 @@ uninstall_node() {
         st_awg_port="$(get_state_val "awg_port" 2>/dev/null || true)"
         [[ -z "$st_awg_port" && (-f /etc/nginx/sites-available/just1k-amnezia.conf || -f /etc/systemd/system/amnezia-api.service) ]] && st_awg_port="8443"
 
-        if [[ -n "$st_relay_port" ]]; then
+        if [[ -n "$st_relay_port" ]] && ! is_ssh_port "$st_relay_port"; then
             if [[ -n "$st_origin_ip" ]]; then
                 ufw delete allow from "$st_origin_ip" to any port "$st_relay_port" proto tcp >/dev/null 2>&1 || true
             fi
             ufw delete allow "$st_relay_port"/tcp >/dev/null 2>&1 || true
             ufw delete allow "$st_relay_port" >/dev/null 2>&1 || true
         fi
-        if [[ -n "$st_bot_ip" ]]; then
-            ufw delete allow from "$st_bot_ip" to any port 8444 proto tcp >/dev/null 2>&1 || true
-            if [[ -n "$st_awg_port" ]]; then
+        if ! is_ssh_port "8444"; then
+            if [[ -n "$st_bot_ip" ]]; then
+                ufw delete allow from "$st_bot_ip" to any port 8444 proto tcp >/dev/null 2>&1 || true
+            fi
+            ufw delete allow 8444/tcp >/dev/null 2>&1 || true
+            ufw delete allow 8444 >/dev/null 2>&1 || true
+        fi
+        if [[ -n "$st_awg_port" ]] && ! is_ssh_port "$st_awg_port"; then
+            if [[ -n "$st_bot_ip" ]]; then
                 ufw delete allow from "$st_bot_ip" to any port "$st_awg_port" proto tcp >/dev/null 2>&1 || true
             fi
-        fi
-        ufw delete allow 8444/tcp >/dev/null 2>&1 || true
-        ufw delete allow 8444 >/dev/null 2>&1 || true
-        if [[ -n "$st_awg_port" ]]; then
             ufw delete allow "${st_awg_port}/tcp" >/dev/null 2>&1 || true
             ufw delete allow "${st_awg_port}" >/dev/null 2>&1 || true
         fi

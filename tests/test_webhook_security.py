@@ -138,9 +138,17 @@ class WebhookIPValidationTests(unittest.TestCase):
     def test_yookassa_extra_ips_validator(self):
         from config.settings import Settings
 
-        # Valid IP and CIDR
-        res = Settings.validate_yookassa_extra_ips("198.51.100.5, 203.0.113.0/24")
+        # Valid space-separated IP and CIDR
+        res = Settings.validate_yookassa_extra_ips("198.51.100.5 203.0.113.0/24")
         self.assertEqual(res, "198.51.100.5/32 203.0.113.0/24")
+
+        # Commas rejected to prevent breaking Caddyfile parser
+        with self.assertRaisesRegex(ValueError, "space-separated IP/CIDR"):
+            Settings.validate_yookassa_extra_ips("198.51.100.5, 203.0.113.0/24")
+
+        # Semicolons rejected
+        with self.assertRaisesRegex(ValueError, "space-separated IP/CIDR"):
+            Settings.validate_yookassa_extra_ips("198.51.100.5;203.0.113.0/24")
 
         # Empty / whitespace
         self.assertEqual(Settings.validate_yookassa_extra_ips(""), "")

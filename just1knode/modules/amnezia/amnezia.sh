@@ -1225,10 +1225,10 @@ uninstall_amnezia_component() {
     pub_port="$(get_state_val "awg_port" "${AMNEZIA_PUBLIC_PORT}")"
     bot_ip="$(get_state_val "bot_ip" 2>/dev/null || true)"
     if command -v ufw >/dev/null 2>&1; then
-        if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" && -n "$pub_port" && "$pub_port" != "-" ]]; then
-            ufw delete allow from "$bot_ip" to any port "$pub_port" proto tcp >/dev/null 2>&1 || true
-        fi
         if [[ -n "$pub_port" && "$pub_port" != "-" ]] && ! is_ssh_port "$pub_port"; then
+            if [[ -n "$bot_ip" && "$bot_ip" != "any" && "$bot_ip" != "0.0.0.0/0" ]]; then
+                ufw delete allow from "$bot_ip" to any port "$pub_port" proto tcp >/dev/null 2>&1 || true
+            fi
             ufw delete allow "${pub_port}/tcp" >/dev/null 2>&1 || true
             ufw delete allow "${pub_port}" >/dev/null 2>&1 || true
         fi

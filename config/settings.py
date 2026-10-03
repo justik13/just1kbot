@@ -305,9 +305,16 @@ class Settings(BaseSettings):
             return ""
         import ipaddress
 
+        # Caddy remote_ip matches arguments separated strictly by whitespace.
+        # Reject commas/semicolons explicitly so .env doesn't break Caddyfile syntax.
+        if "," in normalized or ";" in normalized:
+            raise ValueError(
+                "YOOKASSA_EXTRA_IPS must be space-separated IP/CIDR ranges without commas or semicolons (e.g. '185.71.76.0/27 77.75.153.0/25')"
+            )
+
         tokens = [
             token.strip()
-            for token in re.split(r"[,;\s]+", normalized)
+            for token in normalized.split()
             if token.strip()
         ]
         valid_ranges: list[str] = []
