@@ -1,6 +1,9 @@
+import ipaddress
 import re
 import unittest
 from pathlib import Path
+
+from config.constants import YOOKASSA_IP_RANGES
 
 
 class DockerComposeSecurityTests(unittest.TestCase):
@@ -61,11 +64,24 @@ class DockerComposeSecurityTests(unittest.TestCase):
 
     def test_caddy_ingress_routes_reject_unmatched_and_restrict_backend_proxy(self):
         root = Path(__file__).parents[1]
+        expected_yookassa_networks = {
+            ipaddress.ip_network(cidr, strict=False) for cidr in YOOKASSA_IP_RANGES
+        }
         for fname in ("Caddyfile", "Caddyfile.ci"):
             content = (root / fname).read_text(encoding="utf-8")
             self.assertIn("@yookassa_allowed", content)
-            self.assertIn("185.71.76.0/27", content)
-            self.assertIn("77.75.153.0/25", content)
+
+            # SSOT Check: ensure Caddyfile remote_ip ranges match config.constants.YOOKASSA_IP_RANGES exactly
+            match = re.search(r"remote_ip\s+([0-9a-fA-F:\./ ]+)", content)
+            self.assertIsNotNone(match, f"remote_ip directive not found in {fname}")
+            raw_ips = match.group(1).split()
+            caddy_networks = {ipaddress.ip_network(ip, strict=False) for ip in raw_ips}
+            self.assertEqual(
+                caddy_networks,
+                expected_yookassa_networks,
+                f"Mismatch between {fname} and config.constants.YOOKASSA_IP_RANGES",
+            )
+
             self.assertIn("@subscription_paths path", content)
             self.assertNotIn("@limited_body_paths path /health", content)
             self.assertNotIn("path /health", content)
@@ -119,6 +135,10 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("-Server", example_caddy)
         self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive"', example_caddy)
         self.assertIn('Permissions-Policy "camera=(), microphone=(), geolocation=()"', example_caddy)
+
+        # 6. Update applies Caddy configuration via reload with restart fallback
+        self.assertIn("caddy reload --config /etc/caddy/Caddyfile", cli_sh)
+        self.assertIn("docker restart just1kbot_caddy", cli_sh)
 
     def test_just1knode_origin_bot_ip_cli_support(self):
         root = Path(__file__).parents[1]
