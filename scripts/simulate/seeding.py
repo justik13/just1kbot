@@ -33,10 +33,12 @@ class SimulationAutoSeedMiddleware:
         real_balance: Decimal = Decimal(350),
         bonus_balance: Decimal = Decimal(150),
         enabled: bool = True,
+        allow_admin_seed: bool = False,
     ):
         self.real_balance = real_balance
         self.bonus_balance = bonus_balance
         self.enabled = enabled
+        self.allow_admin_seed = allow_admin_seed
 
     async def __call__(self, handler, event: Update, data: dict):
         if not self.enabled:
@@ -46,11 +48,13 @@ class SimulationAutoSeedMiddleware:
         if not user:
             return await handler(event, data)
 
-        # In simulation mode, dynamically grant admin rights to connecting tester
-        from config.settings import get_settings
-        sim_settings = get_settings()
-        if user.id not in sim_settings.ADMIN_IDS:
-            sim_settings.ADMIN_IDS.append(user.id)
+        # Granting admin rights is opt-in (dev backdoor otherwise): only when
+        # the simulator is started with --allow-admin-seed.
+        if self.allow_admin_seed:
+            from config.settings import get_settings
+            sim_settings = get_settings()
+            if user.id not in sim_settings.ADMIN_IDS:
+                sim_settings.ADMIN_IDS.append(user.id)
 
         async with session_scope() as session:
             db_user = await session.scalar(
