@@ -11,7 +11,7 @@ ENCRYPTED_FILE="${BACKUP_FILE}.age"
 mkdir -p "$BACKUP_DIR"
 
 # Plaintext and partial encrypted dumps are always removed on failure/interruption.
-trap 'rm -f "$BACKUP_FILE" "${ENCRYPTED_FILE}.tmp" /tmp/rclone.conf' EXIT
+trap 'rm -f "$BACKUP_FILE" "${ENCRYPTED_FILE}.tmp" /tmp/rclone.conf /tmp/gdrive_sa.json' EXIT
 
 if [ -z "${BACKUP_AGE_RECIPIENT:-}" ]; then
     echo "ERROR: BACKUP_AGE_RECIPIENT is not set. Backup cannot be encrypted."
@@ -59,13 +59,24 @@ fi
 # Optional automated upload to Google Drive via rclone (Google Service Account).
 # The encrypted artifact is uploaded; plaintext never leaves this container.
 GDRIVE_ENABLED="${GDRIVE_BACKUP_ENABLED:-false}"
-if [[ "$GDRIVE_ENABLED" == "true" ]] || [[ -n "${GDRIVE_FOLDER_ID:-}" && -f "${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}" ]]; then
-    GDRIVE_SA="${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}"
-    if [[ ! -f "$GDRIVE_SA" && -f "/backups/$(basename "$GDRIVE_SA")" ]]; then
-        GDRIVE_SA="/backups/$(basename "$GDRIVE_SA")"
+if [[ "$GDRIVE_ENABLED" == "true" ]] || [[ -n "${GDRIVE_FOLDER_ID:-}" && (-n "${GDRIVE_SA_BASE64:-}" || -f "${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}") ]]; then
+    GDRIVE_SA=""
+    if [[ -n "${GDRIVE_SA_BASE64:-}" ]]; then
+        echo "$GDRIVE_SA_BASE64" | base64 -d > /tmp/gdrive_sa.json 2>/dev/null || true
+        chmod 600 /tmp/gdrive_sa.json 2>/dev/null || true
+        if [[ -s /tmp/gdrive_sa.json ]]; then
+            GDRIVE_SA="/tmp/gdrive_sa.json"
+        fi
     fi
 
-    if [[ -f "$GDRIVE_SA" && -n "${GDRIVE_FOLDER_ID:-}" ]]; then
+    if [[ -z "$GDRIVE_SA" ]]; then
+        GDRIVE_SA="${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}"
+        if [[ ! -f "$GDRIVE_SA" && -f "/backups/$(basename "$GDRIVE_SA")" ]]; then
+            GDRIVE_SA="/backups/$(basename "$GDRIVE_SA")"
+        fi
+    fi
+
+    if [[ -n "$GDRIVE_SA" && -f "$GDRIVE_SA" && -n "${GDRIVE_FOLDER_ID:-}" ]]; then
         echo "Загрузка encrypted backup в Google Drive (rclone)..."
         cat <<EOF > /tmp/rclone.conf
 [gdrive]
@@ -84,9 +95,9 @@ EOF
         else
             echo "ПРЕДУПРЕЖДЕНИЕ: Ошибка загрузки бэкапа в Google Drive." >&2
         fi
-        rm -f /tmp/rclone.conf
+        rm -f /tmp/rclone.conf /tmp/gdrive_sa.json
     else
-        echo "ПРЕДУПРЕЖДЕНИЕ: Google Drive включен, но не найден файл SA (${GDRIVE_SA}) или не задан GDRIVE_FOLDER_ID." >&2
+        echo "ПРЕДУПРЕЖДЕНИЕ: Google Drive включен, но не задан ключ Service Account (GDRIVE_SA_BASE64 или файл) либо GDRIVE_FOLDER_ID." >&2
     fi
 fi
 

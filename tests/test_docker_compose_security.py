@@ -160,6 +160,7 @@ class DockerComposeSecurityTests(unittest.TestCase):
         # 2. docker-compose passes GDRIVE_* environment variables to backup service
         self.assertIn("GDRIVE_BACKUP_ENABLED:", compose)
         self.assertIn("GDRIVE_FOLDER_ID:", compose)
+        self.assertIn("GDRIVE_SA_BASE64:", compose)
         self.assertIn("GDRIVE_SA_FILE:", compose)
         self.assertIn("GDRIVE_RETENTION_DAYS:", compose)
 
@@ -168,14 +169,18 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("rclone --config /tmp/rclone.conf delete", backup_sh)
         self.assertIn("chmod 600 /tmp/rclone.conf", backup_sh)
         self.assertIn("/tmp/rclone.conf", backup_sh)
+        self.assertIn("GDRIVE_SA_BASE64", backup_sh)
+        self.assertIn("/tmp/gdrive_sa.json", backup_sh)
 
         # 4. scripts/cli.sh checks Google Drive settings in doctor
         self.assertIn("GDRIVE_BACKUP_ENABLED", cli_sh)
         self.assertIn("Google Drive бэкап", cli_sh)
+        self.assertIn("GDRIVE_SA_BASE64", cli_sh)
 
         # 5. .env.example documents Google Drive variables
         self.assertIn("GDRIVE_BACKUP_ENABLED=false", env_example)
         self.assertIn("GDRIVE_FOLDER_ID=''", env_example)
+        self.assertIn("GDRIVE_SA_BASE64=''", env_example)
 
         # 6. .gitignore protects service account keys
         self.assertIn("*gdrive*.json", gitignore)

@@ -1445,18 +1445,23 @@ cmd_doctor() {
         local gdrive_check_enabled
         gdrive_check_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "false")
         if [[ "$gdrive_check_enabled" == "true" ]]; then
-            local gd_folder gd_sa
+            local gd_folder gd_sa_b64 gd_sa
             gd_folder=$(grep -E "^GDRIVE_FOLDER_ID=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+            gd_sa_b64=$(grep -E "^GDRIVE_SA_BASE64=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
             gd_sa=$(grep -E "^GDRIVE_SA_FILE=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "backups/gdrive_sa.json")
             if [[ "$gd_sa" != /* ]]; then
                 gd_sa="${PROJECT_DIR}/${gd_sa}"
             fi
             if [[ -z "$gd_folder" ]]; then
                 warn "Google Drive бэкап включен, но GDRIVE_FOLDER_ID не задан в .env."
-            elif [[ ! -f "$gd_sa" ]]; then
-                warn "Google Drive бэкап включен, но файл сервисного аккаунта не найден: $gd_sa"
+            elif [[ -z "$gd_sa_b64" && ! -f "$gd_sa" ]]; then
+                warn "Google Drive бэкап включен, но не задан GDRIVE_SA_BASE64 в .env и не найден файл $gd_sa"
             else
-                log "Google Drive бэкап: настроен (папка ID: $gd_folder, ключ: $(basename "$gd_sa")) (OK)"
+                local key_desc="в .env (Base64)"
+                if [[ -z "$gd_sa_b64" ]]; then
+                    key_desc="файл $(basename "$gd_sa")"
+                fi
+                log "Google Drive бэкап: настроен (папка ID: $gd_folder, ключ: $key_desc) (OK)"
             fi
         fi
     fi

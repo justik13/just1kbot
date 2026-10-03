@@ -51,17 +51,20 @@
 
 ---
 
-### Шаг 3. Размещение ключа на сервере
+### Шаг 3. Получение Base64 строки ключа
 
-1. Загрузите скачанный JSON-файл на сервер в папку проекта `backups/gdrive_sa.json`:
-   ```bash
-   # Пример через scp с локального компьютера:
-   scp path/to/downloaded-key.json user@server_ip:/opt/just1kbot/backups/gdrive_sa.json
-   ```
-2. Установите строгие права доступа (только для владельца):
-   ```bash
-   chmod 600 /opt/just1kbot/backups/gdrive_sa.json
-   ```
+Чтобы не загружать отдельный файл на сервер и не хранить его на диске, ключ сервисного аккаунта можно закодировать в Base64 и передать в `.env`.
+
+Выполните команду на своем компьютере (где скачан JSON-файл):
+* **Windows (в PowerShell)**:
+  ```powershell
+  [Convert]::ToBase64String([IO.File]::ReadAllBytes("path\to\your-key.json"))
+  ```
+* **Linux / macOS**:
+  ```bash
+  base64 -w 0 path/to/your-key.json
+  ```
+Команда выведет одну сплошную строку символов. Скопируйте её.
 
 ---
 
@@ -72,9 +75,12 @@
 ```bash
 GDRIVE_BACKUP_ENABLED=true
 GDRIVE_FOLDER_ID='1AbCdEfGhIjKlMnOpQrStUvWxYz123456'
-GDRIVE_SA_FILE='backups/gdrive_sa.json'
+GDRIVE_SA_BASE64='ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCIsCiAg...'
 GDRIVE_RETENTION_DAYS=14
 ```
+
+> 💡 **Альтернатива (файлом):** Если вам привычнее хранить ключ отдельным файлом, положите его в `backups/gdrive_sa.json` с правами `chmod 600` и укажите `GDRIVE_SA_FILE='backups/gdrive_sa.json'` (при наличии `GDRIVE_SA_BASE64` ключ из `.env` имеет наивысший приоритет).
+
 
 ---
 
