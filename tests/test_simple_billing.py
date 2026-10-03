@@ -2430,6 +2430,18 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 503)
             self.assertIn("pending", response.text.lower())
 
+    @patch("bot.handlers.webhook._get_real_ip", return_value="198.51.100.99")
+    @patch("bot.handlers.webhook._is_yookassa_ip", return_value=False)
+    async def test_yookassa_webhook_returns_404_when_ip_untrusted(self, mock_ip, mock_real):
+        """Verify webhook from unverified peer IP returns 404 Not Found to enforce Zero-Signature."""
+        from bot.handlers.webhook import yookassa_webhook_handler
+
+        request = AsyncMock()
+        request.content_length = 200
+        response = await yookassa_webhook_handler(request)
+        self.assertEqual(response.status, 404)
+        self.assertEqual(response.text, "Not Found")
+
     @patch("bot.handlers.webhook.session_scope")
     @patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1")
     @patch("bot.handlers.webhook._is_yookassa_ip", return_value=True)

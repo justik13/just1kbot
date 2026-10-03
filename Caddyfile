@@ -24,8 +24,18 @@ http:// {
 		Cross-Origin-Opener-Policy "same-origin"
 		-Server
 	}
-	@allowed_paths path /webhook/* /yookassa/* {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*
-	handle @allowed_paths {
+	@yookassa_allowed {
+		path /webhook/* /yookassa/*
+		remote_ip 185.71.76.0/27 185.71.77.0/27 77.75.153.0/25 77.75.154.128/25 77.75.156.11 77.75.156.35 2a02:5180::/32
+	}
+	handle @yookassa_allowed {
+		reverse_proxy bot:8080 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	@subscription_paths path {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*
+	handle @subscription_paths {
 		reverse_proxy bot:8080 {
 			header_up X-Real-IP {remote_host}
 		}

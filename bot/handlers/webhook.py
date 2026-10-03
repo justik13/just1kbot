@@ -87,7 +87,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     peer_ip = _get_real_ip(request)
     if not peer_ip or not _is_yookassa_ip(peer_ip):
         logger.warning("[%s] Rejected webhook from unverified IP %s", request_id, peer_ip)
-        return web.Response(status=403, text="Forbidden")
+        return web.Response(status=404, text="Not Found")
     if request.content_length is not None and request.content_length > 262144:
         return web.Response(status=413, text="Payload too large")
     try:
