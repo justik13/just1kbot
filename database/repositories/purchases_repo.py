@@ -6,12 +6,20 @@ from decimal import Decimal
 import re
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from config.enums import AdminAuditAction, TariffQuoteOperation
-from database.models import AuditLog, Order, TariffQuote, TariffVersion, User
+from database.models import (
+    AccountLedgerAllocation,
+    AccountLedgerEntry,
+    AuditLog,
+    Order,
+    TariffQuote,
+    TariffVersion,
+    User,
+)
 
 
 @dataclass
@@ -29,6 +37,10 @@ class PurchaseLogEntry:
     duration_days: int
     amount_rub: Decimal
     created_at: datetime
+    # Real vs bonus breakdown of the wallet debit behind this purchase.
+    # None means unknown / not applicable (topups, admin grants).
+    real_amount_rub: Decimal | None = None
+    bonus_amount_rub: Decimal | None = None
 
 
 _AUDIT_ACTION_TO_OP: dict[AdminAuditAction, tuple[str, AdminAuditAction]] = {
@@ -76,6 +88,74 @@ def get_audit_op_info(action: str | AdminAuditAction) -> tuple[str, str]:
     return op_type, title
 
 
+async def _purchase_funds_splits(
+    session: AsyncSession,
+    *,
+    quote_ids: set[int] | frozenset[int] = frozenset(),
+    order_ids: set[uuid.UUID] | frozenset[uuid.UUID] = frozenset(),
+) -> tuple[dict[int, tuple[Decimal, Decimal]], dict[uuid.UUID, tuple[Decimal, Decimal]]]:
+    """Batch (real_rub, bonus_rub) split per purchase debit. Read-only.
+
+    Real part comes from ``payment_credit`` lots, bonus part from
+    ``admin_adjustment`` lots via FIFO allocations. Purchases without a
+    ledger debit (direct card payments) are absent from the result.
+    """
+    by_quote: dict[int, tuple[Decimal, Decimal]] = {}
+    by_order: dict[uuid.UUID, tuple[Decimal, Decimal]] = {}
+    if not quote_ids and not order_ids:
+        return by_quote, by_order
+    conds = []
+    if quote_ids:
+        conds.append(AccountLedgerEntry.quote_id.in_(quote_ids))
+    if order_ids:
+        conds.append(AccountLedgerEntry.order_id.in_(order_ids))
+    debit_rows = (
+        await session.execute(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.entry_type == "purchase_debit",
+                or_(*conds) if len(conds) > 1 else conds[0],
+            )
+        )
+    ).scalars().all()
+    debit_ids = [debit.id for debit in debit_rows]
+    if not debit_ids:
+        return by_quote, by_order
+    agg_rows = (
+        await session.execute(
+            select(
+                AccountLedgerAllocation.debit_entry_id,
+                AccountLedgerEntry.entry_type,
+                func.sum(AccountLedgerAllocation.amount),
+            )
+            .join(
+                AccountLedgerEntry,
+                AccountLedgerEntry.id == AccountLedgerAllocation.credit_entry_id,
+            )
+            .where(AccountLedgerAllocation.debit_entry_id.in_(debit_ids))
+            .group_by(
+                AccountLedgerAllocation.debit_entry_id,
+                AccountLedgerEntry.entry_type,
+            )
+        )
+    ).all()
+    per_debit: dict[int, dict[str, Decimal]] = {}
+    for debit_id, entry_type, total in agg_rows:
+        per_debit.setdefault(debit_id, {})[entry_type] = Decimal(total or 0)
+    for debit in debit_rows:
+        parts = per_debit.get(debit.id)
+        if not parts:
+            continue
+        split = (
+            parts.get("payment_credit", Decimal(0)),
+            parts.get("admin_adjustment", Decimal(0)),
+        )
+        if debit.quote_id is not None and debit.quote_id in quote_ids:
+            by_quote[debit.quote_id] = split
+        if debit.order_id is not None and debit.order_id in order_ids:
+            by_order[debit.order_id] = split
+    return by_quote, by_order
+
+
 async def get_purchase_logs_paginated(
     session: AsyncSession,
     page: int = 1,
@@ -98,6 +178,10 @@ async def get_purchase_logs_paginated(
         .limit(needed)
     )
     order_results = (await session.execute(order_stmt)).scalars().all()
+    _, order_splits = await _purchase_funds_splits(
+        session,
+        order_ids={o.id for o in order_results if o.service_type != "topup"},
+    )
     for ord_item in order_results:
         user = ord_item.user
         tg_id = user.telegram_id if user else 0
@@ -127,6 +211,13 @@ async def get_purchase_logs_paginated(
                     else "Тариф"
                 )
             )
+        if ord_item.service_type == "topup":
+            real_amount_rub, bonus_amount_rub = None, None
+        elif ord_item.id in order_splits:
+            real_amount_rub, bonus_amount_rub = order_splits[ord_item.id]
+        else:
+            # Direct external payment (card): no wallet debit behind it.
+            real_amount_rub, bonus_amount_rub = ord_item.amount_rub, Decimal(0)
         entries.append(
             PurchaseLogEntry(
                 id=f"order_{ord_item.id}",
@@ -142,6 +233,8 @@ async def get_purchase_logs_paginated(
                 duration_days=ord_item.duration_days,
                 amount_rub=ord_item.amount_rub,
                 created_at=ord_item.paid_at or ord_item.created_at,
+                real_amount_rub=real_amount_rub,
+                bonus_amount_rub=bonus_amount_rub,
             )
         )
 
@@ -159,6 +252,10 @@ async def get_purchase_logs_paginated(
         .limit(needed)
     )
     quote_results = (await session.execute(quote_stmt)).scalars().all()
+    quote_splits, _ = await _purchase_funds_splits(
+        session,
+        quote_ids={q.id for q in quote_results},
+    )
     for quote in quote_results:
         user = quote.user
         tg_id = user.telegram_id if user else 0
@@ -176,6 +273,12 @@ async def get_purchase_logs_paginated(
             dev_limit = 1
             dur_days = 30
         op_title = get_quote_op_title(quote.operation_type)
+        quote_split = quote_splits.get(quote.id)
+        if quote_split is not None:
+            real_amount_rub, bonus_amount_rub = quote_split
+        else:
+            # No ledger debit found (should not happen): do not invent numbers.
+            real_amount_rub, bonus_amount_rub = None, None
         entries.append(
             PurchaseLogEntry(
                 id=f"quote_{quote.id}",
@@ -191,6 +294,8 @@ async def get_purchase_logs_paginated(
                 duration_days=dur_days,
                 amount_rub=quote.amount_due_rub or Decimal(0),
                 created_at=quote.consumed_at or quote.created_at,
+                real_amount_rub=real_amount_rub,
+                bonus_amount_rub=bonus_amount_rub,
             )
         )
 
@@ -327,6 +432,16 @@ async def get_purchase_log_by_id(
                     else "Тариф"
                 )
             )
+        if ord_item.service_type == "topup":
+            real_amount_rub, bonus_amount_rub = None, None
+        else:
+            _, single_order_splits = await _purchase_funds_splits(
+                session, order_ids={ord_item.id}
+            )
+            if ord_item.id in single_order_splits:
+                real_amount_rub, bonus_amount_rub = single_order_splits[ord_item.id]
+            else:
+                real_amount_rub, bonus_amount_rub = ord_item.amount_rub, Decimal(0)
         return PurchaseLogEntry(
             id=f"order_{ord_item.id}",
             numeric_id=0,
@@ -341,6 +456,8 @@ async def get_purchase_log_by_id(
             duration_days=ord_item.duration_days,
             amount_rub=ord_item.amount_rub,
             created_at=ord_item.paid_at or ord_item.created_at,
+            real_amount_rub=real_amount_rub,
+            bonus_amount_rub=bonus_amount_rub,
         )
 
     elif entry_id.startswith("quote_"):
@@ -378,6 +495,14 @@ async def get_purchase_log_by_id(
             dur_days = 30
         op_title = get_quote_op_title(quote.operation_type)
 
+        single_quote_splits, _ = await _purchase_funds_splits(
+            session, quote_ids={quote.id}
+        )
+        quote_split = single_quote_splits.get(quote.id)
+        if quote_split is not None:
+            real_amount_rub, bonus_amount_rub = quote_split
+        else:
+            real_amount_rub, bonus_amount_rub = None, None
         return PurchaseLogEntry(
             id=f"quote_{quote.id}",
             numeric_id=quote.id,
@@ -392,6 +517,8 @@ async def get_purchase_log_by_id(
             duration_days=dur_days,
             amount_rub=quote.amount_due_rub or Decimal(0),
             created_at=quote.consumed_at or quote.created_at,
+            real_amount_rub=real_amount_rub,
+            bonus_amount_rub=bonus_amount_rub,
         )
 
     elif entry_id.startswith("audit_"):

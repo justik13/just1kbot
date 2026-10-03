@@ -139,13 +139,26 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         res_quote = MagicMock()
         res_quote.scalars().all.return_value = [quote]
 
+        debit = MagicMock()
+        debit.id = 7
+        debit.quote_id = 100
+        debit.order_id = None
+        res_debits = MagicMock()
+        res_debits.scalars().all.return_value = [debit]
+
+        res_alloc = MagicMock()
+        res_alloc.all.return_value = [
+            (7, "payment_credit", Decimal("100.00")),
+            (7, "admin_adjustment", Decimal("99.00")),
+        ]
+
         res_audit = MagicMock()
         res_audit.scalars().all.return_value = [audit_log]
 
         res_users = MagicMock()
         res_users.all.return_value = [user]
 
-        session.execute.side_effect = [res_orders, res_quote, res_audit]
+        session.execute.side_effect = [res_orders, res_quote, res_debits, res_alloc, res_audit]
         session.scalars.return_value = res_users
 
         entries, total = await get_purchase_logs_paginated(session, page=1, per_page=10)
@@ -153,6 +166,8 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entries[0].id, "quote_100")
         self.assertEqual(entries[0].amount_rub, Decimal("199.00"))
         self.assertEqual(entries[0].tariff_name, "Test Tariff 30d")
+        self.assertEqual(entries[0].real_amount_rub, Decimal("100.00"))
+        self.assertEqual(entries[0].bonus_amount_rub, Decimal("99.00"))
         self.assertEqual(entries[1].id, "audit_200")
 
 
