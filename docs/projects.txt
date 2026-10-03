@@ -17,6 +17,4 @@ https://github.com/frkn-dev/fcore
 https://github.com/frkn-dev/selfhosted
 https://github.com/hyperion-cs/dpi-checkers
 https://github.com/justik13?tab=stars
-# Практические руководства сообщества по отечественным CDN (Beget, Selectel), VLESS XHTTP и прокси-решениям (материалы DenPiligrim)
-https://denpiligrim.ru/guides (UNOFFICIAL - Community Reference)
 

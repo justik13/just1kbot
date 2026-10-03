@@ -30,7 +30,7 @@
 3. [Архитектура каскадного проксирования VLESS XHTTP + CDN (Multi-Hop)](#3-архитектура-каскадного-проксирования-vless-xhttp-cdn-multi-hop)
    - [3.1. Полная топология прохождения трафика](#31-полная-топология-прохождения-трафика)
    - [3.2. Почему именно Yandex Cloud CDN и специфика таймаутов отечественных сетей](#32-почему-именно-yandex-cloud-cdn-и-специфика-таймаутов-отечественных-сетей)
-   - [3.2.1. Альтернативные отечественные CDN (Selectel, Beget, Timeweb, VK Cloud, TurboFlare, CDNvideo)](#321-альтернативные-отечественные-cdn-selectel-beget-timeweb-vk-cloud-turboflare-cdnvideo)
+   - [3.2.1. Альтернативные отечественные CDN (Selectel, Timeweb, VK Cloud, TurboFlare, CDNvideo)](#321-альтернативные-отечественные-cdn-selectel-timeweb-vk-cloud-turboflare-cdnvideo)
    - [3.3. Эволюция Uplink в XHTTP: от POST/OPTIONS к Bodiless GET Uplink (Header Placement) и хроника инцидента Yandex Cloud CDN 413 (28–29.09.2026)](#33-эволюция-uplink-в-xhttp-от-postoptions-к-bodiless-get-uplink-header-placement-и-хроника-инцидента-yandex-cloud-cdn-413-2829092026)
    - [3.4. Роль Nginx на Origin: маппинг методов, поддержка Bodiless GET и legacy-совместимость, Zero Buffering](#34-роль-nginx-на-origin-маппинг-методов-поддержка-bodiless-get-и-legacy-совместимость-zero-buffering)
    - [3.5. Парадокс первичной доставки подписок (Bootstrap Paradox) и решение через CDN-проксирование](#35-парадокс-первичной-доставки-подписок-bootstrap-paradox-и-решение-через-cdn-проксирование)
@@ -462,15 +462,14 @@
 `http2: Transport: cannot retry err [http2: Transport received Server's graceful shutdown GOAWAY]`, так как стандартный `http.Request.Body` в Go не поддерживал автоматический перезапуск (`rewind`).
 В **Xray-core v26.9.8** (PR #6632) для транспорта XHTTP в режиме `packet-up` реализован метод `Request.GetBody()`, что позволяет Go HTTP/2 транспортному клиенту прозрачно переоткрывать новый стрим к CDN без потери пакета при получении `GOAWAY`.
 
-### 3.2.1. Альтернативные отечественные CDN (Selectel, Beget, Timeweb, VK Cloud, TurboFlare, CDNvideo)
+### 3.2.1. Альтернативные отечественные CDN (Selectel, Timeweb, VK Cloud, TurboFlare, CDNvideo)
 
-Хотя **Yandex Cloud CDN** является основным рекомендуемым профилем благодаря надежной Anycast-инфраструктуре, базовому предоплаченному пакету в 150 ГБ и сквозному HTTPS до Origin, на практике (включая исследования сообщества, репозиторий `matrixlegend-code/vpn-cdn-installer` и внешние отчёты пользователей, такие как база знаний DenPiligrim) рассматривались 5 альтернативных активных CDN-провайдеров РФ (и 1 архивный профиль):
+Хотя **Yandex Cloud CDN** является основным рекомендуемым профилем благодаря надежной Anycast-инфраструктуре, базовому предоплаченному пакету в 150 ГБ и сквозному HTTPS до Origin, на практике (включая исследования сообщества и репозитория `matrixlegend-code/vpn-cdn-installer`) рассматривались 4 альтернативных активных CDN-провайдера РФ (и 1 архивный профиль):
 
 | CDN-провайдер | Технический домен / Edge | Протокол до Origin | Метод Uplink (`uplinkHTTPMethod`) | Рекомендуемый путь маскировки (Path) | Специфика настройки профиля CDN |
 | :--- | :--- | :---: | :---: | :--- | :--- |
 | **Yandex Cloud CDN** | `*.gslb.yccdn.ru` | **HTTPS:443** | **`GET` (Bodiless / Header Data)** | `/api/v3/secure-data` | **Основной канонический профиль (Рекомендуемый)**. Защита от 413 через передачу аплинк-данных в заголовках `data-{i}` (`uplinkDataPlacement: "header"`), Zero Buffering, автовыпуск Let's Encrypt через Certificate Manager. |
-| **Beget CDN** *(Community Report)* | `*.begetcdn.cloud` | **HTTPS:443** | `GET` (Body или Header) | `/static/media/live/` | **Внешний опыт сообщества (UNOFFICIAL, проверки других пользователей).** Эджи Beget лояльны к методу `GET` с непустым `body` и крупными чанками (без ошибки 413). Отключить кеширование, разрешить метод GET. Наш канонический профиль Bodiless GET также работает на 100% без изменений. |
-| **Selectel CDN** | `*.selcdn.net` | **HTTPS:443** | **`DELETE`** | `/api/uploadFile/` | Ресурс «Статика». Edge блокирует POST, но **пропускает DELETE** с телом (подтверждено проверками сообщества)! Требует Origin Probe (`/health`). Отключить кеш, Brotli, Gzip и оптимизацию картинок. |
+| **Selectel CDN** | `*.selcdn.net` | **HTTPS:443** | **`DELETE`** | `/api/uploadFile/` | Ресурс «Статика». Edge блокирует POST, но **пропускает DELETE** с телом! Требует Origin Probe (`/health`). Отключить кеш, Brotli, Gzip и оптимизацию картинок. |
 | **Timeweb CDN** *(Архив / не поддерживается)* | `*.cdn.twcstorage.ru` | HTTP:80 | Неприменимо | `/content/media/stream.m3u8` | **Несовместим с XHTTP:** Edge-ноды возвращают `403 Forbidden` на динамических подпутях сессий `/<path>/<session>/<seq>`, требуя расширение строго в последнем сегменте URL. |
 | **VK Cloud CDN** | `*.vkcloud-cdn.ru` | **HTTP:80** | `GET` / `OPTIONS` | `/api/v2/stream` | Базовый профиль с Origin по HTTP. Таймаут сессии 10с. Требует привязки CNAME и отключения буферизации. |
 | **TurboFlare CDN** | Собственные NS | **HTTPS:443** | `POST` | `/static/getFile/video/segment.ts` | Управляет всей DNS-зоной домена (делегирование NS). Сертификат edge выпускает сам TurboFlare. Маскировка под сегменты видео MPEG-TS. |
@@ -507,33 +506,23 @@
    - **Важное правило FQDN:** Пользовательский CDN-домен (например, `cdn.domain.com`) категорически **не должен совпадать** с доменом источника Origin (`origin.domain.com`), иначе возникает бесконечный цикл перенаправлений.
    - **Маскировка:** Путь `/api/uploadFile/` (имитация REST API загрузки файлов).
 
-2. **Beget CDN (`*.begetcdn.cloud`) — Статус: ВНЕШНИЙ ОПЫТ СООБЩЕСТВА (UNOFFICIAL / FIELD REPORT):**
-   - > [!NOTE]
-   - > **Статус источника (Не является Single Source of Truth):**  
-   - > Сведения о работе Beget CDN добавлены на основе независимых практических проверок и отчётов пользователей сообщества (в частности, базы знаний DenPiligrim). Они **не являются нормативным стандартом проекта**, а служат справочным материалом по поведению эдж-нод Beget при проксировании XHTTP.
-   - **Схема подключения к Origin:** Источник по протоколу **HTTPS на порту 443** (FQDN вашего Origin с валидным сертификатом Let's Encrypt).
-   - **Специфика метода Uplink (`GET` с телом vs Bodiless GET):** В практических проверках пользователей установлено, что эдж-серверы Beget CDN в настоящее время **не сбрасывают запросы `GET` с непустым телом (`body`)** и пропускают чанки размером до 500–1000 КиБ (`scMaxEachPostBytes: 500000-1000000`) без буферизации и без ошибки `413 Payload Too Large` (в отличие от Yandex Cloud CDN, где действует строгая отсечка по телу).
-   - **Совместимость с каноническим профилем Just1kbot:** Несмотря на то, что Beget CDN терпим к телу в запросах `GET`, канонический профиль проекта **Bodiless GET Uplink** (`uplinkDataPlacement: "header"`) в кодовой базе работает через Beget CDN полностью «из коробки» без модификаций, так как передача данных в заголовках с пустым телом поддерживается эджами Beget без ограничений.
-   - **Настройки кеширования и методов:** В панели управления Beget при создании CDN-ресурса отключается кеширование, отключается опция «Всегда онлайн», отключается игнорирование параметров запроса, а протокол к источнику выставляется в HTTPS с разрешением HTTP-метода `GET`.
-   - **Оценка устойчивости в белых списках:** Автономные системы Beget (`AS198610`, `AS49505`) входят в реестр аккредитованных хостинг-провайдеров РФ. При частичных ограничениях ТСПУ префиксы Beget пропускаются стабильно. Однако в сценариях максимального режима Default-Drop пулы Yandex Cloud (`AS13238`) и VK (`AS47764`) имеют более высокий приоритет доверия. Поэтому Beget CDN позиционируется как эффективный **резервный кандидат (Hot Standby)** для архитектуры Multi-CDN Failover.
-
-3. **Timeweb CDN (`*.cdn.twcstorage.ru`) — Статус: НЕ ПОДДЕРЖИВАЕТСЯ (Архив):**
+2. **Timeweb CDN (`*.cdn.twcstorage.ru`) — Статус: НЕ ПОДДЕРЖИВАЕТСЯ (Архив):**
    - > [!CAUTION]
      > **Фундаментальная несовместимость с XHTTP:**  
      > Edge-ноды Timeweb CDN принудительно проверяют наличие статического расширения файла **исключительно в последнем сегменте пути URL**. Поскольку транспорт XHTTP динамически формирует URL сессий вида `/<path>/<session_id>/<seq>`, расширение в середине пути (`/stream.m3u8/<session>/0`) Edge-нодами игнорируется, и соединение сбрасывается с ошибкой **`403 Forbidden`**, не доходя до Origin-сервера. Обойти это поведение со стороны стандартных Xray-клиентов невозможно. Провайдер не поддерживается и исключён из всех современных инструментов развёртывания.
 
-4. **VK Cloud CDN:**
+3. **VK Cloud CDN:**
    - **Схема Origin:** Подключение к источнику осуществляется по HTTP (порт 80).
    - **Особенности:** Поддерживает как стандартную схему, так и каскадную цепочку через промежуточный Relay внутри РФ. Требуется привязка CNAME и отключение буферизации/кеширования.
    - **Маскировка:** Путь `/api/v2/stream`.
 
-5. **TurboFlare CDN:**
+4. **TurboFlare CDN:**
    - **Делегирование DNS-зоны:** TurboFlare требует переноса управления всей DNS-зоной домена на собственные NS-серверы провайдера. Перед сменой NS необходимо перенести все существующие записи зоны.
    - **Edge TLS:** Сертификат для Edge-нод выпускается и автоматически обновляется на стороне TurboFlare.
    - **Связь с Origin:** По протоколу **HTTPS на порту 443**.
    - **Маскировка:** Путь `/static/getFile/video/segment.ts` (маскировка под фрагменты видеопотока MPEG-TS).
 
-6. **Beeline CDNvideo и CDN с фильтрацией статических расширений (Статус PR #6307 vs PR #6720):**
+5. **Beeline CDNvideo и CDN с фильтрацией статических расширений (Статус PR #6307 vs PR #6720):**
    - Используется выделенный технический домен платформы CDNvideo.
    - Поддерживает протоколы HTTP и HTTPS до источника. Требует выбора профиля стриминга с отключенной буферизацией ответов.
    - **Маскировка и преодоление правила «403 Forbidden на Edge без расширения файла»:**
@@ -639,14 +628,10 @@
      proxy_method $xhttp_proxy_method;
      proxy_pass http://127.0.0.1:8003;
      ```
-2. **Тотальное отключение буферизации (Zero Buffering) и анти-кэш заголовки:**
+2. **Тотальное отключение буферизации (Zero Buffering):**
    ```nginx
    proxy_buffering off;
    proxy_request_buffering off;
-   # Анти-кэш директивы для предотвращения кеширования стрима промежуточными CDN (включая Beget/Selectel):
-   add_header CDN-Cache-Control "no-store" always;
-   add_header Accept-Ranges none always;
-   add_header Cache-Control "no-store, no-cache" always;
    ```
 3. **Увеличение буферов под обфусцированные заголовки:**
    Поскольку XHTTP передает паддинг внутри HTTP-заголовков (`xPaddingPlacement: queryInHeader`), Nginx обязан иметь расширенные буферы:
@@ -748,7 +733,7 @@ flowchart TD
 ```json
 {
   "observatory": {
-    "subjectSelector": ["cdn-yc", "cdn-beget", "cdn-vk", "cdn-selectel"],
+    "subjectSelector": ["cdn-yc", "cdn-vk", "cdn-selectel"],
     "probeURL": "http://cp.cloudflare.com/generate_204",
     "probeInterval": "10s",
     "enableConcurrency": true
@@ -759,12 +744,6 @@ flowchart TD
       "protocol": "vless",
       "settings": { "vnext": [{ "address": "cdn-yc.YOUR_DOMAIN.COM", "port": 443, "users": [{ "id": "YOUR_UUID", "encryption": "none" }] }] },
       "streamSettings": { "network": "xhttp", "security": "tls", "tlsSettings": { "serverName": "cdn-yc.YOUR_DOMAIN.COM" }, "xhttpSettings": { "path": "/YOUR_TRANSPORT_PATH/", "mode": "packet-up", "uplinkHTTPMethod": "GET", "uplinkDataPlacement": "header", "uplinkDataKey": "data", "scMaxEachPostBytes": 4096, "scMaxConcurrentPosts": 1, "scMinPostsIntervalMs": 30 } }
-    },
-    {
-      "tag": "cdn-beget",
-      "protocol": "vless",
-      "settings": { "vnext": [{ "address": "cdn-beget.YOUR_DOMAIN.COM", "port": 443, "users": [{ "id": "YOUR_UUID", "encryption": "none" }] }] },
-      "streamSettings": { "network": "xhttp", "security": "tls", "tlsSettings": { "serverName": "cdn-beget.YOUR_DOMAIN.COM" }, "xhttpSettings": { "path": "/YOUR_TRANSPORT_PATH/", "mode": "packet-up", "uplinkHTTPMethod": "GET", "uplinkDataPlacement": "header", "uplinkDataKey": "data", "scMaxEachPostBytes": 4096, "scMaxConcurrentPosts": 1, "scMinPostsIntervalMs": 30 } }
     },
     {
       "tag": "cdn-vk",
@@ -783,7 +762,7 @@ flowchart TD
     "balancers": [
       {
         "tag": "multi-cdn-failover",
-        "selector": ["cdn-yc", "cdn-beget", "cdn-vk", "cdn-selectel"],
+        "selector": ["cdn-yc", "cdn-vk", "cdn-selectel"],
         "strategy": {
           "type": "leastPing"
         }
@@ -1883,18 +1862,6 @@ chmod 644 /etc/cron.d/mobile-ranges
 
 4. **Правдоподобная страница-заглушка (Cover Site Fronting):**
    При переходе по адресу `https://origin.YOUR_DOMAIN.COM/` (корень `/`) веб-сервер Nginx должен отдавать реальный HTML-шаблон легитимного сайта (каталог продукции, документацию API или корпоративную визитку). Это гарантирует, что случайные GET-запросы от автоматизированных проверочных систем не вызовут подозрения.
-
-5. **Тюнинг таблицы соединений ядра Linux (`nf_conntrack_max`):**
-   *(Практическая рекомендация сообщества по результатам тестов под нагрузкой)*  
-   При интенсивном клиентском трафике мультиплексированные потоки XHTTP и частые короткие соединения быстро заполняют стандартный лимит таблицы отслеживания состояний соединений `conntrack`, что может приводить к сбросу пакетов (`nf_conntrack: table full, dropping packet`):
-   ```bash
-   # Немедленное применение:
-   sysctl -w net.netfilter.nf_conntrack_max=131072
-
-   # Персистентная фиксация после перезагрузки:
-   echo "net.netfilter.nf_conntrack_max = 131072" > /etc/sysctl.d/99-conntrack.conf
-   sysctl -p /etc/sysctl.d/99-conntrack.conf
-   ```
 
 ---
 
