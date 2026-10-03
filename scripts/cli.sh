@@ -1292,6 +1292,114 @@ cmd_restore() {
     log "База данных успешно восстановлена из $selected_backup!"
 }
 
+# --- 5.1. Настройка Google Drive бэкапа (Интерактивный мастер) ---
+cmd_setup_gdrive() {
+    echo -e "\n${BOLD}${BLUE}=== ☁️ НАСТРОЙКА АВТОМАТИЧЕСКОЙ ВЫГРУЗКИ В GOOGLE DRIVE ===${NC}\n"
+
+    local env_file="${PROJECT_DIR}/.env"
+    if [[ ! -f "$env_file" ]]; then
+        error "Файл конфигурации .env не найден в ${PROJECT_DIR}!"
+        return 1
+    fi
+
+    # Чтение текущих значений
+    local cur_enabled cur_folder cur_token_b64 cur_retention
+    cur_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "$env_file" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "false")
+    cur_folder=$(grep -E "^GDRIVE_FOLDER_ID=" "$env_file" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    cur_token_b64=$(grep -E "^GDRIVE_TOKEN_BASE64=" "$env_file" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    cur_retention=$(grep -E "^GDRIVE_RETENTION_DAYS=" "$env_file" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "14")
+
+    echo -e "Текущий статус: $( [[ "$cur_enabled" == "true" ]] && echo -e "${GREEN}ВКЛЮЧЕН${NC}" || echo -e "${YELLOW}ОТКЛЮЧЕН${NC}" )"
+    if [[ -n "$cur_folder" ]]; then
+        echo -e "ID целевой папки: ${BOLD}${cur_folder}${NC}"
+    fi
+    echo ""
+
+    # Вопрос 1: Включить или отключить
+    local enable_choice
+    local prompt_en="[Y/n]"
+    [[ "$cur_enabled" == "false" ]] && prompt_en="[y/N]"
+    read -r -p "Включить автоматическую выгрузку бэкапов в Google Drive? $prompt_en: " enable_choice
+    enable_choice="${enable_choice:-$( [[ "$cur_enabled" == "true" ]] && echo "y" || echo "n" )}"
+
+    if [[ "$enable_choice" =~ ^[Nn]$ ]]; then
+        set_env_var "GDRIVE_BACKUP_ENABLED" "false"
+        log "Автоматическая выгрузка в Google Drive отключена (GDRIVE_BACKUP_ENABLED=false)."
+        return 0
+    fi
+
+    echo -e "\n${CYAN}--- Шаг 1 из 3: Папка на Google Диске ---${NC}"
+    echo "Откройте папку на drive.google.com и скопируйте ID из адресной строки (после /folders/...)"
+    local folder_input
+    while true; do
+        read -r -p "Введите ID папки Google Drive${cur_folder:+ [текущий: $cur_folder]}: " folder_input
+        folder_input="${folder_input:-$cur_folder}"
+        if [[ -n "$folder_input" ]]; then
+            break
+        fi
+        warn "ID папки не может быть пустым!"
+    done
+
+    echo -e "\n${CYAN}--- Шаг 2 из 3: OAuth 2.0 токен авторизации ---${NC}"
+    echo "Токен получается на вашем ПК командой: rclone authorize \"drive\""
+    echo "Вставьте полученный JSON-токен целиком (начинается с '{') либо Base64-строку:"
+    local token_input
+    while true; do
+        read -r -p "Вставьте токен${cur_token_b64:+ [Enter чтобы оставить текущий]}: " token_input
+        if [[ -z "$token_input" && -n "$cur_token_b64" ]]; then
+            token_input="$cur_token_b64"
+            break
+        fi
+
+        local trimmed
+        trimmed=$(echo "$token_input" | tr -d '\r\n ' || true)
+        if [[ "$trimmed" == \{* ]]; then
+            if echo "$trimmed" | grep -q "refresh_token"; then
+                token_input=$(printf "%s" "$trimmed" | base64 2>/dev/null | tr -d '\r\n ' || true)
+                info "JSON-токен автоматически закодирован в Base64."
+                break
+            else
+                warn "Вставленный JSON не содержит 'refresh_token'. Попробуйте снова."
+            fi
+        else
+            local dec
+            dec=$(echo "$token_input" | tr -d '\r\n ' | base64 -d 2>/dev/null || echo "")
+            if [[ -n "$dec" ]] && echo "$dec" | grep -q "refresh_token"; then
+                token_input=$(echo "$token_input" | tr -d '\r\n ')
+                break
+            else
+                warn "Некорректная строка Base64 либо токен не содержит 'refresh_token'. Попробуйте снова."
+            fi
+        fi
+    done
+
+    echo -e "\n${CYAN}--- Шаг 3 из 3: Срок хранения бэкапов ---${NC}"
+    local retention_input
+    read -r -p "Срок хранения бэкапов в Google Drive (в днях) [${cur_retention:-14}]: " retention_input
+    retention_input="${retention_input:-${cur_retention:-14}}"
+    if ! [[ "$retention_input" =~ ^[0-9]+$ ]] || [ "$retention_input" -le 0 ]; then
+        retention_input="14"
+    fi
+
+    # Сохранение в .env
+    set_env_var "GDRIVE_BACKUP_ENABLED" "true"
+    set_env_var "GDRIVE_FOLDER_ID" "'${folder_input}'"
+    set_env_var "GDRIVE_TOKEN_BASE64" "'${token_input}'"
+    set_env_var "GDRIVE_RETENTION_DAYS" "${retention_input}"
+
+    log "Конфигурация Google Drive успешно сохранена в .env!"
+
+    # Тестовый запуск
+    echo ""
+    local test_choice
+    read -r -p "Создать зашифрованный бэкап и проверить выгрузку в Google Drive прямо сейчас? [Y/n]: " test_choice
+    test_choice="${test_choice:-y}"
+    if [[ "$test_choice" =~ ^[Yy]$ ]]; then
+        info "Запуск тестового создания и выгрузки бэкапа..."
+        cmd_backup
+    fi
+}
+
 # --- 6. Управление сервисами ---
 cmd_restart() {
     local service="${1:-bot}"
@@ -1851,11 +1959,14 @@ interactive_menu() {
             4)
                 echo -e "\n[1] Создать новый зашифрованный бэкап"
                 echo "[2] Восстановить базу данных из бэкапа"
-                read -r -p "Выберите [1-2]: " b_action
+                echo "[3] Настройка выгрузки в Google Drive (мастер настройки)"
+                read -r -p "Выберите [1-3]: " b_action
                 if [[ "$b_action" == "2" ]]; then
                     if ! cmd_restore; then
                         warn "Операция восстановления отменена или завершилась с ошибкой."
                     fi
+                elif [[ "$b_action" == "3" ]]; then
+                    cmd_setup_gdrive || true
                 else
                     if ! cmd_backup; then
                         warn "Создание резервной копии завершилось с ошибкой."
@@ -1924,7 +2035,14 @@ main() {
                 cmd_update
                 ;;
             backup)
-                cmd_backup
+                if [[ "${2:-}" == "gdrive" || "${2:-}" == "setup-gdrive" ]]; then
+                    cmd_setup_gdrive
+                else
+                    cmd_backup
+                fi
+                ;;
+            gdrive|setup-gdrive)
+                cmd_setup_gdrive
                 ;;
             restore)
                 cmd_restore "${2:-}"
@@ -1952,7 +2070,7 @@ main() {
                 cmd_uninstall "$@"
                 ;;
             help|-h|--help)
-                echo -e "Использование: just1kbot [status|version|logs|update|preflight|backup|restore|restart|start|stop|config|doctor|uninstall]"
+                echo -e "Использование: just1kbot [status|version|logs|update|preflight|backup|gdrive|restore|restart|start|stop|config|doctor|uninstall]"
                 ;;
             *)
                 error "Неизвестная команда: $1. Используйте 'just1kbot help'."

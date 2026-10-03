@@ -175,11 +175,13 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn('exit 1', backup_sh)
         self.assertIn('if [[ "$GDRIVE_ENABLED" == "true" ]]; then', backup_sh)
 
-        # 4. scripts/cli.sh rebuilds tools profile during update, checks Google Drive in doctor, and protects uninstalled backups
+        # 4. scripts/cli.sh rebuilds tools profile during update, checks Google Drive in doctor, has interactive wizard, and protects uninstalled backups
         self.assertIn("docker compose --profile tools build backup", cli_sh)
         self.assertIn("GDRIVE_BACKUP_ENABLED", cli_sh)
         self.assertIn("Google Drive бэкап", cli_sh)
         self.assertIn("GDRIVE_TOKEN_BASE64", cli_sh)
+        self.assertIn("cmd_setup_gdrive", cli_sh)
+        self.assertIn("gdrive|setup-gdrive)", cli_sh)
         self.assertIn('rm -f "$safe_backup_dest/rclone.conf"', cli_sh)
 
         # 5. .env.example documents Google Drive variables
