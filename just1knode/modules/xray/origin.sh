@@ -187,14 +187,18 @@ install_xray_origin_node() {
         error "BOT_DOMAIN должен быть доменным именем (FQDN) с доверенным SSL-сертификатом, а не IP-адресом или недопустимым хостом: '$bot_domain'"
     fi
 
+    local origin_sub_prefix="${WHITE_INTERNET_SUB_PATH_PREFIX:-/sub/wl}"
+    origin_sub_prefix="${origin_sub_prefix%/}"
+    [[ ! "$origin_sub_prefix" =~ ^/ ]] && origin_sub_prefix="/$origin_sub_prefix"
+
     if [[ -n "$bot_domain" ]]; then
-        info "Проверка связи с ботом через эндпоинт https://${bot_domain}/health..."
+        info "Проверка связи с ботом через эндпоинт https://${bot_domain}${origin_sub_prefix}/ping..."
         local health_code
-        health_code="$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "https://${bot_domain}/health" 2>/dev/null || echo "000")"
+        health_code="$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "https://${bot_domain}${origin_sub_prefix}/ping" 2>/dev/null || echo "000")"
         if [[ "$health_code" == "200" ]]; then
-            log "Эндпоинт бота https://${bot_domain}/health доступен (HTTP 200)."
+            log "Эндпоинт бота https://${bot_domain}${origin_sub_prefix}/ping доступен (HTTP 200)."
         else
-            warn "Эндпоинт бота https://${bot_domain}/health вернул код: $health_code (или недоступен). Проверьте DNS, валидность TLS-сертификата (редиректы запрещены) и статус бота."
+            warn "Эндпоинт бота https://${bot_domain}${origin_sub_prefix}/ping вернул код: $health_code (или недоступен). Проверьте DNS, валидность TLS-сертификата (редиректы запрещены) и статус бота."
         fi
     fi
 

@@ -24,16 +24,6 @@ http:// {
 		Cross-Origin-Opener-Policy "same-origin"
 		-Server
 	}
-	@limited_body_paths path /health
-	handle @limited_body_paths {
-		request_body {
-			max_size 2KB
-		}
-		reverse_proxy bot:8080 {
-			header_up X-Real-IP {remote_host}
-		}
-	}
-
 	@allowed_paths path /webhook/* /yookassa/* {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*
 	handle @allowed_paths {
 		reverse_proxy bot:8080 {
