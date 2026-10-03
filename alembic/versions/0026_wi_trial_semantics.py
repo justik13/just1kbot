@@ -195,10 +195,11 @@ def downgrade() -> None:
             "Manual data migration of historical trial records is required."
         )
 
-    op.drop_constraint("ck_tariff_quotes_operation", "tariff_quotes", type_="check")
-    op.create_check_constraint(
-        "ck_tariff_quotes_operation",
-        "tariff_quotes",
-        "operation_type IN ('purchase', 'renew', 'change')",
-    )
+    if quotes_present:
+        op.drop_constraint("ck_tariff_quotes_operation", "tariff_quotes", type_="check")
+        op.create_check_constraint(
+            "ck_tariff_quotes_operation",
+            "tariff_quotes",
+            "operation_type IN ('purchase', 'renew', 'change')",
+        )
     op.drop_column("white_internet_subscriptions", "is_trial")
