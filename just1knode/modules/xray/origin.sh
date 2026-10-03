@@ -575,9 +575,14 @@ except Exception:
         local dummy_dir="${DUMMY_CERT_DIR:-${NGINX_CONF_DIR}/fallback_ssl}"
         mkdir -p "$dummy_dir"
         if [[ ! -f "${dummy_dir}/dummy.crt" ]]; then
+            # Fallback self-signed cert for the default_server stub only.
             openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
                 -keyout "${dummy_dir}/dummy.key" -out "${dummy_dir}/dummy.crt" \
                 -subj "/CN=invalid" 2>/dev/null || true
+            chmod 600 "${dummy_dir}/dummy.key" 2>/dev/null || true
+        fi
+        if [[ -f "${dummy_dir}/dummy.key" ]]; then
+            chmod 600 "${dummy_dir}/dummy.key" 2>/dev/null || warn "Не удалось выставить права 0600 на ${dummy_dir}/dummy.key"
         fi
         catchall_ssl_block="server {
     listen 443 ssl default_server;
@@ -1422,9 +1427,14 @@ except Exception:
         local heal_dummy_dir="${DUMMY_CERT_DIR:-${NGINX_CONF_DIR}/fallback_ssl}"
         mkdir -p "$heal_dummy_dir"
         if [[ ! -f "${heal_dummy_dir}/dummy.crt" ]]; then
+            # Fallback self-signed cert for the default_server stub only.
             openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
                 -keyout "${heal_dummy_dir}/dummy.key" -out "${heal_dummy_dir}/dummy.crt" \
                 -subj "/CN=invalid" 2>/dev/null || true
+            chmod 600 "${heal_dummy_dir}/dummy.key" 2>/dev/null || true
+        fi
+        if [[ -f "${heal_dummy_dir}/dummy.key" ]]; then
+            chmod 600 "${heal_dummy_dir}/dummy.key" 2>/dev/null || warn "Не удалось выставить права 0600 на ${heal_dummy_dir}/dummy.key"
         fi
 
         python3 -c "

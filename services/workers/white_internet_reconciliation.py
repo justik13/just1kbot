@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import hashlib
 import logging
 
 from aiogram import Bot
@@ -544,10 +545,11 @@ class WhiteInternetReconciliationWorker:
                         )
                     )
                     if isinstance(reassigned_sub, (int, str)):
+                        cred_hash = hashlib.sha256(row.client_uuid.encode()).hexdigest()[:12]
                         logger.info(
-                            "Orphan cleanup %d cancelled: client %s is currently active/placed on origin %d (sub_id=%s).",
+                            "Orphan cleanup %d cancelled: credential sha256:%s... is currently active/placed on origin %d (sub_id=%s).",
                             row.id,
-                            row.client_uuid,
+                            cred_hash,
                             row.server_id,
                             reassigned_sub,
                         )
@@ -586,9 +588,11 @@ class WhiteInternetReconciliationWorker:
                         await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
                         await sess.commit()
                         swept += 1
+                        cred_hash = hashlib.sha256(row.client_uuid.encode()).hexdigest()[:12]
                         logger.info(
-                            "Swept orphan credential %s on former origin %d.",
-                            row.client_uuid,
+                            "Swept orphan credential id=%d sha256:%s... on former origin %d.",
+                            row.id,
+                            cred_hash,
                             server.id,
                         )
                     elif sync_result == SyncResult.ALREADY_NEWER:

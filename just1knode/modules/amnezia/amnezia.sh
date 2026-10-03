@@ -734,9 +734,15 @@ EOF
         key_file="${ssl_dir}/server.key"
         if [[ ! -f "$cert_file" ]]; then
             log "Генерация SSL-сертификата для HTTPS (${api_domain})..."
+            # -nodes (unencrypted key) is required for headless nginx; the key
+            # is protected by filesystem permissions instead of a passphrase.
             openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
                 -keyout "$key_file" -out "$cert_file" \
                 -subj "/CN=${api_domain}" 2>/dev/null || true
+            chmod 600 "$key_file" 2>/dev/null || true
+        fi
+        if [[ -f "$key_file" ]]; then
+            chmod 600 "$key_file" 2>/dev/null || warn "Не удалось выставить права 0600 на $key_file"
         fi
     fi
 
@@ -778,9 +784,14 @@ except Exception:
             local dummy_dir="${DUMMY_CERT_DIR:-${NGINX_CONF_DIR:-/etc/nginx}/fallback_ssl}"
             mkdir -p "$dummy_dir"
             if [[ ! -f "${dummy_dir}/dummy.crt" ]]; then
+                # Fallback self-signed cert for the default_server stub only.
                 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
                     -keyout "${dummy_dir}/dummy.key" -out "${dummy_dir}/dummy.crt" \
                     -subj "/CN=invalid" 2>/dev/null || true
+                chmod 600 "${dummy_dir}/dummy.key" 2>/dev/null || true
+            fi
+            if [[ -f "${dummy_dir}/dummy.key" ]]; then
+                chmod 600 "${dummy_dir}/dummy.key" 2>/dev/null || warn "Не удалось выставить права 0600 на ${dummy_dir}/dummy.key"
             fi
             catchall_ssl_block="server {
     listen ${public_port} ssl default_server;
@@ -995,7 +1006,7 @@ show_amnezia_bot_credentials() {
     echo -e "  🔗 API URL:            ${CYAN}${api_url}${NC}"
     echo -e "  🤖 BOT IP (защита):    ${CYAN}${bot_ip}${NC}"
     echo -e "  🔑 API Ключ:           ${YELLOW}${api_key}${NC}"
-    echo -e "  🩺 Проверка API:       curl -k -H \"x-api-key: ${api_key}\" ${api_url}/healthz\n"
+    echo -e "  🩺 Проверка API:       export API_KEY='<вставь ключ>'; curl -k -H \"x-api-key: \$API_KEY\" ${api_url}/healthz\n"
     if [[ "$bot_ip" == "-" || "$bot_ip" == "any" ]]; then
         echo -e "  ${YELLOW}💡 Рекомендация: ограничьте доступ к API только для IP бота: just1knode set-bot-ip <IP>${NC}\n"
     fi
