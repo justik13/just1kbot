@@ -22,13 +22,11 @@ from config.constants import (
     WHITE_INTERNET_SERVICE_TYPE,
 )
 from config.enums import (
-    TariffQuoteOperation,
-    TariffQuoteStatus,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
 from database.models import (
-    TariffQuote,
+    Order,
     User,
     WhiteInternetOrphanCleanup,
     WhiteInternetSubscription,
@@ -134,22 +132,31 @@ async def has_user_any_subscription(
 
 
 async def has_ever_activated_trial(session: AsyncSession, user_id: int) -> bool:
-    """Check if user has ever consumed a White Internet trial quote (with last_trial_reset_at guard)."""
+    """Check if user has ever activated a White Internet trial (with last_trial_reset_at guard).
+
+    Trial activations are zero-amount wallet orders carrying is_trial metadata.
+    Candidates are filtered in Python (portable across PostgreSQL and SQLite).
+    """
     if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
         return False
     user = await session.get(User, user_id)
     stmt = (
-        select(TariffQuote.id)
+        select(Order.id, Order.metadata_, Order.created_at)
         .where(
-            TariffQuote.user_id == user_id,
-            TariffQuote.service_type == WHITE_INTERNET_SERVICE_TYPE,
-            TariffQuote.operation_type == TariffQuoteOperation.TRIAL,
-            TariffQuote.status == TariffQuoteStatus.CONSUMED,
+            Order.user_id == user_id,
+            Order.service_type == WHITE_INTERNET_SERVICE_TYPE,
+            Order.status == "paid",
         )
+        .order_by(Order.id.desc())
+        .limit(100)
     )
     if user and user.last_trial_reset_at is not None:
-        stmt = stmt.where(TariffQuote.created_at > user.last_trial_reset_at)
-    return (await session.scalar(stmt.limit(1))) is not None
+        stmt = stmt.where(Order.created_at > user.last_trial_reset_at)
+    rows = (await session.execute(stmt)).all()
+    return any(
+        isinstance(meta, dict) and meta.get("is_trial") is True
+        for _, meta, _ in rows
+    )
 
 
 async def get_subscription_by_id(

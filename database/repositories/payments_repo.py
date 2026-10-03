@@ -1,9 +1,10 @@
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database.models import Payment
+from utils.datetime_helpers import now_utc
 
 
 async def has_successful_topup(
@@ -69,19 +70,22 @@ async def get_payment_by_id(
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
-
 async def get_pending_payments_count_for_tariff(
     session: AsyncSession,
     tariff_id: int,
 ) -> int:
-    from database.models import TariffQuote, TariffVersion
+    from database.models import Order
+
     return int(
         await session.scalar(
-            select(func.count(TariffQuote.id))
-            .join(TariffVersion, TariffQuote.target_tariff_version_id == TariffVersion.id)
-            .where(
-                TariffVersion.tariff_id == tariff_id,
-                TariffQuote.status == "active",
+            select(func.count(Order.id)).where(
+                Order.tariff_id == tariff_id,
+                Order.payment_method == "wallet",
+                Order.status == "pending",
+                or_(
+                    Order.expires_at.is_(None),
+                    Order.expires_at > now_utc(),
+                ),
             )
         )
         or 0
