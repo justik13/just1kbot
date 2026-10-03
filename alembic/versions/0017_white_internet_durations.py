@@ -133,7 +133,12 @@ def downgrade() -> None:
     op.drop_column("servers", "lifecycle_status")
 
     # 3. tariff_versions: drop base_quota_bytes constraint and column, service_type constraint and column
-    op.drop_constraint("ck_tariff_versions_base_quota_positive", "tariff_versions", type_="check")
-    op.drop_column("tariff_versions", "base_quota_bytes")
-    op.drop_constraint("ck_tariff_versions_service_type", "tariff_versions", type_="check")
-    op.drop_column("tariff_versions", "service_type")
+    # Skipped when migration 0034 already dropped the table.
+    if (
+        op.get_bind().scalar(sa.text("SELECT to_regclass('public.tariff_versions')"))
+        is not None
+    ):
+        op.drop_constraint("ck_tariff_versions_base_quota_positive", "tariff_versions", type_="check")
+        op.drop_column("tariff_versions", "base_quota_bytes")
+        op.drop_constraint("ck_tariff_versions_service_type", "tariff_versions", type_="check")
+        op.drop_column("tariff_versions", "service_type")

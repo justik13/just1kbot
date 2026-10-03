@@ -478,20 +478,25 @@ def downgrade() -> None:
     op.drop_column("servers", "capabilities")
 
     # 2. tariff_quotes: revert index, check constraint, drop service_type
-    op.drop_index("uq_tariff_quotes_active_checkout", table_name="tariff_quotes")
-    op.create_index(
-        "uq_tariff_quotes_active_checkout",
-        "tariff_quotes",
-        ["user_id", "target_tariff_version_id"],
-        unique=True,
-        postgresql_where=sa.text("status='active' AND operation_type IN ('purchase','renew')"),
-    )
-    op.drop_constraint(
-        "ck_tariff_quotes_service_type",
-        "tariff_quotes",
-        type_="check",
-    )
-    op.drop_column("tariff_quotes", "service_type")
+    # Skipped when migration 0034 already dropped the table.
+    if (
+        op.get_bind().scalar(sa.text("SELECT to_regclass('public.tariff_quotes')"))
+        is not None
+    ):
+        op.drop_index("uq_tariff_quotes_active_checkout", table_name="tariff_quotes")
+        op.create_index(
+            "uq_tariff_quotes_active_checkout",
+            "tariff_quotes",
+            ["user_id", "target_tariff_version_id"],
+            unique=True,
+            postgresql_where=sa.text("status='active' AND operation_type IN ('purchase','renew')"),
+        )
+        op.drop_constraint(
+            "ck_tariff_quotes_service_type",
+            "tariff_quotes",
+            type_="check",
+        )
+        op.drop_column("tariff_quotes", "service_type")
 
     # 1. tariffs: revert constraint, drop service_type
     op.drop_constraint("uq_tariffs_service_device_duration", "tariffs", type_="unique")

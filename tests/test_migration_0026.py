@@ -41,7 +41,10 @@ class TestMigration0026Metadata(unittest.TestCase):
     def test_downgrade_guard_checks_quotes_and_subs(self):
         bind = MagicMock()
         # 1. trial quotes exist -> raise
-        bind.execute.side_effect = [MagicMock(scalar=MagicMock(return_value=1))]
+        bind.execute.side_effect = [
+            MagicMock(scalar=MagicMock(return_value="public.tariff_quotes")),
+            MagicMock(scalar=MagicMock(return_value=1)),
+        ]
         with patch("alembic.op.get_bind", return_value=bind):
             with self.assertRaises(RuntimeError) as ctx:
                 self.migration.downgrade()
@@ -49,6 +52,7 @@ class TestMigration0026Metadata(unittest.TestCase):
 
         # 2. trial subs exist -> raise
         bind.execute.side_effect = [
+            MagicMock(scalar=MagicMock(return_value="public.tariff_quotes")),
             MagicMock(scalar=MagicMock(return_value=None)),
             MagicMock(scalar=MagicMock(return_value=1)),
         ]
@@ -56,6 +60,20 @@ class TestMigration0026Metadata(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 self.migration.downgrade()
             self.assertIn("Cannot safely downgrade migration 0026", str(ctx.exception))
+
+    def test_downgrade_skips_quote_check_when_table_dropped(self):
+        """After migration 0034 drops tariff_quotes, downgrade must not touch it."""
+        bind = MagicMock()
+        bind.execute.side_effect = [
+            MagicMock(scalar=MagicMock(return_value=None)),
+            MagicMock(scalar=MagicMock(return_value=None)),
+        ]
+        with patch("alembic.op.get_bind", return_value=bind):
+            with patch("alembic.op.drop_constraint"), \
+                patch("alembic.op.create_check_constraint"), \
+                patch("alembic.op.drop_column"):
+                # No trial data anywhere -> downgrade proceeds without raising.
+                self.migration.downgrade()
 
     def test_upgrade_safely_logs_and_does_not_abort_on_ambiguous_data(self):
         """upgrade() must log warnings and complete without raising RuntimeError when ambiguous rows are detected."""

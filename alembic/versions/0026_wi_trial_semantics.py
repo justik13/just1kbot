@@ -174,11 +174,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Fail-safe guard against corrupting historical trial data on downgrade
+    # Fail-safe guard against corrupting historical trial data on downgrade.
+    # The tariff_quotes half is skipped when migration 0034 already dropped it.
     bind = op.get_bind()
-    has_trials = bind.execute(
-        sa.text("SELECT 1 FROM tariff_quotes WHERE operation_type = 'trial' LIMIT 1")
-    ).scalar() or bind.execute(
+    quotes_present = (
+        bind.execute(sa.text("SELECT to_regclass('public.tariff_quotes')")).scalar()
+        is not None
+    )
+    has_trials = (
+        quotes_present
+        and bind.execute(
+            sa.text("SELECT 1 FROM tariff_quotes WHERE operation_type = 'trial' LIMIT 1")
+        ).scalar()
+    ) or bind.execute(
         sa.text("SELECT 1 FROM white_internet_subscriptions WHERE is_trial = true LIMIT 1")
     ).scalar()
     if has_trials:

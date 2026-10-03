@@ -18,7 +18,6 @@ from database.models import (
     AccountLedgerAllocation,
     AccountLedgerEntry,
     Payment,
-    TariffQuote,
     User,
 )
 from utils.datetime_helpers import now_utc
@@ -621,76 +620,6 @@ async def _allocate_fifo(
     if remaining:
         raise AccountLedgerInvariantError("available_balance_has_no_credit_lots")
     return created
-
-
-async def create_purchase_debit(
-    session: AsyncSession,
-    *,
-    user_id: int,
-    quote_id: int,
-    amount: object,
-) -> tuple[AccountLedgerEntry | None, bool]:
-    amount = whole_rubles(amount, allow_zero=True)
-    user = await lock_account_user(session, user_id)
-    quote = await session.scalar(
-        select(TariffQuote)
-        .where(TariffQuote.id == quote_id, TariffQuote.user_id == user.id)
-        .with_for_update()
-    )
-    if quote is None:
-        raise LookupError("purchase_quote_not_found")
-    if quote.amount_due_rub != amount:
-        raise AccountLedgerConflictError("purchase_quote_amount_mismatch")
-    if amount == 0:
-        return None, False
-    existing = await session.scalar(
-        select(AccountLedgerEntry).where(
-            AccountLedgerEntry.entry_type == "purchase_debit",
-            AccountLedgerEntry.quote_id == quote.id,
-        )
-    )
-    if existing is not None:
-        if existing.user_id != user.id or existing.amount != -amount:
-            raise AccountLedgerConflictError("purchase_debit_conflict")
-        return existing, False
-    if quote.status != "active":
-        raise LookupError(f"purchase_quote_inactive:{quote.status}")
-    if quote.expires_at is not None and quote.expires_at <= now_utc():
-        raise LookupError("purchase_quote_expired")
-    snapshot = await get_account_balance(
-        session, user_id=user.id, for_update=False, locked_user=user
-    )
-    if snapshot.available < amount:
-        raise InsufficientAccountBalanceError("insufficient_available_balance")
-    values = {
-        "user_id": user.id,
-        "entry_type": "purchase_debit",
-        "amount": -amount,
-        "currency": "RUB",
-        "payment_id": None,
-        "quote_id": quote.id,
-        "reversal_of_id": None,
-        "idempotency_key": f"purchase-debit:{quote.id}",
-        "metadata_": {"operation_type": quote.operation_type},
-    }
-    debit, created = await _insert_or_get_entry(
-        session,
-        values=values,
-        economic_lookup=(
-            (AccountLedgerEntry.entry_type == "purchase_debit")
-            & (AccountLedgerEntry.quote_id == quote.id)
-        ),
-    )
-    if created:
-        # A committed economic debit must never leave its immutable checkout
-        # quote active. Higher-level settlement runs in the same transaction,
-        # so any later failure rolls this transition back with the debit.
-        quote.status = "consumed"
-        quote.consumed_at = quote.consumed_at or now_utc()
-        await _allocate_fifo(
-            session, user_id=user.id, debit=debit, amount=amount
-        )
-    return debit, created
 
 
 async def get_payment_refundable_amount(
