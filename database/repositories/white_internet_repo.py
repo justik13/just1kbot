@@ -213,7 +213,6 @@ async def create_white_internet_subscription(
     origin_node_id: int,
     token: str,
     uuid: str,
-    quote_id: int,
     price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
     duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     base_bytes: int = WHITE_INTERNET_BASE_TRAFFIC_BYTES,
@@ -257,7 +256,6 @@ async def renew_subscription_atomic(
     session: AsyncSession,
     *,
     subscription_id: int,
-    quote_id: int,
     price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
     duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     base_bytes: int | None = None,
@@ -381,7 +379,6 @@ async def topup_quota_atomic(
     session: AsyncSession,
     *,
     subscription_id: int,
-    quote_id: int,
     pack_gb: int,
     price_rub: Decimal,
 ) -> int:
