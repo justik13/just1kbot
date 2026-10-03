@@ -172,7 +172,8 @@ class TestTextsLayout(unittest.TestCase):
             for target in targets:
                 if isinstance(target, ast.Name):
                     assigned_names.add(target.id)
-        self.assertLessEqual(assigned_names, {"_TEXT_KEYS"})
+        # _TEXTS is a derived lookup cache for _TEXT_KEYS, not a text constant.
+        self.assertLessEqual(assigned_names, {"_TEXT_KEYS", "_TEXTS"})
 
     def test_every_canonical_text_is_reachable_through_facade(self):
         for py_file in TEXTS_DIR.rglob("*.py"):
