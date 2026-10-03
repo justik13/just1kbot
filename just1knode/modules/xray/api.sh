@@ -129,8 +129,8 @@ EOF
     [[ -f "${CLIENTS_FILE}" ]] && { chown root:xrayapi "${CLIENTS_FILE}" 2>/dev/null || true; chmod 660 "${CLIENTS_FILE}"; }
     [[ -f "${RELAYS_FILE}" ]] && { chown root:xrayapi "${RELAYS_FILE}" 2>/dev/null || true; chmod 660 "${RELAYS_FILE}"; }
     [[ -f "${STATE_FILE}" ]] && { chown root:xrayapi "${STATE_FILE}" 2>/dev/null || true; chmod 660 "${STATE_FILE}"; }
-    find "${STATE_DIR}" -name "*.lock" -exec chown root:xrayapi {} + 2>/dev/null || true
-    find "${STATE_DIR}" -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
+    find "${STATE_DIR}" -maxdepth 1 -type f -name "*.lock" -exec chown -h root:xrayapi {} + 2>/dev/null || true
+    find "${STATE_DIR}" -maxdepth 1 -type f -name "*.lock" -exec chmod 660 {} + 2>/dev/null || true
 
     cat > "${SYSTEMD_SYSTEM_DIR}/xray-api.service" <<EOF
 [Unit]

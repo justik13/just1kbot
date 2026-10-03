@@ -71,16 +71,19 @@ try:
     if isinstance(data, dict):
         data[k] = True
         t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+        try:
+            if hasattr(os, 'fchmod'):
+                os.fchmod(t_fd, 0o640)
+            import grp
+            gid = grp.getgrnam('xrayapi').gr_gid
+            if hasattr(os, 'fchown'):
+                os.fchown(t_fd, 0, gid)
+        except Exception:
+            pass
         with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
             json.dump(data, fp, indent=2)
             fp.flush()
         os.replace(t_path, sf)
-        try:
-            import shutil
-            shutil.chown(sf, user='root', group='xrayapi')
-            os.chmod(sf, 0o640)
-        except Exception:
-            pass
 finally:
     if fcntl:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)

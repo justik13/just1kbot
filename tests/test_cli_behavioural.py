@@ -2152,6 +2152,19 @@ cmd_uninstall --confirm=DELETE --keep-backups
                                 f"Must redirect both stdout and stderr (>/dev/null 2>&1) to avoid leaking status text."
                             )
 
+    def test_state_and_watchdog_locks_use_o_nofollow_and_fchmod(self):
+        """Invariant: state.sh, traffic_watchdog.sh and traffic_watchdog.py must use O_NOFOLLOW and fd-based fchmod."""
+        repo_root = CLI_PATH.parent.parent
+        targets = [
+            repo_root / "just1knode" / "lib" / "state.sh",
+            repo_root / "just1knode" / "lib" / "traffic_watchdog.sh",
+            repo_root / "just1knode" / "lib" / "traffic_watchdog.py",
+        ]
+        for path in targets:
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("O_NOFOLLOW", content, f"Missing O_NOFOLLOW in {path.name}")
+            self.assertIn("fchmod", content, f"Missing fchmod in {path.name}")
+
 
 if __name__ == "__main__":
     unittest.main()

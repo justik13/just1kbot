@@ -991,11 +991,11 @@ uninstall_node() {
 
     info "1/11. Остановка и отключение системных служб systemd..."
     remove_traffic_watchdog_timer
-    systemctl stop xray xray-api amnezia-api >/dev/null 2>&1 || true
-    systemctl disable xray xray-api amnezia-api >/dev/null 2>&1 || true
+    systemctl stop xray xray-api amnezia-api 2>/dev/null || true
+    systemctl disable xray xray-api amnezia-api 2>/dev/null || true
     rm -f "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray.service" "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/xray-api.service" "${SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}/amnezia-api.service" 2>/dev/null || true
-    systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl reset-failed xray xray-api amnezia-api just1knode-traffic >/dev/null 2>&1 || true
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl reset-failed xray xray-api amnezia-api just1knode-traffic 2>/dev/null || true
 
     info "2/11. Завершение активных процессов ядра и API..."
     local xray_proc_name

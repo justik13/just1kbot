@@ -26,7 +26,17 @@ def main():
     d = os.path.dirname(os.path.abspath(state_file))
     os.makedirs(d, exist_ok=True)
     
-    lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o660)
+    open_flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0)
+    lock_fd = os.open(lock_file, open_flags, 0o660)
+    try:
+        if hasattr(os, 'fchmod'):
+            os.fchmod(lock_fd, 0o660)
+        import grp
+        gid = grp.getgrnam('xrayapi').gr_gid
+        if hasattr(os, 'fchown'):
+            os.fchown(lock_fd, 0, gid)
+    except Exception:
+        pass
     if fcntl:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
@@ -174,17 +184,19 @@ def main():
             'cutoff_sent': cutoff_sent,
         }
         t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+        try:
+            if hasattr(os, 'fchmod'):
+                os.fchmod(t_fd, 0o640)
+            import grp
+            gid = grp.getgrnam('xrayapi').gr_gid
+            if hasattr(os, 'fchown'):
+                os.fchown(t_fd, 0, gid)
+        except Exception:
+            pass
         with os.fdopen(t_fd, 'w', encoding='utf-8', errors='replace') as fp:
             json.dump(data, fp, indent=2)
             fp.flush()
         os.replace(t_path, state_file)
-
-        try:
-            import shutil
-            shutil.chown(state_file, user='root', group='xrayapi')
-            os.chmod(state_file, 0o640)
-        except Exception:
-            pass
 
         print(f'{action}|{acc_gb_fmt}|{lim_gb_fmt}|{pct:.1f}')
     finally:
