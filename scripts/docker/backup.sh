@@ -62,7 +62,7 @@ GDRIVE_ENABLED="${GDRIVE_BACKUP_ENABLED:-false}"
 if [[ "$GDRIVE_ENABLED" == "true" ]] || [[ -n "${GDRIVE_FOLDER_ID:-}" && (-n "${GDRIVE_SA_BASE64:-}" || -f "${GDRIVE_SA_FILE:-/backups/gdrive_sa.json}") ]]; then
     GDRIVE_SA=""
     if [[ -n "${GDRIVE_SA_BASE64:-}" ]]; then
-        echo "$GDRIVE_SA_BASE64" | base64 -d > /tmp/gdrive_sa.json 2>/dev/null || true
+        echo "$GDRIVE_SA_BASE64" | tr -d '\r\n ' | base64 -d > /tmp/gdrive_sa.json 2>/dev/null || true
         chmod 600 /tmp/gdrive_sa.json 2>/dev/null || true
         if [[ -s /tmp/gdrive_sa.json ]]; then
             GDRIVE_SA="/tmp/gdrive_sa.json"
