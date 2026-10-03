@@ -533,6 +533,154 @@ wait_for_apt_locks 1
         proc = self._run_cli_command("doctor")
         self.assertIn("Порт 80 слушается веб-сервером Caddy (just1kbot_caddy: running)", proc.stdout)
 
+    def test_doctor_reports_gdrive_status_and_permissions(self):
+        """cmd_doctor reports gdrive status and warns on missing config or wrong permissions."""
+        env_file = self.project_dir / ".env"
+        env_file.write_text("GDRIVE_BACKUP_ENABLED=true\n", encoding="utf-8")
+
+        # Case 1: Missing rclone.conf
+        proc = self._run_cli_command("doctor")
+        self.assertIn("файл backups/rclone.conf не найден", proc.stdout + proc.stderr)
+
+        # Case 2: Config present and valid
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        rclone_conf = backups_dir / "rclone.conf"
+        rclone_conf.write_text(
+            "[gdrive]\ntype = drive\nscope = drive\nclient_id = cid\nclient_secret = csec\ntoken = {\"refresh_token\":\"tok\"}\nroot_folder_id = folder123\n",
+            encoding="utf-8",
+        )
+        rclone_conf.chmod(0o600)
+
+        proc = self._run_cli_command("doctor")
+        self.assertIn("Google Drive бэкап: настроен (папка ID: folder123", proc.stdout)
+
+    def test_doctor_probe_uses_rclone_entrypoint_and_does_not_invoke_backup_script(self):
+        """cmd_doctor runs probe via --entrypoint rclone and does not invoke backup.sh."""
+        env_file = self.project_dir / ".env"
+        env_file.write_text("GDRIVE_BACKUP_ENABLED=true\n", encoding="utf-8")
+
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        rclone_conf = backups_dir / "rclone.conf"
+        rclone_conf.write_text(
+            "[gdrive]\ntype = drive\nscope = drive\nclient_id = cid\nclient_secret = csec\ntoken = {\"refresh_token\":\"tok\"}\nroot_folder_id = folder123\n",
+            encoding="utf-8",
+        )
+        rclone_conf.chmod(0o600)
+
+        # Log calls to docker stub
+        docker_log = self.project_dir / "docker_calls.log"
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            f"#!/bin/bash\n"
+            f'echo "$@" >> "{docker_log.as_posix()}"\n'
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ "$1" == "compose" && "$2" == "version" ]]; then echo "Docker Compose version v2.27.0"; exit 0; fi\n'
+            'if [[ "$*" =~ "--entrypoint" ]] && [[ "$*" =~ "rclone" ]]; then exit 0; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        proc = self._run_cli_command("doctor")
+        self.assertIn("Google Drive API: связь и доступ к папке подтверждены", proc.stdout)
+
+        calls = docker_log.read_text(encoding="utf-8") if docker_log.exists() else ""
+        self.assertIn("--entrypoint rclone", calls)
+        self.assertIn("lsd gdrive:", calls)
+        self.assertNotIn("backup.sh", calls)
+
+    def test_doctor_fails_closed_when_gdrive_probe_fails(self):
+        """cmd_doctor sets error and returns exit code 1 if Google Drive API probe fails."""
+        env_file = self.project_dir / ".env"
+        env_file.write_text("GDRIVE_BACKUP_ENABLED=true\n", encoding="utf-8")
+
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        rclone_conf = backups_dir / "rclone.conf"
+        rclone_conf.write_text(
+            "[gdrive]\ntype = drive\nscope = drive\nclient_id = cid\nclient_secret = csec\ntoken = {\"refresh_token\":\"tok\"}\nroot_folder_id = folder123\n",
+            encoding="utf-8",
+        )
+        rclone_conf.chmod(0o600)
+
+        # Mock docker stub where rclone probe fails (exit 1)
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            "#!/bin/bash\n"
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ "$1" == "compose" && "$2" == "version" ]]; then echo "Docker Compose version v2.27.0"; exit 0; fi\n'
+            'if [[ "$*" =~ "lsd gdrive:" ]]; then exit 1; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        proc = self._run_cli_command("doctor")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Google Drive API: проверка связи не удалась", proc.stdout + proc.stderr)
+
+    def test_setup_gdrive_rollback_restores_previous_working_config(self):
+        """cmd_setup_gdrive restores previous rclone.conf on test failure if user opts to rollback."""
+        env_file = self.project_dir / ".env"
+        env_file.write_text("GDRIVE_BACKUP_ENABLED=true\nGDRIVE_RETENTION_DAYS=21\n", encoding="utf-8")
+
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        rclone_conf = backups_dir / "rclone.conf"
+        rclone_conf.write_text("[gdrive]\noriginal_working_content=true\n", encoding="utf-8")
+        rclone_conf.chmod(0o600)
+
+        # Mock docker stub where backup fails
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            "#!/bin/bash\n"
+            'if [[ "$1" == "compose" && "$2" == "version" ]]; then echo "Docker Compose version v2.27.0"; exit 0; fi\n'
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ "$1" == "compose" ]] && [[ "$*" =~ "run" ]]; then exit 1; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
+        wizard_inputs = "\n".join([
+            "y",
+            "new_folder_id_1234567890",
+            "new_client_id",
+            "new_client_secret",
+            '{"refresh_token":"new_tok"}',
+            "14",
+            "y",
+            "y",
+        ]) + "\n"
+
+        proc = self._run_cli_command("gdrive", input_text=wizard_inputs)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("восстановлена из предыдущего рабочего состояния", proc.stdout + proc.stderr)
+        self.assertIn("original_working_content=true", rclone_conf.read_text(encoding="utf-8"))
+
+    def test_setup_gdrive_success_without_test_backup_returns_zero(self):
+        """cmd_setup_gdrive exits with code 0 on successful setup when test backup is skipped."""
+        env_file = self.project_dir / ".env"
+        env_file.write_text("BOT_TOKEN=tok\n", encoding="utf-8")
+
+        wizard_inputs = "\n".join([
+            "y",
+            "folder_id_12345",
+            "client_id_val",
+            "client_sec_val",
+            '{"refresh_token":"sample_token"}',
+            "14",
+            "n",
+        ]) + "\n"
+
+        proc = self._run_cli_command("gdrive", input_text=wizard_inputs)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Конфигурация Google Drive успешно сохранена", proc.stdout)
+        rclone_conf = self.project_dir / "backups" / "rclone.conf"
+        self.assertTrue(rclone_conf.exists())
+
     def test_cmd_backup_creates_restricted_permissions(self):
         """cmd_backup ensures 0700 on backups/ directory and 0600 on created backup files."""
         # Mock docker compose profile tools run --rm backup
@@ -2043,10 +2191,14 @@ cmd_uninstall --confirm=DELETE --purge-backups
         self.assertNotIn("other_app_postgres_data", log_content, "Foreign docker volume must NEVER be removed!")
 
     def test_uninstall_preserves_backups_when_keep_backups_specified(self):
-        """cmd_uninstall preserves backup directory when --keep-backups is given."""
+        """cmd_uninstall preserves backup directory when --keep-backups is given and excludes credentials."""
         backups_dir = self.project_dir / "backups"
         backups_dir.mkdir(parents=True, exist_ok=True)
         (backups_dir / "dump1.sql.gz.age").write_text("encrypted_backup_payload", encoding="utf-8")
+        (backups_dir / "rclone.conf").write_text("[gdrive]\ntoken=secret", encoding="utf-8")
+        (backups_dir / "rclone.bak.123456").write_text("[gdrive]\ntoken=secret_bak", encoding="utf-8")
+        (backups_dir / "rclone.tmp.654321").write_text("[gdrive]\ntoken=secret_tmp", encoding="utf-8")
+        (backups_dir / "service_account.json").write_text('{"private_key":"secret"}', encoding="utf-8")
 
         saved_dir = self.root / "saved_backups"
 
@@ -2072,6 +2224,43 @@ cmd_uninstall --confirm=DELETE --keep-backups
         self.assertFalse(self.project_dir.exists(), "PROJECT_DIR must be deleted")
         self.assertTrue(saved_dir.exists(), "Saved backups directory must exist")
         self.assertTrue((saved_dir / "dump1.sql.gz.age").exists(), "Backup files must be preserved in save location")
+        self.assertFalse((saved_dir / "rclone.conf").exists(), "rclone.conf must NEVER be copied to saved location!")
+        self.assertFalse((saved_dir / "rclone.bak.123456").exists(), "rclone.bak must NEVER be copied to saved location!")
+        self.assertFalse((saved_dir / "rclone.tmp.654321").exists(), "rclone.tmp must NEVER be copied to saved location!")
+        self.assertFalse((saved_dir / "service_account.json").exists(), "service_account.json must NEVER be copied to saved location!")
+
+    def test_uninstall_aborts_fail_closed_if_nested_secret_detected(self):
+        """cmd_uninstall halts fail-closed if nested secret file is copied into safe_backup_dest."""
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        (backups_dir / "dump1.sql.gz.age").write_text("encrypted_backup_payload", encoding="utf-8")
+        nested_dir = backups_dir / "nested"
+        nested_dir.mkdir(parents=True, exist_ok=True)
+        (nested_dir / "rclone.conf").write_text("[gdrive]\ntoken=nested_secret", encoding="utf-8")
+
+        saved_dir = self.root / "saved_backups_nested"
+
+        script = f"""
+export PROJECT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_DIR="{self.project_dir.as_posix()}"
+export JUST1KBOT_NO_SUDO="1"
+export JUST1KBOT_BACKUP_SAVE_DIR="{saved_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
+source "{self.project_dir.as_posix()}/scripts/cli.sh"
+
+cmd_uninstall --confirm=DELETE --keep-backups
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(self.project_dir),
+            env={**os.environ, "PATH": f"{self.bin_dir.as_posix()}:{os.environ.get('PATH', '')}", "JUST1KBOT_NO_SUDO": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertTrue(self.project_dir.exists(), "PROJECT_DIR must NOT be deleted on fail-closed error")
+        self.assertIn("обнаружены файлы конфигурации/секретов в сохраненных бэкапах", proc.stdout + proc.stderr)
 
     def test_uninstall_empty_backups_with_keep_backups_succeeds(self):
         """cmd_uninstall --keep-backups must succeed without fail-closed error when backups/ is empty or contains dotfiles."""

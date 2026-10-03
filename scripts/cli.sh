@@ -532,14 +532,17 @@ _rollback_services_after_db_failure() {
     fi
 }
 
-# --- Настройка системных параметров ядра (Redis + ICMP Stealth) ---
+# --- Настройка системных параметров ядра (Redis + ICMP Stealth + IPv6 Leak Protection) ---
 apply_sysctl_hardening() {
     local sysctl_file="${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}"
     local needs_update=0
     if [[ ! -f "$sysctl_file" ]]; then
         needs_update=1
     elif ! grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
-         ! grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null; then
+         ! grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv6\.conf\.all\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv6\.conf\.default\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null || \
+         ! grep -Eq '^[[:space:]]*net\.ipv6\.conf\.lo\.disable_ipv6[[:space:]]*=[[:space:]]*1' "$sysctl_file" 2>/dev/null; then
         needs_update=1
     fi
 
@@ -557,9 +560,15 @@ apply_sysctl_hardening() {
             if grep -Eq '^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=' "$tmp_sysctl" 2>/dev/null; then
                 sed -i -E '/^[[:space:]]*net\.ipv4\.icmp_echo_ignore_all[[:space:]]*=/d' "$tmp_sysctl" 2>/dev/null || true
             fi
+            if grep -Eq '^[[:space:]]*net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6[[:space:]]*=' "$tmp_sysctl" 2>/dev/null; then
+                sed -i -E '/^[[:space:]]*net\.ipv6\.conf\.(all|default|lo)\.disable_ipv6[[:space:]]*=/d' "$tmp_sysctl" 2>/dev/null || true
+            fi
         fi
         echo "vm.overcommit_memory = 1" >> "$tmp_sysctl"
         echo "net.ipv4.icmp_echo_ignore_all = 1" >> "$tmp_sysctl"
+        echo "net.ipv6.conf.all.disable_ipv6 = 1" >> "$tmp_sysctl"
+        echo "net.ipv6.conf.default.disable_ipv6 = 1" >> "$tmp_sysctl"
+        echo "net.ipv6.conf.lo.disable_ipv6 = 1" >> "$tmp_sysctl"
         run_privileged mkdir -p "$(dirname "$sysctl_file")" 2>/dev/null || true
         run_privileged cp "$tmp_sysctl" "$sysctl_file" 2>/dev/null || true
         run_privileged chmod 644 "$sysctl_file" 2>/dev/null || true
@@ -586,6 +595,9 @@ apply_sysctl_hardening() {
     if command -v sysctl >/dev/null 2>&1; then
         run_privileged sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1 || true
         run_privileged sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
+        run_privileged sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1 || true
         if [[ -f "$sysctl_file" ]]; then
             run_privileged sysctl -p "$sysctl_file" >/dev/null 2>&1 || true
         fi
@@ -595,6 +607,11 @@ apply_sysctl_hardening() {
     icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     if [[ "$icmp_curr" != "1" ]]; then
         warn "Параметр net.ipv4.icmp_echo_ignore_all не применился в ядре (проверьте права или ограничения контейнера)."
+    fi
+    local ipv6_curr
+    ipv6_curr="$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")"
+    if [[ "$ipv6_curr" != "1" ]]; then
+        warn "Параметр net.ipv6.conf.all.disable_ipv6 не применился в ядре (проверьте права или ограничения контейнера)."
     fi
 }
 
@@ -783,7 +800,7 @@ cmd_update() {
     fi
 
     info "Шаг 4/6. Сборка образов, валидация конфигурации и применение миграций..."
-    if ! docker compose build; then
+    if ! docker compose build || ! docker compose --profile tools build backup; then
         error "Ошибка при сборке Docker-образов новой версии!"
         if [[ -n "$rollback_commit" ]]; then
             warn "🚨 Выполняем автоматический откат исходного кода к коммиту $rollback_commit..."
@@ -1042,8 +1059,13 @@ cmd_backup() {
     mkdir -p backups
     chmod 700 backups 2>/dev/null || true
 
-    # Способ 1: Прямой дамп из работающего контейнера db + шифрование age (быстро и надежно)
-    if command -v age >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/.env" ]]; then
+    # Способ 1: Прямой дамп из работающего контейнера db + шифрование age (быстро и надежно).
+    # Если настроена удаленная выгрузка (Google Drive или BACKUP_REMOTE_URI), используется Способ 2 (контейнер backup с rclone).
+    local gdrive_enabled remote_uri
+    gdrive_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    remote_uri=$(grep -E "^BACKUP_REMOTE_URI=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+
+    if [[ "$gdrive_enabled" != "true" && -z "$remote_uri" ]] && command -v age >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/.env" ]]; then
         local age_recipient
         age_recipient=$(grep -E "^BACKUP_AGE_RECIPIENT=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
         if [[ -n "$age_recipient" ]]; then
@@ -1287,6 +1309,266 @@ cmd_restore() {
     log "База данных успешно восстановлена из $selected_backup!"
 }
 
+# --- 5.1. Настройка Google Drive бэкапа (Интерактивный мастер) ---
+cmd_setup_gdrive() {
+    echo -e "\n${BOLD}${BLUE}=== ☁️ НАСТРОЙКА АВТОМАТИЧЕСКОЙ ВЫГРУЗКИ В GOOGLE DRIVE ===${NC}\n"
+
+    local env_file="${PROJECT_DIR}/.env"
+    if [[ ! -f "$env_file" ]]; then
+        error "Файл конфигурации .env не найден в ${PROJECT_DIR}!"
+        return 1
+    fi
+
+    local rclone_conf="${PROJECT_DIR}/backups/rclone.conf"
+    mkdir -p "${PROJECT_DIR}/backups"
+    chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
+
+    # Чтение текущих значений
+    local cur_enabled cur_folder cur_client_id cur_client_secret cur_retention
+    cur_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "$env_file" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "false")
+    cur_retention=$(grep -E "^GDRIVE_RETENTION_DAYS=" "$env_file" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "14")
+    cur_folder=""
+    cur_client_id=""
+    cur_client_secret=""
+
+    if [[ -f "$rclone_conf" ]]; then
+        cur_folder=$(grep -E '^[[:space:]]*root_folder_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+        cur_client_id=$(grep -E '^[[:space:]]*client_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+        cur_client_secret=$(grep -E '^[[:space:]]*client_secret[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    fi
+
+    echo -e "Текущий статус: $( [[ "$cur_enabled" == "true" ]] && echo -e "${GREEN}ВКЛЮЧЕН${NC}" || echo -e "${YELLOW}ОТКЛЮЧЕН${NC}" )"
+    if [[ -n "$cur_folder" ]]; then
+        echo -e "ID целевой папки: ${BOLD}${cur_folder}${NC}"
+    fi
+    echo ""
+
+    # Вопрос: Включить или отключить
+    local enable_choice
+    local prompt_en="[Y/n]"
+    [[ "$cur_enabled" == "false" ]] && prompt_en="[y/N]"
+    read -r -p "Включить автоматическую выгрузку бэкапов в Google Drive? $prompt_en: " enable_choice
+    enable_choice="${enable_choice:-$( [[ "$cur_enabled" == "true" ]] && echo "y" || echo "n" )}"
+
+    if [[ "$enable_choice" =~ ^[Nn]$ ]]; then
+        set_env_var "GDRIVE_BACKUP_ENABLED" "false"
+        log "Автоматическая выгрузка в Google Drive отключена (GDRIVE_BACKUP_ENABLED=false)."
+        return 0
+    fi
+
+    echo -e "\n${CYAN}--- Шаг 1 из 5: Папка на Google Диске ---${NC}"
+    echo "Откройте папку на drive.google.com и скопируйте ID (или полную ссылку) из адресной строки"
+    local folder_input
+    while true; do
+        read -r -p "Введите ID или ссылку на папку Google Drive${cur_folder:+ [текущий: $cur_folder]}: " folder_input
+        folder_input="${folder_input:-$cur_folder}"
+        folder_input=$(echo "$folder_input" | tr -d " '\"\r\n\t")
+        if [[ "$folder_input" =~ folders/([a-zA-Z0-9_-]+) ]]; then
+            folder_input="${BASH_REMATCH[1]}"
+            info "ID папки успешно извлечен из ссылки: $folder_input"
+        fi
+        if [[ "$folder_input" =~ ^[a-zA-Z0-9_-]{15,64}$ ]]; then
+            break
+        fi
+        warn "Некорректный ID папки (ожидается идентификатор Google Drive от 15 до 64 символов)!"
+    done
+
+    echo -e "\n${CYAN}--- Шаг 2 из 5: Google OAuth Client ID ---${NC}"
+    echo "Client ID из Google Cloud Console (Desktop application)"
+    local client_id_input
+    while true; do
+        read -r -p "Введите Client ID${cur_client_id:+ [Enter чтобы оставить текущий]}: " client_id_input
+        client_id_input="${client_id_input:-$cur_client_id}"
+        client_id_input=$(echo "$client_id_input" | tr -d " '\"\r\n\t")
+        if [[ -n "$client_id_input" ]]; then
+            break
+        fi
+        warn "Client ID обязателен для работы персонального OAuth приложения!"
+    done
+
+    echo -e "\n${CYAN}--- Шаг 3 из 5: Google OAuth Client Secret ---${NC}"
+    echo "Client Secret из Google Cloud Console (ввод скрыт для безопасности)"
+    local client_secret_input
+    while true; do
+        read -r -s -p "Введите Client Secret${cur_client_secret:+ [Enter чтобы оставить текущий]}: " client_secret_input
+        echo ""
+        client_secret_input="${client_secret_input:-$cur_client_secret}"
+        client_secret_input=$(echo "$client_secret_input" | tr -d " '\"\r\n\t")
+        if [[ -n "$client_secret_input" ]]; then
+            info "Client Secret принят."
+            break
+        fi
+        warn "Client Secret обязателен! Попробуйте снова."
+    done
+
+    echo -e "\n${CYAN}--- Шаг 4 из 5: OAuth токен авторизации ---${NC}"
+    echo "Токен получается на вашем ПК командой: rclone authorize \"drive\" \"CLIENT_ID\" \"CLIENT_SECRET\""
+    echo "Вставьте полученный JSON-токен целиком (ввод скрыт для безопасности):"
+    local token_input clean_token
+    while true; do
+        read -r -s -p "Вставьте JSON токен: " token_input
+        echo ""
+        # Если пользователь передал Base64, пробуем декодировать
+        if [[ "$token_input" != \{* ]] && echo "$token_input" | base64 -d >/dev/null 2>&1; then
+            token_input=$(echo "$token_input" | base64 -d 2>/dev/null || echo "$token_input")
+        fi
+
+        clean_token=$(printf '%s' "$token_input" | python3 -c "import json, sys; d = json.load(sys.stdin); assert isinstance(d, dict) and d.get('refresh_token'); print(json.dumps(d))" 2>/dev/null || echo "")
+
+        if [[ -n "$clean_token" ]]; then
+            info "OAuth токен успешно проверен и принят."
+            break
+        else
+            warn "Вставленный токен некорректен: требуется валидный JSON rclone с полем 'refresh_token'. Попробуйте снова."
+        fi
+    done
+
+    echo -e "\n${CYAN}--- Шаг 5 из 5: Срок хранения бэкапов ---${NC}"
+    local retention_input
+    read -r -p "Срок хранения бэкапов в Google Drive (в днях) [${cur_retention:-14}]: " retention_input
+    retention_input="${retention_input:-${cur_retention:-14}}"
+    if ! [[ "$retention_input" =~ ^[0-9]+$ ]] || [ "$retention_input" -le 0 ]; then
+        retention_input="14"
+    fi
+
+    # Резервная копия существующей конфигурации на случай отката при неудачном тесте
+    local prev_conf_backup=""
+    local tmp_conf=""
+    local setup_committed=0
+    local prev_enabled="$cur_enabled"
+    local prev_retention="$cur_retention"
+
+    cleanup_setup_gdrive() {
+        [[ -n "$tmp_conf" && -f "$tmp_conf" ]] && rm -f "$tmp_conf" || true
+        if [[ "$setup_committed" -eq 0 ]]; then
+            if [[ -n "$prev_conf_backup" && -s "$prev_conf_backup" ]]; then
+                mv -f "$prev_conf_backup" "$rclone_conf" 2>/dev/null || true
+                chmod 600 "$rclone_conf" 2>/dev/null || true
+                set_env_var "GDRIVE_BACKUP_ENABLED" "$prev_enabled"
+                set_env_var "GDRIVE_RETENTION_DAYS" "$prev_retention"
+            elif [[ -n "$prev_conf_backup" ]]; then
+                rm -f "$prev_conf_backup" "$rclone_conf" 2>/dev/null || true
+            fi
+        else
+            [[ -n "$prev_conf_backup" && -f "$prev_conf_backup" ]] && rm -f "$prev_conf_backup" || true
+        fi
+        return 0
+    }
+
+    on_setup_interrupt() {
+        cleanup_setup_gdrive
+        exit 130
+    }
+
+    on_setup_terminate() {
+        cleanup_setup_gdrive
+        exit 143
+    }
+
+    # shellcheck disable=SC2064
+    trap cleanup_setup_gdrive EXIT
+    trap on_setup_interrupt INT
+    trap on_setup_terminate TERM
+
+    if [[ -f "$rclone_conf" ]]; then
+        prev_conf_backup=$(mktemp "${PROJECT_DIR}/backups/rclone.bak.XXXXXX")
+        if ! cp -a "$rclone_conf" "$prev_conf_backup"; then
+            error "Не удалось создать резервную копию существующей конфигурации $rclone_conf."
+            rm -f "$prev_conf_backup"
+            prev_conf_backup=""
+            setup_committed=1
+            return 1
+        fi
+        chmod 600 "$prev_conf_backup"
+    fi
+
+    # Атомарное сохранение в backups/rclone.conf
+    tmp_conf=$(mktemp "${PROJECT_DIR}/backups/rclone.tmp.XXXXXX")
+    cat <<EOF > "$tmp_conf"
+[gdrive]
+type = drive
+scope = drive
+client_id = ${client_id_input}
+client_secret = ${client_secret_input}
+token = ${clean_token}
+root_folder_id = ${folder_input}
+EOF
+    chmod 600 "$tmp_conf"
+    mv -f "$tmp_conf" "$rclone_conf"
+    tmp_conf=""
+    chmod 600 "$rclone_conf"
+
+    # Сохранение флагов в .env (без хранения токенов в .env!)
+    set_env_var "GDRIVE_BACKUP_ENABLED" "true"
+    set_env_var "GDRIVE_RETENTION_DAYS" "${retention_input}"
+    # Очистка устаревших переменных из .env для исключения утечки
+    sed -i -E '/^[[:space:]]*GDRIVE_FOLDER_ID=/d; /^[[:space:]]*GDRIVE_TOKEN_BASE64=/d; /^[[:space:]]*GDRIVE_SA_BASE64=/d; /^[[:space:]]*GDRIVE_SA_FILE=/d' "$env_file" 2>/dev/null || true
+    chmod 600 "$env_file" 2>/dev/null || true
+
+    log "Конфигурация Google Drive успешно сохранена в backups/rclone.conf (права 0600)!"
+
+    # Тестовый запуск
+    echo ""
+    local test_choice
+    read -r -p "Создать зашифрованный бэкап и проверить выгрузку в Google Drive прямо сейчас? [Y/n]: " test_choice
+    test_choice="${test_choice:-y}"
+    if [[ "$test_choice" =~ ^[Yy]$ ]]; then
+        # Гарантируем актуальную сборку backup-образа с rclone перед тестом
+        if command -v docker >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
+            info "Проверка и сборка Docker-образа бэкапа..."
+            if ! docker compose --profile tools build backup; then
+                error "Не удалось собрать Docker-образ бэкапа."
+                if [[ -n "$prev_conf_backup" && -s "$prev_conf_backup" ]]; then
+                    mv -f "$prev_conf_backup" "$rclone_conf"
+                    chmod 600 "$rclone_conf"
+                    prev_conf_backup=""
+                    set_env_var "GDRIVE_BACKUP_ENABLED" "$prev_enabled"
+                    set_env_var "GDRIVE_RETENTION_DAYS" "$prev_retention"
+                    warn "Конфигурация Google Drive восстановлена из предыдущего рабочего состояния."
+                else
+                    rm -f "$rclone_conf" "$prev_conf_backup"
+                    prev_conf_backup=""
+                    set_env_var "GDRIVE_BACKUP_ENABLED" "false"
+                    warn "Выгрузка в Google Drive отключена, временный конфиг удален."
+                fi
+                setup_committed=1
+                cleanup_setup_gdrive
+                trap - EXIT INT TERM
+                return 1
+            fi
+        fi
+
+        info "Запуск тестового создания и выгрузки бэкапа..."
+        if ! cmd_backup; then
+            warn "Тестовая выгрузка завершилась с ошибкой."
+            local rollback_choice
+            read -r -p "Откатить конфигурацию Google Drive к предыдущему состоянию? [Y/n]: " rollback_choice
+            rollback_choice="${rollback_choice:-y}"
+            if [[ "$rollback_choice" =~ ^[Yy]$ ]]; then
+                if [[ -n "$prev_conf_backup" && -s "$prev_conf_backup" ]]; then
+                    mv -f "$prev_conf_backup" "$rclone_conf"
+                    chmod 600 "$rclone_conf"
+                    prev_conf_backup=""
+                    set_env_var "GDRIVE_BACKUP_ENABLED" "$prev_enabled"
+                    set_env_var "GDRIVE_RETENTION_DAYS" "$prev_retention"
+                    warn "Конфигурация Google Drive восстановлена из предыдущего рабочего состояния."
+                else
+                    rm -f "$rclone_conf" "$prev_conf_backup"
+                    prev_conf_backup=""
+                    set_env_var "GDRIVE_BACKUP_ENABLED" "false"
+                    warn "Выгрузка в Google Drive отключена, временный конфиг удален."
+                fi
+            fi
+        fi
+    fi
+
+    # Снятие trap и очистка временной копии бэкапа конфига
+    setup_committed=1
+    cleanup_setup_gdrive
+    trap - EXIT INT TERM
+    return 0
+}
+
 # --- 6. Управление сервисами ---
 cmd_restart() {
     local service="${1:-bot}"
@@ -1332,6 +1614,7 @@ cmd_config() {
 # --- 8. Доктор (Диагностика) ---
 cmd_doctor() {
     echo -e "\n${BOLD}${BLUE}=== 🩺 ДИАГНОСТИКА СИСТЕМЫ JUST1KBOT ===${NC}\n"
+    local has_errors=0
 
     # 0. Проверка версии ядра Linux
     local kernel_ver
@@ -1380,6 +1663,7 @@ cmd_doctor() {
         log "Docker демон активен и отвечает."
     else
         error "Docker демон недоступен (проверьте права пользователя или 'systemctl status docker')!"
+        has_errors=1
     fi
 
     # 2. Прослушивание портов
@@ -1397,6 +1681,7 @@ cmd_doctor() {
                 fi
             else
                 error "КОНФЛИКТ ПОРТА: Порт $port занят сторонним процессом хоста ($proc), а не Caddy!"
+                has_errors=1
             fi
         else
             warn "Порт $port не слушается. Проверьте статус контейнера Caddy (docker compose logs caddy)."
@@ -1406,9 +1691,9 @@ cmd_doctor() {
     # 3. Чтение .env параметров
     if [[ -f "${PROJECT_DIR}/.env" ]]; then
         local domain
-        domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" | cut -d'=' -f2 | tr -d " '\"")
+        domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
         local bot_token
-        bot_token=$(grep -E "^BOT_TOKEN=" "${PROJECT_DIR}/.env" | cut -d'=' -f2 | tr -d " '\"")
+        bot_token=$(grep -E "^BOT_TOKEN=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
 
         # 4. Проверка DNS домена
         if [[ -n "$domain" ]]; then
@@ -1433,14 +1718,69 @@ cmd_doctor() {
                 log "Связь с Telegram Bot API: @${b_user} (OK)"
             else
                 error "Связь с Telegram Bot API нарушена (неверный токен или блокировка API)."
+                has_errors=1
+            fi
+        fi
+
+        # 5.1 Проверка настроек Google Drive бэкапа
+        local gdrive_check_enabled
+        gdrive_check_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "false")
+        if [[ "$gdrive_check_enabled" == "true" ]]; then
+            local rclone_conf="${PROJECT_DIR}/backups/rclone.conf"
+            if [[ ! -f "$rclone_conf" ]]; then
+                error "Google Drive бэкап включен, но файл backups/rclone.conf не найден! Запустите 'just1kbot gdrive' для настройки."
+                has_errors=1
+            else
+                local conf_folder conf_token conf_perm conf_cid conf_csec
+                conf_folder=$(grep -E '^[[:space:]]*root_folder_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+                conf_token=$(grep -E '^[[:space:]]*token[[:space:]]*=' "$rclone_conf" 2>/dev/null || echo "")
+                conf_cid=$(grep -E '^[[:space:]]*client_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+                conf_csec=$(grep -E '^[[:space:]]*client_secret[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+
+                # Проверка прав доступа файла конфига (0600)
+                conf_perm=$(stat -c "%a" "$rclone_conf" 2>/dev/null || stat -f "%Lp" "$rclone_conf" 2>/dev/null || echo "600")
+                if [[ "$conf_perm" != "600" && "$conf_perm" != "400" ]]; then
+                    warn "Файл backups/rclone.conf имеет права $conf_perm (рекомендуется 0600: выполните 'chmod 600 $rclone_conf')."
+                fi
+
+                if [[ -z "$conf_folder" ]]; then
+                    error "В backups/rclone.conf не задан обязательный root_folder_id (защита корня диска)!"
+                    has_errors=1
+                elif [[ -z "$conf_token" ]] || ! echo "$conf_token" | grep -q "refresh_token"; then
+                    error "В backups/rclone.conf отсутствует валидный OAuth токен (refresh_token)!"
+                    has_errors=1
+                elif [[ -z "$conf_cid" || -z "$conf_csec" ]]; then
+                    warn "В backups/rclone.conf не заданы client_id/client_secret (рекомендуется для исключения сбоев обновления токенов)."
+                    log "Google Drive бэкап: настроен (папка ID: $conf_folder, конфиг: backups/rclone.conf) (OK)"
+                else
+                    log "Google Drive бэкап: настроен (папка ID: $conf_folder, конфиг: backups/rclone.conf, права: 0600) (OK)"
+                fi
+
+                # Автономная проверка связи Google Drive API (read-only probe c явным --entrypoint rclone)
+                if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
+                    info "Проверка связи с Google Drive API (read-only)..."
+                    if docker compose --profile tools run --rm --no-deps --entrypoint rclone backup --config /backups/rclone.conf lsd gdrive: --max-depth 1 >/dev/null 2>&1; then
+                        log "Google Drive API: связь и доступ к папке подтверждены (OK)"
+                    else
+                        error "Google Drive API: проверка связи не удалась (проверьте интернет, валидность OAuth токена и доступность папки)"
+                        has_errors=1
+                    fi
+                fi
             fi
         fi
     fi
 
     # 6. Проверка здоровья контейнеров
     echo ""
-    docker compose ps
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
+        docker compose ps || true
+    fi
     echo ""
+
+    if [[ "$has_errors" -ne 0 ]]; then
+        return 1
+    fi
+    return 0
 }
 
 
@@ -1580,17 +1920,45 @@ cmd_uninstall() {
             error "Не удалось создать каталог для сохранения бэкапов: $safe_backup_dest! Процедура удаления прервана (Fail-Closed)."
             return 1
         fi
-        if ! (run_privileged cp -a "$backups_dir/." "$safe_backup_dest/" 2>/dev/null || cp -a "$backups_dir/." "$safe_backup_dest/" 2>/dev/null); then
-            error "Критическая ошибка при копировании резервных копий в $safe_backup_dest! Процедура удаления прервана (Fail-Closed) во избежание потери данных."
+
+        # Копируем СТРОГО без конфигов авторизации и токенов (исключение rclone и секретов до копирования)
+        local find_tmp
+        find_tmp=$(mktemp)
+        if ! find "$backups_dir" -mindepth 1 -maxdepth 1 ! -name "*rclone*" ! -name "*gdrive*.json" ! -name "*service_account*.json" -print0 > "$find_tmp" 2>/dev/null; then
+            rm -f "$find_tmp"
+            error "Ошибка сканирования каталога бэкапов $backups_dir! Процедура удаления прервана (Fail-Closed)."
             return 1
         fi
+
+        local non_secret_files=()
+        while IFS= read -r -d '' f; do
+            non_secret_files+=("$f")
+        done < "$find_tmp"
+        rm -f "$find_tmp"
+
+        if [[ ${#non_secret_files[@]} -gt 0 ]]; then
+            if ! (run_privileged cp -a "${non_secret_files[@]}" "$safe_backup_dest/" 2>/dev/null || cp -a "${non_secret_files[@]}" "$safe_backup_dest/" 2>/dev/null); then
+                error "Критическая ошибка при копировании резервных копий в $safe_backup_dest! Процедура удаления прервана (Fail-Closed) во избежание потери данных."
+                return 1
+            fi
+        fi
+
         local src_count dst_count
-        src_count=$(find "$backups_dir" -mindepth 1 | wc -l)
-        dst_count=$(find "$safe_backup_dest" -mindepth 1 | wc -l)
+        src_count=${#non_secret_files[@]}
+        dst_count=$(find "$safe_backup_dest" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
         if [[ "$src_count" -gt "$dst_count" ]]; then
             error "Несоответствие количества сохраненных файлов резервных копий ($src_count vs $dst_count)! Процедура удаления прервана (Fail-Closed)."
             return 1
         fi
+
+        # Строгая гарантия: rclone конфиги и любые учетные данные ни при каких условиях не должны оказаться в safe_backup_dest (включая любые подкаталоги)
+        local leaked_secrets
+        leaked_secrets=$(find "$safe_backup_dest" \( -name "*rclone*" -o -name "*gdrive*.json" -o -name "*service_account*.json" \) 2>/dev/null || true)
+        if [[ -n "$leaked_secrets" ]]; then
+            error "Критическая ошибка безопасности: обнаружены файлы конфигурации/секретов в сохраненных бэкапах! Процедура удаления прервана (Fail-Closed)."
+            return 1
+        fi
+
         run_privileged chmod 700 "$safe_backup_dest" 2>/dev/null || chmod 700 "$safe_backup_dest" 2>/dev/null || true
         log "Резервные копии сохранены и проверены в: $safe_backup_dest"
     elif [[ "$purge_backups" == "true" ]]; then
@@ -1818,11 +2186,14 @@ interactive_menu() {
             4)
                 echo -e "\n[1] Создать новый зашифрованный бэкап"
                 echo "[2] Восстановить базу данных из бэкапа"
-                read -r -p "Выберите [1-2]: " b_action
+                echo "[3] Настройка выгрузки в Google Drive (мастер настройки)"
+                read -r -p "Выберите [1-3]: " b_action
                 if [[ "$b_action" == "2" ]]; then
                     if ! cmd_restore; then
                         warn "Операция восстановления отменена или завершилась с ошибкой."
                     fi
+                elif [[ "$b_action" == "3" ]]; then
+                    cmd_setup_gdrive || true
                 else
                     if ! cmd_backup; then
                         warn "Создание резервной копии завершилось с ошибкой."
@@ -1891,7 +2262,14 @@ main() {
                 cmd_update
                 ;;
             backup)
-                cmd_backup
+                if [[ "${2:-}" == "gdrive" || "${2:-}" == "setup-gdrive" ]]; then
+                    cmd_setup_gdrive
+                else
+                    cmd_backup
+                fi
+                ;;
+            gdrive|setup-gdrive)
+                cmd_setup_gdrive
                 ;;
             restore)
                 cmd_restore "${2:-}"
@@ -1919,7 +2297,7 @@ main() {
                 cmd_uninstall "$@"
                 ;;
             help|-h|--help)
-                echo -e "Использование: just1kbot [status|version|logs|update|preflight|backup|restore|restart|start|stop|config|doctor|uninstall]"
+                echo -e "Использование: just1kbot [status|version|logs|update|preflight|backup|gdrive|restore|restart|start|stop|config|doctor|uninstall]"
                 ;;
             *)
                 error "Неизвестная команда: $1. Используйте 'just1kbot help'."
