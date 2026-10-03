@@ -97,8 +97,9 @@ if [[ "$GDRIVE_ENABLED" == "true" ]]; then
             fi
 
             echo "Очистка устаревших бэкапов в Google Drive (старше ${RETENTION} дн.)..."
-            if ! rclone --config "$RCLONE_CONF" delete --include "just1kbot_*.sql.gz.age" --min-age "${RETENTION}d" gdrive: --quiet; then
-                echo "WARNING: Не удалось завершить очистку устаревших копий в Google Drive." >&2
+            if ! rclone --config "$RCLONE_CONF" delete --include "just1kbot_*.sql.gz.age" --min-age "${RETENTION}d" gdrive: --retries 3 --retries-sleep 2s --quiet; then
+                echo "ERROR: Не удалось завершить очистку устаревших копий в Google Drive после 3 попыток!" >&2
+                UPLOAD_FAILED=true
             fi
         else
             echo "ERROR: Ошибка выгрузки бэкапа в Google Drive!" >&2
@@ -106,9 +107,9 @@ if [[ "$GDRIVE_ENABLED" == "true" ]]; then
         fi
     fi
 
-    # Fail-closed при ошибке облачного бэкапа
+    # Fail-closed при ошибке облачного бэкапа или ротации
     if [[ "$UPLOAD_FAILED" == "true" ]]; then
-        echo "ERROR: Локальный зашифрованный бэкап сохранен ($ENCRYPTED_FILE), но выгрузка в Google Drive завершилась с ошибкой!" >&2
+        echo "ERROR: Локальный зашифрованный бэкап сохранен ($ENCRYPTED_FILE), но облачные операции в Google Drive завершились с ошибкой!" >&2
         exit 1
     fi
 fi

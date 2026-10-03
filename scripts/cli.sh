@@ -1340,49 +1340,69 @@ cmd_setup_gdrive() {
     fi
 
     echo -e "\n${CYAN}--- Шаг 1 из 5: Папка на Google Диске ---${NC}"
-    echo "Откройте папку на drive.google.com и скопируйте ID из адресной строки (после /folders/...)"
+    echo "Откройте папку на drive.google.com и скопируйте ID (или полную ссылку) из адресной строки"
     local folder_input
     while true; do
-        read -r -p "Введите ID папки Google Drive${cur_folder:+ [текущий: $cur_folder]}: " folder_input
+        read -r -p "Введите ID или ссылку на папку Google Drive${cur_folder:+ [текущий: $cur_folder]}: " folder_input
         folder_input="${folder_input:-$cur_folder}"
         folder_input=$(echo "$folder_input" | tr -d " '\"\r\n\t")
-        if [[ -n "$folder_input" ]]; then
+        if [[ "$folder_input" =~ folders/([a-zA-Z0-9_-]+) ]]; then
+            folder_input="${BASH_REMATCH[1]}"
+            info "ID папки успешно извлечен из ссылки: $folder_input"
+        fi
+        if [[ "$folder_input" =~ ^[a-zA-Z0-9_-]{15,64}$ ]]; then
             break
         fi
-        warn "ID папки не может быть пустым!"
+        warn "Некорректный ID папки (ожидается идентификатор Google Drive от 15 до 64 символов)!"
     done
 
     echo -e "\n${CYAN}--- Шаг 2 из 5: Google OAuth Client ID ---${NC}"
-    echo "Client ID из Google Cloud Console (для персонального доступа без лимитов)"
+    echo "Client ID из Google Cloud Console (Desktop application)"
     local client_id_input
-    read -r -p "Введите Client ID${cur_client_id:+ [Enter чтобы оставить текущий]}: " client_id_input
-    client_id_input="${client_id_input:-$cur_client_id}"
-    client_id_input=$(echo "$client_id_input" | tr -d " '\"\r\n\t")
+    while true; do
+        read -r -p "Введите Client ID${cur_client_id:+ [Enter чтобы оставить текущий]}: " client_id_input
+        client_id_input="${client_id_input:-$cur_client_id}"
+        client_id_input=$(echo "$client_id_input" | tr -d " '\"\r\n\t")
+        if [[ -n "$client_id_input" ]]; then
+            break
+        fi
+        warn "Client ID обязателен для работы персонального OAuth приложения!"
+    done
 
     echo -e "\n${CYAN}--- Шаг 3 из 5: Google OAuth Client Secret ---${NC}"
+    echo "Client Secret из Google Cloud Console (ввод скрыт для безопасности)"
     local client_secret_input
-    read -r -p "Введите Client Secret${cur_client_secret:+ [Enter чтобы оставить текущий]}: " client_secret_input
-    client_secret_input="${client_secret_input:-$cur_client_secret}"
-    client_secret_input=$(echo "$client_secret_input" | tr -d " '\"\r\n\t")
+    while true; do
+        read -r -s -p "Введите Client Secret${cur_client_secret:+ [Enter чтобы оставить текущий]}: " client_secret_input
+        echo ""
+        client_secret_input="${client_secret_input:-$cur_client_secret}"
+        client_secret_input=$(echo "$client_secret_input" | tr -d " '\"\r\n\t")
+        if [[ -n "$client_secret_input" ]]; then
+            info "Client Secret принят."
+            break
+        fi
+        warn "Client Secret обязателен! Попробуйте снова."
+    done
 
     echo -e "\n${CYAN}--- Шаг 4 из 5: OAuth токен авторизации ---${NC}"
-    echo "Токен получается на вашем ПК командой: rclone authorize \"drive\""
-    echo "Вставьте полученный JSON-токен целиком:"
-    local token_input
+    echo "Токен получается на вашем ПК командой: rclone authorize \"drive\" \"CLIENT_ID\" \"CLIENT_SECRET\""
+    echo "Вставьте полученный JSON-токен целиком (ввод скрыт для безопасности):"
+    local token_input clean_token
     while true; do
-        read -r -p "Вставьте JSON токен: " token_input
-        # Сжимаем строку и убираем переносы
-        token_input=$(echo "$token_input" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-
+        read -r -s -p "Вставьте JSON токен: " token_input
+        echo ""
         # Если пользователь передал Base64, пробуем декодировать
-        if ! echo "$token_input" | grep -q "refresh_token" && echo "$token_input" | base64 -d 2>/dev/null | grep -q "refresh_token"; then
-            token_input=$(echo "$token_input" | base64 -d 2>/dev/null | tr -d '\r\n')
+        if [[ "$token_input" != \{* ]] && echo "$token_input" | base64 -d >/dev/null 2>&1; then
+            token_input=$(echo "$token_input" | base64 -d 2>/dev/null || echo "$token_input")
         fi
 
-        if echo "$token_input" | grep -q "refresh_token"; then
+        clean_token=$(python3 -c "import json, sys; d = json.loads(sys.argv[1]); assert isinstance(d, dict) and d.get('refresh_token'); print(json.dumps(d))" "$token_input" 2>/dev/null || echo "")
+
+        if [[ -n "$clean_token" ]]; then
+            info "OAuth токен успешно проверен и принят."
             break
         else
-            warn "Вставленный токен не содержит обязательный 'refresh_token'. Попробуйте снова."
+            warn "Вставленный токен некорректен: требуется валидный JSON rclone с полем 'refresh_token'. Попробуйте снова."
         fi
     done
 
@@ -1401,15 +1421,9 @@ cmd_setup_gdrive() {
 [gdrive]
 type = drive
 scope = drive
-EOF
-    if [[ -n "$client_id_input" ]]; then
-        echo "client_id = ${client_id_input}" >> "$tmp_conf"
-    fi
-    if [[ -n "$client_secret_input" ]]; then
-        echo "client_secret = ${client_secret_input}" >> "$tmp_conf"
-    fi
-    cat <<EOF >> "$tmp_conf"
-token = ${token_input}
+client_id = ${client_id_input}
+client_secret = ${client_secret_input}
+token = ${clean_token}
 root_folder_id = ${folder_input}
 EOF
     chmod 600 "$tmp_conf"
@@ -1596,29 +1610,43 @@ cmd_doctor() {
 
         # 5.1 Проверка настроек Google Drive бэкапа
         local gdrive_check_enabled
-        gdrive_check_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "false")
+        gdrive_check_enabled=$(grep -E "^GDRIVE_BACKUP_ENABLED=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '"' || echo "false")
         if [[ "$gdrive_check_enabled" == "true" ]]; then
             local rclone_conf="${PROJECT_DIR}/backups/rclone.conf"
             if [[ ! -f "$rclone_conf" ]]; then
                 error "Google Drive бэкап включен, но файл backups/rclone.conf не найден! Запустите 'just1kbot gdrive' для настройки."
             else
-                local conf_folder conf_token conf_perm
-                conf_folder=$(grep -E '^[[:space:]]*root_folder_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+                local conf_folder conf_token conf_perm conf_cid conf_csec
+                conf_folder=$(grep -E '^[[:space:]]*root_folder_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '"' || echo "")
                 conf_token=$(grep -E '^[[:space:]]*token[[:space:]]*=' "$rclone_conf" 2>/dev/null || echo "")
+                conf_cid=$(grep -E '^[[:space:]]*client_id[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '"' || echo "")
+                conf_csec=$(grep -E '^[[:space:]]*client_secret[[:space:]]*=' "$rclone_conf" 2>/dev/null | cut -d'=' -f2- | tr -d " '"' || echo "")
 
                 # Проверка прав доступа файла конфига (0600)
                 conf_perm=$(stat -c "%a" "$rclone_conf" 2>/dev/null || stat -f "%Lp" "$rclone_conf" 2>/dev/null || echo "600")
                 if [[ "$conf_perm" != "600" && "$conf_perm" != "400" ]]; then
-                    warn "Файл backups/rclone.conf имеет права $conf_perm (рекомендуется 600). Исправляю..."
-                    chmod 600 "$rclone_conf" 2>/dev/null || true
+                    warn "Файл backups/rclone.conf имеет права $conf_perm (рекомендуется 0600: выполните 'chmod 600 $rclone_conf')."
                 fi
 
                 if [[ -z "$conf_folder" ]]; then
                     error "В backups/rclone.conf не задан обязательный root_folder_id (защита корня диска)!"
                 elif [[ -z "$conf_token" ]] || ! echo "$conf_token" | grep -q "refresh_token"; then
                     error "В backups/rclone.conf отсутствует валидный OAuth токен (refresh_token)!"
+                elif [[ -z "$conf_cid" || -z "$conf_csec" ]]; then
+                    warn "В backups/rclone.conf не заданы client_id/client_secret (рекомендуется для исключения сбоев обновления токенов)."
+                    log "Google Drive бэкап: настроен (папка ID: $conf_folder, конфиг: backups/rclone.conf) (OK)"
                 else
                     log "Google Drive бэкап: настроен (папка ID: $conf_folder, конфиг: backups/rclone.conf, права: 0600) (OK)"
+                fi
+
+                # Автономная проверка связи Google Drive API (read-only probe)
+                if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
+                    info "Проверка связи с Google Drive API (read-only)..."
+                    if docker compose --profile tools run --rm --no-deps backup rclone --config /backups/rclone.conf lsd gdrive: --max-depth 1 >/dev/null 2>&1; then
+                        log "Google Drive API: связь и доступ к папке подтверждены (OK)"
+                    else
+                        warn "Google Drive API: проверка связи не удалась (проверьте интернет, валидность OAuth токена и доступность папки)"
+                    fi
                 fi
             fi
         fi
@@ -1767,20 +1795,34 @@ cmd_uninstall() {
             error "Не удалось создать каталог для сохранения бэкапов: $safe_backup_dest! Процедура удаления прервана (Fail-Closed)."
             return 1
         fi
-        if ! (run_privileged cp -a "$backups_dir/." "$safe_backup_dest/" 2>/dev/null || cp -a "$backups_dir/." "$safe_backup_dest/" 2>/dev/null); then
-            error "Критическая ошибка при копировании резервных копий в $safe_backup_dest! Процедура удаления прервана (Fail-Closed) во избежание потери данных."
-            return 1
+
+        # Копируем СТРОГО без конфигов авторизации и токенов (исключение rclone.conf и секретов до копирования)
+        local non_secret_files=()
+        while IFS= read -r -d '' f; do
+            non_secret_files+=("$f")
+        done < <(find "$backups_dir" -mindepth 1 -maxdepth 1 ! -name "*rclone*.conf" ! -name "*gdrive*.json" ! -name "*service_account*.json" -print0 2>/dev/null)
+
+        if [[ ${#non_secret_files[@]} -gt 0 ]]; then
+            if ! (run_privileged cp -a "${non_secret_files[@]}" "$safe_backup_dest/" 2>/dev/null || cp -a "${non_secret_files[@]}" "$safe_backup_dest/" 2>/dev/null); then
+                error "Критическая ошибка при копировании резервных копий в $safe_backup_dest! Процедура удаления прервана (Fail-Closed) во избежание потери данных."
+                return 1
+            fi
         fi
-        # Исключаем конфигурации авторизации и токены (rclone.conf, *.json) из сохраненных бэкапов
-        run_privileged rm -f "$safe_backup_dest"/*rclone*.conf "$safe_backup_dest"/*gdrive*.json "$safe_backup_dest"/*service_account*.json 2>/dev/null || true
 
         local src_count dst_count
-        src_count=$(find "$backups_dir" -mindepth 1 ! -name "*rclone*.conf" ! -name "*gdrive*.json" ! -name "*service_account*.json" 2>/dev/null | wc -l)
-        dst_count=$(find "$safe_backup_dest" -mindepth 1 2>/dev/null | wc -l)
+        src_count=${#non_secret_files[@]}
+        dst_count=$(find "$safe_backup_dest" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
         if [[ "$src_count" -gt "$dst_count" ]]; then
             error "Несоответствие количества сохраненных файлов резервных копий ($src_count vs $dst_count)! Процедура удаления прервана (Fail-Closed)."
             return 1
         fi
+
+        # Строгая гарантия: rclone.conf ни при каких условиях не должен оказаться в safe_backup_dest
+        if [[ -f "$safe_backup_dest/rclone.conf" ]] || compgen -G "$safe_backup_dest/*rclone*.conf" >/dev/null 2>&1; then
+            error "Критическая ошибка безопасности: обнаружен rclone.conf в сохраненных бэкапах! Процедура удаления прервана (Fail-Closed)."
+            return 1
+        fi
+
         run_privileged chmod 700 "$safe_backup_dest" 2>/dev/null || chmod 700 "$safe_backup_dest" 2>/dev/null || true
         log "Резервные копии сохранены и проверены в: $safe_backup_dest"
     elif [[ "$purge_backups" == "true" ]]; then

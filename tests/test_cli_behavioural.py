@@ -533,6 +533,28 @@ wait_for_apt_locks 1
         proc = self._run_cli_command("doctor")
         self.assertIn("Порт 80 слушается веб-сервером Caddy (just1kbot_caddy: running)", proc.stdout)
 
+    def test_doctor_reports_gdrive_status_and_permissions(self):
+        """cmd_doctor reports gdrive status and warns on missing config or wrong permissions."""
+        env_file = self.project_dir / ".env"
+        env_file.write_text("GDRIVE_BACKUP_ENABLED=true\n", encoding="utf-8")
+
+        # Case 1: Missing rclone.conf
+        proc = self._run_cli_command("doctor")
+        self.assertIn("файл backups/rclone.conf не найден", proc.stdout + proc.stderr)
+
+        # Case 2: Config present and valid
+        backups_dir = self.project_dir / "backups"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        rclone_conf = backups_dir / "rclone.conf"
+        rclone_conf.write_text(
+            "[gdrive]\ntype = drive\nscope = drive\nclient_id = cid\nclient_secret = csec\ntoken = {\"refresh_token\":\"tok\"}\nroot_folder_id = folder123\n",
+            encoding="utf-8",
+        )
+        rclone_conf.chmod(0o600)
+
+        proc = self._run_cli_command("doctor")
+        self.assertIn("Google Drive бэкап: настроен (папка ID: folder123", proc.stdout)
+
     def test_cmd_backup_creates_restricted_permissions(self):
         """cmd_backup ensures 0700 on backups/ directory and 0600 on created backup files."""
         # Mock docker compose profile tools run --rm backup
@@ -2043,10 +2065,12 @@ cmd_uninstall --confirm=DELETE --purge-backups
         self.assertNotIn("other_app_postgres_data", log_content, "Foreign docker volume must NEVER be removed!")
 
     def test_uninstall_preserves_backups_when_keep_backups_specified(self):
-        """cmd_uninstall preserves backup directory when --keep-backups is given."""
+        """cmd_uninstall preserves backup directory when --keep-backups is given and excludes credentials."""
         backups_dir = self.project_dir / "backups"
         backups_dir.mkdir(parents=True, exist_ok=True)
         (backups_dir / "dump1.sql.gz.age").write_text("encrypted_backup_payload", encoding="utf-8")
+        (backups_dir / "rclone.conf").write_text("[gdrive]\ntoken=secret", encoding="utf-8")
+        (backups_dir / "service_account.json").write_text('{"private_key":"secret"}', encoding="utf-8")
 
         saved_dir = self.root / "saved_backups"
 
@@ -2072,6 +2096,8 @@ cmd_uninstall --confirm=DELETE --keep-backups
         self.assertFalse(self.project_dir.exists(), "PROJECT_DIR must be deleted")
         self.assertTrue(saved_dir.exists(), "Saved backups directory must exist")
         self.assertTrue((saved_dir / "dump1.sql.gz.age").exists(), "Backup files must be preserved in save location")
+        self.assertFalse((saved_dir / "rclone.conf").exists(), "rclone.conf must NEVER be copied to saved location!")
+        self.assertFalse((saved_dir / "service_account.json").exists(), "service_account.json must NEVER be copied to saved location!")
 
     def test_uninstall_empty_backups_with_keep_backups_succeeds(self):
         """cmd_uninstall --keep-backups must succeed without fail-closed error when backups/ is empty or contains dotfiles."""
