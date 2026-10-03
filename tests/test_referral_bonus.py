@@ -563,6 +563,76 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         assert referrer_entry.metadata_["active_referrals_count"] == 2
         assert res.referrer_bonus == Decimal(150)
 
+    def test_direct_tariff_purchase_counts_as_prior_activation(self):
+        """Referral already activated via external tariff purchase, not a topup.
+
+        Scenario: referrer has 3 active referrals (one of whom was activated by
+        a direct awg/external-gateway purchase, not a topup). When that same
+        referral later does their first top-up, _has_other_qualifying_topup must
+        return True (the prior tariff purchase qualifies), so active_count must
+        NOT be decremented — effective_count stays 3 → Silver = 20%.
+
+        Regression guard for the ratchet between:
+          get_user_active_referrals_count:  counts any paid external order
+          _has_other_qualifying_topup (old): only looked at service_type=topup
+        """
+        import asyncio
+
+        from database.models import AccountLedgerEntry
+        from services.referral_bonus import grant_referral_bonus_for_topup
+
+        added_entries = []
+
+        referrer = MagicMock()
+        referrer.id = 10
+        referrer.telegram_id = 1000
+        referrer.is_banned = False
+
+        purchaser = MagicMock()
+        purchaser.id = 20
+        purchaser.telegram_id = 2000
+        purchaser.referred_by = 1000
+
+        def fake_add(entry):
+            if isinstance(entry, AccountLedgerEntry):
+                added_entries.append(entry)
+
+        session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
+        # active=3. _has_other_qualifying_topup finds a prior qualifying order
+        # (the external tariff purchase) → returns True, so effective_count = 3.
+        # 1. purchaser, 2. referrer, 3. active_referrals_count (3),
+        # 4. prior qualifying order (non-None → first_activation=False),
+        # 5. existing idempotency check (None)
+        session.scalar = AsyncMock(
+            side_effect=[purchaser, referrer, 3, "prior-external-order-id", None]
+        )
+        session.add = fake_add
+        session.flush = AsyncMock()
+
+        res = asyncio.run(
+            grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=20,
+                payment_id=105,
+                topup_amount=1000,
+            )
+        )
+
+        assert len(added_entries) == 1
+        referrer_entry = added_entries[0]
+        # effective_count must stay 3 → Silver tier → 20%, not 15%
+        assert referrer_entry.amount == Decimal(200)  # 20% of 1000
+        assert referrer_entry.metadata_["bonus_rate"] == "0.20"
+        assert referrer_entry.metadata_["tier_name"] == "Silver"
+        assert referrer_entry.metadata_["active_referrals_count"] == 3
+        assert res.referrer_bonus == Decimal(200)
+        assert_not_called = getattr(res, 'purchaser_welcome_bonus', Decimal(0))
+        assert assert_not_called == Decimal(0)
+
     def test_dust_topup_does_not_consume_tier_step(self):
         """Sub-threshold top-up keeps the full count (it never activates)."""
         import asyncio
