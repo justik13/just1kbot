@@ -148,7 +148,11 @@ async def render_device_screen(
 
     country_display = f"{flag} {server_name}".strip() if flag else server_name
 
-    archived_bytes = (getattr(user, "archived_device_traffic", None) or {}).get(profile.device_name, 0)
+    from utils.traffic_helpers import get_archived_traffic_for_device
+
+    archived_bytes = get_archived_traffic_for_device(
+        getattr(user, "archived_device_traffic", None), profile.device_name
+    )
     dev_traffic = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0) + archived_bytes
     header = texts.DEVICE_MANAGE_HEADER.format(
         device_name=safe(profile.device_name),

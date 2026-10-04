@@ -99,7 +99,11 @@ async def admin_user_devices(
                     is_online = True
 
             status_hs = texts.ADMIN_USERS_DEVICE_V_SETI_AKTIVNOST_3_MIN if is_online else texts.ADMIN_USERS_DEVICE_OFLAYN
-            archived_bytes = (getattr(user, "archived_device_traffic", None) or {}).get(name, 0)
+            from utils.traffic_helpers import get_archived_traffic_for_device
+
+            archived_bytes = get_archived_traffic_for_device(
+                getattr(user, "archived_device_traffic", None), name
+            )
             dev_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0) + archived_bytes
             traffic_total = format_traffic(dev_bytes)
             last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.ADMIN_USERS_DEVICE_NE_BYLO_PODKLYUCHENIYA

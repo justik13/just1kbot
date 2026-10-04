@@ -15,14 +15,10 @@ def get_device_keyboard(
     adjustments = []
 
     builder.button(
-        text=texts.BTN_CHANGE_NAME,
-        callback_data=f"rename_device:{profile_id}",
-    )
-    builder.button(
         text=texts.BTN_HELP_INSTRUCTIONS,
         callback_data=f"support_help:device_{profile_id}",
     )
-    adjustments.append(2)
+    adjustments.append(1)
 
     if config_ready:
         builder.button(

@@ -273,6 +273,18 @@ async def rename_device_process(
         )
         return
 
+    if old_name and hasattr(db_user, "archived_device_traffic") and db_user.archived_device_traffic:
+        from utils.traffic_helpers import get_device_slot_key
+
+        archived = dict(db_user.archived_device_traffic)
+        old_slot = get_device_slot_key(old_name)
+        new_slot = get_device_slot_key(new_name)
+        if old_name in archived and old_name != old_slot:
+            archived[old_slot] = int(archived.get(old_slot, 0)) + int(archived.pop(old_name))
+        if old_slot != new_slot and old_slot in archived:
+            archived[new_slot] = int(archived.get(new_slot, 0)) + int(archived.pop(old_slot))
+        db_user.archived_device_traffic = archived
+
     from services.audit_service import AuditService
     await AuditService.log_action(
         session,

@@ -477,9 +477,10 @@ class DeviceService:
         if hasattr(user, "archived_device_traffic"):
             old_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
             if old_bytes > 0:
+                from utils.traffic_helpers import record_device_traffic_archive
+
                 archived = dict(user.archived_device_traffic or {})
-                archived[device_name] = int(archived.get(device_name, 0)) + old_bytes
-                user.archived_device_traffic = archived
+                user.archived_device_traffic = record_device_traffic_archive(archived, device_name, old_bytes)
                 old_profile.traffic_down = 0
                 old_profile.traffic_up = 0
 
@@ -593,13 +594,14 @@ class DeviceService:
         # Retain device traffic statistics upon key deletion or recreation
         if user_id and device_name:
             try:
-                user_obj = await session.get(User, user_id)
+                user_obj = await session.get(User, user_id, with_for_update=True)
                 if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
                     cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
                     if cur_bytes > 0:
+                        from utils.traffic_helpers import record_device_traffic_archive
+
                         archived = dict(user_obj.archived_device_traffic or {})
-                        archived[device_name] = int(archived.get(device_name, 0)) + cur_bytes
-                        user_obj.archived_device_traffic = archived
+                        user_obj.archived_device_traffic = record_device_traffic_archive(archived, device_name, cur_bytes)
                         profile.traffic_down = 0
                         profile.traffic_up = 0
             except Exception as archive_err:

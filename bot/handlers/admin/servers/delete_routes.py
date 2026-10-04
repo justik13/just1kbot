@@ -21,6 +21,7 @@ from config.enums import (
 from database.models import (
     APIOperation,
     Server,
+    User,
     VPNProfile,
     WhiteInternetOrphanCleanup,
     WhiteInternetSubscription,
@@ -287,6 +288,16 @@ async def confirm_delete_server(
                 audit_reason="server_delete")
 
     for profile in profiles:
+        cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
+        if cur_bytes > 0 and profile.user_id and profile.device_name:
+            user_obj = await session.get(User, profile.user_id, with_for_update=True)
+            if user_obj and hasattr(user_obj, "archived_device_traffic"):
+                from utils.traffic_helpers import record_device_traffic_archive
+
+                archived = dict(user_obj.archived_device_traffic or {})
+                user_obj.archived_device_traffic = record_device_traffic_archive(
+                    archived, profile.device_name, cur_bytes
+                )
         await session.delete(profile)
 
     deleted_profiles = await delete_profiles_by_server_id(

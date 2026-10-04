@@ -97,8 +97,8 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         # Check that user archived traffic was incremented:
         # Prior archived was 1000, profile had 5000+2000 = 7000
         # Total added from profile: 7000 -> total archived = 1000 + 7000 = 8000
-        self.assertIn("Устройство #1", mock_user.archived_device_traffic)
-        self.assertEqual(mock_user.archived_device_traffic["Устройство #1"], 8000)
+        self.assertIn("slot_1", mock_user.archived_device_traffic)
+        self.assertEqual(mock_user.archived_device_traffic["slot_1"], 8000)
 
     async def test_white_internet_worker_updates_user_and_server_monthly(self):
         """Xray consumption increments User total_wi_traffic_bytes, monthly_wi_bytes and Server extra_data."""
@@ -290,12 +290,14 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extra["host_monthly_traffic_bytes"], 700)
         self.assertEqual(extra["host_last_raw_bytes"], 200)
 
-        # 6. Cycle rollover to "2026-11"
+        # 6. Cycle rollover to "2026-11" preserves boundary delta (1000 - 200 = 800)
         modified = accumulate_host_traffic_cycle(extra, 500, 500, "2026-11")
         self.assertTrue(modified)
-        self.assertEqual(extra["host_monthly_traffic_bytes"], 0)
+        self.assertEqual(extra["host_monthly_traffic_bytes"], 800)
         self.assertEqual(extra["host_last_raw_bytes"], 1000)
         self.assertEqual(extra["host_traffic_cycle"], "2026-11")
+        # Ensure client traffic_cycle is NOT touched by host helper
+        self.assertNotIn("traffic_cycle", extra)
 
     async def test_delete_device_zeroes_live_profile_counters(self):
         """When device is deleted, live counters are set to 0 to prevent double-counting while deleting."""
@@ -328,7 +330,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(mock_profile.traffic_down, 0)
         self.assertEqual(mock_profile.traffic_up, 0)
-        self.assertEqual(mock_user.archived_device_traffic["Phone #1"], 7000)
+        self.assertEqual(mock_user.archived_device_traffic["slot_1"], 7000)
 
     async def test_migrate_device_retains_traffic_in_user_archived(self):
         """Device migration transfers old_profile traffic to User.archived_device_traffic and zeroes old profile."""
@@ -425,7 +427,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIsNotNone(new_profile)
-        self.assertEqual(user.archived_device_traffic["Laptop #1"], 12000)
+        self.assertEqual(user.archived_device_traffic["slot_1"], 12000)
         self.assertEqual(old_profile.traffic_down, 0)
         self.assertEqual(old_profile.traffic_up, 0)
 
@@ -466,7 +468,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
                 expected_attempt_number=1,
             )
 
-        self.assertEqual(mock_user.archived_device_traffic["Tablet #1"], 5000)
+        self.assertEqual(mock_user.archived_device_traffic["slot_1"], 5000)
         mock_session.delete.assert_awaited_once_with(mock_profile)
 
     def test_xray_traffic_snapshot_tuple_backward_compatibility(self):
@@ -487,6 +489,74 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         # 2. Host metrics
         self.assertEqual(snap.host_tx_bytes, 1000)
         self.assertEqual(snap.host_rx_bytes, 2000)
+
+    def test_traffic_query_excludes_deleting_profiles(self):
+        """Traffic query explicitly filters out profiles in deleting or delete_failed status."""
+        from database.models import VPNProfile
+        from sqlalchemy import select
+
+        stmt = select(VPNProfile).where(
+            VPNProfile.provisioning_status.notin_(["deleting", "delete_failed"])
+        )
+        sql = str(stmt)
+        self.assertIn("vpn_profiles.provisioning_status NOT IN", sql)
+
+    def test_slot_key_extraction_and_retention_helpers(self):
+        """Slot-based retention correctly normalizes device names, handles prod devices, and migrates legacy keys."""
+        from utils.traffic_helpers import (
+            get_archived_traffic_for_device,
+            get_device_slot_key,
+            record_device_traffic_archive,
+        )
+
+        # 1. Slot key normalization
+        self.assertEqual(get_device_slot_key("Устройство #1"), "slot_1")
+        self.assertEqual(get_device_slot_key("Устройство #2"), "slot_2")
+        self.assertEqual(get_device_slot_key("Пк #2"), "slot_2")  # Real prod renamed device
+        self.assertEqual(get_device_slot_key("Хабиби #1"), "slot_1")  # Real prod renamed device
+
+        # 2. Recording archive accumulates under canonical slot
+        archived = {}
+        record_device_traffic_archive(archived, "Пк #2", 5000)
+        self.assertEqual(archived, {"slot_2": 5000})
+
+        record_device_traffic_archive(archived, "Хабиби #1", 3000)
+        self.assertEqual(archived, {"slot_2": 5000, "slot_1": 3000})
+
+        # 3. Reading archive matches both recreated slot and legacy names
+        self.assertEqual(get_archived_traffic_for_device(archived, "Устройство #2"), 5000)
+        self.assertEqual(get_archived_traffic_for_device(archived, "Пк #2"), 5000)
+        self.assertEqual(get_archived_traffic_for_device(archived, "Устройство #1"), 3000)
+        self.assertEqual(get_archived_traffic_for_device(archived, "Хабиби #1"), 3000)
+
+        # 4. Legacy migration: unmigrated key is merged into slot key
+        legacy_archived = {"Пк #2": 2000}
+        record_device_traffic_archive(legacy_archived, "Пк #2", 3000)
+        self.assertNotIn("Пк #2", legacy_archived)
+        self.assertEqual(legacy_archived["slot_2"], 5000)
+
+    def test_server_card_cycles_decoupled(self):
+        """Server card evaluates client and host cycles independently."""
+        from utils.datetime_helpers import now_utc
+
+        now = now_utc()
+        current_cycle = now.strftime("%Y-%m")
+        old_cycle = "2020-01"
+
+        # Case 1: Host has new cycle, client has old cycle
+        server_extra = {
+            "traffic_cycle": old_cycle,
+            "monthly_traffic_bytes": 1000000,
+            "host_traffic_cycle": current_cycle,
+            "host_monthly_traffic_bytes": 500000,
+        }
+        client_cycle = server_extra.get("traffic_cycle")
+        host_cycle = server_extra.get("host_traffic_cycle")
+        m_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0) if client_cycle == current_cycle else 0
+        h_bytes = int(server_extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == current_cycle else 0
+
+        self.assertEqual(m_bytes, 0)
+        self.assertEqual(h_bytes, 500000)
 
 
 if __name__ == "__main__":

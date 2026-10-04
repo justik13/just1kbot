@@ -526,7 +526,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     ))
 
                     if extra_changed and fresh_server:
-                        await update_server(session, fresh_server, extra_data=db_extra)
+                        merged_extra = dict(fresh_server.extra_data or {})
+                        merged_extra.update(db_extra)
+                        await update_server(session, fresh_server, extra_data=merged_extra)
 
             # Decoupled alert dispatch outside DB transaction and advisory lock
             for alert_kind, alert_text, alert_kb, is_problem in ingress_alerts_to_send:

@@ -425,7 +425,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
             self.assertNotIn("alt_connection:42", buttons)
             self.assertNotIn("request_delete_device:42", buttons)
-            self.assertIn("rename_device:42", buttons)
+            self.assertIn("support_help:device_42", buttons)
 
     async def test_9_await_profile_ready_polling_mechanics(self):
         """_await_profile_ready uses monotonic clock and independent sessions to return active profile."""

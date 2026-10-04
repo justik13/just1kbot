@@ -229,7 +229,10 @@ async def _process_server_traffic(
                 User.financial_hold,
             )
             .join(User, VPNProfile.user_id == User.id)
-            .where(VPNProfile.server_id == server_id)
+            .where(
+                VPNProfile.server_id == server_id,
+                VPNProfile.provisioning_status.notin_(["deleting", "delete_failed"]),
+            )
         )
         result = await session.execute(stmt)
         rows = result.all()
