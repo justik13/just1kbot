@@ -126,7 +126,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0034_drop_tariff_quotes"])
+        self.assertEqual(heads, ["0035_traffic_device_retention"])
+        rev = scripts.get_revision("0035_traffic_device_retention")
+        self.assertEqual(rev.down_revision, "0034_drop_tariff_quotes")
         rev = scripts.get_revision("0034_drop_tariff_quotes")
         self.assertEqual(rev.down_revision, "0033_wi_order_checkout")
         rev = scripts.get_revision("0033_wi_order_checkout")

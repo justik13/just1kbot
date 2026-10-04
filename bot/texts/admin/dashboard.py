@@ -133,6 +133,9 @@ DASHBOARD_ACTIVE_PODPISOK_ACTIVE = """• Активных подписок: <b>
 DASHBOARD_AWG_TRAFFIC_STATS = """• Трафик туннелей: <b>{total_traffic}</b> (ср. на подписчика: <b>{avg_traffic}</b>)
 """
 
+DASHBOARD_PER_MONTH_SUFFIX = "/мес"
+DASHBOARD_AVG_MONTHLY_TRAFFIC_SUFFIX = " (ср. {avg_traffic}/мес)"
+
 DASHBOARD_WHITE_INTERNET_STATS = """• Белый Интернет: <b>{active_count}</b> акт. (трафик: <b>{traffic}</b>)
 """
 

@@ -95,7 +95,9 @@ def format_user_card_text(
 
     total_traffic_str = format_traffic(awg_total + wi_total)
     if (awg_m + wi_m) > 0 or wi_total > 0:
-        total_traffic_str += f" (за месяц: {format_traffic(awg_m + wi_m)})"
+        total_traffic_str += texts.ADMIN_USER_MONTHLY_TRAFFIC_SUFFIX.format(
+            monthly_traffic=format_traffic(awg_m + wi_m)
+        )
 
     card_text = texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,

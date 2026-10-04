@@ -196,7 +196,9 @@ async def _show_server_card(
         host_bytes = 0
     traffic_month = format_traffic(monthly_bytes)
     if host_bytes > 0:
-        traffic_month += f" (хостинг: {format_traffic(host_bytes)})"
+        traffic_month += texts.ADMIN_SERVER_HOST_TRAFFIC_SUFFIX.format(
+            host_traffic=format_traffic(host_bytes)
+        )
 
     rendered = (
         f"{header}"

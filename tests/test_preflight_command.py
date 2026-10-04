@@ -37,7 +37,7 @@ VALID_PREFLIGHT_BASES = (
 )
 _BASES_LIST = ",".join(f"'{b}'" for b in VALID_PREFLIGHT_BASES)
 EXPECTED_BASE = "0032_drop_banking_residue"
-EXPECTED_HEAD = "0034_drop_tariff_quotes"
+EXPECTED_HEAD = "0035_traffic_device_retention"
 
 DROPPED_TABLES = (
     "paid_value_ledger",
@@ -148,7 +148,7 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
 )
 
 VALID_POSTFLIGHT_HEADS = (
-    "0034_drop_tariff_quotes",
+    "0035_traffic_device_retention",
 )
 _HEADS_LIST = ",".join(f"'{h}'" for h in VALID_POSTFLIGHT_HEADS)
 
