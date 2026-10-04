@@ -339,6 +339,43 @@ exit 0
         with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
             self.assertEqual(json.load(f), relays_data)
 
+    def test_relay_remove_cleans_up_legacy_uppercase_conf_file(self):
+        """Verify remove_relay_node cleans up legacy uppercase DE.conf files from NGINX_RELAYS_DIR."""
+        self._prepare_base_env()
+        # Create legacy uppercase DE.conf
+        de_conf = self.nginx_relays_d / "DE.conf"
+        de_conf.write_text("location ^~ /stream/DE { proxy_pass http://127.0.0.1:8004; }\n", encoding="utf-8")
+
+        relays_data = [
+            {
+                "name": "Germany",
+                "code": "de",
+                "ip": "1.2.3.4",
+                "port": 10443,
+                "inbound_port": 8004,
+                "inbound_tag": "just1k-wl-inbound-de",
+            }
+        ]
+        with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
+            json.dump(relays_data, f)
+
+        xray_config_file = self.xray_config_dir / "config.json"
+        with open(xray_config_file, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "inbounds": [{"tag": "just1k-wl-default", "port": 8003}, {"tag": "just1k-wl-inbound-de", "port": 8004}],
+                    "outbounds": [{"tag": "just1k-wl-outbound-de"}, {"tag": "just1k-wl-direct"}],
+                    "routing": {"rules": []},
+                },
+                f,
+            )
+
+        cmd = 'remove_relay_node "de"'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"remove_relay_node failed: {res.stderr + res.stdout}")
+        self.assertFalse(de_conf.exists(), "Legacy uppercase DE.conf must be removed")
+        self.assertFalse((self.nginx_relays_d / "de.conf").exists())
+
     def test_rename_relay_node(self):
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:

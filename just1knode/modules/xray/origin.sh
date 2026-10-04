@@ -1240,7 +1240,10 @@ print('[+] Xray Origin config успешно согласован с этало�
     # Авто-восстановление Nginx location файлов для всех релеев
     if [[ -f "$RELAYS_FILE" ]]; then
         mkdir -p "$NGINX_RELAYS_DIR"
-        sync_xhttp_upstreams_conf
+        if ! sync_xhttp_upstreams_conf; then
+            manifest_rollback
+            error "Не удалось синхронизировать Nginx upstreams для XHTTP! Выполнен откат."
+        fi
         python3 -c "
 import json, sys, os
 rf, nginx_dir, cfg_file = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -1401,7 +1404,10 @@ location ^~ {path} {{
 except Exception:
     pass
 " "$RELAYS_FILE" "$NGINX_RELAYS_DIR" "$XRAY_CONFIG" 2>/dev/null || true
-        sync_xhttp_upstreams_conf
+        if ! sync_xhttp_upstreams_conf; then
+            manifest_rollback
+            error "Не удалось синхронизировать Nginx upstreams для XHTTP после согласования релеев! Выполнен откат."
+        fi
     fi
 
     # Авто-восстановление Nginx-проксирования подписок Белого Интернета
@@ -1603,7 +1609,10 @@ except Exception:
         error "Ошибка валидации Nginx после оптимизации! Выполнен полный откат."
     fi
 
-    nginx -t && systemctl reload nginx
+    if ! systemctl reload nginx; then
+        manifest_rollback
+        error "Не удалось перезагрузить Nginx после оптимизации! Выполнен откат."
+    fi
     set +e
     systemctl restart xray
     local xray_rc=$?
@@ -1615,7 +1624,7 @@ except Exception:
     fi
 
     # systemd автоматически перезапускает xray-api благодаря PartOf=xray.service
-    ensure_xray_api_healthy
+    ensure_xray_api_healthy || warn "Служба xray-api не ответила вовремя. Проверьте её статус вручную через 'systemctl status xray-api'."
 
     manifest_commit
     log "Оптимизация и восстановление конфигурации Origin завершены успешно!"

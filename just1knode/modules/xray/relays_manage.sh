@@ -114,7 +114,7 @@ if relays is not None:
 
     if echo "$heal_out" | grep -q "HEALED"; then
         echo -e "${GREEN}✔${NC} ${heal_out//HEALED/}"
-        ensure_xray_api_healthy
+        ensure_xray_api_healthy || true
     fi
 }
 
@@ -1200,7 +1200,7 @@ print(f'OK:{matched_code}')
         return 1
     fi
 
-    ensure_xray_api_healthy
+    ensure_xray_api_healthy || warn "Служба xray-api не ответила вовремя. Проверьте её статус вручную через 'systemctl status xray-api'."
 
     manifest_commit
     log "✔ Relay '$matched_code' успешно переключен на домен '$new_sni' (режим: $new_sec)!"
