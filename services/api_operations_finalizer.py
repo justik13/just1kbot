@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -9,12 +10,15 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from database.connection import session_scope
-from database.models import APIOperation, Server, VPNProfile
+from database.models import APIOperation, Server, User, VPNProfile
+
 from services.api_operations_queue import (
     APIOperationOwnershipError,
     calculate_retry_delay,
     enqueue_api_operation,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CreateCompensationRequired(Exception):
@@ -382,6 +386,16 @@ async def finalize_delete_success(
             session, operation_id, worker_id, expected_attempt_number
         )
         if profile:
+            cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
+            if cur_bytes > 0 and getattr(profile, "user_id", None) and getattr(profile, "device_name", None):
+                try:
+                    user_obj = await session.get(User, profile.user_id)
+                    if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
+                        archived = dict(user_obj.archived_device_traffic or {})
+                        archived[profile.device_name] = int(archived.get(profile.device_name, 0)) + cur_bytes
+                        user_obj.archived_device_traffic = archived
+                except Exception as archive_err:
+                    logger.debug("Failed safety archiving in finalize_delete_success: %s", archive_err)
             await session.delete(profile)
         _complete(operation)
 

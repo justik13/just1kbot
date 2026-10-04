@@ -473,6 +473,16 @@ class DeviceService:
         if duplicate:
             raise DuplicateDeviceName("Device name already exists on target server")
 
+        # Retain device traffic statistics across server migration
+        if hasattr(user, "archived_device_traffic"):
+            old_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
+            if old_bytes > 0:
+                archived = dict(user.archived_device_traffic or {})
+                archived[device_name] = int(archived.get(device_name, 0)) + old_bytes
+                user.archived_device_traffic = archived
+                old_profile.traffic_down = 0
+                old_profile.traffic_up = 0
+
         new_profile = VPNProfile(
             user_id=user.id,
             server_id=target_server.id,
@@ -590,6 +600,8 @@ class DeviceService:
                         archived = dict(user_obj.archived_device_traffic or {})
                         archived[device_name] = int(archived.get(device_name, 0)) + cur_bytes
                         user_obj.archived_device_traffic = archived
+                        profile.traffic_down = 0
+                        profile.traffic_up = 0
             except Exception as archive_err:
                 logger.debug("Failed to archive device traffic for profile %s: %s", profile_id, archive_err)
 

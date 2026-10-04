@@ -21,6 +21,7 @@ from services.amnezia_client import AmneziaClient
 from services.slots_cache import update_cached_peer_count
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe, safe_send_message
+from utils.traffic_helpers import accumulate_host_traffic_cycle
 
 logger = logging.getLogger(__name__)
 
@@ -147,22 +148,27 @@ async def _traffic_sync_once(bot: Bot | None = None):
             api_clients_list = await client.get_all_clients()
             t_done = time.monotonic()
             if api_clients_list is None:
-                return server_info["id"], None, t_done, gen
+                return server_info["id"], None, None, t_done, gen
+            load_data = None
+            try:
+                load_data = await client.get_server_load(timeout=2.0)
+            except Exception:
+                pass
             return server_info["id"], {
                 c.id: c for c in api_clients_list
-            }, t_done, gen
+            }, load_data, t_done, gen
         except Exception as e:
             t_done = time.monotonic()
             logger.error(
                 "Failed to fetch traffic from server %s: %s", server_info["name"], e
             )
-            return server_info["id"], None, t_done, gen
+            return server_info["id"], None, None, t_done, gen
 
     tasks = [_fetch_server_traffic(s) for s in servers]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     api_data_by_server = {
-        r[0]: (r[1], r[2], r[3])
+        r[0]: (r[1], r[2], r[3], r[4])
         for r in results
         if not isinstance(r, Exception) and r is not None and r[1] is not None
     }
@@ -171,7 +177,7 @@ async def _traffic_sync_once(bot: Bot | None = None):
         server_id = server_info["id"]
         if server_id not in api_data_by_server:
             continue
-        api_clients, t_done, gen = api_data_by_server[server_id]
+        api_clients, load_data, t_done, gen = api_data_by_server[server_id]
 
         from services.slots_cache import get_server_generation
         if gen != get_server_generation(server_id):
@@ -181,7 +187,7 @@ async def _traffic_sync_once(bot: Bot | None = None):
         # ── ИСПРАВЛЕНО: обновляем slots_cache реальными данными ──
         update_cached_peer_count(server_id, len(api_clients), timestamp=t_done, generation=gen)
 
-        await _process_server_traffic(server_info, api_clients, bot, expected_gen=gen)
+        await _process_server_traffic(server_info, api_clients, bot, expected_gen=gen, load_data=load_data)
 
 
 async def _process_server_traffic(
@@ -189,6 +195,7 @@ async def _process_server_traffic(
     api_clients,
     bot: Bot | None = None,
     expected_gen: int | None = None,
+    load_data: dict | None = None,
 ):
     server_id = server_info["id"]
     from services.slots_cache import get_server_generation
@@ -392,13 +399,24 @@ async def _process_server_traffic(
             extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
             current_cycle = current_time.strftime("%Y-%m")
             saved_cycle = extra.get("traffic_cycle")
+            changed = False
             if saved_cycle != current_cycle:
                 if saved_cycle is not None or server_delta > 0:
                     extra["traffic_cycle"] = current_cycle
                     extra["monthly_traffic_bytes"] = server_delta
-                    server_obj.extra_data = extra
+                    changed = True
             elif server_delta > 0:
                 extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_delta
+                changed = True
+
+            if isinstance(load_data, dict):
+                host_tx = int(load_data.get("host_tx_bytes", 0) or 0)
+                host_rx = int(load_data.get("host_rx_bytes", 0) or 0)
+                if host_tx > 0 or host_rx > 0:
+                    if accumulate_host_traffic_cycle(extra, host_tx, host_rx, current_cycle):
+                        changed = True
+
+            if changed:
                 server_obj.extra_data = extra
 
 

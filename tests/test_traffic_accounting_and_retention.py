@@ -257,6 +257,237 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             # format_traffic(6500) produces "6.3 KiB"
             self.assertIn("6.3 KiB", rendered_text)
 
+    def test_accumulate_host_traffic_cycle_logic(self):
+        """Host monthly traffic accumulates deltas, detects reboots, and rolls over cycles."""
+        from utils.traffic_helpers import accumulate_host_traffic_cycle
+
+        extra = {}
+        # 1. Zero/invalid bytes -> no modification
+        self.assertFalse(accumulate_host_traffic_cycle(extra, 0, 0, "2026-10"))
+        self.assertEqual(extra, {})
+
+        # 2. First observation in cycle "2026-10" (baseline)
+        modified = accumulate_host_traffic_cycle(extra, 1000, 2000, "2026-10")
+        self.assertTrue(modified)
+        self.assertEqual(extra["host_monthly_traffic_bytes"], 0)
+        self.assertEqual(extra["host_last_raw_bytes"], 3000)
+        self.assertEqual(extra["host_traffic_cycle"], "2026-10")
+
+        # 3. Normal traffic growth (raw increases by 500)
+        modified = accumulate_host_traffic_cycle(extra, 1200, 2300, "2026-10")
+        self.assertTrue(modified)
+        self.assertEqual(extra["host_monthly_traffic_bytes"], 500)
+        self.assertEqual(extra["host_last_raw_bytes"], 3500)
+
+        # 4. Same raw bytes -> no change
+        modified = accumulate_host_traffic_cycle(extra, 1200, 2300, "2026-10")
+        self.assertFalse(modified)
+        self.assertEqual(extra["host_monthly_traffic_bytes"], 500)
+
+        # 5. Node reboot (raw counters drop to 200)
+        modified = accumulate_host_traffic_cycle(extra, 100, 100, "2026-10")
+        self.assertTrue(modified)
+        self.assertEqual(extra["host_monthly_traffic_bytes"], 700)
+        self.assertEqual(extra["host_last_raw_bytes"], 200)
+
+        # 6. Cycle rollover to "2026-11"
+        modified = accumulate_host_traffic_cycle(extra, 500, 500, "2026-11")
+        self.assertTrue(modified)
+        self.assertEqual(extra["host_monthly_traffic_bytes"], 0)
+        self.assertEqual(extra["host_last_raw_bytes"], 1000)
+        self.assertEqual(extra["host_traffic_cycle"], "2026-11")
+
+    async def test_delete_device_zeroes_live_profile_counters(self):
+        """When device is deleted, live counters are set to 0 to prevent double-counting while deleting."""
+        mock_session = AsyncMock()
+        mock_user = User(
+            id=42,
+            telegram_id=999888,
+            archived_device_traffic={},
+        )
+        mock_profile = VPNProfile(
+            id=10,
+            user_id=42,
+            server_id=1,
+            peer_id="peer-key-to-delete",
+            device_name="Phone #1",
+            traffic_down=5000,
+            traffic_up=2000,
+            provisioning_status="active",
+        )
+
+        mock_profile_res = MagicMock()
+        mock_profile_res.scalar_one_or_none.return_value = mock_profile
+        mock_session.execute.return_value = mock_profile_res
+        mock_session.get.return_value = mock_user
+
+        with patch("services.device_service.resolve_profile_endpoint_snapshot", return_value=(1, "DE-1", "http://node:8080", "secret")), \
+             patch("services.device_service.ensure_delete_operation"), \
+             patch("services.device_service.DeviceService.has_active_migration", return_value=False):
+            await DeviceService.delete_device(mock_session, mock_profile)
+
+        self.assertEqual(mock_profile.traffic_down, 0)
+        self.assertEqual(mock_profile.traffic_up, 0)
+        self.assertEqual(mock_user.archived_device_traffic["Phone #1"], 7000)
+
+    async def test_migrate_device_retains_traffic_in_user_archived(self):
+        """Device migration transfers old_profile traffic to User.archived_device_traffic and zeroes old profile."""
+        from datetime import timedelta
+        from services.slots_cache import ServerPeerSnapshot
+
+        now = datetime.now(timezone.utc)
+        mock_session = AsyncMock()
+
+        user = User(
+            id=1,
+            telegram_id=12345,
+            device_limit=2,
+            subscription_end=now + timedelta(days=30),
+            is_banned=False,
+            device_creations_today=0,
+            last_creation_date=now.date(),
+            archived_device_traffic={"Laptop #1": 2000},
+        )
+        old_profile = VPNProfile(
+            id=10,
+            user_id=1,
+            server_id=100,
+            device_name="Laptop #1",
+            peer_id="peer-old-123",
+            provisioning_status="active",
+            traffic_down=8000,
+            traffic_up=2000,
+        )
+        target_server = Server(
+            id=200,
+            name="NL-1",
+            protocol="amneziawg2",
+            api_url="http://node200:8080",
+            api_key="secret200",
+            is_active=True,
+            max_clients=100,
+        )
+
+        snapshot = ServerPeerSnapshot(
+            server_id=200,
+            peer_ids=frozenset(["peer-1"]),
+            captured_at=now,
+        )
+
+        mock_user_res = MagicMock()
+        mock_user_res.scalar_one.return_value = user
+
+        mock_profile_res = MagicMock()
+        mock_profile_res.scalar_one_or_none.return_value = old_profile
+
+        mock_target_res = MagicMock()
+        mock_target_res.scalar_one_or_none.return_value = target_server
+
+        mock_count_user = MagicMock()
+        mock_count_user.scalar_one.return_value = 1
+
+        mock_count_server = MagicMock()
+        mock_count_server.scalar_one.return_value = 1
+
+        mock_bot_peers = MagicMock()
+        mock_bot_peers.scalars.return_value.all.return_value = []
+
+        mock_dup_check = MagicMock()
+        mock_dup_check.scalar_one_or_none.return_value = None
+
+        mock_session.execute.side_effect = [
+            mock_user_res,
+            mock_profile_res,
+            mock_target_res,
+            mock_count_user,
+            mock_count_server,
+            mock_bot_peers,
+            mock_dup_check,
+        ]
+
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock()
+        mock_ctx.__aexit__ = AsyncMock()
+        mock_session.begin_nested = MagicMock(return_value=mock_ctx)
+        mock_session.add = MagicMock()
+
+        with patch("services.device_service.DeviceService.has_active_migration", return_value=False), \
+             patch("services.device_service.DeviceService.get_last_migration_time", return_value=None), \
+             patch("services.device_service.ensure_server_capacity", new_callable=AsyncMock), \
+             patch("services.device_service.enqueue_api_operation", new_callable=AsyncMock), \
+             patch("services.device_service.AuditService.log_action", new_callable=AsyncMock):
+            new_profile = await DeviceService.migrate_device(
+                mock_session,
+                user_id=user.id,
+                profile_id=old_profile.id,
+                target_server_id=target_server.id,
+                snapshot=snapshot,
+            )
+
+        self.assertIsNotNone(new_profile)
+        self.assertEqual(user.archived_device_traffic["Laptop #1"], 12000)
+        self.assertEqual(old_profile.traffic_down, 0)
+        self.assertEqual(old_profile.traffic_up, 0)
+
+    async def test_finalize_delete_success_safety_archiving(self):
+        """Finalizer ensures unarchived bytes on profile are retained before deleting."""
+        from database.models import APIOperation
+        from services.api_operations_finalizer import finalize_delete_success
+
+        mock_session = AsyncMock()
+        mock_op = APIOperation(
+            id=101,
+            profile_id=55,
+            operation_type="delete_peer",
+            status="processing",
+            locked_by="worker-1",
+            attempts=1,
+        )
+        mock_profile = VPNProfile(
+            id=55,
+            user_id=99,
+            device_name="Tablet #1",
+            traffic_down=3000,
+            traffic_up=1500,
+        )
+        mock_user = User(
+            id=99,
+            archived_device_traffic={"Tablet #1": 500},
+        )
+
+        mock_session.get.return_value = mock_user
+
+        with patch("services.api_operations_finalizer._lock_operation_and_profile", return_value=(mock_op, mock_profile)), \
+             patch("services.api_operations_finalizer._scope") as mock_scope:
+            mock_scope.return_value.__aenter__.return_value = mock_session
+            await finalize_delete_success(
+                operation_id=101,
+                worker_id="worker-1",
+                expected_attempt_number=1,
+            )
+
+        self.assertEqual(mock_user.archived_device_traffic["Tablet #1"], 5000)
+        mock_session.delete.assert_awaited_once_with(mock_profile)
+
+    def test_xray_traffic_snapshot_tuple_backward_compatibility(self):
+        """TrafficSnapshot acts as a 4-tuple while exposing host_tx_bytes and host_rx_bytes."""
+        from services.xray_node_client import TrafficSnapshot
+
+        users = {"uuid-1": {"uplink": 100, "downlink": 200}}
+        snap = TrafficSnapshot("epoch-x", "boot-y", 12345, users, host_tx_bytes=1000, host_rx_bytes=2000)
+
+        # 1. Unpacking as 4-tuple
+        epoch, boot_id, starttime, users_out = snap
+        self.assertEqual(epoch, "epoch-x")
+        self.assertEqual(boot_id, "boot-y")
+        self.assertEqual(starttime, 12345)
+        self.assertEqual(users_out, users)
+        self.assertEqual(len(snap), 4)
+
+        # 2. Host metrics
+        self.assertEqual(snap.host_tx_bytes, 1000)
+        self.assertEqual(snap.host_rx_bytes, 2000)
+
 
 if __name__ == "__main__":
     unittest.main()

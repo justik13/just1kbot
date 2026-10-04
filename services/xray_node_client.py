@@ -56,6 +56,27 @@ class SyncResponse:
         return f"<SyncResponse result={self.result} epoch={self.verified_epoch} inbounds={self.verified_inbounds}>"
 
 
+class TrafficSnapshot(tuple):
+    """Normalized traffic snapshot tuple (epoch, boot_id, starttime, users) with host net bytes."""
+
+    host_tx_bytes: int
+    host_rx_bytes: int
+
+    def __new__(
+        cls,
+        epoch: str | None,
+        boot_id: str | None,
+        starttime: int | None,
+        users: dict[str, dict[str, int]] | None,
+        host_tx_bytes: int = 0,
+        host_rx_bytes: int = 0,
+    ):
+        obj = super().__new__(cls, (epoch, boot_id, starttime, users))
+        obj.host_tx_bytes = host_tx_bytes
+        obj.host_rx_bytes = host_rx_bytes
+        return obj
+
+
 class XrayNodeClientError(RuntimeError):
     """Base exception for Xray Node API errors."""
     pass
@@ -275,7 +296,7 @@ class XrayNodeClient:
 
     async def get_traffic_snapshot(
         self, api_url: str, api_key: str
-    ) -> tuple[str | None, str | None, int | None, dict[str, dict[str, int]] | None]:
+    ) -> TrafficSnapshot:
         """Fetch normalized traffic snapshot across all configured inbounds."""
         url = f"{api_url.rstrip('/')}/v1/traffic/snapshot"
         headers = self._get_headers(api_key)
@@ -285,9 +306,11 @@ class XrayNodeClient:
             node_boot_id = data.get("boot_id")
             node_starttime = data.get("starttime")
             users = data.get("users", {})
-            return node_epoch, node_boot_id, node_starttime, users
+            host_tx = int(data.get("host_tx_bytes", 0) or 0)
+            host_rx = int(data.get("host_rx_bytes", 0) or 0)
+            return TrafficSnapshot(node_epoch, node_boot_id, node_starttime, users, host_tx, host_rx)
         logger.error("Traffic snapshot fetch failed for %s: %s", _sanitize_url(url), err)
-        return None, None, None, None
+        return TrafficSnapshot(None, None, None, None, 0, 0)
 
     async def get_relays_health(
         self, api_url: str, api_key: str
