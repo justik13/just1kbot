@@ -171,6 +171,21 @@ class User(Base):
     total_traffic_bytes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default=text("0")
     )
+    total_wi_traffic_bytes: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0")
+    )
+    monthly_awg_bytes: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0")
+    )
+    monthly_wi_bytes: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0")
+    )
+    traffic_cycle: Mapped[str | None] = mapped_column(
+        String(7), nullable=True
+    )
+    archived_device_traffic: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
+    )
 
     profiles = relationship(
         "VPNProfile",

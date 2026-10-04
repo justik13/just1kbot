@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from aiogram import Bot
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import XRAY_PROTOCOL
@@ -286,6 +286,37 @@ class WhiteInternetTrafficWorker:
                             now=now,
                         )
                         total_processed += 1
+
+                        if consumed > 0:
+                            current_cycle = now.strftime("%Y-%m")
+                            await sess.execute(
+                                update(User)
+                                .where(User.id == sub.user_id)
+                                .values(
+                                    total_wi_traffic_bytes=User.total_wi_traffic_bytes + consumed,
+                                    monthly_wi_bytes=case(
+                                        (User.traffic_cycle == current_cycle, User.monthly_wi_bytes + consumed),
+                                        else_=consumed,
+                                    ),
+                                    monthly_awg_bytes=case(
+                                        (User.traffic_cycle == current_cycle, User.monthly_awg_bytes),
+                                        else_=0,
+                                    ),
+                                    traffic_cycle=current_cycle,
+                                )
+                            )
+                            server_obj = await sess.get(Server, server_id, with_for_update=True)
+                            if server_obj:
+                                raw_extra = getattr(server_obj, "extra_data", None)
+                                extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+                                saved_cycle = extra.get("traffic_cycle")
+                                if saved_cycle != current_cycle:
+                                    extra["traffic_cycle"] = current_cycle
+                                    extra["monthly_traffic_bytes"] = consumed
+                                    server_obj.extra_data = extra
+                                else:
+                                    extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + consumed
+                                    server_obj.extra_data = extra
 
                         if became_exhausted:
                             exhausted_users_to_notify.append((sub.user_id, bool(getattr(sub, "is_trial", False))))

@@ -190,9 +190,13 @@ async def _show_server_card(
     current_cycle = now_utc().strftime("%Y-%m")
     if saved_cycle == current_cycle:
         monthly_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0)
+        host_bytes = int(server_extra.get("host_monthly_traffic_bytes", 0) or 0)
     else:
         monthly_bytes = 0
+        host_bytes = 0
     traffic_month = format_traffic(monthly_bytes)
+    if host_bytes > 0:
+        traffic_month += f" (хостинг: {format_traffic(host_bytes)})"
 
     rendered = (
         f"{header}"

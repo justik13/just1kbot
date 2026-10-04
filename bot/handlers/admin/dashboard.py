@@ -191,8 +191,16 @@ async def _show_admin_dashboard(
     maintenance_enabled = await MaintenanceService.is_enabled(session)
 
     wl_traffic_str = format_traffic(wl_stats["total_traffic_bytes"])
+    avg_m_wi = stats.get("avg_monthly_wi_bytes", 0)
+    if avg_m_wi > 0:
+        wl_traffic_str += f" (ср. {format_traffic(avg_m_wi)}/мес)"
+
     awg_total_str = format_traffic(stats.get("total_traffic_bytes", 0))
-    awg_avg_str = format_traffic(stats.get("avg_traffic_bytes_active", 0))
+    avg_m_awg = stats.get("avg_monthly_awg_bytes", 0)
+    if avg_m_awg > 0:
+        awg_avg_str = f"{format_traffic(avg_m_awg)}/мес"
+    else:
+        awg_avg_str = format_traffic(stats.get("avg_traffic_bytes_active", 0))
 
     header = format_admin_breadcrumbs(texts.DASHBOARD_MAIN_DASHBOARD)
     text = (

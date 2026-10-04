@@ -85,7 +85,17 @@ def format_user_card_text(
         devices_count = len(profiles)
         device_limit = user.device_limit or 0
 
-    total_traffic_str = format_traffic(getattr(user, "total_traffic_bytes", 0) or 0)
+    awg_total = getattr(user, "total_traffic_bytes", 0) or 0
+    wi_total = getattr(user, "total_wi_traffic_bytes", 0) or 0
+    awg_m = getattr(user, "monthly_awg_bytes", 0) or 0
+    wi_m = getattr(user, "monthly_wi_bytes", 0) or 0
+    current_cycle = now.strftime("%Y-%m")
+    if getattr(user, "traffic_cycle", None) != current_cycle:
+        awg_m, wi_m = 0, 0
+
+    total_traffic_str = format_traffic(awg_total + wi_total)
+    if (awg_m + wi_m) > 0 or wi_total > 0:
+        total_traffic_str += f" (за месяц: {format_traffic(awg_m + wi_m)})"
 
     card_text = texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,

@@ -7,7 +7,7 @@ from aiogram import Bot
 from bot.keyboards.notifications import get_traffic_alert_keyboard
 from bot.texts.runtime.alerts import ALERT_TRAFFIC_OVERUSAGE
 from cachetools import TTLCache
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -366,12 +366,24 @@ async def _process_server_traffic(
                 )
 
         if user_traffic_deltas:
+            current_cycle = current_time.strftime("%Y-%m")
             for u_id, u_delta in user_traffic_deltas.items():
                 if u_delta > 0:
                     await session.execute(
                         update(User)
                         .where(User.id == u_id)
-                        .values(total_traffic_bytes=User.total_traffic_bytes + u_delta)
+                        .values(
+                            total_traffic_bytes=User.total_traffic_bytes + u_delta,
+                            monthly_awg_bytes=case(
+                                (User.traffic_cycle == current_cycle, User.monthly_awg_bytes + u_delta),
+                                else_=u_delta,
+                            ),
+                            monthly_wi_bytes=case(
+                                (User.traffic_cycle == current_cycle, User.monthly_wi_bytes),
+                                else_=0,
+                            ),
+                            traffic_cycle=current_cycle,
+                        )
                     )
 
         server_obj = await session.get(Server, server_id, with_for_update=True)

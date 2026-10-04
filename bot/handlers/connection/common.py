@@ -146,7 +146,9 @@ async def _build_connections_screen(
 
             location_label = f"{flag} {safe(server_name)}"
 
-            traffic_str = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
+            archived_bytes = (getattr(user, "archived_device_traffic", None) or {}).get(profile.device_name, 0)
+            dev_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0) + archived_bytes
+            traffic_str = format_traffic(dev_bytes)
             last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
 
             rendered += texts.CONNECTION_DEVICE_ROW_FORMAT.format(

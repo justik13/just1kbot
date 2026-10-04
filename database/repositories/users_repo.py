@@ -153,6 +153,7 @@ async def get_active_subscriptions_count(session: AsyncSession) -> int:
 
 async def get_dashboard_stats(session: AsyncSession) -> dict:
     now = now_utc()
+    current_cycle = now.strftime("%Y-%m")
     stmt = select(
         func.count(User.id).label("total"),
         func.count(User.id).filter(User.subscription_end > now).label("active"),
@@ -160,10 +161,23 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
         .filter(User.created_at > now - timedelta(hours=24))
         .label("new_24h"),
         func.coalesce(func.sum(User.total_traffic_bytes), 0).label("total_traffic_bytes"),
+        func.coalesce(func.sum(User.total_wi_traffic_bytes), 0).label("total_wi_traffic_bytes"),
         func.coalesce(
             func.avg(User.total_traffic_bytes).filter(User.subscription_end > now),
             0,
         ).label("avg_traffic_bytes_active"),
+        func.coalesce(
+            func.avg(User.monthly_awg_bytes).filter(
+                User.subscription_end > now, User.traffic_cycle == current_cycle
+            ),
+            0,
+        ).label("avg_monthly_awg_bytes"),
+        func.coalesce(
+            func.avg(User.monthly_wi_bytes).filter(
+                User.subscription_end > now, User.traffic_cycle == current_cycle
+            ),
+            0,
+        ).label("avg_monthly_wi_bytes"),
     ).where(User.is_deleted.is_(False))
     result = await session.execute(stmt)
     row = result.one()
@@ -172,7 +186,10 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
         "active": row.active,
         "new_24h": row.new_24h,
         "total_traffic_bytes": int(row.total_traffic_bytes or 0),
+        "total_wi_traffic_bytes": int(row.total_wi_traffic_bytes or 0),
         "avg_traffic_bytes_active": int(row.avg_traffic_bytes_active or 0),
+        "avg_monthly_awg_bytes": int(row.avg_monthly_awg_bytes or 0),
+        "avg_monthly_wi_bytes": int(row.avg_monthly_wi_bytes or 0),
     }
 
 
