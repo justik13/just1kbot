@@ -1,6 +1,6 @@
 """Add user traffic breakdown (AWG and Xray), monthly cycles, and device traffic retention.
 
-Revision ID: 0035_traffic_accounting_and_device_retention
+Revision ID: 0035_traffic_device_retention
 Revises: 0034_drop_tariff_quotes
 Create Date: 2026-10-05 02:00:00.000000
 """
@@ -12,7 +12,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "0035_traffic_accounting_and_device_retention"
+revision: str = "0035_traffic_device_retention"
 down_revision: str | None = "0034_drop_tariff_quotes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
