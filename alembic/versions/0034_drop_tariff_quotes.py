@@ -38,7 +38,8 @@ def _backfill_consumed_quotes(bind) -> None:
         sa.text(
             "SELECT q.id, q.user_id, q.service_type, q.operation_type, "
             "q.amount_due_rub, q.created_at, q.consumed_at, "
-            "tv.tariff_id, tv.duration_hours, tv.device_limit "
+            "tv.tariff_id, tv.duration_hours, tv.device_limit, "
+            "q.resulting_paid_hours "
             "FROM tariff_quotes q "
             "JOIN tariff_versions tv ON tv.id = q.target_tariff_version_id "
             "WHERE q.status = 'consumed' ORDER BY q.id"
@@ -56,9 +57,20 @@ def _backfill_consumed_quotes(bind) -> None:
             tariff_id,
             duration_hours,
             device_limit,
+            resulting_paid_hours,
         ) = row
         order_id = uuid.uuid4()
         paid_at = consumed_at or created_at
+        if operation_type == "trial":
+            days = int(resulting_paid_hours or 72) // 24
+        elif operation_type in ("purchase", "renew", "change"):
+            if resulting_paid_hours is not None and resulting_paid_hours == 0:
+                days = 0
+            else:
+                effective_hours = resulting_paid_hours or duration_hours or 0
+                days = int(effective_hours) // 24
+        else:
+            days = 0
         bind.execute(
             sa.text(
                 "INSERT INTO orders (id, user_id, service_type, tariff_id, "
@@ -74,7 +86,7 @@ def _backfill_consumed_quotes(bind) -> None:
                 "service_type": service_type,
                 "tariff_id": tariff_id,
                 "amount": amount_due,
-                "days": int(duration_hours or 0) // 24,
+                "days": days,
                 "devices": device_limit,
                 "paid_at": paid_at,
                 "created_at": created_at,

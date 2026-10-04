@@ -12,6 +12,7 @@ Tests cover:
 
 import os
 import unittest
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -33,6 +34,7 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.models import Server, User, WhiteInternetSubscription
+from database.repositories.white_internet_repo import has_ever_activated_trial
 from services.xray_node_client import SyncResponse, SyncResult
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
@@ -465,6 +467,55 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
             with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub):
                 await show_topup_menu(query, session)
                 query.answer.assert_awaited_with(texts.WL_TRIAL_CANNOT_TOPUP, show_alert=True)
+
+
+class TestHasEverActivatedTrial(unittest.IsolatedAsyncioTestCase):
+    """Direct unit tests for white_internet_repo.has_ever_activated_trial."""
+
+    async def asyncSetUp(self):
+        self.session = AsyncMock(spec=AsyncSession)
+        self.user = User(id=42, telegram_id=999888777, last_trial_reset_at=None)
+        self.session.get.return_value = self.user
+
+    async def test_returns_true_when_paid_trial_order_exists(self):
+        order_id = uuid.uuid4()
+        now = datetime(2026, 9, 5, 12, 0, 0, tzinfo=timezone.utc)
+        self.session.execute.return_value = MagicMock(
+            all=lambda: [(order_id, {"operation": "trial", "is_trial": True}, now)]
+        )
+
+        result = await has_ever_activated_trial(self.session, user_id=42)
+        self.assertTrue(result)
+
+    async def test_returns_false_when_only_regular_purchases_exist(self):
+        order_id = uuid.uuid4()
+        now = datetime(2026, 9, 5, 12, 0, 0, tzinfo=timezone.utc)
+        self.session.execute.return_value = MagicMock(
+            all=lambda: [(order_id, {"operation": "purchase", "is_trial": False}, now)]
+        )
+
+        result = await has_ever_activated_trial(self.session, user_id=42)
+        self.assertFalse(result)
+
+    async def test_returns_false_when_no_orders_exist(self):
+        self.session.execute.return_value = MagicMock(
+            all=lambda: []
+        )
+
+        result = await has_ever_activated_trial(self.session, user_id=42)
+        self.assertFalse(result)
+
+    async def test_filters_out_trial_orders_prior_to_reset(self):
+        reset_time = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+        self.user.last_trial_reset_at = reset_time
+        self.session.execute.return_value = MagicMock(
+            all=lambda: []
+        )
+
+        result = await has_ever_activated_trial(self.session, user_id=42)
+        self.assertFalse(result)
+        self.session.get.assert_awaited_once_with(User, 42)
+        self.session.execute.assert_awaited_once()
 
 
 if __name__ == "__main__":

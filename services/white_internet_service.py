@@ -235,8 +235,6 @@ class WhiteInternetService:
         )
         session.add(order)
         await session.flush()
-        if order.expires_at is not None and order.expires_at <= now_utc():
-            raise LookupError("purchase_order_expired")
         if amount == 0:
             order.status = "paid"
             order.paid_at = now_utc()
@@ -729,10 +727,10 @@ class WhiteInternetService:
                 service_type=WHITE_INTERNET_SERVICE_TYPE,
                 tariff_id=tariff.id,
                 amount_due=price,
-                duration_days=tariff.duration_days,
+                duration_days=0,
                 traffic_bytes=WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
                 device_limit=new_device_limit,
-                operation="purchase",
+                operation="add_device_slot",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
             )
             if checkout_failure is not None:

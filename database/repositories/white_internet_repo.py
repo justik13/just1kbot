@@ -147,8 +147,7 @@ async def has_ever_activated_trial(session: AsyncSession, user_id: int) -> bool:
             Order.service_type == WHITE_INTERNET_SERVICE_TYPE,
             Order.status == "paid",
         )
-        .order_by(Order.id.desc())
-        .limit(100)
+        .order_by(Order.created_at.desc())
     )
     if user and user.last_trial_reset_at is not None:
         stmt = stmt.where(Order.created_at > user.last_trial_reset_at)

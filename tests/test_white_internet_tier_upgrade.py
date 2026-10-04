@@ -153,6 +153,9 @@ class TestWhiteInternetDeviceSlotPurchase(unittest.IsolatedAsyncioTestCase):
             mock_debit.assert_awaited_once()
             debit_call_args = mock_debit.await_args[1]
             self.assertEqual(debit_call_args["amount_rub"], Decimal("200.00"))
+            order = mock_session.add.call_args[0][0]
+            self.assertEqual(order.duration_days, 0)
+            self.assertEqual(order.metadata_["operation"], "add_device_slot")
 
     async def test_purchase_device_slot_admin_success(self):
         mock_session = AsyncMock()

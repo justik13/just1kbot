@@ -70,7 +70,7 @@ def _wi_operation_title(operation: str | None) -> tuple[str, str] | None:
     }
     if operation in titles:
         return operation, titles[operation]
-    if operation == "trial":
+    if operation in ("trial", "add_device_slot"):
         return operation, getattr(texts, "PAYMENT_OP_TITLE_DEFAULT", "Операция")
     return None
 

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 import sys
 import unittest
+
+logger = logging.getLogger("run_suite")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -114,8 +117,8 @@ def main(argv: list[str] | None = None) -> int:
                 await engine.dispose()
 
             asyncio.run(_cleanup())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to truncate test DB: %s", exc)
 
     return 0 if result.wasSuccessful() else 1
 

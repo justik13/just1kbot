@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 DB = os.getenv("TEST_DATABASE_URL")
 
 EXPECTED_BASE = "0031_awg_persistent_traffic"
-EXPECTED_HEAD = "0032_drop_banking_residue"
+EXPECTED_HEAD = "0034_drop_tariff_quotes"
 
 DROPPED_TABLES = (
     "paid_value_ledger",
@@ -295,7 +295,7 @@ class TestPreflightStatementsExecute(unittest.IsolatedAsyncioTestCase):
 
     async def test_migration_head_matches_expected_revision(self):
         verdict = await self._verdict_for(dict(POSTFLIGHT_STATEMENTS)["1_MIGRATION_HEAD"])
-        self.assertEqual(verdict, "OK", f"alembic_version is not at {EXPECTED_HEAD}")
+        self.assertEqual(verdict, "OK", f"alembic_version is not in {VALID_POSTFLIGHT_HEADS}")
 
     async def _verdict_with_hazard(self, kind: str, label: str) -> str:
         """Seed one synthetic violation and read its block verdict.
