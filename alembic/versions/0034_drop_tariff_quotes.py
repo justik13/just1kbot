@@ -34,30 +34,46 @@ depends_on: str | Sequence[str] | None = None
 
 _DISABLE_LEDGER_TRIGGER_SQL = sa.text(
     """
-    DO $$ BEGIN
-      IF to_regclass('public.account_ledger_entries') IS NOT NULL THEN
-        IF EXISTS (
-          SELECT 1 FROM pg_trigger
-          WHERE tgrelid = 'public.account_ledger_entries'::regclass
-            AND tgname = 'account_ledger_append_only'
-        ) THEN
-          ALTER TABLE public.account_ledger_entries DISABLE TRIGGER account_ledger_append_only;
-        END IF;
+    DO $$
+    DECLARE
+      trig_status "char";
+    BEGIN
+      IF to_regclass('public.account_ledger_entries') IS NULL THEN
+        RAISE EXCEPTION 'table public.account_ledger_entries missing';
       END IF;
+
+      SELECT tgenabled INTO trig_status
+      FROM pg_trigger
+      WHERE tgrelid = 'public.account_ledger_entries'::regclass
+        AND tgname = 'account_ledger_append_only';
+
+      IF trig_status IS NULL THEN
+        RAISE EXCEPTION 'trigger account_ledger_append_only missing on account_ledger_entries';
+      ELSIF trig_status <> 'O' THEN
+        RAISE EXCEPTION 'trigger account_ledger_append_only is not in origin enabled state (status: %)', trig_status;
+      END IF;
+
+      ALTER TABLE public.account_ledger_entries DISABLE TRIGGER account_ledger_append_only;
     END $$;
     """
 )
 
 _ENABLE_LEDGER_TRIGGER_SQL = sa.text(
     """
-    DO $$ BEGIN
+    DO $$
+    DECLARE
+      trig_status "char";
+    BEGIN
       IF to_regclass('public.account_ledger_entries') IS NOT NULL THEN
-        IF EXISTS (
-          SELECT 1 FROM pg_trigger
-          WHERE tgrelid = 'public.account_ledger_entries'::regclass
-            AND tgname = 'account_ledger_append_only'
-        ) THEN
-          ALTER TABLE public.account_ledger_entries ENABLE TRIGGER account_ledger_append_only;
+        ALTER TABLE public.account_ledger_entries ENABLE TRIGGER account_ledger_append_only;
+
+        SELECT tgenabled INTO trig_status
+        FROM pg_trigger
+        WHERE tgrelid = 'public.account_ledger_entries'::regclass
+          AND tgname = 'account_ledger_append_only';
+
+        IF trig_status <> 'O' THEN
+          RAISE EXCEPTION 'failed to re-enable account_ledger_append_only trigger (status: %)', trig_status;
         END IF;
       END IF;
     END $$;
@@ -105,6 +121,23 @@ def _backfill_consumed_quotes(bind) -> None:
                     resulting_paid_hours,
                     name_snapshot,
                 ) = row
+
+                # Financial integrity: consumed paid quotes must have a matching purchase_debit
+                if amount_due and amount_due > 0:
+                    debit_count = bind.execute(
+                        sa.text(
+                            "SELECT count(*) FROM account_ledger_entries "
+                            "WHERE quote_id = :qid AND entry_type = 'purchase_debit' "
+                            "AND user_id = :uid"
+                        ),
+                        {"qid": qid, "uid": user_id},
+                    ).scalar()
+                    if not debit_count:
+                        raise RuntimeError(
+                            f"drop tariff_quotes aborted: consumed quote #{qid} for {amount_due} RUB "
+                            f"has no matching purchase_debit in account_ledger_entries"
+                        )
+
                 order_id = uuid.uuid4()
                 paid_at = consumed_at or created_at
                 traffic_bytes = 0
@@ -178,6 +211,17 @@ def _backfill_consumed_quotes(bind) -> None:
     if leftover:
         raise RuntimeError(
             f"drop tariff_quotes aborted: {leftover} ledger rows still reference quotes"
+        )
+
+    migrated_orders = bind.execute(
+        sa.text(
+            "SELECT count(*) FROM orders "
+            "WHERE metadata ->> 'migrated_from_quote' IS NOT NULL"
+        )
+    ).scalar()
+    if migrated_orders != len(quotes):
+        raise RuntimeError(
+            f"drop tariff_quotes aborted: created {migrated_orders} orders but expected {len(quotes)}"
         )
 
 

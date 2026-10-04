@@ -157,9 +157,17 @@ class CleanBaselineTests(unittest.TestCase):
             elif "UPDATE account_ledger_entries" in s:
                 recorded_updates.append(params)
                 return None
-            elif "SELECT count(*)" in s:
+            elif "entry_type = 'purchase_debit'" in s:
+                m = MagicMock()
+                m.scalar.return_value = 1
+                return m
+            elif "WHERE quote_id IS NOT NULL" in s:
                 m = MagicMock()
                 m.scalar.return_value = 0
+                return m
+            elif "migrated_from_quote" in s:
+                m = MagicMock()
+                m.scalar.return_value = len(quotes)
                 return m
             return MagicMock()
 
@@ -260,14 +268,24 @@ class CleanBaselineTests(unittest.TestCase):
                 m = MagicMock()
                 m.fetchall.return_value = quotes
                 return m
+            elif "entry_type = 'purchase_debit'" in s:
+                executed_actions.append("check_debit")
+                m = MagicMock()
+                m.scalar.return_value = 1
+                return m
             elif "INSERT INTO orders" in s:
                 executed_actions.append("insert_order")
             elif "UPDATE account_ledger_entries" in s:
                 executed_actions.append("update_ledger")
-            elif "SELECT count(*)" in s:
+            elif "WHERE quote_id IS NOT NULL" in s:
                 executed_actions.append("count_leftovers")
                 m = MagicMock()
                 m.scalar.return_value = 0
+                return m
+            elif "migrated_from_quote" in s:
+                executed_actions.append("count_orders")
+                m = MagicMock()
+                m.scalar.return_value = len(quotes)
                 return m
             return MagicMock()
 
@@ -275,17 +293,19 @@ class CleanBaselineTests(unittest.TestCase):
         bind.dialect.name = "postgresql"
         bind.execute.side_effect = tracking_execute
 
-        # 1. Normal run: disable -> insert -> update -> enable -> count
+        # 1. Normal run: disable -> debit_check -> insert -> update -> enable -> count -> orders_count
         m0034._backfill_consumed_quotes(bind)
         self.assertEqual(
             executed_actions,
             [
                 "select_quotes",
                 "trigger_disabled",
+                "check_debit",
                 "insert_order",
                 "update_ledger",
                 "trigger_enabled",
                 "count_leftovers",
+                "count_orders",
             ],
         )
 
@@ -302,6 +322,10 @@ class CleanBaselineTests(unittest.TestCase):
                 executed_actions.append("select_quotes")
                 m = MagicMock()
                 m.fetchall.return_value = quotes
+                return m
+            elif "entry_type = 'purchase_debit'" in s:
+                m = MagicMock()
+                m.scalar.return_value = 1
                 return m
             elif "UPDATE account_ledger_entries" in s:
                 executed_actions.append("update_ledger_fail")
@@ -323,6 +347,122 @@ class CleanBaselineTests(unittest.TestCase):
         m0034._set_ledger_immutable_trigger(sqlite_bind, enable=False)
         m0034._set_ledger_immutable_trigger(sqlite_bind, enable=True)
         sqlite_bind.execute.assert_not_called()
+
+    def test_quote_drop_backfill_missing_debit_aborts(self):
+        """Verify backfill aborts if a consumed paid quote has no matching purchase_debit."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        import importlib.util
+        from unittest.mock import MagicMock
+
+        spec = importlib.util.spec_from_file_location(
+            "m0034", str(VERSIONS / "0034_drop_tariff_quotes.py")
+        )
+        m0034 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m0034)
+
+        now = datetime.now(timezone.utc)
+        quotes = [
+            (99, 10, "white_internet", "purchase", Decimal("300.00"), now, now, 1, 720, 2, 720, "WI"),
+        ]
+
+        def fake_execute(stmt, params=None):
+            s = str(stmt)
+            if "SELECT q.id" in s:
+                m = MagicMock()
+                m.fetchall.return_value = quotes
+                return m
+            elif "entry_type = 'purchase_debit'" in s:
+                m = MagicMock()
+                m.scalar.return_value = 0  # Missing debit!
+                return m
+            return MagicMock()
+
+        bind = MagicMock()
+        bind.execute.side_effect = fake_execute
+
+        with self.assertRaises(RuntimeError) as cm:
+            m0034._backfill_consumed_quotes(bind)
+        self.assertIn("has no matching purchase_debit", str(cm.exception))
+
+    def test_quote_drop_backfill_trial_without_debit_succeeds(self):
+        """Verify 0 RUB trial quotes succeed without needing a ledger debit."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        import importlib.util
+        from unittest.mock import MagicMock
+
+        spec = importlib.util.spec_from_file_location(
+            "m0034", str(VERSIONS / "0034_drop_tariff_quotes.py")
+        )
+        m0034 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m0034)
+
+        now = datetime.now(timezone.utc)
+        quotes = [
+            (101, 10, "white_internet", "trial", Decimal("0.00"), now, now, 1, 72, 2, 72, "Trial"),
+        ]
+
+        def fake_execute(stmt, params=None):
+            s = str(stmt)
+            if "SELECT q.id" in s:
+                m = MagicMock()
+                m.fetchall.return_value = quotes
+                return m
+            elif "WHERE quote_id IS NOT NULL" in s:
+                m = MagicMock()
+                m.scalar.return_value = 0
+                return m
+            elif "migrated_from_quote" in s:
+                m = MagicMock()
+                m.scalar.return_value = 1
+                return m
+            return MagicMock()
+
+        bind = MagicMock()
+        bind.execute.side_effect = fake_execute
+        m0034._backfill_consumed_quotes(bind)  # Must not raise
+
+    def test_quote_drop_backfill_migrated_orders_mismatch_aborts(self):
+        """Verify backfill aborts if the count of created orders does not match quotes."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        import importlib.util
+        from unittest.mock import MagicMock
+
+        spec = importlib.util.spec_from_file_location(
+            "m0034", str(VERSIONS / "0034_drop_tariff_quotes.py")
+        )
+        m0034 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m0034)
+
+        now = datetime.now(timezone.utc)
+        quotes = [
+            (1, 10, "white_internet", "trial", Decimal("0.00"), now, now, 1, 72, 2, 72, "Trial"),
+        ]
+
+        def fake_execute(stmt, params=None):
+            s = str(stmt)
+            if "SELECT q.id" in s:
+                m = MagicMock()
+                m.fetchall.return_value = quotes
+                return m
+            elif "WHERE quote_id IS NOT NULL" in s:
+                m = MagicMock()
+                m.scalar.return_value = 0
+                return m
+            elif "migrated_from_quote" in s:
+                m = MagicMock()
+                m.scalar.return_value = 0  # Mismatch: 0 orders instead of 1
+                return m
+            return MagicMock()
+
+        bind = MagicMock()
+        bind.execute.side_effect = fake_execute
+
+        with self.assertRaises(RuntimeError) as cm:
+            m0034._backfill_consumed_quotes(bind)
+        self.assertIn("created 0 orders but expected 1", str(cm.exception))
 
 
 if __name__ == "__main__":
