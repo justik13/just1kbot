@@ -141,7 +141,7 @@ class WhiteInternetTrafficWorker:
                             server_id,
                         )
                         continue
-
+            server_consumed = 0
             for client_uuid, stats in users_stats.items():
                 if (
                     not isinstance(client_uuid, str)
@@ -288,6 +288,7 @@ class WhiteInternetTrafficWorker:
                         total_processed += 1
 
                         if consumed > 0:
+                            server_consumed += consumed
                             current_cycle = now.strftime("%Y-%m")
                             await sess.execute(
                                 update(User)
@@ -305,18 +306,6 @@ class WhiteInternetTrafficWorker:
                                     traffic_cycle=current_cycle,
                                 )
                             )
-                            server_obj = await sess.get(Server, server_id, with_for_update=True)
-                            if server_obj:
-                                raw_extra = getattr(server_obj, "extra_data", None)
-                                extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
-                                saved_cycle = extra.get("traffic_cycle")
-                                if saved_cycle != current_cycle:
-                                    extra["traffic_cycle"] = current_cycle
-                                    extra["monthly_traffic_bytes"] = consumed
-                                    server_obj.extra_data = extra
-                                else:
-                                    extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + consumed
-                                    server_obj.extra_data = extra
 
                         if became_exhausted:
                             exhausted_users_to_notify.append((sub.user_id, bool(getattr(sub, "is_trial", False))))
@@ -337,6 +326,22 @@ class WhiteInternetTrafficWorker:
                         client_exc,
                         exc_info=True,
                     )
+
+            if server_consumed > 0:
+                current_cycle = now.strftime("%Y-%m")
+                async with sf() as sess:
+                    server_obj = await sess.get(Server, server_id, with_for_update=True)
+                    if server_obj:
+                        raw_extra = getattr(server_obj, "extra_data", None)
+                        extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+                        saved_cycle = extra.get("traffic_cycle")
+                        if saved_cycle != current_cycle:
+                            extra["traffic_cycle"] = current_cycle
+                            extra["monthly_traffic_bytes"] = server_consumed
+                            server_obj.extra_data = extra
+                        else:
+                            extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_consumed
+                            server_obj.extra_data = extra
 
         # Send Telegram notifications strictly outside all DB transactions
         if self.bot is not None and exhausted_users_to_notify:

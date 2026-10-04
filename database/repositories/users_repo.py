@@ -1,7 +1,7 @@
 from datetime import timedelta
 import inspect
 
-from sqlalchemy import and_, false, func, or_, select, text, update
+from sqlalchemy import and_, case, false, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -154,6 +154,12 @@ async def get_active_subscriptions_count(session: AsyncSession) -> int:
 async def get_dashboard_stats(session: AsyncSession) -> dict:
     now = now_utc()
     current_cycle = now.strftime("%Y-%m")
+    active_wi_sub_user_ids = select(WhiteInternetSubscription.user_id).where(
+        WhiteInternetSubscription.status.in_(
+            (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED)
+        ),
+        WhiteInternetSubscription.expires_at > now,
+    )
     stmt = select(
         func.count(User.id).label("total"),
         func.count(User.id).filter(User.subscription_end > now).label("active"),
@@ -167,14 +173,25 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
             0,
         ).label("avg_traffic_bytes_active"),
         func.coalesce(
-            func.avg(User.monthly_awg_bytes).filter(
-                User.subscription_end > now, User.traffic_cycle == current_cycle
-            ),
+            func.avg(
+                case(
+                    (User.traffic_cycle == current_cycle, User.monthly_awg_bytes),
+                    else_=0,
+                )
+            ).filter(User.subscription_end > now),
             0,
         ).label("avg_monthly_awg_bytes"),
         func.coalesce(
-            func.avg(User.monthly_wi_bytes).filter(
-                User.subscription_end > now, User.traffic_cycle == current_cycle
+            func.avg(
+                case(
+                    (User.traffic_cycle == current_cycle, User.monthly_wi_bytes),
+                    else_=0,
+                )
+            ).filter(
+                or_(
+                    User.id.in_(active_wi_sub_user_ids),
+                    and_(User.traffic_cycle == current_cycle, User.monthly_wi_bytes > 0),
+                )
             ),
             0,
         ).label("avg_monthly_wi_bytes"),
