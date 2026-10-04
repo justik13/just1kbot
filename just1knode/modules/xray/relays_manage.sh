@@ -331,9 +331,11 @@ r_sni = sys.argv[13]
 with open(cfg_file, 'r', encoding='utf-8') as f:
     cfg = json.load(f)
 
-# Удаляем старые записи этого релея, если были
-cfg['inbounds'] = [ib for ib in cfg.get('inbounds', []) if ib.get('tag') != in_tag]
-cfg['outbounds'] = [ob for ob in cfg.get('outbounds', []) if ob.get('tag') != out_tag]
+# Удаляем старые записи этого релея, если были (с защитой от любого регистра)
+target_tags = {in_tag.lower(), f'just1k-wl-{code}'.lower(), f'inbound-{code}'.lower()}
+target_out_tags = {out_tag.lower(), f'just1k-wl-out-{code}'.lower(), f'outbound-{code}'.lower()}
+cfg['inbounds'] = [ib for ib in cfg.get('inbounds', []) if str(ib.get('tag', '')).strip().lower() not in target_tags]
+cfg['outbounds'] = [ob for ob in cfg.get('outbounds', []) if str(ob.get('tag', '')).strip().lower() not in target_out_tags]
 
 # 1. Добавляем локальный inbound для этого релея
 new_ib = {
@@ -407,22 +409,23 @@ cfg['outbounds'].append(new_ob)
 
 # 3. Добавляем inbound этого релея в правила прямого выхода в Рунет (just1k-wl-direct)
 rules = cfg.setdefault('routing', {}).setdefault('rules', [])
-rules = [r for r in rules if r.get('outboundTag') != out_tag]
+rules = [r for r in rules if str(r.get('outboundTag', '')).strip().lower() not in target_out_tags]
 
 for r in rules:
     if r.get('outboundTag') == 'just1k-wl-direct':
         # Relay inbounds MUST ONLY be in domain-based direct rules (ru_domains), NEVER in ip-based rules!
         if 'domain' in r:
             existing_ib = r.get('inboundTag', [])
-            if isinstance(existing_ib, list) and in_tag not in existing_ib:
+            if isinstance(existing_ib, list):
+                existing_ib = [t for t in existing_ib if str(t).strip().lower() not in target_tags]
                 r['inboundTag'] = existing_ib + [in_tag]
             if 'domain:2ip.ru' not in r['domain']:
                 r['domain'].append('domain:2ip.ru')
         elif 'ip' in r:
             # Exclude relay inbounds from geoip:ru to prevent Origin from resolving foreign domains
             existing_ib = r.get('inboundTag', [])
-            if isinstance(existing_ib, list) and in_tag in existing_ib:
-                r['inboundTag'] = [t for t in existing_ib if t != in_tag]
+            if isinstance(existing_ib, list):
+                r['inboundTag'] = [t for t in existing_ib if str(t).strip().lower() not in target_tags]
 
 # Запрет BitTorrent (P2P трафик)
 if not any(r.get('protocol') == ['bittorrent'] for r in rules):
@@ -698,17 +701,20 @@ out_tag = '$out_tag'
 rf = '$RELAYS_FILE'
 
 with open(cfg_file) as f: cfg = json.load(f)
-cfg['inbounds'] = [ib for ib in cfg.get('inbounds', []) if ib.get('tag') not in (in_tag, f'just1k-wl-{code}', f'inbound-{code}')]
-cfg['outbounds'] = [ob for ob in cfg.get('outbounds', []) if ob.get('tag') not in (out_tag, f'just1k-wl-out-{code}', f'outbound-{code}')]
+target_tags = {in_tag.lower(), f'just1k-wl-{code}'.lower(), f'inbound-{code}'.lower()}
+target_out_tags = {out_tag.lower(), f'just1k-wl-out-{code}'.lower(), f'outbound-{code}'.lower()}
+
+cfg['inbounds'] = [ib for ib in cfg.get('inbounds', []) if str(ib.get('tag', '')).strip().lower() not in target_tags]
+cfg['outbounds'] = [ob for ob in cfg.get('outbounds', []) if str(ob.get('tag', '')).strip().lower() not in target_out_tags]
 
 # Очищаем тег из правил маршрутизации
 if 'routing' in cfg and 'rules' in cfg['routing']:
-    cfg['routing']['rules'] = [r for r in cfg['routing']['rules'] if r.get('outboundTag') not in (out_tag, f'just1k-wl-out-{code}', f'outbound-{code}')]
+    cfg['routing']['rules'] = [r for r in cfg['routing']['rules'] if str(r.get('outboundTag', '')).strip().lower() not in target_out_tags]
     for r in cfg['routing']['rules']:
         if r.get('outboundTag') == 'just1k-wl-direct':
             existing_ib = r.get('inboundTag', [])
-            if isinstance(existing_ib, list) and in_tag in existing_ib:
-                r['inboundTag'] = [t for t in existing_ib if t != in_tag]
+            if isinstance(existing_ib, list):
+                r['inboundTag'] = [t for t in existing_ib if str(t).strip().lower() not in target_tags]
 
 # Default inbound traffic for Russia always routes directly via Moscow IP
 default_rule_found = False

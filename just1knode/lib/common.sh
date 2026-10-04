@@ -337,6 +337,8 @@ EOF
     fi
 
     if command -v sysctl >/dev/null 2>&1; then
+        modprobe tcp_bbr 2>/dev/null || true
+        modprobe sch_fq 2>/dev/null || true
         sysctl -p "$conf_path" >/dev/null 2>&1 || true
         sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
         sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
@@ -358,6 +360,11 @@ EOF
     icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     if [[ "$icmp_curr" != "1" ]]; then
         warn "Параметр net.ipv4.icmp_echo_ignore_all не применился в ядре ноды (проверьте права или ограничения контейнера)."
+    fi
+    local bbr_curr
+    bbr_curr="$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || echo "")"
+    if [[ -n "$bbr_curr" && "$bbr_curr" != "bbr" ]]; then
+        warn "Контроль перегрузки BBR не активирован в ядре (текущий: $bbr_curr). Проверьте поддержку BBR хостинг-провайдером."
     fi
 }
 
@@ -610,7 +617,9 @@ for r in relays:
             if t.lower() == f'just1k-wl-inbound-{code_lower}':
                 port = p
                 break
-    if not port:
+    # Источник истины — секция inbounds в config.json (Desired-State).
+    # Релеи, отсутствующие в Xray, не получают upstream (защита от устаревших записей в relays.json).
+    if not port and not xray_inbound_ports:
         port = r.get('inbound_port')
     if port:
         try:

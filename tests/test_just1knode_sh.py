@@ -568,6 +568,7 @@ exit 0
                 "inbounds": [
                     {"tag": "just1k-wl-default", "port": 8003},
                     {"tag": "just1k-wl-inbound-de", "port": 8004},
+                    {"tag": "just1k-wl-inbound-nl", "port": 8005},
                     {"tag": "just1k-wl-inbound-se", "port": 8006},
                 ]
             }
@@ -577,6 +578,7 @@ exit 0
                 {"code": "de", "name": "Germany", "inbound_port": 8004, "inbound_tag": "just1k-wl-inbound-de"},
                 {"code": "DE", "name": "Germany Uppercase Dup", "inbound_port": 8004, "inbound_tag": "just1k-wl-inbound-de"},
                 {"code": "nl", "name": "Netherlands", "inbound_port": 8005, "inbound_tag": "just1k-wl-inbound-nl"},
+                {"code": "fr", "name": "France (Orphaned)", "inbound_port": 8007, "inbound_tag": "just1k-wl-inbound-fr"},
             ]
             relays_file.write_text(json.dumps(relays_data), encoding="utf-8")
 
@@ -609,13 +611,16 @@ exit 0
             self.assertNotIn("upstream xray_xhttp_relay_DE {", content)
             self.assertIn("server 127.0.0.1:8004;", content)
 
-            # Check nl upstream (from relays.json fallback port)
+            # Check nl upstream (matches active inbound in Xray)
             self.assertEqual(content.count("upstream xray_xhttp_relay_nl {"), 1)
             self.assertIn("server 127.0.0.1:8005;", content)
 
             # Check se upstream (from Xray inbound defense-in-depth scan)
             self.assertEqual(content.count("upstream xray_xhttp_relay_se {"), 1)
             self.assertIn("server 127.0.0.1:8006;", content)
+
+            # Check fr upstream is NOT generated (strict SSOT protects against orphaned relays in relays.json)
+            self.assertNotIn("upstream xray_xhttp_relay_fr {", content)
 
     def test_doctor_icmp_stealth_fails_closed_when_dropin_missing(self):
         """Verify doctor ICMP stealth check fails closed if runtime=1 but drop-in is missing."""
