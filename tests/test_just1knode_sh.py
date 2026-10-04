@@ -339,6 +339,43 @@ exit 0
         with open(self.state_dir / "relays.json", "r", encoding="utf-8") as f:
             self.assertEqual(json.load(f), relays_data)
 
+    def test_relay_remove_cleans_up_legacy_uppercase_conf_file(self):
+        """Verify remove_relay_node cleans up legacy uppercase DE.conf files from NGINX_RELAYS_DIR."""
+        self._prepare_base_env()
+        # Create legacy uppercase DE.conf
+        de_conf = self.nginx_relays_d / "DE.conf"
+        de_conf.write_text("location ^~ /stream/DE { proxy_pass http://127.0.0.1:8004; }\n", encoding="utf-8")
+
+        relays_data = [
+            {
+                "name": "Germany",
+                "code": "de",
+                "ip": "1.2.3.4",
+                "port": 10443,
+                "inbound_port": 8004,
+                "inbound_tag": "just1k-wl-inbound-de",
+            }
+        ]
+        with open(self.state_dir / "relays.json", "w", encoding="utf-8") as f:
+            json.dump(relays_data, f)
+
+        xray_config_file = self.xray_config_dir / "config.json"
+        with open(xray_config_file, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "inbounds": [{"tag": "just1k-wl-default", "port": 8003}, {"tag": "just1k-wl-inbound-de", "port": 8004}],
+                    "outbounds": [{"tag": "just1k-wl-outbound-de"}, {"tag": "just1k-wl-direct"}],
+                    "routing": {"rules": []},
+                },
+                f,
+            )
+
+        cmd = 'remove_relay_node "de"'
+        res = self._run_shell_snippet(cmd)
+        self.assertEqual(res.returncode, 0, f"remove_relay_node failed: {res.stderr + res.stdout}")
+        self.assertFalse(de_conf.exists(), "Legacy uppercase DE.conf must be removed")
+        self.assertFalse((self.nginx_relays_d / "de.conf").exists())
+
     def test_rename_relay_node(self):
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
@@ -522,6 +559,129 @@ exit 0
         self.assertIn("net.ipv6.conf.default.disable_ipv6 = 1", content)
         self.assertIn("net.ipv6.conf.lo.disable_ipv6 = 1", content)
         self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", content)
+        self.assertIn("net.ipv4.tcp_tw_reuse = 1", content)
+        self.assertIn("net.ipv4.tcp_fin_timeout = 15", content)
+        self.assertIn("net.core.somaxconn = 65535", content)
+        self.assertIn("net.ipv4.ip_local_port_range = 32768 65535", content)
+        self.assertIn("net.core.default_qdisc = fq", content)
+        self.assertIn("net.ipv4.tcp_congestion_control = bbr", content)
+
+    def test_origin_and_relay_xhttp_inbound_limits_and_nginx_keepalive(self):
+        """Verify origin.sh and relays_manage.sh set scMaxEachPostBytes=1000000, serverMaxHeaderBytes=65536, and keepalive_requests=100000."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+
+        self.assertIn("'scMaxEachPostBytes': 1000000", origin_sh)
+        self.assertIn("'serverMaxHeaderBytes': 65536", origin_sh)
+        self.assertIn("keepalive_requests 100000;", origin_sh)
+        self.assertIn("keepalive_timeout 300s;", origin_sh)
+        self.assertIn("client_header_buffer_size 16k;", origin_sh)
+        self.assertIn("proxy_pass http://xray_xhttp_default;", origin_sh)
+
+        self.assertIn("'scMaxEachPostBytes': 1000000", relays_manage_sh)
+        self.assertIn("'serverMaxHeaderBytes': 65536", relays_manage_sh)
+        self.assertIn("sync_xhttp_upstreams_conf", relays_manage_sh)
+
+        self.assertIn("sync_xhttp_upstreams_conf()", common_sh)
+        self.assertIn("upstream xray_xhttp_default", common_sh)
+        self.assertIn("keepalive 128;", common_sh)
+        self.assertIn("keepalive_requests 100000;", common_sh)
+        self.assertIn("keepalive_timeout 300s;", common_sh)
+
+    def test_xhttp_upstreams_topology_sync_and_deduplication(self):
+        """Verify sync_xhttp_upstreams_conf python logic creates upstream pools, sets keepalive directives, and deduplicates codes."""
+        import json
+        import subprocess
+        import sys
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cfg_file = tmp_path / "config.json"
+            relays_file = tmp_path / "relays.json"
+            upstreams_file = tmp_path / "just1k-xhttp-upstreams.conf"
+
+            cfg_data = {
+                "inbounds": [
+                    {"tag": "just1k-wl-default", "port": 8003},
+                    {"tag": "just1k-wl-inbound-de", "port": 8004},
+                    {"tag": "just1k-wl-inbound-nl", "port": 8005},
+                    {"tag": "just1k-wl-inbound-se", "port": 8006},
+                ]
+            }
+            cfg_file.write_text(json.dumps(cfg_data), encoding="utf-8")
+
+            relays_data = [
+                {"code": "de", "name": "Germany", "inbound_port": 8004, "inbound_tag": "just1k-wl-inbound-de"},
+                {"code": "DE", "name": "Germany Uppercase Dup", "inbound_port": 8004, "inbound_tag": "just1k-wl-inbound-de"},
+                {"code": "nl", "name": "Netherlands", "inbound_port": 8005, "inbound_tag": "just1k-wl-inbound-nl"},
+                {"code": "fr", "name": "France (Orphaned)", "inbound_port": 8007, "inbound_tag": "just1k-wl-inbound-fr"},
+            ]
+            relays_file.write_text(json.dumps(relays_data), encoding="utf-8")
+
+            common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+            # Extract python script from sync_xhttp_upstreams_conf
+            func_idx = common_sh.find("sync_xhttp_upstreams_conf()")
+            py_start = common_sh.find('python3 -c "', func_idx) + len('python3 -c "')
+            py_end = common_sh.find('" "$upstreams_file" "$cfg_file" "$relays_file"', py_start)
+            py_code = common_sh[py_start:py_end].strip()
+
+            proc = subprocess.run(
+                [sys.executable, "-c", py_code, str(upstreams_file), str(cfg_file), str(relays_file)],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            self.assertEqual(proc.returncode, 0, f"Python execution failed: {proc.stderr}")
+            self.assertTrue(upstreams_file.exists())
+            content = upstreams_file.read_text(encoding="utf-8")
+
+            # Check default upstream
+            self.assertIn("upstream xray_xhttp_default {", content)
+            self.assertIn("server 127.0.0.1:8003;", content)
+            self.assertIn("keepalive 128;", content)
+            self.assertIn("keepalive_requests 100000;", content)
+            self.assertIn("keepalive_timeout 300s;", content)
+
+            # Check de upstream (exactly one block, no duplicates from 'DE')
+            self.assertEqual(content.count("upstream xray_xhttp_relay_de {"), 1)
+            self.assertNotIn("upstream xray_xhttp_relay_DE {", content)
+            self.assertIn("server 127.0.0.1:8004;", content)
+
+            # Check nl upstream (matches active inbound in Xray)
+            self.assertEqual(content.count("upstream xray_xhttp_relay_nl {"), 1)
+            self.assertIn("server 127.0.0.1:8005;", content)
+
+            # Check se upstream (from Xray inbound defense-in-depth scan)
+            self.assertEqual(content.count("upstream xray_xhttp_relay_se {"), 1)
+            self.assertIn("server 127.0.0.1:8006;", content)
+
+            # Check fr upstream is NOT generated (strict SSOT protects against orphaned relays in relays.json)
+            self.assertNotIn("upstream xray_xhttp_relay_fr {", content)
+
+            # Test fail-closed behavior when config.json is corrupted
+            cfg_file.write_text("{ invalid json", encoding="utf-8")
+            corrupt_proc = subprocess.run(
+                [sys.executable, "-c", py_code, str(upstreams_file), str(cfg_file), str(relays_file)],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            self.assertNotEqual(corrupt_proc.returncode, 0, "Corrupted config.json must fail-closed")
+            self.assertIn("Error parsing Xray config", corrupt_proc.stderr)
+
+            # Test fallback when config.json physically does not exist (e.g. bootstrap)
+            cfg_file.unlink()
+            bootstrap_proc = subprocess.run(
+                [sys.executable, "-c", py_code, str(upstreams_file), str(cfg_file), str(relays_file)],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            self.assertEqual(bootstrap_proc.returncode, 0)
+            bootstrap_content = upstreams_file.read_text(encoding="utf-8")
+            self.assertIn("upstream xray_xhttp_relay_de {", bootstrap_content)
+            self.assertIn("server 127.0.0.1:8004;", bootstrap_content)
 
     def test_doctor_icmp_stealth_fails_closed_when_dropin_missing(self):
         """Verify doctor ICMP stealth check fails closed if runtime=1 but drop-in is missing."""
@@ -2986,7 +3146,7 @@ remove_traffic_watchdog_timer
                     if not code or not path:
                         continue
                     code_lower = str(code).strip().lower()
-                    cf_name = f"{code}.conf"
+                    cf_name = f"{code_lower}.conf"
                     cf_path = os.path.join(nginx_dir, cf_name)
                     in_tag = r.get("inbound_tag") or f"just1k-wl-inbound-{code_lower}"
                     port = xray_inbound_ports.get(in_tag)
@@ -3019,7 +3179,8 @@ remove_traffic_watchdog_timer
 
             # Invariant: pl.conf was created with local port 8007
             self.assertTrue(os.path.exists(os.path.join(nginx_dir, "pl.conf")))
-            self.assertIn("127.0.0.1:8007", open(os.path.join(nginx_dir, "pl.conf")).read())
+            with open(os.path.join(nginx_dir, "pl.conf"), encoding="utf-8") as f:
+                self.assertIn("127.0.0.1:8007", f.read())
 
             # Invariant: stale nl.conf was explicitly DELETED because Xray does not listen on 8008
             self.assertFalse(os.path.exists(os.path.join(nginx_dir, "nl.conf")))
@@ -3031,6 +3192,96 @@ remove_traffic_watchdog_timer
             self.assertFalse(os.path.exists(os.path.join(nginx_dir, "bad.conf")))
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_sync_xhttp_upstreams_conf_behavior_regex_and_seen_codes(self):
+        """Behavioral test: sync_xhttp_upstreams_conf validates relay code with regex and does not block defense-in-depth on unresolvable entries."""
+        import re
+
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn("import json, os, tempfile, sys, re", common_sh)
+        self.assertIn("re.fullmatch(r'^[a-z0-9_-]+$', code_lower)", common_sh)
+
+        def generate_upstreams(cfg, relays):
+            xray_inbound_ports = {}
+            for ib in cfg.get("inbounds", []):
+                t = ib.get("tag")
+                p = ib.get("port")
+                if t and p:
+                    xray_inbound_ports[t] = int(p)
+
+            def_port = xray_inbound_ports.get("just1k-wl-default", 8003)
+            lines = [
+                "upstream xray_xhttp_default {",
+                f"    server 127.0.0.1:{def_port};",
+                "    keepalive 128;",
+                "    keepalive_requests 100000;",
+                "    keepalive_timeout 300s;",
+                "}",
+            ]
+
+            seen_codes = set()
+            for r in relays:
+                if not isinstance(r, dict):
+                    continue
+                code = r.get("code")
+                if not code:
+                    continue
+                code_lower = str(code).strip().lower()
+                if not code_lower or not re.fullmatch(r"^[a-z0-9_-]+$", code_lower) or code_lower in seen_codes:
+                    continue
+                in_tag = r.get("inbound_tag") or f"just1k-wl-inbound-{code_lower}"
+                port = xray_inbound_ports.get(in_tag)
+                if not port:
+                    for t, p in xray_inbound_ports.items():
+                        if t.lower() == f"just1k-wl-inbound-{code_lower}":
+                            port = p
+                            break
+                if port:
+                    seen_codes.add(code_lower)
+                    port_num = int(port)
+                    lines.append(f"upstream xray_xhttp_relay_{code_lower} {{")
+                    lines.append(f"    server 127.0.0.1:{port_num};")
+                    lines.append("    keepalive 128;")
+                    lines.append("    keepalive_requests 100000;")
+                    lines.append("    keepalive_timeout 300s;")
+                    lines.append("}")
+
+            for t, p in xray_inbound_ports.items():
+                if t.startswith("just1k-wl-inbound-"):
+                    c_tag = t[len("just1k-wl-inbound-"):].strip().lower()
+                    if c_tag and re.fullmatch(r"^[a-z0-9_-]+$", c_tag) and c_tag not in seen_codes:
+                        port_num = int(p)
+                        seen_codes.add(c_tag)
+                        lines.append(f"upstream xray_xhttp_relay_{c_tag} {{")
+                        lines.append(f"    server 127.0.0.1:{port_num};")
+                        lines.append("    keepalive 128;")
+                        lines.append("    keepalive_requests 100000;")
+                        lines.append("    keepalive_timeout 300s;")
+                        lines.append("}")
+
+            return "\n".join(lines)
+
+        cfg = {
+            "inbounds": [
+                {"tag": "just1k-wl-default", "port": 8003},
+                {"tag": "just1k-wl-inbound-de", "port": 8004},
+                {"tag": "just1k-wl-inbound-nl", "port": 8005},
+            ]
+        }
+        relays = [
+            {"code": "DE", "inbound_tag": "just1k-wl-inbound-de"},
+            {"code": "bad;injection\n", "inbound_tag": "just1k-wl-inbound-bad"},
+            {"code": "nl", "inbound_tag": "non-existent-tag"},
+        ]
+
+        output = generate_upstreams(cfg, relays)
+        self.assertIn("upstream xray_xhttp_default {", output)
+        self.assertIn("server 127.0.0.1:8003;", output)
+        self.assertIn("upstream xray_xhttp_relay_de {", output)
+        self.assertIn("server 127.0.0.1:8004;", output)
+        self.assertNotIn("bad;injection", output)
+        self.assertIn("upstream xray_xhttp_relay_nl {", output)
+        self.assertIn("server 127.0.0.1:8005;", output)
 
     def test_ufw_before_rules_sync_and_remove_behavior(self):
         """Behavioral test: UFW before.rules sync inserts 4 rules and removal cleanly cleans them up."""

@@ -338,9 +338,10 @@ inbounds.append({
             'uplinkHTTPMethod': 'GET',
             'uplinkDataPlacement': 'header',
             'uplinkDataKey': 'data',
-            'scMaxEachPostBytes': 4096,
+            'scMaxEachPostBytes': 1000000,
             'scMaxConcurrentPosts': 1,
             'scMinPostsIntervalMs': 30,
+            'serverMaxHeaderBytes': 65536,
             'xPaddingObfsMode': True,
             'xPaddingKey': 'dc',
             'xPaddingHeader': 'X-Cache',
@@ -489,6 +490,10 @@ map \$request_method \$xhttp_proxy_method {
 }
 EOF
 
+    if ! sync_xhttp_upstreams_conf; then
+        error "Не удалось сгенерировать Nginx upstreams для XHTTP!"
+    fi
+
     create_backup "${NGINX_RELAYS_DIR}/default.conf"
     cat > "${NGINX_RELAYS_DIR}/default.conf" <<EOF
     location = ${secret_path} {
@@ -496,7 +501,7 @@ EOF
     }
 
     location ^~ ${secret_path}/default {
-        proxy_pass http://127.0.0.1:8003;
+        proxy_pass http://xray_xhttp_default;
         proxy_method \$xhttp_proxy_method;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -638,6 +643,9 @@ server {
 
     client_max_body_size 0;
     client_body_buffer_size 128k;
+    keepalive_requests 100000;
+    keepalive_timeout 300s;
+    client_header_buffer_size 16k;
     large_client_header_buffers 8 64k;
 
     location = /cdn-check {
@@ -845,7 +853,7 @@ heal_and_update_origin_config() {
     fi
 
     create_backup "$XRAY_CONFIG"
-    manifest_begin
+    manifest_begin "${NGINX_CONF_DIR:-/etc/nginx}/sites-available/just1k-origin.conf" "${NGINX_CONF_DIR:-/etc/nginx}/conf.d/just1k-xhttp-upstreams.conf"
     auto_heal_relays_registry
 
     if ! python3 -c "
@@ -1031,9 +1039,10 @@ if not def_ib:
                 'uplinkHTTPMethod': 'GET',
                 'uplinkDataPlacement': 'header',
                 'uplinkDataKey': 'data',
-                'scMaxEachPostBytes': 4096,
+                'scMaxEachPostBytes': 1000000,
                 'scMaxConcurrentPosts': 1,
                 'scMinPostsIntervalMs': 30,
+                'serverMaxHeaderBytes': 65536,
                 'xPaddingObfsMode': True,
                 'xPaddingKey': 'dc',
                 'xPaddingHeader': 'X-Cache',
@@ -1065,9 +1074,10 @@ for ib in inbounds:
         xs['uplinkHTTPMethod'] = 'GET'
         xs['uplinkDataPlacement'] = 'header'
         xs['uplinkDataKey'] = 'data'
-        xs['scMaxEachPostBytes'] = 4096
+        xs['scMaxEachPostBytes'] = 1000000
         xs['scMaxConcurrentPosts'] = 1
         xs['scMinPostsIntervalMs'] = 30
+        xs['serverMaxHeaderBytes'] = 65536
 
 # 3. DNS: Split-DNS с UseIPv4 и skipFallback для доменов РФ (строго отечественные резолверы)
 cfg['dns'] = {
@@ -1232,6 +1242,10 @@ print('[+] Xray Origin config успешно согласован с этало�
     # Авто-восстановление Nginx location файлов для всех релеев
     if [[ -f "$RELAYS_FILE" ]]; then
         mkdir -p "$NGINX_RELAYS_DIR"
+        if ! sync_xhttp_upstreams_conf; then
+            manifest_rollback
+            error "Не удалось синхронизировать Nginx upstreams для XHTTP! Выполнен откат."
+        fi
         python3 -c "
 import json, sys, os
 rf, nginx_dir, cfg_file = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -1253,6 +1267,20 @@ try:
         except Exception:
             pass
 
+    # Реконсиляция default.conf на keepalive upstream xray_xhttp_default
+    def_cf_path = os.path.join(nginx_dir, 'default.conf')
+    if os.path.exists(def_cf_path):
+        try:
+            with open(def_cf_path, 'r', encoding='utf-8') as df_f:
+                df_cur = df_f.read()
+            if 'proxy_pass http://127.0.0.1:8003;' in df_cur:
+                df_cur = df_cur.replace('proxy_pass http://127.0.0.1:8003;', 'proxy_pass http://xray_xhttp_default;')
+                with open(def_cf_path, 'w', encoding='utf-8') as df_f:
+                    df_f.write(df_cur)
+                print('[+] Согласован Nginx default.conf: переключен на keepalive upstream xray_xhttp_default')
+        except Exception:
+            pass
+
     relays_modified = False
     active_configs = set()
     for r in relays:
@@ -1263,7 +1291,7 @@ try:
 
             code_s = str(code).strip()
             code_lower = code_s.lower()
-            cf_name = f'{code}.conf'
+            cf_name = f'{code_lower}.conf'
             cf_path = os.path.join(nginx_dir, cf_name)
             in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
 
@@ -1303,7 +1331,7 @@ location = {cf_base} {{
 }}
 
 location ^~ {path} {{
-    proxy_pass http://127.0.0.1:{port};
+    proxy_pass http://xray_xhttp_relay_{code_lower};
     proxy_method \$xhttp_proxy_method;
     proxy_http_version 1.1;
     proxy_set_header Connection \"\";
@@ -1334,7 +1362,7 @@ location ^~ {path} {{
                     if (f'location = {cf_base}' in cur_text and
                         'CDN-Cache-Control' in cur_text and
                         'xhttp_proxy_method' in cur_text and
-                        f'proxy_pass http://127.0.0.1:{port};' in cur_text):
+                        f'proxy_pass http://xray_xhttp_relay_{code_lower};' in cur_text):
                         needs_write = False
                 except Exception:
                     needs_write = True
@@ -1378,6 +1406,10 @@ location ^~ {path} {{
 except Exception:
     pass
 " "$RELAYS_FILE" "$NGINX_RELAYS_DIR" "$XRAY_CONFIG" 2>/dev/null || true
+        if ! sync_xhttp_upstreams_conf; then
+            manifest_rollback
+            error "Не удалось синхронизировать Nginx upstreams для XHTTP после согласования релеев! Выполнен откат."
+        fi
     fi
 
     # Авто-восстановление Nginx-проксирования подписок Белого Интернета
@@ -1436,7 +1468,7 @@ except Exception:
         fi
 
         python3 -c "
-import sys, re, os
+import sys, re, os, tempfile
 conf_path = sys.argv[1]
 ssl_rej = (sys.argv[2] == '1')
 domain = sys.argv[3] if len(sys.argv) > 3 else ''
@@ -1515,9 +1547,46 @@ server {{
 
     content = re.sub(r'server\s*\{[^}]*listen\s+8443\s+ssl[^}]*\}\n*', '', content, flags=re.DOTALL)
 
-    with open(conf_path, 'w', encoding='utf-8') as f:
+    if 'keepalive_requests' in content:
+        content = re.sub(r'keepalive_requests\s+\d+;', 'keepalive_requests 100000;', content)
+    else:
+        content = re.sub(
+            r'large_client_header_buffers\s+8\s+64k;',
+            'keepalive_requests 100000;\n    large_client_header_buffers 8 64k;',
+            content
+        )
+
+    if 'keepalive_timeout' in content:
+        content = re.sub(r'keepalive_timeout\s+[^;]+;', 'keepalive_timeout 300s;', content)
+    else:
+        content = re.sub(
+            r'keepalive_requests\s+100000;',
+            'keepalive_requests 100000;\n    keepalive_timeout 300s;',
+            content
+        )
+
+    if 'client_header_buffer_size' in content:
+        content = re.sub(r'client_header_buffer_size\s+[^;]+;', 'client_header_buffer_size 16k;', content)
+    else:
+        content = re.sub(
+            r'large_client_header_buffers\s+8\s+64k;',
+            'client_header_buffer_size 16k;\n    large_client_header_buffers 8 64k;',
+            content
+        )
+
+    d = os.path.dirname(os.path.abspath(conf_path))
+    os.makedirs(d, exist_ok=True)
+    t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+    with os.fdopen(t_fd, 'w', encoding='utf-8') as f:
         f.write(content)
-    print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found, Catch-All защищен')
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(t_path, conf_path)
+    try:
+        os.chmod(conf_path, 0o644)
+    except Exception:
+        pass
+    print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found, Catch-All и keepalive защищены')
 except Exception:
     pass
 " "$origin_vhost" "$ssl_reject_supported" "$heal_origin_domain" "$heal_dummy_dir" 2>/dev/null || true
@@ -1542,7 +1611,10 @@ except Exception:
         error "Ошибка валидации Nginx после оптимизации! Выполнен полный откат."
     fi
 
-    nginx -t && systemctl reload nginx
+    if ! systemctl reload nginx; then
+        manifest_rollback
+        error "Не удалось перезагрузить Nginx после оптимизации! Выполнен откат."
+    fi
     set +e
     systemctl restart xray
     local xray_rc=$?
@@ -1554,7 +1626,7 @@ except Exception:
     fi
 
     # systemd автоматически перезапускает xray-api благодаря PartOf=xray.service
-    ensure_xray_api_healthy
+    ensure_xray_api_healthy || warn "Служба xray-api не ответила вовремя. Проверьте её статус вручную через 'systemctl status xray-api'."
 
     manifest_commit
     log "Оптимизация и восстановление конфигурации Origin завершены успешно!"

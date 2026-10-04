@@ -712,6 +712,8 @@ large_client_header_buffers 8 64k;
    upstream xray_xhttp_backend {
        server 127.0.0.1:8003;
        keepalive 128;
+       keepalive_requests 100000;
+       keepalive_timeout 300s;
    }
    ```
    В блоке `location`:
@@ -2681,6 +2683,8 @@ curl -fsSL https://cheburcheck.ru/install-probe.sh | sudo sh
 | **Утечка реального IP Origin через CT-логи** | Для поддомена Origin (`rnd.domain.com`) выпущен публичный Let's Encrypt, попавший в базы Certificate Transparency (`crt.sh`) | Использовать Wildcard-сертификат `*.domain.com` либо самоподписанный SSL на Origin (`self-signed`) с включенной опцией «Игнорировать сертификат источника» в панели Yandex Cloud CDN |
 | **Скрытый сбой Nginx / certbot (Гомоглифы)** | При настройке домена или пути случайно набраны визуально неотличимые кириллические буквы (`с`, `а`, `о`, `р`, `е`, `х`) | Проверить строку через IDNA/punycode или скрипт поиска не-латинских символов (`ord(ch) > 127`), перенабрать строку строго в английской раскладке |
 | **Массовые TIME_WAIT и `Cannot assign requested address`** | Нарезка Bodiless GET генерирует поток HTTP/1.1 запросов без повторного использования локальных сокетов | Настроить в Nginx пул соединений: `upstream xray_xhttp_backend { server 127.0.0.1:8003; keepalive 128; }` и `proxy_set_header Connection "";` |
+| **Обрыв и зависание Upload после ~4 МБ переданного файла** | Nginx по умолчанию закрывает HTTP/2 соединение после 1000 запросов (`keepalive_requests 1000;`) | Задать в блоке `server 443`: `keepalive_requests 100000;`, `keepalive_timeout 300s;`, `client_header_buffer_size 16k;` |
+| **HTTP 413 на Origin при передаче чанков клиентом** | На сервере Origin в Xray инбаунде задан жесткий лимит `scMaxEachPostBytes: 4096` | На сервере Origin задать универсальный лимит: `'scMaxEachPostBytes': 1000000` (1 МБ) и `'serverMaxHeaderBytes': 65536`. Клиентские чанки могут безопасно масштабироваться до 16 КБ без риска 413 |
 
 ### 9.1. Послойная изоляция сбоев: CDN vs Nginx vs Xray и специфика таймаутов (5-секундный лимит YC)
 
@@ -2759,7 +2763,8 @@ curl -fsSL https://cheburcheck.ru/install-probe.sh | sudo sh
    - [VPN Configs for Russia Repository](https://github.com/igareck/vpn-configs-for-russia)
    - [runetfreedom/per-app-split-bypass-poc: PoC утечки локальных портов через 127.0.0.1](https://github.com/runetfreedom/per-app-split-bypass-poc)
    - [cherepavel/VPN-Detector: Библиотека обнаружения VPN в Android-приложениях](https://github.com/cherepavel/VPN-Detector)
-   - [CraftStick/node-installer-cdn: Автоматизированный скрипт развертывания VPN-нод за Yandex Cloud CDN с Remnawave 3.x и Nginx (версия v2.0; поддержка 3x-ui, VK Cloud, Beeline и Timeweb прекращена из-за несовместимости с XHTTP)](https://github.com/CraftStick/node-installer-cdn)
+   - [CraftStick/node-installer-cdn: Автоматизированный скрипт развертывания VPN-нод за Yandex Cloud CDN с Remnawave 3.x, Nginx keepalive upstreams и sysctl tuning](https://github.com/CraftStick/node-installer-cdn)
+   - [RustForNew/cdn-xhttp-setup: Автоматизированный скрипт развертывания VLESS XHTTP за CDN с профилем Bodiless GET, serverMaxHeaderBytes 65536 и keepalive_requests 100000](https://github.com/RustForNew/cdn-xhttp-setup)
    - [zxcstas/yandex-cdn-mobile-only: Nginx geo-фильтр для ограничения доступа к CDN только с мобильных операторов РФ (LTE/5G) по базе RIPEstat API для экономии квот](https://github.com/zxcstas/yandex-cdn-mobile-only)
    - [catoo-hub/yandex-cdn-controller: Контроллер автоматической ротации CDN-ресурсов Yandex Cloud, автовыпуска Let's Encrypt через Certificate Manager, переключения CNAME в Cloudflare и обновления хостов в Remnawave](https://github.com/catoo-hub/yandex-cdn-controller)
    - [frank-underwood64/whitelists_bypass: Аналитика архитектуры VLESS XHTTP через CDN РФ, сравнительный анализ рисков покупки «белых IP» против CDN-фронтинга и послойная диагностика 502/504](https://github.com/frank-underwood64/whitelists_bypass)

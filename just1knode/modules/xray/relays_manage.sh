@@ -114,7 +114,7 @@ if relays is not None:
 
     if echo "$heal_out" | grep -q "HEALED"; then
         echo -e "${GREEN}✔${NC} ${heal_out//HEALED/}"
-        ensure_xray_api_healthy
+        ensure_xray_api_healthy || true
     fi
 }
 
@@ -160,6 +160,7 @@ add_relay_node() {
     local port="${3:-10443}"
     local uuid="${4:-}"
     local code="${5:-de}"
+    code="$(echo "$code" | tr '[:upper:]' '[:lower:]')"
     local arg6="${6:-}"
     local arg7="${7:-}"
     local arg8="${8:-}"
@@ -246,8 +247,8 @@ add_relay_node() {
     fi
 
     # Санитизация кода страны во избежание path traversal
-    if [[ ! "$code" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-        error "Недопустимый код страны: $code (разрешены только буквы, цифры, дефис и подчеркивание)."
+    if [[ ! "$code" =~ ^[a-z0-9_-]+$ ]]; then
+        error "Недопустимый код страны: $code (разрешены только строчные буквы, цифры, дефис и подчеркивание)."
     fi
 
     local secret_path
@@ -261,12 +262,12 @@ add_relay_node() {
     existing_relay_info=$(python3 -c "
 import json, os, sys
 rf = sys.argv[1]
-code = sys.argv[2]
+code = sys.argv[2].strip().lower()
 if os.path.exists(rf):
     try:
-        with open(rf) as f:
+        with open(rf, encoding='utf-8') as f:
             for r in json.load(f):
-                if r.get('code') == code:
+                if str(r.get('code', '')).strip().lower() == code:
                     print(f\"{r.get('name')}|{r.get('ip')}\")
                     sys.exit(0)
     except Exception:
@@ -330,9 +331,11 @@ r_sni = sys.argv[13]
 with open(cfg_file, 'r', encoding='utf-8') as f:
     cfg = json.load(f)
 
-# Удаляем старые записи этого релея, если были
-cfg['inbounds'] = [ib for ib in cfg.get('inbounds', []) if ib.get('tag') != in_tag]
-cfg['outbounds'] = [ob for ob in cfg.get('outbounds', []) if ob.get('tag') != out_tag]
+# Удаляем старые записи этого релея, если были (с защитой от любого регистра)
+target_tags = {in_tag.lower(), f'just1k-wl-{code}'.lower(), f'inbound-{code}'.lower()}
+target_out_tags = {out_tag.lower(), f'just1k-wl-out-{code}'.lower(), f'outbound-{code}'.lower()}
+cfg['inbounds'] = [ib for ib in cfg.get('inbounds', []) if str(ib.get('tag', '')).strip().lower() not in target_tags]
+cfg['outbounds'] = [ob for ob in cfg.get('outbounds', []) if str(ob.get('tag', '')).strip().lower() not in target_out_tags]
 
 # 1. Добавляем локальный inbound для этого релея
 new_ib = {
@@ -349,9 +352,10 @@ new_ib = {
             'uplinkHTTPMethod': 'GET',
             'uplinkDataPlacement': 'header',
             'uplinkDataKey': 'data',
-            'scMaxEachPostBytes': 4096,
+            'scMaxEachPostBytes': 1000000,
             'scMaxConcurrentPosts': 1,
             'scMinPostsIntervalMs': 30,
+            'serverMaxHeaderBytes': 65536,
             'xPaddingObfsMode': True,
             'xPaddingKey': 'dc',
             'xPaddingHeader': 'X-Cache',
@@ -405,22 +409,23 @@ cfg['outbounds'].append(new_ob)
 
 # 3. Добавляем inbound этого релея в правила прямого выхода в Рунет (just1k-wl-direct)
 rules = cfg.setdefault('routing', {}).setdefault('rules', [])
-rules = [r for r in rules if r.get('outboundTag') != out_tag]
+rules = [r for r in rules if str(r.get('outboundTag', '')).strip().lower() not in target_out_tags]
 
 for r in rules:
     if r.get('outboundTag') == 'just1k-wl-direct':
         # Relay inbounds MUST ONLY be in domain-based direct rules (ru_domains), NEVER in ip-based rules!
         if 'domain' in r:
             existing_ib = r.get('inboundTag', [])
-            if isinstance(existing_ib, list) and in_tag not in existing_ib:
+            if isinstance(existing_ib, list):
+                existing_ib = [t for t in existing_ib if str(t).strip().lower() not in target_tags]
                 r['inboundTag'] = existing_ib + [in_tag]
             if 'domain:2ip.ru' not in r['domain']:
                 r['domain'].append('domain:2ip.ru')
         elif 'ip' in r:
             # Exclude relay inbounds from geoip:ru to prevent Origin from resolving foreign domains
             existing_ib = r.get('inboundTag', [])
-            if isinstance(existing_ib, list) and in_tag in existing_ib:
-                r['inboundTag'] = [t for t in existing_ib if t != in_tag]
+            if isinstance(existing_ib, list):
+                r['inboundTag'] = [t for t in existing_ib if str(t).strip().lower() not in target_tags]
 
 # Запрет BitTorrent (P2P трафик)
 if not any(r.get('protocol') == ['bittorrent'] for r in rules):
@@ -510,47 +515,7 @@ except Exception:
     fi
     ensure_xray_config_permissions "$XRAY_CONFIG"
 
-    # Генерация Nginx Location для этого релея
-    mkdir -p "$NGINX_RELAYS_DIR"
-    local nginx_relay_conf="${NGINX_RELAYS_DIR}/${code}.conf"
-    local relay_base_path="${relay_inbound_path%/}"
-    cat > "$nginx_relay_conf" <<EOF
-# Relay location for ${name} (${code})
-location = ${relay_base_path} {
-    return 404;
-}
-
-location ^~ ${relay_inbound_path} {
-    proxy_pass http://127.0.0.1:${next_port};
-    proxy_method \$xhttp_proxy_method;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    proxy_pass_request_headers on;
-    proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
-    client_max_body_size 0;
-    proxy_buffering off;
-    proxy_request_buffering off;
-    proxy_max_temp_file_size 0;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    add_header Cache-Control "no-store, no-cache" always;
-    add_header CDN-Cache-Control "no-store" always;
-    add_header Pragma "no-cache" always;
-    add_header Expires "0" always;
-    add_header X-Accel-Buffering no always;
-    add_header Accept-Ranges none always;
-}
-EOF
-
-    # Валидация Nginx и Xray
-    if ! nginx -t; then
-        manifest_rollback
-        error "Ошибка конфигурации Nginx при добавлении релея $name ($code). Изменения полностью отменены."
-    fi
-
+    # Валидация конфигурации Xray
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
         manifest_rollback
         error "Ошибка тестирования Xray при добавлении релея $name ($code). Изменения полностью отменены."
@@ -569,7 +534,7 @@ def safe_arg(val):
         return val
 
 rf = sys.argv[1]
-code = safe_arg(sys.argv[2]).strip()
+code = safe_arg(sys.argv[2]).strip().lower()
 name = safe_arg(sys.argv[3]).strip()
 ip = sys.argv[4]
 port = int(sys.argv[5])
@@ -591,7 +556,7 @@ if os.path.exists(rf):
     except Exception:
         relays = []
 
-relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
+relays = [r for r in relays if isinstance(r, dict) and str(r.get('code', '')).strip().lower() != code]
 new_entry = {
     'name': name,
     'code': code,
@@ -625,7 +590,59 @@ except Exception:
     pass
 " "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$next_port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni" "$badge"
 
-    nginx -t && systemctl reload nginx
+    # Синхронизация пулов Nginx upstreams (теперь relays.json содержит новый релей)
+    if ! sync_xhttp_upstreams_conf; then
+        manifest_rollback
+        error "Ошибка генерации upstream-конфигурации Nginx при добавлении релея $name ($code). Изменения полностью отменены."
+    fi
+
+    # Генерация Nginx Location для этого релея
+    mkdir -p "$NGINX_RELAYS_DIR"
+    find "$NGINX_RELAYS_DIR" -maxdepth 1 -type f -iname "${code}.conf" ! -name "${code}.conf" -delete 2>/dev/null || true
+    local nginx_relay_conf="${NGINX_RELAYS_DIR}/${code}.conf"
+    local relay_base_path="${relay_inbound_path%/}"
+    cat > "$nginx_relay_conf" <<EOF
+# Relay location for ${name} (${code})
+location = ${relay_base_path} {
+    return 404;
+}
+
+location ^~ ${relay_inbound_path} {
+    proxy_pass http://xray_xhttp_relay_${code};
+    proxy_method \$xhttp_proxy_method;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_pass_request_headers on;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    client_max_body_size 0;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_max_temp_file_size 0;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    add_header Cache-Control "no-store, no-cache" always;
+    add_header CDN-Cache-Control "no-store" always;
+    add_header Pragma "no-cache" always;
+    add_header Expires "0" always;
+    add_header X-Accel-Buffering no always;
+    add_header Accept-Ranges none always;
+}
+EOF
+
+    # Валидация Nginx
+    if ! nginx -t; then
+        manifest_rollback
+        error "Ошибка конфигурации Nginx при добавлении релея $name ($code). Изменения полностью отменены."
+    fi
+
+    if ! systemctl reload nginx; then
+        manifest_rollback
+        error "Не удалось перезагрузить Nginx после добавления релея $name ($code). Выполнен откат."
+    fi
+
     set +e
     systemctl restart xray
     local xray_rc=$?
@@ -634,7 +651,7 @@ except Exception:
         manifest_rollback
         error "Xray не запустился после добавления релея $name ($code). Выполнен полный откат."
     fi
-    ensure_xray_api_healthy
+    ensure_xray_api_healthy || warn "Служба xray-api не ответила вовремя. Проверьте её статус вручную через 'systemctl status xray-api'."
     manifest_commit
 
     log "Relay '${name}' (код: ${code}) успешно добавлен и подключен к шлюзу Origin!"
@@ -661,12 +678,13 @@ target = '$target'.lower()
 code = ''
 if os.path.exists(rf):
     try:
-        with open(rf) as f:
+        with open(rf, encoding='utf-8') as f:
             for r in json.load(f):
-                if r.get('code', '').lower() == target or r.get('name', '').lower() == target:
-                    code = r.get('code')
+                if str(r.get('code', '')).lower() == target or str(r.get('name', '')).lower() == target:
+                    code = str(r.get('code', '')).strip().lower()
                     break
-    except: pass
+    except Exception:
+        pass
 print(code)
 ")
 
@@ -691,17 +709,20 @@ out_tag = '$out_tag'
 rf = '$RELAYS_FILE'
 
 with open(cfg_file) as f: cfg = json.load(f)
-cfg['inbounds'] = [ib for ib in cfg.get('inbounds', []) if ib.get('tag') not in (in_tag, f'just1k-wl-{code}', f'inbound-{code}')]
-cfg['outbounds'] = [ob for ob in cfg.get('outbounds', []) if ob.get('tag') not in (out_tag, f'just1k-wl-out-{code}', f'outbound-{code}')]
+target_tags = {in_tag.lower(), f'just1k-wl-{code}'.lower(), f'inbound-{code}'.lower()}
+target_out_tags = {out_tag.lower(), f'just1k-wl-out-{code}'.lower(), f'outbound-{code}'.lower()}
+
+cfg['inbounds'] = [ib for ib in cfg.get('inbounds', []) if str(ib.get('tag', '')).strip().lower() not in target_tags]
+cfg['outbounds'] = [ob for ob in cfg.get('outbounds', []) if str(ob.get('tag', '')).strip().lower() not in target_out_tags]
 
 # Очищаем тег из правил маршрутизации
 if 'routing' in cfg and 'rules' in cfg['routing']:
-    cfg['routing']['rules'] = [r for r in cfg['routing']['rules'] if r.get('outboundTag') not in (out_tag, f'just1k-wl-out-{code}', f'outbound-{code}')]
+    cfg['routing']['rules'] = [r for r in cfg['routing']['rules'] if str(r.get('outboundTag', '')).strip().lower() not in target_out_tags]
     for r in cfg['routing']['rules']:
         if r.get('outboundTag') == 'just1k-wl-direct':
             existing_ib = r.get('inboundTag', [])
-            if isinstance(existing_ib, list) and in_tag in existing_ib:
-                r['inboundTag'] = [t for t in existing_ib if t != in_tag]
+            if isinstance(existing_ib, list):
+                r['inboundTag'] = [t for t in existing_ib if str(t).strip().lower() not in target_tags]
 
 # Default inbound traffic for Russia always routes directly via Moscow IP
 default_rule_found = False
@@ -723,8 +744,11 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
 "
     ensure_xray_config_permissions "$XRAY_CONFIG"
 
-    # Удаление Nginx конфига
+    # Удаление Nginx конфига (с поддержкой любого регистра: de.conf, DE.conf)
     rm -f "${NGINX_RELAYS_DIR}/${code}.conf"
+    if [[ -d "$NGINX_RELAYS_DIR" ]]; then
+        find "$NGINX_RELAYS_DIR" -maxdepth 1 -type f -iname "${code}.conf" -delete 2>/dev/null || true
+    fi
 
     # Удаление из relays.json (Durable-by-Default: атомарная запись через tempfile)
     python3 -c "
@@ -739,7 +763,7 @@ def safe_arg(val):
         return val
 
 rf = sys.argv[1]
-code = safe_arg(sys.argv[2]).strip()
+code = safe_arg(sys.argv[2]).strip().lower()
 relays = []
 if os.path.exists(rf):
     try:
@@ -749,7 +773,7 @@ if os.path.exists(rf):
                 relays = data
     except Exception:
         relays = []
-relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
+relays = [r for r in relays if isinstance(r, dict) and str(r.get('code', '')).strip().lower() != code]
 d = os.path.dirname(os.path.abspath(rf))
 os.makedirs(d, exist_ok=True)
 t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
@@ -766,6 +790,11 @@ except Exception:
     pass
 " "$RELAYS_FILE" "$code"
 
+    if ! sync_xhttp_upstreams_conf; then
+        manifest_rollback
+        error "Ошибка генерации upstream-конфигурации Nginx при удалении релея $target. Изменения полностью отменены."
+    fi
+
     if ! nginx -t; then
         manifest_rollback
         error "Ошибка валидации Nginx при удалении релея $target. Изменения полностью отменены."
@@ -776,7 +805,11 @@ except Exception:
         error "Ошибка тестирования Xray при удалении релея $target. Изменения полностью отменены."
     fi
 
-    nginx -t && systemctl reload nginx
+    if ! systemctl reload nginx; then
+        manifest_rollback
+        error "Не удалось перезагрузить Nginx при удалении релея $target. Выполнен откат."
+    fi
+
     set +e
     systemctl restart xray
     local xray_rc=$?
@@ -785,7 +818,7 @@ except Exception:
         manifest_rollback
         error "Xray не запустился после удаления релея $target. Выполнен полный откат."
     fi
-    ensure_xray_api_healthy
+    ensure_xray_api_healthy || warn "Служба xray-api не ответила вовремя. Проверьте её статус вручную через 'systemctl status xray-api'."
     manifest_commit
 
     log "Relay '${target}' (код: ${code}) успешно удален."
@@ -1167,7 +1200,7 @@ print(f'OK:{matched_code}')
         return 1
     fi
 
-    ensure_xray_api_healthy
+    ensure_xray_api_healthy || warn "Служба xray-api не ответила вовремя. Проверьте её статус вручную через 'systemctl status xray-api'."
 
     manifest_commit
     log "✔ Relay '$matched_code' успешно переключен на домен '$new_sni' (режим: $new_sec)!"

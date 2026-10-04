@@ -319,6 +319,12 @@ net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 net.ipv4.icmp_echo_ignore_all = 1
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 15
+net.core.somaxconn = 65535
+net.ipv4.ip_local_port_range = 32768 65535
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
 EOF
     chmod 644 "$conf_path" 2>/dev/null || true
 
@@ -331,11 +337,19 @@ EOF
     fi
 
     if command -v sysctl >/dev/null 2>&1; then
+        modprobe tcp_bbr 2>/dev/null || true
+        modprobe sch_fq 2>/dev/null || true
         sysctl -p "$conf_path" >/dev/null 2>&1 || true
         sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
         sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
         sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1 || true
         sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null 2>&1 || true
+        sysctl -w net.ipv4.tcp_tw_reuse=1 >/dev/null 2>&1 || true
+        sysctl -w net.ipv4.tcp_fin_timeout=15 >/dev/null 2>&1 || true
+        sysctl -w net.core.somaxconn=65535 >/dev/null 2>&1 || true
+        sysctl -w net.ipv4.ip_local_port_range="32768 65535" >/dev/null 2>&1 || true
+        sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1 || true
+        sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
     fi
     local ipv6_curr
     ipv6_curr="$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")"
@@ -346,6 +360,11 @@ EOF
     icmp_curr="$(cat /proc/sys/net/ipv4/icmp_echo_ignore_all 2>/dev/null || echo "0")"
     if [[ "$icmp_curr" != "1" ]]; then
         warn "Параметр net.ipv4.icmp_echo_ignore_all не применился в ядре ноды (проверьте права или ограничения контейнера)."
+    fi
+    local bbr_curr
+    bbr_curr="$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || echo "")"
+    if [[ -n "$bbr_curr" && "$bbr_curr" != "bbr" ]]; then
+        warn "Контроль перегрузки BBR не активирован в ядре (текущий: $bbr_curr). Проверьте поддержку BBR хостинг-провайдером."
     fi
 }
 
@@ -524,6 +543,134 @@ heal_node_firewall_and_stealth() {
             fi
         fi
     fi
+}
+
+sync_xhttp_upstreams_conf() {
+    local conf_d="${NGINX_CONF_DIR:-/etc/nginx}/conf.d"
+    local upstreams_file="${conf_d}/just1k-xhttp-upstreams.conf"
+    local cfg_file="${XRAY_CONFIG:-/usr/local/etc/xray/config.json}"
+    local relays_file="${RELAYS_FILE:-${STATE_DIR:-/etc/just1knode}/relays.json}"
+
+    mkdir -p "$conf_d" 2>/dev/null || true
+    manifest_track_file "$upstreams_file" 2>/dev/null || true
+    create_backup "$upstreams_file" 2>/dev/null || true
+
+    if ! python3 -c "
+import json, os, tempfile, sys, re
+
+upstreams_file = sys.argv[1]
+cfg_file = sys.argv[2]
+relays_file = sys.argv[3]
+
+xray_inbound_ports = {}
+if os.path.exists(cfg_file):
+    try:
+        with open(cfg_file, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+            for ib in cfg.get('inbounds', []):
+                t = ib.get('tag')
+                p = ib.get('port')
+                if t and p:
+                    xray_inbound_ports[t] = int(p)
+    except Exception as e:
+        sys.stderr.write('Error parsing Xray config: ' + str(e) + '\\n')
+        sys.exit(1)
+
+relays = []
+if os.path.exists(relays_file):
+    try:
+        with open(relays_file, 'r', encoding='utf-8') as f:
+            relays = json.load(f)
+            if not isinstance(relays, list):
+                relays = []
+    except Exception:
+        relays = []
+
+def_port = xray_inbound_ports.get('just1k-wl-default', 8003)
+lines = [
+    '# =============================================================================',
+    '# Persistent Keepalive Upstream Pools for Xray XHTTP (Zero TIME_WAIT)',
+    '# =============================================================================',
+    'upstream xray_xhttp_default {',
+    f'    server 127.0.0.1:{def_port};',
+    '    keepalive 128;',
+    '    keepalive_requests 100000;',
+    '    keepalive_timeout 300s;',
+    '}',
+    ''
+]
+
+seen_codes = set()
+for r in relays:
+    if not isinstance(r, dict):
+        continue
+    code = r.get('code')
+    if not code:
+        continue
+    code_lower = str(code).strip().lower()
+    if not code_lower or not re.fullmatch(r'^[a-z0-9_-]+$', code_lower) or code_lower in seen_codes:
+        continue
+    in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
+    port = xray_inbound_ports.get(in_tag)
+    if not port:
+        for t, p in xray_inbound_ports.items():
+            if t.lower() == f'just1k-wl-inbound-{code_lower}':
+                port = p
+                break
+    # Источник истины — секция inbounds в config.json (Desired-State).
+    # Релеи, отсутствующие в Xray, не получают upstream (защита от устаревших записей в relays.json).
+    if not port and not os.path.exists(cfg_file):
+        port = r.get('inbound_port')
+    if port:
+        seen_codes.add(code_lower)
+        try:
+            port_num = int(port)
+            lines.append(f'upstream xray_xhttp_relay_{code_lower} {{')
+            lines.append(f'    server 127.0.0.1:{port_num};')
+            lines.append('    keepalive 128;')
+            lines.append('    keepalive_requests 100000;')
+            lines.append('    keepalive_timeout 300s;')
+            lines.append('}')
+            lines.append('')
+        except Exception:
+            continue
+
+# Защита в глубину: если релеи есть в Xray inbounds, но relays.json временно пуст
+for t, p in xray_inbound_ports.items():
+    if t.startswith('just1k-wl-inbound-'):
+        c_tag = t[len('just1k-wl-inbound-'):].strip().lower()
+        if c_tag and re.fullmatch(r'^[a-z0-9_-]+$', c_tag) and c_tag not in seen_codes:
+            try:
+                port_num = int(p)
+                seen_codes.add(c_tag)
+                lines.append(f'upstream xray_xhttp_relay_{c_tag} {{')
+                lines.append(f'    server 127.0.0.1:{port_num};')
+                lines.append('    keepalive 128;')
+                lines.append('    keepalive_requests 100000;')
+                lines.append('    keepalive_timeout 300s;')
+                lines.append('}')
+                lines.append('')
+            except Exception:
+                continue
+
+content = '\\n'.join(lines) + '\\n'
+d = os.path.dirname(os.path.abspath(upstreams_file))
+os.makedirs(d, exist_ok=True)
+t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+with os.fdopen(t_fd, 'w', encoding='utf-8') as f:
+    f.write(content)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(t_path, upstreams_file)
+try:
+    os.chmod(upstreams_file, 0o644)
+except Exception:
+    pass
+" "$upstreams_file" "$cfg_file" "$relays_file"; then
+        warn "Не удалось сгенерировать Nginx upstreams для XHTTP ($upstreams_file)"
+        return 1
+    fi
+    return 0
 }
 
 
