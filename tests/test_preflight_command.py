@@ -43,6 +43,8 @@ DROPPED_TABLES = (
     "entitlement_entries",
     "payment_disputes",
     "provider_refund_operations",
+    "tariff_quotes",
+    "tariff_versions",
 )
 
 _DROPPED_LIST = ",".join(f"'{name}'" for name in DROPPED_TABLES)
@@ -141,8 +143,6 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
 )
 
 VALID_POSTFLIGHT_HEADS = (
-    "0032_drop_banking_residue",
-    "0033_wi_order_checkout",
     "0034_drop_tariff_quotes",
 )
 _HEADS_LIST = ",".join(f"'{h}'" for h in VALID_POSTFLIGHT_HEADS)

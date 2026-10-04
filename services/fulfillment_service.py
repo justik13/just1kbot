@@ -60,7 +60,23 @@ class FulfillmentService:
             )
 
             sub = await get_subscription_by_user_id(session, user.id)
-            if (order.traffic_bytes or 0) > 0 and (order.duration_days or 0) == 0:
+            meta_op = (order.metadata_ or {}).get("operation")
+            if meta_op == "add_device_slot" or (
+                order.device_limit
+                and not (order.traffic_bytes or 0)
+                and (order.duration_days or 0) == 0
+            ):
+                ok, msg, _ = await WhiteInternetService.purchase_device_slot(
+                    session,
+                    user.id,
+                    actor_telegram_id=user.telegram_id,
+                    debit_balance=False,
+                )
+                if not ok:
+                    raise RuntimeError(f"White Internet device slot purchase failed: {msg}")
+            elif meta_op == "topup" or (
+                (order.traffic_bytes or 0) > 0 and (order.duration_days or 0) == 0
+            ):
                 pack_gb = max(1, order.traffic_bytes // (1024**3))
                 ok, msg, _ = await WhiteInternetService.topup_quota(
                     session,
@@ -71,15 +87,6 @@ class FulfillmentService:
                 )
                 if not ok:
                     raise RuntimeError(f"White Internet quota topup failed: {msg}")
-            elif order.device_limit and (order.duration_days or 0) == 0:
-                ok, msg, _ = await WhiteInternetService.purchase_device_slot(
-                    session,
-                    user.id,
-                    actor_telegram_id=user.telegram_id,
-                    debit_balance=False,
-                )
-                if not ok:
-                    raise RuntimeError(f"White Internet device slot purchase failed: {msg}")
             else:
                 if sub and sub.status in ("ACTIVE", "EXPIRED", "EXHAUSTED"):
                     ok, msg, _ = await WhiteInternetService.renew_subscription(
