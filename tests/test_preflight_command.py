@@ -31,7 +31,12 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 DB = os.getenv("TEST_DATABASE_URL")
 
-EXPECTED_BASE = "0031_awg_persistent_traffic"
+VALID_PREFLIGHT_BASES = (
+    "0031_awg_persistent_traffic",
+    "0032_drop_banking_residue",
+)
+_BASES_LIST = ",".join(f"'{b}'" for b in VALID_PREFLIGHT_BASES)
+EXPECTED_BASE = "0032_drop_banking_residue"
 EXPECTED_HEAD = "0034_drop_tariff_quotes"
 
 DROPPED_TABLES = (
@@ -49,13 +54,13 @@ DROPPED_TABLES = (
 
 _DROPPED_LIST = ",".join(f"'{name}'" for name in DROPPED_TABLES)
 
-# Pre-flight statements: run BEFORE applying migration 0032 against the baseline database.
+# Pre-flight statements: run BEFORE applying migrations 0033/0034 against the baseline database.
 # Verifies expected baseline revision, invariant constraints on kept tables, and zero in-flight operations.
 PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
     (
         "1_MIGRATION_BASE",
-        "SELECT '1_MIGRATION_BASE' AS block, CASE WHEN (SELECT version_num FROM alembic_version) = "
-        f"'{EXPECTED_BASE}' THEN 'OK' ELSE 'FAIL: MISMATCH have=' || "
+        "SELECT '1_MIGRATION_BASE' AS block, CASE WHEN (SELECT version_num FROM alembic_version) IN "
+        f"({_BASES_LIST}) THEN 'OK' ELSE 'FAIL: MISMATCH have=' || "
         "(SELECT version_num FROM alembic_version) END AS verdict",
     ),
     (

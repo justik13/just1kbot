@@ -1029,7 +1029,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             service_type="white_internet",
             device_limit=3,
             duration_days=0,
-            amount_rub=Decimal("150.00"),
+            amount_rub=Decimal("200.00"),
             status="paid",
         )
         with patch(
@@ -1059,7 +1059,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             device_limit=3,
             duration_days=0,
             traffic_bytes=50 * 1024**3,
-            amount_rub=Decimal("150.00"),
+            amount_rub=Decimal("200.00"),
             status="paid",
             metadata_={"operation": "add_device_slot"},
         )
