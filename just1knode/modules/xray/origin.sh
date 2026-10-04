@@ -338,9 +338,10 @@ inbounds.append({
             'uplinkHTTPMethod': 'GET',
             'uplinkDataPlacement': 'header',
             'uplinkDataKey': 'data',
-            'scMaxEachPostBytes': 4096,
+            'scMaxEachPostBytes': 1000000,
             'scMaxConcurrentPosts': 1,
             'scMinPostsIntervalMs': 30,
+            'serverMaxHeaderBytes': 65536,
             'xPaddingObfsMode': True,
             'xPaddingKey': 'dc',
             'xPaddingHeader': 'X-Cache',
@@ -489,6 +490,8 @@ map \$request_method \$xhttp_proxy_method {
 }
 EOF
 
+    sync_xhttp_upstreams_conf
+
     create_backup "${NGINX_RELAYS_DIR}/default.conf"
     cat > "${NGINX_RELAYS_DIR}/default.conf" <<EOF
     location = ${secret_path} {
@@ -496,7 +499,7 @@ EOF
     }
 
     location ^~ ${secret_path}/default {
-        proxy_pass http://127.0.0.1:8003;
+        proxy_pass http://xray_xhttp_default;
         proxy_method \$xhttp_proxy_method;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -638,6 +641,9 @@ server {
 
     client_max_body_size 0;
     client_body_buffer_size 128k;
+    keepalive_requests 100000;
+    keepalive_timeout 300s;
+    client_header_buffer_size 16k;
     large_client_header_buffers 8 64k;
 
     location = /cdn-check {
@@ -1031,9 +1037,10 @@ if not def_ib:
                 'uplinkHTTPMethod': 'GET',
                 'uplinkDataPlacement': 'header',
                 'uplinkDataKey': 'data',
-                'scMaxEachPostBytes': 4096,
+                'scMaxEachPostBytes': 1000000,
                 'scMaxConcurrentPosts': 1,
                 'scMinPostsIntervalMs': 30,
+                'serverMaxHeaderBytes': 65536,
                 'xPaddingObfsMode': True,
                 'xPaddingKey': 'dc',
                 'xPaddingHeader': 'X-Cache',
@@ -1065,9 +1072,10 @@ for ib in inbounds:
         xs['uplinkHTTPMethod'] = 'GET'
         xs['uplinkDataPlacement'] = 'header'
         xs['uplinkDataKey'] = 'data'
-        xs['scMaxEachPostBytes'] = 4096
+        xs['scMaxEachPostBytes'] = 1000000
         xs['scMaxConcurrentPosts'] = 1
         xs['scMinPostsIntervalMs'] = 30
+        xs['serverMaxHeaderBytes'] = 65536
 
 # 3. DNS: Split-DNS с UseIPv4 и skipFallback для доменов РФ (строго отечественные резолверы)
 cfg['dns'] = {
@@ -1232,6 +1240,7 @@ print('[+] Xray Origin config успешно согласован с этало�
     # Авто-восстановление Nginx location файлов для всех релеев
     if [[ -f "$RELAYS_FILE" ]]; then
         mkdir -p "$NGINX_RELAYS_DIR"
+        sync_xhttp_upstreams_conf
         python3 -c "
 import json, sys, os
 rf, nginx_dir, cfg_file = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -1250,6 +1259,20 @@ try:
                     p = ib.get('port')
                     if t and p:
                         xray_inbound_ports[t] = int(p)
+        except Exception:
+            pass
+
+    # Реконсиляция default.conf на keepalive upstream xray_xhttp_default
+    def_cf_path = os.path.join(nginx_dir, 'default.conf')
+    if os.path.exists(def_cf_path):
+        try:
+            with open(def_cf_path, 'r', encoding='utf-8') as df_f:
+                df_cur = df_f.read()
+            if 'proxy_pass http://127.0.0.1:8003;' in df_cur:
+                df_cur = df_cur.replace('proxy_pass http://127.0.0.1:8003;', 'proxy_pass http://xray_xhttp_default;')
+                with open(def_cf_path, 'w', encoding='utf-8') as df_f:
+                    df_f.write(df_cur)
+                print('[+] Согласован Nginx default.conf: переключен на keepalive upstream xray_xhttp_default')
         except Exception:
             pass
 
@@ -1303,7 +1326,7 @@ location = {cf_base} {{
 }}
 
 location ^~ {path} {{
-    proxy_pass http://127.0.0.1:{port};
+    proxy_pass http://xray_xhttp_relay_{code_lower};
     proxy_method \$xhttp_proxy_method;
     proxy_http_version 1.1;
     proxy_set_header Connection \"\";
@@ -1334,7 +1357,7 @@ location ^~ {path} {{
                     if (f'location = {cf_base}' in cur_text and
                         'CDN-Cache-Control' in cur_text and
                         'xhttp_proxy_method' in cur_text and
-                        f'proxy_pass http://127.0.0.1:{port};' in cur_text):
+                        f'proxy_pass http://xray_xhttp_relay_{code_lower};' in cur_text):
                         needs_write = False
                 except Exception:
                     needs_write = True
@@ -1378,6 +1401,7 @@ location ^~ {path} {{
 except Exception:
     pass
 " "$RELAYS_FILE" "$NGINX_RELAYS_DIR" "$XRAY_CONFIG" 2>/dev/null || true
+        sync_xhttp_upstreams_conf
     fi
 
     # Авто-восстановление Nginx-проксирования подписок Белого Интернета
@@ -1514,6 +1538,19 @@ server {{
         content = re.sub(r'server\s*\{[^}]*listen\s+443\s+ssl\s+default_server[^}]*\}', fix_catchall, content, flags=re.DOTALL)
 
     content = re.sub(r'server\s*\{[^}]*listen\s+8443\s+ssl[^}]*\}\n*', '', content, flags=re.DOTALL)
+
+    if 'keepalive_requests' not in content:
+        content = re.sub(
+            r'large_client_header_buffers\s+8\s+64k;',
+            'keepalive_requests 100000;\n    keepalive_timeout 300s;\n    client_header_buffer_size 16k;\n    large_client_header_buffers 8 64k;',
+            content
+        )
+    elif 'client_header_buffer_size' not in content:
+        content = re.sub(
+            r'large_client_header_buffers\s+8\s+64k;',
+            'client_header_buffer_size 16k;\n    large_client_header_buffers 8 64k;',
+            content
+        )
 
     with open(conf_path, 'w', encoding='utf-8') as f:
         f.write(content)

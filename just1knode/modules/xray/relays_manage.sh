@@ -349,9 +349,10 @@ new_ib = {
             'uplinkHTTPMethod': 'GET',
             'uplinkDataPlacement': 'header',
             'uplinkDataKey': 'data',
-            'scMaxEachPostBytes': 4096,
+            'scMaxEachPostBytes': 1000000,
             'scMaxConcurrentPosts': 1,
             'scMinPostsIntervalMs': 30,
+            'serverMaxHeaderBytes': 65536,
             'xPaddingObfsMode': True,
             'xPaddingKey': 'dc',
             'xPaddingHeader': 'X-Cache',
@@ -514,6 +515,9 @@ except Exception:
     mkdir -p "$NGINX_RELAYS_DIR"
     local nginx_relay_conf="${NGINX_RELAYS_DIR}/${code}.conf"
     local relay_base_path="${relay_inbound_path%/}"
+    local code_lower
+    code_lower="$(echo "$code" | tr '[:upper:]' '[:lower:]')"
+    sync_xhttp_upstreams_conf
     cat > "$nginx_relay_conf" <<EOF
 # Relay location for ${name} (${code})
 location = ${relay_base_path} {
@@ -521,7 +525,7 @@ location = ${relay_base_path} {
 }
 
 location ^~ ${relay_inbound_path} {
-    proxy_pass http://127.0.0.1:${next_port};
+    proxy_pass http://xray_xhttp_relay_${code_lower};
     proxy_method \$xhttp_proxy_method;
     proxy_http_version 1.1;
     proxy_set_header Connection "";
@@ -765,6 +769,8 @@ try:
 except Exception:
     pass
 " "$RELAYS_FILE" "$code"
+
+    sync_xhttp_upstreams_conf
 
     if ! nginx -t; then
         manifest_rollback

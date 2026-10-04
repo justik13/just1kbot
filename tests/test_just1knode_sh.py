@@ -522,6 +522,33 @@ exit 0
         self.assertIn("net.ipv6.conf.default.disable_ipv6 = 1", content)
         self.assertIn("net.ipv6.conf.lo.disable_ipv6 = 1", content)
         self.assertIn("net.ipv4.icmp_echo_ignore_all = 1", content)
+        self.assertIn("net.ipv4.tcp_tw_reuse = 1", content)
+        self.assertIn("net.ipv4.tcp_fin_timeout = 15", content)
+        self.assertIn("net.core.somaxconn = 65535", content)
+        self.assertIn("net.ipv4.ip_local_port_range = 1024 65535", content)
+        self.assertIn("net.core.default_qdisc = fq", content)
+        self.assertIn("net.ipv4.tcp_congestion_control = bbr", content)
+
+    def test_origin_and_relay_xhttp_inbound_limits_and_nginx_keepalive(self):
+        """Verify origin.sh and relays_manage.sh set scMaxEachPostBytes=1000000, serverMaxHeaderBytes=65536, and keepalive_requests=100000."""
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        relays_manage_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relays_manage.sh").read_text(encoding="utf-8")
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+
+        self.assertIn("'scMaxEachPostBytes': 1000000", origin_sh)
+        self.assertIn("'serverMaxHeaderBytes': 65536", origin_sh)
+        self.assertIn("keepalive_requests 100000;", origin_sh)
+        self.assertIn("keepalive_timeout 300s;", origin_sh)
+        self.assertIn("client_header_buffer_size 16k;", origin_sh)
+        self.assertIn("proxy_pass http://xray_xhttp_default;", origin_sh)
+
+        self.assertIn("'scMaxEachPostBytes': 1000000", relays_manage_sh)
+        self.assertIn("'serverMaxHeaderBytes': 65536", relays_manage_sh)
+        self.assertIn("sync_xhttp_upstreams_conf", relays_manage_sh)
+
+        self.assertIn("sync_xhttp_upstreams_conf()", common_sh)
+        self.assertIn("upstream xray_xhttp_default", common_sh)
+        self.assertIn("keepalive 128;", common_sh)
 
     def test_doctor_icmp_stealth_fails_closed_when_dropin_missing(self):
         """Verify doctor ICMP stealth check fails closed if runtime=1 but drop-in is missing."""
