@@ -864,7 +864,7 @@ class WhiteInternetService:
                 duration_days=0,
                 traffic_bytes=pack_bytes,
                 device_limit=_effective_device_limit(sub),
-                operation="purchase",
+                operation="topup",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_TOPUP,
                 gb=pack_gb,
             )
