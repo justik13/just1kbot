@@ -591,10 +591,14 @@ except Exception:
 " "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$next_port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni" "$badge"
 
     # Синхронизация пулов Nginx upstreams (теперь relays.json содержит новый релей)
-    sync_xhttp_upstreams_conf
+    if ! sync_xhttp_upstreams_conf; then
+        manifest_rollback
+        error "Ошибка генерации upstream-конфигурации Nginx при добавлении релея $name ($code). Изменения полностью отменены."
+    fi
 
     # Генерация Nginx Location для этого релея
     mkdir -p "$NGINX_RELAYS_DIR"
+    find "$NGINX_RELAYS_DIR" -maxdepth 1 -type f -iname "${code}.conf" ! -name "${code}.conf" -delete 2>/dev/null || true
     local nginx_relay_conf="${NGINX_RELAYS_DIR}/${code}.conf"
     local relay_base_path="${relay_inbound_path%/}"
     cat > "$nginx_relay_conf" <<EOF
@@ -634,7 +638,11 @@ EOF
         error "Ошибка конфигурации Nginx при добавлении релея $name ($code). Изменения полностью отменены."
     fi
 
-    nginx -t && systemctl reload nginx
+    if ! systemctl reload nginx; then
+        manifest_rollback
+        error "Не удалось перезагрузить Nginx после добавления релея $name ($code). Выполнен откат."
+    fi
+
     set +e
     systemctl restart xray
     local xray_rc=$?
@@ -643,7 +651,7 @@ EOF
         manifest_rollback
         error "Xray не запустился после добавления релея $name ($code). Выполнен полный откат."
     fi
-    ensure_xray_api_healthy
+    ensure_xray_api_healthy || warn "Служба xray-api не ответила вовремя. Проверьте её статус вручную через 'systemctl status xray-api'."
     manifest_commit
 
     log "Relay '${name}' (код: ${code}) успешно добавлен и подключен к шлюзу Origin!"
@@ -736,8 +744,11 @@ with open(cfg_file, 'w', encoding='utf-8') as f:
 "
     ensure_xray_config_permissions "$XRAY_CONFIG"
 
-    # Удаление Nginx конфига
+    # Удаление Nginx конфига (с поддержкой любого регистра: de.conf, DE.conf)
     rm -f "${NGINX_RELAYS_DIR}/${code}.conf"
+    if [[ -d "$NGINX_RELAYS_DIR" ]]; then
+        find "$NGINX_RELAYS_DIR" -maxdepth 1 -type f -iname "${code}.conf" -delete 2>/dev/null || true
+    fi
 
     # Удаление из relays.json (Durable-by-Default: атомарная запись через tempfile)
     python3 -c "
@@ -779,7 +790,10 @@ except Exception:
     pass
 " "$RELAYS_FILE" "$code"
 
-    sync_xhttp_upstreams_conf
+    if ! sync_xhttp_upstreams_conf; then
+        manifest_rollback
+        error "Ошибка генерации upstream-конфигурации Nginx при удалении релея $target. Изменения полностью отменены."
+    fi
 
     if ! nginx -t; then
         manifest_rollback
@@ -791,7 +805,11 @@ except Exception:
         error "Ошибка тестирования Xray при удалении релея $target. Изменения полностью отменены."
     fi
 
-    nginx -t && systemctl reload nginx
+    if ! systemctl reload nginx; then
+        manifest_rollback
+        error "Не удалось перезагрузить Nginx при удалении релея $target. Выполнен откат."
+    fi
+
     set +e
     systemctl restart xray
     local xray_rc=$?
@@ -800,7 +818,7 @@ except Exception:
         manifest_rollback
         error "Xray не запустился после удаления релея $target. Выполнен полный откат."
     fi
-    ensure_xray_api_healthy
+    ensure_xray_api_healthy || warn "Служба xray-api не ответила вовремя. Проверьте её статус вручную через 'systemctl status xray-api'."
     manifest_commit
 
     log "Relay '${target}' (код: ${code}) успешно удален."

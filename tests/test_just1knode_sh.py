@@ -622,6 +622,30 @@ exit 0
             # Check fr upstream is NOT generated (strict SSOT protects against orphaned relays in relays.json)
             self.assertNotIn("upstream xray_xhttp_relay_fr {", content)
 
+            # Test fail-closed behavior when config.json is corrupted
+            cfg_file.write_text("{ invalid json", encoding="utf-8")
+            corrupt_proc = subprocess.run(
+                [sys.executable, "-c", py_code, str(upstreams_file), str(cfg_file), str(relays_file)],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            self.assertNotEqual(corrupt_proc.returncode, 0, "Corrupted config.json must fail-closed")
+            self.assertIn("Error parsing Xray config", corrupt_proc.stderr)
+
+            # Test fallback when config.json physically does not exist (e.g. bootstrap)
+            cfg_file.unlink()
+            bootstrap_proc = subprocess.run(
+                [sys.executable, "-c", py_code, str(upstreams_file), str(cfg_file), str(relays_file)],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            self.assertEqual(bootstrap_proc.returncode, 0)
+            bootstrap_content = upstreams_file.read_text(encoding="utf-8")
+            self.assertIn("upstream xray_xhttp_relay_de {", bootstrap_content)
+            self.assertIn("server 127.0.0.1:8004;", bootstrap_content)
+
     def test_doctor_icmp_stealth_fails_closed_when_dropin_missing(self):
         """Verify doctor ICMP stealth check fails closed if runtime=1 but drop-in is missing."""
         just1knode_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")

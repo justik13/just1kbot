@@ -572,8 +572,9 @@ if os.path.exists(cfg_file):
                 p = ib.get('port')
                 if t and p:
                     xray_inbound_ports[t] = int(p)
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"Error parsing Xray config {cfg_file}: {e}\n")
+        sys.exit(1)
 
 relays = []
 if os.path.exists(relays_file):
@@ -619,7 +620,7 @@ for r in relays:
                 break
     # Источник истины — секция inbounds в config.json (Desired-State).
     # Релеи, отсутствующие в Xray, не получают upstream (защита от устаревших записей в relays.json).
-    if not port and not xray_inbound_ports:
+    if not port and not os.path.exists(cfg_file):
         port = r.get('inbound_port')
     if port:
         try:

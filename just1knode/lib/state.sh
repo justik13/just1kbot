@@ -199,6 +199,7 @@ manifest_begin() {
         "$RELAYS_FILE"
         "${XRAY_CONFIG:-/usr/local/etc/xray/config.json}"
         "${XRAY_API_CONFIG_ENV:-/etc/xray-api/config.env}"
+        "${NGINX_CONF_DIR:-/etc/nginx}/conf.d/just1k-xhttp-upstreams.conf"
     )
 
     if [[ -d "${NGINX_RELAYS_DIR:-/etc/nginx/just1k_relays.d}" ]]; then
