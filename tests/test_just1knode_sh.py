@@ -525,7 +525,7 @@ exit 0
         self.assertIn("net.ipv4.tcp_tw_reuse = 1", content)
         self.assertIn("net.ipv4.tcp_fin_timeout = 15", content)
         self.assertIn("net.core.somaxconn = 65535", content)
-        self.assertIn("net.ipv4.ip_local_port_range = 1024 65535", content)
+        self.assertIn("net.ipv4.ip_local_port_range = 32768 65535", content)
         self.assertIn("net.core.default_qdisc = fq", content)
         self.assertIn("net.ipv4.tcp_congestion_control = bbr", content)
 
@@ -549,6 +549,73 @@ exit 0
         self.assertIn("sync_xhttp_upstreams_conf()", common_sh)
         self.assertIn("upstream xray_xhttp_default", common_sh)
         self.assertIn("keepalive 128;", common_sh)
+        self.assertIn("keepalive_requests 100000;", common_sh)
+        self.assertIn("keepalive_timeout 300s;", common_sh)
+
+    def test_xhttp_upstreams_topology_sync_and_deduplication(self):
+        """Verify sync_xhttp_upstreams_conf python logic creates upstream pools, sets keepalive directives, and deduplicates codes."""
+        import json
+        import subprocess
+        import sys
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cfg_file = tmp_path / "config.json"
+            relays_file = tmp_path / "relays.json"
+            upstreams_file = tmp_path / "just1k-xhttp-upstreams.conf"
+
+            cfg_data = {
+                "inbounds": [
+                    {"tag": "just1k-wl-default", "port": 8003},
+                    {"tag": "just1k-wl-inbound-de", "port": 8004},
+                    {"tag": "just1k-wl-inbound-se", "port": 8006},
+                ]
+            }
+            cfg_file.write_text(json.dumps(cfg_data), encoding="utf-8")
+
+            relays_data = [
+                {"code": "de", "name": "Germany", "inbound_port": 8004, "inbound_tag": "just1k-wl-inbound-de"},
+                {"code": "DE", "name": "Germany Uppercase Dup", "inbound_port": 8004, "inbound_tag": "just1k-wl-inbound-de"},
+                {"code": "nl", "name": "Netherlands", "inbound_port": 8005, "inbound_tag": "just1k-wl-inbound-nl"},
+            ]
+            relays_file.write_text(json.dumps(relays_data), encoding="utf-8")
+
+            common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+            # Extract python script from sync_xhttp_upstreams_conf
+            func_idx = common_sh.find("sync_xhttp_upstreams_conf()")
+            py_start = common_sh.find('python3 -c "', func_idx) + len('python3 -c "')
+            py_end = common_sh.find('" "$upstreams_file" "$cfg_file" "$relays_file"', py_start)
+            py_code = common_sh[py_start:py_end].strip()
+
+            proc = subprocess.run(
+                [sys.executable, "-c", py_code, str(upstreams_file), str(cfg_file), str(relays_file)],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            self.assertEqual(proc.returncode, 0, f"Python execution failed: {proc.stderr}")
+            self.assertTrue(upstreams_file.exists())
+            content = upstreams_file.read_text(encoding="utf-8")
+
+            # Check default upstream
+            self.assertIn("upstream xray_xhttp_default {", content)
+            self.assertIn("server 127.0.0.1:8003;", content)
+            self.assertIn("keepalive 128;", content)
+            self.assertIn("keepalive_requests 100000;", content)
+            self.assertIn("keepalive_timeout 300s;", content)
+
+            # Check de upstream (exactly one block, no duplicates from 'DE')
+            self.assertEqual(content.count("upstream xray_xhttp_relay_de {"), 1)
+            self.assertNotIn("upstream xray_xhttp_relay_DE {", content)
+            self.assertIn("server 127.0.0.1:8004;", content)
+
+            # Check nl upstream (from relays.json fallback port)
+            self.assertEqual(content.count("upstream xray_xhttp_relay_nl {"), 1)
+            self.assertIn("server 127.0.0.1:8005;", content)
+
+            # Check se upstream (from Xray inbound defense-in-depth scan)
+            self.assertEqual(content.count("upstream xray_xhttp_relay_se {"), 1)
+            self.assertIn("server 127.0.0.1:8006;", content)
 
     def test_doctor_icmp_stealth_fails_closed_when_dropin_missing(self):
         """Verify doctor ICMP stealth check fails closed if runtime=1 but drop-in is missing."""

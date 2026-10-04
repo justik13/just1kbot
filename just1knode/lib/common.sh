@@ -322,7 +322,7 @@ net.ipv4.icmp_echo_ignore_all = 1
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 15
 net.core.somaxconn = 65535
-net.ipv4.ip_local_port_range = 1024 65535
+net.ipv4.ip_local_port_range = 32768 65535
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
@@ -345,7 +345,7 @@ EOF
         sysctl -w net.ipv4.tcp_tw_reuse=1 >/dev/null 2>&1 || true
         sysctl -w net.ipv4.tcp_fin_timeout=15 >/dev/null 2>&1 || true
         sysctl -w net.core.somaxconn=65535 >/dev/null 2>&1 || true
-        sysctl -w net.ipv4.ip_local_port_range="1024 65535" >/dev/null 2>&1 || true
+        sysctl -w net.ipv4.ip_local_port_range="32768 65535" >/dev/null 2>&1 || true
         sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1 || true
         sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
     fi
@@ -586,10 +586,13 @@ lines = [
     'upstream xray_xhttp_default {',
     f'    server 127.0.0.1:{def_port};',
     '    keepalive 128;',
+    '    keepalive_requests 100000;',
+    '    keepalive_timeout 300s;',
     '}',
     ''
 ]
 
+seen_codes = set()
 for r in relays:
     if not isinstance(r, dict):
         continue
@@ -597,6 +600,9 @@ for r in relays:
     if not code:
         continue
     code_lower = str(code).strip().lower()
+    if not code_lower or code_lower in seen_codes:
+        continue
+    seen_codes.add(code_lower)
     in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
     port = xray_inbound_ports.get(in_tag)
     if not port:
@@ -612,10 +618,30 @@ for r in relays:
             lines.append(f'upstream xray_xhttp_relay_{code_lower} {{')
             lines.append(f'    server 127.0.0.1:{port_num};')
             lines.append('    keepalive 128;')
+            lines.append('    keepalive_requests 100000;')
+            lines.append('    keepalive_timeout 300s;')
             lines.append('}')
             lines.append('')
         except Exception:
             continue
+
+# Защита в глубину: если релеи есть в Xray inbounds, но relays.json временно пуст
+for t, p in xray_inbound_ports.items():
+    if t.startswith('just1k-wl-inbound-'):
+        c_tag = t[len('just1k-wl-inbound-'):].strip().lower()
+        if c_tag and c_tag not in seen_codes:
+            try:
+                port_num = int(p)
+                seen_codes.add(c_tag)
+                lines.append(f'upstream xray_xhttp_relay_{c_tag} {{')
+                lines.append(f'    server 127.0.0.1:{port_num};')
+                lines.append('    keepalive 128;')
+                lines.append('    keepalive_requests 100000;')
+                lines.append('    keepalive_timeout 300s;')
+                lines.append('}')
+                lines.append('')
+            except Exception:
+                continue
 
 content = '\\n'.join(lines) + '\\n'
 d = os.path.dirname(os.path.abspath(upstreams_file))
@@ -630,7 +656,11 @@ try:
     os.chmod(upstreams_file, 0o644)
 except Exception:
     pass
-" "$upstreams_file" "$cfg_file" "$relays_file" 2>/dev/null || true
+" "$upstreams_file" "$cfg_file" "$relays_file"; then
+        warn "Не удалось сгенерировать Nginx upstreams для XHTTP ($upstreams_file)"
+        return 1
+    fi
+    return 0
 }
 
 

@@ -160,6 +160,7 @@ add_relay_node() {
     local port="${3:-10443}"
     local uuid="${4:-}"
     local code="${5:-de}"
+    code="$(echo "$code" | tr '[:upper:]' '[:lower:]')"
     local arg6="${6:-}"
     local arg7="${7:-}"
     local arg8="${8:-}"
@@ -246,8 +247,8 @@ add_relay_node() {
     fi
 
     # Санитизация кода страны во избежание path traversal
-    if [[ ! "$code" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-        error "Недопустимый код страны: $code (разрешены только буквы, цифры, дефис и подчеркивание)."
+    if [[ ! "$code" =~ ^[a-z0-9_-]+$ ]]; then
+        error "Недопустимый код страны: $code (разрешены только строчные буквы, цифры, дефис и подчеркивание)."
     fi
 
     local secret_path
@@ -261,12 +262,12 @@ add_relay_node() {
     existing_relay_info=$(python3 -c "
 import json, os, sys
 rf = sys.argv[1]
-code = sys.argv[2]
+code = sys.argv[2].strip().lower()
 if os.path.exists(rf):
     try:
-        with open(rf) as f:
+        with open(rf, encoding='utf-8') as f:
             for r in json.load(f):
-                if r.get('code') == code:
+                if str(r.get('code', '')).strip().lower() == code:
                     print(f\"{r.get('name')}|{r.get('ip')}\")
                     sys.exit(0)
     except Exception:
@@ -511,50 +512,7 @@ except Exception:
     fi
     ensure_xray_config_permissions "$XRAY_CONFIG"
 
-    # Генерация Nginx Location для этого релея
-    mkdir -p "$NGINX_RELAYS_DIR"
-    local nginx_relay_conf="${NGINX_RELAYS_DIR}/${code}.conf"
-    local relay_base_path="${relay_inbound_path%/}"
-    local code_lower
-    code_lower="$(echo "$code" | tr '[:upper:]' '[:lower:]')"
-    sync_xhttp_upstreams_conf
-    cat > "$nginx_relay_conf" <<EOF
-# Relay location for ${name} (${code})
-location = ${relay_base_path} {
-    return 404;
-}
-
-location ^~ ${relay_inbound_path} {
-    proxy_pass http://xray_xhttp_relay_${code_lower};
-    proxy_method \$xhttp_proxy_method;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    proxy_pass_request_headers on;
-    proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
-    client_max_body_size 0;
-    proxy_buffering off;
-    proxy_request_buffering off;
-    proxy_max_temp_file_size 0;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    add_header Cache-Control "no-store, no-cache" always;
-    add_header CDN-Cache-Control "no-store" always;
-    add_header Pragma "no-cache" always;
-    add_header Expires "0" always;
-    add_header X-Accel-Buffering no always;
-    add_header Accept-Ranges none always;
-}
-EOF
-
-    # Валидация Nginx и Xray
-    if ! nginx -t; then
-        manifest_rollback
-        error "Ошибка конфигурации Nginx при добавлении релея $name ($code). Изменения полностью отменены."
-    fi
-
+    # Валидация конфигурации Xray
     if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
         manifest_rollback
         error "Ошибка тестирования Xray при добавлении релея $name ($code). Изменения полностью отменены."
@@ -573,7 +531,7 @@ def safe_arg(val):
         return val
 
 rf = sys.argv[1]
-code = safe_arg(sys.argv[2]).strip()
+code = safe_arg(sys.argv[2]).strip().lower()
 name = safe_arg(sys.argv[3]).strip()
 ip = sys.argv[4]
 port = int(sys.argv[5])
@@ -595,7 +553,7 @@ if os.path.exists(rf):
     except Exception:
         relays = []
 
-relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
+relays = [r for r in relays if isinstance(r, dict) and str(r.get('code', '')).strip().lower() != code]
 new_entry = {
     'name': name,
     'code': code,
@@ -628,6 +586,50 @@ try:
 except Exception:
     pass
 " "$RELAYS_FILE" "$code" "$name" "$ip" "$port" "$next_port" "$relay_inbound_path" "$relay_inbound_tag" "$relay_outbound_tag" "$security_type" "$sni" "$badge"
+
+    # Синхронизация пулов Nginx upstreams (теперь relays.json содержит новый релей)
+    sync_xhttp_upstreams_conf
+
+    # Генерация Nginx Location для этого релея
+    mkdir -p "$NGINX_RELAYS_DIR"
+    local nginx_relay_conf="${NGINX_RELAYS_DIR}/${code}.conf"
+    local relay_base_path="${relay_inbound_path%/}"
+    cat > "$nginx_relay_conf" <<EOF
+# Relay location for ${name} (${code})
+location = ${relay_base_path} {
+    return 404;
+}
+
+location ^~ ${relay_inbound_path} {
+    proxy_pass http://xray_xhttp_relay_${code};
+    proxy_method \$xhttp_proxy_method;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_pass_request_headers on;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    client_max_body_size 0;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_max_temp_file_size 0;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    add_header Cache-Control "no-store, no-cache" always;
+    add_header CDN-Cache-Control "no-store" always;
+    add_header Pragma "no-cache" always;
+    add_header Expires "0" always;
+    add_header X-Accel-Buffering no always;
+    add_header Accept-Ranges none always;
+}
+EOF
+
+    # Валидация Nginx
+    if ! nginx -t; then
+        manifest_rollback
+        error "Ошибка конфигурации Nginx при добавлении релея $name ($code). Изменения полностью отменены."
+    fi
 
     nginx -t && systemctl reload nginx
     set +e
@@ -665,12 +667,13 @@ target = '$target'.lower()
 code = ''
 if os.path.exists(rf):
     try:
-        with open(rf) as f:
+        with open(rf, encoding='utf-8') as f:
             for r in json.load(f):
-                if r.get('code', '').lower() == target or r.get('name', '').lower() == target:
-                    code = r.get('code')
+                if str(r.get('code', '')).lower() == target or str(r.get('name', '')).lower() == target:
+                    code = str(r.get('code', '')).strip().lower()
                     break
-    except: pass
+    except Exception:
+        pass
 print(code)
 ")
 
@@ -743,7 +746,7 @@ def safe_arg(val):
         return val
 
 rf = sys.argv[1]
-code = safe_arg(sys.argv[2]).strip()
+code = safe_arg(sys.argv[2]).strip().lower()
 relays = []
 if os.path.exists(rf):
     try:
@@ -753,7 +756,7 @@ if os.path.exists(rf):
                 relays = data
     except Exception:
         relays = []
-relays = [r for r in relays if isinstance(r, dict) and r.get('code') != code]
+relays = [r for r in relays if isinstance(r, dict) and str(r.get('code', '')).strip().lower() != code]
 d = os.path.dirname(os.path.abspath(rf))
 os.makedirs(d, exist_ok=True)
 t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')

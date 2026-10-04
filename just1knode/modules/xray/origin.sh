@@ -851,7 +851,7 @@ heal_and_update_origin_config() {
     fi
 
     create_backup "$XRAY_CONFIG"
-    manifest_begin
+    manifest_begin "${NGINX_CONF_DIR:-/etc/nginx}/sites-available/just1k-origin.conf" "${NGINX_CONF_DIR:-/etc/nginx}/conf.d/just1k-xhttp-upstreams.conf"
     auto_heal_relays_registry
 
     if ! python3 -c "
@@ -1460,7 +1460,7 @@ except Exception:
         fi
 
         python3 -c "
-import sys, re, os
+import sys, re, os, tempfile
 conf_path = sys.argv[1]
 ssl_rej = (sys.argv[2] == '1')
 domain = sys.argv[3] if len(sys.argv) > 3 else ''
@@ -1539,22 +1539,46 @@ server {{
 
     content = re.sub(r'server\s*\{[^}]*listen\s+8443\s+ssl[^}]*\}\n*', '', content, flags=re.DOTALL)
 
-    if 'keepalive_requests' not in content:
+    if 'keepalive_requests' in content:
+        content = re.sub(r'keepalive_requests\s+\d+;', 'keepalive_requests 100000;', content)
+    else:
         content = re.sub(
             r'large_client_header_buffers\s+8\s+64k;',
-            'keepalive_requests 100000;\n    keepalive_timeout 300s;\n    client_header_buffer_size 16k;\n    large_client_header_buffers 8 64k;',
+            'keepalive_requests 100000;\n    large_client_header_buffers 8 64k;',
             content
         )
-    elif 'client_header_buffer_size' not in content:
+
+    if 'keepalive_timeout' in content:
+        content = re.sub(r'keepalive_timeout\s+[^;]+;', 'keepalive_timeout 300s;', content)
+    else:
+        content = re.sub(
+            r'keepalive_requests\s+100000;',
+            'keepalive_requests 100000;\n    keepalive_timeout 300s;',
+            content
+        )
+
+    if 'client_header_buffer_size' in content:
+        content = re.sub(r'client_header_buffer_size\s+[^;]+;', 'client_header_buffer_size 16k;', content)
+    else:
         content = re.sub(
             r'large_client_header_buffers\s+8\s+64k;',
             'client_header_buffer_size 16k;\n    large_client_header_buffers 8 64k;',
             content
         )
 
-    with open(conf_path, 'w', encoding='utf-8') as f:
+    d = os.path.dirname(os.path.abspath(conf_path))
+    os.makedirs(d, exist_ok=True)
+    t_fd, t_path = tempfile.mkstemp(dir=d, suffix='.tmp')
+    with os.fdopen(t_fd, 'w', encoding='utf-8') as f:
         f.write(content)
-    print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found, Catch-All защищен')
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(t_path, conf_path)
+    try:
+        os.chmod(conf_path, 0o644)
+    except Exception:
+        pass
+    print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found, Catch-All и keepalive защищены')
 except Exception:
     pass
 " "$origin_vhost" "$ssl_reject_supported" "$heal_origin_domain" "$heal_dummy_dir" 2>/dev/null || true

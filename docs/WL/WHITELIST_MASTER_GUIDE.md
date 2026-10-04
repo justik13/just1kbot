@@ -712,6 +712,8 @@ large_client_header_buffers 8 64k;
    upstream xray_xhttp_backend {
        server 127.0.0.1:8003;
        keepalive 128;
+       keepalive_requests 100000;
+       keepalive_timeout 300s;
    }
    ```
    В блоке `location`:
