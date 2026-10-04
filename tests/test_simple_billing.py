@@ -838,6 +838,30 @@ class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry.operation_title, "Пополнение")
         self.assertEqual(entry.tariff_name, "Баланс")
 
+    async def test_purchases_repo_uses_metadata_tariff_name_snapshot(self):
+        from database.repositories.purchases_repo import get_purchase_log_by_id
+
+        session = AsyncMock(spec=AsyncSession)
+        test_uuid = uuid.uuid4()
+        order = Order(
+            id=test_uuid,
+            user_id=1,
+            service_type="white_internet",
+            amount_rub=Decimal("300.00"),
+            duration_days=30,
+            status="paid",
+            created_at=datetime.now(timezone.utc),
+            metadata_={"tariff_name": "Historical Snapshot Name", "operation": "purchase"},
+        )
+        mock_result = unittest.mock.MagicMock()
+        mock_result.scalar_one_or_none.return_value = order
+        session.execute.return_value = mock_result
+
+        entry = await get_purchase_log_by_id(session, f"order_{test_uuid}")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.tariff_name, "Historical Snapshot Name")
+
+
 
 class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
     """Unit tests for defect fixes identified during audit of PR #277."""

@@ -132,8 +132,8 @@ class CleanBaselineTests(unittest.TestCase):
             (1, 10, "white_internet", "trial", Decimal("0.00"), now, now, 1, 72, 2, 72, "Trial"),
             # 2. Topup 25 GiB quote
             (2, 11, "white_internet", "purchase", Decimal("100.00"), now, now, 1, 720, 2, 0, "White Internet"),
-            # 3. Add device slot quote
-            (3, 12, "white_internet", "purchase", Decimal("150.00"), now, now, 1, 720, 3, 0, "White Internet"),
+            # 3. Addon 200 RUB quote (50 GiB topup or device slot)
+            (3, 12, "white_internet", "purchase", Decimal("200.00"), now, now, 1, 720, 2, 0, "White Internet"),
             # 4. Regular 30d purchase quote
             (4, 13, "white_internet", "purchase", Decimal("300.00"), now, now, 1, 720, 2, 720, "White Internet"),
         ]
@@ -181,9 +181,9 @@ class CleanBaselineTests(unittest.TestCase):
         self.assertEqual(recorded_inserts[1]["days"], 0)
         self.assertEqual(recorded_inserts[1]["traffic_bytes"], 25 * 1024**3)
 
-        # 3. Add device slot order (50 GiB)
+        # 3. Addon 200 RUB order (50 GiB topup or device slot)
         slot_meta = json.loads(recorded_inserts[2]["metadata"])
-        self.assertEqual(slot_meta["operation"], "add_device_slot")
+        self.assertEqual(slot_meta["operation"], "topup_or_device_slot")
         self.assertEqual(slot_meta["tariff_name"], "White Internet")
         self.assertEqual(recorded_inserts[2]["days"], 0)
         self.assertEqual(recorded_inserts[2]["traffic_bytes"], 50 * 1024**3)

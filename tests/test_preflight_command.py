@@ -147,7 +147,7 @@ VALID_POSTFLIGHT_HEADS = (
 )
 _HEADS_LIST = ",".join(f"'{h}'" for h in VALID_POSTFLIGHT_HEADS)
 
-# Post-flight statements: run AFTER applying migration 0032.
+# Post-flight statements: run AFTER applying migration 0034.
 # Verifies expected head revision, 8 dropped tables gone, and clean functions without stale references.
 POSTFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
     (

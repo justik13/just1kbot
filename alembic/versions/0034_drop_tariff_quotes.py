@@ -71,11 +71,13 @@ def _backfill_consumed_quotes(bind) -> None:
                 days = 0
                 if service_type == "white_internet":
                     amt = int(amount_due or 0)
-                    if amt in (40, 100, 200):
+                    if amt in (40, 100):
                         effective_op = "topup"
-                        traffic_bytes = {40: 10, 100: 25, 200: 50}[amt] * 1024**3
-                    elif amt == 150:
-                        effective_op = "add_device_slot"
+                        traffic_bytes = {40: 10, 100: 25}[amt] * 1024**3
+                    elif amt == 200:
+                        # 200 RUB in White Internet was either 50 GiB top-up or an additional
+                        # device slot (both granted 50 GiB of extra traffic).
+                        effective_op = "topup_or_device_slot"
                         traffic_bytes = 50 * 1024**3
             else:
                 effective_hours = resulting_paid_hours or duration_hours or 0
