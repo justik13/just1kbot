@@ -64,8 +64,8 @@ class Migration0034PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             user_id = (
                 await conn.execute(
                     text(
-                        "INSERT INTO users (telegram_id, is_active, created_at, updated_at) "
-                        "VALUES (:tg, true, now(), now()) RETURNING id"
+                        "INSERT INTO users (telegram_id, created_at, updated_at) "
+                        "VALUES (:tg, now(), now()) RETURNING id"
                     ),
                     {"tg": user_tg},
                 )
