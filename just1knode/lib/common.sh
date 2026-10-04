@@ -548,7 +548,7 @@ sync_xhttp_upstreams_conf() {
     manifest_track_file "$upstreams_file" 2>/dev/null || true
     create_backup "$upstreams_file" 2>/dev/null || true
 
-    python3 -c "
+    if ! python3 -c "
 import json, os, tempfile, sys
 
 upstreams_file = sys.argv[1]
