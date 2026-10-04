@@ -838,6 +838,30 @@ class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry.operation_title, "Пополнение")
         self.assertEqual(entry.tariff_name, "Баланс")
 
+    async def test_purchases_repo_uses_metadata_tariff_name_snapshot(self):
+        from database.repositories.purchases_repo import get_purchase_log_by_id
+
+        session = AsyncMock(spec=AsyncSession)
+        test_uuid = uuid.uuid4()
+        order = Order(
+            id=test_uuid,
+            user_id=1,
+            service_type="white_internet",
+            amount_rub=Decimal("300.00"),
+            duration_days=30,
+            status="paid",
+            created_at=datetime.now(timezone.utc),
+            metadata_={"tariff_name": "Historical Snapshot Name", "operation": "purchase"},
+        )
+        mock_result = unittest.mock.MagicMock()
+        mock_result.scalar_one_or_none.return_value = order
+        session.execute.return_value = mock_result
+
+        entry = await get_purchase_log_by_id(session, f"order_{test_uuid}")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.tariff_name, "Historical Snapshot Name")
+
+
 
 class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
     """Unit tests for defect fixes identified during audit of PR #277."""
@@ -1005,7 +1029,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             service_type="white_internet",
             device_limit=3,
             duration_days=0,
-            amount_rub=Decimal("150.00"),
+            amount_rub=Decimal("200.00"),
             status="paid",
         )
         with patch(
@@ -1016,6 +1040,39 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError) as cm:
                 await FulfillmentService.fulfill_order(session, order)
             self.assertIn("Device limit reached", str(cm.exception))
+
+    @patch("services.fulfillment_service.WhiteInternetService.topup_quota")
+    @patch("services.fulfillment_service.WhiteInternetService.purchase_device_slot")
+    async def test_fulfill_order_device_slot_with_bundle_traffic_calls_purchase_device_slot(
+        self, mock_slot, mock_topup
+    ):
+        """Device slot order carrying bundled extra traffic must route to purchase_device_slot, not topup."""
+        mock_slot.return_value = (True, "OK", AsyncMock())
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=10, telegram_id=12345678)
+        session.get.return_value = user
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="white_internet",
+            device_limit=3,
+            duration_days=0,
+            traffic_bytes=50 * 1024**3,
+            amount_rub=Decimal("200.00"),
+            status="paid",
+            metadata_={"operation": "add_device_slot"},
+        )
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_by_user_id",
+            new_callable=AsyncMock,
+            return_value=AsyncMock(),
+        ):
+            await FulfillmentService.fulfill_order(session, order)
+            mock_slot.assert_awaited_once_with(
+                session, 10, actor_telegram_id=12345678, debit_balance=False
+            )
+            mock_topup.assert_not_called()
 
     @patch("services.fulfillment_service.WhiteInternetService.renew_subscription")
     async def test_fulfill_order_raises_on_renew_failure(self, mock_renew):

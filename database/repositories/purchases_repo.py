@@ -70,7 +70,7 @@ def _wi_operation_title(operation: str | None) -> tuple[str, str] | None:
     }
     if operation in titles:
         return operation, titles[operation]
-    if operation in ("trial", "add_device_slot"):
+    if operation in ("trial", "add_device_slot", "topup", "topup_or_device_slot"):
         return operation, getattr(texts, "PAYMENT_OP_TITLE_DEFAULT", "Операция")
     return None
 
@@ -194,6 +194,11 @@ async def get_purchase_logs_paginated(
         is_change = bool(
             ord_item.metadata_ and ord_item.metadata_.get("is_tariff_change")
         )
+        meta_tariff_name = (
+            ord_item.metadata_.get("tariff_name")
+            if isinstance(ord_item.metadata_, dict)
+            else None
+        )
         if ord_item.service_type == "topup":
             op_type = "topup"
             op_title = "Пополнение"
@@ -201,14 +206,14 @@ async def get_purchase_logs_paginated(
         elif is_change:
             op_type = "change"
             op_title = "Смена тарифа"
-            tariff_name = tariff_obj.name if tariff_obj else "Тариф"
+            tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "Тариф")
         else:
             op_type = "purchase"
             op_title = "Покупка"
             tariff_name = (
-                tariff_obj.name
-                if tariff_obj
-                else (
+                meta_tariff_name
+                or (tariff_obj.name if tariff_obj else None)
+                or (
                     "White Internet"
                     if getattr(ord_item, "service_type", None) == "white_internet"
                     else "Тариф"
@@ -335,6 +340,11 @@ async def get_purchase_log_by_id(
         is_change = bool(
             ord_item.metadata_ and ord_item.metadata_.get("is_tariff_change")
         )
+        meta_tariff_name = (
+            ord_item.metadata_.get("tariff_name")
+            if isinstance(ord_item.metadata_, dict)
+            else None
+        )
         if ord_item.service_type == "topup":
             op_type = "topup"
             op_title = "Пополнение"
@@ -342,14 +352,14 @@ async def get_purchase_log_by_id(
         elif is_change:
             op_type = "change"
             op_title = "Смена тарифа"
-            tariff_name = tariff_obj.name if tariff_obj else "Тариф"
+            tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "Тариф")
         else:
             op_type = "purchase"
             op_title = "Покупка"
             tariff_name = (
-                tariff_obj.name
-                if tariff_obj
-                else (
+                meta_tariff_name
+                or (tariff_obj.name if tariff_obj else None)
+                or (
                     "White Internet"
                     if ord_item.service_type == "white_internet"
                     else "Тариф"

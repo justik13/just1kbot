@@ -112,6 +112,119 @@ class CleanBaselineTests(unittest.TestCase):
                 self.assertIn("to_regclass", source)
                 self.assertIn(table, source)
 
+    def test_quote_drop_backfill_enrichment_unit(self):
+        """Verify 0034 backfill logic preserves topup and add_device_slot semantics with traffic_bytes."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        import importlib.util
+        import json
+        from unittest.mock import MagicMock
+
+        spec = importlib.util.spec_from_file_location(
+            "m0034", str(VERSIONS / "0034_drop_tariff_quotes.py")
+        )
+        m0034 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m0034)
+
+        now = datetime.now(timezone.utc)
+        quotes = [
+            # 1. Trial quote
+            (1, 10, "white_internet", "trial", Decimal("0.00"), now, now, 1, 72, 2, 72, "Trial"),
+            # 2. Topup 25 GiB quote
+            (2, 11, "white_internet", "purchase", Decimal("100.00"), now, now, 1, 720, 2, 0, "White Internet"),
+            # 3. Addon 200 RUB quote (50 GiB topup or device slot)
+            (3, 12, "white_internet", "purchase", Decimal("200.00"), now, now, 1, 720, 2, 0, "White Internet"),
+            # 4. Regular 30d purchase quote
+            (4, 13, "white_internet", "purchase", Decimal("300.00"), now, now, 1, 720, 2, 720, "White Internet"),
+        ]
+
+        recorded_inserts = []
+        recorded_updates = []
+
+        def fake_execute(stmt, params=None):
+            s = str(stmt)
+            if "SELECT q.id" in s:
+                m = MagicMock()
+                m.fetchall.return_value = quotes
+                return m
+            elif "INSERT INTO orders" in s:
+                recorded_inserts.append(params)
+                return None
+            elif "UPDATE account_ledger_entries" in s:
+                recorded_updates.append(params)
+                return None
+            elif "SELECT count(*)" in s:
+                m = MagicMock()
+                m.scalar.return_value = 0
+                return m
+            return MagicMock()
+
+        bind = MagicMock()
+        bind.execute.side_effect = fake_execute
+
+        m0034._backfill_consumed_quotes(bind)
+
+        self.assertEqual(len(recorded_inserts), 4)
+        self.assertEqual(len(recorded_updates), 4)
+
+        # 1. Trial order
+        trial_meta = json.loads(recorded_inserts[0]["metadata"])
+        self.assertEqual(trial_meta["operation"], "trial")
+        self.assertEqual(trial_meta["tariff_name"], "Trial")
+        self.assertEqual(recorded_inserts[0]["days"], 3)
+        self.assertEqual(recorded_inserts[0]["traffic_bytes"], 0)
+
+        # 2. Topup order (25 GiB)
+        topup_meta = json.loads(recorded_inserts[1]["metadata"])
+        self.assertEqual(topup_meta["operation"], "topup")
+        self.assertEqual(topup_meta["tariff_name"], "White Internet")
+        self.assertEqual(recorded_inserts[1]["days"], 0)
+        self.assertEqual(recorded_inserts[1]["traffic_bytes"], 25 * 1024**3)
+
+        # 3. Addon 200 RUB order (50 GiB topup or device slot)
+        slot_meta = json.loads(recorded_inserts[2]["metadata"])
+        self.assertEqual(slot_meta["operation"], "topup_or_device_slot")
+        self.assertEqual(slot_meta["tariff_name"], "White Internet")
+        self.assertEqual(recorded_inserts[2]["days"], 0)
+        self.assertEqual(recorded_inserts[2]["traffic_bytes"], 50 * 1024**3)
+
+        # 4. Regular purchase order
+        purchase_meta = json.loads(recorded_inserts[3]["metadata"])
+        self.assertEqual(purchase_meta["operation"], "purchase")
+        self.assertEqual(recorded_inserts[3]["days"], 30)
+        self.assertEqual(recorded_inserts[3]["traffic_bytes"], 0)
+
+    def test_quote_drop_backfill_leftover_aborts(self):
+        """Verify 0034 raises RuntimeError if leftover ledger rows still reference quote_id."""
+        import importlib.util
+        from unittest.mock import MagicMock
+
+        spec = importlib.util.spec_from_file_location(
+            "m0034", str(VERSIONS / "0034_drop_tariff_quotes.py")
+        )
+        m0034 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m0034)
+
+        def fake_execute(stmt, params=None):
+            s = str(stmt)
+            if "SELECT q.id" in s:
+                m = MagicMock()
+                m.fetchall.return_value = []
+                return m
+            elif "SELECT count(*)" in s:
+                m = MagicMock()
+                m.scalar.return_value = 2  # 2 leftovers!
+                return m
+            return MagicMock()
+
+        bind = MagicMock()
+        bind.execute.side_effect = fake_execute
+
+        with self.assertRaises(RuntimeError) as cm:
+            m0034._backfill_consumed_quotes(bind)
+        self.assertIn("2 ledger rows still reference quotes", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
+
