@@ -32,6 +32,48 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+_DISABLE_LEDGER_TRIGGER_SQL = sa.text(
+    """
+    DO $$ BEGIN
+      IF to_regclass('public.account_ledger_entries') IS NOT NULL THEN
+        IF EXISTS (
+          SELECT 1 FROM pg_trigger
+          WHERE tgrelid = 'public.account_ledger_entries'::regclass
+            AND tgname = 'account_ledger_append_only'
+        ) THEN
+          ALTER TABLE public.account_ledger_entries DISABLE TRIGGER account_ledger_append_only;
+        END IF;
+      END IF;
+    END $$;
+    """
+)
+
+_ENABLE_LEDGER_TRIGGER_SQL = sa.text(
+    """
+    DO $$ BEGIN
+      IF to_regclass('public.account_ledger_entries') IS NOT NULL THEN
+        IF EXISTS (
+          SELECT 1 FROM pg_trigger
+          WHERE tgrelid = 'public.account_ledger_entries'::regclass
+            AND tgname = 'account_ledger_append_only'
+        ) THEN
+          ALTER TABLE public.account_ledger_entries ENABLE TRIGGER account_ledger_append_only;
+        END IF;
+      END IF;
+    END $$;
+    """
+)
+
+
+def _set_ledger_immutable_trigger(bind, enable: bool) -> None:
+    """Temporarily toggle the append-only trigger on account_ledger_entries for backfill."""
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", None)
+    if isinstance(dialect_name, str) and dialect_name != "postgresql":
+        return
+    stmt = _ENABLE_LEDGER_TRIGGER_SQL if enable else _DISABLE_LEDGER_TRIGGER_SQL
+    bind.execute(stmt)
+
+
 def _backfill_consumed_quotes(bind) -> None:
     """Create paid wallet Orders for consumed quotes and re-link debits."""
     quotes = bind.execute(
@@ -45,83 +87,88 @@ def _backfill_consumed_quotes(bind) -> None:
             "WHERE q.status = 'consumed' ORDER BY q.id"
         )
     ).fetchall()
-    for row in quotes:
-        (
-            qid,
-            user_id,
-            service_type,
-            operation_type,
-            amount_due,
-            created_at,
-            consumed_at,
-            tariff_id,
-            duration_hours,
-            device_limit,
-            resulting_paid_hours,
-            name_snapshot,
-        ) = row
-        order_id = uuid.uuid4()
-        paid_at = consumed_at or created_at
-        traffic_bytes = 0
-        effective_op = operation_type
-        if operation_type == "trial":
-            days = int(resulting_paid_hours or 72) // 24
-        elif operation_type in ("purchase", "renew", "change"):
-            if resulting_paid_hours is not None and resulting_paid_hours == 0:
-                days = 0
-                if service_type == "white_internet":
-                    amt = int(amount_due or 0)
-                    if amt in (40, 100):
-                        effective_op = "topup"
-                        traffic_bytes = {40: 10, 100: 25}[amt] * 1024**3
-                    elif amt == 200:
-                        # 200 RUB in White Internet was either 50 GiB top-up or an additional
-                        # device slot (both granted 50 GiB of extra traffic).
-                        effective_op = "topup_or_device_slot"
-                        traffic_bytes = 50 * 1024**3
-            else:
-                effective_hours = resulting_paid_hours or duration_hours or 0
-                days = int(effective_hours) // 24
-        else:
-            days = 0
-        bind.execute(
-            sa.text(
-                "INSERT INTO orders (id, user_id, service_type, tariff_id, "
-                "amount_rub, duration_days, traffic_bytes, device_limit, payment_method, "
-                "status, paid_at, created_at, metadata) "
-                "VALUES (:id, :user_id, :service_type, :tariff_id, :amount, "
-                ":days, :traffic_bytes, :devices, 'wallet', 'paid', :paid_at, :created_at, "
-                "CAST(:metadata AS jsonb))"
-            ),
-            {
-                "id": order_id,
-                "user_id": user_id,
-                "service_type": service_type,
-                "tariff_id": tariff_id,
-                "amount": amount_due,
-                "days": days,
-                "traffic_bytes": traffic_bytes,
-                "devices": device_limit,
-                "paid_at": paid_at,
-                "created_at": created_at,
-                "metadata": json.dumps(
+    if quotes:
+        _set_ledger_immutable_trigger(bind, enable=False)
+        try:
+            for row in quotes:
+                (
+                    qid,
+                    user_id,
+                    service_type,
+                    operation_type,
+                    amount_due,
+                    created_at,
+                    consumed_at,
+                    tariff_id,
+                    duration_hours,
+                    device_limit,
+                    resulting_paid_hours,
+                    name_snapshot,
+                ) = row
+                order_id = uuid.uuid4()
+                paid_at = consumed_at or created_at
+                traffic_bytes = 0
+                effective_op = operation_type
+                if operation_type == "trial":
+                    days = int(resulting_paid_hours or 72) // 24
+                elif operation_type in ("purchase", "renew", "change"):
+                    if resulting_paid_hours is not None and resulting_paid_hours == 0:
+                        days = 0
+                        if service_type == "white_internet":
+                            amt = int(amount_due or 0)
+                            if amt in (40, 100):
+                                effective_op = "topup"
+                                traffic_bytes = {40: 10, 100: 25}[amt] * 1024**3
+                            elif amt == 200:
+                                # 200 RUB in White Internet was either 50 GiB top-up or an additional
+                                # device slot (both granted 50 GiB of extra traffic).
+                                effective_op = "topup_or_device_slot"
+                                traffic_bytes = 50 * 1024**3
+                    else:
+                        effective_hours = resulting_paid_hours or duration_hours or 0
+                        days = int(effective_hours) // 24
+                else:
+                    days = 0
+                bind.execute(
+                    sa.text(
+                        "INSERT INTO orders (id, user_id, service_type, tariff_id, "
+                        "amount_rub, duration_days, traffic_bytes, device_limit, payment_method, "
+                        "status, paid_at, created_at, metadata) "
+                        "VALUES (:id, :user_id, :service_type, :tariff_id, :amount, "
+                        ":days, :traffic_bytes, :devices, 'wallet', 'paid', :paid_at, :created_at, "
+                        "CAST(:metadata AS jsonb))"
+                    ),
                     {
-                        "operation": effective_op,
-                        "is_trial": operation_type == "trial",
-                        "migrated_from_quote": qid,
-                        "tariff_name": name_snapshot,
-                    }
-                ),
-            },
-        )
-        # Re-link every ledger row (debits and their reversals) to the order.
-        bind.execute(
-            sa.text(
-                "UPDATE account_ledger_entries SET order_id = :oid, "
-                "quote_id = NULL WHERE quote_id = :qid"
-            ),
-            {"oid": order_id, "qid": qid},
-        )
+                        "id": order_id,
+                        "user_id": user_id,
+                        "service_type": service_type,
+                        "tariff_id": tariff_id,
+                        "amount": amount_due,
+                        "days": days,
+                        "traffic_bytes": traffic_bytes,
+                        "devices": device_limit,
+                        "paid_at": paid_at,
+                        "created_at": created_at,
+                        "metadata": json.dumps(
+                            {
+                                "operation": effective_op,
+                                "is_trial": operation_type == "trial",
+                                "migrated_from_quote": qid,
+                                "tariff_name": name_snapshot,
+                            }
+                        ),
+                    },
+                )
+                # Re-link every ledger row (debits and their reversals) to the order.
+                bind.execute(
+                    sa.text(
+                        "UPDATE account_ledger_entries SET order_id = :oid, "
+                        "quote_id = NULL WHERE quote_id = :qid"
+                    ),
+                    {"oid": order_id, "qid": qid},
+                )
+        finally:
+            _set_ledger_immutable_trigger(bind, enable=True)
     leftover = bind.execute(
         sa.text(
             "SELECT count(*) FROM account_ledger_entries "

@@ -91,6 +91,10 @@ class CleanBaselineTests(unittest.TestCase):
         self.assertIn("migrated_from_quote", source)
         self.assertIn("DROP TABLE IF EXISTS public.tariff_quotes", source)
         self.assertIn("DROP TABLE IF EXISTS public.tariff_versions", source)
+        # Append-only trigger guard around ledger backfill
+        self.assertIn("_set_ledger_immutable_trigger", source)
+        self.assertIn("DISABLE TRIGGER account_ledger_append_only", source)
+        self.assertIn("ENABLE TRIGGER account_ledger_append_only", source)
         # Fail-closed: abort instead of dropping with dangling ledger links.
         self.assertIn("quote_id IS NOT NULL", source)
 
@@ -225,6 +229,103 @@ class CleanBaselineTests(unittest.TestCase):
         self.assertIn("2 ledger rows still reference quotes", str(cm.exception))
 
 
+    def test_quote_drop_backfill_trigger_guard_lifecycle(self):
+        """Verify trigger is disabled before ledger updates and re-enabled in finally."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        import importlib.util
+        from unittest.mock import MagicMock
+
+        spec = importlib.util.spec_from_file_location(
+            "m0034", str(VERSIONS / "0034_drop_tariff_quotes.py")
+        )
+        m0034 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m0034)
+
+        now = datetime.now(timezone.utc)
+        quotes = [
+            (1, 10, "white_internet", "purchase", Decimal("100.00"), now, now, 1, 720, 2, 720, "WI"),
+        ]
+
+        executed_actions = []
+
+        def tracking_execute(stmt, params=None):
+            s = str(stmt)
+            if "DISABLE TRIGGER" in s:
+                executed_actions.append("trigger_disabled")
+            elif "ENABLE TRIGGER" in s:
+                executed_actions.append("trigger_enabled")
+            elif "SELECT q.id" in s:
+                executed_actions.append("select_quotes")
+                m = MagicMock()
+                m.fetchall.return_value = quotes
+                return m
+            elif "INSERT INTO orders" in s:
+                executed_actions.append("insert_order")
+            elif "UPDATE account_ledger_entries" in s:
+                executed_actions.append("update_ledger")
+            elif "SELECT count(*)" in s:
+                executed_actions.append("count_leftovers")
+                m = MagicMock()
+                m.scalar.return_value = 0
+                return m
+            return MagicMock()
+
+        bind = MagicMock()
+        bind.dialect.name = "postgresql"
+        bind.execute.side_effect = tracking_execute
+
+        # 1. Normal run: disable -> insert -> update -> enable -> count
+        m0034._backfill_consumed_quotes(bind)
+        self.assertEqual(
+            executed_actions,
+            [
+                "select_quotes",
+                "trigger_disabled",
+                "insert_order",
+                "update_ledger",
+                "trigger_enabled",
+                "count_leftovers",
+            ],
+        )
+
+        # 2. Failure run: trigger is re-enabled even on failure
+        executed_actions.clear()
+
+        def failing_execute(stmt, params=None):
+            s = str(stmt)
+            if "DISABLE TRIGGER" in s:
+                executed_actions.append("trigger_disabled")
+            elif "ENABLE TRIGGER" in s:
+                executed_actions.append("trigger_enabled")
+            elif "SELECT q.id" in s:
+                executed_actions.append("select_quotes")
+                m = MagicMock()
+                m.fetchall.return_value = quotes
+                return m
+            elif "UPDATE account_ledger_entries" in s:
+                executed_actions.append("update_ledger_fail")
+                raise RuntimeError("ledger simulated failure")
+            return MagicMock()
+
+        bind.execute.side_effect = failing_execute
+        with self.assertRaises(RuntimeError) as cm:
+            m0034._backfill_consumed_quotes(bind)
+        self.assertIn("ledger simulated failure", str(cm.exception))
+        self.assertIn("trigger_disabled", executed_actions)
+        self.assertIn("trigger_enabled", executed_actions)
+        # Ensure enable was called after failure
+        self.assertEqual(executed_actions[-1], "trigger_enabled")
+
+        # 3. Non-postgresql dialect (e.g. SQLite) safely skips trigger DDL
+        sqlite_bind = MagicMock()
+        sqlite_bind.dialect.name = "sqlite"
+        m0034._set_ledger_immutable_trigger(sqlite_bind, enable=False)
+        m0034._set_ledger_immutable_trigger(sqlite_bind, enable=True)
+        sqlite_bind.execute.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
