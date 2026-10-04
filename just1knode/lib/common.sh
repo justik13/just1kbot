@@ -556,7 +556,7 @@ sync_xhttp_upstreams_conf() {
     create_backup "$upstreams_file" 2>/dev/null || true
 
     if ! python3 -c "
-import json, os, tempfile, sys
+import json, os, tempfile, sys, re
 
 upstreams_file = sys.argv[1]
 cfg_file = sys.argv[2]
@@ -608,9 +608,8 @@ for r in relays:
     if not code:
         continue
     code_lower = str(code).strip().lower()
-    if not code_lower or code_lower in seen_codes:
+    if not code_lower or not re.fullmatch(r'^[a-z0-9_-]+$', code_lower) or code_lower in seen_codes:
         continue
-    seen_codes.add(code_lower)
     in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
     port = xray_inbound_ports.get(in_tag)
     if not port:
@@ -623,6 +622,7 @@ for r in relays:
     if not port and not os.path.exists(cfg_file):
         port = r.get('inbound_port')
     if port:
+        seen_codes.add(code_lower)
         try:
             port_num = int(port)
             lines.append(f'upstream xray_xhttp_relay_{code_lower} {{')
@@ -639,7 +639,7 @@ for r in relays:
 for t, p in xray_inbound_ports.items():
     if t.startswith('just1k-wl-inbound-'):
         c_tag = t[len('just1k-wl-inbound-'):].strip().lower()
-        if c_tag and c_tag not in seen_codes:
+        if c_tag and re.fullmatch(r'^[a-z0-9_-]+$', c_tag) and c_tag not in seen_codes:
             try:
                 port_num = int(p)
                 seen_codes.add(c_tag)

@@ -3146,7 +3146,7 @@ remove_traffic_watchdog_timer
                     if not code or not path:
                         continue
                     code_lower = str(code).strip().lower()
-                    cf_name = f"{code}.conf"
+                    cf_name = f"{code_lower}.conf"
                     cf_path = os.path.join(nginx_dir, cf_name)
                     in_tag = r.get("inbound_tag") or f"just1k-wl-inbound-{code_lower}"
                     port = xray_inbound_ports.get(in_tag)
@@ -3179,7 +3179,8 @@ remove_traffic_watchdog_timer
 
             # Invariant: pl.conf was created with local port 8007
             self.assertTrue(os.path.exists(os.path.join(nginx_dir, "pl.conf")))
-            self.assertIn("127.0.0.1:8007", open(os.path.join(nginx_dir, "pl.conf")).read())
+            with open(os.path.join(nginx_dir, "pl.conf"), encoding="utf-8") as f:
+                self.assertIn("127.0.0.1:8007", f.read())
 
             # Invariant: stale nl.conf was explicitly DELETED because Xray does not listen on 8008
             self.assertFalse(os.path.exists(os.path.join(nginx_dir, "nl.conf")))
@@ -3191,6 +3192,96 @@ remove_traffic_watchdog_timer
             self.assertFalse(os.path.exists(os.path.join(nginx_dir, "bad.conf")))
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_sync_xhttp_upstreams_conf_behavior_regex_and_seen_codes(self):
+        """Behavioral test: sync_xhttp_upstreams_conf validates relay code with regex and does not block defense-in-depth on unresolvable entries."""
+        import re
+
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn("import json, os, tempfile, sys, re", common_sh)
+        self.assertIn("re.fullmatch(r'^[a-z0-9_-]+$', code_lower)", common_sh)
+
+        def generate_upstreams(cfg, relays):
+            xray_inbound_ports = {}
+            for ib in cfg.get("inbounds", []):
+                t = ib.get("tag")
+                p = ib.get("port")
+                if t and p:
+                    xray_inbound_ports[t] = int(p)
+
+            def_port = xray_inbound_ports.get("just1k-wl-default", 8003)
+            lines = [
+                "upstream xray_xhttp_default {",
+                f"    server 127.0.0.1:{def_port};",
+                "    keepalive 128;",
+                "    keepalive_requests 100000;",
+                "    keepalive_timeout 300s;",
+                "}",
+            ]
+
+            seen_codes = set()
+            for r in relays:
+                if not isinstance(r, dict):
+                    continue
+                code = r.get("code")
+                if not code:
+                    continue
+                code_lower = str(code).strip().lower()
+                if not code_lower or not re.fullmatch(r"^[a-z0-9_-]+$", code_lower) or code_lower in seen_codes:
+                    continue
+                in_tag = r.get("inbound_tag") or f"just1k-wl-inbound-{code_lower}"
+                port = xray_inbound_ports.get(in_tag)
+                if not port:
+                    for t, p in xray_inbound_ports.items():
+                        if t.lower() == f"just1k-wl-inbound-{code_lower}":
+                            port = p
+                            break
+                if port:
+                    seen_codes.add(code_lower)
+                    port_num = int(port)
+                    lines.append(f"upstream xray_xhttp_relay_{code_lower} {{")
+                    lines.append(f"    server 127.0.0.1:{port_num};")
+                    lines.append("    keepalive 128;")
+                    lines.append("    keepalive_requests 100000;")
+                    lines.append("    keepalive_timeout 300s;")
+                    lines.append("}")
+
+            for t, p in xray_inbound_ports.items():
+                if t.startswith("just1k-wl-inbound-"):
+                    c_tag = t[len("just1k-wl-inbound-"):].strip().lower()
+                    if c_tag and re.fullmatch(r"^[a-z0-9_-]+$", c_tag) and c_tag not in seen_codes:
+                        port_num = int(p)
+                        seen_codes.add(c_tag)
+                        lines.append(f"upstream xray_xhttp_relay_{c_tag} {{")
+                        lines.append(f"    server 127.0.0.1:{port_num};")
+                        lines.append("    keepalive 128;")
+                        lines.append("    keepalive_requests 100000;")
+                        lines.append("    keepalive_timeout 300s;")
+                        lines.append("}")
+
+            return "\n".join(lines)
+
+        cfg = {
+            "inbounds": [
+                {"tag": "just1k-wl-default", "port": 8003},
+                {"tag": "just1k-wl-inbound-de", "port": 8004},
+                {"tag": "just1k-wl-inbound-nl", "port": 8005},
+            ]
+        }
+        relays = [
+            {"code": "DE", "inbound_tag": "just1k-wl-inbound-de"},
+            {"code": "bad;injection\n", "inbound_tag": "just1k-wl-inbound-bad"},
+            {"code": "nl", "inbound_tag": "non-existent-tag"},
+        ]
+
+        output = generate_upstreams(cfg, relays)
+        self.assertIn("upstream xray_xhttp_default {", output)
+        self.assertIn("server 127.0.0.1:8003;", output)
+        self.assertIn("upstream xray_xhttp_relay_de {", output)
+        self.assertIn("server 127.0.0.1:8004;", output)
+        self.assertNotIn("bad;injection", output)
+        self.assertIn("upstream xray_xhttp_relay_nl {", output)
+        self.assertIn("server 127.0.0.1:8005;", output)
 
     def test_ufw_before_rules_sync_and_remove_behavior(self):
         """Behavioral test: UFW before.rules sync inserts 4 rules and removal cleanly cleans them up."""

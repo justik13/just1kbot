@@ -490,7 +490,9 @@ map \$request_method \$xhttp_proxy_method {
 }
 EOF
 
-    sync_xhttp_upstreams_conf
+    if ! sync_xhttp_upstreams_conf; then
+        error "Не удалось сгенерировать Nginx upstreams для XHTTP!"
+    fi
 
     create_backup "${NGINX_RELAYS_DIR}/default.conf"
     cat > "${NGINX_RELAYS_DIR}/default.conf" <<EOF
@@ -1289,7 +1291,7 @@ try:
 
             code_s = str(code).strip()
             code_lower = code_s.lower()
-            cf_name = f'{code}.conf'
+            cf_name = f'{code_lower}.conf'
             cf_path = os.path.join(nginx_dir, cf_name)
             in_tag = r.get('inbound_tag') or f'just1k-wl-inbound-{code_lower}'
 
