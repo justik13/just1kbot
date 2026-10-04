@@ -573,7 +573,7 @@ if os.path.exists(cfg_file):
                 if t and p:
                     xray_inbound_ports[t] = int(p)
     except Exception as e:
-        sys.stderr.write(f"Error parsing Xray config {cfg_file}: {e}\n")
+        sys.stderr.write('Error parsing Xray config: ' + str(e) + '\\n')
         sys.exit(1)
 
 relays = []
