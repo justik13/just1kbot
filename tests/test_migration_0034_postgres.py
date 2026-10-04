@@ -90,12 +90,13 @@ class Migration0034PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
             # 3. With trigger active, UPDATE must fail with CheckViolationError
             with self.assertRaises(Exception) as cm:
-                await conn.execute(
-                    text(
-                        "UPDATE account_ledger_entries SET amount = 200.00 WHERE id = :id"
-                    ),
-                    {"id": entry_id},
-                )
+                async with conn.begin_nested():
+                    await conn.execute(
+                        text(
+                            "UPDATE account_ledger_entries SET amount = 200.00 WHERE id = :id"
+                        ),
+                        {"id": entry_id},
+                    )
             self.assertIn("account ledger is append-only", str(cm.exception))
 
             # 4. Disable trigger via migration helper
@@ -134,12 +135,13 @@ class Migration0034PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
             # 7. With trigger re-enabled, UPDATE fails again
             with self.assertRaises(Exception) as cm:
-                await conn.execute(
-                    text(
-                        "UPDATE account_ledger_entries SET amount = 300.00 WHERE id = :id"
-                    ),
-                    {"id": entry_id},
-                )
+                async with conn.begin_nested():
+                    await conn.execute(
+                        text(
+                            "UPDATE account_ledger_entries SET amount = 300.00 WHERE id = :id"
+                        ),
+                        {"id": entry_id},
+                    )
             self.assertIn("account ledger is append-only", str(cm.exception))
 
             # Cleanup: disable trigger to clean up test rows
@@ -153,6 +155,7 @@ class Migration0034PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 {"uid": user_id},
             )
             await conn.execute(self.m0034._ENABLE_LEDGER_TRIGGER_SQL)
+            await conn.commit()
 
 
 if __name__ == "__main__":
