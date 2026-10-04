@@ -36,6 +36,12 @@ class Migration0034PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.engine.dispose()
 
+    @staticmethod
+    def _norm(val: object) -> str:
+        if isinstance(val, (bytes, bytearray)):
+            return val.decode("ascii")
+        return str(val) if val is not None else ""
+
     async def test_trigger_toggle_and_append_only_protection_on_postgres(self):
         """Verify trigger account_ledger_append_only protects table and toggle works."""
         from sqlalchemy import text
@@ -45,13 +51,13 @@ class Migration0034PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             status = (
                 await conn.execute(
                     text(
-                        "SELECT tgenabled FROM pg_trigger "
+                        "SELECT tgenabled::text FROM pg_trigger "
                         "WHERE tgrelid = 'public.account_ledger_entries'::regclass "
                         "AND tgname = 'account_ledger_append_only'"
                     )
                 )
             ).scalar()
-            self.assertEqual(status, "O")
+            self.assertEqual(self._norm(status), "O")
 
             # 2. Insert test user and ledger entry
             user_tg = int(uuid.uuid4().int % 1000000000)
@@ -91,13 +97,13 @@ class Migration0034PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             dis_status = (
                 await conn.execute(
                     text(
-                        "SELECT tgenabled FROM pg_trigger "
+                        "SELECT tgenabled::text FROM pg_trigger "
                         "WHERE tgrelid = 'public.account_ledger_entries'::regclass "
                         "AND tgname = 'account_ledger_append_only'"
                     )
                 )
             ).scalar()
-            self.assertEqual(dis_status, "D")
+            self.assertEqual(self._norm(dis_status), "D")
 
             # 5. While disabled, UPDATE succeeds
             await conn.execute(
@@ -112,13 +118,13 @@ class Migration0034PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             en_status = (
                 await conn.execute(
                     text(
-                        "SELECT tgenabled FROM pg_trigger "
+                        "SELECT tgenabled::text FROM pg_trigger "
                         "WHERE tgrelid = 'public.account_ledger_entries'::regclass "
                         "AND tgname = 'account_ledger_append_only'"
                     )
                 )
             ).scalar()
-            self.assertEqual(en_status, "O")
+            self.assertEqual(self._norm(en_status), "O")
 
             # 7. With trigger re-enabled, UPDATE fails again
             with self.assertRaises(Exception) as cm:
