@@ -52,11 +52,14 @@ class TestMigration0026Metadata(unittest.TestCase):
             MagicMock(scalar=MagicMock(return_value=None)),
         ]
         with patch("alembic.op.get_bind", return_value=bind):
-            with patch("alembic.op.drop_constraint"), \
-                patch("alembic.op.create_check_constraint"), \
-                patch("alembic.op.drop_column"):
+            with patch("alembic.op.drop_constraint") as mock_drop_c, \
+                patch("alembic.op.create_check_constraint") as mock_create_c, \
+                patch("alembic.op.drop_column") as mock_drop_col:
                 # No trial data anywhere -> downgrade proceeds without raising.
                 self.migration.downgrade()
+                mock_drop_c.assert_not_called()
+                mock_create_c.assert_not_called()
+                mock_drop_col.assert_called_once_with("white_internet_subscriptions", "is_trial")
 
     def test_upgrade_safely_logs_and_does_not_abort_on_ambiguous_data(self):
         """upgrade() must log warnings and complete without raising RuntimeError when ambiguous rows are detected."""

@@ -73,7 +73,6 @@ from sqlalchemy import (
     DateTime,
     Integer,
     select,
-    text,
 )
 from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
@@ -210,13 +209,6 @@ async def run_simulation(args: argparse.Namespace):
 
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            # Partial unique indexes required by ON CONFLICT clauses
-            await conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_tariff_quotes_active_change_user "
-                    "ON tariff_quotes (user_id) WHERE operation_type='change' AND status='active'"
-                )
-            )
         logger.info("SQLite database schema initialized.")
     else:
         logger.info("Connecting to real PostgreSQL database: %s", args.db_url.split("@")[-1])
