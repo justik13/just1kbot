@@ -64,8 +64,14 @@ class Migration0034PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             user_id = (
                 await conn.execute(
                     text(
-                        "INSERT INTO users (telegram_id) "
-                        "VALUES (:tg) RETURNING id"
+                        "INSERT INTO users (telegram_id, is_deleted, "
+                        "is_banned, is_bot_blocked, device_limit, "
+                        "notification_retry_count, notified_3d, "
+                        "notified_1d, notified_2h, notified_expired, "
+                        "notified_grace_12h, device_creations_today, "
+                        "created_at) VALUES (:tg, false, false, false, "
+                        "0, 0, false, false, false, false, false, 0, "
+                        "now()) RETURNING id"
                     ),
                     {"tg": user_tg},
                 )
