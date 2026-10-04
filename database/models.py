@@ -40,9 +40,6 @@ from config.enums import (
     PaymentReconciliationStatus,
     ServerHealthState,
     ServerLifecycleStatus,
-    ServiceType,
-    TariffQuoteOperation,
-    TariffQuoteStatus,
     VPNProvisioningStatus,
     WebhookInboxStatus,
 )
@@ -371,150 +368,6 @@ class Tariff(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class TariffVersion(Base):
-    __tablename__ = "tariff_versions"
-    __table_args__ = (
-        UniqueConstraint("tariff_id", "version_number", name="uq_tariff_versions_number"),
-        CheckConstraint("duration_hours > 0", name="ck_tariff_versions_duration_positive"),
-        CheckConstraint("device_limit > 0", name="ck_tariff_versions_device_limit_positive"),
-        CheckConstraint("price_rub > 0", name="ck_tariff_versions_price_positive"),
-        CheckConstraint("currency = 'RUB'", name="ck_tariff_versions_currency_rub"),
-        CheckConstraint(
-            sql_enum_in("service_type", ServiceType),
-            name="ck_tariff_versions_service_type",
-        ),
-        CheckConstraint(
-            "base_quota_bytes IS NULL OR base_quota_bytes > 0",
-            name="ck_tariff_versions_base_quota_positive",
-        ),
-    )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tariff_id: Mapped[int] = mapped_column(
-        ForeignKey("tariffs.id", ondelete="RESTRICT"), index=True
-    )
-    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    name_snapshot: Mapped[str] = mapped_column(String(100), nullable=False)
-    service_type: Mapped[str] = mapped_column(
-        String(30), nullable=False, default=ServiceType.AWG, server_default="awg"
-    )
-    duration_hours: Mapped[int] = mapped_column(Integer, nullable=False)
-    device_limit: Mapped[int] = mapped_column(Integer, nullable=False)
-    price_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    currency: Mapped[str] = mapped_column(
-        String(3), nullable=False, default="RUB", server_default=text("'RUB'")
-    )
-    base_quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
-    )
-    tariff = relationship("Tariff", foreign_keys=[tariff_id])
-
-    @property
-    def duration_days(self) -> int:
-        return self.duration_hours // 24
-
-
-class TariffQuote(Base):
-    __tablename__ = "tariff_quotes"
-    __table_args__ = (
-        CheckConstraint(
-            sql_enum_in("operation_type", TariffQuoteOperation), name="ck_tariff_quotes_operation"
-        ),
-        CheckConstraint(sql_enum_in("status", TariffQuoteStatus), name="ck_tariff_quotes_status"),
-        CheckConstraint("currency = 'RUB'", name="ck_tariff_quotes_currency_rub"),
-        CheckConstraint(
-            "current_paid_hours >= 0 AND bonus_hours >= 0 AND resulting_paid_hours >= 0 AND resulting_bonus_hours >= 0",
-            name="ck_tariff_quotes_hours_nonnegative",
-        ),
-        CheckConstraint(
-            "current_paid_value_rub >= 0 AND amount_due_rub >= 0 AND resulting_paid_value_rub >= 0 AND rounding_loss_value_rub >= 0",
-            name="ck_tariff_quotes_values_nonnegative",
-        ),
-        CheckConstraint(
-            "rounding_loss_hours >= 0 AND rounding_loss_hours < 1",
-            name="ck_tariff_quotes_rounding_loss",
-        ),
-        CheckConstraint(
-            "resulting_paid_value_rub <= current_paid_value_rub + amount_due_rub",
-            name="ck_tariff_quotes_value_invariant",
-        ),
-        CheckConstraint(
-            "operation_type <> 'change' OR (source_tariff_version_id IS NOT NULL AND target_tariff_version_id IS NOT NULL AND source_tariff_version_id <> target_tariff_version_id AND balance_as_of IS NOT NULL AND source_subscription_end IS NOT NULL AND source_balance_fingerprint IS NOT NULL AND source_entitlement_entry_ids IS NOT NULL AND source_ledger_entry_ids IS NOT NULL)",
-            name="ck_tariff_quotes_change_source_snapshot",
-        ),
-        CheckConstraint(
-            "source_balance_fingerprint IS NULL OR source_balance_fingerprint ~ '^[0-9a-f]{64}$'",
-            name="ck_tariff_quotes_fingerprint",
-        ),
-        CheckConstraint(
-            "(status = 'consumed' AND consumed_at IS NOT NULL AND manual_review_at IS NULL) OR (status = 'manual_review' AND manual_review_at IS NOT NULL) OR (status IN ('active','expired','cancelled') AND consumed_at IS NULL AND manual_review_at IS NULL)",
-            name="ck_tariff_quotes_lifecycle_timestamps",
-        ),
-        CheckConstraint(
-            "service_type IN ('awg', 'white_internet')", name="ck_tariff_quotes_service_type"
-        ),
-        Index(
-            "uq_tariff_quotes_active_change_user",
-            "user_id",
-            unique=True,
-            postgresql_where=text("operation_type='change' AND status='active'"),
-        ),
-        Index(
-            "uq_tariff_quotes_active_checkout",
-            "user_id",
-            "service_type",
-            "target_tariff_version_id",
-            unique=True,
-            postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')"),
-        ),
-        Index(
-            "ix_tariff_quotes_consumed_journal",
-            text("consumed_at DESC NULLS LAST"),
-            text("created_at DESC"),
-            postgresql_where=text("status = 'consumed'"),
-        ),
-    )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    public_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
-    service_type: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="awg", server_default="awg"
-    )
-    operation_type: Mapped[str] = mapped_column(String(20))
-    source_tariff_version_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tariff_versions.id", ondelete="RESTRICT")
-    )
-    target_tariff_version_id: Mapped[int] = mapped_column(
-        ForeignKey("tariff_versions.id", ondelete="RESTRICT")
-    )
-    current_paid_hours: Mapped[int] = mapped_column(Integer)
-    current_paid_value_rub: Mapped[Decimal] = mapped_column(Numeric(18, 6))
-    bonus_hours: Mapped[int] = mapped_column(Integer)
-    amount_due_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2))
-    resulting_paid_hours: Mapped[int] = mapped_column(Integer)
-    resulting_paid_value_rub: Mapped[Decimal] = mapped_column(Numeric(18, 6))
-    resulting_bonus_hours: Mapped[int] = mapped_column(Integer)
-    rounding_loss_hours: Mapped[Decimal] = mapped_column(Numeric(18, 12))
-    rounding_loss_value_rub: Mapped[Decimal] = mapped_column(Numeric(18, 6))
-    currency: Mapped[str] = mapped_column(String(3), default="RUB")
-    status: Mapped[str] = mapped_column(String(20), default="active")
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    manual_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    diagnostic_reason: Mapped[str | None] = mapped_column(String(255))
-    balance_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    source_subscription_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    source_balance_fingerprint: Mapped[str | None] = mapped_column(String(64))
-    source_entitlement_entry_ids: Mapped[list | None] = mapped_column(JSONB)
-    source_ledger_entry_ids: Mapped[list | None] = mapped_column(JSONB)
-    purchase_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    user = relationship("User", foreign_keys=[user_id])
-    target_tariff_version = relationship("TariffVersion", foreign_keys=[target_tariff_version_id])
-    source_tariff_version = relationship("TariffVersion", foreign_keys=[source_tariff_version_id])
-
-
 class Payment(Base):
     """YooKassa balance top-up tracked through provider and account-ledger state."""
 
@@ -737,6 +590,7 @@ class Order(Base):
     )
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user = relationship("User", back_populates="orders", foreign_keys=[user_id])
     tariff = relationship("Tariff", foreign_keys=[tariff_id])
@@ -838,9 +692,7 @@ class AccountLedgerEntry(Base):
     payment_id: Mapped[int | None] = mapped_column(
         ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True
     )
-    quote_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tariff_quotes.id", ondelete="RESTRICT"), nullable=True
-    )
+    quote_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     order_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="RESTRICT"),

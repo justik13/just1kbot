@@ -39,21 +39,6 @@ class PaymentReconciliationStatus(StrEnum):
     MANUAL_REVIEW = "manual_review"
 
 
-class TariffQuoteStatus(StrEnum):
-    ACTIVE = "active"
-    CONSUMED = "consumed"
-    EXPIRED = "expired"
-    CANCELLED = "cancelled"
-    MANUAL_REVIEW = "manual_review"
-
-
-class TariffQuoteOperation(StrEnum):
-    PURCHASE = "purchase"
-    RENEW = "renew"
-    CHANGE = "change"
-    TRIAL = "trial"
-
-
 class AccountLedgerEntryType(StrEnum):
     PAYMENT_CREDIT = "payment_credit"
     PURCHASE_DEBIT = "purchase_debit"
@@ -238,8 +223,6 @@ __all__ = [
     "ServerHealthState",
     "ServerLifecycleStatus",
     "ServiceType",
-    "TariffQuoteOperation",
-    "TariffQuoteStatus",
     "VPNProvisioningStatus",
     "WebhookInboxStatus",
     "WhiteInternetGrantType",

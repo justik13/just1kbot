@@ -144,7 +144,6 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                 await white_internet_repo.topup_quota_atomic(
                     mock_session,
                     subscription_id=1,
-                    quote_id=10,
                     pack_gb=25,
                     price_rub=Decimal("100.00"),
                 )
@@ -153,7 +152,6 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
             await white_internet_repo.topup_quota_atomic(
                 mock_session,
                 subscription_id=1,
-                quote_id=11,
                 pack_gb=10,
                 price_rub=Decimal("40.00"),
             )
@@ -194,7 +192,6 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
             renewed = await white_internet_repo.renew_subscription_atomic(
                 mock_session,
                 subscription_id=1,
-                quote_id=42,
                 price_rub=Decimal("250.00"),
                 duration_days=30,
                 base_bytes=50 * 1024**3,
@@ -630,7 +627,7 @@ class TestWhiteInternetExtension(unittest.IsolatedAsyncioTestCase):
             await white_internet_repo.add_device_slot_atomic(mock_session, subscription_id=1, extra_bytes=1024**3)
 
         with self.assertRaises(white_internet_repo.WhiteInternetTrialSubscriptionError):
-            await white_internet_repo.topup_quota_atomic(mock_session, subscription_id=1, quote_id=1, pack_gb=10, price_rub=Decimal(50))
+            await white_internet_repo.topup_quota_atomic(mock_session, subscription_id=1, pack_gb=10, price_rub=Decimal(50))
 
 
 class TestCalculateExtensionEnd(unittest.TestCase):
@@ -713,7 +710,7 @@ class TestWhiteInternetQuotaAndDeviceAuditFixes(unittest.IsolatedAsyncioTestCase
         # Adding 60 GiB would make 250 + 60 = 310 > 300 GiB
         with self.assertRaises(white_internet_repo.WhiteInternetQuotaCapExceededError) as cm:
             await white_internet_repo.topup_quota_atomic(
-                session, subscription_id=1, quote_id=1, pack_gb=60, price_rub=Decimal("200")
+                session, subscription_id=1, pack_gb=60, price_rub=Decimal("200")
             )
         self.assertIn(f"maximum extra traffic cap of {expected_cap_gb} GiB", str(cm.exception))
 

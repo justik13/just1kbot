@@ -87,54 +87,61 @@ def downgrade() -> None:
     op.drop_column("white_internet_subscriptions", "base_traffic_bytes")
 
     # Re-create white_internet_quota_grants table and indexes
-    op.create_table(
-        "white_internet_quota_grants",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("subscription_id", sa.Integer(), nullable=False),
-        sa.Column("grant_type", sa.String(length=20), nullable=False),
-        sa.Column("bytes_granted", sa.BigInteger(), nullable=False),
-        sa.Column("bytes_remaining", sa.BigInteger(), nullable=False),
-        sa.Column(
-            "price_rub",
-            sa.Numeric(precision=12, scale=2),
-            nullable=False,
-            server_default=sa.text("0.00"),
-        ),
-        sa.Column("quote_id", sa.BigInteger(), nullable=False),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["quote_id"],
-            ["tariff_quotes.id"],
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
+    # Skipped when migration 0034 already dropped tariff_quotes (FK target gone).
+    # The events table below is still recreated unconditionally.
+    has_quotes = (
+        op.get_bind().scalar(sa.text("SELECT to_regclass('public.tariff_quotes')"))
+        is not None
+    )
+    if has_quotes:
+        op.create_table(
+            "white_internet_quota_grants",
+            sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+            sa.Column("subscription_id", sa.Integer(), nullable=False),
+            sa.Column("grant_type", sa.String(length=20), nullable=False),
+            sa.Column("bytes_granted", sa.BigInteger(), nullable=False),
+            sa.Column("bytes_remaining", sa.BigInteger(), nullable=False),
+            sa.Column(
+                "price_rub",
+                sa.Numeric(precision=12, scale=2),
+                nullable=False,
+                server_default=sa.text("0.00"),
+            ),
+            sa.Column("quote_id", sa.BigInteger(), nullable=False),
+            sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("now()"),
+            ),
+            sa.ForeignKeyConstraint(
+                ["quote_id"],
+                ["tariff_quotes.id"],
+                ondelete="RESTRICT",
+            ),
+            sa.ForeignKeyConstraint(
+                ["subscription_id"],
+                ["white_internet_subscriptions.id"],
+                ondelete="CASCADE",
+            ),
+            sa.PrimaryKeyConstraint("id"),
+        )
+        op.create_index(
+            "ix_white_internet_quota_grants_subscription_id",
+            "white_internet_quota_grants",
             ["subscription_id"],
-            ["white_internet_subscriptions.id"],
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index(
-        "ix_white_internet_quota_grants_subscription_id",
-        "white_internet_quota_grants",
-        ["subscription_id"],
-    )
-    op.create_index(
-        "ix_white_internet_quota_grants_quote_id",
-        "white_internet_quota_grants",
-        ["quote_id"],
-    )
-    op.create_index(
-        "ix_white_internet_quota_grants_expires_at",
-        "white_internet_quota_grants",
-        ["expires_at"],
-    )
+        )
+        op.create_index(
+            "ix_white_internet_quota_grants_quote_id",
+            "white_internet_quota_grants",
+            ["quote_id"],
+        )
+        op.create_index(
+            "ix_white_internet_quota_grants_expires_at",
+            "white_internet_quota_grants",
+            ["expires_at"],
+        )
 
     # Re-create white_internet_traffic_events table and indexes
     op.create_table(

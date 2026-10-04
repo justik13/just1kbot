@@ -6,18 +6,16 @@ from decimal import Decimal
 import re
 import uuid
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from config.enums import AdminAuditAction, TariffQuoteOperation
+from config.enums import AdminAuditAction
 from database.models import (
     AccountLedgerAllocation,
     AccountLedgerEntry,
     AuditLog,
     Order,
-    TariffQuote,
-    TariffVersion,
     User,
 )
 
@@ -57,15 +55,34 @@ _AUDIT_ACTION_TO_OP: dict[AdminAuditAction, tuple[str, AdminAuditAction]] = {
 AUDIT_PURCHASE_ACTIONS: list[str] = [a.value for a in _AUDIT_ACTION_TO_OP]
 
 
-def get_quote_op_title(op: str | TariffQuoteOperation) -> str:
+def _wi_operation_title(operation: str | None) -> tuple[str, str] | None:
+    """Title override for White Internet wallet orders from metadata.
+
+    Returns (operation_type, title) or None when the order carries no known
+    wallet operation. Trial keeps the historical default title.
+    """
     from bot import texts
 
-    op_title_map = {
-        TariffQuoteOperation.PURCHASE: getattr(texts, "PAYMENT_OP_TITLE_PURCHASE", "Покупка"),
-        TariffQuoteOperation.RENEW: getattr(texts, "PAYMENT_OP_TITLE_RENEW", "Продление"),
-        TariffQuoteOperation.CHANGE: getattr(texts, "PAYMENT_OP_TITLE_CHANGE", "Смена тарифа"),
+    titles = {
+        "purchase": getattr(texts, "PAYMENT_OP_TITLE_PURCHASE", "Покупка"),
+        "renew": getattr(texts, "PAYMENT_OP_TITLE_RENEW", "Продление"),
+        "change": getattr(texts, "PAYMENT_OP_TITLE_CHANGE", "Смена тарифа"),
     }
-    return op_title_map.get(op, getattr(texts, "PAYMENT_OP_TITLE_DEFAULT", "Операция"))
+    if operation in titles:
+        return operation, titles[operation]
+    if operation in ("trial", "add_device_slot"):
+        return operation, getattr(texts, "PAYMENT_OP_TITLE_DEFAULT", "Операция")
+    return None
+
+
+def _apply_wi_operation_title(
+    entry: PurchaseLogEntry, metadata: dict | None
+) -> None:
+    """Override a wallet order entry title from its stored operation."""
+    operation = metadata.get("operation") if isinstance(metadata, dict) else None
+    titled = _wi_operation_title(operation)
+    if titled is not None:
+        entry.operation_type, entry.operation_title = titled
 
 
 def get_audit_op_info(action: str | AdminAuditAction) -> tuple[str, str]:
@@ -91,35 +108,28 @@ def get_audit_op_info(action: str | AdminAuditAction) -> tuple[str, str]:
 async def _purchase_funds_splits(
     session: AsyncSession,
     *,
-    quote_ids: set[int] | frozenset[int] = frozenset(),
     order_ids: set[uuid.UUID] | frozenset[uuid.UUID] = frozenset(),
-) -> tuple[dict[int, tuple[Decimal, Decimal]], dict[uuid.UUID, tuple[Decimal, Decimal]]]:
-    """Batch (real_rub, bonus_rub) split per purchase debit. Read-only.
+) -> dict[uuid.UUID, tuple[Decimal, Decimal]]:
+    """Batch (real_rub, bonus_rub) split per order purchase debit. Read-only.
 
     Real part comes from ``payment_credit`` lots, bonus part from
-    ``admin_adjustment`` lots via FIFO allocations. Purchases without a
+    ``admin_adjustment`` lots via FIFO allocations. Orders without a
     ledger debit (direct card payments) are absent from the result.
     """
-    by_quote: dict[int, tuple[Decimal, Decimal]] = {}
     by_order: dict[uuid.UUID, tuple[Decimal, Decimal]] = {}
-    if not quote_ids and not order_ids:
-        return by_quote, by_order
-    conds = []
-    if quote_ids:
-        conds.append(AccountLedgerEntry.quote_id.in_(quote_ids))
-    if order_ids:
-        conds.append(AccountLedgerEntry.order_id.in_(order_ids))
+    if not order_ids:
+        return by_order
     debit_rows = (
         await session.execute(
             select(AccountLedgerEntry).where(
                 AccountLedgerEntry.entry_type == "purchase_debit",
-                or_(*conds) if len(conds) > 1 else conds[0],
+                AccountLedgerEntry.order_id.in_(order_ids),
             )
         )
     ).scalars().all()
     debit_ids = [debit.id for debit in debit_rows]
     if not debit_ids:
-        return by_quote, by_order
+        return by_order
     agg_rows = (
         await session.execute(
             select(
@@ -145,15 +155,12 @@ async def _purchase_funds_splits(
         parts = per_debit.get(debit.id)
         if not parts:
             continue
-        split = (
-            parts.get("payment_credit", Decimal(0)),
-            parts.get("admin_adjustment", Decimal(0)),
-        )
-        if debit.quote_id is not None and debit.quote_id in quote_ids:
-            by_quote[debit.quote_id] = split
         if debit.order_id is not None and debit.order_id in order_ids:
-            by_order[debit.order_id] = split
-    return by_quote, by_order
+            by_order[debit.order_id] = (
+                parts.get("payment_credit", Decimal(0)),
+                parts.get("admin_adjustment", Decimal(0)),
+            )
+    return by_order
 
 
 async def get_purchase_logs_paginated(
@@ -208,75 +215,25 @@ async def get_purchase_logs_paginated(
                 )
             )
         # List view shows no funds split (see purchase card for the breakdown).
-        entries.append(
-            PurchaseLogEntry(
-                id=f"order_{ord_item.id}",
-                numeric_id=0,
-                user_id=user.id if user else 0,
-                telegram_id=tg_id,
-                username=username,
-                user_label=user_label,
-                operation_type=op_type,
-                operation_title=op_title,
-                tariff_name=tariff_name,
-                device_limit=ord_item.device_limit or 2,
-                duration_days=ord_item.duration_days,
-                amount_rub=ord_item.amount_rub,
-                created_at=ord_item.paid_at or ord_item.created_at,
-            )
+        entry = PurchaseLogEntry(
+            id=f"order_{ord_item.id}",
+            numeric_id=0,
+            user_id=user.id if user else 0,
+            telegram_id=tg_id,
+            username=username,
+            user_label=user_label,
+            operation_type=op_type,
+            operation_title=op_title,
+            tariff_name=tariff_name,
+            device_limit=ord_item.device_limit or 2,
+            duration_days=ord_item.duration_days,
+            amount_rub=ord_item.amount_rub,
+            created_at=ord_item.paid_at or ord_item.created_at,
         )
+        _apply_wi_operation_title(entry, ord_item.metadata_)
+        entries.append(entry)
 
-    # 2. Fetch consumed TariffQuotes (historical)
-    quote_stmt = (
-        select(TariffQuote)
-        .where(TariffQuote.status == "consumed")
-        .options(
-            selectinload(TariffQuote.user),
-            selectinload(TariffQuote.target_tariff_version).selectinload(
-                TariffVersion.tariff
-            ),
-        )
-        .order_by(TariffQuote.consumed_at.desc().nullslast(), TariffQuote.created_at.desc())
-        .limit(needed)
-    )
-    quote_results = (await session.execute(quote_stmt)).scalars().all()
-    for quote in quote_results:
-        user = quote.user
-        tg_id = user.telegram_id if user else 0
-        username = user.username if user else None
-        user_label = f"@{username}" if username else f"ID: {tg_id}"
-        target_ver = quote.target_tariff_version
-        if target_ver:
-            tariff_name = target_ver.name_snapshot
-            if target_ver.tariff and target_ver.tariff.name:
-                tariff_name = target_ver.tariff.name
-            dev_limit = target_ver.device_limit
-            dur_days = target_ver.duration_days
-        else:
-            tariff_name = "Тариф"
-            dev_limit = 1
-            dur_days = 30
-        op_title = get_quote_op_title(quote.operation_type)
-        # List view shows no funds split (see purchase card for the breakdown).
-        entries.append(
-            PurchaseLogEntry(
-                id=f"quote_{quote.id}",
-                numeric_id=quote.id,
-                user_id=user.id if user else 0,
-                telegram_id=tg_id,
-                username=username,
-                user_label=user_label,
-                operation_type=quote.operation_type,
-                operation_title=op_title,
-                tariff_name=tariff_name,
-                device_limit=dev_limit,
-                duration_days=dur_days,
-                amount_rub=quote.amount_due_rub or Decimal(0),
-                created_at=quote.consumed_at or quote.created_at,
-            )
-        )
-
-    # 3. Fetch AuditLogs for admin grants
+    # 2. Fetch AuditLogs for admin grants
     audit_stmt = (
         select(AuditLog)
         .where(AuditLog.action.in_(AUDIT_PURCHASE_ACTIONS))
@@ -328,11 +285,7 @@ async def get_purchase_logs_paginated(
 
     entries.sort(key=lambda x: x.created_at, reverse=True)
 
-    if (
-        len(order_results) < needed
-        and len(quote_results) < needed
-        and len(audit_results) < needed
-    ):
+    if len(order_results) < needed and len(audit_results) < needed:
         total = len(entries)
     else:
         order_count = (
@@ -343,13 +296,6 @@ async def get_purchase_logs_paginated(
                 )
             )
         ) or 0
-        quote_count = (
-            await session.scalar(
-                select(func.count(TariffQuote.id)).where(
-                    TariffQuote.status == "consumed"
-                )
-            )
-        ) or 0
         audit_count = (
             await session.scalar(
                 select(func.count(AuditLog.id)).where(
@@ -357,7 +303,7 @@ async def get_purchase_logs_paginated(
                 )
             )
         ) or 0
-        total = order_count + quote_count + audit_count
+        total = order_count + audit_count
 
     paged_entries = entries[offset : offset + per_page]
     return paged_entries, total
@@ -412,7 +358,7 @@ async def get_purchase_log_by_id(
         if ord_item.service_type == "topup":
             real_amount_rub, bonus_amount_rub = None, None
         else:
-            _, single_order_splits = await _purchase_funds_splits(
+            single_order_splits = await _purchase_funds_splits(
                 session, order_ids={ord_item.id}
             )
             if ord_item.id in single_order_splits:
@@ -421,7 +367,7 @@ async def get_purchase_log_by_id(
                 real_amount_rub, bonus_amount_rub = None, None
             else:
                 real_amount_rub, bonus_amount_rub = ord_item.amount_rub, Decimal(0)
-        return PurchaseLogEntry(
+        entry = PurchaseLogEntry(
             id=f"order_{ord_item.id}",
             numeric_id=0,
             user_id=user.id if user else 0,
@@ -438,67 +384,8 @@ async def get_purchase_log_by_id(
             real_amount_rub=real_amount_rub,
             bonus_amount_rub=bonus_amount_rub,
         )
-
-    elif entry_id.startswith("quote_"):
-        try:
-            q_id = int(entry_id.split("_", 1)[1])
-        except ValueError:
-            return None
-        stmt = (
-            select(TariffQuote)
-            .where(TariffQuote.id == q_id)
-            .options(
-                selectinload(TariffQuote.user),
-                selectinload(TariffQuote.target_tariff_version).selectinload(
-                    TariffVersion.tariff
-                ),
-            )
-        )
-        quote = (await session.execute(stmt)).scalar_one_or_none()
-        if not quote:
-            return None
-        user = quote.user
-        tg_id = user.telegram_id if user else 0
-        username = user.username if user else None
-        user_label = f"@{username}" if username else f"ID: {tg_id}"
-        target_ver = quote.target_tariff_version
-        if target_ver:
-            tariff_name = target_ver.name_snapshot
-            if target_ver.tariff and target_ver.tariff.name:
-                tariff_name = target_ver.tariff.name
-            dev_limit = target_ver.device_limit
-            dur_days = target_ver.duration_days
-        else:
-            tariff_name = "Тариф"
-            dev_limit = 1
-            dur_days = 30
-        op_title = get_quote_op_title(quote.operation_type)
-
-        single_quote_splits, _ = await _purchase_funds_splits(
-            session, quote_ids={quote.id}
-        )
-        quote_split = single_quote_splits.get(quote.id)
-        if quote_split is not None:
-            real_amount_rub, bonus_amount_rub = quote_split
-        else:
-            real_amount_rub, bonus_amount_rub = None, None
-        return PurchaseLogEntry(
-            id=f"quote_{quote.id}",
-            numeric_id=quote.id,
-            user_id=user.id if user else 0,
-            telegram_id=tg_id,
-            username=username,
-            user_label=user_label,
-            operation_type=quote.operation_type,
-            operation_title=op_title,
-            tariff_name=tariff_name,
-            device_limit=dev_limit,
-            duration_days=dur_days,
-            amount_rub=quote.amount_due_rub or Decimal(0),
-            created_at=quote.consumed_at or quote.created_at,
-            real_amount_rub=real_amount_rub,
-            bonus_amount_rub=bonus_amount_rub,
-        )
+        _apply_wi_operation_title(entry, ord_item.metadata_)
+        return entry
 
     elif entry_id.startswith("audit_"):
         try:

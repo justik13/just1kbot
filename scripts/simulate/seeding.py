@@ -12,11 +12,10 @@ from sqlalchemy import select
 from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
+    Order,
     Payment,
     Server,
     Tariff,
-    TariffQuote,
-    TariffVersion,
     User,
     VPNProfile,
 )
@@ -73,10 +72,6 @@ class SimulationAutoSeedMiddleware:
                     )
                     tariff_id = tariff.id if tariff else None
                     device_limit = getattr(tariff, "device_limit", 2)
-                    tv = await session.scalar(
-                        select(TariffVersion).where(TariffVersion.tariff_id == tariff_id).limit(1)
-                    ) if tariff_id else None
-                    tv_id = tv.id if tv else None
 
                     server = await session.scalar(
                         select(Server).where(Server.is_active.is_(True)).order_by(Server.id.asc()).limit(1)
@@ -142,28 +137,20 @@ class SimulationAutoSeedMiddleware:
                         created_at=now_utc() - timedelta(days=2),
                     )
 
-                    # Initial quote, entitlement and paid value ledger
-                    init_quote = TariffQuote(
-                        public_id=uuid.uuid4(),
+                    # Seed demo purchase order (history showcase)
+                    seed_order = Order(
                         user_id=db_user.id,
-                        target_tariff_version_id=tv_id,
-                        operation_type="purchase",
-                        current_paid_hours=0,
-                        current_paid_value_rub=Decimal(0),
-                        bonus_hours=0,
-                        amount_due_rub=Decimal(180),
-                        resulting_paid_hours=720,
-                        resulting_paid_value_rub=Decimal(180),
-                        resulting_bonus_hours=0,
-                        rounding_loss_hours=Decimal(0),
-                        rounding_loss_value_rub=Decimal(0),
-                        status="consumed",
-                        consumed_at=now_utc() - timedelta(days=2),
-                        purchase_notified_at=now_utc() - timedelta(days=2),
-                        expires_at=now_utc(),
+                        service_type="awg",
+                        tariff_id=tariff_id,
+                        amount_rub=Decimal(180),
+                        duration_days=30,
+                        payment_method="wallet",
+                        status="paid",
+                        paid_at=now_utc() - timedelta(days=2),
                         created_at=now_utc() - timedelta(days=2),
+                        metadata_={"operation": "purchase", "seed": True},
                     )
-                    session.add(init_quote)
+                    session.add(seed_order)
                     await session.flush()
 
                     session.add_all([entry_real, entry_bonus])

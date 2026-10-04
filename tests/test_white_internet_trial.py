@@ -1,7 +1,7 @@
 """Unit tests for White Internet Free Trial mode (3 days / 10 GiB / 0 RUB).
 
 Tests cover:
-- Trial subscription creation with 0 RUB quote and 10 GiB quota
+- Trial subscription creation with 0 RUB order and 10 GiB quota
 - Synchronous Xray node sync on trial activation (Zero-Wait UX)
 - Anti-abuse: blocking repeat trial activations
 - Fallback handling if node sync times out
@@ -12,6 +12,7 @@ Tests cover:
 
 import os
 import unittest
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -33,6 +34,7 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.models import Server, User, WhiteInternetSubscription
+from database.repositories.white_internet_repo import has_ever_activated_trial
 from services.xray_node_client import SyncResponse, SyncResult
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
@@ -55,7 +57,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             extra_data={"cdn_domain": "cdn.just1k.best"},
         )
         self.tariff = MagicMock(id=5, duration_days=30)
-        self.tariff_version = MagicMock(id=15, price_rub=Decimal("0.00"))
 
     async def asyncTearDown(self):
         if self.orig_trial_env is None:
@@ -92,7 +93,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub) as mock_create_sub, \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 
@@ -175,7 +175,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 
@@ -217,7 +216,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 
@@ -265,7 +263,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", return_value=created_sub), \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 
@@ -285,14 +282,12 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
         from database.repositories.account_ledger_repo import InsufficientAccountBalanceError
 
         fake_balance = MagicMock(available=Decimal("0.00"))
-        paid_tariff = MagicMock(id=5, duration_days=30, is_active=True)
-        paid_tariff_version = MagicMock(id=15, price_rub=Decimal("150.00"), base_quota_bytes=5368709120)
+        paid_tariff = MagicMock(id=5, duration_days=30, device_limit=2, price_rub=Decimal("150.00"), is_active=True)
         with patch("services.white_internet_service.lock_checkout_user", return_value=self.user), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=None), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=paid_tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=paid_tariff_version), \
-             patch("services.white_internet_service.create_purchase_debit", side_effect=InsufficientAccountBalanceError("Insufficient balance")), \
+             patch("services.white_internet_service.create_order_debit", side_effect=InsufficientAccountBalanceError("Insufficient balance")), \
              patch("services.white_internet_service.get_account_balance", return_value=fake_balance):
             ok, msg, sub = await WhiteInternetService.purchase_subscription(self.session, self.user.id)
             self.assertFalse(ok)
@@ -362,7 +357,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", side_effect=fake_get_sub_by_user_id), \
              patch.object(WhiteInternetService, "select_origin_node", return_value=self.origin_server), \
              patch.object(WhiteInternetService, "get_or_create_white_internet_tariff", return_value=self.tariff), \
-             patch("services.white_internet_service.get_or_create_current_version", return_value=self.tariff_version), \
              patch("database.repositories.white_internet_repo.create_white_internet_subscription", side_effect=fake_create_sub) as mock_create, \
              patch("services.white_internet_service.XrayNodeClient") as mock_xray_client_cls:
 
@@ -473,6 +467,55 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
             with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub):
                 await show_topup_menu(query, session)
                 query.answer.assert_awaited_with(texts.WL_TRIAL_CANNOT_TOPUP, show_alert=True)
+
+
+class TestHasEverActivatedTrial(unittest.IsolatedAsyncioTestCase):
+    """Direct unit tests for white_internet_repo.has_ever_activated_trial."""
+
+    async def asyncSetUp(self):
+        self.session = AsyncMock(spec=AsyncSession)
+        self.user = User(id=42, telegram_id=999888777, last_trial_reset_at=None)
+        self.session.get.return_value = self.user
+
+    async def test_returns_true_when_paid_trial_order_exists(self):
+        order_id = uuid.uuid4()
+        now = datetime(2026, 9, 5, 12, 0, 0, tzinfo=timezone.utc)
+        self.session.execute.return_value = MagicMock(
+            all=lambda: [(order_id, {"operation": "trial", "is_trial": True}, now)]
+        )
+
+        result = await has_ever_activated_trial(self.session, user_id=42)
+        self.assertTrue(result)
+
+    async def test_returns_false_when_only_regular_purchases_exist(self):
+        order_id = uuid.uuid4()
+        now = datetime(2026, 9, 5, 12, 0, 0, tzinfo=timezone.utc)
+        self.session.execute.return_value = MagicMock(
+            all=lambda: [(order_id, {"operation": "purchase", "is_trial": False}, now)]
+        )
+
+        result = await has_ever_activated_trial(self.session, user_id=42)
+        self.assertFalse(result)
+
+    async def test_returns_false_when_no_orders_exist(self):
+        self.session.execute.return_value = MagicMock(
+            all=lambda: []
+        )
+
+        result = await has_ever_activated_trial(self.session, user_id=42)
+        self.assertFalse(result)
+
+    async def test_filters_out_trial_orders_prior_to_reset(self):
+        reset_time = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+        self.user.last_trial_reset_at = reset_time
+        self.session.execute.return_value = MagicMock(
+            all=lambda: []
+        )
+
+        result = await has_ever_activated_trial(self.session, user_id=42)
+        self.assertFalse(result)
+        self.session.get.assert_awaited_once_with(User, 42)
+        self.session.execute.assert_awaited_once()
 
 
 if __name__ == "__main__":
