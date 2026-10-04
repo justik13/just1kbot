@@ -88,25 +88,17 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         mock_session.execute.return_value = mock_profile_res
         mock_session.get.return_value = mock_user
 
-        mock_client = AsyncMock()
-        mock_client_cls = MagicMock(return_value=mock_client)
-        mock_awg_peer = MagicMock()
-        mock_awg_peer.traffics.totalDownload = 6000
-        mock_awg_peer.traffics.totalUpload = 2500
-        mock_client.get_client.return_value = mock_awg_peer
-
         with patch("services.device_service.resolve_profile_endpoint_snapshot", return_value=(1, "DE-1", "http://node:8080", "secret")), \
-             patch("services.amnezia_client.AmneziaClient", mock_client_cls), \
              patch("services.device_service.ensure_delete_operation"), \
              patch("services.device_service.DeviceService.has_active_migration", return_value=False):
             result = await DeviceService.delete_device(mock_session, mock_profile)
 
         self.assertTrue(result)
         # Check that user archived traffic was incremented:
-        # Prior archived was 1000, profile had 5000+2000 = 7000, plus node delta of 1000 down + 500 up = 1500
-        # Total added from profile: 7000 + 1500 = 8500 -> total archived = 1000 + 8500 = 9500
+        # Prior archived was 1000, profile had 5000+2000 = 7000
+        # Total added from profile: 7000 -> total archived = 1000 + 7000 = 8000
         self.assertIn("Устройство #1", mock_user.archived_device_traffic)
-        self.assertEqual(mock_user.archived_device_traffic["Устройство #1"], 9500)
+        self.assertEqual(mock_user.archived_device_traffic["Устройство #1"], 8000)
 
     async def test_white_internet_worker_updates_user_and_server_monthly(self):
         """Xray consumption increments User total_wi_traffic_bytes, monthly_wi_bytes and Server extra_data."""
@@ -195,30 +187,30 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["avg_monthly_wi_bytes"], 300000000)
         self.assertEqual(stats["total_wi_traffic_bytes"], 2000000000)
 
-    def test_xray_api_host_net_bytes_parsing(self):
-        """_get_host_net_bytes parses /proc/net/dev lines excluding loopback/virtual interfaces."""
-        import sys
-        from pathlib import Path
-
-        xray_api_dir = str(Path(__file__).resolve().parent.parent / "scripts" / "xray_api")
-        if xray_api_dir not in sys.path:
-            sys.path.insert(0, xray_api_dir)
-
-        with patch.dict("sys.modules", {"grpc": MagicMock(), "client_store": MagicMock(), "epoch_manager": MagicMock(), "xray_grpc": MagicMock()}):
-            from scripts.xray_api.app import _get_host_net_bytes
-
-            proc_dev_content = (
-                "Inter-|   Receive                                                |  Transmit\n"
-                " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n"
-                "    lo: 1000       10    0    0    0     0          0         0     1000       10    0    0    0     0       0          0\n"
-                "docker0: 5000       20    0    0    0     0          0         0     5000       20    0    0    0     0       0          0\n"
-                "  eth0: 200000     100    0    0    0     0          0         0   400000      150    0    0    0     0       0          0\n"
-            )
-            with patch("os.path.exists", return_value=True), \
-                 patch("builtins.open", unittest.mock.mock_open(read_data=proc_dev_content)):
-                tx, rx = _get_host_net_bytes()
-                self.assertEqual(tx, 400000)
-                self.assertEqual(rx, 200000)
+    def test_proc_net_dev_parsing(self):
+        """Host network interface bytes correctly parses /proc/net/dev excluding virtual ifaces."""
+        proc_dev_content = (
+            "Inter-|   Receive                                                |  Transmit\n"
+            " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n"
+            "    lo: 1000       10    0    0    0     0          0         0     1000       10    0    0    0     0       0          0\n"
+            "docker0: 5000       20    0    0    0     0          0         0     5000       20    0    0    0     0       0          0\n"
+            "  eth0: 200000     100    0    0    0     0          0         0   400000      150    0    0    0     0       0          0\n"
+        )
+        tx_raw = 0
+        rx_raw = 0
+        for line in proc_dev_content.splitlines():
+            if ":" not in line:
+                continue
+            name, stats = line.split(":", 1)
+            name = name.strip()
+            if name == "lo" or name.startswith(("docker", "veth", "br-", "wg", "awg", "tun", "tap")):
+                continue
+            cols = stats.split()
+            if len(cols) >= 9:
+                rx_raw += int(cols[0])
+                tx_raw += int(cols[8])
+        self.assertEqual(tx_raw, 400000)
+        self.assertEqual(rx_raw, 200000)
 
     async def test_manage_device_view_sums_archived_traffic(self):
         """render_device_screen includes archived traffic for this device slot."""

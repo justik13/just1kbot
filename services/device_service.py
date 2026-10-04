@@ -1,4 +1,3 @@
-import asyncio
 import inspect
 import logging
 import re
@@ -582,42 +581,17 @@ class DeviceService:
         user_id = profile.user_id
 
         # Retain device traffic statistics upon key deletion or recreation
-        user = await session.get(User, user_id, with_for_update=True)
-        if user and device_name:
-            if server_id and profile.peer_id and api_url and api_key:
-                try:
-                    from services.amnezia_client import AmneziaClient
-
-                    client = AmneziaClient(api_url, api_key)
-                    client_data = await asyncio.wait_for(client.get_client(profile.peer_id), timeout=1.5)
-                    if client_data and getattr(client_data, "traffics", None):
-                        raw_down = max(0, int(client_data.traffics.totalDownload or 0))
-                        raw_up = max(0, int(client_data.traffics.totalUpload or 0))
-                        last_down = (
-                            profile.raw_last_down
-                            if profile.raw_last_down is not None
-                            else (profile.traffic_down or 0)
-                        )
-                        last_up = (
-                            profile.raw_last_up
-                            if profile.raw_last_up is not None
-                            else (profile.traffic_up or 0)
-                        )
-                        d_down = (raw_down - last_down) if raw_down >= last_down else raw_down
-                        d_up = (raw_up - last_up) if raw_up >= last_up else raw_up
-                        final_delta = max(0, d_down) + max(0, d_up)
-                        if final_delta > 0:
-                            profile.traffic_down = (profile.traffic_down or 0) + max(0, d_down)
-                            profile.traffic_up = (profile.traffic_up or 0) + max(0, d_up)
-                            user.total_traffic_bytes = (user.total_traffic_bytes or 0) + final_delta
-                except Exception as flush_err:
-                    logger.debug("Final traffic flush skipped for profile %s: %s", profile.id, flush_err)
-
-            archived = dict(user.archived_device_traffic or {})
-            cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
-            if cur_bytes > 0:
-                archived[device_name] = int(archived.get(device_name, 0)) + cur_bytes
-                user.archived_device_traffic = archived
+        if user_id and device_name:
+            try:
+                user_obj = await session.get(User, user_id)
+                if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
+                    cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
+                    if cur_bytes > 0:
+                        archived = dict(user_obj.archived_device_traffic or {})
+                        archived[device_name] = int(archived.get(device_name, 0)) + cur_bytes
+                        user_obj.archived_device_traffic = archived
+            except Exception as archive_err:
+                logger.debug("Failed to archive device traffic for profile %s: %s", profile_id, archive_err)
 
         create_operation = None
         if force and not profile.peer_id:
