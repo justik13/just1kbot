@@ -152,14 +152,14 @@ just1kbot uninstall            # Полное удаление проекта с
 
 ## Развертывание и управление узлами (`just1knode`)
 
-Управление узлами AmneziaWG и Белого Интернета выполняется через утилиту `just1knode`.
+Управление узлами AmneziaWG и Белого Интернета вынесено в отдельный специализированный репозиторий: **[justik13/just1knode](https://github.com/justik13/just1knode)**.
 
 ### 1. Установка утилиты на узел
 
 Поддерживаемые ОС: Ubuntu 22.04 / 24.04 или Debian 11 / 12.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/justik13/just1kbot/main/just1knode/just1knode.sh | bash
+curl -fsSL https://raw.githubusercontent.com/justik13/just1knode/main/just1knode.sh | bash
 ```
 
 Скрипт развертывает модули в `/opt/just1knode` и создает симлинк `/usr/local/bin/just1knode`.
