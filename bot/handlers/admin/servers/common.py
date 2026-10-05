@@ -186,13 +186,16 @@ async def _show_server_card(
         )
 
     server_extra = getattr(server, "extra_data", {}) or {}
-    saved_cycle = server_extra.get("traffic_cycle")
+    client_cycle = server_extra.get("traffic_cycle")
+    host_cycle = server_extra.get("host_traffic_cycle")
     current_cycle = now_utc().strftime("%Y-%m")
-    if saved_cycle == current_cycle:
-        monthly_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0)
-    else:
-        monthly_bytes = 0
+    monthly_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0) if client_cycle == current_cycle else 0
+    host_bytes = int(server_extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == current_cycle else 0
     traffic_month = format_traffic(monthly_bytes)
+    if host_bytes > 0:
+        traffic_month += texts.ADMIN_SERVER_HOST_TRAFFIC_SUFFIX.format(
+            host_traffic=format_traffic(host_bytes)
+        )
 
     rendered = (
         f"{header}"

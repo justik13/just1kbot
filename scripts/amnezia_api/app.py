@@ -1143,6 +1143,18 @@ async def get_server_load():
     except Exception:
         pass
 
+    host_tx = 0
+    host_rx = 0
+    try:
+        net_io = psutil.net_io_counters(pernic=True)
+        for iface_name, io_stat in net_io.items():
+            if iface_name == "lo" or iface_name.startswith(("docker", "veth", "br-", "wg", "awg", "tun", "tap")):
+                continue
+            host_tx += io_stat.bytes_sent
+            host_rx += io_stat.bytes_recv
+    except Exception:
+        pass
+
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
 
@@ -1170,6 +1182,8 @@ async def get_server_load():
         "uptime_seconds": uptime,
         "total_peers": total_peers,
         "active_peers": len(peers),
+        "host_tx_bytes": host_tx,
+        "host_rx_bytes": host_rx,
     }
 
 

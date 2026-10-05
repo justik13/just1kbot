@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -9,12 +10,15 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from database.connection import session_scope
-from database.models import APIOperation, Server, VPNProfile
+from database.models import APIOperation, Server, User, VPNProfile
+
 from services.api_operations_queue import (
     APIOperationOwnershipError,
     calculate_retry_delay,
     enqueue_api_operation,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CreateCompensationRequired(Exception):
@@ -40,15 +44,30 @@ async def _locked(session, operation_id, worker_id, attempt):
 
 
 async def _lock_operation_and_profile(session, operation_id, worker_id, attempt):
-    """Acquires locks in canonical global hierarchy: VPNProfile -> APIOperation.
+    """Acquires locks in canonical global hierarchy: User -> VPNProfile -> APIOperation.
 
-    This strictly prevents PostgreSQL deadlocks between background workers (finalizer)
+    This strictly prevents PostgreSQL deadlocks between background workers (finalizer, traffic)
     and foreground services (ProfileDeletionService, server deletion, user ban).
     """
     op_profile_res = await session.execute(
         select(APIOperation.profile_id).where(APIOperation.id == operation_id)
     )
     profile_id = op_profile_res.scalar_one_or_none()
+
+    # Pre-fetch user_id without lock to strictly enforce global lock hierarchy:
+    # User FOR UPDATE -> VPNProfile FOR UPDATE -> APIOperation FOR UPDATE
+    user_id = None
+    if profile_id is not None:
+        user_id_res = await session.execute(
+            select(VPNProfile.user_id).where(VPNProfile.id == profile_id)
+        )
+        user_id = user_id_res.scalar_one_or_none()
+
+    if user_id is not None:
+        await session.execute(
+            select(User.id).where(User.id == user_id).with_for_update()
+        )
+
     profile = None
     if profile_id is not None:
         profile_res = await session.execute(
@@ -60,6 +79,15 @@ async def _lock_operation_and_profile(session, operation_id, worker_id, attempt)
 
     operation = await _locked(session, operation_id, worker_id, attempt)
     if profile is None and operation and getattr(operation, "profile_id", None):
+        if user_id is None:
+            user_id_res = await session.execute(
+                select(VPNProfile.user_id).where(VPNProfile.id == operation.profile_id)
+            )
+            user_id = user_id_res.scalar_one_or_none()
+            if user_id is not None:
+                await session.execute(
+                    select(User.id).where(User.id == user_id).with_for_update()
+                )
         profile_res = await session.execute(
             select(VPNProfile)
             .where(VPNProfile.id == operation.profile_id)
@@ -152,6 +180,11 @@ async def _schedule_migration_grace_deletion(session, operation, profile) -> Non
     )
     from utils.datetime_helpers import now_utc
 
+    user = None
+    user_id = getattr(profile, "user_id", None)
+    if user_id:
+        user = await session.get(User, user_id, with_for_update=True)
+
     old_profile = (
         await session.execute(
             select(VPNProfile)
@@ -162,6 +195,20 @@ async def _schedule_migration_grace_deletion(session, operation, profile) -> Non
     ).scalar_one_or_none()
 
     if old_profile and old_profile.provisioning_status != "deleting":
+        cur_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
+        if cur_bytes > 0 and getattr(old_profile, "device_name", None):
+            if user is None and getattr(old_profile, "user_id", None):
+                user = await session.get(User, old_profile.user_id, with_for_update=True)
+            if user is not None and hasattr(user, "archived_device_traffic"):
+                from utils.traffic_helpers import record_device_traffic_archive
+
+                archived = dict(user.archived_device_traffic or {})
+                user.archived_device_traffic = record_device_traffic_archive(
+                    archived, old_profile.device_name, cur_bytes
+                )
+                old_profile.traffic_down = 0
+                old_profile.traffic_up = 0
+
         old_profile.provisioning_status = "deleting"
         if old_profile.peer_id:
             (

@@ -212,6 +212,119 @@ class AdminServerDeleteSafetyTests(unittest.IsolatedAsyncioTestCase):
             state.clear.assert_called_once()
 
 
+    async def test_confirm_delete_server_phased_execution_and_traffic_archiving(self):
+        callback = MagicMock()
+        callback.from_user.id = 1
+        callback.data = "confirm_server_delete:10"
+        callback.answer = AsyncMock()
+        callback.message.edit_text = AsyncMock()
+        state = AsyncMock(spec=FSMContext)
+        state.get_state.return_value = AdminStates.confirming_server_delete
+        state.get_data.return_value = {"delete_server_id": 10}
+
+        mock_server = MagicMock()
+        mock_server.id = 10
+        mock_server.name = "Test Origin"
+        mock_server.api_url = "http://127.0.0.1:8444"
+        mock_server.api_key = "secret"
+        mock_server.protocol = "amneziawg"
+        mock_server.is_active = True
+        mock_server.lifecycle_status = ServerLifecycleStatus.ACTIVE
+
+        mock_profile = MagicMock()
+        mock_profile.id = 101
+        mock_profile.server_id = 10
+        mock_profile.user_id = 42
+        mock_profile.device_name = "Phone"
+        mock_profile.traffic_down = 300
+        mock_profile.traffic_up = 200
+        mock_profile.peer_id = None
+        mock_profile.client_name = "client1"
+
+        mock_user = MagicMock()
+        mock_user.id = 42
+        mock_user.archived_device_traffic = None
+
+        mock_session = AsyncMock()
+        mock_session.expire_all = MagicMock()
+        mock_session.get.return_value = mock_user
+
+        res_server = MagicMock()
+        res_server.scalar_one_or_none.return_value = mock_server
+
+        res_profiles = MagicMock()
+        res_profiles.scalars.return_value.all.return_value = [mock_profile]
+
+        res_ops = MagicMock()
+        res_ops.scalars.return_value.all.return_value = []
+
+        res_wl = MagicMock()
+        res_wl.scalars.return_value.all.return_value = []
+
+        res_user_profiles = MagicMock()
+        res_user_profiles.scalars.return_value.all.return_value = [mock_profile]
+
+        res_orphan_profiles = MagicMock()
+        res_orphan_profiles.scalars.return_value.all.return_value = []
+
+        res_server_del = MagicMock()
+        res_server_del.scalar_one_or_none.return_value = mock_server
+
+        mock_session.execute.side_effect = [
+            res_server,          # select server for_update
+            res_profiles,        # select profiles
+            res_ops,             # select operations for_update
+            res_wl,              # select wl subs for_update
+            res_user_profiles,   # Phase 2: select user_profiles for_update
+            res_orphan_profiles, # Phase 2: select orphan_profiles
+            res_server_del,      # Phase 3: select server_to_delete for_update
+            MagicMock(),         # Phase 3: update WhiteInternetSubscription
+        ]
+        mock_session.scalar.side_effect = [0, 0]  # orphans_count, trial_resets_count
+
+        with patch(
+            "bot.handlers.admin.servers.delete_routes.is_admin",
+            return_value=True,
+        ), patch(
+            "bot.handlers.admin.servers.delete_routes.parse_callback_id",
+            return_value=10,
+        ), patch(
+            "bot.handlers.admin.servers.delete_routes.delete_profiles_by_server_id",
+            new=AsyncMock(return_value=1),
+        ), patch(
+            "bot.handlers.admin.servers.delete_routes.delete_server",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin.servers.delete_routes.cleanup_server_circuit_breakers",
+        ), patch(
+            "services.slots_cache.invalidate_server_cache",
+        ), patch(
+            "services.workers.node_monitor.clear_server_monitor_state",
+        ), patch(
+            "bot.handlers.admin.servers.delete_routes.AuditService.log_action",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin.servers.delete_routes._show_servers_list",
+            new=AsyncMock(),
+        ):
+            await confirm_delete_server(callback, state, mock_session)
+
+        # Verify Phase 1: deactivated before Phase 2
+        self.assertFalse(mock_server.is_active)
+        self.assertEqual(mock_server.lifecycle_status, ServerLifecycleStatus.DECOMMISSIONING)
+
+        # Verify Phase 2: traffic archived to user
+        from utils.traffic_helpers import get_archived_traffic_for_device
+        self.assertIsNotNone(mock_user.archived_device_traffic)
+        self.assertEqual(get_archived_traffic_for_device(mock_user.archived_device_traffic, "Phone"), 500)
+        self.assertEqual(mock_user.archived_device_traffic.get("slot_phone"), 500)
+
+        # Verify 3 transactional phases committed
+        self.assertEqual(mock_session.commit.await_count, 3)
+        mock_session.delete.assert_any_call(mock_profile)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

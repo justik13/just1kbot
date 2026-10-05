@@ -154,7 +154,7 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
         }
         self.assertNotIn("alt_connection:1", pending_callback_data)
         self.assertNotIn("request_delete_device:1", pending_callback_data)
-        self.assertIn("rename_device:1", pending_callback_data)
+        self.assertNotIn("rename_device:1", pending_callback_data)
         self.assertIn("support_help:device_1", pending_callback_data)
 
         ready_callback_data = {
@@ -165,7 +165,7 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
         }
         self.assertIn("alt_connection:1", ready_callback_data)
         self.assertIn("request_delete_device:1", ready_callback_data)
-        self.assertIn("rename_device:1", ready_callback_data)
+        self.assertNotIn("rename_device:1", ready_callback_data)
         self.assertIn("support_help:device_1", ready_callback_data)
 
     async def test_device_help_topic_buttons_keep_device_context(self):

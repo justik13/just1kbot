@@ -31,7 +31,7 @@ class Migration0031Tests(unittest.TestCase):
         rev = scripts.get_revision("0031_awg_persistent_traffic")
         self.assertIsNotNone(rev)
         self.assertEqual(rev.down_revision, "0030_simple_billing")
-        self.assertEqual(scripts.get_heads(), ["0034_drop_tariff_quotes"])
+        self.assertEqual(scripts.get_heads(), ["0035_traffic_device_retention"])
         self.assertEqual(self.migration.revision, "0031_awg_persistent_traffic")
         self.assertEqual(self.migration.down_revision, "0030_simple_billing")
 

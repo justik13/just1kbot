@@ -21,6 +21,7 @@ from config.enums import (
 from database.models import (
     APIOperation,
     Server,
+    User,
     VPNProfile,
     WhiteInternetOrphanCleanup,
     WhiteInternetSubscription,
@@ -189,9 +190,11 @@ async def confirm_delete_server(
     server_name = server.name
     api_url = server.api_url
     api_key = server.api_key
+    server_protocol = server.protocol
 
     profiles = list((await session.execute(select(VPNProfile).where(
-        VPNProfile.server_id == server.id).with_for_update())).scalars().all())
+        VPNProfile.server_id == server.id))).scalars().all())
+    deleted_profiles = len(profiles)
     operations = list((await session.execute(select(APIOperation).where(
         APIOperation.server_id == server.id,
         APIOperation.status.in_(("pending", "retry", "processing")),
@@ -267,6 +270,12 @@ async def confirm_delete_server(
         except TelegramBadRequest:
             pass
         return
+
+    # Phase 1: Deactivate server and cancel pending peer operations under Server lock.
+    # Committing Phase 1 marks the server inactive immediately so create_device / migrate_device
+    # cannot allocate it, and releases the Server lock to eliminate lock graph cycles.
+    server.is_active = False
+    server.lifecycle_status = ServerLifecycleStatus.DECOMMISSIONING
     for operation in operations:
         if operation.operation_type in {"create_peer", "update_peer"} and operation.status in {
             "pending", "retry"
@@ -275,36 +284,73 @@ async def confirm_delete_server(
             operation.completed_at = now_utc()
             operation.locked_at = operation.locked_by = None
             operation.last_error_code = "server_deleting"
-    for profile in profiles:
-        if profile.peer_id:
-            await ensure_delete_operation(session,
-                idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
-                server_id=server.id, profile_id=None,
-                server_name_snapshot=server_name, api_url_snapshot=api_url,
-                api_key_snapshot=api_key, peer_id=profile.peer_id,
-                client_name=profile.client_name,
-                protocol=server.protocol,
-                audit_reason="server_delete")
+    await session.commit()
 
-    for profile in profiles:
-        await session.delete(profile)
+    # Phase 2: Archive device traffic and delete profiles per user in canonical lock hierarchy (User -> VPNProfile).
+    user_ids = sorted({p.user_id for p in profiles if p.user_id})
+    for uid in user_ids:
+        user_obj = await session.get(User, uid, with_for_update=True)
+        user_profiles = list((await session.execute(
+            select(VPNProfile)
+            .where(VPNProfile.user_id == uid, VPNProfile.server_id == server_id)
+            .with_for_update()
+        )).scalars().all())
 
-    deleted_profiles = await delete_profiles_by_server_id(
-        session,
-        server_id,
-    )
+        for p in user_profiles:
+            cur_bytes = (getattr(p, "traffic_down", 0) or 0) + (getattr(p, "traffic_up", 0) or 0)
+            if cur_bytes > 0 and user_obj and p.device_name:
+                from utils.traffic_helpers import record_device_traffic_archive
 
-    await session.execute(
-        update(WhiteInternetSubscription)
-        .where(WhiteInternetSubscription.origin_node_id == server_id)
-        .values(
-            origin_node_id=None,
-            provisioning_status=WhiteInternetProvisioningStatus.SYNCED_INACTIVE,
-            last_reconciled_node_epoch=None,
+                archived = dict(user_obj.archived_device_traffic or {})
+                user_obj.archived_device_traffic = record_device_traffic_archive(
+                    archived, p.device_name, cur_bytes
+                )
+            if p.peer_id:
+                await ensure_delete_operation(
+                    session,
+                    idempotency_key=f"delete-peer:{p.id}:{p.peer_id}",
+                    server_id=server_id,
+                    profile_id=None,
+                    server_name_snapshot=server_name,
+                    api_url_snapshot=api_url,
+                    api_key_snapshot=api_key,
+                    peer_id=p.peer_id,
+                    client_name=p.client_name,
+                    protocol=server_protocol,
+                    audit_reason="server_delete",
+                )
+            await session.delete(p)
+
+    # Any remaining profiles without user_id
+    orphan_profiles = list((await session.execute(
+        select(VPNProfile)
+        .where(VPNProfile.user_id.is_(None), VPNProfile.server_id == server_id)
+        .with_for_update()
+    )).scalars().all())
+    for op in orphan_profiles:
+        await session.delete(op)
+
+    await session.commit()
+
+    # Phase 3: Final server removal and cache invalidation.
+    server_to_delete = (await session.execute(
+        select(Server).where(Server.id == server_id).with_for_update()
+    )).scalar_one_or_none()
+
+    if server_to_delete:
+        await delete_profiles_by_server_id(session, server_id)
+        await session.execute(
+            update(WhiteInternetSubscription)
+            .where(WhiteInternetSubscription.origin_node_id == server_id)
+            .values(
+                origin_node_id=None,
+                provisioning_status=WhiteInternetProvisioningStatus.SYNCED_INACTIVE,
+                last_reconciled_node_epoch=None,
+            )
         )
-    )
+        await delete_server(session, server_to_delete)
+        await session.commit()
 
-    await delete_server(session, server)
     session.expire_all()
 
     cleanup_server_circuit_breakers(api_url)

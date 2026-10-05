@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from aiogram import Bot
-from sqlalchemy import select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import XRAY_PROTOCOL
@@ -19,6 +19,7 @@ from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
+from utils.traffic_helpers import accumulate_host_traffic_cycle
 
 import enum
 
@@ -105,12 +106,13 @@ class WhiteInternetTrafficWorker:
 
         for server_id, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime in server_list:
             # Network I/O outside DB transaction
+            snapshot = await self.client.get_traffic_snapshot(api_url, api_key)
             (
                 node_epoch,
                 node_boot_id,
                 node_starttime,
                 users_stats,
-            ) = await self.client.get_traffic_snapshot(api_url, api_key)
+            ) = snapshot
             if not node_epoch or users_stats is None or not isinstance(users_stats, dict):
                 if users_stats is not None and not isinstance(users_stats, dict):
                     logger.warning(
@@ -141,7 +143,7 @@ class WhiteInternetTrafficWorker:
                             server_id,
                         )
                         continue
-
+            server_consumed = 0
             for client_uuid, stats in users_stats.items():
                 if (
                     not isinstance(client_uuid, str)
@@ -181,10 +183,15 @@ class WhiteInternetTrafficWorker:
                         if sub_meta is None:
                             continue
 
+                        if sub_meta.user_id:
+                            await sess.execute(
+                                select(User.id).where(User.id == sub_meta.user_id).with_for_update()
+                            )
+
                         sub = await white_internet_repo.get_subscription_with_lock(
                             sess, sub_meta.id
                         )
-                        if sub is None:
+                        if sub is None or sub.origin_node_id != server_id:
                             continue
 
                         if uplink < 0 or downlink < 0:
@@ -268,6 +275,7 @@ class WhiteInternetTrafficWorker:
                             delta,
                         )
 
+
                         (
                             consumed,
                             became_exhausted,
@@ -285,6 +293,31 @@ class WhiteInternetTrafficWorker:
                             node_starttime=node_starttime,
                             now=now,
                         )
+                        if consumed > 0 and sub.user_id:
+                            current_cycle = now.strftime("%Y-%m")
+                            await sess.execute(
+                                update(User)
+                                .where(User.id == sub.user_id)
+                                .values(
+                                    total_wi_traffic_bytes=User.total_wi_traffic_bytes + consumed,
+                                    monthly_wi_bytes=case(
+                                        (User.traffic_cycle > current_cycle, User.monthly_wi_bytes),
+                                        (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_wi_bytes, 0) + consumed),
+                                        else_=consumed,
+                                    ),
+                                    monthly_awg_bytes=case(
+                                        (User.traffic_cycle > current_cycle, User.monthly_awg_bytes),
+                                        (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_awg_bytes, 0)),
+                                        else_=0,
+                                    ),
+                                    traffic_cycle=case(
+                                        (User.traffic_cycle > current_cycle, User.traffic_cycle),
+                                        else_=current_cycle,
+                                    ),
+                                )
+                            )
+                            server_consumed += consumed
+
                         total_processed += 1
 
                         if became_exhausted:
@@ -306,6 +339,30 @@ class WhiteInternetTrafficWorker:
                         client_exc,
                         exc_info=True,
                     )
+
+            host_tx = getattr(snapshot, "host_tx_bytes", 0) or 0
+            host_rx = getattr(snapshot, "host_rx_bytes", 0) or 0
+            if server_consumed > 0 or host_tx > 0 or host_rx > 0:
+                current_cycle = now.strftime("%Y-%m")
+                async with sf() as sess:
+                    server_obj = await sess.get(Server, server_id, with_for_update=True)
+                    if server_obj:
+                        raw_extra = getattr(server_obj, "extra_data", None)
+                        extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+                        changed = False
+                        if server_consumed > 0:
+                            saved_cycle = extra.get("traffic_cycle")
+                            if saved_cycle != current_cycle:
+                                extra["traffic_cycle"] = current_cycle
+                                extra["monthly_traffic_bytes"] = server_consumed
+                            else:
+                                extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_consumed
+                            changed = True
+                        if host_tx > 0 or host_rx > 0:
+                            if accumulate_host_traffic_cycle(extra, host_tx, host_rx, current_cycle):
+                                changed = True
+                        if changed:
+                            server_obj.extra_data = extra
 
         # Send Telegram notifications strictly outside all DB transactions
         if self.bot is not None and exhausted_users_to_notify:

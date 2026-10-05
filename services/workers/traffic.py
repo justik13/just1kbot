@@ -7,7 +7,7 @@ from aiogram import Bot
 from bot.keyboards.notifications import get_traffic_alert_keyboard
 from bot.texts.runtime.alerts import ALERT_TRAFFIC_OVERUSAGE
 from cachetools import TTLCache
-from sqlalchemy import select, update
+from sqlalchemy import bindparam, case, func, select, update
 
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -21,6 +21,7 @@ from services.amnezia_client import AmneziaClient
 from services.slots_cache import update_cached_peer_count
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe, safe_send_message
+from utils.traffic_helpers import accumulate_host_traffic_cycle
 
 logger = logging.getLogger(__name__)
 
@@ -147,22 +148,27 @@ async def _traffic_sync_once(bot: Bot | None = None):
             api_clients_list = await client.get_all_clients()
             t_done = time.monotonic()
             if api_clients_list is None:
-                return server_info["id"], None, t_done, gen
+                return server_info["id"], None, None, t_done, gen
+            load_data = None
+            try:
+                load_data = await client.get_server_load(timeout=2.0)
+            except Exception:
+                pass
             return server_info["id"], {
                 c.id: c for c in api_clients_list
-            }, t_done, gen
+            }, load_data, t_done, gen
         except Exception as e:
             t_done = time.monotonic()
             logger.error(
                 "Failed to fetch traffic from server %s: %s", server_info["name"], e
             )
-            return server_info["id"], None, t_done, gen
+            return server_info["id"], None, None, t_done, gen
 
     tasks = [_fetch_server_traffic(s) for s in servers]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     api_data_by_server = {
-        r[0]: (r[1], r[2], r[3])
+        r[0]: (r[1], r[2], r[3], r[4])
         for r in results
         if not isinstance(r, Exception) and r is not None and r[1] is not None
     }
@@ -171,7 +177,7 @@ async def _traffic_sync_once(bot: Bot | None = None):
         server_id = server_info["id"]
         if server_id not in api_data_by_server:
             continue
-        api_clients, t_done, gen = api_data_by_server[server_id]
+        api_clients, load_data, t_done, gen = api_data_by_server[server_id]
 
         from services.slots_cache import get_server_generation
         if gen != get_server_generation(server_id):
@@ -181,7 +187,7 @@ async def _traffic_sync_once(bot: Bot | None = None):
         # ── ИСПРАВЛЕНО: обновляем slots_cache реальными данными ──
         update_cached_peer_count(server_id, len(api_clients), timestamp=t_done, generation=gen)
 
-        await _process_server_traffic(server_info, api_clients, bot, expected_gen=gen)
+        await _process_server_traffic(server_info, api_clients, bot, expected_gen=gen, load_data=load_data)
 
 
 async def _process_server_traffic(
@@ -189,6 +195,7 @@ async def _process_server_traffic(
     api_clients,
     bot: Bot | None = None,
     expected_gen: int | None = None,
+    load_data: dict | None = None,
 ):
     server_id = server_info["id"]
     from services.slots_cache import get_server_generation
@@ -205,27 +212,68 @@ async def _process_server_traffic(
     current_time = now_utc()
 
     async with session_scope() as session:
+        # Pre-filter candidate profiles on this server
         stmt = (
             select(
                 VPNProfile.id,
                 VPNProfile.peer_id,
-                VPNProfile.traffic_down,
-                VPNProfile.traffic_up,
-                VPNProfile.raw_last_down,
-                VPNProfile.raw_last_up,
-                VPNProfile.last_connected,
-                VPNProfile.is_active,
-                User.id,
-                User.is_banned,
-                User.telegram_id,
-                User.subscription_end,
-                User.financial_hold,
+                VPNProfile.user_id,
             )
             .join(User, VPNProfile.user_id == User.id)
-            .where(VPNProfile.server_id == server_id)
+            .where(
+                VPNProfile.server_id == server_id,
+                VPNProfile.provisioning_status.notin_(["deleting", "delete_failed"]),
+            )
         )
         result = await session.execute(stmt)
-        rows = result.all()
+        candidate_rows = result.all()
+
+        matching_candidates = [
+            (row[0], row[1], row[2] if len(row) == 3 else row[8])
+            for row in candidate_rows
+            if len(row) > 1 and row[1] in api_clients
+        ]
+
+        if matching_candidates:
+            candidate_uids = sorted({u_id for _, _, u_id in matching_candidates})
+            candidate_pids = sorted([p_id for p_id, _, _ in matching_candidates])
+
+            # 1. Lock Users FIRST in canonical hierarchy order (User -> Profile -> Server)
+            await session.execute(
+                select(User.id)
+                .where(User.id.in_(candidate_uids))
+                .order_by(User.id)
+                .with_for_update()
+            )
+
+            # 2. Re-read and lock candidate VPNProfiles SECOND (filtering out any profile deleted/migrated concurrently)
+            locked_stmt = (
+                select(
+                    VPNProfile.id,
+                    VPNProfile.peer_id,
+                    VPNProfile.traffic_down,
+                    VPNProfile.traffic_up,
+                    VPNProfile.raw_last_down,
+                    VPNProfile.raw_last_up,
+                    VPNProfile.last_connected,
+                    VPNProfile.is_active,
+                    User.id,
+                    User.is_banned,
+                    User.telegram_id,
+                    User.subscription_end,
+                    User.financial_hold,
+                )
+                .join(User, VPNProfile.user_id == User.id)
+                .where(
+                    VPNProfile.id.in_(candidate_pids),
+                    VPNProfile.provisioning_status.notin_(["deleting", "delete_failed"]),
+                )
+                .order_by(VPNProfile.id)
+                .with_for_update()
+            )
+            rows = (await session.execute(locked_stmt)).all()
+        else:
+            rows = []
 
         for (
             p_id,
@@ -347,9 +395,40 @@ async def _process_server_traffic(
                     )
                 )
 
+        # 1. Update User totals FIRST to respect canonical hierarchy: User -> Profile -> Server
+        if user_traffic_deltas:
+            current_cycle = current_time.strftime("%Y-%m")
+            sorted_uids = sorted(user_traffic_deltas.keys())
+            for u_id in sorted_uids:
+                u_delta = user_traffic_deltas[u_id]
+                if u_delta > 0:
+                    await session.execute(
+                        update(User)
+                        .where(User.id == u_id)
+                        .values(
+                            total_traffic_bytes=User.total_traffic_bytes + u_delta,
+                            monthly_awg_bytes=case(
+                                (User.traffic_cycle > current_cycle, User.monthly_awg_bytes),
+                                (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_awg_bytes, 0) + u_delta),
+                                else_=u_delta,
+                            ),
+                            monthly_wi_bytes=case(
+                                (User.traffic_cycle > current_cycle, User.monthly_wi_bytes),
+                                (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_wi_bytes, 0)),
+                                else_=0,
+                            ),
+                            traffic_cycle=case(
+                                (User.traffic_cycle > current_cycle, User.traffic_cycle),
+                                else_=current_cycle,
+                            ),
+                        )
+                    )
+
+        # 2. Update VPNProfile SECOND with status guard (prevents resurrection of deleting/delete_failed profiles)
         if updates_data:
             bulk_params = [
                 {
+                    "b_id": profile_id,
                     "id": profile_id,
                     "traffic_down": data.get("traffic_down"),
                     "traffic_up": data.get("traffic_up"),
@@ -360,33 +439,55 @@ async def _process_server_traffic(
                 for profile_id, data in updates_data.items()
             ]
             if bulk_params:
+                stmt_update = (
+                    update(VPNProfile)
+                    .where(
+                        VPNProfile.id == bindparam("b_id"),
+                        VPNProfile.provisioning_status != "deleting",
+                        VPNProfile.provisioning_status != "delete_failed",
+                    )
+                    .values(
+                        traffic_down=bindparam("traffic_down"),
+                        traffic_up=bindparam("traffic_up"),
+                        raw_last_down=bindparam("raw_last_down"),
+                        raw_last_up=bindparam("raw_last_up"),
+                        last_connected=bindparam("last_connected"),
+                    )
+                    .execution_options(synchronize_session=False)
+                )
                 await session.execute(
-                    update(VPNProfile),
+                    stmt_update,
                     bulk_params,
                 )
 
-        if user_traffic_deltas:
-            for u_id, u_delta in user_traffic_deltas.items():
-                if u_delta > 0:
-                    await session.execute(
-                        update(User)
-                        .where(User.id == u_id)
-                        .values(total_traffic_bytes=User.total_traffic_bytes + u_delta)
-                    )
-
+    # 3. In a separate isolated transaction, update Server extra_data.
+    # Decoupling this from the User and VPNProfile transaction eliminates deadlock
+    # cycles with confirm_delete_server (which locks Server -> VPNProfile).
+    async with session_scope() as session:
         server_obj = await session.get(Server, server_id, with_for_update=True)
         if server_obj:
             raw_extra = getattr(server_obj, "extra_data", None)
             extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
             current_cycle = current_time.strftime("%Y-%m")
             saved_cycle = extra.get("traffic_cycle")
+            changed = False
             if saved_cycle != current_cycle:
                 if saved_cycle is not None or server_delta > 0:
                     extra["traffic_cycle"] = current_cycle
                     extra["monthly_traffic_bytes"] = server_delta
-                    server_obj.extra_data = extra
+                    changed = True
             elif server_delta > 0:
                 extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_delta
+                changed = True
+
+            if isinstance(load_data, dict):
+                host_tx = int(load_data.get("host_tx_bytes", 0) or 0)
+                host_rx = int(load_data.get("host_rx_bytes", 0) or 0)
+                if host_tx > 0 or host_rx > 0:
+                    if accumulate_host_traffic_cycle(extra, host_tx, host_rx, current_cycle):
+                        changed = True
+
+            if changed:
                 server_obj.extra_data = extra
 
 

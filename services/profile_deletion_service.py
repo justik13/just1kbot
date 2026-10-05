@@ -19,6 +19,11 @@ class ProfileDeletionService:
     async def delete_profiles_for_user(
         session: AsyncSession, user_id: int, *, reason: str, background: bool = True
     ) -> int:
+        from database.models import User
+
+        await session.execute(
+            select(User.id).where(User.id == user_id).with_for_update()
+        )
         profiles = list(
             (
                 await session.execute(
@@ -42,6 +47,18 @@ class ProfileDeletionService:
         ]
         if not profile_ids:
             return 0
+        from database.models import User
+
+        user_ids = sorted({
+            profile.user_id for profile in profiles if getattr(profile, "user_id", None)
+        })
+        if user_ids:
+            await session.execute(
+                select(User.id)
+                .where(User.id.in_(user_ids))
+                .order_by(User.id)
+                .with_for_update()
+            )
         current = list(
             (
                 await session.execute(
@@ -65,6 +82,19 @@ class ProfileDeletionService:
         for profile in profiles:
             if getattr(profile, "server_id", None):
                 affected_server_ids.add(profile.server_id)
+            cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
+            if cur_bytes > 0 and getattr(profile, "user_id", None) and getattr(profile, "device_name", None):
+                from database.models import User
+                from utils.traffic_helpers import record_device_traffic_archive
+
+                user_obj = await session.get(User, profile.user_id)
+                if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
+                    archived = dict(user_obj.archived_device_traffic or {})
+                    user_obj.archived_device_traffic = record_device_traffic_archive(
+                        archived, profile.device_name, cur_bytes
+                    )
+                    profile.traffic_down = 0
+                    profile.traffic_up = 0
             if profile.provisioning_status == "create_cleanup_pending":
                 await session.execute(
                     update(APIOperation)

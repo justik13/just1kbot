@@ -722,6 +722,30 @@ def list_clients(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     }
 
 
+def _get_host_net_bytes() -> tuple[int, int]:
+    """Reads cumulative host interface traffic (tx, rx) excluding loopback and virtual interfaces."""
+    tx_raw = 0
+    rx_raw = 0
+    proc_net = "/proc/net/dev"
+    if os.path.exists(proc_net):
+        try:
+            with open(proc_net, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if ":" not in line:
+                        continue
+                    name, stats = line.split(":", 1)
+                    name = name.strip()
+                    if name == "lo" or name.startswith(("docker", "veth", "br-", "wg", "awg", "tun", "tap")):
+                        continue
+                    cols = stats.split()
+                    if len(cols) >= 9:
+                        rx_raw += int(cols[0])
+                        tx_raw += int(cols[8])
+        except Exception:
+            pass
+    return tx_raw, rx_raw
+
+
 @app.get("/v1/traffic/snapshot")
 async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
@@ -767,12 +791,15 @@ async def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, A
             continue
 
         if epoch1 == epoch2 and pid1 == pid2 and starttime1 == starttime2 and boot_id1 == boot_id2:
+            tx_bytes, rx_bytes = _get_host_net_bytes()
             return {
                 "node_epoch": epoch1,
                 "boot_id": boot_id1,
                 "starttime": starttime1,
                 "timestamp": int(time.time()),
                 "users": users_stats,
+                "host_tx_bytes": tx_bytes,
+                "host_rx_bytes": rx_bytes,
             }
 
         logger.warning(

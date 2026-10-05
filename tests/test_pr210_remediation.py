@@ -638,14 +638,13 @@ class TestIntegrationsAndCleanupVerification(unittest.TestCase):
         self.assertEqual(back_inactive[0].callback_data, "back_to_main_menu")
 
     def test_device_keyboard_layout_and_button_order(self):
-        """Verify device card keyboard places rename/instructions in row 1, alt connection in row 2."""
+        """Verify device card keyboard places instructions in row 1, alt connection in row 2."""
         from bot.keyboards.device import get_device_keyboard
 
         kb = get_device_keyboard(profile_id=42, config_ready=True, show_delete=True)
         rows = kb.inline_keyboard
-        self.assertEqual(len(rows[0]), 2)  # Rename, Instructions
-        self.assertTrue(rows[0][0].callback_data.startswith("rename_device"))
-        self.assertTrue(rows[0][1].callback_data.startswith("support_help"))
+        self.assertEqual(len(rows[0]), 1)  # Instructions
+        self.assertTrue(rows[0][0].callback_data.startswith("support_help"))
 
         self.assertEqual(len(rows[1]), 1)  # Alt connection
         self.assertTrue(rows[1][0].callback_data.startswith("alt_connection"))

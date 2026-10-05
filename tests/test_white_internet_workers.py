@@ -694,9 +694,9 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         mock_session.scalar.return_value = sub
 
-        mock_session.execute.side_effect = [
-            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
-        ]
+        mock_session.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [server])
+        )
 
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
             with patch(
@@ -764,9 +764,9 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         mock_session.scalar.return_value = sub
 
-        mock_session.execute.side_effect = [
-            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),
-        ]
+        mock_session.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [server])
+        )
 
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
             with patch(
@@ -835,9 +835,9 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         mock_session.scalar.return_value = sub
 
-        mock_session.execute.side_effect = [
-            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),
-        ]
+        mock_session.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [server])
+        )
 
         with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
             with patch(
@@ -944,9 +944,9 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
             return None
 
         mock_session.scalar.side_effect = fake_scalar
-        mock_session.execute.side_effect = [
-            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
-        ]
+        mock_session.execute.return_value = MagicMock(
+            scalars=lambda: MagicMock(all=lambda: [server])
+        )
 
         async def fake_record_and_deduct(session, subscription_id, **kwargs):
             if subscription_id == error_sub.id:

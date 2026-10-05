@@ -473,6 +473,17 @@ class DeviceService:
         if duplicate:
             raise DuplicateDeviceName("Device name already exists on target server")
 
+        # Retain device traffic statistics across server migration
+        if hasattr(user, "archived_device_traffic"):
+            old_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
+            if old_bytes > 0:
+                from utils.traffic_helpers import record_device_traffic_archive
+
+                archived = dict(user.archived_device_traffic or {})
+                user.archived_device_traffic = record_device_traffic_archive(archived, device_name, old_bytes)
+                old_profile.traffic_down = 0
+                old_profile.traffic_up = 0
+
         new_profile = VPNProfile(
             user_id=user.id,
             server_id=target_server.id,
@@ -557,6 +568,12 @@ class DeviceService:
         actor_id: int | None = None,
         force: bool = False,
     ) -> bool:
+        # Consistent lock order across lifecycle operations: User FOR UPDATE -> Profile FOR UPDATE
+        user_id = getattr(profile, "user_id", None)
+        user_obj = None
+        if user_id:
+            user_obj = await session.get(User, user_id, with_for_update=True)
+
         profile = (
             await session.execute(
                 select(VPNProfile).where(VPNProfile.id == profile.id).with_for_update()
@@ -578,7 +595,22 @@ class DeviceService:
         server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
         device_name = profile.device_name
         profile_id = profile.id
-        user_id = profile.user_id
+        if user_id is None:
+            user_id = profile.user_id
+
+        # Retain device traffic statistics upon key deletion or recreation
+        if user_id and device_name:
+            if user_obj is None:
+                user_obj = await session.get(User, user_id, with_for_update=True)
+            if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
+                cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
+                if cur_bytes > 0:
+                    from utils.traffic_helpers import record_device_traffic_archive
+
+                    archived = dict(user_obj.archived_device_traffic or {})
+                    user_obj.archived_device_traffic = record_device_traffic_archive(archived, device_name, cur_bytes)
+                    profile.traffic_down = 0
+                    profile.traffic_up = 0
 
         create_operation = None
         if force and not profile.peer_id:
