@@ -564,7 +564,7 @@ class TestGroupJWhiteInternetServiceDynamicQuotaAndOptions(unittest.TestCase):
         self.assertEqual(extra_json.get("uplinkHTTPMethod"), "GET")
         self.assertEqual(extra_json.get("uplinkDataPlacement"), "header")
         self.assertEqual(extra_json.get("uplinkDataKey"), "data")
-        self.assertEqual(extra_json.get("scMaxEachPostBytes"), 4096)
+        self.assertEqual(extra_json.get("scMaxEachPostBytes"), 16384)
         self.assertEqual(extra_json.get("mode"), "packet-up")
         self.assertTrue(extra_json.get("xPaddingObfsMode"))
 

@@ -1456,6 +1456,9 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
 
     client_max_body_size 0;
+    keepalive_requests 100000;
+    keepalive_time 24h;
+    keepalive_timeout 300s;
     client_header_buffer_size 64k;
     large_client_header_buffers 8 128k;
 
@@ -1491,8 +1494,8 @@ server {
 
         proxy_buffering off;
         proxy_request_buffering off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
     }
 
     # 3. Универсальная выдача подписок через CDN (решение Bootstrap Paradox)
@@ -2684,6 +2687,7 @@ curl -fsSL https://cheburcheck.ru/install-probe.sh | sudo sh
 | **Скрытый сбой Nginx / certbot (Гомоглифы)** | При настройке домена или пути случайно набраны визуально неотличимые кириллические буквы (`с`, `а`, `о`, `р`, `е`, `х`) | Проверить строку через IDNA/punycode или скрипт поиска не-латинских символов (`ord(ch) > 127`), перенабрать строку строго в английской раскладке |
 | **Массовые TIME_WAIT и `Cannot assign requested address`** | Нарезка Bodiless GET генерирует поток HTTP/1.1 запросов без повторного использования локальных сокетов | Настроить в Nginx пул соединений: `upstream xray_xhttp_backend { server 127.0.0.1:8003; keepalive 128; }` и `proxy_set_header Connection "";` |
 | **Обрыв и зависание Upload после ~4 МБ переданного файла** | Nginx по умолчанию закрывает HTTP/2 соединение после 1000 запросов (`keepalive_requests 1000;`) | Задать в блоке `server 443`: `keepalive_requests 100000;`, `keepalive_timeout 300s;`, `client_header_buffer_size 16k;` |
+| **Обрыв и зависание соединения ровно через ~1 час (INCY)** | Nginx по умолчанию закрывает HTTP/2 соединение через 1 час (`keepalive_time 1h;`), `proxy_read_timeout 3600s;`, а в клиенте зависает сокет без ротации XMUX | 1. На Origin в `server 443`: `keepalive_time 24h;`, в `location`: `proxy_read_timeout 86400s; proxy_send_timeout 86400s;`. 2. В профиле XHTTP: `hMaxReusableSecs: 1800`, `hKeepAlivePeriod: 30`, `mux=false`. |
 | **HTTP 413 на Origin при передаче чанков клиентом** | На сервере Origin в Xray инбаунде задан жесткий лимит `scMaxEachPostBytes: 4096` | На сервере Origin задать универсальный лимит: `'scMaxEachPostBytes': 1000000` (1 МБ) и `'serverMaxHeaderBytes': 65536`. Клиентские чанки могут безопасно масштабироваться до 16 КБ без риска 413 |
 
 ### 9.1. Послойная изоляция сбоев: CDN vs Nginx vs Xray и специфика таймаутов (5-секундный лимит YC)

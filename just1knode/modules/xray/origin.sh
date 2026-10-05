@@ -514,8 +514,8 @@ EOF
         proxy_buffering off;
         proxy_request_buffering off;
         proxy_max_temp_file_size 0;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
         add_header Cache-Control "no-store, no-cache" always;
         add_header CDN-Cache-Control "no-store" always;
         add_header Pragma "no-cache" always;
@@ -556,6 +556,7 @@ EOF
     fi
 
     local ssl_reject_directive=""
+    local keepalive_time_directive=""
     local nginx_ver
     nginx_ver="$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "0.0.0")"
     if [[ -n "$nginx_ver" ]] && python3 -c "
@@ -567,6 +568,16 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
         ssl_reject_directive="ssl_reject_handshake on;"
+    fi
+    if [[ -n "$nginx_ver" ]] && python3 -c "
+import sys
+try:
+    v = tuple(map(int, '$nginx_ver'.split('.')))
+    sys.exit(0 if v >= (1, 19, 10) else 1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+        keepalive_time_directive="    keepalive_time 24h;"
     fi
 
     local catchall_ssl_block
@@ -644,7 +655,8 @@ server {
     client_max_body_size 0;
     client_body_buffer_size 128k;
     keepalive_requests 100000;
-    keepalive_timeout 300s;
+${keepalive_time_directive:+$keepalive_time_directive
+}    keepalive_timeout 300s;
     client_header_buffer_size 16k;
     large_client_header_buffers 8 64k;
 
@@ -1267,17 +1279,23 @@ try:
         except Exception:
             pass
 
-    # Реконсиляция default.conf на keepalive upstream xray_xhttp_default
+    # Реконсиляция default.conf на keepalive upstream xray_xhttp_default и таймауты 86400s
     def_cf_path = os.path.join(nginx_dir, 'default.conf')
     if os.path.exists(def_cf_path):
         try:
             with open(def_cf_path, 'r', encoding='utf-8') as df_f:
                 df_cur = df_f.read()
+            df_changed = False
             if 'proxy_pass http://127.0.0.1:8003;' in df_cur:
                 df_cur = df_cur.replace('proxy_pass http://127.0.0.1:8003;', 'proxy_pass http://xray_xhttp_default;')
+                df_changed = True
+            if 'proxy_read_timeout 3600s;' in df_cur or 'proxy_send_timeout 3600s;' in df_cur:
+                df_cur = df_cur.replace('proxy_read_timeout 3600s;', 'proxy_read_timeout 86400s;').replace('proxy_send_timeout 3600s;', 'proxy_send_timeout 86400s;')
+                df_changed = True
+            if df_changed:
                 with open(def_cf_path, 'w', encoding='utf-8') as df_f:
                     df_f.write(df_cur)
-                print('[+] Согласован Nginx default.conf: переключен на keepalive upstream xray_xhttp_default')
+                print('[+] Согласован Nginx default.conf: обновлены таймауты (86400s) и upstream xray_xhttp_default')
         except Exception:
             pass
 
@@ -1344,8 +1362,8 @@ location ^~ {path} {{
     proxy_buffering off;
     proxy_request_buffering off;
     proxy_max_temp_file_size 0;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
     add_header Cache-Control \"no-store, no-cache\" always;
     add_header CDN-Cache-Control \"no-store\" always;
     add_header Pragma \"no-cache\" always;
@@ -1362,6 +1380,8 @@ location ^~ {path} {{
                     if (f'location = {cf_base}' in cur_text and
                         'CDN-Cache-Control' in cur_text and
                         'xhttp_proxy_method' in cur_text and
+                        'proxy_read_timeout 86400s;' in cur_text and
+                        'proxy_send_timeout 86400s;' in cur_text and
                         f'proxy_pass http://xray_xhttp_relay_{code_lower};' in cur_text):
                         needs_write = False
                 except Exception:
@@ -1440,6 +1460,7 @@ except Exception:
     if [[ -f "$origin_vhost" ]]; then
         manifest_track_file "$origin_vhost"
         local ssl_reject_supported=0
+        local keepalive_time_supported=0
         local nginx_ver
         nginx_ver="$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo "0.0.0")"
         if [[ -n "$nginx_ver" ]] && python3 -c "
@@ -1451,6 +1472,16 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null; then
             ssl_reject_supported=1
+        fi
+        if [[ -n "$nginx_ver" ]] && python3 -c "
+import sys
+try:
+    v = tuple(map(int, '$nginx_ver'.split('.')))
+    sys.exit(0 if v >= (1, 19, 10) else 1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+            keepalive_time_supported=1
         fi
         local heal_origin_domain
         heal_origin_domain="$(get_state_val "domain" 2>/dev/null || true)"
@@ -1473,6 +1504,7 @@ conf_path = sys.argv[1]
 ssl_rej = (sys.argv[2] == '1')
 domain = sys.argv[3] if len(sys.argv) > 3 else ''
 dummy_dir = sys.argv[4] if len(sys.argv) > 4 else ''
+keepalive_time_supported = (sys.argv[5] == '1') if len(sys.argv) > 5 else False
 try:
     with open(conf_path, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -1556,23 +1588,51 @@ server {{
             content
         )
 
+    if keepalive_time_supported:
+        if 'keepalive_time' in content:
+            content = re.sub(r'keepalive_time\s+[^;]+;', 'keepalive_time 24h;', content)
+        else:
+            content = re.sub(
+                r'keepalive_requests\s+100000;',
+                'keepalive_requests 100000;\n    keepalive_time 24h;',
+                content
+            )
+    else:
+        content = re.sub(r'keepalive_time\s+[^;]+;\n*', '', content)
+
     if 'keepalive_timeout' in content:
         content = re.sub(r'keepalive_timeout\s+[^;]+;', 'keepalive_timeout 300s;', content)
     else:
-        content = re.sub(
-            r'keepalive_requests\s+100000;',
-            'keepalive_requests 100000;\n    keepalive_timeout 300s;',
-            content
-        )
+        if keepalive_time_supported and 'keepalive_time 24h;' in content:
+            content = re.sub(
+                r'keepalive_time\s+24h;',
+                'keepalive_time 24h;\n    keepalive_timeout 300s;',
+                content
+            )
+        else:
+            content = re.sub(
+                r'keepalive_requests\s+100000;',
+                'keepalive_requests 100000;\n    keepalive_timeout 300s;',
+                content
+            )
 
     if 'client_header_buffer_size' in content:
         content = re.sub(r'client_header_buffer_size\s+[^;]+;', 'client_header_buffer_size 16k;', content)
-    else:
+    elif 'large_client_header_buffers' in content:
         content = re.sub(
-            r'large_client_header_buffers\s+8\s+64k;',
+            r'large_client_header_buffers\s+[^;]+;',
             'client_header_buffer_size 16k;\n    large_client_header_buffers 8 64k;',
             content
         )
+    else:
+        content = re.sub(
+            r'keepalive_timeout\s+300s;',
+            'keepalive_timeout 300s;\n    client_header_buffer_size 16k;\n    large_client_header_buffers 8 64k;',
+            content
+        )
+
+    if 'large_client_header_buffers' in content:
+        content = re.sub(r'large_client_header_buffers\s+[^;]+;', 'large_client_header_buffers 8 64k;', content)
 
     d = os.path.dirname(os.path.abspath(conf_path))
     os.makedirs(d, exist_ok=True)
@@ -1589,7 +1649,7 @@ server {{
     print('[+] Nginx just1k-origin.conf обновлен: заглушка заменена на 404 Not Found, Catch-All и keepalive защищены')
 except Exception:
     pass
-" "$origin_vhost" "$ssl_reject_supported" "$heal_origin_domain" "$heal_dummy_dir" 2>/dev/null || true
+" "$origin_vhost" "$ssl_reject_supported" "$heal_origin_domain" "$heal_dummy_dir" "$keepalive_time_supported" 2>/dev/null || true
     fi
 
     # Удаление дефолтного сайта, если он был случайно восстановлен

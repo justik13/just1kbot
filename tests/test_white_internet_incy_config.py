@@ -140,6 +140,41 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
                 self.assertNotIn("serverDescription=", links[0])
                 self.assertNotIn("serverDescription=", links[1])
 
+    def test_generate_vless_links_and_full_config_mux_disabled_and_upload_tuning(self):
+        import json
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+        relays = [{"code": "de", "name": "🇩🇪 Германия"}]
+        links = WhiteInternetService.generate_vless_links(
+            sub,
+            cdn_domain="cdn.just1k.online",
+            relays=relays,
+        )
+        self.assertEqual(len(links), 2)
+        for link in links:
+            # 1. mux=false must be explicitly present in link parameters
+            self.assertIn("&mux=false", link)
+            # 2. extra param must contain fast upload params without custom xmux override
+            parsed = urllib.parse.urlparse(link)
+            query = urllib.parse.parse_qs(parsed.query)
+            self.assertIn("extra", query)
+            extra_data = json.loads(query["extra"][0])
+            self.assertNotIn("xmux", extra_data)
+            self.assertEqual(extra_data["scMaxEachPostBytes"], 16384)
+            self.assertEqual(extra_data["scMinPostsIntervalMs"], 10)
+
+        # 3. generate_full_xray_config must contain mux: {enabled: False} and fast upload params without custom xmux
+        cfg = WhiteInternetService.generate_full_xray_config(
+            sub,
+            cdn_domain="cdn.just1k.online",
+        )
+        outbound = cfg["outbounds"][0]
+        self.assertEqual(outbound["mux"], {"enabled": False})
+        xhttp_settings = outbound["streamSettings"]["xhttpSettings"]
+        self.assertNotIn("xmux", xhttp_settings)
+        self.assertEqual(xhttp_settings["scMaxEachPostBytes"], 16384)
+        self.assertEqual(xhttp_settings["scMinPostsIntervalMs"], 10)
+
 
 class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
     """Test HTTP subscription feed headers with configurable INCY options."""

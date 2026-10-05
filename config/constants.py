@@ -194,6 +194,32 @@ def _validate_xhttp_padding_bytes(val: str | None) -> str:
     return default_val
 
 
+def _validate_xhttp_post_bytes(val: str | None) -> int:
+    default_val = 16384  # 16 KB default: eliminates 4 Mbps upload bottleneck while staying safe for CDN
+    if not val or not isinstance(val, str):
+        return default_val
+    try:
+        parsed = int(val.strip())
+        if 1024 <= parsed <= 65536:
+            return parsed
+    except ValueError:
+        pass
+    return default_val
+
+
+def _validate_xhttp_min_posts_interval(val: str | None) -> int:
+    default_val = 10  # 10 ms: 3x lower interval between upload packets
+    if not val or not isinstance(val, str):
+        return default_val
+    try:
+        parsed = int(val.strip())
+        if 0 <= parsed <= 1000:
+            return parsed
+    except ValueError:
+        pass
+    return default_val
+
+
 # Referral System Constants
 REFERRAL_TIERS: tuple[tuple[int, Decimal, str], ...] = (
     (0, Decimal("0.15"), "Standard"),
@@ -222,11 +248,12 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "uplinkHTTPMethod": "GET",
     "uplinkDataPlacement": "header",
     "uplinkDataKey": "data",
-    # Keep a single upload post within the server-side scMaxEachPostBytes
-    # limit (Xray itself answers 413 when a post exceeds it).
-    "scMaxEachPostBytes": 4096,
+    # Tuned post bytes and interval for fast upload without exceeding CDN edge header limits:
+    "scMaxEachPostBytes": _validate_xhttp_post_bytes(os.getenv("WHITE_INTERNET_SC_MAX_EACH_POST_BYTES")),
     "scMaxConcurrentPosts": 1,
-    "scMinPostsIntervalMs": 30,
+    "scMinPostsIntervalMs": _validate_xhttp_min_posts_interval(
+        os.getenv("WHITE_INTERNET_SC_MIN_POSTS_INTERVAL_MS")
+    ),
     "xPaddingPlacement": "queryInHeader",
     "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
     "xPaddingHeader": "X-Cache",

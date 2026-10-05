@@ -1372,7 +1372,7 @@ class WhiteInternetService:
                 effective_origin_badge = None
             origin_tag_formatted = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
             standalone_path = f"{base}/default"
-            origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{origin_tag_formatted}"
+            origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{origin_tag_formatted}"
             links.append(origin_link)
 
         if relays and isinstance(relays, list):
@@ -1412,7 +1412,7 @@ class WhiteInternetService:
                     r_badge = None
 
                 r_tag = WhiteInternetService._format_vless_tag(r_name, r_badge)
-                link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
+                link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{r_tag}"
                 links.append(link)
 
         return links
@@ -1483,6 +1483,7 @@ class WhiteInternetService:
                             "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
                         },
                     },
+                    "mux": {"enabled": False},
                 },
                 {"tag": "direct", "protocol": "freedom"},
                 {"tag": "block", "protocol": "blackhole"},
