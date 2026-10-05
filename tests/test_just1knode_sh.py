@@ -567,31 +567,120 @@ exit 0
         self.assertIn("net.ipv4.tcp_congestion_control = bbr", content)
 
     def test_get_public_ipv4_and_early_hardening_contract(self):
-        """Verify get_public_ipv4 strictly forces IPv4 and node installers call sysctl hardening early."""
+        """Verify get_public_ipv4 contract, early role checks before mutations, and DNS validation safety."""
         common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
         relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
         origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
         amnezia_sh = (REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
         node_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
 
-        # common.sh must define get_public_ipv4 with curl -4 and validate_ipv4
+        # common.sh must define validate_public_ipv4 and get_public_ipv4
+        self.assertIn("validate_public_ipv4()", common_sh)
         self.assertIn("get_public_ipv4()", common_sh)
         self.assertIn("curl -4 -s", common_sh)
-        self.assertIn('validate_ipv4 "$ip"', common_sh)
+        self.assertIn('validate_public_ipv4 "$ip"', common_sh)
 
-        # relay.sh must call apply_node_sysctl_hardening early in install_xray_relay_node
-        self.assertIn("install_base_deps\n    apply_node_sysctl_hardening", relay_sh)
+        # relay.sh: role check MUST execute BEFORE install_base_deps and apply_node_sysctl_hardening
+        relay_role_idx = relay_sh.index('prev_role="$(get_node_status)"')
+        relay_deps_idx = relay_sh.index("install_base_deps\n    apply_node_sysctl_hardening")
+        self.assertLess(relay_role_idx, relay_deps_idx, "Relay role check must occur before install_base_deps/hardening")
         self.assertIn('my_ip="$(get_public_ipv4 || true)"', relay_sh)
 
-        # origin.sh must call apply_node_sysctl_hardening early in install_xray_origin_node
-        self.assertIn("install_base_deps\n    apply_node_sysctl_hardening", origin_sh)
+        # origin.sh: role check MUST execute BEFORE install_base_deps and apply_node_sysctl_hardening
+        origin_role_idx = origin_sh.index('prev_role="$(get_node_status)"')
+        origin_deps_idx = origin_sh.index("install_base_deps\n    apply_node_sysctl_hardening")
+        self.assertLess(origin_role_idx, origin_deps_idx, "Origin role check must occur before install_base_deps/hardening")
 
         # amnezia.sh and just1knode.sh must use get_public_ipv4
         self.assertIn('my_ip="$(get_public_ipv4 || true)"', amnezia_sh)
         self.assertIn('my_ip="$(get_public_ipv4 || true)"', node_sh)
 
-        # validate_relay_dns must guard against non-IPv4 / IPv6 expected IP
-        self.assertIn("DNS A-запись — строго IPv4", relay_sh)
+        # validate_relay_dns must explicitly report NO_EXPECTED and INVALID_EXPECTED instead of false OK
+        self.assertIn("INVALID_EXPECTED|", relay_sh)
+        self.assertIn("NO_EXPECTED|", relay_sh)
+
+    def test_validate_public_ipv4_behavioural(self):
+        """Verify public IPv4 classification rejects private, loopback, link-local, CGNAT, and IPv6."""
+        import ipaddress
+
+        def is_public_ipv4(ip_str: str) -> bool:
+            try:
+                addr = ipaddress.IPv4Address(ip_str)
+                return addr.is_global and not addr.is_multicast and not addr.is_reserved and not addr.is_unspecified
+            except Exception:
+                return False
+
+        # Globally routable public IPv4 addresses
+        self.assertTrue(is_public_ipv4("87.121.86.155"))
+        self.assertTrue(is_public_ipv4("1.1.1.1"))
+        self.assertTrue(is_public_ipv4("8.8.8.8"))
+        self.assertTrue(is_public_ipv4("142.250.180.206"))
+
+        # Private RFC 1918
+        self.assertFalse(is_public_ipv4("10.0.0.1"))
+        self.assertFalse(is_public_ipv4("10.255.255.255"))
+        self.assertFalse(is_public_ipv4("172.16.0.1"))
+        self.assertFalse(is_public_ipv4("172.31.255.255"))
+        self.assertFalse(is_public_ipv4("192.168.0.1"))
+        self.assertFalse(is_public_ipv4("192.168.1.100"))
+
+        # Loopback & Link-local
+        self.assertFalse(is_public_ipv4("127.0.0.1"))
+        self.assertFalse(is_public_ipv4("127.0.1.1"))
+        self.assertFalse(is_public_ipv4("169.254.1.1"))
+
+        # Carrier-Grade NAT (100.64.0.0/10)
+        self.assertFalse(is_public_ipv4("100.64.0.1"))
+        self.assertFalse(is_public_ipv4("100.127.255.254"))
+
+        # Multicast, Broadcast, Reserved
+        self.assertFalse(is_public_ipv4("0.0.0.0"))
+        self.assertFalse(is_public_ipv4("224.0.0.1"))
+        self.assertFalse(is_public_ipv4("240.0.0.1"))
+        self.assertFalse(is_public_ipv4("255.255.255.255"))
+
+        # IPv6 strings
+        self.assertFalse(is_public_ipv4("2a12:bec4:1483:7b1::2"))
+        self.assertFalse(is_public_ipv4("::1"))
+        self.assertFalse(is_public_ipv4("fe80::1"))
+
+    def test_validate_relay_dns_script_behavioural(self):
+        """Verify the Python DNS validator snippet inside relay.sh handles match, mismatch, invalid, and empty expected IP."""
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        m = re.search(r'python3 -c "\n(.*?)\n" "\$domain" "\$expected_ip"', relay_sh, re.DOTALL)
+        self.assertIsNotNone(m, "Python snippet in validate_relay_dns must be extractable")
+        py_code = m.group(1)
+
+        def run_validator(domain: str, expected_ip: str) -> str:
+            res = subprocess.run(
+                [sys.executable, "-c", py_code, domain, expected_ip],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return res.stdout.strip()
+
+        # 1. Cyrillic domain
+        self.assertEqual(run_validator("домен.com", "1.1.1.1"), "CYRILLIC")
+
+        # 2. Invalid FQDN
+        self.assertEqual(run_validator("not_a_domain", "1.1.1.1"), "INVALID_FQDN")
+
+        # 3. Invalid / IPv6 expected IP must NOT succeed as OK
+        ipv6_res = run_validator("one.one.one.one", "2a12:bec4:1483:7b1::2")
+        self.assertTrue(ipv6_res.startswith("INVALID_EXPECTED|2a12:"), f"Expected INVALID_EXPECTED, got {ipv6_res}")
+
+        # 4. Empty expected IP must return NO_EXPECTED, NOT a false OK
+        no_exp_res = run_validator("one.one.one.one", "")
+        self.assertTrue(no_exp_res.startswith("NO_EXPECTED|"), f"Expected NO_EXPECTED, got {no_exp_res}")
+
+        # 5. Correct matching IPv4 -> OK
+        ok_res = run_validator("one.one.one.one", "1.1.1.1")
+        self.assertTrue(ok_res.startswith("OK|"), f"Expected OK, got {ok_res}")
+
+        # 6. Mismatching IPv4 -> MISMATCH
+        mismatch_res = run_validator("one.one.one.one", "8.8.8.8")
+        self.assertTrue(mismatch_res.startswith("MISMATCH|"), f"Expected MISMATCH, got {mismatch_res}")
 
     def test_origin_and_relay_xhttp_inbound_limits_and_nginx_keepalive(self):
         """Verify origin.sh and relays_manage.sh set scMaxEachPostBytes=1000000, serverMaxHeaderBytes=65536, and keepalive_requests=100000."""
