@@ -239,7 +239,8 @@ class TestAdminUserCardWhiteInternet(unittest.IsolatedAsyncioTestCase):
                 now=now_utc(),
                 white_internet_info=None,
             )
-            self.assertNotIn("Белый Интернет", full_card)
+            self.assertNotIn("🌐 <b>Белый Интернет:</b>", full_card)
+            self.assertIn("• <b>Белый Интернет (за месяц):</b>", full_card)
 
     async def test_user_card_renders_white_internet_last_seen(self):
         """User card must include last seen activity if active_hwids has timestamps."""

@@ -1122,6 +1122,62 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(user_lock_idx, prof_lock_idx)
         self.assertLess(prof_lock_idx, op_lock_idx)
 
+    def test_format_user_card_renders_separate_monthly_traffic(self):
+        """User card renders total traffic and separate AWG and White Internet monthly lines."""
+        from bot.handlers.admin.users.common import format_user_card_text
+
+        now = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=987654321,
+            username="monthly_tester",
+            first_name="Tester",
+            total_traffic_bytes=15 * 1024 * 1024 * 1024,
+            total_wi_traffic_bytes=5 * 1024 * 1024 * 1024,
+            monthly_awg_bytes=10 * 1024 * 1024 * 1024,
+            monthly_wi_bytes=2 * 1024 * 1024 * 1024,
+            traffic_cycle="2026-10",
+        )
+
+        card_text = format_user_card_text(
+            user,
+            profiles=[],
+            referrals=[],
+            now=now,
+        )
+
+        self.assertIn("<b>Трафик туннелей:</b> 20.0 GiB", card_text)
+        self.assertIn("• <b>AWG (за месяц):</b> 10.0 GiB", card_text)
+        self.assertIn("• <b>Белый Интернет (за месяц):</b> 2.0 GiB", card_text)
+
+    def test_format_user_card_resets_monthly_traffic_on_cycle_rotation(self):
+        """When user traffic_cycle does not match current month, monthly counters show 0 B."""
+        from bot.handlers.admin.users.common import format_user_card_text
+
+        now = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=987654321,
+            username="monthly_tester",
+            first_name="Tester",
+            total_traffic_bytes=10 * 1024 * 1024 * 1024,
+            total_wi_traffic_bytes=3 * 1024 * 1024 * 1024,
+            monthly_awg_bytes=10 * 1024 * 1024 * 1024,
+            monthly_wi_bytes=3 * 1024 * 1024 * 1024,
+            traffic_cycle="2026-09",
+        )
+
+        card_text = format_user_card_text(
+            user,
+            profiles=[],
+            referrals=[],
+            now=now,
+        )
+
+        self.assertIn("<b>Трафик туннелей:</b> 13.0 GiB", card_text)
+        self.assertIn("• <b>AWG (за месяц):</b> 0 B", card_text)
+        self.assertIn("• <b>Белый Интернет (за месяц):</b> 0 B", card_text)
+
 
 if __name__ == "__main__":
     unittest.main()
