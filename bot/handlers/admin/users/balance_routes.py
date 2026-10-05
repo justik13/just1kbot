@@ -249,9 +249,16 @@ async def process_balance_topup(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
+
+    trigger_msg_id = getattr(message, "message_id", None)
 
     data = await state.get_data()
     telegram_id = data.get("target_telegram_id")
@@ -261,16 +268,12 @@ async def process_balance_topup(
 
     if message.text and message.text.startswith("/"):
         await state.clear()
-        try:
-            await message.delete()
-        except Exception:
-            pass
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -282,7 +285,7 @@ async def process_balance_topup(
             message.chat.id,
             texts.ERROR_POSITIVE_NUMBER,
             get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -292,7 +295,7 @@ async def process_balance_topup(
             message.chat.id,
             texts.ADMIN_USERS_BALANCE_AMOUNT_DOLZHNA_BYT_BOLSHE_0_I_N.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
             get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -306,7 +309,7 @@ async def process_balance_topup(
         texts.ADMIN_USERS_BALANCE_ENTER_TEKSTOVOE_NOTE.format()+
         texts.ADMIN_USERS_BALANCE_ILI_OTPRAVTE_DEFIS_FOR_ABSTRA.format(),
         get_back_button(f"admin_user_balance:{telegram_id}"),
-        trigger_message_id=message.message_id,
+        trigger_message_id=trigger_msg_id,
     )
 
 
@@ -316,9 +319,16 @@ async def process_balance_deduct(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
+
+    trigger_msg_id = getattr(message, "message_id", None)
 
     data = await state.get_data()
     telegram_id = data.get("target_telegram_id")
@@ -328,16 +338,12 @@ async def process_balance_deduct(
 
     if message.text and message.text.startswith("/"):
         await state.clear()
-        try:
-            await message.delete()
-        except Exception:
-            pass
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -349,7 +355,7 @@ async def process_balance_deduct(
             message.chat.id,
             texts.ERROR_POSITIVE_NUMBER,
             get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -359,7 +365,7 @@ async def process_balance_deduct(
             message.chat.id,
             texts.ADMIN_USERS_BALANCE_AMOUNT_DOLZHNA_BYT_BOLSHE_0_I_N.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
             get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -370,7 +376,7 @@ async def process_balance_deduct(
             message.chat.id,
             texts.ERROR_USER_NOT_FOUND,
             get_back_button("admin_users"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         await state.clear()
         return
@@ -383,7 +389,7 @@ async def process_balance_deduct(
             texts.ADMIN_USER_BALANCE_INSUFFICIENT_FOR_DEBIT.format()+
             texts.ADMIN_USERS_BALANCE_DOSTUPNO_FOR_REDUCE_BONUSN.format(int_balance_info_bonus_available=int(balance_info.bonus_available)),
             get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         await state.clear()
         return
@@ -398,7 +404,7 @@ async def process_balance_deduct(
         texts.ADMIN_USER_DEBIT_REASON_PROMPT.format()+
         texts.ADMIN_USERS_BALANCE_ILI_OTPRAVTE_DEFIS_FOR_ABSTRA.format(),
         get_back_button(f"admin_user_balance:{telegram_id}"),
-        trigger_message_id=message.message_id,
+        trigger_message_id=trigger_msg_id,
     )
 
 
@@ -408,9 +414,16 @@ async def process_balance_reason(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
+
+    trigger_msg_id = getattr(message, "message_id", None)
 
     data = await state.get_data()
     telegram_id = data.get("target_telegram_id")
@@ -423,16 +436,12 @@ async def process_balance_reason(
 
     if message.text and message.text.startswith("/"):
         await state.clear()
-        try:
-            await message.delete()
-        except Exception:
-            pass
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -443,7 +452,7 @@ async def process_balance_reason(
             message.chat.id,
             texts.ERROR_REASON_TOO_LONG.format(max=100),
             get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -454,6 +463,13 @@ async def process_balance_reason(
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
         await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_USER_NOT_FOUND,
+            get_back_button("admin_users"),
+            trigger_message_id=trigger_msg_id,
+        )
         return
 
     username_str = f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
@@ -490,7 +506,7 @@ async def process_balance_reason(
         message.chat.id,
         text,
         builder.as_markup(),
-        trigger_message_id=message.message_id,
+        trigger_message_id=trigger_msg_id,
         parse_mode="HTML",
     )
 

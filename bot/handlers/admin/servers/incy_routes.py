@@ -30,7 +30,7 @@ from config.constants import (
 from database.repositories.servers_repo import get_server_by_id, update_server
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from utils.telegram import safe
+from utils.telegram import render_hub, safe
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -193,8 +193,13 @@ async def process_server_incy_param_input(
     state: FSMContext,
     session: AsyncSession,
 ) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
-        await message.answer(texts.ERROR_ACCESS_DENIED)
+        await state.clear()
         return
 
     data = await state.get_data()
@@ -207,8 +212,14 @@ async def process_server_incy_param_input(
 
     server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
-        await message.answer(texts.ERROR_SERVER_NOT_FOUND)
         await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_SERVER_NOT_FOUND,
+            get_back_button("admin_servers"),
+            trigger_message_id=getattr(message, "message_id", None),
+        )
         return
 
     raw_text = (message.text or "").strip()
@@ -224,7 +235,18 @@ async def process_server_incy_param_input(
         if any(c in v for c in (" ", "\n", "\r", "\t")) or not (
             v.startswith("https://") or v.startswith("http://") or v.startswith("tg://")
         ):
-            await message.answer(texts.ADMIN_SERVER_INCY_ERR_INVALID_URL)
+            details = _get_server_incy_details(server)
+            prompt_text = texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL.format(
+                current=safe(details["announce_url"])
+            )
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                f"{texts.ADMIN_SERVER_INCY_ERR_INVALID_URL}\n\n{prompt_text}",
+                get_back_button(f"admin_server_incy:{server_id}"),
+                parse_mode="HTML",
+                trigger_message_id=getattr(message, "message_id", None),
+            )
             return
 
     extra = dict(server.extra_data or {})
@@ -276,10 +298,13 @@ async def process_server_incy_param_input(
         origin_status=safe(details["origin_status"]),
     )
 
-    await message.answer(
+    await render_hub(
+        message.bot,
+        message.chat.id,
         card_text,
         reply_markup=get_admin_server_incy_keyboard(server_id, origin_hidden=details["origin_hidden"]),
         parse_mode="HTML",
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
 
@@ -596,8 +621,13 @@ async def process_server_incy_relay_name_input(
     state: FSMContext,
     session: AsyncSession,
 ) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
-        await message.answer(texts.ERROR_ACCESS_DENIED)
+        await state.clear()
         return
 
     data = await state.get_data()
@@ -610,8 +640,14 @@ async def process_server_incy_relay_name_input(
 
     server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
-        await message.answer(texts.ERROR_SERVER_NOT_FOUND)
         await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_SERVER_NOT_FOUND,
+            get_back_button("admin_servers"),
+            trigger_message_id=getattr(message, "message_id", None),
+        )
         return
 
     raw_text = (message.text or "").strip()
@@ -664,12 +700,15 @@ async def process_server_incy_relay_name_input(
         status=safe(status),
     )
 
-    await message.answer(
+    await render_hub(
+        message.bot,
+        message.chat.id,
         card_text,
         reply_markup=get_admin_server_incy_relay_actions_keyboard(
             server_id, relay_code, is_hidden=is_hidden
         ),
         parse_mode="HTML",
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
 
@@ -747,8 +786,13 @@ async def process_server_incy_relay_badge_input(
     state: FSMContext,
     session: AsyncSession,
 ) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
-        await message.answer(texts.ERROR_ACCESS_DENIED)
+        await state.clear()
         return
 
     data = await state.get_data()
@@ -761,8 +805,14 @@ async def process_server_incy_relay_badge_input(
 
     server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
-        await message.answer(texts.ERROR_SERVER_NOT_FOUND)
         await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_SERVER_NOT_FOUND,
+            get_back_button("admin_servers"),
+            trigger_message_id=getattr(message, "message_id", None),
+        )
         return
 
     raw_text = (message.text or "").strip()
@@ -817,12 +867,15 @@ async def process_server_incy_relay_badge_input(
         status=safe(status),
     )
 
-    await message.answer(
+    await render_hub(
+        message.bot,
+        message.chat.id,
         card_text,
         reply_markup=get_admin_server_incy_relay_actions_keyboard(
             server_id, relay_code, is_hidden=is_hidden
         ),
         parse_mode="HTML",
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
 

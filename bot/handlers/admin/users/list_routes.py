@@ -252,9 +252,16 @@ async def process_search_user(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
+
+    trigger_msg_id = getattr(message, "message_id", None)
 
     if not message.text:
         await render_hub(
@@ -262,15 +269,12 @@ async def process_search_user(
             message.chat.id,
             texts.ADMIN_USERS_LIST_ENTER_USERNAME_TELEGRAM_ID_I,
             get_back_button("admin_users"),
+            trigger_message_id=trigger_msg_id,
         )
         return
 
     if message.text.startswith("/"):
         await state.clear()
-        try:
-            await message.delete()
-        except Exception:
-            pass
         return
 
     query_text = message.text.strip()
@@ -280,7 +284,7 @@ async def process_search_user(
             message.chat.id,
             texts.ERROR_SEARCH_QUERY_TOO_LONG.format(max=64),
             get_back_button("admin_users"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
             parse_mode="HTML",
         )
         await state.clear()
@@ -295,7 +299,7 @@ async def process_search_user(
             message.chat.id,
             texts.ADMIN_USERS_LIST_USER_PO_ZAPROSU_NE_NAYDE.format(safe_message_text=safe(query_text)),
             get_back_button("admin_users"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
             parse_mode="HTML",
         )
         await state.clear()

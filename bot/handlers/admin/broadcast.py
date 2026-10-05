@@ -166,21 +166,25 @@ async def process_broadcast_message(
     state: FSMContext,
     session: AsyncSession = None,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
+
+    trigger_msg_id = getattr(message, "message_id", None)
+
     if message.text and message.text.startswith("/"):
         await state.clear()
-        try:
-            await message.delete()
-        except Exception:
-            pass
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_broadcast"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -221,6 +225,7 @@ async def process_broadcast_message(
             message.chat.id,
             texts.ERROR_TEXT_OR_MEDIA,
             get_back_button("admin_menu"),
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -232,6 +237,7 @@ async def process_broadcast_message(
                 error_summary=TELEGRAM_MESSAGE_LIMIT
             ),
             get_back_button("admin_menu"),
+            trigger_message_id=trigger_msg_id,
         )
         return
     if media_id and len(broadcast_text) > TELEGRAM_CAPTION_LIMIT:
@@ -242,6 +248,7 @@ async def process_broadcast_message(
                 error_summary=TELEGRAM_CAPTION_LIMIT
             ),
             get_back_button("admin_menu"),
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -312,6 +319,7 @@ async def process_broadcast_message(
             preview_summary,
             get_broadcast_launch_keyboard(total_count),
             parse_mode="HTML",
+            trigger_message_id=trigger_msg_id,
         )
         await state.update_data(
             broadcast_text=broadcast_text,
@@ -327,6 +335,7 @@ async def process_broadcast_message(
             message.chat.id,
             texts.ERROR_VALIDATION.format(error=safe(str(e))),
             get_back_button("admin_menu"),
+            trigger_message_id=trigger_msg_id,
         )
 
 

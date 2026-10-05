@@ -339,10 +339,9 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         try:
-            await query.answer()
+            await query.answer(texts.WL_USER_NOT_FOUND, show_alert=True)
         except Exception:
             pass
-        await query.message.answer(texts.WL_USER_NOT_FOUND)
         return
 
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)

@@ -369,8 +369,16 @@ async def admin_sub_extend_custom_process(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
+        await state.clear()
         return
+
+    trigger_msg_id = getattr(message, "message_id", None)
 
     data = await state.get_data()
 
@@ -389,6 +397,7 @@ async def admin_sub_extend_custom_process(
             texts.ERROR_DAYS_OVERFLOW,
             get_back_button(f"admin_sub_extend:{telegram_id}"),
             parse_mode="HTML",
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -402,6 +411,7 @@ async def admin_sub_extend_custom_process(
             message.chat.id,
             texts.ERROR_USER_NOT_FOUND,
             get_back_button(f"admin_sub_extend:{telegram_id}"),
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -439,4 +449,5 @@ async def admin_sub_extend_custom_process(
                 f"admin_sub_extend:{telegram_id}"
             ),
         ),
+        trigger_message_id=trigger_msg_id,
     )
