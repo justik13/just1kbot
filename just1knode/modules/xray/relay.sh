@@ -28,13 +28,19 @@ if not re.match(r'^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$
     print('INVALID_FQDN')
     sys.exit(0)
 
+if expected and (':' in expected or not re.match(r'^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', expected)):
+    print(f'INVALID_EXPECTED|{expected}')
+    sys.exit(0)
+
 try:
     addr_info = socket.getaddrinfo(domain, None, socket.AF_INET, socket.SOCK_STREAM)
     ips = list(dict.fromkeys([ai[4][0] for ai in addr_info if ai[4]]))
     if not ips:
         print('NO_RECORDS')
-    elif expected and expected not in ips:
-        print(f'MISMATCH|{\",\".join(ips)}')
+    elif not expected:
+        print(f'NO_EXPECTED|{ips[0]}')
+    elif expected not in ips:
+        print('MISMATCH|' + ','.join(ips))
     else:
         print(f'OK|{ips[0]}')
 except Exception as e:
@@ -47,6 +53,9 @@ except Exception as e:
         elif [[ "$dns_res" == "INVALID_FQDN" ]]; then
             error "Некорректный формат домена: '$domain'. Ожидается валидное имя FQDN (например: your-relay.yourdomain.com)."
             return 1
+        elif echo "$dns_res" | grep -q "^INVALID_EXPECTED|"; then
+            local bad_exp="${dns_res#INVALID_EXPECTED|}"
+            warn "Ожидаемый IP сервера '$bad_exp' не является валидным IPv4 адресом. Сверка DNS A-записи невозможна."
         elif echo "$dns_res" | grep -q "^OK|"; then
             local resolved_ip="${dns_res#OK|}"
             log "✔ DNS A-запись подтверждена: $domain ➔ $resolved_ip"
@@ -55,6 +64,10 @@ except Exception as e:
             local mismatch_ip="${dns_res#MISMATCH|}"
             warn "DNS A-запись для '$domain' указывает на IP $mismatch_ip, а ожидаемый IP этого сервера: $expected_ip."
             warn "Возможные причины: в Cloudflare включен Proxy (оранжевое облако вместо серого) или не обновился кэш DNS."
+        elif echo "$dns_res" | grep -q "^NO_EXPECTED|"; then
+            local resolved_ip="${dns_res#NO_EXPECTED|}"
+            warn "DNS A-запись для '$domain' указывает на IP $resolved_ip, но публичный IPv4 этого сервера не определен."
+            warn "Невозможно автоматически подтвердить соответствие IP серверу."
         else
             local err_msg="${dns_res#ERROR|}"
             warn "DNS-запись для '$domain' пока не найдена ($err_msg)."
@@ -74,7 +87,11 @@ except Exception as e:
                 *) error "Настройка отменена."; return 1 ;;
             esac
         else
-            error "DNS-валидация не пройдена в неинтерактивном режиме для '$domain' (ожидался $expected_ip)."
+            if [[ -n "$expected_ip" ]]; then
+                error "DNS-валидация не пройдена в неинтерактивном режиме для '$domain' (ожидался $expected_ip)."
+            else
+                error "DNS-валидация не пройдена в неинтерактивном режиме для '$domain' (публичный IPv4 сервера не определён)."
+            fi
             return 1
         fi
     done
@@ -276,7 +293,6 @@ install_xray_relay_node() {
     title "УСТАНОВКА RELAY УЗЛА (Белый Интернет — Выход VLESS)"
     check_root
     init_state_dir
-    install_base_deps
 
     local prev_role
     prev_role="$(get_node_status)"
@@ -284,6 +300,9 @@ install_xray_relay_node() {
         error "Узел уже настроен как Origin. Установка Relay на Origin запрещена (контуры строго изолированы)."
         return 1
     fi
+
+    install_base_deps
+    apply_node_sysctl_hardening
 
     local relay_port="${1:-}"
     local origin_ip="${2:-}"
@@ -305,7 +324,7 @@ install_xray_relay_node() {
     fi
 
     local my_ip
-    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+    my_ip="$(get_public_ipv4 || true)"
 
     local sec_mode="tls"
 
@@ -764,7 +783,7 @@ print('')
     fi
 
     local my_ip
-    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+    my_ip="$(get_public_ipv4 || true)"
 
     local cur_sni
     cur_sni="$(get_state_val "sni" "")"
@@ -950,7 +969,7 @@ heal_and_update_relay_config() {
 
     # 1. Автоматический перевод Relay на VLESS+TLS, если на хосте уже есть сертификат Let's Encrypt
     local my_ip
-    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+    my_ip="$(get_public_ipv4 || true)"
     local cur_sni
     cur_sni="$(get_state_val "sni" "")"
     local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"

@@ -336,7 +336,7 @@ show_relay_credentials() {
     fi
 
     local my_ip r_port r_uuid r_sec r_pubkey r_shortid r_sni
-    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+    my_ip="$(get_public_ipv4 || true)"
     r_port="$(get_state_val "relay_port" "10443")"
     r_uuid="$(get_state_val "tunnel_uuid")"
     r_sec="$(get_state_val "security" "")"

@@ -261,6 +261,83 @@ validate_ip() {
     fi
 }
 
+validate_public_ipv4() {
+    local ip="${1:-}"
+    [[ -z "$ip" ]] && return 1
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import ipaddress, sys; ip = sys.argv[1]; addr = ipaddress.IPv4Address(ip); sys.exit(0 if addr.is_global and not addr.is_multicast and not addr.is_reserved and not addr.is_unspecified else 1)" "$ip" 2>/dev/null
+    else
+        [[ "$ip" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+        local o1="${BASH_REMATCH[1]}" o2="${BASH_REMATCH[2]}" o3="${BASH_REMATCH[3]}" o4="${BASH_REMATCH[4]}"
+        for oct in "$o1" "$o2" "$o3" "$o4"; do
+            [[ ${#oct} -gt 1 && "$oct" =~ ^0 ]] && return 1
+            (( 10#$oct < 0 || 10#$oct > 255 )) && return 1
+        done
+        # 0.0.0.0/8 (текущая сеть)
+        (( o1 == 0 )) && return 1
+        # 10.0.0.0/8 (частная сеть RFC 1918)
+        (( o1 == 10 )) && return 1
+        # 100.64.0.0/10 (CGNAT RFC 6598)
+        (( o1 == 100 && o2 >= 64 && o2 <= 127 )) && return 1
+        # 127.0.0.0/8 (loopback RFC 1122)
+        (( o1 == 127 )) && return 1
+        # 169.254.0.0/16 (link-local RFC 3927)
+        (( o1 == 169 && o2 == 254 )) && return 1
+        # 172.16.0.0/12 (частная сеть RFC 1918)
+        (( o1 == 172 && o2 >= 16 && o2 <= 31 )) && return 1
+        # 192.0.0.0/24 (IETF RFC 6890)
+        (( o1 == 192 && o2 == 0 && o3 == 0 )) && return 1
+        # 192.0.2.0/24 (TEST-NET-1 RFC 5737)
+        (( o1 == 192 && o2 == 0 && o3 == 2 )) && return 1
+        # 192.168.0.0/16 (частная сеть RFC 1918)
+        (( o1 == 192 && o2 == 168 )) && return 1
+        # 198.18.0.0/15 (бенчмаркинг RFC 2544)
+        (( o1 == 198 && (o2 == 18 || o2 == 19) )) && return 1
+        # 198.51.100.0/24 (TEST-NET-2 RFC 5737)
+        (( o1 == 198 && o2 == 51 && o3 == 100 )) && return 1
+        # 203.0.113.0/24 (TEST-NET-3 RFC 5737)
+        (( o1 == 203 && o2 == 0 && o3 == 113 )) && return 1
+        # 224.0.0.0/4 (мультикаст) и >= 240.0.0.0/4 (резерв/broadcast)
+        (( o1 >= 224 )) && return 1
+        return 0
+    fi
+}
+
+get_public_ipv4() {
+    local ip=""
+    # 1. Внешние сервисы строго по IPv4 (-4)
+    ip="$(curl -4 -s --max-time 5 https://api.ipify.org 2>/dev/null || \
+          curl -4 -s --max-time 5 https://ifconfig.me 2>/dev/null || \
+          curl -4 -s --max-time 5 https://icanhazip.com 2>/dev/null || true)"
+    ip="$(echo "$ip" | tr -d '[:space:]')"
+
+    if validate_public_ipv4 "$ip"; then
+        echo "$ip"
+        return 0
+    fi
+
+    # 2. Локальный fallback через сетевой стек ядра (строго публичный IPv4 маршрут)
+    if command -v ip >/dev/null 2>&1; then
+        ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)"
+        ip="$(echo "$ip" | tr -d '[:space:]')"
+        if validate_public_ipv4 "$ip"; then
+            echo "$ip"
+            return 0
+        fi
+    fi
+
+    # 3. Fallback через hostname -I (фильтрация только глобальных публичных IPv4 адресов)
+    for cand in $(hostname -I 2>/dev/null); do
+        cand="$(echo "$cand" | tr -d '[:space:]')"
+        if validate_public_ipv4 "$cand"; then
+            echo "$cand"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 ensure_xray_api_healthy() {
     # Функция вызывается на узлах, где установлен агент xray-api (Origin / Dual).
     if [[ ! -f /etc/systemd/system/xray-api.service && ! -f /lib/systemd/system/xray-api.service ]]; then
