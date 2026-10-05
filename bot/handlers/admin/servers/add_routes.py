@@ -97,13 +97,15 @@ async def process_add_server(
         await state.clear()
         return
 
+    trigger_msg_id = getattr(message, "message_id", None)
+
     if not message.text:
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -115,7 +117,7 @@ async def process_add_server(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -131,7 +133,7 @@ async def process_add_server(
                 message.chat.id,
                 texts.ERROR_NAME_TOO_LONG.format(max=50),
                 get_back_button("admin_servers"),
-                trigger_message_id=message.message_id,
+                trigger_message_id=trigger_msg_id,
             )
             return
 
@@ -142,7 +144,7 @@ async def process_add_server(
             message.chat.id,
             texts.ADMIN_SERVER_FLAG_PROMPT,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
 
     elif step == "flag":
@@ -154,7 +156,7 @@ async def process_add_server(
                 message.chat.id,
                 texts.ADMIN_SERVER_FLAG_TOO_LONG,
                 get_back_button("admin_servers"),
-                trigger_message_id=message.message_id,
+                trigger_message_id=trigger_msg_id,
             )
             return
 
@@ -168,7 +170,7 @@ async def process_add_server(
             message.chat.id,
             texts.ADMIN_SERVER_URL_PROMPT,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
 
     elif step == "api_url":
@@ -180,7 +182,7 @@ async def process_add_server(
                 message.chat.id,
                 texts.ERROR_URL_TOO_LONG.format(max=500),
                 get_back_button("admin_servers"),
-                trigger_message_id=message.message_id,
+                trigger_message_id=trigger_msg_id,
             )
             return
 
@@ -191,7 +193,7 @@ async def process_add_server(
                 texts.ERROR_INVALID_URL,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
-                trigger_message_id=message.message_id,
+                trigger_message_id=trigger_msg_id,
             )
             return
 
@@ -202,7 +204,7 @@ async def process_add_server(
                 texts.ADMIN_SERVER_URL_FORBIDDEN,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
-                trigger_message_id=message.message_id,
+                trigger_message_id=trigger_msg_id,
             )
             return
 
@@ -217,7 +219,7 @@ async def process_add_server(
                 ),
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
-                trigger_message_id=message.message_id,
+                trigger_message_id=trigger_msg_id,
             )
 
             await state.clear()
@@ -231,7 +233,7 @@ async def process_add_server(
             message.chat.id,
             texts.ADMIN_SERVER_KEY_PROMPT,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
 
     elif step == "api_key":
@@ -243,7 +245,7 @@ async def process_add_server(
                 message.chat.id,
                 texts.ERROR_API_KEY_SHORT.format(min=8),
                 get_back_button("admin_servers"),
-                trigger_message_id=message.message_id,
+                trigger_message_id=trigger_msg_id,
             )
             return
 
@@ -255,7 +257,7 @@ async def process_add_server(
             texts.ADMIN_SERVER_CHECKING,
             get_back_button("admin_servers"),
             parse_mode="HTML",
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
 
         protocol = all_data.get("protocol", AMNEZIA_PROTOCOL)

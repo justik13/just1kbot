@@ -100,7 +100,7 @@ async def process_edit_server_name(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -112,7 +112,7 @@ async def process_edit_server_name(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -127,7 +127,7 @@ async def process_edit_server_name(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
 
         await state.clear()
@@ -142,7 +142,7 @@ async def process_edit_server_name(
             message.chat.id,
             texts.ERROR_NAME_TOO_LONG.format(max=50),
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -170,7 +170,7 @@ async def process_edit_server_name(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
-        trigger_message_id=message.message_id,
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
     logger.info(
@@ -255,7 +255,7 @@ async def process_edit_server_flag(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -267,7 +267,7 @@ async def process_edit_server_flag(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -282,7 +282,7 @@ async def process_edit_server_flag(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
 
         await state.clear()
@@ -297,7 +297,7 @@ async def process_edit_server_flag(
             message.chat.id,
             texts.ADMIN_SERVER_FLAG_TOO_LONG,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -323,7 +323,7 @@ async def process_edit_server_flag(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
-        trigger_message_id=message.message_id,
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
     logger.info(
@@ -390,7 +390,7 @@ async def process_edit_server_url(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -402,7 +402,7 @@ async def process_edit_server_url(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -417,7 +417,7 @@ async def process_edit_server_url(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
 
         await state.clear()
@@ -434,7 +434,7 @@ async def process_edit_server_url(
             message.chat.id,
             texts.ERROR_URL_TOO_LONG.format(max=500),
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -445,7 +445,7 @@ async def process_edit_server_url(
             texts.ERROR_INVALID_URL,
             get_back_button("admin_servers"),
             parse_mode="HTML",
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -456,7 +456,7 @@ async def process_edit_server_url(
             texts.ERROR_INVALID_URL,
             get_back_button("admin_servers"),
             parse_mode="HTML",
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -673,7 +673,7 @@ async def process_edit_server_url(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
-        trigger_message_id=message.message_id,
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
     logger.info(
@@ -740,7 +740,7 @@ async def process_edit_server_key(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -752,7 +752,7 @@ async def process_edit_server_key(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -767,7 +767,7 @@ async def process_edit_server_key(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
 
         await state.clear()
@@ -965,7 +965,7 @@ async def process_edit_server_key(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
-        trigger_message_id=message.message_id,
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
     logger.info(
@@ -1032,7 +1032,7 @@ async def process_edit_server_max_clients(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -1044,7 +1044,7 @@ async def process_edit_server_max_clients(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -1059,7 +1059,7 @@ async def process_edit_server_max_clients(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
 
         await state.clear()
@@ -1077,7 +1077,7 @@ async def process_edit_server_max_clients(
             message.chat.id,
             texts.ERROR_NUMBER_GT_ZERO,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -1122,7 +1122,7 @@ async def process_edit_server_max_clients(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
-        trigger_message_id=message.message_id,
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
     logger.info(

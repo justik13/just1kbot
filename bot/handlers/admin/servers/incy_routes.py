@@ -218,7 +218,7 @@ async def process_server_incy_param_input(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -245,7 +245,7 @@ async def process_server_incy_param_input(
                 f"{texts.ADMIN_SERVER_INCY_ERR_INVALID_URL}\n\n{prompt_text}",
                 get_back_button(f"admin_server_incy:{server_id}"),
                 parse_mode="HTML",
-                trigger_message_id=message.message_id,
+                trigger_message_id=getattr(message, "message_id", None),
             )
             return
 
@@ -304,7 +304,7 @@ async def process_server_incy_param_input(
         card_text,
         reply_markup=get_admin_server_incy_keyboard(server_id, origin_hidden=details["origin_hidden"]),
         parse_mode="HTML",
-        trigger_message_id=message.message_id,
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
 
@@ -646,7 +646,7 @@ async def process_server_incy_relay_name_input(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -708,7 +708,7 @@ async def process_server_incy_relay_name_input(
             server_id, relay_code, is_hidden=is_hidden
         ),
         parse_mode="HTML",
-        trigger_message_id=message.message_id,
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
 
@@ -811,7 +811,7 @@ async def process_server_incy_relay_badge_input(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=getattr(message, "message_id", None),
         )
         return
 
@@ -875,7 +875,7 @@ async def process_server_incy_relay_badge_input(
             server_id, relay_code, is_hidden=is_hidden
         ),
         parse_mode="HTML",
-        trigger_message_id=message.message_id,
+        trigger_message_id=getattr(message, "message_id", None),
     )
 
 

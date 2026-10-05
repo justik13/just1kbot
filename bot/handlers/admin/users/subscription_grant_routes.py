@@ -350,6 +350,8 @@ async def admin_sub_grant_custom_process(
         await state.clear()
         return
 
+    trigger_msg_id = getattr(message, "message_id", None)
+
     data = await state.get_data()
 
     telegram_id = data.get("admin_telegram_id")
@@ -370,7 +372,7 @@ async def admin_sub_grant_custom_process(
                 f"admin_sub_grant_group:{telegram_id}:{tariff_id}"
             ),
             parse_mode="HTML",
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -384,7 +386,7 @@ async def admin_sub_grant_custom_process(
             message.chat.id,
             texts.ERROR_TARIFF_NOT_FOUND,
             get_back_button(f"admin_subscription:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -417,7 +419,7 @@ async def admin_sub_grant_custom_process(
                 f"{telegram_id}:{tariff.device_limit}"
             ),
         ),
-        trigger_message_id=message.message_id,
+        trigger_message_id=trigger_msg_id,
     )
 
 

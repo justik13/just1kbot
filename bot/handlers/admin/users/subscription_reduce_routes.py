@@ -107,6 +107,8 @@ async def admin_sub_reduce_process(
         await state.clear()
         return
 
+    trigger_msg_id = getattr(message, "message_id", None)
+
     data = await state.get_data()
 
     telegram_id = data.get("admin_telegram_id")
@@ -124,7 +126,7 @@ async def admin_sub_reduce_process(
             texts.ERROR_DAYS_OVERFLOW,
             get_back_button(f"admin_subscription:{telegram_id}"),
             parse_mode="HTML",
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -138,7 +140,7 @@ async def admin_sub_reduce_process(
             message.chat.id,
             texts.ADMIN_SUB_NO_SUBSCRIPTION,
             get_back_button(f"admin_subscription:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -164,7 +166,7 @@ async def admin_sub_reduce_process(
                 f"admin_subscription:{telegram_id}"
             ),
         ),
-        trigger_message_id=message.message_id,
+        trigger_message_id=trigger_msg_id,
     )
 
 

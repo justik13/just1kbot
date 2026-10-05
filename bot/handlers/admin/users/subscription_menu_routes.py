@@ -1264,6 +1264,8 @@ async def admin_wi_extend_custom_process(
         await state.clear()
         return
 
+    trigger_msg_id = getattr(message, "message_id", None)
+
     data = await state.get_data()
     telegram_id = data.get("admin_telegram_id")
     if not telegram_id:
@@ -1278,7 +1280,7 @@ async def admin_wi_extend_custom_process(
             texts.ERROR_DAYS_OVERFLOW,
             get_back_button(f"admin_wi_extend_menu:{telegram_id}"),
             parse_mode="HTML",
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -1291,7 +1293,7 @@ async def admin_wi_extend_custom_process(
             message.chat.id,
             texts.ERROR_USER_NOT_FOUND,
             get_back_button(f"admin_wi_extend_menu:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -1301,7 +1303,7 @@ async def admin_wi_extend_custom_process(
             message.chat.id,
             texts.ADMIN_MANUAL_GRANT_USER_BANNED,
             get_back_button(f"admin_wi_extend_menu:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -1312,7 +1314,7 @@ async def admin_wi_extend_custom_process(
             message.chat.id,
             texts.ADMIN_WI_SUB_NOT_FOUND,
             get_back_button(f"admin_sub_wi_menu:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -1322,7 +1324,7 @@ async def admin_wi_extend_custom_process(
             message.chat.id,
             texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN,
             get_back_button(f"admin_sub_wi_menu:{telegram_id}"),
-            trigger_message_id=message.message_id,
+            trigger_message_id=trigger_msg_id,
         )
         return
 
@@ -1346,7 +1348,7 @@ async def admin_wi_extend_custom_process(
             cancel_callback=f"admin_wi_extend_menu:{telegram_id}",
         ),
         parse_mode="HTML",
-        trigger_message_id=message.message_id,
+        trigger_message_id=trigger_msg_id,
     )
 
 
