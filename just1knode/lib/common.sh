@@ -270,8 +270,8 @@ validate_public_ipv4() {
         [[ "$ip" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
         local o1="${BASH_REMATCH[1]}" o2="${BASH_REMATCH[2]}" o3="${BASH_REMATCH[3]}" o4="${BASH_REMATCH[4]}"
         for oct in "$o1" "$o2" "$o3" "$o4"; do
-            (( oct < 0 || oct > 255 )) && return 1
             [[ ${#oct} -gt 1 && "$oct" =~ ^0 ]] && return 1
+            (( 10#$oct < 0 || 10#$oct > 255 )) && return 1
         done
         # 0.0.0.0/8 (текущая сеть)
         (( o1 == 0 )) && return 1

@@ -87,7 +87,11 @@ except Exception as e:
                 *) error "Настройка отменена."; return 1 ;;
             esac
         else
-            error "DNS-валидация не пройдена в неинтерактивном режиме для '$domain' (ожидался $expected_ip)."
+            if [[ -n "$expected_ip" ]]; then
+                error "DNS-валидация не пройдена в неинтерактивном режиме для '$domain' (ожидался $expected_ip)."
+            else
+                error "DNS-валидация не пройдена в неинтерактивном режиме для '$domain' (публичный IPv4 сервера не определён)."
+            fi
             return 1
         fi
     done

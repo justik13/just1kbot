@@ -932,6 +932,14 @@ _cached_public_ip_time: float = 0.0
 _PUBLIC_IP_CACHE_TTL_SEC: float = 300.0
 
 
+def _is_valid_public_ipv4(ip_str: str) -> bool:
+    try:
+        addr = ipaddress.IPv4Address(ip_str.strip())
+        return addr.is_global and not addr.is_multicast and not addr.is_reserved and not addr.is_unspecified
+    except ValueError:
+        return False
+
+
 async def _fetch_public_ip_async() -> str:
     global _cached_public_ip, _cached_public_ip_time
     now = time.monotonic()
@@ -947,7 +955,7 @@ async def _fetch_public_ip_async() -> str:
             )
             stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
             ip = stdout_b.decode("utf-8", errors="ignore").strip()
-            if ip and not ip.startswith("<") and len(ip.split(".")) == 4:
+            if ip and _is_valid_public_ipv4(ip):
                 _cached_public_ip = ip
                 _cached_public_ip_time = now
                 return ip
@@ -964,7 +972,7 @@ async def _fetch_public_ip_async() -> str:
         stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=3.0)
         candidates = stdout_b.decode("utf-8", errors="ignore").strip().split()
         for cand in candidates:
-            if cand and not cand.startswith("127.") and not cand.startswith("::") and len(cand.split(".")) == 4:
+            if cand and _is_valid_public_ipv4(cand):
                 _cached_public_ip = cand
                 _cached_public_ip_time = now
                 return cand

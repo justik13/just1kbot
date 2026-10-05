@@ -352,7 +352,9 @@ install_amnezia_node() {
     # Определение публичного IP узла (строго IPv4)
     local my_ip
     my_ip="$(get_public_ipv4 || true)"
-    [[ -z "$my_ip" ]] && my_ip="127.0.0.1"
+    if [[ -z "$my_ip" ]]; then
+        warn "Публичный IPv4 адрес узла не определён автоматически."
+    fi
 
     local chosen_api_key="${saved_api_key:-}"
     local api_domain="${arg_domain:-${saved_host:-}}"
@@ -384,7 +386,11 @@ install_amnezia_node() {
             echo ""
             echo -e "${BOLD}Выберите тип адреса для подключения Telegram-бота:${NC}"
             echo -e "  ${GREEN}[1]${NC} Доменное имя с доверенным Let's Encrypt SSL ${GREEN}[Рекомендуется]${NC}"
-            echo -e "  ${CYAN}[2]${NC} IP-адрес сервера (${my_ip}) с самоподписанным SSL-сертификатом"
+            if [[ -n "$my_ip" ]]; then
+                echo -e "  ${CYAN}[2]${NC} IP-адрес сервера (${my_ip}) с самоподписанным SSL-сертификатом"
+            else
+                echo -e "  ${CYAN}[2]${NC} IP-адрес сервера (указать вручную) с самоподписанным SSL-сертификатом"
+            fi
             echo ""
             read -rp "Ваш выбор [по умолчанию: 1]: " conn_type || true
             conn_type="${conn_type:-1}"
@@ -393,11 +399,16 @@ install_amnezia_node() {
                 domain_in="$(echo "$domain_in" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's|^https\?://||' -e 's|/.*$||')"
                 api_domain="${domain_in:-$my_ip}"
             else
+                if [[ -z "$my_ip" ]]; then
+                    read -rp "Введите публичный IP-адрес сервера: " manual_ip || true
+                    my_ip="$(echo "$manual_ip" | tr -d '[:space:]')"
+                fi
                 api_domain="$my_ip"
             fi
         else
             api_domain="$my_ip"
         fi
+        [[ -z "$api_domain" ]] && api_domain="127.0.0.1"
     fi
 
     local default_port="${arg_port:-$AMNEZIA_PUBLIC_PORT}"
@@ -976,7 +987,11 @@ show_amnezia_bot_credentials() {
     if [[ "$api_url" == "-" ]]; then
         local my_ip
         my_ip="$(get_public_ipv4 || true)"
-        api_url="https://${my_ip}:${AMNEZIA_PUBLIC_PORT}"
+        if [[ -n "$my_ip" ]]; then
+            api_url="https://${my_ip}:${AMNEZIA_PUBLIC_PORT}"
+        else
+            api_url="https://<IP-СЕРВЕРА>:${AMNEZIA_PUBLIC_PORT}"
+        fi
     fi
 
     local container_name proto_id proto_display

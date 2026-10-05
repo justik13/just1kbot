@@ -601,6 +601,9 @@ exit 0
 
     def test_validate_public_ipv4_behavioural(self):
         """Verify public IPv4 classification rejects private, loopback, link-local, CGNAT, and IPv6."""
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        self.assertIn("10#$oct < 0 || 10#$oct > 255", common_sh, "Bash fallback must enforce decimal base")
+
         import ipaddress
 
         def is_public_ipv4(ip_str: str) -> bool:
@@ -651,9 +654,19 @@ exit 0
         self.assertIsNotNone(m, "Python snippet in validate_relay_dns must be extractable")
         py_code = m.group(1)
 
-        def run_validator(domain: str, expected_ip: str) -> str:
+        def run_validator(domain: str, expected_ip: str, mock_dns_ip: str | None = None) -> str:
+            mock_preamble = ""
+            if mock_dns_ip is not None:
+                mock_preamble = f"""
+import socket
+_orig_gai = socket.getaddrinfo
+def _mock_gai(h, p, family=0, type=0, proto=0, flags=0):
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('{mock_dns_ip}', 0))]
+socket.getaddrinfo = _mock_gai
+"""
+            test_py = mock_preamble + py_code
             res = subprocess.run(
-                [sys.executable, "-c", py_code, domain, expected_ip],
+                [sys.executable, "-c", test_py, domain, expected_ip],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -667,19 +680,19 @@ exit 0
         self.assertEqual(run_validator("not_a_domain", "1.1.1.1"), "INVALID_FQDN")
 
         # 3. Invalid / IPv6 expected IP must NOT succeed as OK
-        ipv6_res = run_validator("one.one.one.one", "2a12:bec4:1483:7b1::2")
+        ipv6_res = run_validator("relay.example.com", "2a12:bec4:1483:7b1::2", mock_dns_ip="87.121.86.155")
         self.assertTrue(ipv6_res.startswith("INVALID_EXPECTED|2a12:"), f"Expected INVALID_EXPECTED, got {ipv6_res}")
 
         # 4. Empty expected IP must return NO_EXPECTED, NOT a false OK
-        no_exp_res = run_validator("one.one.one.one", "")
+        no_exp_res = run_validator("relay.example.com", "", mock_dns_ip="87.121.86.155")
         self.assertTrue(no_exp_res.startswith("NO_EXPECTED|"), f"Expected NO_EXPECTED, got {no_exp_res}")
 
         # 5. Correct matching IPv4 -> OK
-        ok_res = run_validator("one.one.one.one", "1.1.1.1")
+        ok_res = run_validator("relay.example.com", "87.121.86.155", mock_dns_ip="87.121.86.155")
         self.assertTrue(ok_res.startswith("OK|"), f"Expected OK, got {ok_res}")
 
         # 6. Mismatching IPv4 -> MISMATCH
-        mismatch_res = run_validator("one.one.one.one", "8.8.8.8")
+        mismatch_res = run_validator("relay.example.com", "1.1.1.1", mock_dns_ip="87.121.86.155")
         self.assertTrue(mismatch_res.startswith("MISMATCH|"), f"Expected MISMATCH, got {mismatch_res}")
 
     def test_origin_and_relay_xhttp_inbound_limits_and_nginx_keepalive(self):
