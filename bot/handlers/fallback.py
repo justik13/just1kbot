@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import StateFilter
@@ -9,6 +11,8 @@ from bot import texts
 from bot.middlewares.action_lock import STALE_ACTION_PREFIXES
 from database.models import User
 from utils.telegram import spawn_auto_delete
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -146,6 +150,21 @@ async def dismiss_notification(
     # In all other cases (it IS the hub, or hub could not be determined), safely restore main menu
     from bot.handlers.start import back_to_main_menu
     await back_to_main_menu(callback, state, db_user, session)
+
+
+@router.callback_query(F.data == "dismiss_broadcast")
+async def dismiss_broadcast_message(callback: CallbackQuery):
+    try:
+        await callback.answer(show_alert=False)
+    except Exception:
+        pass
+    if callback.message:
+        try:
+            await callback.message.delete()
+        except (TelegramBadRequest, TelegramAPIError):
+            pass
+        except Exception as e:
+            logger.debug(f"dismiss_broadcast_message delete failed: {e}")
 
 
 @router.callback_query(F.data.in_({"menu_profile", "back_to_profile"}))
