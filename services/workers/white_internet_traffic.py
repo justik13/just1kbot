@@ -183,6 +183,11 @@ class WhiteInternetTrafficWorker:
                         if sub_meta is None:
                             continue
 
+                        if sub_meta.user_id:
+                            await sess.execute(
+                                select(User.id).where(User.id == sub_meta.user_id).with_for_update()
+                            )
+
                         sub = await white_internet_repo.get_subscription_with_lock(
                             sess, sub_meta.id
                         )
@@ -270,10 +275,6 @@ class WhiteInternetTrafficWorker:
                             delta,
                         )
 
-                        if sub.user_id:
-                            await sess.execute(
-                                select(User.id).where(User.id == sub.user_id).with_for_update()
-                            )
 
                         (
                             consumed,

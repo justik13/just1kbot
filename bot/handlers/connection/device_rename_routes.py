@@ -284,10 +284,11 @@ async def rename_device_process(
         )
         return
 
-    if old_name and hasattr(user_obj, "archived_device_traffic") and user_obj.archived_device_traffic:
+    archived_raw = getattr(user_obj, "archived_device_traffic", None)
+    if old_name and isinstance(archived_raw, dict):
         from utils.traffic_helpers import get_device_slot_key
 
-        archived = dict(user_obj.archived_device_traffic)
+        archived = dict(archived_raw)
         old_slot = get_device_slot_key(old_name)
         new_slot = get_device_slot_key(new_name)
         if old_name in archived and old_name != old_slot:
