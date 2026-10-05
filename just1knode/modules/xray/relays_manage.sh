@@ -621,8 +621,8 @@ location ^~ ${relay_inbound_path} {
     proxy_buffering off;
     proxy_request_buffering off;
     proxy_max_temp_file_size 0;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
     add_header Cache-Control "no-store, no-cache" always;
     add_header CDN-Cache-Control "no-store" always;
     add_header Pragma "no-cache" always;

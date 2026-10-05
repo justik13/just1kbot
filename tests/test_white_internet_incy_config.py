@@ -140,6 +140,42 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
                 self.assertNotIn("serverDescription=", links[0])
                 self.assertNotIn("serverDescription=", links[1])
 
+    def test_generate_vless_links_and_full_config_xmux_and_mux_disabled(self):
+        import json
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+        relays = [{"code": "de", "name": "🇩🇪 Германия"}]
+        links = WhiteInternetService.generate_vless_links(
+            sub,
+            cdn_domain="cdn.just1k.online",
+            relays=relays,
+        )
+        self.assertEqual(len(links), 2)
+        for link in links:
+            # 1. mux=false must be explicitly present in link parameters
+            self.assertIn("&mux=false", link)
+            # 2. extra param must contain xmux configuration to prevent 1-hour drops
+            parsed = urllib.parse.urlparse(link)
+            query = urllib.parse.parse_qs(parsed.query)
+            self.assertIn("extra", query)
+            extra_data = json.loads(query["extra"][0])
+            self.assertIn("xmux", extra_data)
+            self.assertEqual(extra_data["xmux"]["maxConcurrency"], 16)
+            self.assertEqual(extra_data["xmux"]["hMaxReusableSecs"], 1800)
+            self.assertEqual(extra_data["xmux"]["hKeepAlivePeriod"], 30)
+
+        # 3. generate_full_xray_config must contain xmux and mux: {enabled: False}
+        cfg = WhiteInternetService.generate_full_xray_config(
+            sub,
+            cdn_domain="cdn.just1k.online",
+        )
+        outbound = cfg["outbounds"][0]
+        self.assertEqual(outbound["mux"], {"enabled": False})
+        xhttp_settings = outbound["streamSettings"]["xhttpSettings"]
+        self.assertIn("xmux", xhttp_settings)
+        self.assertEqual(xhttp_settings["xmux"]["hMaxReusableSecs"], 1800)
+        self.assertEqual(xhttp_settings["xmux"]["hKeepAlivePeriod"], 30)
+
 
 class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
     """Test HTTP subscription feed headers with configurable INCY options."""

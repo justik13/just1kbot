@@ -514,8 +514,8 @@ EOF
         proxy_buffering off;
         proxy_request_buffering off;
         proxy_max_temp_file_size 0;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
         add_header Cache-Control "no-store, no-cache" always;
         add_header CDN-Cache-Control "no-store" always;
         add_header Pragma "no-cache" always;
@@ -644,6 +644,7 @@ server {
     client_max_body_size 0;
     client_body_buffer_size 128k;
     keepalive_requests 100000;
+    keepalive_time 24h;
     keepalive_timeout 300s;
     client_header_buffer_size 16k;
     large_client_header_buffers 8 64k;
@@ -1267,17 +1268,23 @@ try:
         except Exception:
             pass
 
-    # Реконсиляция default.conf на keepalive upstream xray_xhttp_default
+    # Реконсиляция default.conf на keepalive upstream xray_xhttp_default и таймауты 86400s
     def_cf_path = os.path.join(nginx_dir, 'default.conf')
     if os.path.exists(def_cf_path):
         try:
             with open(def_cf_path, 'r', encoding='utf-8') as df_f:
                 df_cur = df_f.read()
+            df_changed = False
             if 'proxy_pass http://127.0.0.1:8003;' in df_cur:
                 df_cur = df_cur.replace('proxy_pass http://127.0.0.1:8003;', 'proxy_pass http://xray_xhttp_default;')
+                df_changed = True
+            if 'proxy_read_timeout 3600s;' in df_cur or 'proxy_send_timeout 3600s;' in df_cur:
+                df_cur = df_cur.replace('proxy_read_timeout 3600s;', 'proxy_read_timeout 86400s;').replace('proxy_send_timeout 3600s;', 'proxy_send_timeout 86400s;')
+                df_changed = True
+            if df_changed:
                 with open(def_cf_path, 'w', encoding='utf-8') as df_f:
                     df_f.write(df_cur)
-                print('[+] Согласован Nginx default.conf: переключен на keepalive upstream xray_xhttp_default')
+                print('[+] Согласован Nginx default.conf: обновлены таймауты (86400s) и upstream xray_xhttp_default')
         except Exception:
             pass
 
@@ -1344,8 +1351,8 @@ location ^~ {path} {{
     proxy_buffering off;
     proxy_request_buffering off;
     proxy_max_temp_file_size 0;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
     add_header Cache-Control \"no-store, no-cache\" always;
     add_header CDN-Cache-Control \"no-store\" always;
     add_header Pragma \"no-cache\" always;
@@ -1362,6 +1369,7 @@ location ^~ {path} {{
                     if (f'location = {cf_base}' in cur_text and
                         'CDN-Cache-Control' in cur_text and
                         'xhttp_proxy_method' in cur_text and
+                        'proxy_read_timeout 86400s;' in cur_text and
                         f'proxy_pass http://xray_xhttp_relay_{code_lower};' in cur_text):
                         needs_write = False
                 except Exception:
@@ -1556,12 +1564,21 @@ server {{
             content
         )
 
+    if 'keepalive_time' in content:
+        content = re.sub(r'keepalive_time\s+[^;]+;', 'keepalive_time 24h;', content)
+    else:
+        content = re.sub(
+            r'keepalive_requests\s+100000;',
+            'keepalive_requests 100000;\n    keepalive_time 24h;',
+            content
+        )
+
     if 'keepalive_timeout' in content:
         content = re.sub(r'keepalive_timeout\s+[^;]+;', 'keepalive_timeout 300s;', content)
     else:
         content = re.sub(
-            r'keepalive_requests\s+100000;',
-            'keepalive_requests 100000;\n    keepalive_timeout 300s;',
+            r'keepalive_time\s+24h;',
+            'keepalive_time 24h;\n    keepalive_timeout 300s;',
             content
         )
 

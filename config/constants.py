@@ -233,6 +233,13 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "xPaddingMethod": "tokenish",
     "xPaddingObfsMode": True,
     "xPaddingBytes": _validate_xhttp_padding_bytes(os.getenv("WHITE_INTERNET_PADDING_BYTES")),
+    "xmux": {
+        "maxConcurrency": 16,
+        "cMaxReuseTimes": 0,
+        "hMaxRequestTimes": 0,
+        "hMaxReusableSecs": 1800,
+        "hKeepAlivePeriod": 30,
+    },
     "security": "tls",
     "alpn": ["h2", "http/1.1"],
     "fp": WHITE_INTERNET_TLS_FINGERPRINT,

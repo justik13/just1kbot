@@ -575,12 +575,15 @@ exit 0
         self.assertIn("'scMaxEachPostBytes': 1000000", origin_sh)
         self.assertIn("'serverMaxHeaderBytes': 65536", origin_sh)
         self.assertIn("keepalive_requests 100000;", origin_sh)
+        self.assertIn("keepalive_time 24h;", origin_sh)
         self.assertIn("keepalive_timeout 300s;", origin_sh)
+        self.assertIn("proxy_read_timeout 86400s;", origin_sh)
         self.assertIn("client_header_buffer_size 16k;", origin_sh)
         self.assertIn("proxy_pass http://xray_xhttp_default;", origin_sh)
 
         self.assertIn("'scMaxEachPostBytes': 1000000", relays_manage_sh)
         self.assertIn("'serverMaxHeaderBytes': 65536", relays_manage_sh)
+        self.assertIn("proxy_read_timeout 86400s;", relays_manage_sh)
         self.assertIn("sync_xhttp_upstreams_conf", relays_manage_sh)
 
         self.assertIn("sync_xhttp_upstreams_conf()", common_sh)

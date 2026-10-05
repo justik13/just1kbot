@@ -1348,6 +1348,8 @@ class WhiteInternetService:
             "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
             "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
         }
+        if "xmux" in CANONICAL_XHTTP_PROFILE:
+            extra_dict["xmux"] = CANONICAL_XHTTP_PROFILE["xmux"]
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
         fp = CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT)
         base = _normalize_base_path(path)
@@ -1372,7 +1374,7 @@ class WhiteInternetService:
                 effective_origin_badge = None
             origin_tag_formatted = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
             standalone_path = f"{base}/default"
-            origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&extra={extra_param}#{origin_tag_formatted}"
+            origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{origin_tag_formatted}"
             links.append(origin_link)
 
         if relays and isinstance(relays, list):
@@ -1412,7 +1414,7 @@ class WhiteInternetService:
                     r_badge = None
 
                 r_tag = WhiteInternetService._format_vless_tag(r_name, r_badge)
-                link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&extra={extra_param}#{r_tag}"
+                link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{r_tag}"
                 links.append(link)
 
         return links
@@ -1481,8 +1483,10 @@ class WhiteInternetService:
                             "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
                             "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
                             "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
+                            **({"xmux": CANONICAL_XHTTP_PROFILE["xmux"]} if "xmux" in CANONICAL_XHTTP_PROFILE else {}),
                         },
                     },
+                    "mux": {"enabled": False},
                 },
                 {"tag": "direct", "protocol": "freedom"},
                 {"tag": "block", "protocol": "blackhole"},
