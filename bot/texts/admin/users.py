@@ -13,7 +13,10 @@ ADMIN_BAN_SUCCESS = """✅ Пользователь успешно забане�
 ADMIN_BONUS_REASON_LINE_FORMAT = "Причина: <i>{safe_reason}</i>"
 
 ADMIN_BTN_BACK_TO_CARD = "← К карточке"
-ADMIN_USER_MONTHLY_TRAFFIC_SUFFIX = " (за месяц: {monthly_traffic})"
+ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN = (
+    "\n• <b>AWG (за месяц):</b> {monthly_awg}"
+    "\n• <b>Белый Интернет (за месяц):</b> {monthly_wi}"
+)
 
 ADMIN_BTN_INPUT_MANUALLY = "⌨️ Ввести вручную"
 
