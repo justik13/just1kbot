@@ -568,6 +568,12 @@ class DeviceService:
         actor_id: int | None = None,
         force: bool = False,
     ) -> bool:
+        # Consistent lock order across lifecycle operations: User FOR UPDATE -> Profile FOR UPDATE
+        user_id = getattr(profile, "user_id", None)
+        user_obj = None
+        if user_id:
+            user_obj = await session.get(User, user_id, with_for_update=True)
+
         profile = (
             await session.execute(
                 select(VPNProfile).where(VPNProfile.id == profile.id).with_for_update()
@@ -589,12 +595,14 @@ class DeviceService:
         server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
         device_name = profile.device_name
         profile_id = profile.id
-        user_id = profile.user_id
+        if user_id is None:
+            user_id = profile.user_id
 
         # Retain device traffic statistics upon key deletion or recreation
         if user_id and device_name:
             try:
-                user_obj = await session.get(User, user_id, with_for_update=True)
+                if user_obj is None:
+                    user_obj = await session.get(User, user_id, with_for_update=True)
                 if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
                     cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
                     if cur_bytes > 0:

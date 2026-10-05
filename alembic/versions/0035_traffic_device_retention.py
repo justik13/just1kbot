@@ -29,6 +29,21 @@ def upgrade() -> None:
             server_default="0",
         ),
     )
+    # Backfill historical White Internet lifetime traffic from existing subscriptions
+    op.execute(
+        sa.text(
+            """
+            UPDATE users u
+            SET total_wi_traffic_bytes = sub.total_bytes
+            FROM (
+                SELECT user_id, sum(traffic_used_bytes) AS total_bytes
+                FROM white_internet_subscriptions
+                GROUP BY user_id
+            ) sub
+            WHERE u.id = sub.user_id AND sub.total_bytes > 0
+            """
+        )
+    )
 
     # 2. Monthly traffic counters for current billing cycle (AWG and White Internet)
     op.add_column(
