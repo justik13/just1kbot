@@ -475,14 +475,23 @@ class DeviceService:
 
         # Retain device traffic statistics across server migration
         if hasattr(user, "archived_device_traffic"):
-            old_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
-            if old_bytes > 0:
-                from utils.traffic_helpers import record_device_traffic_archive
+            try:
+                old_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
+                if old_bytes > 0:
+                    from utils.traffic_helpers import record_device_traffic_archive
 
-                archived = dict(user.archived_device_traffic or {})
-                user.archived_device_traffic = record_device_traffic_archive(archived, device_name, old_bytes)
-                old_profile.traffic_down = 0
-                old_profile.traffic_up = 0
+                    archived = dict(user.archived_device_traffic or {})
+                    user.archived_device_traffic = record_device_traffic_archive(archived, device_name, old_bytes)
+                    old_profile.traffic_down = 0
+                    old_profile.traffic_up = 0
+            except Exception as archive_err:
+                logger.warning(
+                    "Failed to archive device traffic during migration for user %s device %s: %s",
+                    user.id,
+                    device_name,
+                    archive_err,
+                    exc_info=True,
+                )
 
         new_profile = VPNProfile(
             user_id=user.id,
@@ -613,7 +622,12 @@ class DeviceService:
                         profile.traffic_down = 0
                         profile.traffic_up = 0
             except Exception as archive_err:
-                logger.debug("Failed to archive device traffic for profile %s: %s", profile_id, archive_err)
+                logger.warning(
+                    "Failed to archive device traffic for profile %s: %s",
+                    profile_id,
+                    archive_err,
+                    exc_info=True,
+                )
 
         create_operation = None
         if force and not profile.peer_id:

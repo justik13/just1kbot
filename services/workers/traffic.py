@@ -417,7 +417,10 @@ async def _process_server_traffic(
                     bulk_params,
                 )
 
-        # 3. Lock Server FOR UPDATE THIRD and update host extra_data
+    # 3. In a separate isolated transaction, update Server extra_data.
+    # Decoupling this from the User and VPNProfile transaction eliminates deadlock
+    # cycles with confirm_delete_server (which locks Server -> VPNProfile).
+    async with session_scope() as session:
         server_obj = await session.get(Server, server_id, with_for_update=True)
         if server_obj:
             raw_extra = getattr(server_obj, "extra_data", None)
