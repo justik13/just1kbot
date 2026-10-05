@@ -1702,7 +1702,7 @@ cmd_doctor() {
             local dom_ip
             dom_ip=$(dig +short @8.8.8.8 "$domain" A 2>/dev/null | tail -1 || true)
             local srv_ip
-            srv_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+            srv_ip=$(curl -4 -s --max-time 5 https://api.ipify.org 2>/dev/null || curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || curl -4 -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')
             if [[ -n "$dom_ip" ]] && [[ "$dom_ip" == "$srv_ip" ]]; then
                 log "DNS резолвинг домена: $domain -> $srv_ip (OK)"
             else

@@ -566,6 +566,33 @@ exit 0
         self.assertIn("net.core.default_qdisc = fq", content)
         self.assertIn("net.ipv4.tcp_congestion_control = bbr", content)
 
+    def test_get_public_ipv4_and_early_hardening_contract(self):
+        """Verify get_public_ipv4 strictly forces IPv4 and node installers call sysctl hardening early."""
+        common_sh = (REPO_ROOT / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        relay_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+        origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        amnezia_sh = (REPO_ROOT / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
+        node_sh = (REPO_ROOT / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
+
+        # common.sh must define get_public_ipv4 with curl -4 and validate_ipv4
+        self.assertIn("get_public_ipv4()", common_sh)
+        self.assertIn("curl -4 -s", common_sh)
+        self.assertIn('validate_ipv4 "$ip"', common_sh)
+
+        # relay.sh must call apply_node_sysctl_hardening early in install_xray_relay_node
+        self.assertIn("install_base_deps\n    apply_node_sysctl_hardening", relay_sh)
+        self.assertIn('my_ip="$(get_public_ipv4 || true)"', relay_sh)
+
+        # origin.sh must call apply_node_sysctl_hardening early in install_xray_origin_node
+        self.assertIn("install_base_deps\n    apply_node_sysctl_hardening", origin_sh)
+
+        # amnezia.sh and just1knode.sh must use get_public_ipv4
+        self.assertIn('my_ip="$(get_public_ipv4 || true)"', amnezia_sh)
+        self.assertIn('my_ip="$(get_public_ipv4 || true)"', node_sh)
+
+        # validate_relay_dns must guard against non-IPv4 / IPv6 expected IP
+        self.assertIn("DNS A-запись — строго IPv4", relay_sh)
+
     def test_origin_and_relay_xhttp_inbound_limits_and_nginx_keepalive(self):
         """Verify origin.sh and relays_manage.sh set scMaxEachPostBytes=1000000, serverMaxHeaderBytes=65536, and keepalive_requests=100000."""
         origin_sh = (REPO_ROOT / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")

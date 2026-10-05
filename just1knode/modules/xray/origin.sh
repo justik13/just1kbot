@@ -119,6 +119,7 @@ install_xray_origin_node() {
     check_root
     init_state_dir
     install_base_deps
+    apply_node_sysctl_hardening
 
     local prev_role
     prev_role="$(get_node_status)"

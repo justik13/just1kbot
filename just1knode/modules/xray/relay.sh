@@ -20,6 +20,10 @@ import socket, sys, re
 domain = sys.argv[1].strip()
 expected = sys.argv[2].strip() if len(sys.argv) > 2 else ''
 
+# DNS A-запись — строго IPv4. Игнорируем IPv6 или невалидный expected IP
+if expected and (':' in expected or not re.match(r'^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', expected)):
+    expected = ''
+
 if re.search(r'[\u0400-\u04FF]', domain):
     print('CYRILLIC')
     sys.exit(0)
@@ -277,6 +281,7 @@ install_xray_relay_node() {
     check_root
     init_state_dir
     install_base_deps
+    apply_node_sysctl_hardening
 
     local prev_role
     prev_role="$(get_node_status)"
@@ -305,7 +310,7 @@ install_xray_relay_node() {
     fi
 
     local my_ip
-    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+    my_ip="$(get_public_ipv4 || true)"
 
     local sec_mode="tls"
 
@@ -764,7 +769,7 @@ print('')
     fi
 
     local my_ip
-    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+    my_ip="$(get_public_ipv4 || true)"
 
     local cur_sni
     cur_sni="$(get_state_val "sni" "")"
@@ -950,7 +955,7 @@ heal_and_update_relay_config() {
 
     # 1. Автоматический перевод Relay на VLESS+TLS, если на хосте уже есть сертификат Let's Encrypt
     local my_ip
-    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+    my_ip="$(get_public_ipv4 || true)"
     local cur_sni
     cur_sni="$(get_state_val "sni" "")"
     local le_dir="${LETSENCRYPT_DIR:-/etc/letsencrypt}"

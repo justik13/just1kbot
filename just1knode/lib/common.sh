@@ -261,6 +261,41 @@ validate_ip() {
     fi
 }
 
+get_public_ipv4() {
+    local ip=""
+    # 1. Внешние сервисы строго по IPv4 (-4)
+    ip="$(curl -4 -s --max-time 5 https://api.ipify.org 2>/dev/null || \
+          curl -4 -s --max-time 5 https://ifconfig.me 2>/dev/null || \
+          curl -4 -s --max-time 5 https://icanhazip.com 2>/dev/null || true)"
+    ip="$(echo "$ip" | tr -d '[:space:]')"
+
+    if validate_ipv4 "$ip"; then
+        echo "$ip"
+        return 0
+    fi
+
+    # 2. Локальный fallback через сетевой стек ядра (строго IPv4 маршрут)
+    if command -v ip >/dev/null 2>&1; then
+        ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)"
+        ip="$(echo "$ip" | tr -d '[:space:]')"
+        if validate_ipv4 "$ip"; then
+            echo "$ip"
+            return 0
+        fi
+    fi
+
+    # 3. Fallback через hostname -I (фильтрация только валидных IPv4 адресов)
+    for cand in $(hostname -I 2>/dev/null); do
+        cand="$(echo "$cand" | tr -d '[:space:]')"
+        if validate_ipv4 "$cand"; then
+            echo "$cand"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 ensure_xray_api_healthy() {
     # Функция вызывается на узлах, где установлен агент xray-api (Origin / Dual).
     if [[ ! -f /etc/systemd/system/xray-api.service && ! -f /lib/systemd/system/xray-api.service ]]; then

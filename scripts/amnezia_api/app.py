@@ -941,7 +941,7 @@ async def _fetch_public_ip_async() -> str:
     for url in ("https://ifconfig.me", "https://icanhazip.com", "https://api.ipify.org"):
         try:
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "--max-time", "3", url,
+                "curl", "-4", "-s", "--max-time", "3", url,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

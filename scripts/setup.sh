@@ -569,7 +569,7 @@ run_interactive_wizard() {
     title "3/6. Настройка доменного имени и SSL"
 
     local server_ip
-    server_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')
+    server_ip=$(curl -4 -s --max-time 5 https://api.ipify.org 2>/dev/null || curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || curl -4 -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')
 
     while true; do
         read -r -p "Введите ваш привязанный домен (например vpn.example.com): " DOMAIN

@@ -349,9 +349,9 @@ install_amnezia_node() {
         saved_max_peers="$(grep -E "^SERVER_MAX_PEERS=" "$AMNEZIA_API_ETC/config.env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "\r\n' || true)"
     fi
 
-    # Определение публичного IP узла
+    # Определение публичного IP узла (строго IPv4)
     local my_ip
-    my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+    my_ip="$(get_public_ipv4 || true)"
     [[ -z "$my_ip" ]] && my_ip="127.0.0.1"
 
     local chosen_api_key="${saved_api_key:-}"
@@ -975,7 +975,7 @@ show_amnezia_bot_credentials() {
 
     if [[ "$api_url" == "-" ]]; then
         local my_ip
-        my_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+        my_ip="$(get_public_ipv4 || true)"
         api_url="https://${my_ip}:${AMNEZIA_PUBLIC_PORT}"
     fi
 
