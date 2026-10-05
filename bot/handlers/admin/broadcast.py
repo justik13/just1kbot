@@ -982,11 +982,3 @@ async def dismiss_broadcast_result(callback: CallbackQuery):
     except TelegramBadRequest as e:
         logger.debug(f"dismiss_broadcast_result delete failed: {e}")
 
-
-@router.callback_query(F.data == "dismiss_broadcast")
-async def dismiss_broadcast_message(callback: CallbackQuery):
-    await callback.answer(show_alert=False)
-    try:
-        await callback.message.delete()
-    except TelegramBadRequest as e:
-        logger.debug(f"dismiss_broadcast_message delete failed: {e}")
