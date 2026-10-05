@@ -212,21 +212,12 @@ async def _process_server_traffic(
     current_time = now_utc()
 
     async with session_scope() as session:
+        # Pre-filter candidate profiles on this server
         stmt = (
             select(
                 VPNProfile.id,
                 VPNProfile.peer_id,
-                VPNProfile.traffic_down,
-                VPNProfile.traffic_up,
-                VPNProfile.raw_last_down,
-                VPNProfile.raw_last_up,
-                VPNProfile.last_connected,
-                VPNProfile.is_active,
-                User.id,
-                User.is_banned,
-                User.telegram_id,
-                User.subscription_end,
-                User.financial_hold,
+                VPNProfile.user_id,
             )
             .join(User, VPNProfile.user_id == User.id)
             .where(
@@ -235,7 +226,54 @@ async def _process_server_traffic(
             )
         )
         result = await session.execute(stmt)
-        rows = result.all()
+        candidate_rows = result.all()
+
+        matching_candidates = [
+            (row[0], row[1], row[2] if len(row) == 3 else row[8])
+            for row in candidate_rows
+            if len(row) > 1 and row[1] in api_clients
+        ]
+
+        if matching_candidates:
+            candidate_uids = sorted({u_id for _, _, u_id in matching_candidates})
+            candidate_pids = sorted([p_id for p_id, _, _ in matching_candidates])
+
+            # 1. Lock Users FIRST in canonical hierarchy order (User -> Profile -> Server)
+            await session.execute(
+                select(User.id)
+                .where(User.id.in_(candidate_uids))
+                .order_by(User.id)
+                .with_for_update()
+            )
+
+            # 2. Re-read and lock candidate VPNProfiles SECOND (filtering out any profile deleted/migrated concurrently)
+            locked_stmt = (
+                select(
+                    VPNProfile.id,
+                    VPNProfile.peer_id,
+                    VPNProfile.traffic_down,
+                    VPNProfile.traffic_up,
+                    VPNProfile.raw_last_down,
+                    VPNProfile.raw_last_up,
+                    VPNProfile.last_connected,
+                    VPNProfile.is_active,
+                    User.id,
+                    User.is_banned,
+                    User.telegram_id,
+                    User.subscription_end,
+                    User.financial_hold,
+                )
+                .join(User, VPNProfile.user_id == User.id)
+                .where(
+                    VPNProfile.id.in_(candidate_pids),
+                    VPNProfile.provisioning_status.notin_(["deleting", "delete_failed"]),
+                )
+                .order_by(VPNProfile.id)
+                .with_for_update()
+            )
+            rows = (await session.execute(locked_stmt)).all()
+        else:
+            rows = []
 
         for (
             p_id,

@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from database.connection import session_scope
-from database.models import APIOperation, Server, VPNProfile
+from database.models import APIOperation, Server, User, VPNProfile
 
 from services.api_operations_queue import (
     APIOperationOwnershipError,
@@ -166,6 +166,19 @@ async def _schedule_migration_grace_deletion(session, operation, profile) -> Non
     ).scalar_one_or_none()
 
     if old_profile and old_profile.provisioning_status != "deleting":
+        cur_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
+        if cur_bytes > 0 and getattr(old_profile, "user_id", None) and getattr(old_profile, "device_name", None):
+            user = await session.get(User, old_profile.user_id)
+            if user is not None and hasattr(user, "archived_device_traffic"):
+                from utils.traffic_helpers import record_device_traffic_archive
+
+                archived = dict(user.archived_device_traffic or {})
+                user.archived_device_traffic = record_device_traffic_archive(
+                    archived, old_profile.device_name, cur_bytes
+                )
+                old_profile.traffic_down = 0
+                old_profile.traffic_up = 0
+
         old_profile.provisioning_status = "deleting"
         if old_profile.peer_id:
             (

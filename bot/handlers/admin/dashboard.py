@@ -190,7 +190,8 @@ async def _show_admin_dashboard(
     servers_summary = await _get_servers_capacity_summary(session)
     maintenance_enabled = await MaintenanceService.is_enabled(session)
 
-    wl_traffic_str = format_traffic(wl_stats["total_traffic_bytes"])
+    wi_total = stats.get("total_wi_traffic_bytes", 0) or wl_stats["total_traffic_bytes"]
+    wl_traffic_str = format_traffic(wi_total)
     avg_m_wi = stats.get("avg_monthly_wi_bytes", 0)
     if avg_m_wi > 0:
         wl_traffic_str += texts.DASHBOARD_AVG_MONTHLY_TRAFFIC_SUFFIX.format(
@@ -202,7 +203,7 @@ async def _show_admin_dashboard(
     if avg_m_awg > 0:
         awg_avg_str = f"{format_traffic(avg_m_awg)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
     else:
-        awg_avg_str = format_traffic(stats.get("avg_traffic_bytes_active", 0))
+        awg_avg_str = f"{format_traffic(0)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
 
     header = format_admin_breadcrumbs(texts.DASHBOARD_MAIN_DASHBOARD)
     text = (

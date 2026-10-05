@@ -219,6 +219,45 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["avg_monthly_wi_bytes"], 300000000)
         self.assertEqual(stats["total_wi_traffic_bytes"], 2000000000)
 
+    async def test_admin_dashboard_rendering_monthly_zero_semantic(self):
+        """When monthly AWG average is 0, dashboard shows 0/month rather than lifetime fallback."""
+        from bot.handlers.admin.dashboard import _show_admin_dashboard
+
+        callback = MagicMock()
+        callback.message = AsyncMock()
+        mock_session = AsyncMock()
+
+        stats_mock = {
+            "total": 50,
+            "active": 25,
+            "new_24h": 3,
+            "total_traffic_bytes": 100 * 1024 * 1024 * 1024,
+            "total_wi_traffic_bytes": 50 * 1024 * 1024 * 1024,
+            "avg_traffic_bytes_active": 4 * 1024 * 1024 * 1024,
+            "avg_monthly_awg_bytes": 0,
+            "avg_monthly_wi_bytes": 0,
+        }
+        wl_stats_mock = {
+            "active_count": 10,
+            "total_traffic_bytes": 10 * 1024 * 1024 * 1024,
+        }
+
+        with patch("bot.handlers.admin.dashboard.get_dashboard_stats", new=AsyncMock(return_value=stats_mock)), \
+             patch("bot.handlers.admin.dashboard.get_white_internet_dashboard_stats", new=AsyncMock(return_value=wl_stats_mock)), \
+             patch("bot.handlers.admin.dashboard.get_total_free_ips", new=AsyncMock(return_value=100)), \
+             patch("bot.handlers.admin.dashboard._get_financial_stats", new=AsyncMock(return_value={"rev_24h": 0, "count_24h": 0, "rev_7d": 0, "rev_30d": 0, "avg_check": 0})), \
+             patch("bot.handlers.admin.dashboard._get_servers_capacity_summary", new=AsyncMock(return_value="")), \
+             patch("bot.handlers.admin.dashboard.MaintenanceService.is_enabled", new=AsyncMock(return_value=False)):
+            await _show_admin_dashboard(callback, mock_session)
+
+        sent_text = callback.message.edit_text.call_args[0][0]
+        # Must show 0 Б/мес or 0 B/month, NOT 4 GB
+        self.assertNotIn("4 ГБ", sent_text)
+        self.assertNotIn("4.0 ГБ", sent_text)
+        self.assertIn("/мес", sent_text)
+        # WI total must render the 50 GB from total_wi_traffic_bytes
+        self.assertIn("50", sent_text)
+
     def test_proc_net_dev_parsing(self):
         """Host network interface bytes correctly parses /proc/net/dev excluding virtual ifaces."""
         proc_dev_content = (
@@ -948,6 +987,103 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         # Processed should be 0 because sub.origin_node_id != server_id (2 != 1)
         self.assertEqual(processed, 0)
         mock_deduct.assert_not_called()
+
+    async def test_awg_traffic_worker_skips_concurrently_deleting_profile(self):
+        """If profile becomes deleting concurrently, worker skips delta to prevent user/profile desync."""
+        from services.workers.traffic import _process_server_traffic
+
+        server_info = {"id": 1, "name": "NL-1"}
+        peer_id = "test-peer-uuid-deleting"
+        api_clients = {
+            peer_id: MagicMock(
+                traffics=MagicMock(totalDownload=2000000, totalUpload=1000000),
+                lastHandshake=1700000000,
+                status="active",
+            )
+        }
+
+        mock_session = AsyncMock()
+
+        # Step 1 initial candidate check: finds profile
+        candidate_row = (10, peer_id, 42)
+        # Step 2 locked check: profile is now missing or deleted (empty list)
+        call_count = 0
+
+        def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            m = MagicMock()
+            if call_count == 1:
+                # Candidate selection
+                m.all.return_value = [candidate_row]
+            elif call_count == 2:
+                # User lock
+                m.all.return_value = []
+            elif call_count == 3:
+                # Locked profiles query: returns empty because profile was deleted
+                m.all.return_value = []
+            return m
+
+        mock_session.execute.side_effect = mock_execute
+        mock_server = Server(
+            id=1,
+            name="NL-1",
+            extra_data={"traffic_cycle": "2026-10", "monthly_traffic_bytes": 0},
+        )
+        mock_session.get.return_value = mock_server
+
+        with patch("services.workers.traffic.session_scope") as mock_scope, \
+             patch("services.slots_cache.get_server_generation", return_value=1):
+            mock_scope.return_value.__aenter__.return_value = mock_session
+            await _process_server_traffic(server_info, api_clients, expected_gen=1)
+
+        # Confirm no UPDATE statements were executed on User or VPNProfile
+        exec_calls = mock_session.execute.call_args_list
+        # call 1: select candidates
+        # call 2: select users with_for_update
+        # call 3: select locked profiles with_for_update
+        self.assertEqual(len(exec_calls), 3)
+
+    async def test_migration_grace_deletion_archives_residual_traffic(self):
+        """_schedule_migration_grace_deletion archives any residual traffic on old_profile into user archive."""
+        from services.api_operations_finalizer import _schedule_migration_grace_deletion
+
+        operation = MagicMock()
+        operation.payload = {"migrating_from_id": 99}
+        new_profile = MagicMock(provisioning_status="active")
+
+        mock_user = User(
+            id=10,
+            telegram_id=123456,
+            archived_device_traffic={"slot_1": 5000},
+        )
+        old_profile = VPNProfile(
+            id=99,
+            user_id=10,
+            device_name="Устройство #1",
+            provisioning_status="active",
+            traffic_down=3000,
+            traffic_up=2000,
+            peer_id="old-peer-1",
+            server=MagicMock(protocol="amneziawg2"),
+        )
+
+        mock_session = AsyncMock()
+        mock_res = MagicMock()
+        mock_res.scalar_one_or_none.return_value = old_profile
+        mock_session.execute.return_value = mock_res
+        mock_session.get.return_value = mock_user
+
+        with patch("services.api_operations_queue.resolve_profile_endpoint_snapshot", return_value=(1, "S1", "http://url", "key")), \
+             patch("services.api_operations_queue.ensure_delete_operation", new_callable=AsyncMock) as mock_ensure:
+            await _schedule_migration_grace_deletion(mock_session, operation, new_profile)
+
+        # Traffic must be transferred to user archive: 5000 + 3000 + 2000 = 10000
+        self.assertEqual(mock_user.archived_device_traffic["slot_1"], 10000)
+        self.assertEqual(old_profile.traffic_down, 0)
+        self.assertEqual(old_profile.traffic_up, 0)
+        self.assertEqual(old_profile.provisioning_status, "deleting")
+        mock_ensure.assert_awaited_once()
 
 
 if __name__ == "__main__":
