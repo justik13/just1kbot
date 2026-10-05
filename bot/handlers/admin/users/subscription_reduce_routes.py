@@ -98,7 +98,13 @@ async def admin_sub_reduce_process(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
+        await state.clear()
         return
 
     data = await state.get_data()
@@ -118,6 +124,7 @@ async def admin_sub_reduce_process(
             texts.ERROR_DAYS_OVERFLOW,
             get_back_button(f"admin_subscription:{telegram_id}"),
             parse_mode="HTML",
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -131,6 +138,7 @@ async def admin_sub_reduce_process(
             message.chat.id,
             texts.ADMIN_SUB_NO_SUBSCRIPTION,
             get_back_button(f"admin_subscription:{telegram_id}"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -156,6 +164,7 @@ async def admin_sub_reduce_process(
                 f"admin_subscription:{telegram_id}"
             ),
         ),
+        trigger_message_id=message.message_id,
     )
 
 

@@ -85,6 +85,11 @@ async def process_edit_server_name(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
@@ -95,6 +100,7 @@ async def process_edit_server_name(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -106,6 +112,7 @@ async def process_edit_server_name(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -120,6 +127,7 @@ async def process_edit_server_name(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
 
         await state.clear()
@@ -134,6 +142,7 @@ async def process_edit_server_name(
             message.chat.id,
             texts.ERROR_NAME_TOO_LONG.format(max=50),
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -161,6 +170,7 @@ async def process_edit_server_name(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
+        trigger_message_id=message.message_id,
     )
 
     logger.info(
@@ -230,6 +240,11 @@ async def process_edit_server_flag(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
@@ -240,6 +255,7 @@ async def process_edit_server_flag(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -251,6 +267,7 @@ async def process_edit_server_flag(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -265,6 +282,7 @@ async def process_edit_server_flag(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
 
         await state.clear()
@@ -279,6 +297,7 @@ async def process_edit_server_flag(
             message.chat.id,
             texts.ADMIN_SERVER_FLAG_TOO_LONG,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -304,6 +323,7 @@ async def process_edit_server_flag(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
+        trigger_message_id=message.message_id,
     )
 
     logger.info(
@@ -355,6 +375,11 @@ async def process_edit_server_url(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
@@ -365,6 +390,7 @@ async def process_edit_server_url(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -376,6 +402,7 @@ async def process_edit_server_url(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -390,6 +417,7 @@ async def process_edit_server_url(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
 
         await state.clear()
@@ -406,6 +434,7 @@ async def process_edit_server_url(
             message.chat.id,
             texts.ERROR_URL_TOO_LONG.format(max=500),
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -416,6 +445,7 @@ async def process_edit_server_url(
             texts.ERROR_INVALID_URL,
             get_back_button("admin_servers"),
             parse_mode="HTML",
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -426,6 +456,7 @@ async def process_edit_server_url(
             texts.ERROR_INVALID_URL,
             get_back_button("admin_servers"),
             parse_mode="HTML",
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -642,6 +673,7 @@ async def process_edit_server_url(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
+        trigger_message_id=message.message_id,
     )
 
     logger.info(
@@ -693,6 +725,11 @@ async def process_edit_server_key(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
@@ -703,6 +740,7 @@ async def process_edit_server_key(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -714,6 +752,7 @@ async def process_edit_server_key(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -728,6 +767,7 @@ async def process_edit_server_key(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
 
         await state.clear()
@@ -737,10 +777,6 @@ async def process_edit_server_key(
     validated_api_url = server.api_url
     validated_api_key = server.api_key
     new_key = message.text.strip()
-    try:
-        await message.delete()
-    except Exception as e:
-        logger.warning("Failed to delete secret message %s: %s", message.message_id, e)
 
 
     if not new_key or len(new_key) < 8:
@@ -929,6 +965,7 @@ async def process_edit_server_key(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
+        trigger_message_id=message.message_id,
     )
 
     logger.info(
@@ -980,6 +1017,11 @@ async def process_edit_server_max_clients(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
@@ -990,6 +1032,7 @@ async def process_edit_server_max_clients(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -1001,6 +1044,7 @@ async def process_edit_server_max_clients(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -1015,6 +1059,7 @@ async def process_edit_server_max_clients(
             message.chat.id,
             texts.ERROR_SERVER_NOT_FOUND,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
 
         await state.clear()
@@ -1032,6 +1077,7 @@ async def process_edit_server_max_clients(
             message.chat.id,
             texts.ERROR_NUMBER_GT_ZERO,
             get_back_button("admin_servers"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -1076,6 +1122,7 @@ async def process_edit_server_max_clients(
         get_back_button(
             f"admin_server_card:{server_id}"
         ),
+        trigger_message_id=message.message_id,
     )
 
     logger.info(

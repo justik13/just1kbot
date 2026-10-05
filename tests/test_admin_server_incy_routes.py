@@ -41,6 +41,21 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
         self.key = StorageKey(bot_id=1, chat_id=111, user_id=111)
         self.state = FSMContext(storage=self.storage, key=self.key)
         self.mock_session = AsyncMock()
+        self.mock_render_hub = patch(
+            "bot.handlers.admin.servers.incy_routes.render_hub", new_callable=AsyncMock
+        ).start()
+        self.addCleanup(patch.stopall)
+
+    def _create_msg(self, text: str) -> MagicMock:
+        msg = MagicMock(spec=Message)
+        msg.from_user = self.admin_user
+        msg.chat = self.chat
+        msg.bot = AsyncMock()
+        msg.message_id = 123
+        msg.text = text
+        msg.delete = AsyncMock()
+        msg.answer = AsyncMock()
+        return msg
 
     async def test_show_server_incy_card_unauthorized(self):
         cb = MagicMock(spec=CallbackQuery)
@@ -104,10 +119,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
         await self.state.set_state(AdminStates.editing_server_incy_param)
         await self.state.update_data(server_id=1, incy_param="title")
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = "★ Just1k Prime"
-        msg.answer = AsyncMock()
+        msg = self._create_msg("★ Just1k Prime")
 
         server = Server(
             id=1,
@@ -128,16 +140,14 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     )
                     state_after = await self.state.get_state()
                     self.assertIsNone(state_after)
-                    msg.answer.assert_awaited_once()
+                    self.mock_render_hub.assert_awaited_once()
+                    msg.delete.assert_awaited_once()
 
     async def test_process_server_incy_param_input_clear(self):
         await self.state.set_state(AdminStates.editing_server_incy_param)
         await self.state.update_data(server_id=1, incy_param="desc")
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = "-"
-        msg.answer = AsyncMock()
+        msg = self._create_msg("-")
 
         server = Server(
             id=1,
@@ -156,6 +166,8 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                         server,
                         extra_data={"profile_description": ""},
                     )
+                    self.mock_render_hub.assert_awaited_once()
+                    msg.delete.assert_awaited_once()
 
     async def test_process_server_incy_param_input_desc_100_chars(self):
         await self.state.set_state(AdminStates.editing_server_incy_param)
@@ -165,10 +177,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(long_desc), 50)
         self.assertLessEqual(len(long_desc), 100)
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = long_desc
-        msg.answer = AsyncMock()
+        msg = self._create_msg(long_desc)
 
         server = Server(
             id=1,
@@ -187,6 +196,8 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                         server,
                         extra_data={"profile_description": long_desc},
                     )
+                    self.mock_render_hub.assert_awaited_once()
+                    msg.delete.assert_awaited_once()
 
     async def test_show_server_incy_relays(self):
         cb = MagicMock(spec=CallbackQuery)
@@ -216,10 +227,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
         await self.state.set_state(AdminStates.editing_server_incy_relay_badge)
         await self.state.update_data(server_id=1, relay_code="de")
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = "⚡ YouTube БЕЗ рекламы"
-        msg.answer = AsyncMock()
+        msg = self._create_msg("⚡ YouTube БЕЗ рекламы")
 
         server = Server(
             id=1,
@@ -237,6 +245,8 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     self.assertIs(mock_update.call_args[0][1], server)
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["relay_badges"]["de"], "⚡ YouTube БЕЗ рекламы")
+                    self.mock_render_hub.assert_awaited_once()
+                    msg.delete.assert_awaited_once()
 
     async def test_show_server_incy_relay_card(self):
         cb = MagicMock(spec=CallbackQuery)
@@ -292,10 +302,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(data["server_id"], 1)
                 self.assertEqual(data["relay_code"], "de")
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = "🇩🇪 Франкфурт Скоростной"
-        msg.answer = AsyncMock()
+        msg = self._create_msg("🇩🇪 Франкфурт Скоростной")
 
         with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
             with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
@@ -305,6 +312,8 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     self.assertIs(mock_update.call_args[0][1], server)
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["relay_names"]["de"], "🇩🇪 Франкфурт Скоростной")
+                    self.mock_render_hub.assert_awaited_once()
+                    msg.delete.assert_awaited_once()
 
     async def test_confirm_server_incy_reset(self):
         cb = MagicMock(spec=CallbackQuery)
@@ -426,10 +435,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
         await self.state.set_state(AdminStates.editing_server_incy_param)
         await self.state.update_data(server_id=1, incy_param="announce")
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = "⚡ Новые скоростные узлы добавлены!"
-        msg.answer = AsyncMock()
+        msg = self._create_msg("⚡ Новые скоростные узлы добавлены!")
 
         server = Server(
             id=1,
@@ -446,6 +452,8 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     mock_update.assert_awaited_once()
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["announce"], "⚡ Новые скоростные узлы добавлены!")
+                    self.mock_render_hub.assert_awaited_once()
+                    msg.delete.assert_awaited_once()
 
     async def test_process_server_incy_announce_url_validation(self):
         await self.state.set_state(AdminStates.editing_server_incy_param)
@@ -460,23 +468,21 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
         )
 
         # 1. Invalid URL schema
-        msg_invalid = MagicMock(spec=Message)
-        msg_invalid.from_user = self.admin_user
-        msg_invalid.text = "javascript:alert(1)"
-        msg_invalid.answer = AsyncMock()
+        msg_invalid = self._create_msg("javascript:alert(1)")
 
         with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
             with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
                 with patch("bot.handlers.admin.servers.incy_routes.update_server", new_callable=AsyncMock) as mock_update:
                     await process_server_incy_param_input(msg_invalid, self.state, self.mock_session)
-                    msg_invalid.answer.assert_awaited_once_with(texts.ADMIN_SERVER_INCY_ERR_INVALID_URL)
+                    self.mock_render_hub.assert_awaited_once()
+                    self.assertIn(texts.ADMIN_SERVER_INCY_ERR_INVALID_URL, self.mock_render_hub.call_args[0][2])
+                    msg_invalid.delete.assert_awaited_once()
                     mock_update.assert_not_awaited()
 
+        self.mock_render_hub.reset_mock()
+
         # 2. Valid URL
-        msg_valid = MagicMock(spec=Message)
-        msg_valid.from_user = self.admin_user
-        msg_valid.text = "https://t.me/just1k_channel"
-        msg_valid.answer = AsyncMock()
+        msg_valid = self._create_msg("https://t.me/just1k_channel")
 
         with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
             with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
@@ -485,15 +491,14 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     mock_update.assert_awaited_once()
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["announce_url"], "https://t.me/just1k_channel")
+                    self.mock_render_hub.assert_awaited_once()
+                    msg_valid.delete.assert_awaited_once()
 
     async def test_process_server_incy_title_truncates_to_25_chars(self):
         await self.state.set_state(AdminStates.editing_server_incy_param)
         await self.state.update_data(server_id=1, incy_param="title")
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = "A" * 40
-        msg.answer = AsyncMock()
+        msg = self._create_msg("A" * 40)
 
         server = Server(
             id=1,
@@ -511,15 +516,14 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(len(saved_extra["profile_title"]), 25)
                     self.assertEqual(saved_extra["profile_title"], "A" * 25)
+                    self.mock_render_hub.assert_awaited_once()
+                    msg.delete.assert_awaited_once()
 
     async def test_process_server_incy_origin_badge_none_disables(self):
         await self.state.set_state(AdminStates.editing_server_incy_param)
         await self.state.update_data(server_id=1, incy_param="origin_badge")
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = "none"
-        msg.answer = AsyncMock()
+        msg = self._create_msg("none")
 
         server = Server(
             id=1,
@@ -536,6 +540,8 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     mock_update.assert_awaited_once()
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["origin_badge"], "none")
+                    self.mock_render_hub.assert_awaited_once()
+                    msg.delete.assert_awaited_once()
 
         # Details formatter should show disabled
         server.extra_data = {"origin_badge": "none"}
@@ -546,10 +552,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
         await self.state.set_state(AdminStates.editing_server_incy_relay_badge)
         await self.state.update_data(server_id=1, relay_code="de")
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = "none"
-        msg.answer = AsyncMock()
+        msg = self._create_msg("none")
 
         server = Server(
             id=1,
@@ -566,15 +569,14 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     mock_update.assert_awaited_once()
                     saved_extra = mock_update.call_args[1]["extra_data"]
                     self.assertEqual(saved_extra["relay_badges"]["de"], "none")
+                    self.mock_render_hub.assert_awaited_once()
+                    msg.delete.assert_awaited_once()
 
     async def test_process_server_incy_param_input_slash_command_resets_state(self):
         await self.state.set_state(AdminStates.editing_server_incy_param)
         await self.state.update_data(server_id=1, incy_param="title")
 
-        msg = MagicMock(spec=Message)
-        msg.from_user = self.admin_user
-        msg.text = "/start"
-        msg.answer = AsyncMock()
+        msg = self._create_msg("/start")
 
         server = Server(
             id=1,
@@ -591,3 +593,4 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     mock_update.assert_not_awaited()
                     state_after = await self.state.get_state()
                     self.assertIsNone(state_after)
+                    msg.delete.assert_awaited_once()

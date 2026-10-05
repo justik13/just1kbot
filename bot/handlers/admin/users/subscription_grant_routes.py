@@ -341,7 +341,13 @@ async def admin_sub_grant_custom_process(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
+        await state.clear()
         return
 
     data = await state.get_data()
@@ -364,6 +370,7 @@ async def admin_sub_grant_custom_process(
                 f"admin_sub_grant_group:{telegram_id}:{tariff_id}"
             ),
             parse_mode="HTML",
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -377,6 +384,7 @@ async def admin_sub_grant_custom_process(
             message.chat.id,
             texts.ERROR_TARIFF_NOT_FOUND,
             get_back_button(f"admin_subscription:{telegram_id}"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -409,6 +417,7 @@ async def admin_sub_grant_custom_process(
                 f"{telegram_id}:{tariff.device_limit}"
             ),
         ),
+        trigger_message_id=message.message_id,
     )
 
 
