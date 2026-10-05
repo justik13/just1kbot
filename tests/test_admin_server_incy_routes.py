@@ -41,10 +41,11 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
         self.key = StorageKey(bot_id=1, chat_id=111, user_id=111)
         self.state = FSMContext(storage=self.storage, key=self.key)
         self.mock_session = AsyncMock()
-        self.mock_render_hub = patch(
+        self.patcher = patch(
             "bot.handlers.admin.servers.incy_routes.render_hub", new_callable=AsyncMock
-        ).start()
-        self.addCleanup(patch.stopall)
+        )
+        self.mock_render_hub = self.patcher.start()
+        self.addCleanup(self.patcher.stop)
 
     def _create_msg(self, text: str) -> MagicMock:
         msg = MagicMock(spec=Message)
