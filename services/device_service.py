@@ -475,23 +475,14 @@ class DeviceService:
 
         # Retain device traffic statistics across server migration
         if hasattr(user, "archived_device_traffic"):
-            try:
-                old_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
-                if old_bytes > 0:
-                    from utils.traffic_helpers import record_device_traffic_archive
+            old_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
+            if old_bytes > 0:
+                from utils.traffic_helpers import record_device_traffic_archive
 
-                    archived = dict(user.archived_device_traffic or {})
-                    user.archived_device_traffic = record_device_traffic_archive(archived, device_name, old_bytes)
-                    old_profile.traffic_down = 0
-                    old_profile.traffic_up = 0
-            except Exception as archive_err:
-                logger.warning(
-                    "Failed to archive device traffic during migration for user %s device %s: %s",
-                    user.id,
-                    device_name,
-                    archive_err,
-                    exc_info=True,
-                )
+                archived = dict(user.archived_device_traffic or {})
+                user.archived_device_traffic = record_device_traffic_archive(archived, device_name, old_bytes)
+                old_profile.traffic_down = 0
+                old_profile.traffic_up = 0
 
         new_profile = VPNProfile(
             user_id=user.id,
@@ -609,25 +600,17 @@ class DeviceService:
 
         # Retain device traffic statistics upon key deletion or recreation
         if user_id and device_name:
-            try:
-                if user_obj is None:
-                    user_obj = await session.get(User, user_id, with_for_update=True)
-                if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
-                    cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
-                    if cur_bytes > 0:
-                        from utils.traffic_helpers import record_device_traffic_archive
+            if user_obj is None:
+                user_obj = await session.get(User, user_id, with_for_update=True)
+            if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
+                cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
+                if cur_bytes > 0:
+                    from utils.traffic_helpers import record_device_traffic_archive
 
-                        archived = dict(user_obj.archived_device_traffic or {})
-                        user_obj.archived_device_traffic = record_device_traffic_archive(archived, device_name, cur_bytes)
-                        profile.traffic_down = 0
-                        profile.traffic_up = 0
-            except Exception as archive_err:
-                logger.warning(
-                    "Failed to archive device traffic for profile %s: %s",
-                    profile_id,
-                    archive_err,
-                    exc_info=True,
-                )
+                    archived = dict(user_obj.archived_device_traffic or {})
+                    user_obj.archived_device_traffic = record_device_traffic_archive(archived, device_name, cur_bytes)
+                    profile.traffic_down = 0
+                    profile.traffic_up = 0
 
         create_operation = None
         if force and not profile.peer_id:

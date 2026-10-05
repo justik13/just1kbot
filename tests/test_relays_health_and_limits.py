@@ -98,6 +98,65 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Timeout", rendered_text)
             self.assertIn("🟢 Онлайн (RTT:", rendered_text)
 
+    async def test_show_server_relays_re_fetches_server_with_for_update_to_prevent_lost_update(self):
+        initial_server = Server(
+            id=42,
+            name="Origin-Main",
+            country_flag="🇷🇺",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://origin.node:8444",
+            api_key="key-123",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+        fresh_server = Server(
+            id=42,
+            name="Origin-Main",
+            country_flag="🇷🇺",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://origin.node:8444",
+            api_key="key-123",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={"host_monthly_traffic_bytes": 1024000},
+        )
+
+        mock_session = AsyncMock()
+        mock_callback = AsyncMock(spec=CallbackQuery)
+        mock_callback.answer = AsyncMock()
+        mock_callback.from_user = TgUser(id=1001, is_bot=False, first_name="Admin")
+        mock_callback.data = "admin_server_relays:42"
+        mock_callback.message = AsyncMock()
+
+        relays_data = {
+            "status": "ok",
+            "count": 1,
+            "all_healthy": True,
+            "relays": [
+                {"name": "DE", "code": "de", "ip": "1.2.3.4", "port": 10443, "healthy": True, "rtt_ms": 30.0, "error": None},
+            ],
+        }
+
+        async def fake_get_server(session, server_id, for_update=False):
+            if for_update:
+                return fresh_server
+            return initial_server
+
+        with patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.card_routes.get_server_by_id", side_effect=fake_get_server) as mock_get_server, \
+             patch.object(XrayNodeClient, "check_health", new_callable=AsyncMock, return_value=(True, "epoch-1", {})), \
+             patch.object(XrayNodeClient, "get_relays_health", new_callable=AsyncMock, return_value=(True, relays_data, None)):
+
+            await show_server_relays(mock_callback, mock_session)
+
+            self.assertEqual(mock_get_server.call_count, 2)
+            mock_get_server.assert_any_call(mock_session, 42, for_update=True)
+            self.assertEqual(fresh_server.extra_data.get("host_monthly_traffic_bytes"), 1024000)
+            self.assertEqual(fresh_server.extra_data.get("relays"), relays_data["relays"])
+            mock_session.flush.assert_awaited_once()
+
     async def test_show_server_relays_origin_offline_renders_offline_badge(self):
         server = Server(
             id=42,

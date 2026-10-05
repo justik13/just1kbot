@@ -84,20 +84,17 @@ class ProfileDeletionService:
                 affected_server_ids.add(profile.server_id)
             cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
             if cur_bytes > 0 and getattr(profile, "user_id", None) and getattr(profile, "device_name", None):
-                try:
-                    from database.models import User
-                    from utils.traffic_helpers import record_device_traffic_archive
+                from database.models import User
+                from utils.traffic_helpers import record_device_traffic_archive
 
-                    user_obj = await session.get(User, profile.user_id)
-                    if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
-                        archived = dict(user_obj.archived_device_traffic or {})
-                        user_obj.archived_device_traffic = record_device_traffic_archive(
-                            archived, profile.device_name, cur_bytes
-                        )
-                        profile.traffic_down = 0
-                        profile.traffic_up = 0
-                except Exception as archive_err:
-                    logger.debug("Failed to archive device traffic in ProfileDeletionService: %s", archive_err)
+                user_obj = await session.get(User, profile.user_id)
+                if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
+                    archived = dict(user_obj.archived_device_traffic or {})
+                    user_obj.archived_device_traffic = record_device_traffic_archive(
+                        archived, profile.device_name, cur_bytes
+                    )
+                    profile.traffic_down = 0
+                    profile.traffic_up = 0
             if profile.provisioning_status == "create_cleanup_pending":
                 await session.execute(
                     update(APIOperation)

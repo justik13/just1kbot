@@ -207,7 +207,8 @@ async def _process_server_traffic(
         return
 
     updates_data = {}
-    user_traffic_deltas: dict[int, int] = {}
+    profile_deltas: dict[int, int] = {}
+    profile_user_map: dict[int, int] = {}
     server_delta: int = 0
     current_time = now_utc()
 
@@ -338,8 +339,8 @@ async def _process_server_traffic(
                     "last_connected": new_last_connected,
                 }
                 if total_delta > 0:
-                    user_traffic_deltas[user_id] = user_traffic_deltas.get(user_id, 0) + total_delta
-                    server_delta += total_delta
+                    profile_deltas[p_id] = total_delta
+                profile_user_map[p_id] = user_id
 
             total_traffic = (new_t_down or 0) + (new_t_up or 0)
             if (
@@ -357,13 +358,42 @@ async def _process_server_traffic(
                     )
                 )
 
-        # 1. Update User totals FIRST to respect canonical hierarchy: User -> Profile -> Server
-        if user_traffic_deltas:
+        # 1. Update User totals and VPNProfile in canonical lock hierarchy (User -> VPNProfile)
+        # Re-verify profile provisioning_status under User lock to ensure traffic deltas are only
+        # applied for profiles that were not decommissioned concurrently.
+        if updates_data:
             current_cycle = current_time.strftime("%Y-%m")
-            sorted_uids = sorted(user_traffic_deltas.keys())
+            profiles_by_user: dict[int, list[int]] = {}
+            for p_id in updates_data:
+                u_id = profile_user_map.get(p_id)
+                if u_id:
+                    profiles_by_user.setdefault(u_id, []).append(p_id)
+
+            sorted_uids = sorted(profiles_by_user.keys())
+            eligible_pids: set[int] = set()
+
             for u_id in sorted_uids:
-                u_delta = user_traffic_deltas[u_id]
+                # Lock User first
+                await session.execute(
+                    select(User.id).where(User.id == u_id).with_for_update()
+                )
+                user_pids = profiles_by_user[u_id]
+                # Lock and check which profiles are still eligible (not deleting/delete_failed)
+                result_eligible = await session.execute(
+                    select(VPNProfile.id)
+                    .where(
+                        VPNProfile.id.in_(user_pids),
+                        VPNProfile.provisioning_status.notin_(["deleting", "delete_failed"]),
+                    )
+                    .with_for_update()
+                )
+                user_eligible = set(result_eligible.scalars().all())
+
+                eligible_pids.update(user_eligible)
+
+                u_delta = sum(profile_deltas.get(pid, 0) for pid in user_eligible)
                 if u_delta > 0:
+                    server_delta += u_delta
                     await session.execute(
                         update(User)
                         .where(User.id == u_id)
@@ -381,8 +411,7 @@ async def _process_server_traffic(
                         )
                     )
 
-        # 2. Update VPNProfile SECOND with status guard (prevents resurrection of deleting/delete_failed profiles)
-        if updates_data:
+            # 2. Update VPNProfile ONLY for eligible profiles
             bulk_params = [
                 {
                     "b_id": profile_id,
@@ -394,6 +423,7 @@ async def _process_server_traffic(
                     "last_connected": data.get("last_connected"),
                 }
                 for profile_id, data in updates_data.items()
+                if profile_id in eligible_pids
             ]
             if bulk_params:
                 stmt_update = (

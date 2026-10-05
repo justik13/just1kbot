@@ -38,6 +38,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             datetime(2028, 1, 1, tzinfo=timezone.utc), False,
         )
         mock_result.all.return_value = [mock_row]
+        mock_result.scalars.return_value.all.return_value = [101]
         mock_session.execute.return_value = mock_result
 
         mock_server = Server(
@@ -625,8 +626,8 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("vpn_profiles.provisioning_status !=", sql)
         self.assertIn("vpn_profiles.id = :b_id", sql)
 
-    async def test_archive_failure_logs_warning_and_allows_deletion(self):
-        """Archive failure logs warning with exc_info and deletion proceeds (fail-open)."""
+    async def test_archive_failure_raises_and_aborts_deletion_fail_closed(self):
+        """Archive failure raises exception to abort deletion, preventing permanent traffic loss (fail-closed)."""
         mock_session = AsyncMock()
         mock_profile = VPNProfile(
             id=77,
@@ -650,20 +651,15 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         mock_session.execute.return_value = mock_res
 
         with patch("utils.traffic_helpers.record_device_traffic_archive", side_effect=ValueError("Simulated archive corrupt error")), \
-             patch("services.device_service.logger.warning") as mock_log_warn, \
              patch("services.device_service.resolve_profile_endpoint_snapshot", return_value=(1, "AWG-1", "http://node", "secret")), \
-             patch("services.device_service.ensure_delete_operation", new_callable=AsyncMock):
-            res = await DeviceService.delete_device(
-                mock_session,
-                profile=mock_profile,
-            )
-            # Deletion succeeded (fail-open)
-            self.assertTrue(res)
-            # Warning was logged with exc_info=True
-            mock_log_warn.assert_called_once()
-            call_args = mock_log_warn.call_args
-            self.assertIn("Failed to archive device traffic", call_args[0][0])
-            self.assertTrue(call_args[1].get("exc_info"))
+             patch("services.device_service.ensure_delete_operation", new_callable=AsyncMock) as mock_ensure:
+            with self.assertRaises(ValueError):
+                await DeviceService.delete_device(
+                    mock_session,
+                    profile=mock_profile,
+                )
+            # Delete operation was NOT enqueued, transaction aborted
+            mock_ensure.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -29,7 +29,10 @@ def upgrade() -> None:
             server_default="0",
         ),
     )
-    # Backfill historical White Internet lifetime traffic from existing subscriptions
+    # Best-effort backfill of available White Internet traffic from existing active subscription records.
+    # Note: Prior to PR #354, subscription renewals reset traffic_used_bytes to 0 on each cycle, so
+    # pre-PR historical cycles cannot be reconstructed without a prior ledger. Monotonic lifetime
+    # accumulation begins with this migration.
     op.execute(
         sa.text(
             """
