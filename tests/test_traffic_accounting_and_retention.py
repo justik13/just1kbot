@@ -761,6 +761,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         mock_sub = WhiteInternetSubscription(
             id=1,
             user_id=42,
+            origin_node_id=1,
             uuid="uuid-1",
             token="token-1",
             status=WhiteInternetStatus.ACTIVE,
@@ -832,6 +833,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         mock_sub = WhiteInternetSubscription(
             id=1,
             user_id=42,
+            origin_node_id=1,
             uuid="uuid-1",
             token="token-1",
             status=WhiteInternetStatus.ACTIVE,
@@ -879,6 +881,73 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(processed, 0)
         # Server monthly_traffic_bytes was NOT incremented with the failed consumption
         self.assertEqual(mock_server.extra_data.get("monthly_traffic_bytes", 0), 0)
+
+    async def test_white_internet_worker_skips_snapshot_if_subscription_migrated(self):
+        """WI worker skips deducting snapshot from old server if subscription was migrated concurrently."""
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+
+        mock_server = Server(
+            id=1,
+            name="Origin-1",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="http://node:8444",
+            api_key="secret",
+            is_active=True,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=12345,
+            extra_data={"traffic_cycle": "2026-10", "monthly_traffic_bytes": 0},
+        )
+        migrated_sub = WhiteInternetSubscription(
+            id=1,
+            user_id=42,
+            origin_node_id=2,  # Moved to server 2
+            uuid="uuid-1",
+            token="token-1",
+            status=WhiteInternetStatus.ACTIVE,
+            traffic_stats_epoch="epoch-1",
+            last_uplink_snapshot=100,
+            last_downlink_snapshot=200,
+            base_traffic_bytes=1000000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=0,
+            traffic_overage_bytes=0,
+            notified_90p=False,
+            is_trial=False,
+            desired_version=1,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = migrated_sub
+        mock_session.get.return_value = mock_server
+
+        def mock_execute(stmt, *args, **kwargs):
+            m = MagicMock()
+            m.scalars.return_value.all.return_value = [mock_server]
+            return m
+
+        mock_session.execute.side_effect = mock_execute
+
+        mock_client = AsyncMock()
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1",
+            "boot-1",
+            12345,
+            {"uuid-1": {"uplink": 150, "downlink": 300}},
+        )
+
+        worker = WhiteInternetTrafficWorker(node_client=mock_client)
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=migrated_sub), \
+             patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic") as mock_deduct:
+            processed = await worker.run_traffic_cycle(mock_session)
+
+        # Processed should be 0 because sub.origin_node_id != server_id (2 != 1)
+        self.assertEqual(processed, 0)
+        mock_deduct.assert_not_called()
 
 
 if __name__ == "__main__":

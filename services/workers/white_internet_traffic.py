@@ -191,7 +191,7 @@ class WhiteInternetTrafficWorker:
                         sub = await white_internet_repo.get_subscription_with_lock(
                             sess, sub_meta.id
                         )
-                        if sub is None:
+                        if sub is None or sub.origin_node_id != server_id:
                             continue
 
                         if uplink < 0 or downlink < 0:
