@@ -34,9 +34,11 @@ DB = os.getenv("TEST_DATABASE_URL")
 VALID_PREFLIGHT_BASES = (
     "0031_awg_persistent_traffic",
     "0032_drop_banking_residue",
+    "0033_drop_legacy_financial_tables",
+    "0034_drop_tariff_quotes",
 )
 _BASES_LIST = ",".join(f"'{b}'" for b in VALID_PREFLIGHT_BASES)
-EXPECTED_BASE = "0032_drop_banking_residue"
+EXPECTED_BASE = "0034_drop_tariff_quotes"
 EXPECTED_HEAD = "0035_traffic_device_retention"
 
 DROPPED_TABLES = (

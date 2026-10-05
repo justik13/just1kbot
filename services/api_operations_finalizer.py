@@ -156,6 +156,11 @@ async def _schedule_migration_grace_deletion(session, operation, profile) -> Non
     )
     from utils.datetime_helpers import now_utc
 
+    user = None
+    user_id = getattr(profile, "user_id", None)
+    if user_id:
+        user = await session.get(User, user_id, with_for_update=True)
+
     old_profile = (
         await session.execute(
             select(VPNProfile)
@@ -167,8 +172,9 @@ async def _schedule_migration_grace_deletion(session, operation, profile) -> Non
 
     if old_profile and old_profile.provisioning_status != "deleting":
         cur_bytes = (getattr(old_profile, "traffic_down", 0) or 0) + (getattr(old_profile, "traffic_up", 0) or 0)
-        if cur_bytes > 0 and getattr(old_profile, "user_id", None) and getattr(old_profile, "device_name", None):
-            user = await session.get(User, old_profile.user_id)
+        if cur_bytes > 0 and getattr(old_profile, "device_name", None):
+            if user is None and getattr(old_profile, "user_id", None):
+                user = await session.get(User, old_profile.user_id, with_for_update=True)
             if user is not None and hasattr(user, "archived_device_traffic"):
                 from utils.traffic_helpers import record_device_traffic_archive
 

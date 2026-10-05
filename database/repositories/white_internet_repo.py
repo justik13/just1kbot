@@ -476,8 +476,8 @@ async def record_and_deduct_traffic_atomic(
     node_epoch: int | str,
     snapshot_uplink_after: int,
     snapshot_downlink_after: int,
-    snapshot_uplink_before: int = 0,
-    snapshot_downlink_before: int = 0,
+    snapshot_uplink_before: int | None = None,
+    snapshot_downlink_before: int | None = None,
     *,
     node_boot_id: str | None = None,
     node_starttime: int | None = None,
@@ -491,11 +491,13 @@ async def record_and_deduct_traffic_atomic(
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
 
     effective_before_up = (
-        snapshot_uplink_before if snapshot_uplink_before > 0 else (sub.last_uplink_snapshot or 0)
+        snapshot_uplink_before
+        if snapshot_uplink_before is not None
+        else (sub.last_uplink_snapshot or 0)
     )
     effective_before_down = (
         snapshot_downlink_before
-        if snapshot_downlink_before > 0
+        if snapshot_downlink_before is not None
         else (sub.last_downlink_snapshot or 0)
     )
 

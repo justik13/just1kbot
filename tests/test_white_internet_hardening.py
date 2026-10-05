@@ -482,6 +482,50 @@ class TestGroupHWhiteInternetRepoAtomicDeduplication(unittest.IsolatedAsyncioTes
             self.assertEqual(sub.last_uplink_snapshot, 50)
             self.assertEqual(sub.last_downlink_snapshot, 550)
 
+    async def test_record_and_deduct_explicit_zero_baseline_with_historical_snapshot(self):
+        session = AsyncMock(spec=AsyncSession)
+        sub = WhiteInternetSubscription(
+            id=1,
+            status=WhiteInternetStatus.ACTIVE,
+            base_traffic_bytes=5000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=1000,
+            traffic_uplink_bytes=500,
+            traffic_downlink_bytes=1000,
+            last_uplink_snapshot=500,
+            last_downlink_snapshot=1000,
+            expires_at=now_utc() + timedelta(days=10),
+        )
+
+        with patch(
+            "database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub
+        ):
+            # When node restarts / new session starts with 0 baseline,
+            # snapshot_downlink_before=0 must be respected rather than falling back
+            # to sub.last_downlink_snapshot (1000).
+            (
+                consumed,
+                became_exhausted,
+                available,
+                event,
+            ) = await white_internet_repo.record_and_deduct_traffic_atomic(
+                session,
+                subscription_id=1,
+                node_epoch="ep-restart",
+                snapshot_uplink_after=100,
+                snapshot_downlink_after=200,
+                snapshot_uplink_before=0,
+                snapshot_downlink_before=0,
+            )
+
+            self.assertEqual(consumed, 200)
+            self.assertEqual(sub.traffic_used_bytes, 1200)
+            self.assertEqual(sub.traffic_downlink_bytes, 1200)
+            self.assertEqual(sub.traffic_uplink_bytes, 600)
+            self.assertEqual(sub.last_uplink_snapshot, 100)
+            self.assertEqual(sub.last_downlink_snapshot, 200)
+
+
 
 class TestGroupIWhiteInternetRepoGrantConservation(unittest.IsolatedAsyncioTestCase):
     """Group I: White Internet Repo Quota Pool Conservation & Topup."""
