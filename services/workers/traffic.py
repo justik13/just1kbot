@@ -371,9 +371,11 @@ async def _process_server_traffic(
             ]
             if bulk_params:
                 await session.execute(
-                    update(VPNProfile).where(
+                    update(VPNProfile)
+                    .where(
                         VPNProfile.provisioning_status.notin_(["deleting", "delete_failed"])
-                    ),
+                    )
+                    .execution_options(synchronize_session=False),
                     bulk_params,
                 )
 
