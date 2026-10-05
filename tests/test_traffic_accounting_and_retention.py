@@ -468,8 +468,48 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
                 expected_attempt_number=1,
             )
 
-        self.assertEqual(mock_user.archived_device_traffic["slot_1"], 5000)
+        # Finalizer deletes profile without locking User (preventing deadlocks)
         mock_session.delete.assert_awaited_once_with(mock_profile)
+        mock_session.get.assert_not_called()
+
+    async def test_profile_deletion_service_archives_traffic(self):
+        """ProfileDeletionService archives unarchived traffic to User before deleting."""
+        from services.profile_deletion_service import ProfileDeletionService
+
+        mock_session = AsyncMock()
+        mock_profile = VPNProfile(
+            id=55,
+            user_id=99,
+            server_id=1,
+            peer_id="peer-55",
+            client_name="c55",
+            device_name="Tablet #1",
+            traffic_down=3000,
+            traffic_up=1500,
+            provisioning_status="active",
+        )
+        mock_user = User(
+            id=99,
+            archived_device_traffic={"Tablet #1": 500},
+        )
+
+        mock_session.get.return_value = mock_user
+        mock_res = MagicMock()
+        mock_res.scalars.return_value = [mock_profile]
+        mock_session.execute.return_value = mock_res
+
+        with patch("services.profile_deletion_service.resolve_profile_endpoint_snapshot", return_value=(1, "srv", "http://url", "key")), \
+             patch("services.profile_deletion_service.ensure_delete_operation") as mock_ensure:
+            await ProfileDeletionService.delete_profiles_for_user(
+                mock_session,
+                user_id=99,
+                reason="ban_delete",
+            )
+
+        self.assertEqual(mock_user.archived_device_traffic["slot_1"], 5000)
+        self.assertEqual(mock_profile.traffic_down, 0)
+        self.assertEqual(mock_profile.traffic_up, 0)
+        mock_ensure.assert_awaited_once()
 
     def test_xray_traffic_snapshot_tuple_backward_compatibility(self):
         """TrafficSnapshot acts as a 4-tuple while exposing host_tx_bytes and host_rx_bytes."""
@@ -557,6 +597,30 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(m_bytes, 0)
         self.assertEqual(h_bytes, 500000)
+
+    def test_traffic_worker_bulk_update_excludes_deleting_profiles(self):
+        """Traffic worker bulk update statement contains strict provisioning_status guards."""
+        from sqlalchemy import bindparam, update
+        from database.models import VPNProfile
+
+        stmt = (
+            update(VPNProfile)
+            .where(
+                VPNProfile.id == bindparam("b_id"),
+                VPNProfile.provisioning_status != "deleting",
+                VPNProfile.provisioning_status != "delete_failed",
+            )
+            .values(
+                traffic_down=bindparam("traffic_down"),
+                traffic_up=bindparam("traffic_up"),
+                raw_last_down=bindparam("raw_last_down"),
+                raw_last_up=bindparam("raw_last_up"),
+                last_connected=bindparam("last_connected"),
+            )
+        )
+        sql = str(stmt)
+        self.assertIn("vpn_profiles.provisioning_status !=", sql)
+        self.assertIn("vpn_profiles.id = :b_id", sql)
 
 
 if __name__ == "__main__":

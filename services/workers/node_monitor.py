@@ -387,7 +387,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                     got_lock = True
 
                 if got_lock:
-                    fresh_server = await get_server_by_id(session, server.id)
+                    fresh_server = (
+                        await session.execute(
+                            select(Server).where(Server.id == server.id).with_for_update()
+                        )
+                    ).scalar_one_or_none()
                     db_extra = dict((fresh_server.extra_data if fresh_server else server.extra_data) or {})
                     db_ingress_problem = bool(db_extra.get("ingress_problem"))
                     db_cdn_problem = bool(db_extra.get("cdn_problem"))
@@ -545,7 +549,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                     state_prop = "cdn_problem" if alert_kind == "cdn" else "ingress_problem"
                     setattr(st, state_prop, is_problem)
                     async with session_scope() as session:
-                        fresh = await get_server_by_id(session, server.id)
+                        fresh = (
+                            await session.execute(
+                                select(Server).where(Server.id == server.id).with_for_update()
+                            )
+                        ).scalar_one_or_none()
                         if fresh:
                             cur_extra = dict(fresh.extra_data or {})
                             if is_problem:

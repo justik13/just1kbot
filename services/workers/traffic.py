@@ -7,7 +7,7 @@ from aiogram import Bot
 from bot.keyboards.notifications import get_traffic_alert_keyboard
 from bot.texts.runtime.alerts import ALERT_TRAFFIC_OVERUSAGE
 from cachetools import TTLCache
-from sqlalchemy import case, select, update
+from sqlalchemy import bindparam, case, select, update
 
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -357,27 +357,12 @@ async def _process_server_traffic(
                     )
                 )
 
-        if updates_data:
-            bulk_params = [
-                {
-                    "id": profile_id,
-                    "traffic_down": data.get("traffic_down"),
-                    "traffic_up": data.get("traffic_up"),
-                    "raw_last_down": data.get("raw_last_down"),
-                    "raw_last_up": data.get("raw_last_up"),
-                    "last_connected": data.get("last_connected"),
-                }
-                for profile_id, data in updates_data.items()
-            ]
-            if bulk_params:
-                await session.execute(
-                    update(VPNProfile),
-                    bulk_params,
-                )
-
+        # 1. Update User totals FIRST to respect canonical hierarchy: User -> Profile -> Server
         if user_traffic_deltas:
             current_cycle = current_time.strftime("%Y-%m")
-            for u_id, u_delta in user_traffic_deltas.items():
+            sorted_uids = sorted(user_traffic_deltas.keys())
+            for u_id in sorted_uids:
+                u_delta = user_traffic_deltas[u_id]
                 if u_delta > 0:
                     await session.execute(
                         update(User)
@@ -396,6 +381,43 @@ async def _process_server_traffic(
                         )
                     )
 
+        # 2. Update VPNProfile SECOND with status guard (prevents resurrection of deleting/delete_failed profiles)
+        if updates_data:
+            bulk_params = [
+                {
+                    "b_id": profile_id,
+                    "id": profile_id,
+                    "traffic_down": data.get("traffic_down"),
+                    "traffic_up": data.get("traffic_up"),
+                    "raw_last_down": data.get("raw_last_down"),
+                    "raw_last_up": data.get("raw_last_up"),
+                    "last_connected": data.get("last_connected"),
+                }
+                for profile_id, data in updates_data.items()
+            ]
+            if bulk_params:
+                stmt_update = (
+                    update(VPNProfile)
+                    .where(
+                        VPNProfile.id == bindparam("b_id"),
+                        VPNProfile.provisioning_status != "deleting",
+                        VPNProfile.provisioning_status != "delete_failed",
+                    )
+                    .values(
+                        traffic_down=bindparam("traffic_down"),
+                        traffic_up=bindparam("traffic_up"),
+                        raw_last_down=bindparam("raw_last_down"),
+                        raw_last_up=bindparam("raw_last_up"),
+                        last_connected=bindparam("last_connected"),
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                await session.execute(
+                    stmt_update,
+                    bulk_params,
+                )
+
+        # 3. Lock Server FOR UPDATE THIRD and update host extra_data
         server_obj = await session.get(Server, server_id, with_for_update=True)
         if server_obj:
             raw_extra = getattr(server_obj, "extra_data", None)

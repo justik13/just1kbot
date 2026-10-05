@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from bot import texts
 from database.connection import session_scope
-from database.models import APIOperation, Server, User, VPNProfile
+from database.models import APIOperation, Server, VPNProfile
 
 from services.api_operations_queue import (
     APIOperationOwnershipError,
@@ -386,19 +386,6 @@ async def finalize_delete_success(
             session, operation_id, worker_id, expected_attempt_number
         )
         if profile:
-            cur_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
-            if cur_bytes > 0 and getattr(profile, "user_id", None) and getattr(profile, "device_name", None):
-                try:
-                    user_obj = await session.get(User, profile.user_id, with_for_update=True)
-                    if user_obj is not None and hasattr(user_obj, "archived_device_traffic"):
-                        from utils.traffic_helpers import record_device_traffic_archive
-
-                        archived = dict(user_obj.archived_device_traffic or {})
-                        user_obj.archived_device_traffic = record_device_traffic_archive(
-                            archived, profile.device_name, cur_bytes
-                        )
-                except Exception as archive_err:
-                    logger.debug("Failed safety archiving in finalize_delete_success: %s", archive_err)
             await session.delete(profile)
         _complete(operation)
 

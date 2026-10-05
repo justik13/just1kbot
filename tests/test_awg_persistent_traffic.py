@@ -75,8 +75,8 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(mock_session.execute.called)
         calls = mock_session.execute.call_args_list
 
-        # Bulk update call for VPNProfile
-        profile_update_args = calls[1]  # calls[0] is select
+        # Bulk update call for VPNProfile (User updated first, Profile updated second)
+        profile_update_args = [c for c in calls if len(c[0]) > 1 and isinstance(c[0][1], list)][0]
         bulk_params = profile_update_args[0][1]
         self.assertEqual(len(bulk_params), 1)
         self.assertEqual(bulk_params[0]["id"], 10)
@@ -135,7 +135,7 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
             await _process_server_traffic(server_info, api_clients, expected_gen=1)
 
         calls = mock_session.execute.call_args_list
-        profile_update_args = calls[1]
+        profile_update_args = [c for c in calls if len(c[0]) > 1 and isinstance(c[0][1], list)][0]
         bulk_params = profile_update_args[0][1]
 
         # Profile traffic MUST NOT reset to 10MB; it must be 510MB!
@@ -301,10 +301,10 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
 
         # Check calls to session.execute
         # call[0]: select VPNProfile
-        # call[1]: bulk update VPNProfile
-        # call[2]: update(User).where(User.id == 42).values(total_traffic_bytes=User.total_traffic_bytes + 30MB)
+        # call[1]: update(User).where(User.id == 42).values(total_traffic_bytes=User.total_traffic_bytes + 30MB)
+        # call[2]: bulk update VPNProfile
         self.assertGreaterEqual(len(mock_session.execute.call_args_list), 3)
-        user_update_stmt = mock_session.execute.call_args_list[2][0][0]
+        user_update_stmt = [c[0][0] for c in mock_session.execute.call_args_list if "users" in str(c[0][0])][0]
         # Check compiled SQL or parameter values
         self.assertIn("users", str(user_update_stmt))
         # Total server delta is delta_1 + delta_2 = 30MB
