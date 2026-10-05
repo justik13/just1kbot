@@ -44,15 +44,30 @@ async def _locked(session, operation_id, worker_id, attempt):
 
 
 async def _lock_operation_and_profile(session, operation_id, worker_id, attempt):
-    """Acquires locks in canonical global hierarchy: VPNProfile -> APIOperation.
+    """Acquires locks in canonical global hierarchy: User -> VPNProfile -> APIOperation.
 
-    This strictly prevents PostgreSQL deadlocks between background workers (finalizer)
+    This strictly prevents PostgreSQL deadlocks between background workers (finalizer, traffic)
     and foreground services (ProfileDeletionService, server deletion, user ban).
     """
     op_profile_res = await session.execute(
         select(APIOperation.profile_id).where(APIOperation.id == operation_id)
     )
     profile_id = op_profile_res.scalar_one_or_none()
+
+    # Pre-fetch user_id without lock to strictly enforce global lock hierarchy:
+    # User FOR UPDATE -> VPNProfile FOR UPDATE -> APIOperation FOR UPDATE
+    user_id = None
+    if profile_id is not None:
+        user_id_res = await session.execute(
+            select(VPNProfile.user_id).where(VPNProfile.id == profile_id)
+        )
+        user_id = user_id_res.scalar_one_or_none()
+
+    if user_id is not None:
+        await session.execute(
+            select(User.id).where(User.id == user_id).with_for_update()
+        )
+
     profile = None
     if profile_id is not None:
         profile_res = await session.execute(
@@ -64,6 +79,15 @@ async def _lock_operation_and_profile(session, operation_id, worker_id, attempt)
 
     operation = await _locked(session, operation_id, worker_id, attempt)
     if profile is None and operation and getattr(operation, "profile_id", None):
+        if user_id is None:
+            user_id_res = await session.execute(
+                select(VPNProfile.user_id).where(VPNProfile.id == operation.profile_id)
+            )
+            user_id = user_id_res.scalar_one_or_none()
+            if user_id is not None:
+                await session.execute(
+                    select(User.id).where(User.id == user_id).with_for_update()
+                )
         profile_res = await session.execute(
             select(VPNProfile)
             .where(VPNProfile.id == operation.profile_id)

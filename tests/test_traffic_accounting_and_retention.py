@@ -1085,8 +1085,46 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(old_profile.provisioning_status, "deleting")
         mock_ensure.assert_awaited_once()
 
+    async def test_lock_operation_and_profile_canonical_lock_order(self):
+        """_lock_operation_and_profile acquires User FOR UPDATE before VPNProfile and APIOperation."""
+        from services.api_operations_finalizer import _lock_operation_and_profile
+
+        mock_session = AsyncMock()
+        executed_stmts = []
+
+        async def fake_execute(stmt, *args, **kwargs):
+            executed_stmts.append(str(stmt))
+            mock_res = MagicMock()
+            sql = str(stmt).lower()
+            if "for update" in sql and "users" in sql:
+                mock_res.scalar_one_or_none.return_value = 10
+            elif "for update" in sql and "vpn_profiles" in sql:
+                mock_res.scalar_one_or_none.return_value = MagicMock(id=42, user_id=10)
+            elif "for update" in sql and "api_operations" in sql:
+                mock_op = MagicMock(id=1, status="processing", locked_by="w1", attempts=1, profile_id=42)
+                mock_res.scalar_one_or_none.return_value = mock_op
+            elif "api_operations.profile_id" in sql:
+                mock_res.scalar_one_or_none.return_value = 42
+            elif "vpn_profiles.user_id" in sql:
+                mock_res.scalar_one_or_none.return_value = 10
+            return mock_res
+
+        mock_session.execute = AsyncMock(side_effect=fake_execute)
+
+        op, prof = await _lock_operation_and_profile(mock_session, operation_id=1, worker_id="w1", attempt=1)
+
+        self.assertIsNotNone(op)
+        self.assertIsNotNone(prof)
+        user_lock_idx = next(i for i, s in enumerate(executed_stmts) if "users" in s.lower() and "for update" in s.lower())
+        prof_lock_idx = next(i for i, s in enumerate(executed_stmts) if "vpn_profiles" in s.lower() and "for update" in s.lower())
+        op_lock_idx = next(i for i, s in enumerate(executed_stmts) if "api_operations" in s.lower() and "for update" in s.lower())
+
+        self.assertLess(user_lock_idx, prof_lock_idx)
+        self.assertLess(prof_lock_idx, op_lock_idx)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
