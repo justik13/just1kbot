@@ -116,12 +116,23 @@ async def rename_device_process(
         )
         return
 
+    user_obj = await session.get(User, db_user.id, with_for_update=True)
+    if not user_obj:
+        await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_ACCESS_DENIED,
+            get_back_button("back_to_connections"),
+        )
+        return
+
     profile = (
         await session.execute(
             select(VPNProfile)
             .where(
                 VPNProfile.id == profile_id,
-                VPNProfile.user_id == db_user.id,
+                VPNProfile.user_id == user_obj.id,
             )
             .with_for_update()
         )
@@ -273,17 +284,17 @@ async def rename_device_process(
         )
         return
 
-    if old_name and hasattr(db_user, "archived_device_traffic") and db_user.archived_device_traffic:
+    if old_name and hasattr(user_obj, "archived_device_traffic") and user_obj.archived_device_traffic:
         from utils.traffic_helpers import get_device_slot_key
 
-        archived = dict(db_user.archived_device_traffic)
+        archived = dict(user_obj.archived_device_traffic)
         old_slot = get_device_slot_key(old_name)
         new_slot = get_device_slot_key(new_name)
         if old_name in archived and old_name != old_slot:
             archived[old_slot] = int(archived.get(old_slot, 0)) + int(archived.pop(old_name))
         if old_slot != new_slot and old_slot in archived:
             archived[new_slot] = int(archived.get(new_slot, 0)) + int(archived.pop(old_slot))
-        db_user.archived_device_traffic = archived
+        user_obj.archived_device_traffic = archived
 
     from services.audit_service import AuditService
     await AuditService.log_action(
@@ -291,7 +302,7 @@ async def rename_device_process(
         admin_id=0,
         action=AdminAuditAction.DEVICE_RENAME,
         target_type="user",
-        target_id=db_user.id,
+        target_id=user_obj.id,
         details={
             "old_name": old_name,
             "new_name": new_name,

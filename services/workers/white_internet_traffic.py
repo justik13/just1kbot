@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from aiogram import Bot
-from sqlalchemy import case, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import XRAY_PROTOCOL
@@ -270,6 +270,11 @@ class WhiteInternetTrafficWorker:
                             delta,
                         )
 
+                        if sub.user_id:
+                            await sess.execute(
+                                select(User.id).where(User.id == sub.user_id).with_for_update()
+                            )
+
                         (
                             consumed,
                             became_exhausted,
@@ -287,10 +292,7 @@ class WhiteInternetTrafficWorker:
                             node_starttime=node_starttime,
                             now=now,
                         )
-                        total_processed += 1
-
-                        if consumed > 0:
-                            server_consumed += consumed
+                        if consumed > 0 and sub.user_id:
                             current_cycle = now.strftime("%Y-%m")
                             await sess.execute(
                                 update(User)
@@ -298,16 +300,24 @@ class WhiteInternetTrafficWorker:
                                 .values(
                                     total_wi_traffic_bytes=User.total_wi_traffic_bytes + consumed,
                                     monthly_wi_bytes=case(
-                                        (User.traffic_cycle == current_cycle, User.monthly_wi_bytes + consumed),
+                                        (User.traffic_cycle > current_cycle, User.monthly_wi_bytes),
+                                        (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_wi_bytes, 0) + consumed),
                                         else_=consumed,
                                     ),
                                     monthly_awg_bytes=case(
-                                        (User.traffic_cycle == current_cycle, User.monthly_awg_bytes),
+                                        (User.traffic_cycle > current_cycle, User.monthly_awg_bytes),
+                                        (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_awg_bytes, 0)),
                                         else_=0,
                                     ),
-                                    traffic_cycle=current_cycle,
+                                    traffic_cycle=case(
+                                        (User.traffic_cycle > current_cycle, User.traffic_cycle),
+                                        else_=current_cycle,
+                                    ),
                                 )
                             )
+                            server_consumed += consumed
+
+                        total_processed += 1
 
                         if became_exhausted:
                             exhausted_users_to_notify.append((sub.user_id, bool(getattr(sub, "is_trial", False))))

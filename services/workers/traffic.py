@@ -370,14 +370,19 @@ async def _process_server_traffic(
                         .values(
                             total_traffic_bytes=User.total_traffic_bytes + u_delta,
                             monthly_awg_bytes=case(
+                                (User.traffic_cycle > current_cycle, User.monthly_awg_bytes),
                                 (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_awg_bytes, 0) + u_delta),
                                 else_=u_delta,
                             ),
                             monthly_wi_bytes=case(
+                                (User.traffic_cycle > current_cycle, User.monthly_wi_bytes),
                                 (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_wi_bytes, 0)),
                                 else_=0,
                             ),
-                            traffic_cycle=current_cycle,
+                            traffic_cycle=case(
+                                (User.traffic_cycle > current_cycle, User.traffic_cycle),
+                                else_=current_cycle,
+                            ),
                         )
                     )
 

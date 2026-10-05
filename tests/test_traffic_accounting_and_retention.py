@@ -1,9 +1,11 @@
 """Comprehensive unit tests for traffic accounting, per-device retention, and node metrics."""
 
 from datetime import datetime, timezone
+import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from config.enums import WhiteInternetStatus
 from database.models import Server, User, VPNProfile, WhiteInternetSubscription
 from services.device_service import DeviceService
 from services.workers.traffic import _process_server_traffic
@@ -12,6 +14,32 @@ from services.workers.white_internet_traffic import WhiteInternetTrafficWorker
 
 class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
     """Test suite verifying continuous traffic stats, device archiving, and monthly cycles."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.env_patcher = patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "123:test",
+                "REDIS_URL": "redis://localhost:6379/1",
+                "REDIS_PASSWORD": "test",
+                "ADMIN_IDS": "[123456789]",
+                "SUPPORT_USERNAME": "test_support",
+                "DOMAIN": "test.domain",
+                "SSL_EMAIL": "test@domain.com",
+                "YOOKASSA_SHOP_ID": "123456",
+                "YOOKASSA_SECRET_KEY": "test_secret",
+                "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
+                "YOOKASSA_WEBHOOK_PORT": "8080",
+                "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+                "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/db",
+            },
+        )
+        cls.env_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.env_patcher.stop()
 
     def _make_mock_awg_client(self, down: int, up: int):
         client = MagicMock()
@@ -436,7 +464,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(old_profile.traffic_up, 0)
 
     async def test_finalize_delete_success_safety_archiving(self):
-        """Finalizer ensures unarchived bytes on profile are retained before deleting."""
+        """Finalizer deletes profile directly without locking User, preventing lock order deadlocks."""
         from database.models import APIOperation
         from services.api_operations_finalizer import finalize_delete_success
 
@@ -662,6 +690,198 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             mock_ensure.assert_not_called()
 
 
+    async def test_rename_device_canonical_lock_order_and_archive_update(self):
+        """Device rename acquires User FOR UPDATE before VPNProfile FOR UPDATE and updates archive."""
+        from aiogram.fsm.context import FSMContext
+        from bot.handlers.connection.device_rename_routes import rename_device_process
+
+        mock_session = AsyncMock()
+        mock_session.begin_nested = None
+        mock_user = User(
+            id=10,
+            telegram_id=123456,
+            archived_device_traffic={"Phone #1": 500},
+        )
+        mock_profile = VPNProfile(
+            id=5,
+            user_id=10,
+            device_name="Phone #1",
+            provisioning_status="active",
+        )
+        mock_session.get.return_value = mock_user
+
+        mock_res = MagicMock()
+        mock_res.scalar_one_or_none.return_value = mock_profile
+        mock_session.execute.return_value = mock_res
+
+        message = MagicMock()
+        message.from_user.id = 123456
+        message.chat.id = 123456
+        message.text = "Work Phone"
+        message.bot = AsyncMock()
+
+        state = AsyncMock(spec=FSMContext)
+        state.get_data.return_value = {"profile_id": 5}
+
+        with patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", return_value=True), \
+             patch("services.device_service.DeviceService.has_active_migration", return_value=False), \
+             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", return_value=[]), \
+             patch("bot.handlers.connection.device_rename_routes.update_profile", new_callable=AsyncMock), \
+             patch("bot.handlers.connection.device_rename_routes.render_hub", new_callable=AsyncMock), \
+             patch("bot.handlers.connection.device_rename_routes.render_device_screen", new_callable=AsyncMock), \
+             patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock):
+            await rename_device_process(message, state, mock_session, db_user=mock_user)
+
+        # 1. User was locked first via session.get with for_update
+        mock_session.get.assert_awaited_once_with(User, 10, with_for_update=True)
+        # 2. Archive was updated on user_obj with slot key
+        self.assertIsNotNone(mock_user.archived_device_traffic)
+        self.assertIn("slot_1", mock_user.archived_device_traffic)
+        self.assertEqual(mock_user.archived_device_traffic["slot_1"], 500)
+
+    async def test_white_internet_worker_locks_user_before_deduction(self):
+        """White Internet traffic worker acquires User lock before deducting to eliminate deadlock."""
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+
+        mock_server = Server(
+            id=1,
+            name="Origin-1",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="http://node:8444",
+            api_key="secret",
+            is_active=True,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=12345,
+            extra_data={"traffic_cycle": "2026-10", "monthly_traffic_bytes": 0},
+        )
+        mock_sub = WhiteInternetSubscription(
+            id=1,
+            user_id=42,
+            uuid="uuid-1",
+            token="token-1",
+            status=WhiteInternetStatus.ACTIVE,
+            traffic_stats_epoch="epoch-1",
+            last_uplink_snapshot=100,
+            last_downlink_snapshot=200,
+            base_traffic_bytes=1000000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=0,
+            traffic_overage_bytes=0,
+            notified_90p=False,
+            is_trial=False,
+            desired_version=1,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = mock_sub
+        mock_session.get.return_value = mock_server
+
+        def mock_execute(stmt, *args, **kwargs):
+            m = MagicMock()
+            m.scalars.return_value.all.return_value = [mock_server]
+            return m
+
+        mock_session.execute.side_effect = mock_execute
+
+        mock_client = AsyncMock()
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1",
+            "boot-1",
+            12345,
+            {"uuid-1": {"uplink": 150, "downlink": 300}},
+        )
+
+        worker = WhiteInternetTrafficWorker(node_client=mock_client)
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=mock_sub), \
+             patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(150, False, 1000, None)):
+            processed = await worker.run_traffic_cycle(mock_session)
+
+        self.assertEqual(processed, 1)
+        # Verify User.id was locked via select with_for_update before deduction
+        execute_calls = mock_session.execute.call_args_list
+        user_lock_calls = [
+            c for c in execute_calls
+            if "users" in str(c[0][0]).lower() and "for update" in str(c[0][0]).lower()
+        ]
+        self.assertGreaterEqual(len(user_lock_calls), 1)
+
+    async def test_white_internet_worker_isolates_server_consumed_on_user_error(self):
+        """If user update fails in WI worker, server_consumed is not added to server extra_data."""
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+
+        mock_server = Server(
+            id=1,
+            name="Origin-1",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="http://node:8444",
+            api_key="secret",
+            is_active=True,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-1",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=12345,
+            extra_data={"traffic_cycle": "2026-10", "monthly_traffic_bytes": 0},
+        )
+        mock_sub = WhiteInternetSubscription(
+            id=1,
+            user_id=42,
+            uuid="uuid-1",
+            token="token-1",
+            status=WhiteInternetStatus.ACTIVE,
+            traffic_stats_epoch="epoch-1",
+            last_uplink_snapshot=100,
+            last_downlink_snapshot=200,
+            base_traffic_bytes=1000000,
+            extra_traffic_bytes=0,
+            traffic_used_bytes=0,
+            traffic_overage_bytes=0,
+            notified_90p=False,
+            is_trial=False,
+            desired_version=1,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = mock_sub
+        mock_session.get.return_value = mock_server
+
+        def mock_execute(stmt, *args, **kwargs):
+            s_str = str(stmt).lower()
+            if "update users" in s_str:
+                raise RuntimeError("Simulated DB conflict on User update")
+            m = MagicMock()
+            m.scalars.return_value.all.return_value = [mock_server]
+            return m
+
+        mock_session.execute.side_effect = mock_execute
+
+        mock_client = AsyncMock()
+        mock_client.get_traffic_snapshot.return_value = (
+            "epoch-1",
+            "boot-1",
+            12345,
+            {"uuid-1": {"uplink": 150, "downlink": 300}},
+        )
+
+        worker = WhiteInternetTrafficWorker(node_client=mock_client)
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=mock_sub), \
+             patch("database.repositories.white_internet_repo.record_and_deduct_traffic_atomic", return_value=(150, False, 1000, None)):
+            processed = await worker.run_traffic_cycle(mock_session)
+
+        # 0 processed successfully because of user update error
+        self.assertEqual(processed, 0)
+        # Server monthly_traffic_bytes was NOT incremented with the failed consumption
+        self.assertEqual(mock_server.extra_data.get("monthly_traffic_bytes", 0), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
