@@ -622,7 +622,8 @@ class TestOrderKeyboards(unittest.TestCase):
         # First row is URL button
         self.assertEqual(rows[0][0].url, "https://pay.link/123")
         self.assertEqual(rows[1][0].callback_data, "order_check:ord-abc")
-        self.assertEqual(rows[2][0].callback_data, "order_cancel:ord-abc")
+        self.assertEqual(rows[2][0].callback_data, "menu_support")
+        self.assertEqual(rows[3][0].callback_data, "order_cancel:ord-abc")
 
 
 class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):

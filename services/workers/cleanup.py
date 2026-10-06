@@ -786,7 +786,7 @@ async def _reconcile_stale_pending_orders() -> None:
 
     now = now_utc()
     window_start = now - timedelta(hours=24)
-    stale_threshold = now - timedelta(minutes=15)
+    stale_threshold = now - timedelta(minutes=3)
 
     # 1. Fetch candidate order tuples in a fast read query (no lock held during external HTTP)
     candidates: list[tuple[Any, str, str]] = []
