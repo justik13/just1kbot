@@ -1693,100 +1693,155 @@ cmd_doctor() {
     # 2.1 Проверка фаервола UFW хоста (аудит периметра, поиск мёртвых и посторонних портов)
     if command -v ufw >/dev/null 2>&1 && run_privileged env LC_ALL=C ufw status 2>/dev/null | grep -qi "Status: active"; then
         log "Фаервол UFW активен."
+        local ufw_status_verbose
+        ufw_status_verbose="$(run_privileged env LC_ALL=C ufw status verbose 2>/dev/null || true)"
+
+        # Проверка политики входящего трафика по умолчанию
+        if echo "$ufw_status_verbose" | grep -qi "Default: allow (incoming)"; then
+            warn "КРИТИЧЕСКАЯ УЯЗВИМОСТЬ: Входящая политика UFW по умолчанию установлена в ALLOW (все входящие порты открыты)!"
+            info "Рекомендация: установите безопасную политику по умолчанию: sudo ufw default deny incoming"
+        fi
+
+        # Снимаем один снимок слушающих сокетов в системе
+        local ss_tcp_listen ss_udp_listen
+        ss_tcp_listen="$(run_privileged ss -tlnp 2>/dev/null || true)"
+        ss_udp_listen="$(run_privileged ss -ulnp 2>/dev/null || true)"
+
         local live_ssh_ports=()
         while read -r sp; do
             [[ -n "$sp" && "$sp" =~ ^[0-9]+$ ]] && live_ssh_ports+=("$sp")
-        done < <(run_privileged ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"' | awk '{print $4}' | rev | cut -d: -f1 | rev | grep -v '^127\.' || true)
+        done < <(echo "$ss_tcp_listen" | grep -E 'users:.*"sshd"' | awk '{print $4}' | rev | cut -d: -f1 | rev | grep -v '^127\.' || true)
         [[ ${#live_ssh_ports[@]} -eq 0 ]] && live_ssh_ports=("22")
 
+        # Извлекаем все строки правил ALLOW (пропуская заголовки и разделители)
         local ufw_rules_raw
-        ufw_rules_raw="$(run_privileged env LC_ALL=C ufw status verbose 2>/dev/null | grep -E '^[0-9]+' || true)"
+        ufw_rules_raw="$(echo "$ufw_status_verbose" | grep -vE '^(Status:|Logging:|Default:|New profiles:|To[[:space:]]+Action|--+[[:space:]]+--+)' | grep -E '[[:space:]]ALLOW([[:space:]]|$)' || true)"
+
         if [[ -n "$ufw_rules_raw" ]]; then
             local warned_dead_targets=()
             local warned_public_targets=()
             while read -r rule_line; do
                 [[ -z "$rule_line" ]] && continue
-                local clean_line raw_target action from_part
-                clean_line="${rule_line//(v6)/}"
+                # Очищаем (v6) и профили в круглых скобках вида '(Nginx Full)'
+                local clean_line
+                clean_line=$(echo "$rule_line" | sed -E 's/\(v6\)//g' | sed -E 's/\([^\)]+\)//g')
+                clean_line="$(echo "$clean_line" | xargs)"
+                [[ -z "$clean_line" ]] && continue
+
+                # Разбираем To, Action, Direction, From
+                local raw_target action direction from_part
                 raw_target=$(echo "$clean_line" | awk '{print $1}')
                 action=$(echo "$clean_line" | awk '{print $2}')
-                from_part=$(echo "$clean_line" | awk '{$1=""; $2=""; print $0}' | sed -E 's/^[[:space:]]*(IN|OUT)[[:space:]]*//' | sed 's/^[[:space:]]*//')
 
+                # Если после Action указано направление (IN, OUT, FWD)
+                local token3
+                token3=$(echo "$clean_line" | awk '{print $3}')
+                if [[ "$token3" == "IN" || "$token3" == "OUT" || "$token3" == "FWD" ]]; then
+                    direction="$token3"
+                    from_part=$(echo "$clean_line" | awk '{$1=""; $2=""; $3=""; print $0}' | xargs)
+                else
+                    direction="IN"
+                    from_part=$(echo "$clean_line" | awk '{$1=""; $2=""; print $0}' | xargs)
+                fi
+
+                # Фильтруем: проверяем только входящие разрешающие правила
                 [[ "$action" != "ALLOW" ]] && continue
+                [[ "$direction" != "IN" ]] && continue
 
-                local norm_target
-                norm_target=$(echo "$raw_target" | tr -d '[:space:]')
-                local r_port r_proto
-                if [[ "$norm_target" == *"/"* ]]; then
-                    r_port="${norm_target%/*}"
-                    r_proto="${norm_target#*/}"
-                else
-                    r_port="$norm_target"
-                    r_proto="any"
-                fi
-
-                local target_key="${r_port}/${r_proto}"
-
-                local proc_owner=""
-                if [[ "$r_proto" == "tcp" ]]; then
-                    proc_owner=$(run_privileged ss -tlnp 2>/dev/null | grep -E ":${r_port}[[:space:]]" | awk '{print $NF}' | head -n 1 || true)
-                elif [[ "$r_proto" == "udp" ]]; then
-                    proc_owner=$(run_privileged ss -ulnp 2>/dev/null | grep -E ":${r_port}[[:space:]]" | awk '{print $NF}' | head -n 1 || true)
-                else
-                    proc_owner=$(run_privileged ss -tlnp 2>/dev/null | grep -E ":${r_port}[[:space:]]" | awk '{print $NF}' | head -n 1 || true)
-                    [[ -z "$proc_owner" ]] && proc_owner=$(run_privileged ss -ulnp 2>/dev/null | grep -E ":${r_port}[[:space:]]" | awk '{print $NF}' | head -n 1 || true)
-                fi
-
+                # Проверяем, открыт ли порт наружу (Anywhere / 0.0.0.0/0 / ::/0)
                 local is_public=0
                 if echo "$from_part" | grep -qiE "(Anywhere|Везде|0\.0\.0\.0/0|::/0)"; then
                     is_public=1
                 fi
 
-                if [[ -z "$proc_owner" ]]; then
-                    local already_warned=0
-                    for dt in "${warned_dead_targets[@]}"; do
-                        if [[ "$dt" == "$target_key" ]]; then
-                            already_warned=1
-                            break
-                        fi
+                # Нормализуем цель: порт/протокол или профиль приложения
+                local norm_target proto ports_to_check=()
+                norm_target="$raw_target"
+                if [[ "$norm_target" == *"/"* ]]; then
+                    proto="${norm_target#*/}"
+                    local raw_ports="${norm_target%/*}"
+                    # Разворачиваем составные порты 80,443 -> [80, 443]
+                    local old_ifs="$IFS"
+                    IFS=',' read -ra port_arr <<< "$raw_ports"
+                    IFS="$old_ifs"
+                    for p in "${port_arr[@]}"; do
+                        [[ -n "$p" ]] && ports_to_check+=("$p")
                     done
-                    if [[ $already_warned -eq 0 ]]; then
-                        warned_dead_targets+=("$target_key")
-                        warn "«Мёртвое» правило в UFW: порт ${r_port}/${r_proto} разрешён, но служба не запущена."
-                        info "Рекомендация: если порт не нужен, удалите: sudo ufw delete allow ${norm_target}"
-                    fi
-                elif [[ $is_public -eq 1 ]]; then
-                    local is_authorized=0
-                    for sp in "${live_ssh_ports[@]}"; do
-                        if [[ "$r_port" == "$sp" && ("$r_proto" == "tcp" || "$r_proto" == "any") ]]; then
-                            is_authorized=1
-                            break
-                        fi
-                    done
-                    if [[ ("$r_port" == "80" || "$r_port" == "443") && ("$r_proto" == "tcp" || "$r_proto" == "any") ]]; then
-                        is_authorized=1
+                elif [[ "$norm_target" =~ ^[0-9]+$ ]]; then
+                    proto="any"
+                    ports_to_check+=("$norm_target")
+                else
+                    # Профиль приложения без явного номера порта (OpenSSH, Nginx Full и др.)
+                    proto="tcp"
+                    case "$norm_target" in
+                        OpenSSH|openssh) ports_to_check+=("22") ;;
+                        "Nginx HTTP") ports_to_check+=("80") ;;
+                        "Nginx HTTPS") ports_to_check+=("443") ;;
+                        "Nginx Full") ports_to_check+=("80" "443") ;;
+                        *) ports_to_check+=("$norm_target") ;;
+                    esac
+                fi
+
+                for r_port in "${ports_to_check[@]}"; do
+                    local target_key="${r_port}/${proto}"
+
+                    # Проверяем наличие слушающего сокета в заранее снятом снапшоте ss
+                    local matching_line=""
+                    if [[ "$proto" == "tcp" ]]; then
+                        matching_line=$(echo "$ss_tcp_listen" | grep -E "[:\s]${r_port}[[:space:]]" | head -n 1 || true)
+                    elif [[ "$proto" == "udp" ]]; then
+                        matching_line=$(echo "$ss_udp_listen" | grep -E "[:\s]${r_port}[[:space:]]" | head -n 1 || true)
+                    else
+                        matching_line=$(echo "$ss_tcp_listen" | grep -E "[:\s]${r_port}[[:space:]]" | head -n 1 || true)
+                        [[ -z "$matching_line" ]] && matching_line=$(echo "$ss_udp_listen" | grep -E "[:\s]${r_port}[[:space:]]" | head -n 1 || true)
                     fi
 
-                    if [[ $is_authorized -eq 0 ]]; then
+                    if [[ -z "$matching_line" ]]; then
+                        # Служба не запущена — «мёртвое» правило в UFW
                         local already_warned=0
-                        for pt in "${warned_public_targets[@]}"; do
-                            if [[ "$pt" == "$target_key" ]]; then
+                        for dt in "${warned_dead_targets[@]}"; do
+                            if [[ "$dt" == "$target_key" ]]; then
                                 already_warned=1
                                 break
                             fi
                         done
                         if [[ $already_warned -eq 0 ]]; then
-                            warned_public_targets+=("$target_key")
-                            local proc_name=""
-                            if [[ -n "$proc_owner" ]]; then
-                                proc_name=$(echo "$proc_owner" | sed -E 's/.*"([^"]+)".*/\1/')
+                            warned_dead_targets+=("$target_key")
+                            warn "«Мёртвое» правило в UFW: порт ${r_port}/${proto} разрешён, но служба не запущена."
+                            info "Рекомендация: если порт не нужен, удалите правило: sudo ufw delete allow ${norm_target}"
+                        fi
+                    elif [[ $is_public -eq 1 ]]; then
+                        # Порт слушается и открыт для всех (Anywhere). Проверяем авторизацию.
+                        local is_authorized=0
+                        for sp in "${live_ssh_ports[@]}"; do
+                            if [[ "$r_port" == "$sp" && ("$proto" == "tcp" || "$proto" == "any") ]]; then
+                                is_authorized=1
+                                break
                             fi
-                            [[ -z "$proc_name" || "$proc_name" == "-" ]] && proc_name="не определен"
-                            warn "ВНИМАНИЕ: Посторонний порт ${r_port}/${r_proto} (процесс: ${proc_name}) открыт для всех (Anywhere)!"
-                            info "Если это сторонний сервис, убедитесь в его необходимости. Для закрытия: sudo ufw delete allow ${norm_target}"
+                        done
+                        if [[ ("$r_port" == "80" || "$r_port" == "443") && ("$proto" == "tcp" || "$proto" == "any") ]]; then
+                            is_authorized=1
+                        fi
+
+                        if [[ $is_authorized -eq 0 ]]; then
+                            local already_warned=0
+                            for pt in "${warned_public_targets[@]}"; do
+                                if [[ "$pt" == "$target_key" ]]; then
+                                    already_warned=1
+                                    break
+                                fi
+                            done
+                            if [[ $already_warned -eq 0 ]]; then
+                                warned_public_targets+=("$target_key")
+                                local proc_name=""
+                                proc_name=$(echo "$matching_line" | sed -E 's/.*users:\(\("([^"]+)".*/\1/' || true)
+                                [[ -z "$proc_name" || "$proc_name" == "$matching_line" ]] && proc_name="не определен"
+                                warn "ВНИМАНИЕ: Посторонний порт ${r_port}/${proto} (процесс: ${proc_name}) открыт для всех (Anywhere)!"
+                                info "Если это сторонний сервис, убедитесь в его необходимости. Для закрытия: sudo ufw delete allow ${norm_target}"
+                            fi
                         fi
                     fi
-                fi
+                done
             done <<< "$ufw_rules_raw"
         fi
     fi
