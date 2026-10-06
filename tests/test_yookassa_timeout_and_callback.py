@@ -307,6 +307,49 @@ class TestFailClosedAndAdminAlert(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res3.is_paid)
         self.assertIsNone(res3.amount_rub)
 
+    async def test_parse_webhook_fail_closed_on_non_rub_or_zero_amount(self):
+        """Webhooks with non-RUB currency or zero/negative amount must have is_paid=False."""
+        from decimal import Decimal
+        from integrations.payment_gateways.yookassa import YooKassaGateway
+
+        gw = YooKassaGateway()
+
+        # Non-RUB
+        payload_usd = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-usd",
+                "amount": {"value": "100.00", "currency": "USD"},
+            },
+        }
+        res_usd = await gw.parse_webhook(payload_usd)
+        self.assertFalse(res_usd.is_paid)
+        self.assertIsNone(res_usd.amount_rub)
+
+        # Zero amount
+        payload_zero = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-zero",
+                "amount": {"value": "0.00", "currency": "RUB"},
+            },
+        }
+        res_zero = await gw.parse_webhook(payload_zero)
+        self.assertFalse(res_zero.is_paid)
+        self.assertIsNone(res_zero.amount_rub)
+
+        # Valid RUB
+        payload_valid = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-rub",
+                "amount": {"value": "150.00", "currency": "RUB"},
+            },
+        }
+        res_valid = await gw.parse_webhook(payload_valid)
+        self.assertTrue(res_valid.is_paid)
+        self.assertEqual(res_valid.amount_rub, Decimal("150.00"))
+
     @patch("integrations.payment_gateways.factory.get_payment_gateway")
     @patch("services.workers.cleanup.session_scope")
     async def test_reconcile_exception_adds_order_to_backoff_cache(

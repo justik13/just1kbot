@@ -133,7 +133,16 @@ class YooKassaGateway(BasePaymentGateway):
 
         amount_obj = obj.get("amount") or {}
         amount_val = amount_obj.get("value")
-        amount_rub = Decimal(str(amount_val)) if amount_val is not None else None
+        currency = amount_obj.get("currency")
+        amount_rub = None
+        has_invalid_currency = bool(currency is not None and currency != "RUB")
+        if amount_val is not None and not has_invalid_currency:
+            try:
+                parsed = Decimal(str(amount_val))
+                if parsed > 0:
+                    amount_rub = parsed
+            except (InvalidOperation, ValueError, TypeError):
+                amount_rub = None
 
         related_external_id = None
         is_canceled = False
@@ -144,7 +153,7 @@ class YooKassaGateway(BasePaymentGateway):
             is_refunded = True
         elif event == "payment.succeeded":
             external_id = obj.get("id", "")
-            is_paid = True
+            is_paid = not has_invalid_currency and (amount_val is None or amount_rub is not None)
             is_refunded = False
         elif event == "payment.canceled":
             external_id = obj.get("id", "")
