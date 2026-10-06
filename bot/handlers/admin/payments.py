@@ -575,7 +575,14 @@ async def show_order_card(
         display_status, texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON
     )
 
-    tariff_label = order.tariff.name if order.tariff else order.service_type
+    if order.tariff:
+        tariff_label = order.tariff.name
+    elif order.service_type == "topup":
+        tariff_label = texts.ADMIN_ORDER_SERVICE_TOPUP
+    elif isinstance(order.metadata_, dict) and order.metadata_.get("tariff_name"):
+        tariff_label = str(order.metadata_["tariff_name"])
+    else:
+        tariff_label = order.service_type
     paid_at_line = (
         texts.ADMIN_ORDER_PAID_AT_LINE.format(paid_at=format_datetime(order.paid_at))
         if order.paid_at

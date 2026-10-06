@@ -281,11 +281,13 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("orders.service_type IN", stmt_sql)
 
         # Slot order checks
+        self.assertEqual(entries[0].numeric_id, str(slot_order.id)[:8])
         self.assertEqual(entries[0].operation_type, "add_device_slot")
         self.assertEqual(entries[0].operation_title, "Доп. устройство")
         self.assertEqual(entries[0].payment_method, "wallet")
 
         # Quota order checks
+        self.assertEqual(entries[1].numeric_id, str(quota_order.id)[:8])
         self.assertEqual(entries[1].operation_type, "topup_quota")
         self.assertEqual(entries[1].operation_title, "Докупка трафика")
         self.assertEqual(entries[1].payment_method, "yookassa")
@@ -303,9 +305,9 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         order = Order(
             id=test_uuid,
             user_id=20,
-            service_type="awg",
+            service_type="topup",
             amount_rub=Decimal("300.00"),
-            duration_days=30,
+            duration_days=0,
             status="pending",
             payment_method="yookassa",
             payment_url="https://yookassa.ru/checkout/12345",
@@ -329,6 +331,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         rendered_text = callback.message.edit_text.call_args[0][0]
         self.assertIn("Платёж ЮKassa", rendered_text)
         self.assertIn("Заказ #", rendered_text)
+        self.assertIn("Пополнение баланса (topup)", rendered_text)
         self.assertIn("Ожидает завершения оплаты клиентом", rendered_text)
         self.assertIn("Тайм-аут шлюза при создании", rendered_text)
         self.assertIn("https://yookassa.ru/checkout/12345", rendered_text)

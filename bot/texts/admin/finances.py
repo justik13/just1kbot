@@ -97,6 +97,7 @@ ADMIN_ORDER_PAYMENT_URL_LINE = "\n🌐 <b>Ссылка на оплату:</b> <a
 ADMIN_ORDER_DIAGNOSTICS_PENDING = "\nℹ️ <i>Ожидает завершения оплаты клиентом или ответа банка.</i>"
 ADMIN_ORDER_DIAGNOSTICS_AMBIGUOUS = "\n⚠️ <i>Тайм-аут шлюза при создании. Платёж мог зафиксироваться в ЮKassa.</i>"
 ADMIN_ORDER_DESCRIPTION_LINE = "\n📝 <b>Описание:</b> {description}"
+ADMIN_ORDER_SERVICE_TOPUP = "Пополнение баланса"
 
 # --- Purchases additional texts --------------------------------------------
 ADMIN_PURCHASES_ENTRY_PAYMENT_METHOD_LINE = """💳 <b>Способ оплаты:</b> {payment_method_label}

@@ -23,7 +23,7 @@ from database.models import (
 @dataclass
 class PurchaseLogEntry:
     id: str
-    numeric_id: int
+    numeric_id: str | int
     user_id: int
     telegram_id: int
     username: str | None
@@ -252,7 +252,7 @@ async def get_purchase_logs_paginated(
         # List view shows no funds split (see purchase card for the breakdown).
         entry = PurchaseLogEntry(
             id=f"order_{ord_item.id}",
-            numeric_id=0,
+            numeric_id=str(ord_item.id)[:8],
             user_id=user.id if user else 0,
             telegram_id=tg_id,
             username=username,
@@ -439,7 +439,7 @@ async def get_purchase_log_by_id(
                 real_amount_rub, bonus_amount_rub = ord_item.amount_rub, Decimal(0)
         entry = PurchaseLogEntry(
             id=f"order_{ord_item.id}",
-            numeric_id=0,
+            numeric_id=str(ord_item.id)[:8],
             user_id=user.id if user else 0,
             telegram_id=tg_id,
             username=username,
