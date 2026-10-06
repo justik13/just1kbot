@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # JUST1KBOT - Обертка обратной совместимости для just1knode
-# Делегирует вызовы в модульную реализацию just1knode/just1knode.sh
+# Делегирует вызовы в /opt/just1knode/just1knode.sh или загружает из just1knode
 # =============================================================================
 set -euo pipefail
 
@@ -14,14 +14,7 @@ fi
 TARGET=""
 current_real="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")"
 
-if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../just1knode/just1knode.sh" && -f "${SCRIPT_DIR}/../just1knode/lib/common.sh" ]]; then
-    cand="$(readlink -f "${SCRIPT_DIR}/../just1knode/just1knode.sh" 2>/dev/null || echo "${SCRIPT_DIR}/../just1knode/just1knode.sh")"
-    if [[ "$cand" != "$current_real" ]]; then
-        TARGET="$cand"
-    fi
-fi
-
-if [[ -z "$TARGET" && -f "/opt/just1knode/just1knode.sh" && -f "/opt/just1knode/lib/common.sh" ]]; then
+if [[ -f "/opt/just1knode/just1knode.sh" && -f "/opt/just1knode/lib/common.sh" ]]; then
     cand="$(readlink -f "/opt/just1knode/just1knode.sh" 2>/dev/null || echo "/opt/just1knode/just1knode.sh")"
     if [[ "$cand" != "$current_real" ]]; then
         TARGET="$cand"
@@ -95,7 +88,7 @@ chmod +x "$TARGET" 2>/dev/null || true
 
 if [[ "${BASH_SOURCE[0]:-}" != "${0:-}" && -n "${BASH_SOURCE[0]:-}" ]]; then
     # Sourced mode
-    # shellcheck source=../just1knode/just1knode.sh
+    # shellcheck source=/dev/null
     source "$TARGET"
     return 0 2>/dev/null || true
 else
