@@ -176,8 +176,13 @@ async def global_error_handler(
                     await event.bot.send_message(
                         admin_id, error_msg, parse_mode="HTML"
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.error(
+                        "[%s] Failed to deliver error alert to admin %s: %s",
+                        request_id,
+                        admin_id,
+                        exc,
+                    )
     except Exception as e:
         logger.error("[%s] Failed to send error alert: %s", request_id, e)
 

@@ -191,6 +191,261 @@ class TestReconciliationWorkerUnit(unittest.IsolatedAsyncioTestCase):
             await _reconcile_stale_pending_orders()
             self.assertEqual(mock_mark.await_count, 2)
 
+    @patch("integrations.payment_gateways.factory.get_payment_gateway")
+    @patch("services.workers.cleanup.session_scope")
+    async def test_reconcile_404_does_not_cancel_order(
+        self, mock_session_scope, mock_gw_factory
+    ):
+        """A 404 from gateway must NOT prematurely cancel pending order."""
+        import uuid
+        from integrations.payment_gateways.base import PaymentStatusResult
+        from services.workers.cleanup import _reconcile_stale_pending_orders, _pending_order_backoff_cache
+
+        gw = AsyncMock()
+        gw.check_payment_status.return_value = PaymentStatusResult(
+            is_paid=False,
+            is_refunded=False,
+            is_canceled=False,
+            status_str="not_found",
+        )
+        mock_gw_factory.return_value = gw
+
+        order_id = uuid.uuid4()
+        _pending_order_backoff_cache.clear()
+
+        read_session = AsyncMock()
+        cand_mock = MagicMock()
+        cand_mock.all.return_value = [(order_id, "ext-404", "yookassa")]
+        read_session.execute.return_value = cand_mock
+
+        expire_session = AsyncMock()
+        expire_mock = MagicMock()
+        expire_mock.scalars.return_value.all.return_value = []
+        expire_session.execute.return_value = expire_mock
+
+        mock_session_scope.side_effect = [
+            AsyncMock(__aenter__=AsyncMock(return_value=read_session), __aexit__=AsyncMock()),
+            AsyncMock(__aenter__=AsyncMock(return_value=expire_session), __aexit__=AsyncMock()),
+        ]
+
+        with patch("services.order_service.OrderService.mark_order_canceled") as mock_cancel:
+            await _reconcile_stale_pending_orders()
+            mock_cancel.assert_not_called()
+            self.assertIn(order_id, _pending_order_backoff_cache)
+
+    @patch("integrations.payment_gateways.factory.get_payment_gateway")
+    @patch("services.workers.cleanup.session_scope")
+    async def test_reconcile_backoff_cache_filters_candidates(
+        self, mock_session_scope, mock_gw_factory
+    ):
+        """Orders in backoff cache must be skipped on subsequent pass."""
+        import uuid
+        from services.workers.cleanup import _reconcile_stale_pending_orders, _pending_order_backoff_cache
+
+        order_id = uuid.uuid4()
+        _pending_order_backoff_cache[order_id] = 12345.0
+
+        read_session = AsyncMock()
+        cand_mock = MagicMock()
+        cand_mock.all.return_value = [(order_id, "ext-cached", "yookassa")]
+        read_session.execute.return_value = cand_mock
+
+        expire_session = AsyncMock()
+        expire_mock = MagicMock()
+        expire_mock.scalars.return_value.all.return_value = []
+        expire_session.execute.return_value = expire_mock
+
+        mock_session_scope.side_effect = [
+            AsyncMock(__aenter__=AsyncMock(return_value=read_session), __aexit__=AsyncMock()),
+            AsyncMock(__aenter__=AsyncMock(return_value=expire_session), __aexit__=AsyncMock()),
+        ]
+
+        await _reconcile_stale_pending_orders()
+        mock_gw_factory.assert_not_called()
+
+
+class TestFailClosedAndAdminAlert(unittest.IsolatedAsyncioTestCase):
+    @patch("integrations.payment_gateways.yookassa.YooKassaService.get_payment_result")
+    async def test_check_payment_status_fail_closed_on_missing_or_non_rub_amount(
+        self, mock_get_result
+    ):
+        """If YooKassa returns succeeded but currency is not RUB or amount is missing, is_paid must be False."""
+        from integrations.payment_gateways.yookassa import YooKassaGateway
+        from services.yookassa_service import YooKassaResult
+
+        # Non-RUB currency
+        mock_get_result.return_value = YooKassaResult(
+            True,
+            value={
+                "status": "succeeded",
+                "amount": {"value": "100.00", "currency": "USD"},
+            },
+        )
+        gw = YooKassaGateway()
+        res = await gw.check_payment_status("pay-usd")
+        self.assertFalse(res.is_paid)
+        self.assertIsNone(res.amount_rub)
+
+        # Missing amount
+        mock_get_result.return_value = YooKassaResult(
+            True,
+            value={"status": "succeeded"},
+        )
+        res2 = await gw.check_payment_status("pay-no-amount")
+        self.assertFalse(res2.is_paid)
+        self.assertIsNone(res2.amount_rub)
+
+        # Zero or negative amount
+        mock_get_result.return_value = YooKassaResult(
+            True,
+            value={
+                "status": "succeeded",
+                "amount": {"value": "0.00", "currency": "RUB"},
+            },
+        )
+        res3 = await gw.check_payment_status("pay-zero")
+        self.assertFalse(res3.is_paid)
+        self.assertIsNone(res3.amount_rub)
+
+    async def test_parse_webhook_fail_closed_on_non_rub_or_zero_amount(self):
+        """Webhooks with non-RUB currency or zero/negative amount must have is_paid=False."""
+        from decimal import Decimal
+        from integrations.payment_gateways.yookassa import YooKassaGateway
+
+        gw = YooKassaGateway()
+
+        # Non-RUB
+        payload_usd = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-usd",
+                "amount": {"value": "100.00", "currency": "USD"},
+            },
+        }
+        res_usd = await gw.parse_webhook(payload_usd)
+        self.assertFalse(res_usd.is_paid)
+        self.assertIsNone(res_usd.amount_rub)
+
+        # Zero amount
+        payload_zero = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-zero",
+                "amount": {"value": "0.00", "currency": "RUB"},
+            },
+        }
+        res_zero = await gw.parse_webhook(payload_zero)
+        self.assertFalse(res_zero.is_paid)
+        self.assertIsNone(res_zero.amount_rub)
+
+        # Negative amount
+        payload_neg = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-neg",
+                "amount": {"value": "-50.00", "currency": "RUB"},
+            },
+        }
+        res_neg = await gw.parse_webhook(payload_neg)
+        self.assertFalse(res_neg.is_paid)
+        self.assertIsNone(res_neg.amount_rub)
+
+        # Missing currency
+        payload_no_cur = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-no-cur",
+                "amount": {"value": "100.00"},
+            },
+        }
+        res_no_cur = await gw.parse_webhook(payload_no_cur)
+        self.assertFalse(res_no_cur.is_paid)
+        self.assertIsNone(res_no_cur.amount_rub)
+
+        # Missing amount object
+        payload_no_amt = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-no-amt",
+            },
+        }
+        res_no_amt = await gw.parse_webhook(payload_no_amt)
+        self.assertFalse(res_no_amt.is_paid)
+        self.assertIsNone(res_no_amt.amount_rub)
+
+        # Valid RUB
+        payload_valid = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-rub",
+                "amount": {"value": "150.00", "currency": "RUB"},
+            },
+        }
+        res_valid = await gw.parse_webhook(payload_valid)
+        self.assertTrue(res_valid.is_paid)
+        self.assertEqual(res_valid.amount_rub, Decimal("150.00"))
+
+    @patch("integrations.payment_gateways.factory.get_payment_gateway")
+    @patch("services.workers.cleanup.session_scope")
+    async def test_reconcile_exception_adds_order_to_backoff_cache(
+        self, mock_session_scope, mock_gw_factory
+    ):
+        """When checking gateway raises an exception, the order must be added to backoff cache."""
+        import uuid
+        from services.workers.cleanup import _reconcile_stale_pending_orders, _pending_order_backoff_cache
+
+        order_id = uuid.uuid4()
+        _pending_order_backoff_cache.clear()
+
+        gw = AsyncMock()
+        gw.check_payment_status.side_effect = RuntimeError("Network timeout to gateway")
+        mock_gw_factory.return_value = gw
+
+        read_session = AsyncMock()
+        cand_mock = MagicMock()
+        cand_mock.all.return_value = [(order_id, "ext-err", "yookassa")]
+        read_session.execute.return_value = cand_mock
+
+        expire_session = AsyncMock()
+        expire_mock = MagicMock()
+        expire_mock.scalars.return_value.all.return_value = []
+        expire_session.execute.return_value = expire_mock
+
+        mock_session_scope.side_effect = [
+            AsyncMock(__aenter__=AsyncMock(return_value=read_session), __aexit__=AsyncMock()),
+            AsyncMock(__aenter__=AsyncMock(return_value=expire_session), __aexit__=AsyncMock()),
+        ]
+
+        await _reconcile_stale_pending_orders()
+        self.assertIn(order_id, _pending_order_backoff_cache)
+
+    @patch("bot.main.logger")
+    @patch("bot.main.get_settings")
+    async def test_global_error_handler_logs_admin_alert_delivery_failure(
+        self, mock_settings, mock_logger
+    ):
+        """Delivery failure when sending error alert to admin must be logged with logger.error."""
+        from bot.main import global_error_handler, _error_alert_cache
+
+        _error_alert_cache.clear()
+        mock_settings.return_value.ADMIN_IDS = [99999]
+
+        event = MagicMock()
+        event.bot.send_message = AsyncMock(side_effect=RuntimeError("Telegram network drop"))
+        event.update.callback_query = None
+        event.update.message = None
+
+        exc = ValueError("Test fatal error for alert")
+        event.exception = exc
+        await global_error_handler(event)
+
+        # Verify logger.error was called with delivery failure message
+        found = any(
+            "Failed to deliver error alert to admin %s" in str(c.args[0]) and c.args[2] == 99999
+            for c in mock_logger.error.call_args_list
+        )
+        self.assertTrue(found, f"Expected admin alert failure log, got: {mock_logger.error.call_args_list}")
+
 
 class TestAdminReduceCutoff(unittest.TestCase):
     def test_cutoff_clamping_prevents_ancient_dates(self):

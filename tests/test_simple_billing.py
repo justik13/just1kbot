@@ -67,6 +67,7 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
             "object": {
                 "id": "ext-pay-999",
                 "status": "succeeded",
+                "amount": {"value": "250.00", "currency": "RUB"},
                 "metadata": {"order_id": "ord-777"},
             },
         }
@@ -75,6 +76,7 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.is_refunded)
         self.assertEqual(result.order_id, "ord-777")
         self.assertEqual(result.external_id, "ext-pay-999")
+        self.assertEqual(result.amount_rub, Decimal("250.00"))
 
     async def test_parse_webhook_refund_succeeded(self):
         payload = {
@@ -188,18 +190,18 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res_refund.payment_id, "pay-99")
 
     async def test_parse_webhook_null_safety(self):
-        # 1. Payload with None object
+        # 1. Payload with None object: fail-closed must reject as not paid
         res_none_obj = await self.gateway.parse_webhook({"event": "payment.succeeded", "object": None})
-        self.assertTrue(res_none_obj.is_paid)
+        self.assertFalse(res_none_obj.is_paid)
         self.assertEqual(res_none_obj.external_id, "")
         self.assertIsNone(res_none_obj.amount_rub)
 
-        # 2. Object with None amount
+        # 2. Object with None amount: fail-closed must reject as not paid
         res_none_amt = await self.gateway.parse_webhook({
             "event": "payment.succeeded",
             "object": {"id": "pay-123", "amount": None},
         })
-        self.assertTrue(res_none_amt.is_paid)
+        self.assertFalse(res_none_amt.is_paid)
         self.assertEqual(res_none_amt.external_id, "pay-123")
         self.assertIsNone(res_none_amt.amount_rub)
 
@@ -622,7 +624,8 @@ class TestOrderKeyboards(unittest.TestCase):
         # First row is URL button
         self.assertEqual(rows[0][0].url, "https://pay.link/123")
         self.assertEqual(rows[1][0].callback_data, "order_check:ord-abc")
-        self.assertEqual(rows[2][0].callback_data, "order_cancel:ord-abc")
+        self.assertEqual(rows[2][0].callback_data, "menu_support")
+        self.assertEqual(rows[3][0].callback_data, "order_cancel:ord-abc")
 
 
 class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):

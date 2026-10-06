@@ -348,6 +348,10 @@ def get_order_invoice_keyboard(
         style="primary",
     )
     builder.button(
+        text=texts.BTN_SUPPORT,
+        callback_data="menu_support",
+    )
+    builder.button(
         text=texts.BTN_CANCEL_ACTION,
         callback_data=f"order_cancel:{order_id}",
         style="danger",

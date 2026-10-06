@@ -133,7 +133,15 @@ class YooKassaGateway(BasePaymentGateway):
 
         amount_obj = obj.get("amount") or {}
         amount_val = amount_obj.get("value")
-        amount_rub = Decimal(str(amount_val)) if amount_val is not None else None
+        currency = amount_obj.get("currency")
+        amount_rub = None
+        if amount_val is not None and currency == "RUB":
+            try:
+                parsed = Decimal(str(amount_val))
+                if parsed > 0:
+                    amount_rub = parsed
+            except (InvalidOperation, ValueError, TypeError):
+                amount_rub = None
 
         related_external_id = None
         is_canceled = False
@@ -144,7 +152,7 @@ class YooKassaGateway(BasePaymentGateway):
             is_refunded = True
         elif event == "payment.succeeded":
             external_id = obj.get("id", "")
-            is_paid = True
+            is_paid = (amount_rub is not None and amount_rub > 0)
             is_refunded = False
         elif event == "payment.canceled":
             external_id = obj.get("id", "")
@@ -208,7 +216,9 @@ class YooKassaGateway(BasePaymentGateway):
         amount_rub = None
         if amount_val is not None and currency == "RUB":
             try:
-                amount_rub = Decimal(str(amount_val))
+                parsed = Decimal(str(amount_val))
+                if parsed > 0:
+                    amount_rub = parsed
             except (InvalidOperation, ValueError, TypeError):
                 amount_rub = None
         cancellation_details = data.get("cancellation_details") or {}
@@ -218,7 +228,7 @@ class YooKassaGateway(BasePaymentGateway):
             else None
         )
         return PaymentStatusResult(
-            is_paid=(status == "succeeded"),
+            is_paid=(status == "succeeded" and amount_rub is not None and amount_rub > 0),
             is_refunded=(status == "refunded"),
             is_canceled=(status == "canceled"),
             status_str=status,
