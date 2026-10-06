@@ -1,6 +1,6 @@
 import unittest
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot.handlers.admin.users.common import _build_users_list_text_and_kb
 from bot.keyboards.device import get_device_keyboard
@@ -227,6 +227,111 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry.amount_rub, Decimal("199.00"))
         self.assertIsNone(entry.real_amount_rub)
         self.assertIsNone(entry.bonus_amount_rub)
+        self.assertEqual(entry.payment_method, "wallet")
+
+    async def test_purchases_repo_excludes_topup_and_resolves_slot_and_quota(self):
+        import uuid
+
+        session = AsyncMock()
+        user = User(id=15, telegram_id=3005, username="wi_buyer")
+
+        slot_order = MagicMock()
+        slot_order.id = uuid.uuid4()
+        slot_order.service_type = "white_internet"
+        slot_order.payment_method = "wallet"
+        slot_order.tariff = None
+        slot_order.metadata_ = {"operation": "add_device_slot"}
+        slot_order.device_limit = 1
+        slot_order.traffic_bytes = 0
+        slot_order.duration_days = 0
+        slot_order.amount_rub = Decimal("100.00")
+        from datetime import timedelta
+        t0 = now_utc()
+        slot_order.paid_at = t0
+        slot_order.created_at = t0
+        slot_order.user = user
+
+        quota_order = MagicMock()
+        quota_order.id = uuid.uuid4()
+        quota_order.service_type = "white_internet"
+        quota_order.payment_method = "yookassa"
+        quota_order.tariff = None
+        quota_order.metadata_ = {"operation": "topup"}
+        quota_order.device_limit = 2
+        quota_order.traffic_bytes = 20 * (1024**3)
+        quota_order.duration_days = 0
+        quota_order.amount_rub = Decimal("150.00")
+        quota_order.paid_at = t0 - timedelta(minutes=1)
+        quota_order.created_at = t0 - timedelta(minutes=1)
+        quota_order.user = user
+
+        res_orders = MagicMock()
+        res_orders.scalars().all.return_value = [slot_order, quota_order]
+
+        res_audit = MagicMock()
+        res_audit.scalars().all.return_value = []
+
+        session.execute.side_effect = [res_orders, res_audit]
+
+        entries, total = await get_purchase_logs_paginated(session, page=1, per_page=10)
+        self.assertEqual(len(entries), 2)
+        # Check order query statement excludes topup
+        called_stmt = session.execute.call_args_list[0][0][0]
+        stmt_sql = str(called_stmt)
+        self.assertIn("orders.service_type IN", stmt_sql)
+
+        # Slot order checks
+        self.assertEqual(entries[0].operation_type, "add_device_slot")
+        self.assertEqual(entries[0].operation_title, "Доп. устройство")
+        self.assertEqual(entries[0].payment_method, "wallet")
+
+        # Quota order checks
+        self.assertEqual(entries[1].operation_type, "topup_quota")
+        self.assertEqual(entries[1].operation_title, "Докупка трафика")
+        self.assertEqual(entries[1].payment_method, "yookassa")
+
+    async def test_show_order_card_yookassa_pending_diagnostics(self):
+        import uuid
+        from datetime import datetime, timedelta, timezone
+        from bot.handlers.admin.payments import show_order_card
+        from database.models import Order
+
+        session = AsyncMock()
+        test_uuid = uuid.uuid4()
+        user = User(id=20, telegram_id=555666, username="diagnostics_user")
+        old_created = datetime.now(timezone.utc) - timedelta(minutes=25)
+        order = Order(
+            id=test_uuid,
+            user_id=20,
+            service_type="awg",
+            amount_rub=Decimal("300.00"),
+            duration_days=30,
+            status="pending",
+            payment_method="yookassa",
+            payment_url="https://yookassa.ru/checkout/12345",
+            created_at=old_created,
+            user=user,
+            tariff=None,
+            metadata_={"payment_creation_ambiguous": True},
+        )
+        session.scalar.return_value = order
+
+        callback = AsyncMock()
+        callback.data = f"admin_order_card:{test_uuid}"
+        callback.from_user.id = 12345
+        callback.message = AsyncMock()
+        state = AsyncMock()
+
+        with patch("bot.handlers.admin.payments.is_admin", return_value=True):
+            await show_order_card(callback, state, session)
+
+        callback.message.edit_text.assert_called_once()
+        rendered_text = callback.message.edit_text.call_args[0][0]
+        self.assertIn("Платёж ЮKassa", rendered_text)
+        self.assertIn("Заказ #", rendered_text)
+        self.assertIn("Ожидает завершения оплаты клиентом", rendered_text)
+        self.assertIn("Тайм-аут шлюза при создании", rendered_text)
+        self.assertIn("https://yookassa.ru/checkout/12345", rendered_text)
 
 
 if __name__ == "__main__":

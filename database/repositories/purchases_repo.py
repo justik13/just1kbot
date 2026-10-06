@@ -39,6 +39,7 @@ class PurchaseLogEntry:
     # None means unknown / not applicable (topups, admin grants).
     real_amount_rub: Decimal | None = None
     bonus_amount_rub: Decimal | None = None
+    payment_method: str = "wallet"
 
 
 _AUDIT_ACTION_TO_OP: dict[AdminAuditAction, tuple[str, AdminAuditAction]] = {
@@ -70,7 +71,11 @@ def _wi_operation_title(operation: str | None) -> tuple[str, str] | None:
     }
     if operation in titles:
         return operation, titles[operation]
-    if operation in ("trial", "add_device_slot", "topup", "topup_or_device_slot"):
+    if operation == "add_device_slot":
+        return "add_device_slot", "Доп. устройство"
+    if operation in ("topup", "topup_quota"):
+        return "topup_quota", "Докупка трафика"
+    if operation in ("trial", "topup_or_device_slot"):
         return operation, getattr(texts, "PAYMENT_OP_TITLE_DEFAULT", "Операция")
     return None
 
@@ -173,12 +178,12 @@ async def get_purchase_logs_paginated(
 
     entries: list[PurchaseLogEntry] = []
 
-    # 1. Fetch paid orders
+    # 1. Fetch paid orders (excluding topup)
     order_stmt = (
         select(Order)
         .where(
             Order.status == "paid",
-            Order.service_type.in_(("awg", "white_internet", "topup")),
+            Order.service_type.in_(("awg", "white_internet")),
         )
         .options(selectinload(Order.user), selectinload(Order.tariff))
         .order_by(Order.paid_at.desc().nullslast(), Order.created_at.desc())
@@ -191,21 +196,46 @@ async def get_purchase_logs_paginated(
         username = user.username if user else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
         tariff_obj = getattr(ord_item, "tariff", None)
-        is_change = bool(
-            ord_item.metadata_ and ord_item.metadata_.get("is_tariff_change")
-        )
-        meta_tariff_name = (
-            ord_item.metadata_.get("tariff_name")
-            if isinstance(ord_item.metadata_, dict)
-            else None
-        )
-        if ord_item.service_type == "topup":
-            op_type = "topup"
-            op_title = "Пополнение"
-            tariff_name = "Баланс"
+        meta = ord_item.metadata_ if isinstance(ord_item.metadata_, dict) else {}
+        is_change = bool(meta.get("is_tariff_change"))
+        meta_tariff_name = meta.get("tariff_name")
+        meta_op = meta.get("operation")
+
+        d_limit = ord_item.device_limit if isinstance(getattr(ord_item, "device_limit", None), (int, float)) else 2
+        t_bytes = ord_item.traffic_bytes if isinstance(getattr(ord_item, "traffic_bytes", None), (int, float)) else 0
+        d_days = ord_item.duration_days if isinstance(getattr(ord_item, "duration_days", None), (int, float)) else 0
+
+        if ord_item.service_type == "white_internet":
+            if meta_op == "add_device_slot" or (
+                d_limit
+                and not t_bytes
+                and d_days == 0
+            ):
+                op_type = "add_device_slot"
+                op_title = "Доп. устройство"
+                tariff_name = f"+{d_limit} слот"
+            elif meta_op in ("topup", "topup_quota") or (
+                t_bytes > 0 and d_days == 0
+            ):
+                op_type = "topup_quota"
+                op_title = "Докупка трафика"
+                pack_gb = max(1, int(t_bytes) // (1024**3))
+                tariff_name = f"+{pack_gb} ГБ"
+            elif meta_op == "renew":
+                op_type = "renew"
+                op_title = "Продление"
+                tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "White Internet")
+            else:
+                op_type = "purchase"
+                op_title = "Покупка"
+                tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "White Internet")
         elif is_change:
             op_type = "change"
             op_title = "Смена тарифа"
+            tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "Тариф")
+        elif meta.get("is_renewal"):
+            op_type = "renew"
+            op_title = "Продление"
             tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "Тариф")
         else:
             op_type = "purchase"
@@ -234,6 +264,7 @@ async def get_purchase_logs_paginated(
             duration_days=ord_item.duration_days,
             amount_rub=ord_item.amount_rub,
             created_at=ord_item.paid_at or ord_item.created_at,
+            payment_method=ord_item.payment_method or "wallet",
         )
         _apply_wi_operation_title(entry, ord_item.metadata_)
         entries.append(entry)
@@ -285,6 +316,7 @@ async def get_purchase_logs_paginated(
                 duration_days=dur_days,
                 amount_rub=Decimal("0.00"),
                 created_at=log.created_at,
+                payment_method="admin",
             )
         )
 
@@ -297,7 +329,7 @@ async def get_purchase_logs_paginated(
             await session.scalar(
                 select(func.count(Order.id)).where(
                     Order.status == "paid",
-                    Order.service_type.in_(("awg", "white_internet", "topup")),
+                    Order.service_type.in_(("awg", "white_internet")),
                 )
             )
         ) or 0
@@ -337,21 +369,49 @@ async def get_purchase_log_by_id(
         username = user.username if user else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
         tariff_obj = ord_item.tariff
-        is_change = bool(
-            ord_item.metadata_ and ord_item.metadata_.get("is_tariff_change")
-        )
-        meta_tariff_name = (
-            ord_item.metadata_.get("tariff_name")
-            if isinstance(ord_item.metadata_, dict)
-            else None
-        )
+        meta = ord_item.metadata_ if isinstance(ord_item.metadata_, dict) else {}
+        is_change = bool(meta.get("is_tariff_change"))
+        meta_tariff_name = meta.get("tariff_name")
+        meta_op = meta.get("operation")
+
         if ord_item.service_type == "topup":
             op_type = "topup"
             op_title = "Пополнение"
             tariff_name = "Баланс"
+        elif ord_item.service_type == "white_internet":
+            d_limit = ord_item.device_limit if isinstance(getattr(ord_item, "device_limit", None), (int, float)) else 2
+            t_bytes = ord_item.traffic_bytes if isinstance(getattr(ord_item, "traffic_bytes", None), (int, float)) else 0
+            d_days = ord_item.duration_days if isinstance(getattr(ord_item, "duration_days", None), (int, float)) else 0
+            if meta_op == "add_device_slot" or (
+                d_limit
+                and not t_bytes
+                and d_days == 0
+            ):
+                op_type = "add_device_slot"
+                op_title = "Доп. устройство"
+                tariff_name = f"+{d_limit} слот"
+            elif meta_op in ("topup", "topup_quota") or (
+                t_bytes > 0 and d_days == 0
+            ):
+                op_type = "topup_quota"
+                op_title = "Докупка трафика"
+                pack_gb = max(1, int(t_bytes) // (1024**3))
+                tariff_name = f"+{pack_gb} ГБ"
+            elif meta_op == "renew":
+                op_type = "renew"
+                op_title = "Продление"
+                tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "White Internet")
+            else:
+                op_type = "purchase"
+                op_title = "Покупка"
+                tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "White Internet")
         elif is_change:
             op_type = "change"
             op_title = "Смена тарифа"
+            tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "Тариф")
+        elif meta.get("is_renewal"):
+            op_type = "renew"
+            op_title = "Продление"
             tariff_name = meta_tariff_name or (tariff_obj.name if tariff_obj else "Тариф")
         else:
             op_type = "purchase"
@@ -393,6 +453,7 @@ async def get_purchase_log_by_id(
             created_at=ord_item.paid_at or ord_item.created_at,
             real_amount_rub=real_amount_rub,
             bonus_amount_rub=bonus_amount_rub,
+            payment_method=ord_item.payment_method or "wallet",
         )
         _apply_wi_operation_title(entry, ord_item.metadata_)
         return entry
@@ -438,5 +499,6 @@ async def get_purchase_log_by_id(
             duration_days=dur_days,
             amount_rub=Decimal("0.00"),
             created_at=log.created_at,
+            payment_method="admin",
         )
     return None
