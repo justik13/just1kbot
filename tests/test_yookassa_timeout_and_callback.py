@@ -113,7 +113,7 @@ class TestPeerIdLoggingNotCorrupted(unittest.TestCase):
 
 
 class TestReconciliationWorkerUnit(unittest.IsolatedAsyncioTestCase):
-    @patch("database.connection.session_scope")
+    @patch("services.workers.cleanup.session_scope")
     async def test_reconcile_handles_empty(self, mock_session_scope):
         from services.workers.cleanup import _reconcile_stale_pending_orders
 
