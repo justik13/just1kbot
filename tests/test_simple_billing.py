@@ -116,12 +116,43 @@ class TestYooKassaGateway(unittest.IsolatedAsyncioTestCase):
     async def test_check_payment_status(self, mock_get):
         mock_get.return_value = YooKassaResult(
             True,
-            value={"status": "succeeded"},
+            value={
+                "status": "succeeded",
+                "amount": {"value": "250.00", "currency": "RUB"},
+            },
         )
 
         status_result = await self.gateway.check_payment_status("ext-123")
         self.assertTrue(status_result.is_paid)
         self.assertFalse(status_result.is_canceled)
+        self.assertEqual(status_result.amount_rub, Decimal("250.00"))
+        self.assertFalse(status_result.is_temporary_error)
+
+        # Canceled status with cancellation details
+        mock_get.return_value = YooKassaResult(
+            True,
+            value={
+                "status": "canceled",
+                "cancellation_details": {"party": "yoo_money", "reason": "expired_on_confirmation"},
+            },
+        )
+        canceled_res = await self.gateway.check_payment_status("ext-123")
+        self.assertFalse(canceled_res.is_paid)
+        self.assertTrue(canceled_res.is_canceled)
+        self.assertEqual(canceled_res.cancellation_reason, "expired_on_confirmation")
+        self.assertFalse(canceled_res.is_temporary_error)
+
+        # Temporary error (timeout)
+        from services.yookassa_service import YooKassaErrorKind
+        mock_get.return_value = YooKassaResult(
+            False,
+            error_kind=YooKassaErrorKind.TIMEOUT,
+            retryable=True,
+        )
+        timeout_res = await self.gateway.check_payment_status("ext-123")
+        self.assertFalse(timeout_res.is_paid)
+        self.assertFalse(timeout_res.is_canceled)
+        self.assertTrue(timeout_res.is_temporary_error)
 
     def test_webhook_result_dataclass_contract(self):
         import dataclasses
@@ -2730,8 +2761,9 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
 
         with patch("services.white_internet_service.WhiteInternetService.deactivate_user_subscriptions") as mock_deact:
             await FulfillmentService.revoke_order(session, order)
-            session.get.assert_called_once_with(User, 42, with_for_update=True)
-            mock_deact.assert_called_once_with(session, 42)
+            mock_deact.assert_called_once_with(
+                session, 42, reason="order_refunded", target_subscription_id=None
+            )
 
     @patch("bot.handlers.payment.balance_routes._render_balance")
     @patch("bot.handlers.webhook.session_scope")

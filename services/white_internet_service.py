@@ -1104,8 +1104,10 @@ class WhiteInternetService:
         session: AsyncSession,
         user_id: int,
         reason: str = "user_banned",
+        *,
+        target_subscription_id: int | None = None,
     ) -> list[WhiteInternetSubscription]:
-        """Deactivate and deprovision all White Internet subscriptions for a user (e.g. on ban)."""
+        """Deactivate and deprovision White Internet subscriptions for a user (e.g. on ban or refund)."""
         stmt = (
             select(WhiteInternetSubscription)
             .where(
@@ -1114,6 +1116,8 @@ class WhiteInternetService:
             )
             .with_for_update()
         )
+        if target_subscription_id is not None:
+            stmt = stmt.where(WhiteInternetSubscription.id == target_subscription_id)
         res = await session.execute(stmt)
         subs = list(res.scalars().all())
 

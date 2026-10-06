@@ -3,6 +3,7 @@ import html
 import logging
 import re
 import time
+from typing import Any
 
 from aiogram.exceptions import (
     TelegramBadRequest,
@@ -10,7 +11,7 @@ from aiogram.exceptions import (
     TelegramNetworkError,
     TelegramRetryAfter,
 )
-from aiogram.types import InlineKeyboardMarkup, InputFile, LinkPreviewOptions
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InputFile, LinkPreviewOptions
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -951,4 +952,45 @@ async def safe_send_message(
         return None
 
     return sent_id
+
+
+async def safe_callback_answer(
+    callback: CallbackQuery | Any,
+    text: str | None = None,
+    *,
+    show_alert: bool = False,
+    url: str | None = None,
+    cache_time: int = 0,
+) -> bool:
+    """Safely answer a Telegram CallbackQuery without crashing on expired or duplicate queries."""
+    if callback is None:
+        return False
+    try:
+        kwargs: dict[str, Any] = {}
+        if show_alert:
+            kwargs["show_alert"] = show_alert
+        if url is not None:
+            kwargs["url"] = url
+        if cache_time:
+            kwargs["cache_time"] = cache_time
+        if text is not None:
+            await callback.answer(text, **kwargs)
+        else:
+            await callback.answer(**kwargs)
+        return True
+    except TelegramBadRequest as exc:
+        err = str(exc).lower()
+        if (
+            "query is too old" in err
+            or "query id is invalid" in err
+            or "query is already answered" in err
+        ):
+            logger.debug("safe_callback_answer ignored expected error: %s", exc)
+            return False
+        logger.warning("safe_callback_answer TelegramBadRequest: %s", exc)
+        return False
+    except Exception as exc:
+        logger.warning("safe_callback_answer failed: %s", exc)
+        return False
+
 

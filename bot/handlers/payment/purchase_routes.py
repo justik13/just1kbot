@@ -30,7 +30,7 @@ from services.order_service import (
     OrderService,
 )
 from utils.datetime_helpers import now_utc
-from utils.telegram import EFFECT_CONFETTI, render_hub
+from utils.telegram import EFFECT_CONFETTI, render_hub, safe_callback_answer
 
 from .common import _render_maintenance
 
@@ -52,7 +52,7 @@ async def handle_order_pay_wallet(
     db_user: User | None = None,
 ) -> None:
     if not db_user:
-        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
     # Capture primitive before DB/gateway IO: on failure the session may be
     # rolled back (expired ORM -> MissingGreenlet if db_user.id is touched).
@@ -66,15 +66,13 @@ async def handle_order_pay_wallet(
     try:
         tariff_id = int(callback.data.split(":")[1])
     except (IndexError, ValueError):
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if not tariff or not tariff.is_active:
-        await callback.answer(texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE, show_alert=True)
+        await safe_callback_answer(callback, texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE, show_alert=True)
         return
-
-    await callback.answer(texts.PAYMENT_PURCHASE_PROCESSING_NOTICE, show_alert=False)
 
     try:
         order = await OrderService.pay_from_wallet(
@@ -84,10 +82,10 @@ async def handle_order_pay_wallet(
             tariff_id=tariff.id,
         )
     except (AccountDebtBlockedError, InsufficientBalanceError):
-        await callback.answer(texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
+        await safe_callback_answer(callback, texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
         return
     except FinancialHoldBlockedError:
-        await callback.answer(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
+        await safe_callback_answer(callback, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
         return
     except Exception as exc:
         # pay_from_wallet() may have flushed a partial paid order before
@@ -103,7 +101,7 @@ async def handle_order_pay_wallet(
             await session.rollback()
         except Exception:
             pass
-        await callback.answer(texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True)
+        await safe_callback_answer(callback, texts.PAYMENT_PURCHASE_OPEN_FAILED, show_alert=True)
         return
 
     balance = await get_account_balance(session, user_id=db_user_id)
@@ -126,6 +124,7 @@ async def handle_order_pay_wallet(
         message_effect_id=EFFECT_CONFETTI,
         force_new=True,
     )
+    await safe_callback_answer(callback)
 
 
 @router.callback_query(F.data.startswith("order_pay_card:"))
@@ -135,7 +134,7 @@ async def handle_order_pay_card(
     db_user: User | None = None,
 ) -> None:
     if not db_user:
-        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
     # Capture primitive before gateway IO: OrderService.create_order() does
     # session.rollback() on gateway failure, expiring db_user (MissingGreenlet).
@@ -149,18 +148,18 @@ async def handle_order_pay_card(
     # Authoritative enforcement lives at settlement (mark_order_paid);
     # this is an early UX reject on (possibly stale) middleware state.
     if getattr(db_user, "financial_hold", False):
-        await callback.answer(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
+        await safe_callback_answer(callback, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
         return
 
     try:
         tariff_id = int(callback.data.split(":")[1])
     except (IndexError, ValueError):
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if not tariff or not tariff.is_active:
-        await callback.answer(texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE, show_alert=True)
+        await safe_callback_answer(callback, texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE, show_alert=True)
         return
 
     # Check if this is a zero-cost change: if so, route to wallet payment
@@ -227,8 +226,6 @@ async def handle_order_pay_card(
             )
             return
 
-    await callback.answer(texts.PAYMENT_CREATING_LINK_NOTICE, show_alert=False)
-
     try:
         bot_username = getattr(getattr(callback.bot, "_me", None), "username", None)
         order = await OrderService.create_order(
@@ -243,15 +240,15 @@ async def handle_order_pay_card(
         # The provider may still create the payment; the order is kept so a
         # webhook can settle it. Tell the user to wait instead of claiming
         # the purchase failed.
-        await callback.answer(
-            texts.PAYMENT_CREATION_STATUS_UNKNOWN, show_alert=True
+        await safe_callback_answer(
+            callback, texts.PAYMENT_CREATION_STATUS_UNKNOWN, show_alert=True
         )
         return
     except Exception as exc:
         logger.exception(
             "Failed to create YooKassa order for user %s: %s", db_user_id, exc
         )
-        await callback.answer(texts.ERROR_PAYMENT_SERVICE, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_PAYMENT_SERVICE, show_alert=True)
         return
 
     tariff_name = get_tariff_display_name(order.device_limit or 2)
@@ -278,6 +275,7 @@ async def handle_order_pay_card(
             back_callback=back_target,
         ),
     )
+    await safe_callback_answer(callback)
 
 
 @router.callback_query(F.data.startswith("order_check:"))
@@ -287,17 +285,17 @@ async def handle_order_check(
     db_user: User | None = None,
 ) -> None:
     if not db_user:
-        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
     order_id = _uuid_from_callback(callback.data)
     if not order_id:
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     order = await session.get(Order, order_id, with_for_update=True)
     if not order or order.user_id != db_user.id:
-        await callback.answer(texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
+        await safe_callback_answer(callback, texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
         return
 
     if order.status == "paid":
@@ -308,8 +306,10 @@ async def handle_order_check(
             # Never present withheld benefits as credited/granted.
             paid_order = await OrderService.mark_order_paid(session, order.id)
             if not paid_order or (paid_order.metadata_ or {}).get("settlement_held"):
-                await callback.answer(
-                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
+                await safe_callback_answer(
+                    callback,
+                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+                    show_alert=True,
                 )
                 return
             order = paid_order
@@ -340,6 +340,7 @@ async def handle_order_check(
             # Push delivered straight to the user looking at the screen:
             # clear the debt so the credit-notify worker does not duplicate it.
             mark_notified(order)
+            await safe_callback_answer(callback)
             return
 
         balance = await get_account_balance(session, user_id=db_user.id)
@@ -353,6 +354,7 @@ async def handle_order_check(
             force_new=True,
         )
         mark_notified(order)
+        await safe_callback_answer(callback)
         return
 
     if order.external_id:
@@ -360,17 +362,22 @@ async def handle_order_check(
         status_res = await gateway.check_payment_status(order.external_id)
         if status_res.is_paid:
             paid_order = await OrderService.mark_order_paid(
-                session, order.id, external_id=order.external_id
+                session,
+                order.id,
+                external_id=order.external_id,
+                paid_amount_rub=status_res.amount_rub,
             )
             if not paid_order:
-                await callback.answer(texts.ERROR_PAYMENT_SERVICE, show_alert=True)
+                await safe_callback_answer(callback, texts.ERROR_PAYMENT_SERVICE, show_alert=True)
                 return
 
             if (paid_order.metadata_ or {}).get("settlement_held"):
                 # Credit/fulfillment were withheld (hold/block at settlement):
                 # never show a success/credited card for withheld benefits.
-                await callback.answer(
-                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
+                await safe_callback_answer(
+                    callback,
+                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+                    show_alert=True,
                 )
                 return
 
@@ -399,6 +406,7 @@ async def handle_order_check(
                     custom_keyboard=kb,
                 )
                 mark_notified(paid_order)
+                await safe_callback_answer(callback)
                 return
 
             balance = await get_account_balance(session, user_id=db_user.id)
@@ -412,16 +420,49 @@ async def handle_order_check(
                 force_new=True,
             )
             mark_notified(paid_order)
+            await safe_callback_answer(callback)
             return
         elif status_res.is_canceled:
-            OrderService.mark_order_canceled(order, reason="gateway_canceled")
+            OrderService.mark_order_canceled(
+                order,
+                reason=status_res.cancellation_reason or "gateway_canceled",
+            )
             await session.flush()
-            await callback.answer(
-                texts.PAYMENT_ORDER_PAYMENT_CANCELLED, show_alert=True
+            await safe_callback_answer(
+                callback,
+                texts.PAYMENT_ORDER_PAYMENT_CANCELLED,
+                show_alert=True,
+            )
+            return
+        elif getattr(status_res, "is_refunded", False):
+            OrderService.mark_order_canceled(
+                order,
+                reason="gateway_refunded",
+            )
+            await session.flush()
+            await safe_callback_answer(
+                callback,
+                texts.PAYMENT_ORDER_PAYMENT_CANCELLED,
+                show_alert=True,
+            )
+            return
+        elif status_res.is_temporary_error or status_res.status_str in (
+            "not_found",
+            "server_error",
+            "timeout",
+            "network_error",
+            "rate_limited",
+            "unknown",
+        ):
+            await safe_callback_answer(
+                callback,
+                texts.ERROR_PAYMENT_SERVICE,
+                show_alert=True,
             )
             return
 
-    await callback.answer(
+    await safe_callback_answer(
+        callback,
         texts.PAYMENT_ORDER_WAITING_PAYMENT,
         show_alert=True,
     )
@@ -441,7 +482,7 @@ async def handle_order_cancel(
             OrderService.mark_order_canceled(order, reason="user_canceled")
             await session.flush()
 
-    await callback.answer(show_alert=False)
+    await safe_callback_answer(callback, show_alert=False)
 
     order_context = (
         (order.metadata_ or {}).get("context") if order and order.metadata_ else None

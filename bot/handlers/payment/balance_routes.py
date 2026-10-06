@@ -35,7 +35,7 @@ from services.maintenance_service import MaintenanceService
 from services.order_service import OrderService
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
-from utils.telegram import render_hub
+from utils.telegram import render_hub, safe_callback_answer
 
 from .common import _render_maintenance
 
@@ -312,6 +312,8 @@ async def _create_and_render_topup(
             back_callback=back_to,
         ),
     )
+    if isinstance(target, CallbackQuery):
+        await safe_callback_answer(target)
 
 
 @router.callback_query(F.data == "menu_balance")
@@ -519,7 +521,6 @@ async def create_preset_topup(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer(texts.PAYMENT_CREATING_LINK_NOTICE, show_alert=False)
     amount = parse_callback_id(callback.data, 1)
     if db_user is None or amount is None:
         return
@@ -530,7 +531,7 @@ async def create_preset_topup(
         return
     cfg = get_settings()
     if amount < cfg.BALANCE_MIN_TOPUP_RUB or amount > cfg.BALANCE_MAX_CUSTOM_TOPUP_RUB:
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
     await _create_and_render_topup(callback, session, db_user, amount)
 

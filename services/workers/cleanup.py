@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from datetime import timedelta
+from typing import Any
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
@@ -21,6 +22,7 @@ from database.models import (
     APIOperation,
     BroadcastProgress,
     HubMessage,
+    Order,
     Server,
     User,
     VPNProfile,
@@ -87,6 +89,7 @@ async def cleanup_dangling_peers_loop(
             await _cleanup_stuck_profiles()
             await _cleanup_expired_profiles_grace(bot)
             await _cleanup_dangling_peers()
+            await _reconcile_stale_pending_orders()
 
             now = time.monotonic()
             if now - _last_old_cleanup > OLD_RECORDS_INTERVAL:
@@ -767,3 +770,129 @@ async def _cleanup_old_records():
             hub_deleted,
             webhooks_deleted,
         )
+
+
+async def _reconcile_stale_pending_orders() -> None:
+    """Safety net: reconcile pending orders whose webhooks were dropped or missed.
+
+    Decoupled transaction & network boundary:
+    1. Read candidate order identifiers in a fast query without holding database locks.
+    2. Query external gateway HTTP outside DB transactions.
+    3. Settle or cancel each order in its own isolated transaction boundary.
+    4. Expire ancient pending orders (> 24 hours old).
+    """
+    from integrations.payment_gateways.factory import get_payment_gateway
+    from services.order_service import OrderService
+
+    now = now_utc()
+    window_start = now - timedelta(hours=24)
+    stale_threshold = now - timedelta(minutes=15)
+
+    # 1. Fetch candidate order tuples in a fast read query (no lock held during external HTTP)
+    candidates: list[tuple[Any, str, str]] = []
+    try:
+        async with session_scope() as session:
+            stmt = (
+                select(Order.id, Order.external_id, Order.payment_method)
+                .where(
+                    Order.status == "pending",
+                    Order.external_id.is_not(None),
+                    Order.created_at >= window_start,
+                    Order.created_at <= stale_threshold,
+                )
+                .order_by(Order.created_at.asc())
+                .limit(20)
+            )
+            res = await session.execute(stmt)
+            candidates = [(row[0], row[1], row[2]) for row in res.all()]
+    except Exception as exc:
+        logger.error("Failed to query stale pending order candidates: %s", exc)
+        return
+
+    # 2. Check each candidate with the payment gateway outside DB transactions,
+    # then settle/cancel in an isolated transaction per order.
+    for order_id, external_id, payment_method in candidates:
+        try:
+            gateway = get_payment_gateway(payment_method)
+            status_res = await gateway.check_payment_status(external_id)
+
+            # Isolated transaction for this specific order
+            async with session_scope() as order_session:
+                order = await order_session.scalar(
+                    select(Order).where(Order.id == order_id).with_for_update()
+                )
+                if not order or order.status != "pending":
+                    continue
+
+                if status_res.is_paid:
+                    paid_order = await OrderService.mark_order_paid(
+                        order_session,
+                        order.id,
+                        external_id=external_id,
+                        paid_amount_rub=status_res.amount_rub,
+                    )
+                    if paid_order:
+                        logger.info(
+                            "Reconciliation settled stale pending order %s (amount=%s rub)",
+                            order.id,
+                            order.amount_rub,
+                        )
+                elif status_res.is_canceled:
+                    OrderService.mark_order_canceled(
+                        order,
+                        reason=status_res.cancellation_reason or "gateway_canceled",
+                    )
+                    logger.info(
+                        "Reconciliation canceled stale pending order %s (reason=%s)",
+                        order.id,
+                        status_res.cancellation_reason,
+                    )
+                elif getattr(status_res, "is_refunded", False):
+                    OrderService.mark_order_canceled(
+                        order,
+                        reason="gateway_refunded",
+                    )
+                    logger.info(
+                        "Reconciliation canceled stale pending order %s (refunded in gateway)",
+                        order.id,
+                    )
+                elif status_res.status_str == "not_found":
+                    OrderService.mark_order_canceled(
+                        order,
+                        reason="gateway_not_found",
+                    )
+                    logger.info(
+                        "Reconciliation canceled stale pending order %s (not found in gateway)",
+                        order.id,
+                    )
+        except Exception as exc:
+            logger.warning(
+                "Reconciliation check failed for order %s: %s",
+                order_id,
+                exc,
+            )
+
+    # 3. Expire ancient pending orders (> 24 hours old) in a bounded transaction
+    try:
+        async with session_scope() as session:
+            expired_stmt = (
+                select(Order)
+                .where(
+                    Order.status == "pending",
+                    Order.created_at < window_start,
+                )
+                .order_by(Order.created_at.asc())
+                .limit(50)
+                .with_for_update(skip_locked=True)
+            )
+            expired_res = await session.execute(expired_stmt)
+            expired_orders = list(expired_res.scalars().all())
+            for exp_order in expired_orders:
+                OrderService.mark_order_canceled(exp_order, reason="order_expired_24h")
+                logger.info(
+                    "Reconciliation expired ancient pending order %s",
+                    exp_order.id,
+                )
+    except Exception as exc:
+        logger.error("Error expiring ancient pending orders: %s", exc)
+

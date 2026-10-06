@@ -136,5 +136,11 @@ class FulfillmentService:
                 )
 
         elif order.service_type == "white_internet":
-            await WhiteInternetService.deactivate_user_subscriptions(session, user.id)
+            target_sub_id = (order.metadata_ or {}).get("subscription_id")
+            await WhiteInternetService.deactivate_user_subscriptions(
+                session,
+                user.id,
+                reason="order_refunded",
+                target_subscription_id=target_sub_id,
+            )
             logger.info("Revoked White Internet order %s for user %s", order.id, user.id)
