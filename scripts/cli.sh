@@ -1690,6 +1690,71 @@ cmd_doctor() {
         fi
     done
 
+    # 2.1 Проверка фаервола UFW хоста (аудит периметра, поиск мёртвых и посторонних портов)
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
+        log "Фаервол UFW активен."
+        local ufw_rules_raw
+        ufw_rules_raw="$(ufw status verbose 2>/dev/null | grep -E '^[0-9]+' || true)"
+        if [[ -n "$ufw_rules_raw" ]]; then
+            local checked_targets=()
+            while read -r rule_line; do
+                [[ -z "$rule_line" ]] && continue
+                local raw_target action from_part
+                raw_target=$(echo "$rule_line" | awk '{print $1}')
+                action=$(echo "$rule_line" | awk '{print $2}')
+                from_part=$(echo "$rule_line" | awk '{$1=""; $2=""; print $0}' | sed -E 's/^[[:space:]]*(IN|OUT)[[:space:]]*//' | sed 's/^[[:space:]]*//')
+
+                [[ "$action" != "ALLOW" ]] && continue
+
+                local norm_target
+                norm_target=$(echo "$raw_target" | sed 's/(v6)//g' | tr -d '[:space:]')
+                local r_port="${norm_target%/*}"
+                local r_proto="${norm_target#*/}"
+                [[ "$r_proto" == "$norm_target" ]] && r_proto="tcp"
+
+                local already_checked=0
+                for ct in "${checked_targets[@]}"; do
+                    if [[ "$ct" == "${r_port}/${r_proto}" ]]; then
+                        already_checked=1
+                        break
+                    fi
+                done
+                [[ $already_checked -eq 1 ]] && continue
+                checked_targets+=("${r_port}/${r_proto}")
+
+                local proc_owner=""
+                if [[ "$r_proto" == "tcp" ]]; then
+                    proc_owner=$(run_privileged ss -tlnp 2>/dev/null | grep -E "[:\s]${r_port}\b" | awk '{print $NF}' | head -n 1 || true)
+                else
+                    proc_owner=$(run_privileged ss -ulnp 2>/dev/null | grep -E "[:\s]${r_port}\b" | awk '{print $NF}' | head -n 1 || true)
+                fi
+
+                local is_public=0
+                if echo "$from_part" | grep -qiE "(Anywhere|Везде|0\.0\.0\.0/0|::/0)"; then
+                    is_public=1
+                fi
+
+                if [[ -z "$proc_owner" ]]; then
+                    warn "«Мёртвое» правило в UFW: порт ${r_port}/${r_proto} разрешён, но служба не запущена."
+                    info "Рекомендация: если порт не нужен, удалите: sudo ufw delete allow ${norm_target}"
+                elif [[ $is_public -eq 1 ]]; then
+                    local is_authorized=0
+                    if run_privileged ss -tlnp 2>/dev/null | grep -E 'users:.*"sshd"' | grep -qE "[:\s]${r_port}\b"; then
+                        is_authorized=1
+                    fi
+                    if [[ ("$r_port" == "80" || "$r_port" == "443") && "$r_proto" == "tcp" ]]; then
+                        is_authorized=1
+                    fi
+
+                    if [[ $is_authorized -eq 0 ]]; then
+                        warn "ВНИМАНИЕ: Посторонний порт ${r_port}/${r_proto} (${proc_owner}) открыт для всех (Anywhere)!"
+                        info "Если это сторонний сервис, убедитесь в его необходимости. Для закрытия: sudo ufw delete allow ${norm_target}"
+                    fi
+                fi
+            done <<< "$ufw_rules_raw"
+        fi
+    fi
+
     # 3. Чтение .env параметров
     if [[ -f "${PROJECT_DIR}/.env" ]]; then
         local domain

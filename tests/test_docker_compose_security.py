@@ -250,6 +250,9 @@ class DockerComposeSecurityTests(unittest.TestCase):
         self.assertIn("safe_backup_dest", cli_sh)
         self.assertIn("--entrypoint rclone", cli_sh)
         self.assertIn("sys.stdin", cli_sh)
+        self.assertIn("Фаервол UFW активен", cli_sh)
+        self.assertIn("«Мёртвое» правило в UFW", cli_sh)
+        self.assertIn("ВНИМАНИЕ: Посторонний порт", cli_sh)
 
         # 5. .env.example documents only non-secret Google Drive flags (no tokens)
         self.assertIn("GDRIVE_BACKUP_ENABLED=false", env_example)
