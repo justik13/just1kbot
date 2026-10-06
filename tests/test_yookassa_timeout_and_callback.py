@@ -338,6 +338,41 @@ class TestFailClosedAndAdminAlert(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res_zero.is_paid)
         self.assertIsNone(res_zero.amount_rub)
 
+        # Negative amount
+        payload_neg = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-neg",
+                "amount": {"value": "-50.00", "currency": "RUB"},
+            },
+        }
+        res_neg = await gw.parse_webhook(payload_neg)
+        self.assertFalse(res_neg.is_paid)
+        self.assertIsNone(res_neg.amount_rub)
+
+        # Missing currency
+        payload_no_cur = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-no-cur",
+                "amount": {"value": "100.00"},
+            },
+        }
+        res_no_cur = await gw.parse_webhook(payload_no_cur)
+        self.assertFalse(res_no_cur.is_paid)
+        self.assertIsNone(res_no_cur.amount_rub)
+
+        # Missing amount object
+        payload_no_amt = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay-no-amt",
+            },
+        }
+        res_no_amt = await gw.parse_webhook(payload_no_amt)
+        self.assertFalse(res_no_amt.is_paid)
+        self.assertIsNone(res_no_amt.amount_rub)
+
         # Valid RUB
         payload_valid = {
             "event": "payment.succeeded",
