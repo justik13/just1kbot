@@ -1,11 +1,6 @@
 """Domain texts for runtime/alerts.py."""
 from __future__ import annotations
 
-ALERT_BALANCE_LIMIT_EXCEEDED = """⚠️ <b>ВНИМАНИЕ: Превышен лимит баланса!</b>
-
-Платёж #{payment_id}, пользователь {telegram_id}
-Позиция: {real_position} ₽"""
-
 ALERT_CRITICAL_BOT_ERROR = """🚨 <b>Критическая ошибка бота</b>
 <b>Тип:</b> <code>{error_type}</code>
 <b>Request ID:</b> <code>{request_id}</code>

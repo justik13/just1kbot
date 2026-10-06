@@ -2,8 +2,10 @@ import logging
 from config.constants import (
     AdminAuditAction,
     PERMANENT_SUBSCRIPTION_DAYS,
+    VPN_ACCESS_GRACE_HOURS,
 )
 from datetime import timedelta
+from utils.datetime_helpers import now_utc
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -237,9 +239,13 @@ async def admin_sub_apply_reduce(
                 pass
             return
 
+        now = now_utc()
+        cutoff = now - timedelta(hours=VPN_ACCESS_GRACE_HOURS + 1)
         new_end = user.subscription_end - timedelta(days=days)
-
-        user.subscription_end = new_end
+        if new_end <= now:
+            user.subscription_end = cutoff
+        else:
+            user.subscription_end = new_end
 
         user.notified_3d = False
         user.notified_1d = False

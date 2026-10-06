@@ -2,7 +2,7 @@
 
 import logging
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from config.settings import get_settings
 from integrations.payment_gateways.base import (
@@ -189,11 +189,14 @@ class YooKassaGateway(BasePaymentGateway):
                 )
                 or result.retryable
             )
+            status_str = result.error_kind.value if result.error_kind else "unknown"
+            if result.status_code == 404:
+                status_str = "not_found"
             return PaymentStatusResult(
                 is_paid=False,
                 is_refunded=False,
                 is_canceled=False,
-                status_str=(result.error_kind.value if result.error_kind else "unknown"),
+                status_str=status_str,
                 is_temporary_error=is_temporary,
             )
 
@@ -201,7 +204,13 @@ class YooKassaGateway(BasePaymentGateway):
         status = data.get("status", "")
         amount_obj = data.get("amount") or {}
         amount_val = amount_obj.get("value")
-        amount_rub = Decimal(str(amount_val)) if amount_val is not None else None
+        currency = amount_obj.get("currency")
+        amount_rub = None
+        if amount_val is not None and currency == "RUB":
+            try:
+                amount_rub = Decimal(str(amount_val))
+            except (InvalidOperation, ValueError, TypeError):
+                amount_rub = None
         cancellation_details = data.get("cancellation_details") or {}
         cancellation_reason = (
             cancellation_details.get("reason")

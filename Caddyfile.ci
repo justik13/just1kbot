@@ -32,6 +32,7 @@
 
 	@subscription_paths path {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*
 	handle @subscription_paths {
+		log_skip
 		reverse_proxy bot:8080 {
 			header_up X-Real-IP {remote_host}
 		}

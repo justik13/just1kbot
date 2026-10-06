@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from bot.texts.runtime.alerts import (
-    ALERT_BALANCE_LIMIT_EXCEEDED,
     ALERT_CRITICAL_BOT_ERROR,
     ALERT_INGRESS_PROBLEM,
     ALERT_INGRESS_RESTORED,
@@ -43,7 +42,6 @@ from bot.texts.runtime.notifications import (
 )
 
 __all__ = [
-    "ALERT_BALANCE_LIMIT_EXCEEDED",
     "ALERT_CRITICAL_BOT_ERROR",
     "ALERT_INGRESS_PROBLEM",
     "ALERT_INGRESS_RESTORED",

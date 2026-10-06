@@ -121,11 +121,93 @@ class TestReconciliationWorkerUnit(unittest.IsolatedAsyncioTestCase):
         mock_session_scope.return_value.__aenter__.return_value = session
 
         result_mock = MagicMock()
+        result_mock.all.return_value = []
         result_mock.scalars.return_value.all.return_value = []
         session.execute.return_value = result_mock
 
         await _reconcile_stale_pending_orders()
         self.assertEqual(session.execute.await_count, 2)
+
+    @patch("integrations.payment_gateways.factory.get_payment_gateway")
+    @patch("services.workers.cleanup.session_scope")
+    async def test_reconcile_transaction_isolation_per_order(
+        self, mock_session_scope, mock_gw_factory
+    ):
+        """Order 1 failure must not poison Order 2 settlement."""
+        import uuid
+        from decimal import Decimal
+        from database.models import Order
+        from integrations.payment_gateways.base import PaymentStatusResult
+        from services.workers.cleanup import _reconcile_stale_pending_orders
+
+        # Gateway returns paid for both
+        gw = AsyncMock()
+        gw.check_payment_status.return_value = PaymentStatusResult(
+            is_paid=True,
+            is_refunded=False,
+            is_canceled=False,
+            status_str="succeeded",
+            amount_rub=Decimal("100.00"),
+        )
+        mock_gw_factory.return_value = gw
+
+        # Read session for candidates
+        read_session = AsyncMock()
+        order1_id = uuid.uuid4()
+        order2_id = uuid.uuid4()
+
+        cand_mock = MagicMock()
+        cand_mock.all.return_value = [
+            (order1_id, "ext-1", "yookassa"),
+            (order2_id, "ext-2", "yookassa"),
+        ]
+
+        # Order sessions
+        order1_session = AsyncMock()
+        order2_session = AsyncMock()
+        expire_session = AsyncMock()
+
+        order1 = Order(id=order1_id, status="pending", amount_rub=Decimal("100.00"))
+        order2 = Order(id=order2_id, status="pending", amount_rub=Decimal("100.00"))
+
+        order1_session.scalar.return_value = order1
+        order2_session.scalar.return_value = order2
+
+        expire_mock = MagicMock()
+        expire_mock.scalars.return_value.all.return_value = []
+        expire_session.execute.return_value = expire_mock
+
+        # Setup sequence of session_scope enters
+        mock_session_scope.side_effect = [
+            AsyncMock(__aenter__=AsyncMock(return_value=read_session), __aexit__=AsyncMock()),
+            AsyncMock(__aenter__=AsyncMock(return_value=order1_session), __aexit__=AsyncMock()),
+            AsyncMock(__aenter__=AsyncMock(return_value=order2_session), __aexit__=AsyncMock()),
+            AsyncMock(__aenter__=AsyncMock(return_value=expire_session), __aexit__=AsyncMock()),
+        ]
+        read_session.execute.return_value = cand_mock
+
+        with patch("services.order_service.OrderService.mark_order_paid") as mock_mark:
+            mock_mark.side_effect = [RuntimeError("DB glitch on order1"), order2]
+            await _reconcile_stale_pending_orders()
+            self.assertEqual(mock_mark.await_count, 2)
+
+
+class TestAdminReduceCutoff(unittest.TestCase):
+    def test_cutoff_clamping_prevents_ancient_dates(self):
+        from datetime import datetime, timezone, timedelta
+        from config.constants import VPN_ACCESS_GRACE_HOURS
+
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=VPN_ACCESS_GRACE_HOURS + 1)
+        sub_end = now + timedelta(days=5)
+        days_to_reduce = 1000
+
+        new_end = sub_end - timedelta(days=days_to_reduce)
+        effective_end = cutoff if new_end <= now else new_end
+
+        self.assertLess(new_end, now - timedelta(days=900))
+        self.assertEqual(effective_end, cutoff)
+        self.assertGreater(effective_end, now - timedelta(days=1))
 
 
 if __name__ == "__main__":

@@ -124,6 +124,7 @@ async def handle_order_pay_wallet(
         message_effect_id=EFFECT_CONFETTI,
         force_new=True,
     )
+    await safe_callback_answer(callback)
 
 
 @router.callback_query(F.data.startswith("order_pay_card:"))
@@ -133,7 +134,7 @@ async def handle_order_pay_card(
     db_user: User | None = None,
 ) -> None:
     if not db_user:
-        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
     # Capture primitive before gateway IO: OrderService.create_order() does
     # session.rollback() on gateway failure, expiring db_user (MissingGreenlet).
@@ -147,18 +148,18 @@ async def handle_order_pay_card(
     # Authoritative enforcement lives at settlement (mark_order_paid);
     # this is an early UX reject on (possibly stale) middleware state.
     if getattr(db_user, "financial_hold", False):
-        await callback.answer(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
+        await safe_callback_answer(callback, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
         return
 
     try:
         tariff_id = int(callback.data.split(":")[1])
     except (IndexError, ValueError):
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        await safe_callback_answer(callback, texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if not tariff or not tariff.is_active:
-        await callback.answer(texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE, show_alert=True)
+        await safe_callback_answer(callback, texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE, show_alert=True)
         return
 
     # Check if this is a zero-cost change: if so, route to wallet payment
@@ -433,7 +434,26 @@ async def handle_order_check(
                 show_alert=True,
             )
             return
-        elif status_res.is_temporary_error:
+        elif getattr(status_res, "is_refunded", False):
+            OrderService.mark_order_canceled(
+                order,
+                reason="gateway_refunded",
+            )
+            await session.flush()
+            await safe_callback_answer(
+                callback,
+                texts.PAYMENT_ORDER_PAYMENT_CANCELLED,
+                show_alert=True,
+            )
+            return
+        elif status_res.is_temporary_error or status_res.status_str in (
+            "not_found",
+            "server_error",
+            "timeout",
+            "network_error",
+            "rate_limited",
+            "unknown",
+        ):
             await safe_callback_answer(
                 callback,
                 texts.ERROR_PAYMENT_SERVICE,

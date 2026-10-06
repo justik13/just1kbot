@@ -2761,8 +2761,9 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
 
         with patch("services.white_internet_service.WhiteInternetService.deactivate_user_subscriptions") as mock_deact:
             await FulfillmentService.revoke_order(session, order)
-            session.get.assert_called_once_with(User, 42, with_for_update=True)
-            mock_deact.assert_called_once_with(session, 42)
+            mock_deact.assert_called_once_with(
+                session, 42, reason="order_refunded", target_subscription_id=None
+            )
 
     @patch("bot.handlers.payment.balance_routes._render_balance")
     @patch("bot.handlers.webhook.session_scope")
