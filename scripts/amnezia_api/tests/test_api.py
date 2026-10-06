@@ -252,7 +252,7 @@ def test_build_client_configs_and_vpn_uri_awg2():
         client,
         interface_params,
         server_pubkey="srvpub=",
-        host_name="nl.just1k.best",
+        host_name="nl.example.com",
         dns1="8.8.8.8",
         dns2="8.8.4.4",
         container_name="amnezia-awg2",
@@ -274,14 +274,14 @@ def test_build_client_configs_and_vpn_uri_awg2():
     assert "PublicKey = srvpub=" in raw_conf
     assert "PresharedKey = psk25=" in raw_conf
     assert "AllowedIPs = 0.0.0.0/0, ::/0" in raw_conf
-    assert "Endpoint = nl.just1k.best:31999" in raw_conf
+    assert "Endpoint = nl.example.com:31999" in raw_conf
     assert "PersistentKeepalive = 25" in raw_conf
 
     # Check vpn:// URI
     assert vpn_uri.startswith("vpn://")
     decoded = decode_vpn_uri(vpn_uri)
     assert decoded["defaultContainer"] == "amnezia-awg2"
-    assert decoded["hostName"] == "nl.just1k.best"
+    assert decoded["hostName"] == "nl.example.com"
     assert decoded["dns1"] == "8.8.8.8"
     assert decoded["dns2"] == "8.8.4.4"
 

@@ -1,7 +1,7 @@
 # Пример подключения страницы статуса (Uptime Kuma) через Caddy
 # Для активации:
 # 1. Скопируйте этот файл: cp status.caddy.example status.caddy
-# 2. Замените status.example.com на ваш реальный домен страницы статуса (например, status.just1k.pro)
+# 2. Замените status.example.com на ваш реальный домен страницы статуса (например, status.example.com)
 # 3. Примените изменения: just1kbot restart caddy (или just1kbot update)
 
 http://status.example.com {

@@ -614,7 +614,7 @@ exit 0
                 return False
 
         # Globally routable public IPv4 addresses
-        self.assertTrue(is_public_ipv4("87.121.86.155"))
+        self.assertTrue(is_public_ipv4("93.184.216.34"))
         self.assertTrue(is_public_ipv4("1.1.1.1"))
         self.assertTrue(is_public_ipv4("8.8.8.8"))
         self.assertTrue(is_public_ipv4("142.250.180.206"))
@@ -680,19 +680,19 @@ socket.getaddrinfo = _mock_gai
         self.assertEqual(run_validator("not_a_domain", "1.1.1.1"), "INVALID_FQDN")
 
         # 3. Invalid / IPv6 expected IP must NOT succeed as OK
-        ipv6_res = run_validator("relay.example.com", "2a12:bec4:1483:7b1::2", mock_dns_ip="87.121.86.155")
+        ipv6_res = run_validator("relay.example.com", "2a12:bec4:1483:7b1::2", mock_dns_ip="198.51.100.155")
         self.assertTrue(ipv6_res.startswith("INVALID_EXPECTED|2a12:"), f"Expected INVALID_EXPECTED, got {ipv6_res}")
 
         # 4. Empty expected IP must return NO_EXPECTED, NOT a false OK
-        no_exp_res = run_validator("relay.example.com", "", mock_dns_ip="87.121.86.155")
+        no_exp_res = run_validator("relay.example.com", "", mock_dns_ip="198.51.100.155")
         self.assertTrue(no_exp_res.startswith("NO_EXPECTED|"), f"Expected NO_EXPECTED, got {no_exp_res}")
 
         # 5. Correct matching IPv4 -> OK
-        ok_res = run_validator("relay.example.com", "87.121.86.155", mock_dns_ip="87.121.86.155")
+        ok_res = run_validator("relay.example.com", "198.51.100.155", mock_dns_ip="198.51.100.155")
         self.assertTrue(ok_res.startswith("OK|"), f"Expected OK, got {ok_res}")
 
         # 6. Mismatching IPv4 -> MISMATCH
-        mismatch_res = run_validator("relay.example.com", "1.1.1.1", mock_dns_ip="87.121.86.155")
+        mismatch_res = run_validator("relay.example.com", "1.1.1.1", mock_dns_ip="198.51.100.155")
         self.assertTrue(mismatch_res.startswith("MISMATCH|"), f"Expected MISMATCH, got {mismatch_res}")
 
     def test_origin_and_relay_xhttp_inbound_limits_and_nginx_keepalive(self):
@@ -1085,7 +1085,7 @@ print("RECONCILE_SUCCESS")
             json.dump({"inbounds": [], "outbounds": custom_outbounds, "routing": {"rules": []}}, f)
 
         # Run origin installer with surgical merge
-        cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4" "origin.example.com" "just1k.best"'
+        cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4" "origin.example.com" "bot.example.com"'
         res = self._run_shell_snippet(cmd)
         self.assertEqual(
             res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}"
@@ -1121,7 +1121,7 @@ print("RECONCILE_SUCCESS")
             json.dump({"inbounds": custom_inbounds, "outbounds": [], "routing": {"rules": []}}, f)
 
         # Run origin installer with surgical merge
-        cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4" "origin.example.com" "just1k.best"'
+        cmd = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "1.2.3.4" "origin.example.com" "bot.example.com"'
         res = self._run_shell_snippet(cmd)
         self.assertEqual(
             res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}"
@@ -1204,7 +1204,7 @@ exit 0
 
         # Case 5: Fail-closed installation when BOT_DOMAIN is an IP address
         res_ip_domain = self._run_shell_snippet(
-            'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/w_test" "1.2.3.4" "origin.example.com" "194.113.106.134" < /dev/null'
+            'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/w_test" "1.2.3.4" "origin.example.com" "198.51.100.134" < /dev/null'
         )
         self.assertNotEqual(res_ip_domain.returncode, 0)
         self.assertIn("BOT_DOMAIN должен быть доменным именем (FQDN)", res_ip_domain.stderr + res_ip_domain.stdout)
@@ -1689,7 +1689,7 @@ run_doctor
         domain = "origin.example.com"
         secret_path = "/stream"
 
-        cmd = f'install_xray_origin_node "{domain}" "admin@example.com" "test_api_key_123" "{secret_path}" "198.51.100.1" "{domain}" "just1k.best"'
+        cmd = f'install_xray_origin_node "{domain}" "admin@example.com" "test_api_key_123" "{secret_path}" "198.51.100.1" "{domain}" "bot.example.com"'
         res = self._run_shell_snippet(cmd)
         self.assertEqual(
             res.returncode, 0, f"install_xray_origin_node failed: {res.stderr + res.stdout}"
@@ -1768,7 +1768,7 @@ run_doctor
     def test_functional_add_relay_node_reality_and_egress_enforcement(self):
         self._prepare_base_env()
         # Initialize origin config first
-        cmd_init = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "198.51.100.1" "origin.example.com" "just1k.best"'
+        cmd_init = 'install_xray_origin_node "origin.example.com" "admin@example.com" "apikey" "/stream" "198.51.100.1" "origin.example.com" "bot.example.com"'
         res_init = self._run_shell_snippet(cmd_init)
         self.assertEqual(res_init.returncode, 0, f"install_xray_origin_node failed: {res_init.stderr + res_init.stdout}")
 
@@ -1882,14 +1882,14 @@ run_doctor
             {
                 "name": "Германия",
                 "code": "de",
-                "ip": "217.60.183.229",
+                "ip": "198.51.100.229",
                 "port": 10443,
                 "path": "/stream/de",
             },
             {
                 "name": "Эстония",
                 "code": "ee",
-                "ip": "217.60.182.33",
+                "ip": "198.51.100.33",
                 "port": 10443,
                 "path": "/stream/ee",
             },
@@ -1943,7 +1943,7 @@ run_doctor
                             "settings": {
                                 "vnext": [
                                     {
-                                        "address": "217.60.183.229",
+                                        "address": "198.51.100.229",
                                         "port": 10443,
                                         "users": [{"id": "test-uuid"}],
                                     }
@@ -1966,14 +1966,14 @@ run_doctor
             healed = json.load(f)
         self.assertEqual(len(healed), 1)
         self.assertEqual(healed[0]["code"], "de")
-        self.assertEqual(healed[0]["ip"], "217.60.183.229")
+        self.assertEqual(healed[0]["ip"], "198.51.100.229")
 
     def test_deploy_subscription_proxy_conf_generates_valid_proxy(self):
         self._prepare_base_env()
         # Set bot_domain in state
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
             json.dump(
-                {"role": "origin", "domain": "origin.example.com", "bot_domain": "just1k.best"}, f
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "bot.example.com"}, f
             )
 
         res = self._run_shell_snippet("deploy_subscription_proxy_conf")
@@ -1991,21 +1991,21 @@ run_doctor
         self.assertNotIn("8.8.8.8", content)
         self.assertIn("resolver_timeout 3s;", content)
         self.assertIn("proxy_connect_timeout 5s;", content)
-        self.assertIn('set $bot_upstream "https://just1k.best";', content)
+        self.assertIn('set $bot_upstream "https://bot.example.com";', content)
         self.assertIn("proxy_pass $bot_upstream;", content)
         self.assertIn("proxy_ssl_server_name on;", content)
-        self.assertIn("proxy_ssl_name just1k.best;", content)
+        self.assertIn("proxy_ssl_name bot.example.com;", content)
         self.assertIn("proxy_ssl_verify on;", content)
         self.assertIn("proxy_ssl_verify_depth 5;", content)
         self.assertIn("proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;", content)
         self.assertNotIn("proxy_ssl_verify off;", content)
-        self.assertIn("proxy_set_header Host just1k.best;", content)
+        self.assertIn("proxy_set_header Host bot.example.com;", content)
 
     def test_deploy_subscription_proxy_conf_fails_on_ip_target(self):
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
             json.dump(
-                {"role": "origin", "domain": "origin.example.com", "bot_domain": "194.113.106.134"}, f
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "198.51.100.134"}, f
             )
 
         res = self._run_shell_snippet("deploy_subscription_proxy_conf")
@@ -2025,7 +2025,7 @@ run_doctor
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
             json.dump(
-                {"role": "origin", "domain": "origin.example.com", "bot_domain": "194.113.106.134"}, f
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "198.51.100.134"}, f
             )
 
         res = self._run_shell_snippet("heal_and_update_origin_config")
@@ -2036,19 +2036,19 @@ run_doctor
         self._prepare_base_env()
         with open(self.state_dir / "state.json", "w", encoding="utf-8") as f:
             json.dump(
-                {"role": "origin", "domain": "origin.example.com", "bot_domain": "194.113.106.134"}, f
+                {"role": "origin", "domain": "origin.example.com", "bot_domain": "198.51.100.134"}, f
             )
 
-        res = self._run_shell_snippet("BOT_DOMAIN=just1k.best heal_and_update_origin_config")
+        res = self._run_shell_snippet("BOT_DOMAIN=bot.example.com heal_and_update_origin_config")
         self.assertEqual(res.returncode, 0)
         sub_conf = self.nginx_relays_d / "sub-wl.conf"
         self.assertTrue(sub_conf.exists())
-        self.assertIn("just1k.best", sub_conf.read_text(encoding="utf-8"))
+        self.assertIn("bot.example.com", sub_conf.read_text(encoding="utf-8"))
 
         # Verify state.json was updated with the migrated FQDN
         with open(self.state_dir / "state.json", "r", encoding="utf-8") as f:
             st = json.load(f)
-        self.assertEqual(st.get("bot_domain"), "just1k.best")
+        self.assertEqual(st.get("bot_domain"), "bot.example.com")
 
     def test_heal_and_update_origin_config_overrides_existing_fqdn_with_env_bot_domain(self):
         self._prepare_base_env()
@@ -2116,9 +2116,9 @@ run_doctor
 
     def test_normalize_domain_strips_protocols_and_slashes(self):
         self._prepare_base_env()
-        res = self._run_shell_snippet('normalize_domain "  https://mybot.just1k.best/some/path/  "')
+        res = self._run_shell_snippet('normalize_domain "  https://mybot.example.com/some/path/  "')
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(res.stdout.strip(), "mybot.just1k.best")
+        self.assertEqual(res.stdout.strip(), "mybot.example.com")
 
         res_http = self._run_shell_snippet('normalize_domain "http://test.domain.com:8443/"')
         self.assertEqual(res_http.returncode, 0)
@@ -2491,7 +2491,7 @@ exit 0
         self._prepare_base_env()
 
         # Valid FQDNs
-        valid_fqdns = ["bot.just1k.best", "sub.example.com", "my-node.origin.cloud", "a.bc"]
+        valid_fqdns = ["bot.example.com", "sub.example.com", "my-node.origin.cloud", "a.bc"]
         for fqdn in valid_fqdns:
             res = self._run_shell_snippet(f"validate_fqdn '{fqdn}'")
             self.assertEqual(res.returncode, 0, f"Expected '{fqdn}' to be valid FQDN")
@@ -2502,18 +2502,18 @@ exit 0
             "localhost",
             "127.0.0.1",
             "192.168.1.1",
-            "bot.just1k.best;rm -rf /",
-            "bot.just1k.best\nset",
-            "bot.just1k.best\r\nset",
-            "bot.just1k.best$(whoami)",
-            "bot.just1k.best`id`",
-            'bot.just1k.best"junk',
-            "bot.just1k.best'junk",
-            "bot.just1k.best/path",
+            "bot.example.com;rm -rf /",
+            "bot.example.com\nset",
+            "bot.example.com\r\nset",
+            "bot.example.com$(whoami)",
+            "bot.example.com`id`",
+            'bot.example.com"junk',
+            "bot.example.com'junk",
+            "bot.example.com/path",
             "bot just1k best",
-            "-bot.just1k.best",
-            "bot.just1k.best-",
-            "http://bot.just1k.best",
+            "-bot.example.com",
+            "bot.example.com-",
+            "http://bot.example.com",
         ]
         for fqdn in invalid_fqdns:
             res = self._run_shell_snippet(f"validate_fqdn '{fqdn}'")
@@ -2551,23 +2551,23 @@ exit 0
         self._prepare_base_env()
 
         # Success case
-        res = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.just1k.best' '/sub/wl'")
+        res = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.example.com' '/sub/wl'")
         self.assertEqual(res.returncode, 0, f"deploy_subscription_proxy_conf failed: {res.stderr}\n{res.stdout}")
         conf_file = self.nginx_relays_d / "sub-wl.conf"
         self.assertTrue(conf_file.exists())
         content = conf_file.read_text(encoding="utf-8")
         self.assertIn("location ^~ /sub/wl {", content)
-        self.assertIn('set $bot_upstream "https://bot.just1k.best";', content)
+        self.assertIn('set $bot_upstream "https://bot.example.com";', content)
         self.assertIn("proxy_ssl_verify on;", content)
         self.assertIn("proxy_ssl_verify_depth 5;", content)
         self.assertIn("proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;", content)
 
         # Failure cases: hostile target host (non-interactive fails closed)
-        res_hostile_host = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.just1k.best;rm -rf /' '/sub/wl'")
+        res_hostile_host = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.example.com;rm -rf /' '/sub/wl'")
         self.assertNotEqual(res_hostile_host.returncode, 0)
 
         # Failure cases: hostile sub prefix
-        res_hostile_prefix = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.just1k.best' '/sub/../evil'")
+        res_hostile_prefix = self._run_shell_snippet("deploy_subscription_proxy_conf 'bot.example.com' '/sub/../evil'")
         self.assertNotEqual(res_hostile_prefix.returncode, 0)
 
     def test_deploy_and_remove_traffic_watchdog_timer_and_cutoff_invariants(self):

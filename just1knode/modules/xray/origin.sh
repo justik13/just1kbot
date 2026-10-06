@@ -55,7 +55,7 @@ deploy_subscription_proxy_conf() {
     if ! validate_fqdn "$target_host"; then
         if [[ -t 0 ]]; then
             warn "Указан недопустимый хост для проксирования подписок: '${target_host:-<пусто>}' (требуется FQDN с валидным TLS)."
-            read -rp "Введите домен Telegram-бота (например: just1k.best): " prompt_target || true
+            read -rp "Введите домен Telegram-бота (например: bot.example.com): " prompt_target || true
             target_host="$(normalize_domain "$prompt_target")"
         fi
     fi
@@ -174,7 +174,7 @@ install_xray_origin_node() {
             if [[ -n "$existing_bot_domain" ]]; then
                 warn "Обнаружено устаревшее значение bot_domain в state.json (IP: '$existing_bot_domain'). Для защищенного TLS-проксирования требуется FQDN."
             fi
-            read -rp "Введите домен Telegram-бота (например: just1k.best): " input_bot_domain || true
+            read -rp "Введите домен Telegram-бота (например: bot.example.com): " input_bot_domain || true
             bot_domain="${input_bot_domain:-}"
         fi
     fi

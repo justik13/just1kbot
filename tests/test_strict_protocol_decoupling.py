@@ -52,7 +52,7 @@ class StrictProtocolDecouplingTests(unittest.IsolatedAsyncioTestCase):
         xray_server.name = "Xray Origin Node"
         xray_server.protocol = XRAY_PROTOCOL
         xray_server.capabilities = ["xray_origin"]
-        xray_server.api_url = "https://origin.just1k.best:8444"
+        xray_server.api_url = "https://origin.example.com:8444"
         xray_server.api_key = "test_key"
         xray_server.is_active = True
         xray_server.health_state = "ONLINE"

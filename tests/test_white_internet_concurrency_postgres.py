@@ -67,7 +67,7 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 "YOOKASSA_WEBHOOK_PORT": "8080",
                 "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
                 "DATABASE_URL": os.environ["TEST_DATABASE_URL"],
-                "WHITE_INTERNET_CDN_DOMAIN": "cdn.test.just1k.online",
+                "WHITE_INTERNET_CDN_DOMAIN": "cdn.test.example.com",
             },
         )
         self.env_patcher.start()
@@ -99,7 +99,7 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 name="Origin-MSK-PG-Test",
                 protocol="xray",
                 capabilities=["xray_origin"],
-                api_url="https://origin.test.just1k.online:8444",
+                api_url="https://origin.test.example.com:8444",
                 api_key="secret-pg-test",
                 health_state=ServerHealthState.ONLINE,
                 xray_instance_epoch="epoch_100",

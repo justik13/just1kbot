@@ -69,7 +69,7 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
 
         links = WhiteInternetService.generate_vless_links(
             sub,
-            cdn_domain="cdn.just1k.online",
+            cdn_domain="cdn.example.com",
             relays=relays,
             origin_tag="🇷🇺 РФ Премиум",
             origin_badge="⚡ Шлюз РФ",
@@ -102,7 +102,7 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
         relays = [{"code": "nl", "name": "🇳🇱 Нидерланды"}]
         links = WhiteInternetService.generate_vless_links(
             sub,
-            cdn_domain="cdn.just1k.online",
+            cdn_domain="cdn.example.com",
             relays=relays,
         )
         self.assertEqual(len(links), 2)
@@ -116,7 +116,7 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
         # return empty list rather than forcing origin to be included.
         links = WhiteInternetService.generate_vless_links(
             sub,
-            cdn_domain="cdn.just1k.online",
+            cdn_domain="cdn.example.com",
             relays=[],
             include_origin=False,
         )
@@ -130,7 +130,7 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
             with patch("services.white_internet_service.WHITE_INTERNET_RELAY_BADGE", "GlobalRelayBadge"):
                 links = WhiteInternetService.generate_vless_links(
                     sub,
-                    cdn_domain="cdn.just1k.online",
+                    cdn_domain="cdn.example.com",
                     relays=relays,
                     origin_badge="none",
                     relay_badges={"de": "none"},
@@ -147,7 +147,7 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
         relays = [{"code": "de", "name": "🇩🇪 Германия"}]
         links = WhiteInternetService.generate_vless_links(
             sub,
-            cdn_domain="cdn.just1k.online",
+            cdn_domain="cdn.example.com",
             relays=relays,
         )
         self.assertEqual(len(links), 2)
@@ -166,7 +166,7 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
         # 3. generate_full_xray_config must contain mux: {enabled: False} and fast upload params without custom xmux
         cfg = WhiteInternetService.generate_full_xray_config(
             sub,
-            cdn_domain="cdn.just1k.online",
+            cdn_domain="cdn.example.com",
         )
         outbound = cfg["outbounds"][0]
         self.assertEqual(outbound["mux"], {"enabled": False})
@@ -209,7 +209,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -225,7 +225,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch(
                     "database.repositories.white_internet_repo.get_subscription_by_token",
@@ -265,7 +265,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
             id=2,
             name="Origin-Custom",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -289,7 +289,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch(
                     "database.repositories.white_internet_repo.get_subscription_by_token",
@@ -357,7 +357,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
             id=2,
             name="Origin-Custom",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -376,7 +376,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch(
                     "database.repositories.white_internet_repo.get_subscription_by_token",
@@ -426,7 +426,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
             id=3,
             name="Origin-RU",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -449,7 +449,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch(
                     "database.repositories.white_internet_repo.get_subscription_by_token",
@@ -497,7 +497,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -513,7 +513,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch(
                     "database.repositories.white_internet_repo.get_subscription_by_token",

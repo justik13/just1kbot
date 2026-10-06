@@ -133,7 +133,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch_xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -171,7 +171,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-new",  # Node rebooted / restarted!
             capabilities=["xray_origin"],
             is_active=True,
@@ -221,7 +221,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -237,7 +237,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
                     resp = await self.client.get(
@@ -290,7 +290,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -305,7 +305,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
                     resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
@@ -340,7 +340,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -390,7 +390,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://origin.just1k.best:8444",
+            api_url="https://origin.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -444,7 +444,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -601,7 +601,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
@@ -620,7 +620,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
                     resp = await self.client.get(
@@ -656,12 +656,12 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=False,  # Server disabled for maintenance!
             health_state=ServerHealthState.MANUAL_DISABLED,
-            extra_data={"cdn_domain": "cdn.just1k.online"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
@@ -708,12 +708,12 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="AWG-Node",
             protocol="amneziawg2",  # Wrong protocol!
-            api_url="https://awg.just1k.online:8444",
+            api_url="https://awg.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
             health_state=ServerHealthState.ONLINE,
-            extra_data={"cdn_domain": "cdn.just1k.online"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
@@ -750,12 +750,12 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="new-epoch-restarted",
             capabilities=["xray_origin"],
             is_active=True,
             health_state=ServerHealthState.ONLINE,
-            extra_data={"cdn_domain": "cdn.just1k.online"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
@@ -792,12 +792,12 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
             health_state=ServerHealthState.ONLINE,
-            extra_data={"cdn_domain": "cdn.just1k.online"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
@@ -834,12 +834,12 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=True,
             health_state=ServerHealthState.PROBLEM,  # Monitoring detected node outage!
-            extra_data={"cdn_domain": "cdn.just1k.online"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
@@ -884,12 +884,12 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             id=1,
             name="Origin-Node",
             protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.just1k.online:8444",
+            api_url="https://cdn.example.com:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
             is_active=False,
             health_state=ServerHealthState.AUTO_DISABLED,
-            extra_data={"cdn_domain": "cdn.just1k.online"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
