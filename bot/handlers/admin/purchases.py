@@ -89,13 +89,14 @@ async def _show_purchases_list(
         )
         nav_buttons += 1
 
-    builder.button(text=texts.ADMIN_PURCHASES_PAYMENTS_BUTTON, callback_data="admin_payments")
+    builder.button(text=texts.BTN_ADMIN_YOOKASSA_PAYMENTS, callback_data="admin_payments")
+    builder.button(text=texts.BTN_BACK_TO_FINANCES, callback_data="admin_cat_finance")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
 
     adjust_pattern = [1] * len(entries)
     if nav_buttons > 0:
         adjust_pattern.append(nav_buttons)
-    adjust_pattern.extend([1, 1])
+    adjust_pattern.extend([1, 1, 1])
 
     builder.adjust(*adjust_pattern)
 
@@ -173,6 +174,16 @@ async def show_purchase_card(
         bonus_str = f"{int(entry.bonus_amount_rub or 0)} ₽"
         funds_str = texts.ADMIN_PURCHASES_ENTRY_FUNDS_LINE.format(real_str=real_str, bonus_str=bonus_str)
 
+    if getattr(entry, "payment_method", None) == "yookassa":
+        method_label = texts.ADMIN_PURCHASES_METHOD_YOOKASSA
+    elif getattr(entry, "payment_method", None) == "admin":
+        method_label = texts.ADMIN_PURCHASES_METHOD_ADMIN
+    elif getattr(entry, "payment_method", None) == "wallet":
+        method_label = texts.ADMIN_PURCHASES_METHOD_WALLET
+    else:
+        method_label = getattr(entry, "payment_method", "") or texts.ADMIN_PURCHASES_METHOD_OTHER
+    method_str = texts.ADMIN_PURCHASES_ENTRY_PAYMENT_METHOD_LINE.format(payment_method_label=method_label)
+
     rendered = (
         f"{header}"+
         texts.ADMIN_PURCHASES_ENTRY_TITLE.format(entry_numeric_id=entry.numeric_id)+
@@ -181,6 +192,7 @@ async def show_purchase_card(
         texts.ADMIN_PURCHASES_ENTRY_DEVICE_LIMIT_LINE.format(entry_device_limit=entry.device_limit)+
         texts.ADMIN_PURCHASES_ENTRY_DURATION_LINE.format(entry_duration_days=entry.duration_days)+
         texts.ADMIN_PURCHASES_ENTRY_SUMMARY_LINE.format(amount_str=amount_str)+
+        method_str+
         funds_str+
         texts.ADMIN_PURCHASES_ENTRY_OPERATION_TYPE_LINE.format(safe_entry_operation_title=safe(entry.operation_title))+
         texts.ADMIN_PURCHASES_ENTRY_DATETIME_LINE.format(dt_str=dt_str)
@@ -194,6 +206,7 @@ async def show_purchase_card(
             callback_data=f"admin_user_card:{entry.telegram_id}",
         )
     builder.button(text=texts.ADMIN_PURCHASES_LIST_BUTTON, callback_data="admin_purchases")
+    builder.button(text=texts.BTN_BACK_TO_FINANCES, callback_data="admin_cat_finance")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
 

@@ -50,8 +50,8 @@ class TestXrayApiAdversarial(unittest.TestCase):
     """Adversarial stress and edge case tests for Xray API agent."""
 
     def setUp(self):
-        if not HAS_FASTAPI:
-            self.skipTest("fastapi not installed in current environment")
+        if not HAS_FASTAPI or not XRAY_API_DIR.exists():
+            self.skipTest("fastapi not installed or scripts/xray_api moved to dedicated repository")
 
         self.temp_dir = tempfile.mkdtemp()
         self.clients_file = Path(self.temp_dir) / "clients.json"
@@ -332,6 +332,8 @@ class TestJust1kNodeInstallerAdversarial(unittest.TestCase):
     """Adversarial stress and edge case tests for scripts/just1knode.sh."""
 
     def setUp(self):
+        if not (REPO_ROOT / "just1knode").exists():
+            self.skipTest("just1knode moved to dedicated repository")
         self.temp_dir = tempfile.mkdtemp()
         self.state_dir = Path(self.temp_dir) / "etc" / "just1knode"
         self.state_dir.mkdir(parents=True, exist_ok=True)

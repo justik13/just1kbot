@@ -147,9 +147,12 @@ class DockerComposeSecurityTests(unittest.TestCase):
 
     def test_just1knode_origin_bot_ip_cli_support(self):
         root = Path(__file__).parents[1]
-        just1knode_sh = (root / "just1knode" / "just1knode.sh").read_text(encoding="utf-8")
-        origin_sh = (root / "just1knode" / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
-        common_sh = (root / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
+        node_dir = root / "just1knode"
+        if not node_dir.exists():
+            self.skipTest("just1knode files moved to dedicated repository")
+        just1knode_sh = (node_dir / "just1knode.sh").read_text(encoding="utf-8")
+        origin_sh = (node_dir / "modules" / "xray" / "origin.sh").read_text(encoding="utf-8")
+        common_sh = (node_dir / "lib" / "common.sh").read_text(encoding="utf-8")
 
         # 1. CLI registration
         self.assertIn("set-bot-ip|bot-ip)", just1knode_sh)
@@ -177,32 +180,35 @@ class DockerComposeSecurityTests(unittest.TestCase):
 
     def test_node_firewall_and_stealth_ssot_invariants(self):
         root = Path(__file__).parents[1]
-        common_sh = (root / "just1knode" / "lib" / "common.sh").read_text(encoding="utf-8")
-        relay_sh = (root / "just1knode" / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
-        core_sh = (root / "just1knode" / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
-        amnezia_sh = (root / "just1knode" / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
+        node_dir = root / "just1knode"
         cli_sh = (root / "scripts" / "cli.sh").read_text(encoding="utf-8")
         setup_sh = (root / "scripts" / "setup.sh").read_text(encoding="utf-8")
 
-        # 1. common.sh defines heal_node_firewall_and_stealth and protects SSH access
-        self.assertIn("heal_node_firewall_and_stealth()", common_sh)
-        self.assertIn("detect_active_sshd_ports()", common_sh)
-        self.assertIn("is_ssh_port()", common_sh)
-        self.assertIn('comment "just1knode ssh access"', common_sh)
-        # Ensure no heuristic TCP/access.log sniffing remains
-        self.assertNotIn("detected_orig_ip", common_sh)
-        self.assertNotIn("detected_ip=\"$(ss -tn", common_sh)
+        if node_dir.exists():
+            common_sh = (node_dir / "lib" / "common.sh").read_text(encoding="utf-8")
+            relay_sh = (node_dir / "modules" / "xray" / "relay.sh").read_text(encoding="utf-8")
+            core_sh = (node_dir / "modules" / "xray" / "core.sh").read_text(encoding="utf-8")
+            amnezia_sh = (node_dir / "modules" / "amnezia" / "amnezia.sh").read_text(encoding="utf-8")
 
-        # 2. relay.sh never adds awg_port to public extra_ufw_ports
-        self.assertNotIn('extra_ufw_ports+=("${existing_awg_port}/tcp")', relay_sh)
-        self.assertIn("heal_node_firewall_and_stealth", relay_sh)
+            # 1. common.sh defines heal_node_firewall_and_stealth and protects SSH access
+            self.assertIn("heal_node_firewall_and_stealth()", common_sh)
+            self.assertIn("detect_active_sshd_ports()", common_sh)
+            self.assertIn("is_ssh_port()", common_sh)
+            self.assertIn('comment "just1knode ssh access"', common_sh)
+            # Ensure no heuristic TCP/access.log sniffing remains
+            self.assertNotIn("detected_orig_ip", common_sh)
+            self.assertNotIn("detected_ip=\"$(ss -tn", common_sh)
 
-        # 3. core.sh invokes heal_node_firewall_and_stealth during update_node_post
-        self.assertIn("heal_node_firewall_and_stealth", core_sh)
+            # 2. relay.sh never adds awg_port to public extra_ufw_ports
+            self.assertNotIn('extra_ufw_ports+=("${existing_awg_port}/tcp")', relay_sh)
+            self.assertIn("heal_node_firewall_and_stealth", relay_sh)
 
-        # 4. amnezia.sh fails closed if bot_ip is missing and invokes heal
-        self.assertNotIn('ufw allow "${public_port}/tcp" comment "just1knode amnezia api"', amnezia_sh)
-        self.assertIn("heal_node_firewall_and_stealth", amnezia_sh)
+            # 3. core.sh invokes heal_node_firewall_and_stealth during update_node_post
+            self.assertIn("heal_node_firewall_and_stealth", core_sh)
+
+            # 4. amnezia.sh fails closed if bot_ip is missing and invokes heal
+            self.assertNotIn('ufw allow "${public_port}/tcp" comment "just1knode amnezia api"', amnezia_sh)
+            self.assertIn("heal_node_firewall_and_stealth", amnezia_sh)
 
         # 5. cli.sh and setup.sh include IPv6 leak protection sysctl and safe caddy reload
         self.assertIn("net.ipv6.conf.all.disable_ipv6 = 1", cli_sh)

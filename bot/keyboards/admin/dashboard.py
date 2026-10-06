@@ -59,8 +59,8 @@ def get_admin_cat_infra_keyboard() -> InlineKeyboardMarkup:
 
 def get_admin_cat_finance_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_ISTORIYA_PLATEZHEJ, callback_data="admin_payments")
-    builder.button(text=texts.BTN_ZHURNAL_POKUPOK, callback_data="admin_purchases")
+    builder.button(text=texts.BTN_ADMIN_YOOKASSA_PAYMENTS, callback_data="admin_payments")
+    builder.button(text=texts.BTN_ADMIN_PURCHASES_LOGS, callback_data="admin_purchases")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()

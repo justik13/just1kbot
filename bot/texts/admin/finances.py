@@ -46,16 +46,17 @@ ADMIN_PURCHASES_ENTRY_USER_LINE = """👤 <b>Пользователь:</b> {safe
 """
 
 # --- Payments list ---------------------------------------------------------
-ADMIN_PAYMENTS_LIST_TITLE = """🛠 Админка › 💳 <b>Платежи</b>
+ADMIN_PAYMENTS_LIST_TITLE = """🛠 Админка › 💳 <b>Платежи через ЮKassa</b>
 (стр. {page}/{total_pages}) · Всего: {total}
 """
 ADMIN_PAYMENTS_LIST_EMPTY = """<i>Платежей пока нет</i>
 """
-ADMIN_PAYMENTS_USER_TITLE = """🛠 Админка › 💳 <b>Платежи пользователя</b> @{user_label}
+ADMIN_PAYMENTS_USER_TITLE = """🛠 Админка › 💳 <b>Платежи пользователя через ЮKassa</b> @{user_label}
 Страница {page} из {total_pages} (всего: {total_count})"""
 ADMIN_PAYMENTS_USER_EMPTY = "<i>Платежи пользователя не найдены.</i>"
 ADMIN_PAYMENTS_ROW_ENTRY = "{status_icon} #{payment_id} · {user_label} · {amount_rub}₽"
 ADMIN_PAYMENT_STATUS_FALLBACK_ICON = "❓"
+ADMIN_PAYMENTS_GATEWAY_YOOKASSA = "ЮKassa"
 ADMIN_PURCHASES_ROW_BUTTON_TEMPLATE = "🛒 #{numeric_id} | {user_label} | {amount}"
 
 # --- Payment card ----------------------------------------------------------
@@ -80,16 +81,28 @@ ADMIN_PAYMENT_REFUNDABLE_LINE = """
 ADMIN_CLIENT_CARD_BUTTON = "👤 Карточка клиента"
 ADMIN_PAYMENT_NOT_FOUND_ALERT = "Платёж не найден"
 
-ADMIN_ORDER_CARD_TEMPLATE = """🛠 Админка › 🧾 <b>Заказ #{short_id}</b>
+ADMIN_ORDER_CARD_TEMPLATE = """🛠 Админка › 💳 <b>Платёж ЮKassa (Заказ #{short_id})</b>
 
 👤 <b>Пользователь:</b> {user_label}
 💰 <b>Сумма:</b> <b>{amount_rub} ₽</b>
 📦 <b>Услуга:</b> {tariff_label} ({service_type})
 📊 <b>Статус:</b> {status_icon} {status_name} (<code>{status}</code>)
-💳 <b>Метод:</b> <code>{payment_method}</code>
-🕒 <b>Создан:</b> {created_at}{paid_at_line}{refunded_at_line}{external_id_line}{description_line}{held_line}"""
+💳 <b>Шлюз:</b> <code>{payment_method}</code>
+🕒 <b>Создан:</b> {created_at}{paid_at_line}{refunded_at_line}{external_id_line}{payment_url_line}{description_line}{held_line}{diagnostics_line}"""
 ADMIN_ORDER_PAID_AT_LINE = "\n✅ <b>Оплачен:</b> {paid_at}"
 ADMIN_ORDER_HELD_LINE = "\n⛔ <b>Удержан:</b> {reason} — зачисление и выдача удержаны, требуется ручное решение"
 ADMIN_ORDER_REFUNDED_AT_LINE = "\n↩️ <b>Возврат:</b> {refunded_at}"
 ADMIN_ORDER_EXTERNAL_ID_LINE = "\n🔗 <b>Внешний ID:</b> <code>{external_id}</code>"
+ADMIN_ORDER_PAYMENT_URL_LINE = "\n🌐 <b>Ссылка на оплату:</b> <a href=\"{payment_url}\">Перейти к форме</a>"
+ADMIN_ORDER_DIAGNOSTICS_PENDING = "\nℹ️ <i>Ожидает завершения оплаты клиентом или ответа банка.</i>"
+ADMIN_ORDER_DIAGNOSTICS_AMBIGUOUS = "\n⚠️ <i>Тайм-аут шлюза при создании. Платёж мог зафиксироваться в ЮKassa.</i>"
 ADMIN_ORDER_DESCRIPTION_LINE = "\n📝 <b>Описание:</b> {description}"
+ADMIN_ORDER_SERVICE_TOPUP = "Пополнение баланса"
+
+# --- Purchases additional texts --------------------------------------------
+ADMIN_PURCHASES_ENTRY_PAYMENT_METHOD_LINE = """💳 <b>Способ оплаты:</b> {payment_method_label}
+"""
+ADMIN_PURCHASES_METHOD_YOOKASSA = "Банковская карта (ЮKassa)"
+ADMIN_PURCHASES_METHOD_WALLET = "Внутренний баланс"
+ADMIN_PURCHASES_METHOD_ADMIN = "Выдача администратором"
+ADMIN_PURCHASES_METHOD_OTHER = "Другой способ"
