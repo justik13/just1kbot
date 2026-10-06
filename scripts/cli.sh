@@ -1707,7 +1707,7 @@ cmd_doctor() {
             while read -r rule_line; do
                 [[ -z "$rule_line" ]] && continue
                 local clean_line raw_target action from_part
-                clean_line=$(echo "$rule_line" | sed 's/(v6)//g')
+                clean_line="${rule_line//(v6)/}"
                 raw_target=$(echo "$clean_line" | awk '{print $1}')
                 action=$(echo "$clean_line" | awk '{print $2}')
                 from_part=$(echo "$clean_line" | awk '{$1=""; $2=""; print $0}' | sed -E 's/^[[:space:]]*(IN|OUT)[[:space:]]*//' | sed 's/^[[:space:]]*//')
