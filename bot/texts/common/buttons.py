@@ -83,6 +83,10 @@ BTN_ISTORIYA_OPERATSIJ = "📊 История операций"
 
 BTN_ISTORIYA_PLATEZHEJ = "💳 История платежей"
 
+BTN_ADMIN_YOOKASSA_PAYMENTS = "💳 Платежи через ЮKassa"
+BTN_ADMIN_PURCHASES_LOGS = "🛒 Журнал покупок услуг"
+BTN_BACK_TO_FINANCES = "← К разделу финансов"
+
 BTN_ISTORIYA_POPOLNENIJ = "🧾 История пополнений"
 
 BTN_LATEST_VERSION_GITHUB = "📦 Последняя версия (GitHub)"

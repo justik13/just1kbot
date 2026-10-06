@@ -104,6 +104,10 @@ def _get_payment_card_keyboard(
         text=texts.ADMIN_BTN_BACK_TO_PAYMENTS,
         callback_data="admin_payments",
     )
+    builder.button(
+        text=texts.BTN_BACK_TO_FINANCES,
+        callback_data="admin_cat_finance",
+    )
     builder.adjust(1)
     return builder
 
@@ -170,7 +174,8 @@ async def _build_payments_list_text_and_kb(
             text=texts.ADMIN_BTN_PAGINATION_NEXT,
             callback_data=f"admin_payments_page:{page + 1}",
         )
-    builder.button(text=texts.ADMIN_PURCHASES_LOGS_BUTTON, callback_data="admin_purchases")
+    builder.button(text=texts.BTN_ADMIN_PURCHASES_LOGS, callback_data="admin_purchases")
+    builder.button(text=texts.BTN_BACK_TO_FINANCES, callback_data="admin_cat_finance")
     builder.button(text=texts.ADMIN_BTN_BACK_TO_ADMIN, callback_data="admin_menu")
     builder.adjust(1)
     return rendered, builder
@@ -183,7 +188,7 @@ async def _show_payments_list(
 ):
     total_orders = (
         await session.scalar(
-            select(func.count(Order.id))
+            select(func.count(Order.id)).where(Order.payment_method == "yookassa")
         )
         or 0
     )
@@ -204,6 +209,7 @@ async def _show_payments_list(
 
     order_stmt = (
         select(Order)
+        .where(Order.payment_method == "yookassa")
         .options(selectinload(Order.user))
         .order_by(Order.created_at.desc())
         .limit(needed)
@@ -309,7 +315,10 @@ async def show_user_payments_list(
     await state.clear()
     user_orders_count = (
         await session.scalar(
-            select(func.count(Order.id)).where(Order.user_id == user.id)
+            select(func.count(Order.id)).where(
+                Order.user_id == user.id,
+                Order.payment_method == "yookassa",
+            )
         )
         or 0
     )
@@ -328,7 +337,7 @@ async def show_user_payments_list(
 
     order_stmt = (
         select(Order)
-        .where(Order.user_id == user.id)
+        .where(Order.user_id == user.id, Order.payment_method == "yookassa")
         .options(selectinload(Order.user))
         .order_by(Order.created_at.desc())
         .limit(needed)
@@ -540,7 +549,7 @@ async def show_order_card(
     await state.clear()
     order = await session.scalar(
         select(Order)
-        .where(Order.id == order_uuid)
+        .where(Order.id == order_uuid, Order.payment_method == "yookassa")
         .options(selectinload(Order.user), selectinload(Order.tariff))
     )
     if not order:
@@ -566,7 +575,14 @@ async def show_order_card(
         display_status, texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON
     )
 
-    tariff_label = order.tariff.name if order.tariff else order.service_type
+    if order.tariff:
+        tariff_label = order.tariff.name
+    elif order.service_type == "topup":
+        tariff_label = texts.ADMIN_ORDER_SERVICE_TOPUP
+    elif isinstance(order.metadata_, dict) and order.metadata_.get("tariff_name"):
+        tariff_label = str(order.metadata_["tariff_name"])
+    else:
+        tariff_label = order.service_type
     paid_at_line = (
         texts.ADMIN_ORDER_PAID_AT_LINE.format(paid_at=format_datetime(order.paid_at))
         if order.paid_at
@@ -597,6 +613,25 @@ async def show_order_card(
         if held_meta.get("settlement_held")
         else ""
     )
+    payment_url_line = (
+        texts.ADMIN_ORDER_PAYMENT_URL_LINE.format(payment_url=safe(order.payment_url))
+        if (order.payment_url and order.status == "pending")
+        else ""
+    )
+    diagnostics_line = ""
+    now = datetime.now(timezone.utc)
+    if order.status == "pending":
+        if order.created_at and (now - _normalize_dt(order.created_at)).total_seconds() > 900:
+            diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_PENDING
+    if held_meta.get("payment_creation_ambiguous"):
+        diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_AMBIGUOUS
+
+    payment_method_label = (
+        texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
+        if order.payment_method == "yookassa"
+        else safe(order.payment_method)
+    )
+
     rendered = texts.ADMIN_ORDER_CARD_TEMPLATE.format(
         short_id=str(order.id)[:8],
         user_label=user_label,
@@ -606,13 +641,15 @@ async def show_order_card(
         status_icon=status_icon,
         status_name=status_name,
         status=order.status,
-        payment_method=safe(order.payment_method),
+        payment_method=payment_method_label,
         created_at=format_datetime(order.created_at),
         paid_at_line=paid_at_line,
         refunded_at_line=refunded_at_line,
         external_id_line=external_id_line,
+        payment_url_line=payment_url_line,
         description_line=description_line,
         held_line=held_line,
+        diagnostics_line=diagnostics_line,
     )
     builder = InlineKeyboardBuilder()
     if user_telegram_id:
@@ -623,6 +660,10 @@ async def show_order_card(
     builder.button(
         text=texts.ADMIN_BTN_BACK_TO_PAYMENTS,
         callback_data="admin_payments",
+    )
+    builder.button(
+        text=texts.BTN_BACK_TO_FINANCES,
+        callback_data="admin_cat_finance",
     )
     builder.adjust(1)
     try:
