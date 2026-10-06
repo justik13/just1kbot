@@ -733,6 +733,7 @@ class WebhookHeldNotificationTests(unittest.IsolatedAsyncioTestCase):
                 "object": {
                     "id": "pay-held-1",
                     "status": "succeeded",
+                    "amount": {"value": "500.00", "currency": "RUB"},
                     "metadata": {"order_id": str(order.id)},
                 },
             }
