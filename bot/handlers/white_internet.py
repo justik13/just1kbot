@@ -43,6 +43,7 @@ from services.white_internet_service import (
     get_white_internet_tier_price,
 )
 from utils.admin import is_admin
+from utils.telegram import safe_callback_answer
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
 from utils.security import normalize_public_domain
@@ -831,20 +832,14 @@ async def process_wl_topup_shortage(query: CallbackQuery, session: AsyncSession)
     try:
         shortage_val = int(parts[1])
     except (IndexError, ValueError):
-        try:
-            await query.answer()
-        except Exception:
-            pass
+        await safe_callback_answer(query)
         return
 
     action_type = parts[2] if len(parts) > 2 else "buy"
     pack_gb = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
 
     if shortage_val <= 0:
-        try:
-            await query.answer()
-        except Exception:
-            pass
+        await safe_callback_answer(query)
         return
 
     user = await get_user_by_telegram_id(session, query.from_user.id)
@@ -852,10 +847,7 @@ async def process_wl_topup_shortage(query: CallbackQuery, session: AsyncSession)
         return
 
     if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
-        try:
-            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
-        except Exception:
-            pass
+        await safe_callback_answer(query, texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
         return
 
     context = {

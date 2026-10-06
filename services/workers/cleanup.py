@@ -21,6 +21,7 @@ from database.models import (
     APIOperation,
     BroadcastProgress,
     HubMessage,
+    Order,
     Server,
     User,
     VPNProfile,
@@ -87,6 +88,7 @@ async def cleanup_dangling_peers_loop(
             await _cleanup_stuck_profiles()
             await _cleanup_expired_profiles_grace(bot)
             await _cleanup_dangling_peers()
+            await _reconcile_stale_pending_orders()
 
             now = time.monotonic()
             if now - _last_old_cleanup > OLD_RECORDS_INTERVAL:
@@ -767,3 +769,93 @@ async def _cleanup_old_records():
             hub_deleted,
             webhooks_deleted,
         )
+
+
+async def _reconcile_stale_pending_orders() -> None:
+    """Safety net: reconcile pending orders whose webhooks were dropped or missed.
+
+    Orders with an external_id between 15 minutes and 24 hours old are queried against
+    the payment gateway. If succeeded, they are settled; if canceled, marked canceled.
+    Orders older than 24 hours in pending are marked expired (canceled).
+    """
+    from integrations.payment_gateways.factory import get_payment_gateway
+    from services.order_service import OrderService
+
+    now = now_utc()
+    window_start = now - timedelta(hours=24)
+    stale_threshold = now - timedelta(minutes=15)
+
+    try:
+        async with session_scope() as session:
+            # 1. Stale pending orders with external_id (check status via gateway)
+            stmt = (
+                select(Order)
+                .where(
+                    Order.status == "pending",
+                    Order.external_id.is_not(None),
+                    Order.created_at >= window_start,
+                    Order.created_at <= stale_threshold,
+                )
+                .limit(20)
+                .with_for_update(skip_locked=True)
+            )
+            res = await session.execute(stmt)
+            orders = list(res.scalars().all())
+
+            for order in orders:
+                try:
+                    gateway = get_payment_gateway(order.payment_method)
+                    status_res = await gateway.check_payment_status(order.external_id)
+                    if status_res.is_paid:
+                        paid_order = await OrderService.mark_order_paid(
+                            session,
+                            order.id,
+                            external_id=order.external_id,
+                            paid_amount_rub=status_res.amount_rub,
+                        )
+                        if paid_order:
+                            logger.info(
+                                "Reconciliation settled stale pending order %s (amount=%s rub)",
+                                order.id,
+                                order.amount_rub,
+                            )
+                    elif status_res.is_canceled:
+                        OrderService.mark_order_canceled(
+                            order,
+                            reason=status_res.cancellation_reason or "gateway_canceled",
+                        )
+                        logger.info(
+                            "Reconciliation canceled stale pending order %s (reason=%s)",
+                            order.id,
+                            status_res.cancellation_reason,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "Reconciliation check failed for order %s: %s",
+                        order.id,
+                        exc,
+                    )
+
+            # 2. Expire ancient pending orders (> 24 hours old)
+            expired_stmt = (
+                select(Order)
+                .where(
+                    Order.status == "pending",
+                    Order.created_at < window_start,
+                )
+                .limit(50)
+                .with_for_update(skip_locked=True)
+            )
+            expired_res = await session.execute(expired_stmt)
+            expired_orders = list(expired_res.scalars().all())
+            for exp_order in expired_orders:
+                OrderService.mark_order_canceled(exp_order, reason="order_expired_24h")
+                logger.info(
+                    "Reconciliation expired ancient pending order %s",
+                    exp_order.id,
+                )
+            if orders or expired_orders:
+                await session.flush()
+    except Exception as exc:
+        logger.error("Error in _reconcile_stale_pending_orders: %s", exc)
+

@@ -23,6 +23,16 @@ _client_session_factory = None
 _client_session_lock = asyncio.Lock()
 
 
+# Timeout presets:
+# Status checks must be fast to fit strictly within Telegram's 10-12s callback budget.
+# With connect=2.5s, if the first IP (109.235.165.99) is unreachable, aiohttp fails fast
+# and allows fallback or clean reporting well before Telegram's callback expires.
+CHECK_STATUS_TIMEOUT = aiohttp.ClientTimeout(total=6.5, connect=2.5, sock_read=3.5)
+
+# Payment creation involves upstream merchant invoice generation:
+CREATE_PAYMENT_TIMEOUT = aiohttp.ClientTimeout(total=10.0, connect=3.0, sock_read=6.0)
+
+
 async def _get_client_session() -> aiohttp.ClientSession:
     global _client_session, _client_session_factory
     session_factory = aiohttp.ClientSession
@@ -43,7 +53,7 @@ async def _get_client_session() -> aiohttp.ClientSession:
                     close = getattr(_client_session, "close", None)
                     if close is not None:
                         await close()
-                timeout = aiohttp.ClientTimeout(total=15)
+                timeout = CREATE_PAYMENT_TIMEOUT
                 _client_session = session_factory(timeout=timeout)
                 _client_session_factory = session_factory
     return _client_session
@@ -83,7 +93,8 @@ class YooKassaService:
         *,
         payload: dict | None = None,
         idempotency_key: str | None = None,
-        ambiguous_on_failure=False,
+        ambiguous_on_failure: bool = False,
+        timeout: aiohttp.ClientTimeout | None = None,
     ) -> YooKassaResult[dict]:
         settings = get_settings()
         shop = settings.YOOKASSA_SHOP_ID
@@ -99,10 +110,15 @@ class YooKassaService:
                 )
             headers["Idempotence-Key"] = idempotency_key
         start = time.monotonic()
+        req_timeout = timeout or CREATE_PAYMENT_TIMEOUT
         try:
             client = await _get_client_session()
             async with client.request(
-                method, cls.API + path, json=payload, headers=headers
+                method,
+                cls.API + path,
+                json=payload,
+                headers=headers,
+                timeout=req_timeout,
             ) as response:
                 code = response.status
                 # Ambiguity (the provider may have applied the operation while
@@ -275,37 +291,33 @@ class YooKassaService:
             )
 
     @classmethod
-    async def create_payment_result(cls, payload: dict, *, idempotency_key: str):
+    async def create_payment_result(
+        cls,
+        payload: dict,
+        *,
+        idempotency_key: str,
+        timeout: aiohttp.ClientTimeout | None = None,
+    ):
         return await cls._request(
             "POST",
             "/payments",
             payload=payload,
             idempotency_key=idempotency_key,
             ambiguous_on_failure=True,
+            timeout=timeout or CREATE_PAYMENT_TIMEOUT,
         )
 
     @classmethod
-    async def get_payment_result(cls, payment_id: str):
-        return await cls._request("GET", f"/payments/{payment_id}")
-
-    @classmethod
-    async def create_refund_result(cls, payload: dict, *, idempotency_key: str):
+    async def get_payment_result(
+        cls,
+        payment_id: str,
+        timeout: aiohttp.ClientTimeout | None = None,
+    ):
         return await cls._request(
-            "POST",
-            "/refunds",
-            payload=payload,
-            idempotency_key=idempotency_key,
-            ambiguous_on_failure=True,
+            "GET",
+            f"/payments/{payment_id}",
+            timeout=timeout or CHECK_STATUS_TIMEOUT,
         )
-
-    @classmethod
-    async def get_refund_result(cls, refund_id: str):
-        return await cls._request("GET", f"/refunds/{refund_id}")
-
-    @classmethod
-    async def get_payment(cls, payment_id):
-        result = await cls.get_payment_result(payment_id)
-        return result.value if result.ok else None
 
 
 async def close_yookassa_client():

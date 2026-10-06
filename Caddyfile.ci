@@ -6,6 +6,10 @@
 }
 
 :80 {
+	log {
+		output stdout
+		format console
+	}
 	header {
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"

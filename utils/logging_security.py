@@ -62,7 +62,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)Fernet\([^\)]*\)"), "Fernet([REDACTED])"),
     (
         re.compile(
-            r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}=(?![A-Za-z0-9_-])"
+            r"(?<!(?i:peer_id=))(?<!(?i:peer=))(?<!(?i:client_id=))(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}=(?![A-Za-z0-9_-])"
         ),
         "[FERNET_KEY_REDACTED]",
     ),
