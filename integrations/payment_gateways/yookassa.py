@@ -218,7 +218,7 @@ class YooKassaGateway(BasePaymentGateway):
             else None
         )
         return PaymentStatusResult(
-            is_paid=(status == "succeeded"),
+            is_paid=(status == "succeeded" and amount_rub is not None),
             is_refunded=(status == "refunded"),
             is_canceled=(status == "canceled"),
             status_str=status,

@@ -43,6 +43,7 @@ MAX_PENDING_ATTEMPTS = 10
 PENDING_RETRY_INTERVAL = 3600
 CLEANUP_START_DELAY = 60.0
 CLEANUP_LOOP_INTERVAL = 900.0
+RECONCILE_LOOP_INTERVAL = 60.0
 OLD_RECORDS_INTERVAL = 86400.0
 # Auto-expire throughput: each daily pass drains the pending-expiry backlog
 # within a wall-clock budget (and at most MAX_BATCHES batches ≈ 400
@@ -52,7 +53,9 @@ OLD_RECORDS_INTERVAL = 86400.0
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30
 
+_last_heavy_cleanup: float = 0.0
 _last_old_cleanup: float = 0.0
+_pending_order_backoff_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=300.0)
 
 
 def _safe_log_value(value, limit=64):
@@ -65,7 +68,7 @@ async def cleanup_dangling_peers_loop(
     bot_or_shutdown: Bot | asyncio.Event | None = None,
     shutdown_event: asyncio.Event | None = None,
 ):
-    global _last_old_cleanup
+    global _last_old_cleanup, _last_heavy_cleanup
 
     if isinstance(bot_or_shutdown, asyncio.Event):
         event = bot_or_shutdown
@@ -86,12 +89,15 @@ async def cleanup_dangling_peers_loop(
 
     while not event.is_set():
         try:
-            await _cleanup_stuck_profiles()
-            await _cleanup_expired_profiles_grace(bot)
-            await _cleanup_dangling_peers()
+            now = time.monotonic()
+            if now - _last_heavy_cleanup >= CLEANUP_LOOP_INTERVAL:
+                await _cleanup_stuck_profiles()
+                await _cleanup_expired_profiles_grace(bot)
+                await _cleanup_dangling_peers()
+                _last_heavy_cleanup = now
+
             await _reconcile_stale_pending_orders()
 
-            now = time.monotonic()
             if now - _last_old_cleanup > OLD_RECORDS_INTERVAL:
                 await _cleanup_old_records()
                 _last_old_cleanup = now
@@ -109,7 +115,7 @@ async def cleanup_dangling_peers_loop(
         try:
             await asyncio.wait_for(
                 event.wait(),
-                timeout=CLEANUP_LOOP_INTERVAL,
+                timeout=RECONCILE_LOOP_INTERVAL,
             )
             break
         except asyncio.TimeoutError:
@@ -801,10 +807,14 @@ async def _reconcile_stale_pending_orders() -> None:
                     Order.created_at <= stale_threshold,
                 )
                 .order_by(Order.created_at.asc())
-                .limit(20)
+                .limit(50)
             )
             res = await session.execute(stmt)
-            candidates = [(row[0], row[1], row[2]) for row in res.all()]
+            candidates = [
+                (row[0], row[1], row[2])
+                for row in res.all()
+                if row[0] not in _pending_order_backoff_cache
+            ][:20]
     except Exception as exc:
         logger.error("Failed to query stale pending order candidates: %s", exc)
         return
@@ -815,6 +825,18 @@ async def _reconcile_stale_pending_orders() -> None:
         try:
             gateway = get_payment_gateway(payment_method)
             status_res = await gateway.check_payment_status(external_id)
+
+            if not (status_res.is_paid or status_res.is_canceled):
+                _pending_order_backoff_cache[order_id] = time.monotonic()
+
+            if not (status_res.is_paid or status_res.is_canceled or getattr(status_res, "is_refunded", False)):
+                if status_res.status_str == "not_found":
+                    logger.warning(
+                        "Reconciliation payment not found in gateway for order %s (external_id=%s)",
+                        order_id,
+                        external_id,
+                    )
+                continue
 
             # Isolated transaction for this specific order
             async with session_scope() as order_session:
@@ -854,15 +876,6 @@ async def _reconcile_stale_pending_orders() -> None:
                     )
                     logger.info(
                         "Reconciliation canceled stale pending order %s (refunded in gateway)",
-                        order.id,
-                    )
-                elif status_res.status_str == "not_found":
-                    OrderService.mark_order_canceled(
-                        order,
-                        reason="gateway_not_found",
-                    )
-                    logger.info(
-                        "Reconciliation canceled stale pending order %s (not found in gateway)",
                         order.id,
                     )
         except Exception as exc:
