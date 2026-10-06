@@ -797,6 +797,7 @@ async def _reconcile_stale_pending_orders() -> None:
     # 1. Fetch candidate order tuples in a fast read query (no lock held during external HTTP)
     candidates: list[tuple[Any, str, str]] = []
     try:
+        cached_ids = list(_pending_order_backoff_cache.keys())
         async with session_scope() as session:
             stmt = (
                 select(Order.id, Order.external_id, Order.payment_method)
@@ -806,15 +807,16 @@ async def _reconcile_stale_pending_orders() -> None:
                     Order.created_at >= window_start,
                     Order.created_at <= stale_threshold,
                 )
-                .order_by(Order.created_at.asc())
-                .limit(50)
             )
+            if cached_ids:
+                stmt = stmt.where(Order.id.notin_(cached_ids))
+            stmt = stmt.order_by(Order.created_at.asc()).limit(20)
             res = await session.execute(stmt)
             candidates = [
                 (row[0], row[1], row[2])
                 for row in res.all()
                 if row[0] not in _pending_order_backoff_cache
-            ][:20]
+            ]
     except Exception as exc:
         logger.error("Failed to query stale pending order candidates: %s", exc)
         return
@@ -826,10 +828,12 @@ async def _reconcile_stale_pending_orders() -> None:
             gateway = get_payment_gateway(payment_method)
             status_res = await gateway.check_payment_status(external_id)
 
-            if not (status_res.is_paid or status_res.is_canceled):
+            if not (
+                status_res.is_paid
+                or status_res.is_canceled
+                or getattr(status_res, "is_refunded", False)
+            ):
                 _pending_order_backoff_cache[order_id] = time.monotonic()
-
-            if not (status_res.is_paid or status_res.is_canceled or getattr(status_res, "is_refunded", False)):
                 if status_res.status_str == "not_found":
                     logger.warning(
                         "Reconciliation payment not found in gateway for order %s (external_id=%s)",
@@ -854,6 +858,7 @@ async def _reconcile_stale_pending_orders() -> None:
                         paid_amount_rub=status_res.amount_rub,
                     )
                     if paid_order:
+                        _pending_order_backoff_cache.pop(order_id, None)
                         logger.info(
                             "Reconciliation settled stale pending order %s (amount=%s rub)",
                             order.id,
@@ -864,6 +869,7 @@ async def _reconcile_stale_pending_orders() -> None:
                         order,
                         reason=status_res.cancellation_reason or "gateway_canceled",
                     )
+                    _pending_order_backoff_cache.pop(order_id, None)
                     logger.info(
                         "Reconciliation canceled stale pending order %s (reason=%s)",
                         order.id,
@@ -874,11 +880,13 @@ async def _reconcile_stale_pending_orders() -> None:
                         order,
                         reason="gateway_refunded",
                     )
+                    _pending_order_backoff_cache.pop(order_id, None)
                     logger.info(
                         "Reconciliation canceled stale pending order %s (refunded in gateway)",
                         order.id,
                     )
         except Exception as exc:
+            _pending_order_backoff_cache[order_id] = time.monotonic()
             logger.warning(
                 "Reconciliation check failed for order %s: %s",
                 order_id,

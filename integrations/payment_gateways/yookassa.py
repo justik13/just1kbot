@@ -208,7 +208,9 @@ class YooKassaGateway(BasePaymentGateway):
         amount_rub = None
         if amount_val is not None and currency == "RUB":
             try:
-                amount_rub = Decimal(str(amount_val))
+                parsed = Decimal(str(amount_val))
+                if parsed > 0:
+                    amount_rub = parsed
             except (InvalidOperation, ValueError, TypeError):
                 amount_rub = None
         cancellation_details = data.get("cancellation_details") or {}
@@ -218,7 +220,7 @@ class YooKassaGateway(BasePaymentGateway):
             else None
         )
         return PaymentStatusResult(
-            is_paid=(status == "succeeded" and amount_rub is not None),
+            is_paid=(status == "succeeded" and amount_rub is not None and amount_rub > 0),
             is_refunded=(status == "refunded"),
             is_canceled=(status == "canceled"),
             status_str=status,

@@ -295,6 +295,52 @@ class TestFailClosedAndAdminAlert(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res2.is_paid)
         self.assertIsNone(res2.amount_rub)
 
+        # Zero or negative amount
+        mock_get_result.return_value = YooKassaResult(
+            True,
+            value={
+                "status": "succeeded",
+                "amount": {"value": "0.00", "currency": "RUB"},
+            },
+        )
+        res3 = await gw.check_payment_status("pay-zero")
+        self.assertFalse(res3.is_paid)
+        self.assertIsNone(res3.amount_rub)
+
+    @patch("integrations.payment_gateways.factory.get_payment_gateway")
+    @patch("services.workers.cleanup.session_scope")
+    async def test_reconcile_exception_adds_order_to_backoff_cache(
+        self, mock_session_scope, mock_gw_factory
+    ):
+        """When checking gateway raises an exception, the order must be added to backoff cache."""
+        import uuid
+        from services.workers.cleanup import _reconcile_stale_pending_orders, _pending_order_backoff_cache
+
+        order_id = uuid.uuid4()
+        _pending_order_backoff_cache.clear()
+
+        gw = AsyncMock()
+        gw.check_payment_status.side_effect = RuntimeError("Network timeout to gateway")
+        mock_gw_factory.return_value = gw
+
+        read_session = AsyncMock()
+        cand_mock = MagicMock()
+        cand_mock.all.return_value = [(order_id, "ext-err", "yookassa")]
+        read_session.execute.return_value = cand_mock
+
+        expire_session = AsyncMock()
+        expire_mock = MagicMock()
+        expire_mock.scalars.return_value.all.return_value = []
+        expire_session.execute.return_value = expire_mock
+
+        mock_session_scope.side_effect = [
+            AsyncMock(__aenter__=AsyncMock(return_value=read_session), __aexit__=AsyncMock()),
+            AsyncMock(__aenter__=AsyncMock(return_value=expire_session), __aexit__=AsyncMock()),
+        ]
+
+        await _reconcile_stale_pending_orders()
+        self.assertIn(order_id, _pending_order_backoff_cache)
+
     @patch("bot.main.logger")
     @patch("bot.main.get_settings")
     async def test_global_error_handler_logs_admin_alert_delivery_failure(
