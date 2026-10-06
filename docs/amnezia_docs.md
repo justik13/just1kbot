@@ -2,7 +2,7 @@
 
 ## 🚫 ТЕКУЩАЯ ПОЛИТИКА ПОДДЕРЖКИ ПРОТОКОЛОВ
 
-В архитектуре проекта `just1kbot` поддерживается семейство современных протоколов **AmneziaWG 2.0+** (`AMNEZIA_PROTOCOLS`), управляемых через нативный серверный микросервис `amnezia-api` (`scripts/amnezia_api/`) и утилиты автоматизации узлов `just1knode`.
+В архитектуре проекта `just1kbot` поддерживается семейство современных протоколов **AmneziaWG 2.0+** (`AMNEZIA_PROTOCOLS`), управляемых через нативный серверный микросервис `amnezia-api` и утилиту узлов [just1knode](https://github.com/justik13/just1knode).
 
 Чистый WireGuard (`wg`) и устаревшие версии AmneziaWG ниже 2.0 категорически не используются и удалены из кодовой базы.
 
@@ -275,7 +275,7 @@ def encode_vpn_uri(config_dict: dict) -> str:
 
 ## 🖥️ 6. СЕРВЕРНЫЙ МИКРОСЕРВИС `amnezia-api` И НОДА `just1knode`
 
-### 6.1. Архитектура микросервиса (`scripts/amnezia_api/app.py`)
+### 6.1. Архитектура микросервиса (репозиторий just1knode: `scripts/amnezia_api/app.py`)
 Микросервис на базе **FastAPI** развёртывается на каждом сервере AmneziaWG в директории `/opt/amnezia-api` и управляется systemd-службой `amnezia-api.service`:
 
 * **Изоляция транзакций**: Все операции изменения конфигурации сериализуются через асинхронный мьютекс `state_lock = asyncio.Lock()`.
@@ -311,4 +311,4 @@ def encode_vpn_uri(config_dict: dict) -> str:
 
 ### Архитектурные валидаторы:
 * [Any-Tech-ARCHITECT (AmneziaWG Parameter Generator)](https://github.com/Vadim-Khristenko/Any-Tech-ARCHITECT)
-* [just1kbot amnezia_api](../scripts/amnezia_api/) — серверный микросервис интеграции проекта.
+* [just1knode amnezia_api](https://github.com/justik13/just1knode/tree/main/scripts/amnezia_api) — серверный микросервис узлов проекта.

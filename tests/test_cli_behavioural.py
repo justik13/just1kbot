@@ -2312,7 +2312,7 @@ cmd_uninstall --confirm=DELETE --keep-backups
     def test_read_commands_do_not_redirect_stderr_to_devnull(self):
         """Invariant: No read -p command in any shell script may redirect stderr to /dev/null, which silences prompts."""
         repo_root = CLI_PATH.parent.parent
-        target_dirs = [repo_root / "scripts", repo_root / "just1knode"]
+        target_dirs = [d for d in [repo_root / "scripts", repo_root / "just1knode"] if d.exists()]
         for target_dir in target_dirs:
             for script_path in target_dir.rglob("*.sh"):
                 with open(script_path, "r", encoding="utf-8", errors="replace") as f:
@@ -2330,7 +2330,7 @@ cmd_uninstall --confirm=DELETE --keep-backups
     def test_ufw_delete_redirects_both_stdout_and_stderr(self):
         """Invariant: ufw delete commands must redirect both stdout and stderr (>/dev/null 2>&1), not only 2>/dev/null."""
         repo_root = CLI_PATH.parent.parent
-        for target_dir in [repo_root / "scripts", repo_root / "just1knode"]:
+        for target_dir in [d for d in [repo_root / "scripts", repo_root / "just1knode"] if d.exists()]:
             for script_path in target_dir.rglob("*.sh"):
                 with open(script_path, "r", encoding="utf-8", errors="replace") as f:
                     for idx, line in enumerate(f, 1):
@@ -2352,7 +2352,10 @@ cmd_uninstall --confirm=DELETE --keep-backups
             repo_root / "just1knode" / "lib" / "traffic_watchdog.sh",
             repo_root / "just1knode" / "lib" / "traffic_watchdog.py",
         ]
-        for path in targets:
+        existing_targets = [p for p in targets if p.exists()]
+        if not existing_targets:
+            self.skipTest("just1knode lib files moved to dedicated repository")
+        for path in existing_targets:
             content = path.read_text(encoding="utf-8")
             self.assertIn("O_NOFOLLOW", content, f"Missing O_NOFOLLOW in {path.name}")
             self.assertIn("fchmod", content, f"Missing fchmod in {path.name}")

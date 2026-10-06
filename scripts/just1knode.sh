@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # JUST1KBOT - Обертка обратной совместимости для just1knode
-# Делегирует вызовы в модульную реализацию just1knode/just1knode.sh
+# Делегирует вызовы в /opt/just1knode/just1knode.sh или загружает из just1knode
 # =============================================================================
 set -euo pipefail
 
@@ -14,14 +14,7 @@ fi
 TARGET=""
 current_real="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")"
 
-if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/../just1knode/just1knode.sh" && -f "${SCRIPT_DIR}/../just1knode/lib/common.sh" ]]; then
-    cand="$(readlink -f "${SCRIPT_DIR}/../just1knode/just1knode.sh" 2>/dev/null || echo "${SCRIPT_DIR}/../just1knode/just1knode.sh")"
-    if [[ "$cand" != "$current_real" ]]; then
-        TARGET="$cand"
-    fi
-fi
-
-if [[ -z "$TARGET" && -f "/opt/just1knode/just1knode.sh" && -f "/opt/just1knode/lib/common.sh" ]]; then
+if [[ -f "/opt/just1knode/just1knode.sh" && -f "/opt/just1knode/lib/common.sh" ]]; then
     cand="$(readlink -f "/opt/just1knode/just1knode.sh" 2>/dev/null || echo "/opt/just1knode/just1knode.sh")"
     if [[ "$cand" != "$current_real" ]]; then
         TARGET="$cand"
@@ -31,18 +24,18 @@ fi
 if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
     INSTALL_DIR="/opt/just1knode"
     mkdir -p "$INSTALL_DIR"
-    JUST1KBOT_REPO_URL="${JUST1KBOT_REPO_URL:-https://github.com/justik13/just1kbot}"
-    JUST1KBOT_REF="${JUST1KBOT_REF:-main}"
-    if [[ "$JUST1KBOT_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
-        archive_url="${JUST1KBOT_REPO_URL}/archive/${JUST1KBOT_REF}.tar.gz"
+    JUST1KNODE_REPO_URL="${JUST1KNODE_REPO_URL:-https://github.com/justik13/just1knode}"
+    JUST1KNODE_REF="${JUST1KNODE_REF:-main}"
+    if [[ "$JUST1KNODE_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        archive_url="${JUST1KNODE_REPO_URL}/archive/${JUST1KNODE_REF}.tar.gz"
     else
-        archive_url="${JUST1KBOT_REPO_URL}/archive/refs/heads/${JUST1KBOT_REF}.tar.gz"
+        archive_url="${JUST1KNODE_REPO_URL}/archive/refs/heads/${JUST1KNODE_REF}.tar.gz"
     fi
     tmp_tar="$(mktemp /tmp/just1knode_boot.XXXXXX.tar.gz 2>/dev/null || mktemp)"
     tmp_extract="$(mktemp -d /tmp/just1knode_extract.XXXXXX 2>/dev/null || mktemp -d)"
     trap 'rm -rf "$tmp_tar" "$tmp_extract"' EXIT INT TERM
     echo -e "\033[0;36m[i]\033[0m Модули just1knode не обнаружены в /opt/just1knode."
-    echo -e "\033[0;36m[i]\033[0m Загрузка и распаковка компонентов с GitHub (${JUST1KBOT_REF})..."
+    echo -e "\033[0;36m[i]\033[0m Загрузка и распаковка компонентов с GitHub (${JUST1KNODE_REPO_URL} @ ${JUST1KNODE_REF})..."
     download_ok=0
     if command -v curl >/dev/null 2>&1; then
         if curl -fsSL --connect-timeout 15 --max-time 120 "$archive_url" -o "$tmp_tar"; then
@@ -55,10 +48,13 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
     fi
     if [[ $download_ok -eq 1 && -f "$tmp_tar" ]]; then
         tar -xzf "$tmp_tar" -C "$tmp_extract" --strip-components=1 --no-same-owner
-        cp -r "$tmp_extract/just1knode"/* "$INSTALL_DIR/"
-        if [[ -d "$tmp_extract/scripts" ]]; then
-            mkdir -p "$INSTALL_DIR/scripts"
-            cp -r "$tmp_extract/scripts"/* "$INSTALL_DIR/scripts/"
+        if [[ -d "$tmp_extract/just1knode" ]]; then
+            cp -r "$tmp_extract/just1knode"/* "$INSTALL_DIR/"
+        else
+            cp -a "$tmp_extract/just1knode.sh" "$INSTALL_DIR/" 2>/dev/null || true
+            cp -a "$tmp_extract/VERSION" "$INSTALL_DIR/" 2>/dev/null || true
+            cp -a "$tmp_extract/lib" "$INSTALL_DIR/" 2>/dev/null || true
+            cp -a "$tmp_extract/modules" "$INSTALL_DIR/" 2>/dev/null || true
         fi
         if [[ -d "$tmp_extract/scripts/xray_api" ]]; then
             mkdir -p /opt/xray-api
@@ -67,6 +63,8 @@ if [[ -z "$TARGET" || ! -f "$TARGET" ]]; then
         if [[ -d "$tmp_extract/scripts/amnezia_api" ]]; then
             mkdir -p /opt/amnezia-api
             cp -r "$tmp_extract/scripts/amnezia_api"/* /opt/amnezia-api/
+            mkdir -p "$INSTALL_DIR/scripts/amnezia_api"
+            cp -r "$tmp_extract/scripts/amnezia_api"/* "$INSTALL_DIR/scripts/amnezia_api/"
         fi
         rm -rf "$tmp_tar" "$tmp_extract"
         trap - EXIT INT TERM
@@ -90,7 +88,7 @@ chmod +x "$TARGET" 2>/dev/null || true
 
 if [[ "${BASH_SOURCE[0]:-}" != "${0:-}" && -n "${BASH_SOURCE[0]:-}" ]]; then
     # Sourced mode
-    # shellcheck source=../just1knode/just1knode.sh
+    # shellcheck source=/dev/null
     source "$TARGET"
     return 0 2>/dev/null || true
 else

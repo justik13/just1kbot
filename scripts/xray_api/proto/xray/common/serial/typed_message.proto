@@ -1,8 +1,0 @@
-syntax = "proto3";
-
-package xray.common.serial;
-
-message TypedMessage {
-  string type = 1;
-  bytes value = 2;
-}
