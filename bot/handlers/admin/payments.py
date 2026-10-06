@@ -619,7 +619,11 @@ async def show_order_card(
     if held_meta.get("payment_creation_ambiguous"):
         diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_AMBIGUOUS
 
-    payment_method_label = "ЮKassa" if order.payment_method == "yookassa" else safe(order.payment_method)
+    payment_method_label = (
+        texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
+        if order.payment_method == "yookassa"
+        else safe(order.payment_method)
+    )
 
     rendered = texts.ADMIN_ORDER_CARD_TEMPLATE.format(
         short_id=str(order.id)[:8],

@@ -56,6 +56,7 @@ ADMIN_PAYMENTS_USER_TITLE = """🛠 Админка › 💳 <b>Платежи п
 ADMIN_PAYMENTS_USER_EMPTY = "<i>Платежи пользователя не найдены.</i>"
 ADMIN_PAYMENTS_ROW_ENTRY = "{status_icon} #{payment_id} · {user_label} · {amount_rub}₽"
 ADMIN_PAYMENT_STATUS_FALLBACK_ICON = "❓"
+ADMIN_PAYMENTS_GATEWAY_YOOKASSA = "ЮKassa"
 ADMIN_PURCHASES_ROW_BUTTON_TEMPLATE = "🛒 #{numeric_id} | {user_label} | {amount}"
 
 # --- Payment card ----------------------------------------------------------
