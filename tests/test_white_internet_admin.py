@@ -1685,13 +1685,13 @@ class TestWhiteInternetUserFilters(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=user)), \
              patch("database.repositories.white_internet_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)), \
-             patch("bot.handlers.white_internet._resolve_subscription_target", new=AsyncMock(return_value=("origin.just1k.pro", "/sub/wl"))):
+             patch("bot.handlers.white_internet._resolve_subscription_target", new=AsyncMock(return_value=("origin.example.com", "/sub/wl"))):
 
             await admin_wi_copy_link(callback, session)
 
             callback.message.answer.assert_called_once()
             args, kwargs = callback.message.answer.call_args
-            self.assertIn("https://origin.just1k.pro/sub/wl/test_token_abcdef123456", args[0])
+            self.assertIn("https://origin.example.com/sub/wl/test_token_abcdef123456", args[0])
             self.assertIn("12345", args[0])
             callback.answer.assert_called_once()
 

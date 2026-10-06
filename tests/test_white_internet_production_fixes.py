@@ -100,7 +100,7 @@ class TestWhiteInternetProductionFixes(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.white_internet.white_internet_repo.has_ever_activated_trial", return_value=True), \
              patch("bot.handlers.white_internet._get_effective_base_price", return_value=(Decimal("100"), 100, 30)), \
              patch("bot.handlers.white_internet._get_effective_tariff_info", return_value=(Decimal("100"), 100, 30, 50 * 1024**3)), \
-             patch("bot.handlers.white_internet._resolve_subscription_domain", return_value="cdn.just1k.best"):
+             patch("bot.handlers.white_internet._resolve_subscription_domain", return_value="cdn.example.com"):
 
             await show_white_internet_menu(query, session)
 
@@ -183,16 +183,16 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=10,
             name="Origin Moscow",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
             extra_data={
-                "cdn_domain": "cdn.just1k.best",
-                "domain": "origin.just1k.best",
-                "relays": [{"code": "de", "ip": "217.60.183.229"}],
+                "cdn_domain": "cdn.example.com",
+                "domain": "origin.example.com",
+                "relays": [{"code": "de", "ip": "198.51.100.229"}],
             },
         )
 
@@ -249,7 +249,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertEqual(call_args["chat_id"], 999999)
-            self.assertIn("origin.just1k.best", call_args["text"])
+            self.assertIn("origin.example.com", call_args["text"])
             self.assertIn("502", call_args["text"])
 
         # Reset bot mock for Check 2
@@ -278,7 +278,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertEqual(call_args["chat_id"], 999999)
-            self.assertIn("origin.just1k.best", call_args["text"])
+            self.assertIn("origin.example.com", call_args["text"])
             self.assertIn("восстановлено", call_args["text"])
 
     async def test_node_monitor_ingress_probe_flags_404_non_200_as_failure(self):
@@ -290,13 +290,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=11,
             name="Origin CDN Check",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         session_mock = AsyncMock()
@@ -337,7 +337,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertIn("404", call_args["text"])
-            self.assertIn("cdn.just1k.best", call_args["text"])
+            self.assertIn("cdn.example.com", call_args["text"])
 
     async def test_node_monitor_ingress_probe_redirect_301_fails(self):
         """Redirect 301 is not followed and is reported as failure with allow_redirects=False."""
@@ -349,13 +349,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=12,
             name="Origin 301 Check",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         session_mock = AsyncMock()
@@ -406,7 +406,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_args = bot.send_message.call_args[1]
             self.assertIn("301", call_args["text"])
-            self.assertIn("cdn.just1k.best", call_args["text"])
+            self.assertIn("cdn.example.com", call_args["text"])
 
     async def test_node_monitor_ingress_probe_redirect_302_fails(self):
         """Redirect 302 is treated as failure."""
@@ -418,13 +418,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=13,
             name="Origin 302 Check",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         session_mock = AsyncMock()
@@ -480,13 +480,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=14,
             name="Origin TLS Error Check",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         session_mock = AsyncMock()
@@ -538,12 +538,12 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=42,
             name="Origin Extra Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
-            extra_data={"ingress_problem": True, "cdn_problem": True, "cdn_domain": "cdn.just1k.best"},
+            extra_data={"ingress_problem": True, "cdn_problem": True, "cdn_domain": "cdn.example.com"},
         )
         state = ServerMonitorState(server_id=42)
         state.sync_from_db_server(server)
@@ -551,7 +551,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(state.cdn_problem)
 
         # And when False or missing, state is False
-        server.extra_data = {"cdn_domain": "cdn.just1k.best"}
+        server.extra_data = {"cdn_domain": "cdn.example.com"}
         state2 = ServerMonitorState(server_id=42)
         state2.sync_from_db_server(server)
         self.assertFalse(state2.ingress_problem)
@@ -568,13 +568,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=15,
             name="Origin Delivery Fail Check",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         session_mock = AsyncMock()
@@ -624,13 +624,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=16,
             name="Origin Decoupled Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         class FailingXrayClient:
@@ -703,13 +703,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=17,
             name="Origin Prefix Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         session_mock = AsyncMock()
@@ -740,7 +740,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
 
             mock_sess.get.assert_called_once()
             call_url = mock_sess.get.call_args[0][0]
-            self.assertEqual(call_url, "https://cdn.just1k.best/custom_feed/ping")
+            self.assertEqual(call_url, "https://cdn.example.com/custom_feed/ping")
 
     async def test_node_monitor_ingress_probe_prioritizes_server_extra_data_sub_prefix(self):
         """Ingress synthetic probe prioritizes server.extra_data['sub_path_prefix'] over env variable."""
@@ -752,13 +752,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=170,
             name="Origin Prefix Priority Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best", "sub_path_prefix": "/node_custom_feed"},
+            extra_data={"cdn_domain": "cdn.example.com", "sub_path_prefix": "/node_custom_feed"},
         )
 
         class MockXrayClient:
@@ -802,7 +802,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
 
             mock_sess.get.assert_called_once()
             call_url = mock_sess.get.call_args[0][0]
-            self.assertEqual(call_url, "https://cdn.just1k.best/node_custom_feed/ping")
+            self.assertEqual(call_url, "https://cdn.example.com/node_custom_feed/ping")
 
             # Verify snapshot update persisted sub_path_prefix from xray_data
             mock_snap.assert_called_once()
@@ -820,13 +820,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=171,
             name="Origin Dynamic Alert Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best", "sub_path_prefix": "/custom_alert_feed"},
+            extra_data={"cdn_domain": "cdn.example.com", "sub_path_prefix": "/custom_alert_feed"},
         )
 
         session_mock = AsyncMock()
@@ -908,13 +908,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=172,
             name="Origin Timeout Alert Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         session_mock = AsyncMock()
@@ -965,13 +965,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=18,
             name="Origin Dedup Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best", "ingress_problem": True},
+            extra_data={"cdn_domain": "cdn.example.com", "ingress_problem": True},
         )
 
         session_mock = AsyncMock()
@@ -1014,13 +1014,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=19,
             name="Origin Glitch Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         class MockXrayClient:
@@ -1096,13 +1096,13 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=20,
             name="Origin Recovery Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best", "ingress_problem": True, "consecutive_ingress_fails": 2},
+            extra_data={"cdn_domain": "cdn.example.com", "ingress_problem": True, "consecutive_ingress_fails": 2},
         )
 
         class MockXrayClient:
@@ -1176,7 +1176,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             health_state=ServerHealthState.ONLINE,
             protocol=XRAY_PROTOCOL,
             capabilities=["xray_origin"],
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         bot = AsyncMock()
@@ -1240,15 +1240,15 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=18,
             name="Origin Dual Probe Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
             extra_data={
-                "domain": "origin.just1k.best",
-                "cdn_domain": "cdn.just1k.best",
+                "domain": "origin.example.com",
+                "cdn_domain": "cdn.example.com",
             },
         )
 
@@ -1260,7 +1260,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
                 pass
 
             def get(self, url, **kwargs):
-                if "origin.just1k.best" in url:
+                if "origin.example.com" in url:
                     return MockProbeResponse(status=200)
                 # CDN returns 504 Gateway Timeout
                 return MockProbeResponse(status=504)
@@ -1304,15 +1304,15 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=19,
             name="Origin Failure Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
             extra_data={
-                "domain": "origin.just1k.best",
-                "cdn_domain": "cdn.just1k.best",
+                "domain": "origin.example.com",
+                "cdn_domain": "cdn.example.com",
             },
         )
 
@@ -1368,15 +1368,15 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=20,
             name="Origin CDN Outage Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
             extra_data={
-                "domain": "origin.just1k.best",
-                "cdn_domain": "cdn.just1k.best",
+                "domain": "origin.example.com",
+                "cdn_domain": "cdn.example.com",
             },
         )
 
@@ -1388,7 +1388,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
                 pass
 
             def get(self, url, **kwargs):
-                if "origin.just1k.best" in url:
+                if "origin.example.com" in url:
                     return MockProbeResponse(status=200)
                 # CDN returns 504 Gateway Timeout
                 return MockProbeResponse(status=504)
@@ -1419,8 +1419,8 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             call_text = bot.send_message.call_args[1]["text"]
-            self.assertIn("cdn.just1k.best", call_text)
-            self.assertIn("origin.just1k.best", call_text)
+            self.assertIn("cdn.example.com", call_text)
+            self.assertIn("origin.example.com", call_text)
             self.assertIn("504", call_text)
             self.assertIn("CDN", call_text)
 
@@ -1443,15 +1443,15 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             id=21,
             name="Origin CDN Restore Test",
             protocol=XRAY_PROTOCOL,
-            api_url="https://194.113.106.134:8444",
+            api_url="https://198.51.100.134:8444",
             api_key="secret-key",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             lifecycle_status=ServerLifecycleStatus.ACTIVE,
             capabilities=["xray_origin"],
             extra_data={
-                "domain": "origin.just1k.best",
-                "cdn_domain": "cdn.just1k.best",
+                "domain": "origin.example.com",
+                "cdn_domain": "cdn.example.com",
                 "cdn_problem": True,
                 "consecutive_cdn_fails": 5,
             },
@@ -1492,7 +1492,7 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(bot)
             bot.send_message.assert_called_once()
             call_text = bot.send_message.call_args[1]["text"]
-            self.assertIn("cdn.just1k.best", call_text)
+            self.assertIn("cdn.example.com", call_text)
             self.assertIn("восстановлена", call_text)
 
             from services.workers.node_monitor import get_server_monitor_state

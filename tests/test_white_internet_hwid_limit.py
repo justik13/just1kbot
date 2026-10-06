@@ -273,7 +273,7 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
         server.is_active = True
         server.capabilities = ["xray_origin"]
         server.xray_instance_epoch = "epoch-xyz"
-        server.extra_data = {"cdn_domain": "cdn.just1k.online"}
+        server.extra_data = {"cdn_domain": "cdn.example.com"}
 
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
@@ -283,7 +283,7 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
                     with patch(
@@ -400,7 +400,7 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
         server.is_active = True
         server.capabilities = ["xray_origin"]
         server.xray_instance_epoch = "epoch-xyz"
-        server.extra_data = {"cdn_domain": "cdn.just1k.online"}
+        server.extra_data = {"cdn_domain": "cdn.example.com"}
 
         mock_session = AsyncMock()
         mock_session.scalar.return_value = server
@@ -410,7 +410,7 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
                     with patch(

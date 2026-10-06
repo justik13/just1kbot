@@ -8,5 +8,5 @@ import conf.d/*.caddy
 ```
 
 - Если директория не содержит файлов `.caddy`, Caddy обслуживает только основной домен бота.
-- Для подключения Uptime Kuma скопируйте `status.caddy.example` в `status.caddy` и укажите ваш домен (например, `status.just1k.pro`).
+- Для подключения Uptime Kuma скопируйте `status.caddy.example` в `status.caddy` и укажите ваш домен (например, `status.example.com`).
 - Интеграция использует изолированную сеть `status_net`: контейнер Uptime Kuma имеет доступ только к Caddy и изолирован от контейнеров бота и базы данных.

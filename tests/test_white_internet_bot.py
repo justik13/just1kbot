@@ -231,7 +231,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
         )
 
-        domain = "vpn.just1k.online"
+        domain = "vpn.example.com"
         kb = get_white_internet_overview_keyboard(sub, bot_domain=domain)
 
         # Telegram Bot API contract: inline keyboard URLs must only be http/https/tg
@@ -263,7 +263,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
         from database.models import WhiteInternetSubscription
 
-        domain = "vpn.just1k.online"
+        domain = "vpn.example.com"
 
         # 1. No subscription -> Buy button + Back button
         kb_none = get_white_internet_overview_keyboard(None, bot_domain=domain)
@@ -444,9 +444,9 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         origin_node = Server(
             id=10,
             name="Origin",
-            api_url="https://origin.just1k.best:8444",
+            api_url="https://origin.example.com:8444",
             api_key="key",
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
 
         mock_query = AsyncMock(spec=CallbackQuery)
@@ -458,7 +458,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         mock_session.get.return_value = origin_node
 
-        mock_settings = MagicMock(DOMAIN="just1k.best")
+        mock_settings = MagicMock(DOMAIN="example.com")
         with patch("bot.handlers.white_internet.get_settings", return_value=mock_settings):
             with patch("bot.handlers.white_internet.get_user_by_telegram_id", return_value=user):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_user_id", return_value=sub):
@@ -469,10 +469,10 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         text = call_args[0][0]
         reply_markup = call_args[1]["reply_markup"]
 
-        self.assertIn("https://cdn.just1k.best/sub/wl/sub-secret-token", text)
+        self.assertIn("https://cdn.example.com/sub/wl/sub-secret-token", text)
         copy_btn = next((btn for row in reply_markup.inline_keyboard for btn in row if btn.copy_text), None)
         self.assertIsNotNone(copy_btn)
-        self.assertEqual(copy_btn.copy_text.text, "https://cdn.just1k.best/sub/wl/sub-secret-token")
+        self.assertEqual(copy_btn.copy_text.text, "https://cdn.example.com/sub/wl/sub-secret-token")
 
     async def test_show_white_internet_menu_formats_adaptive_traffic(self):
         """Traffic is formatted adaptively (KiB/MiB/GiB), so small usage is not hidden as 0.0 ГБ."""
@@ -569,7 +569,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
                 provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
                 is_trial=is_trial,
             )
-            domain = "cdn.just1k.online"
+            domain = "cdn.example.com"
             kb = get_white_internet_overview_keyboard(sub, bot_domain=domain)
 
             copy_btns = [btn for row in kb.inline_keyboard for btn in row if btn.copy_text]

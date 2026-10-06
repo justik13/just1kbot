@@ -51,10 +51,10 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
         self.origin_server = Server(
             id=1,
             name="Origin-RU",
-            api_url="https://origin.just1k.best:8444",
+            api_url="https://origin.example.com:8444",
             api_key="secret-api-key",
             xray_instance_epoch=1,
-            extra_data={"cdn_domain": "cdn.just1k.best"},
+            extra_data={"cdn_domain": "cdn.example.com"},
         )
         self.tariff = MagicMock(id=5, duration_days=30)
 
@@ -394,7 +394,7 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
 
     def test_trial_overview_keyboard_has_trial_buttons(self):
         """Overview keyboard displays appropriate buttons for trial status."""
-        domain = "cdn.just1k.best"
+        domain = "cdn.example.com"
 
         # 1. No subscription, has_trial_available=True -> Trial activation + buy preview
         kb_none = get_white_internet_overview_keyboard(None, bot_domain=domain, has_trial_available=True)

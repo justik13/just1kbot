@@ -60,7 +60,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             name="Origin-MSK-01",
             protocol="xray",
             capabilities=["xray_origin"],
-            api_url="https://origin.just1k.online:8444",
+            api_url="https://origin.example.com:8444",
             api_key="node-secret-key",
             health_state=ServerHealthState.ONLINE,
             is_active=True,
@@ -169,7 +169,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         self.assertEqual(sub.last_reconciled_node_epoch, node_epoch)
 
         # 4. Feed check after reconciliation -> 200 OK with VLESS links
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope") as mock_scope:
                 session = AsyncMock()
                 session.scalar.return_value = server
@@ -382,7 +382,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                 self.assertEqual(sub.actual_version, 3)
 
         # Feed is restored to 200 OK
-        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
             with patch("bot.handlers.white_internet_web.session_scope") as mock_scope:
                 session = AsyncMock()
                 session.scalar.return_value = server

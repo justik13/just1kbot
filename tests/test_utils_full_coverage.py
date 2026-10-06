@@ -135,7 +135,7 @@ class TestUtilsFormatters(unittest.TestCase):
 
         self.assertEqual(normalize_hostname("https://cdn.example.com/"), "cdn.example.com")
         self.assertEqual(normalize_hostname("http://bot.example.com:8080/sub/wl"), "bot.example.com")
-        self.assertEqual(normalize_hostname("  JUST1K.BEST  "), "just1k.best")
+        self.assertEqual(normalize_hostname("  EXAMPLE.COM  "), "example.com")
         self.assertEqual(normalize_hostname("origin.example.com."), "origin.example.com")
         self.assertEqual(normalize_hostname("cdn.example.com/sub/wl/token"), "cdn.example.com")
         self.assertEqual(normalize_hostname("https://user:pass@cdn.example.com:443/test"), "cdn.example.com")
@@ -151,7 +151,7 @@ class TestUtilsFormatters(unittest.TestCase):
     def test_validate_public_fqdn(self):
         from utils.security import validate_public_fqdn
 
-        self.assertTrue(validate_public_fqdn("cdn.just1k.best"))
+        self.assertTrue(validate_public_fqdn("cdn.example.com"))
         self.assertTrue(validate_public_fqdn("sub.domain.co.uk"))
         self.assertTrue(validate_public_fqdn("node-1.origin.cloud"))
         self.assertTrue(validate_public_fqdn("xn--e1afmkfd.xn--p1ai"))
@@ -161,7 +161,7 @@ class TestUtilsFormatters(unittest.TestCase):
         self.assertFalse(validate_public_fqdn("localhost"))
         self.assertFalse(validate_public_fqdn("app.localhost"))
         self.assertFalse(validate_public_fqdn("127.0.0.1"))
-        self.assertFalse(validate_public_fqdn("194.113.106.134"))
+        self.assertFalse(validate_public_fqdn("198.51.100.134"))
         self.assertFalse(validate_public_fqdn("evil.com:bad"))
         self.assertFalse(validate_public_fqdn("trusted.com@evil.com"))
         self.assertFalse(validate_public_fqdn("evil.com;rm"))
@@ -178,7 +178,7 @@ class TestUtilsFormatters(unittest.TestCase):
 
         self.assertEqual(normalize_public_domain("https://cdn.example.com/"), "cdn.example.com")
         self.assertEqual(normalize_public_domain("http://bot.example.com:8080/sub/wl"), "bot.example.com")
-        self.assertEqual(normalize_public_domain("  JUST1K.BEST  "), "just1k.best")
+        self.assertEqual(normalize_public_domain("  EXAMPLE.COM  "), "example.com")
         self.assertEqual(normalize_public_domain("origin.example.com."), "origin.example.com")
         self.assertEqual(normalize_public_domain("cdn.example.com/sub/wl/token"), "cdn.example.com")
         self.assertEqual(normalize_public_domain("https://user:pass@cdn.example.com:443/test"), "cdn.example.com")

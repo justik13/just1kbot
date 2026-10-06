@@ -27,7 +27,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
         active_server = Server(
             id=2,
             name="Нидерланды",
-            api_url="https://nl.just1k.pro:8443",
+            api_url="https://nl.example.org:8443",
             api_key="secret-key-pro",
         )
 
@@ -40,7 +40,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(server_id, 2)
         self.assertEqual(server_name, "Нидерланды")
-        self.assertEqual(api_url, "https://nl.just1k.pro:8443")
+        self.assertEqual(api_url, "https://nl.example.org:8443")
         self.assertEqual(api_key, "secret-key-pro")
         # Ensure it didn't even need to query historical operations
         session.execute.assert_not_called()
@@ -59,7 +59,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
             profile_id=104,
             server_id=2,
             server_name_snapshot="Legacy Server",
-            api_url_snapshot="https://legacy.just1k.best:8443",
+            api_url_snapshot="https://legacy.example.com:8443",
             api_key_snapshot="legacy-key",
         )
 
@@ -75,7 +75,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(server_id, 2)
         self.assertEqual(server_name, "Legacy Server")
-        self.assertEqual(api_url, "https://legacy.just1k.best:8443")
+        self.assertEqual(api_url, "https://legacy.example.com:8443")
         self.assertEqual(api_key, "legacy-key")
 
     async def test_ensure_delete_operation_updates_snapshots_on_reviving_dead_operation(self):
@@ -87,7 +87,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
             attempts=1,
             server_id=2,
             server_name_snapshot="Нидерланды",
-            api_url_snapshot="https://nl.just1k.best:8443",
+            api_url_snapshot="https://nl.example.com:8443",
             api_key_snapshot="old-key",
             peer_id="peer-104",
             payload={"managed_workflow": True},
@@ -104,20 +104,20 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
             server_id=2,
             profile_id=104,
             server_name_snapshot="Нидерланды",
-            api_url_snapshot="https://nl.just1k.pro:8443",
+            api_url_snapshot="https://nl.example.org:8443",
             api_key_snapshot="new-key",
             peer_id="peer-104",
         )
 
         self.assertEqual(result.status, "retry")
         self.assertEqual(result.attempts, 0)
-        self.assertEqual(result.api_url_snapshot, "https://nl.just1k.pro:8443")
+        self.assertEqual(result.api_url_snapshot, "https://nl.example.org:8443")
         self.assertEqual(result.api_key_snapshot, "new-key")
 
     async def test_operation_285_e2e_reconciliation_after_server_domain_change(self):
         """End-to-end regression test for operation 285 incident:
 
-        1. Server 2 changed domain from https://nl.just1k.best:8443 to https://nl.just1k.pro:8443.
+        1. Server 2 changed domain from https://nl.example.com:8443 to https://nl.example.org:8443.
         2. Claimed operation with old snapshot fails with server_endpoint_changed.
         3. ensure_delete_operation updates operation snapshots to the active server endpoint.
         4. Next execution with updated snapshot succeeds and calls finalize_delete_success.
@@ -125,7 +125,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
         active_server = Server(
             id=2,
             name="Нидерланды",
-            api_url="https://nl.just1k.pro:8443",
+            api_url="https://nl.example.org:8443",
             api_key="secret-key-pro",
             protocol="amneziawg2",
         )
@@ -138,7 +138,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
             server_id=2,
             profile_id=104,
             server_name_snapshot="Нидерланды",
-            api_url_snapshot="https://nl.just1k.best:8443",  # stale domain
+            api_url_snapshot="https://nl.example.com:8443",  # stale domain
             api_key_snapshot="secret-key-pro",
             peer_id="peer-104",
             client_name="tg_100_p104_n2",
@@ -177,7 +177,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
             attempts=1,
             server_id=2,
             server_name_snapshot="Нидерланды",
-            api_url_snapshot="https://nl.just1k.best:8443",
+            api_url_snapshot="https://nl.example.com:8443",
             api_key_snapshot="secret-key-pro",
             peer_id="peer-104",
             payload={"managed_workflow": True},
@@ -199,7 +199,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(reconciled.status, "retry")
         self.assertEqual(reconciled.attempts, 0)
-        self.assertEqual(reconciled.api_url_snapshot, "https://nl.just1k.pro:8443")
+        self.assertEqual(reconciled.api_url_snapshot, "https://nl.example.org:8443")
 
         # Step C: Re-execute claimed operation with updated snapshot -> succeeds
         updated_op = ClaimedAPIOperation(
@@ -209,7 +209,7 @@ class TestApiOperationsEndpoint(unittest.IsolatedAsyncioTestCase):
             server_id=2,
             profile_id=104,
             server_name_snapshot="Нидерланды",
-            api_url_snapshot="https://nl.just1k.pro:8443",  # updated domain
+            api_url_snapshot="https://nl.example.org:8443",  # updated domain
             api_key_snapshot="secret-key-pro",
             peer_id="peer-104",
             client_name="tg_100_p104_n2",
