@@ -216,9 +216,17 @@ class OrderService:
             and sub_end
             and sub_end > now
         )
+        is_renewal = bool(
+            user
+            and current_tid
+            and current_tid == tariff.id
+            and sub_end
+            and sub_end > now
+        )
 
         if is_tariff_change:
             order_meta["is_tariff_change"] = True
+            order_meta["operation"] = "change"
             current_tariff = await session.get(Tariff, current_tid)
             due_rub, resulting_days = OrderService.calculate_tariff_change(
                 current_tariff, tariff, sub_end, now=now
@@ -228,6 +236,11 @@ class OrderService:
             if duration_days is None:
                 duration_days = resulting_days
         else:
+            if is_renewal:
+                order_meta["is_renewal"] = True
+                order_meta["operation"] = "renew"
+            elif "operation" not in order_meta:
+                order_meta["operation"] = "purchase"
             if amount_rub is None:
                 base_cost = Decimal(tariff.price_rub)
                 if await is_eligible_for_referral_first_discount(session, user_id):

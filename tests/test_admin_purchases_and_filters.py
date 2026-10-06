@@ -241,7 +241,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         slot_order.payment_method = "wallet"
         slot_order.tariff = None
         slot_order.metadata_ = {"operation": "add_device_slot"}
-        slot_order.device_limit = 1
+        slot_order.device_limit = 3
         slot_order.traffic_bytes = 0
         slot_order.duration_days = 0
         slot_order.amount_rub = Decimal("100.00")
@@ -280,17 +280,73 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         stmt_sql = str(called_stmt)
         self.assertIn("orders.service_type IN", stmt_sql)
 
-        # Slot order checks
+        # Slot order checks: real-world scenario where user had 2 devices and added 1 (limit becomes 3)
         self.assertEqual(entries[0].numeric_id, str(slot_order.id)[:8])
         self.assertEqual(entries[0].operation_type, "add_device_slot")
         self.assertEqual(entries[0].operation_title, "Доп. устройство")
+        self.assertEqual(entries[0].tariff_name, "+1 слот")
+        self.assertEqual(entries[0].device_limit, 3)
         self.assertEqual(entries[0].payment_method, "wallet")
 
         # Quota order checks
         self.assertEqual(entries[1].numeric_id, str(quota_order.id)[:8])
         self.assertEqual(entries[1].operation_type, "topup_quota")
         self.assertEqual(entries[1].operation_title, "Докупка трафика")
+        self.assertEqual(entries[1].tariff_name, "+20 ГБ")
         self.assertEqual(entries[1].payment_method, "yookassa")
+
+    async def test_purchases_repo_resolves_awg_renewal(self):
+        import uuid
+        from database.models import Tariff
+
+        session = AsyncMock()
+        user = User(id=16, telegram_id=3006, username="awg_renewer")
+        tariff = Tariff(id=5, name="Базовый 30 дней", duration_days=30, price_rub=150)
+
+        renew_order = MagicMock()
+        renew_order.id = uuid.uuid4()
+        renew_order.service_type = "awg"
+        renew_order.payment_method = "wallet"
+        renew_order.tariff = tariff
+        renew_order.metadata_ = {"operation": "renew", "is_renewal": True, "tariff_name": "Базовый 30 дней"}
+        renew_order.device_limit = 2
+        renew_order.traffic_bytes = 0
+        renew_order.duration_days = 30
+        renew_order.amount_rub = Decimal("150.00")
+        t0 = now_utc()
+        renew_order.paid_at = t0
+        renew_order.created_at = t0
+        renew_order.user = user
+
+        res_orders = MagicMock()
+        res_orders.scalars().all.return_value = [renew_order]
+        res_audit = MagicMock()
+        res_audit.scalars().all.return_value = []
+        session.execute.side_effect = [res_orders, res_audit]
+
+        entries, total = await get_purchase_logs_paginated(session, page=1, per_page=10)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].operation_type, "renew")
+        self.assertEqual(entries[0].operation_title, "Продление")
+        self.assertEqual(entries[0].tariff_name, "Базовый 30 дней")
+
+    async def test_get_purchase_log_by_id_excludes_topup_and_unpaid(self):
+        import uuid
+
+        session = AsyncMock()
+        res_order = MagicMock()
+        res_order.scalar_one_or_none.return_value = None
+        session.execute.return_value = res_order
+
+        test_uuid = uuid.uuid4()
+        entry = await get_purchase_log_by_id(session, f"order_{test_uuid}")
+        self.assertIsNone(entry)
+
+        # Check statement requires paid status and non-topup service type
+        called_stmt = session.execute.call_args_list[0][0][0]
+        stmt_sql = str(called_stmt)
+        self.assertIn("orders.status = :status_1", stmt_sql)
+        self.assertIn("orders.service_type IN", stmt_sql)
 
     async def test_show_order_card_yookassa_pending_diagnostics(self):
         import uuid
@@ -335,6 +391,30 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Ожидает завершения оплаты клиентом", rendered_text)
         self.assertIn("Тайм-аут шлюза при создании", rendered_text)
         self.assertIn("https://yookassa.ru/checkout/12345", rendered_text)
+
+    async def test_show_order_card_rejects_non_yookassa_order(self):
+        import uuid
+        from bot.handlers.admin.payments import show_order_card
+        from bot import texts
+
+        session = AsyncMock()
+        # session.scalar returns None because payment_method == 'yookassa' filter excludes it
+        session.scalar.return_value = None
+
+        test_uuid = uuid.uuid4()
+        callback = AsyncMock()
+        callback.data = f"admin_order_card:{test_uuid}"
+        callback.from_user.id = 12345
+        callback.message = AsyncMock()
+        state = AsyncMock()
+
+        with patch("bot.handlers.admin.payments.is_admin", return_value=True):
+            await show_order_card(callback, state, session)
+
+        callback.answer.assert_called_once_with(
+            texts.ADMIN_PAYMENT_NOT_FOUND_ALERT, show_alert=True
+        )
+        callback.message.edit_text.assert_not_called()
 
 
 if __name__ == "__main__":

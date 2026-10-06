@@ -549,7 +549,7 @@ async def show_order_card(
     await state.clear()
     order = await session.scalar(
         select(Order)
-        .where(Order.id == order_uuid)
+        .where(Order.id == order_uuid, Order.payment_method == "yookassa")
         .options(selectinload(Order.user), selectinload(Order.tariff))
     )
     if not order:
