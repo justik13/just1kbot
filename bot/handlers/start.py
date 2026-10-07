@@ -273,6 +273,7 @@ async def cmd_start(
     )
 
     await _ensure_bot_unblocked(session, telegram_id)
+    await session.flush()
 
     if getattr(user, "is_newly_referred", False) and user.referred_by:
         try:

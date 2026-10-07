@@ -284,6 +284,7 @@ async def grant_referral_bonus_for_topup(
             User.telegram_id == purchaser.referred_by,
             User.is_deleted.is_(False),
         )
+        .with_for_update()
     )
     if (
         referrer is None

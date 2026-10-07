@@ -185,6 +185,46 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         assert result.new_tier_name == "Silver"
         assert result.new_rate_pct == 20
 
+    def test_grant_referral_bonus_locks_referrer_with_for_update(self):
+        import asyncio
+
+        from services.referral_bonus import grant_referral_bonus_for_topup
+
+        purchaser = MagicMock(id=4, telegram_id=222, referred_by=111)
+        referrer = MagicMock(id=1, telegram_id=111, is_banned=False)
+
+        captured_stmts = []
+        session = AsyncMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        session.begin_nested = MagicMock(return_value=mock_ctx)
+
+        async def fake_scalar(stmt):
+            captured_stmts.append(stmt)
+            if len(captured_stmts) == 1:
+                return purchaser
+            if len(captured_stmts) == 2:
+                return referrer
+            return None
+
+        session.scalar = fake_scalar
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        asyncio.run(
+            grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=4,
+                payment_id=42,
+                topup_amount=100,
+            )
+        )
+
+        assert len(captured_stmts) >= 2
+        referrer_stmt = captured_stmts[1]
+        assert referrer_stmt._for_update_arg is not None
+
     def test_reverse_referral_bonus_for_topup(self):
         import asyncio
 
