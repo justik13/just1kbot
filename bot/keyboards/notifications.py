@@ -11,6 +11,7 @@ from bot.texts.common.buttons import (
     BTN_DISMISS_ALERT,
     BTN_DISMISS_NOTIFICATION,
     BTN_ENABLE_SERVER,
+    BTN_INVITE_FRIEND,
     BTN_MY_BALANCE,
     BTN_OPEN_USER_CARD,
     BTN_RENEW_ACCESS,
@@ -50,6 +51,14 @@ def get_referral_bonus_keyboard() -> InlineKeyboardMarkup:
     builder.button(text=BTN_MY_BALANCE, callback_data="menu_balance")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def get_referral_onboarding_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=BTN_INVITE_FRIEND, callback_data="menu_referral")
+    builder.adjust(1)
+    return builder.as_markup()
+
 
 
 def get_node_monitor_alert_keyboard(

@@ -143,6 +143,48 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         assert entry.metadata_["bonus_rate"] == "0.15"
         assert entry.metadata_["tier_name"] == "Standard"
 
+    def test_grant_referral_bonus_tier_upgrade_detection(self):
+        import asyncio
+
+        from services.referral_bonus import grant_referral_bonus_for_topup
+
+        referrer = MagicMock()
+        referrer.id = 1
+        referrer.telegram_id = 111
+        referrer.is_banned = False
+
+        purchaser = MagicMock()
+        purchaser.id = 4
+        purchaser.telegram_id = 222
+        purchaser.referred_by = 111
+
+        session = AsyncMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        session.begin_nested = MagicMock(return_value=mock_ctx)
+        # 1. purchaser, 2. referrer, 3. active_referrals_count (3 -> hits Silver boundary),
+        # 4. other qualifying order (None), 5. other qualifying payment (None),
+        # 6. existing check (None)
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, 3, None, None, None])
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        result = asyncio.run(
+            grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=4,
+                payment_id=42,
+                topup_amount=100,
+            )
+        )
+
+        assert result.referrer_bonus == Decimal(15)  # 15% rate applied to this 3rd qualifying topup
+        assert result.bonus_rate_pct == 15
+        assert result.tier_upgraded is True
+        assert result.new_tier_name == "Silver"
+        assert result.new_rate_pct == 20
+
     def test_reverse_referral_bonus_for_topup(self):
         import asyncio
 

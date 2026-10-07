@@ -274,6 +274,25 @@ async def cmd_start(
 
     await _ensure_bot_unblocked(session, telegram_id)
 
+    if getattr(user, "is_newly_referred", False) and user.referred_by:
+        try:
+            from bot.keyboards.notifications import get_referral_onboarding_keyboard
+            from utils.telegram import EFFECT_LIKE, safe_send_message
+
+            await safe_send_message(
+                message.bot,
+                user.referred_by,
+                texts.REFERRAL_ONBOARDING_NOTIFICATION,
+                reply_markup=get_referral_onboarding_keyboard(),
+                message_effect_id=EFFECT_LIKE,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to send referral onboarding push to %s: %s",
+                user.referred_by,
+                e,
+            )
+
     if is_new_user:
         builder = InlineKeyboardBuilder()
         builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")

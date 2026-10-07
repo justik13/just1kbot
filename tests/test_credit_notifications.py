@@ -99,7 +99,16 @@ class TestSettlementCreatesDebt(unittest.IsolatedAsyncioTestCase):
 
         debt = order.metadata_.get("referrer_notify_pending")
         self.assertEqual(
-            debt, {"user_id": 7, "telegram_id": 777, "bonus": "15"}
+            debt,
+            {
+                "user_id": 7,
+                "telegram_id": 777,
+                "bonus": "15",
+                "bonus_rate_pct": 15,
+                "tier_upgraded": False,
+                "new_tier_name": None,
+                "new_rate_pct": None,
+            },
         )
 
     @patch("services.order_service.FulfillmentService")
@@ -509,6 +518,53 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("15", text)
         self.assertTrue(len(texts.REFERRAL_BONUS_ACCREDITED) > 0)
+
+    async def test_referrer_push_formats_detailed_amount_and_balance(self):
+        from services.workers import credit_notifications as worker
+
+        with patch.object(
+            worker, "safe_send_message", new=AsyncMock(return_value=99)
+        ) as mock_send:
+            self.assertTrue(
+                await worker._send_referrer_push(
+                    AsyncMock(),
+                    {
+                        "telegram_id": 555,
+                        "bonus": Decimal("15"),
+                        "bonus_rate_pct": 15,
+                        "bonus_balance": 45,
+                    },
+                )
+            )
+            text = mock_send.await_args[0][2]
+        self.assertIn("+15 ₽", text)
+        self.assertIn("15%", text)
+        self.assertIn("45 ₽", text)
+
+    async def test_referrer_push_sends_tier_upgrade(self):
+        from services.workers import credit_notifications as worker
+
+        with patch.object(
+            worker, "safe_send_message", new=AsyncMock(return_value=99)
+        ) as mock_send:
+            self.assertTrue(
+                await worker._send_referrer_push(
+                    AsyncMock(),
+                    {
+                        "telegram_id": 555,
+                        "bonus": Decimal("20"),
+                        "bonus_rate_pct": 20,
+                        "bonus_balance": 100,
+                        "tier_upgraded": True,
+                        "new_tier_name": "Silver",
+                        "new_rate_pct": 20,
+                    },
+                )
+            )
+            self.assertEqual(mock_send.await_count, 2)
+            upgrade_call_text = mock_send.await_args_list[1][0][2]
+            self.assertIn("Silver", upgrade_call_text)
+            self.assertIn("20%", upgrade_call_text)
 
     async def test_batch_counts_deliveries(self):
         from services.workers import credit_notifications as worker

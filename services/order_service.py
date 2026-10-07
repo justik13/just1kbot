@@ -118,6 +118,10 @@ class OrderService:
                     "user_id": grant_result.referrer_user_id,
                     "telegram_id": grant_result.referrer_telegram_id,
                     "bonus": str(grant_result.referrer_bonus),
+                    "bonus_rate_pct": grant_result.bonus_rate_pct,
+                    "tier_upgraded": grant_result.tier_upgraded,
+                    "new_tier_name": grant_result.new_tier_name,
+                    "new_rate_pct": grant_result.new_rate_pct,
                 }
                 order.metadata_ = referrer_meta
 

@@ -186,6 +186,7 @@ class SubscriptionService:
                     if is_valid:
                         user.referred_by = ref_id
                         changed = True
+                        user.is_newly_referred = True
 
                         from services.audit_service import AuditService
                         await AuditService.log_action(
@@ -272,6 +273,9 @@ class SubscriptionService:
                 )
 
         if created and user is not None:
+            if referred_by:
+                user.is_newly_referred = True
+
             from services.audit_service import AuditService
             await AuditService.log_action(
                 session,

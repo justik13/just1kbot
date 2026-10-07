@@ -42,7 +42,7 @@ from services.order_notifications import (
     mark_notified,
     mark_referrer_notified,
 )
-from utils.telegram import EFFECT_CONFETTI, safe_send_message
+from utils.telegram import EFFECT_CONFETTI, EFFECT_FIRE, safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -196,16 +196,41 @@ async def _send_late_push(
 async def _send_referrer_push(bot: Bot, referrer: dict) -> bool:
     """Proactive push for a referral bonus (no DB access)."""
     try:
-        text = texts.REFERRAL_BONUS_ACCREDITED.format(
-            bonus=int(referrer["bonus"])
-        )
+        bonus = int(referrer["bonus"])
+        rate_pct = referrer.get("bonus_rate_pct")
+        bonus_balance = referrer.get("bonus_balance")
+
+        if rate_pct is not None and bonus_balance is not None:
+            text = texts.REFERRAL_BONUS_ACCREDITED_DETAILED.format(
+                bonus=bonus,
+                rate_pct=rate_pct,
+                bonus_balance=bonus_balance,
+            )
+        else:
+            text = texts.REFERRAL_BONUS_ACCREDITED.format(
+                bonus=bonus
+            )
+
         sent_id = await safe_send_message(
             bot,
             referrer["telegram_id"],
             text,
             reply_markup=get_referral_bonus_keyboard(),
-            message_effect_id=EFFECT_CONFETTI,
+            message_effect_id=EFFECT_FIRE,
         )
+
+        if referrer.get("tier_upgraded") and referrer.get("new_tier_name"):
+            upgrade_text = texts.REFERRAL_TIER_UPGRADE_NOTIFICATION.format(
+                tier_name=referrer["new_tier_name"],
+                rate_pct=referrer.get("new_rate_pct", 20),
+            )
+            await safe_send_message(
+                bot,
+                referrer["telegram_id"],
+                upgrade_text,
+                message_effect_id=EFFECT_FIRE,
+            )
+
         return sent_id is not None
     except Exception as exc:
         logger.warning("Credit-notify referrer send failed: %s", exc)
@@ -351,10 +376,16 @@ async def _snapshot(order_id) -> dict | None:
             ):
                 referrer = {"kind": "drop"}
             else:
+                ref_balance = await get_account_balance(session, user_id=ref_user.id)
                 referrer = {
                     "kind": "send",
                     "telegram_id": ref_user.telegram_id,
                     "bonus": bonus,
+                    "bonus_balance": int(ref_balance.bonus_available),
+                    "bonus_rate_pct": debt.get("bonus_rate_pct"),
+                    "tier_upgraded": bool(debt.get("tier_upgraded")),
+                    "new_tier_name": debt.get("new_tier_name"),
+                    "new_rate_pct": debt.get("new_rate_pct"),
                 }
 
         if owner is None and referrer is None:
