@@ -1189,6 +1189,7 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
             amount_rub=Decimal("150.00"),
             order_id=order.id,
             metadata={"description": order.description},
+            locked_user=user,
         )
 
 
