@@ -217,9 +217,9 @@ class WhiteInternetService:
         contract (15-minute TTL, bonus-first debit, identical failure
         messages) without quote machinery.
         """
-        if getattr(user, "financial_hold", False):
+        if getattr(user, "financial_hold", False) is True:
             return None, (False, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, None)
-        if getattr(user, "topup_blocked", False):
+        if getattr(user, "topup_blocked", False) is True:
             return None, (False, texts.TOPUP_ERROR_BLOCKED, None)
 
         now = now_utc()
