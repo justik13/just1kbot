@@ -271,8 +271,9 @@ async def healthcheck_handler(
                 return web.Response(status=503, text="Unhealthy (Workers Stopped)")
             try:
                 ts = int(content)
-                if now - ts > 180:
-                    logger.warning("Healthcheck Workers failed: stale heartbeat (age=%ss)", int(now - ts))
+                now_wall = int(time.time())
+                if now_wall - ts > 180:
+                    logger.warning("Healthcheck Workers failed: stale heartbeat (age=%ss)", int(now_wall - ts))
                     _healthcheck_cache = (now, 503, "Unhealthy (Workers Stale)")
                     return web.Response(status=503, text="Unhealthy (Workers Stale)")
             except ValueError:

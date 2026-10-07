@@ -7,7 +7,15 @@ import subprocess
 import sys
 import unittest
 
-from scripts.audit_invariants import _PROJECT_ROOT, _inspect_alembic_head, assert_inv_15_alembic_single_head
+from unittest.mock import AsyncMock, MagicMock
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from scripts.audit_invariants import (
+    _PROJECT_ROOT,
+    _inspect_alembic_head,
+    assert_inv_10_account_balance_non_negativity,
+    assert_inv_15_alembic_single_head,
+)
 
 
 class AuditInvariantsTests(unittest.IsolatedAsyncioTestCase):
@@ -45,6 +53,29 @@ class AuditInvariantsTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(res.passed)
         self.assertEqual(res.number, 15)
         self.assertIn("Single head verified", res.details)
+
+    async def test_inv_10_account_balance_passes_when_no_violations(self):
+        """Invariant 10 passes when query returns no violations."""
+        session = AsyncMock(spec=AsyncSession)
+        mock_res = MagicMock()
+        mock_res.all.return_value = []
+        session.execute.return_value = mock_res
+
+        res = await assert_inv_10_account_balance_non_negativity(session)
+        self.assertTrue(res.passed)
+        self.assertEqual(res.number, 10)
+
+    async def test_inv_10_account_balance_fails_when_violations_exist(self):
+        """Invariant 10 fails when query returns violations with unexplained deficit."""
+        session = AsyncMock(spec=AsyncSession)
+        mock_res = MagicMock()
+        mock_res.all.return_value = [(101, -500, 0)]
+        session.execute.return_value = mock_res
+
+        res = await assert_inv_10_account_balance_non_negativity(session)
+        self.assertFalse(res.passed)
+        self.assertEqual(res.number, 10)
+        self.assertIn("1 users with unexplained negative balance", res.details)
 
 
 if __name__ == "__main__":

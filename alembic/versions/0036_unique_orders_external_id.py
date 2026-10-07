@@ -18,7 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_index("ix_orders_external_id", table_name="orders")
+    op.drop_index("ix_orders_external_id", table_name="orders", if_exists=True)
     op.create_index(
         "ix_orders_external_id",
         "orders",
@@ -29,7 +29,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_orders_external_id", table_name="orders")
+    op.drop_index("ix_orders_external_id", table_name="orders", if_exists=True)
     op.create_index(
         "ix_orders_external_id",
         "orders",

@@ -117,8 +117,8 @@ class TestAuditSecurityFixes(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(order.metadata_.get("subscription_id"), 999)
 
-    async def test_h8_underpayment_marks_manual_review_and_underpaid_metadata(self):
-        """H8: mark_order_paid underpayment records underpaid and manual_review in metadata."""
+    async def test_h8_underpayment_marks_manual_review_and_persists_external_id(self):
+        """H8: mark_order_paid underpayment records underpaid, manual_review and persists external_id."""
         session = AsyncMock(spec=AsyncSession)
         order = Order(
             id=uuid.uuid4(),
@@ -134,9 +134,11 @@ class TestAuditSecurityFixes(unittest.IsolatedAsyncioTestCase):
             session,
             order.id,
             paid_amount_rub=Decimal("300.00"),
+            external_id="ext-underpaid-123",
         )
 
         self.assertIsNone(result)
+        self.assertEqual(order.external_id, "ext-underpaid-123")
         self.assertTrue(order.metadata_.get("underpaid"))
         self.assertEqual(order.metadata_.get("underpaid_expected"), "500.00")
         self.assertEqual(order.metadata_.get("underpaid_received"), "300.00")
@@ -144,7 +146,7 @@ class TestAuditSecurityFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.metadata_.get("manual_review_reason"), "underpayment")
 
     async def test_h9_healthcheck_detects_worker_heartbeat_status(self):
-        """H9: Webhook /health endpoint verifies worker heartbeat file."""
+        """H9: Webhook /health endpoint verifies worker heartbeat file status."""
         from aiohttp.test_utils import make_mocked_request
         from bot.handlers.webhook import healthcheck_handler
         import tempfile
@@ -161,7 +163,6 @@ class TestAuditSecurityFixes(unittest.IsolatedAsyncioTestCase):
             with patch.dict(os.environ, {"JUST1KBOT_HEARTBEAT_FILE": temp_path}):
                 with patch("bot.handlers.webhook.session_scope"):
                     with patch("bot.handlers.webhook._get_healthcheck_redis", return_value=mock_redis):
-                        # Clear cache
                         import bot.handlers.webhook as wh
                         wh._healthcheck_cache = None
                         req = make_mocked_request("GET", "/health")
@@ -174,3 +175,67 @@ class TestAuditSecurityFixes(unittest.IsolatedAsyncioTestCase):
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
             await asyncio.to_thread(_cleanup)
+
+    async def test_h9_healthcheck_detects_stale_worker_heartbeat_timestamp(self):
+        """H9: Webhook /health endpoint verifies worker heartbeat file timestamp against wall clock."""
+        from aiohttp.test_utils import make_mocked_request
+        from bot.handlers.webhook import healthcheck_handler
+        import tempfile
+        import time
+
+        # Stale timestamp: 300 seconds ago
+        stale_ts = int(time.time()) - 300
+        with tempfile.NamedTemporaryFile("w+", delete=False) as tf:
+            tf.write(f"{stale_ts}\n")
+            tf.flush()
+            temp_path = tf.name
+
+        mock_redis = MagicMock()
+        mock_redis.ping = AsyncMock(return_value=True)
+
+        try:
+            with patch.dict(os.environ, {"JUST1KBOT_HEARTBEAT_FILE": temp_path}):
+                with patch("bot.handlers.webhook.session_scope"):
+                    with patch("bot.handlers.webhook._get_healthcheck_redis", return_value=mock_redis):
+                        import bot.handlers.webhook as wh
+                        wh._healthcheck_cache = None
+                        req = make_mocked_request("GET", "/health")
+                        resp = await healthcheck_handler(req)
+                        self.assertEqual(resp.status, 503)
+                        self.assertIn("Workers Stale", resp.text)
+        finally:
+            import asyncio
+            def _cleanup():
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            await asyncio.to_thread(_cleanup)
+
+    async def test_revoke_order_skips_white_internet_auxiliary_operations(self):
+        """WI: revoking topup or add_device_slot order does not deactivate user subscriptions."""
+        session = AsyncMock(spec=AsyncSession)
+        user = User(id=42, telegram_id=1001)
+        session.get.return_value = user
+
+        topup_order = Order(
+            id=uuid.uuid4(),
+            user_id=42,
+            service_type="white_internet",
+            amount_rub=Decimal("150.00"),
+            metadata_={"operation": "topup"},
+        )
+
+        with patch("services.white_internet_service.WhiteInternetService.deactivate_user_subscriptions", new=AsyncMock()) as mock_deact:
+            await FulfillmentService.revoke_order(session, topup_order)
+            mock_deact.assert_not_called()
+
+        slot_order = Order(
+            id=uuid.uuid4(),
+            user_id=42,
+            service_type="white_internet",
+            amount_rub=Decimal("100.00"),
+            metadata_={"operation": "add_device_slot"},
+        )
+
+        with patch("services.white_internet_service.WhiteInternetService.deactivate_user_subscriptions", new=AsyncMock()) as mock_deact:
+            await FulfillmentService.revoke_order(session, slot_order)
+            mock_deact.assert_not_called()

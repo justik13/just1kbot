@@ -109,6 +109,7 @@ class FulfillmentService:
                     meta = dict(order.metadata_ or {})
                     meta["subscription_id"] = created_sub.id
                     order.metadata_ = meta
+                    await session.flush()
             logger.info("Fulfilled White Internet order %s for user %s", order.id, user.id)
 
         elif order.service_type == "topup":
@@ -159,7 +160,19 @@ class FulfillmentService:
             )
 
         elif order.service_type == "white_internet":
-            target_sub_id = (order.metadata_ or {}).get("subscription_id")
+            meta = dict(order.metadata_ or {})
+            meta_op = meta.get("operation")
+            target_sub_id = meta.get("subscription_id")
+
+            if meta_op in ("topup", "add_device_slot"):
+                logger.warning(
+                    "Revoke White Internet order %s for user %s: auxiliary operation %s, skipping subscription deactivation",
+                    order.id,
+                    user.id,
+                    meta_op,
+                )
+                return
+
             await WhiteInternetService.deactivate_user_subscriptions(
                 session,
                 user.id,
