@@ -228,9 +228,10 @@ async def create_order_debit(
     amount_rub: object,
     order_id: object,
     metadata: dict | None = None,
+    locked_user: User | None = None,
 ) -> tuple[AccountLedgerEntry | None, bool]:
     amount = -abs(whole_rubles(amount_rub, allow_zero=True))
-    user = await lock_account_user(session, user_id)
+    user = await lock_account_user(session, user_id, locked_user=locked_user)
     if amount == 0:
         return None, False
     existing = await session.scalar(

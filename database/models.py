@@ -551,6 +551,7 @@ class Order(Base):
         Index(
             "ix_orders_external_id",
             "external_id",
+            unique=True,
             postgresql_where=text("external_id IS NOT NULL"),
         ),
         Index("ix_orders_status", "status"),

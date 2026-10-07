@@ -8,7 +8,7 @@ import logging
 import math
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -301,6 +301,15 @@ class OrderService:
         final_duration = duration_days if duration_days is not None else 0
         final_desc = description or texts.CHECKOUT_DESCRIPTION_DEFAULT
 
+        # Lock user to serialize concurrent order creation (prevent double-clicks/races)
+        try:
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": -user_id},
+            )
+        except Exception:
+            pass
+
         # 1. Deduplication guard for pending external orders (prevent double-clicks)
         if payment_method != "wallet":
             cutoff = now_utc() - timedelta(minutes=15)
@@ -407,8 +416,15 @@ class OrderService:
         description: str | None = None,
         metadata: dict | None = None,
     ) -> Order:
-        """Pay for an order immediately using internal wallet balance."""
-        user = await session.get(User, user_id)
+        # Acquire advisory lock then row lock to avoid lock inversion deadlock
+        try:
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": -user_id},
+            )
+        except Exception:
+            pass
+        user = await session.get(User, user_id, with_for_update=True)
         if user and getattr(user, "financial_hold", False):
             raise FinancialHoldBlockedError("Financial hold active on user")
 
@@ -429,7 +445,7 @@ class OrderService:
 
         cost = amount_rub if amount_rub is not None else Decimal("0.00")
         balance_snapshot = await get_account_balance(
-            session, user_id=user_id, for_update=True
+            session, user_id=user_id, for_update=True, locked_user=user
         )
         if balance_snapshot.debt > 0:
             raise AccountDebtBlockedError("Account debt prevents wallet purchases")
@@ -464,6 +480,7 @@ class OrderService:
                 amount_rub=cost,
                 order_id=order.id,
                 metadata={"description": order.description},
+                locked_user=user,
             )
 
         # Fulfill
@@ -556,6 +573,9 @@ class OrderService:
                 "Reviving canceled order %s on valid payment received", order.id
             )
 
+        if external_id:
+            order.external_id = external_id
+
         if paid_amount_rub is not None and paid_amount_rub < order.amount_rub:
             logger.error(
                 "Order %s underpaid: expected %s, got %s",
@@ -563,6 +583,14 @@ class OrderService:
                 order.amount_rub,
                 paid_amount_rub,
             )
+            order_meta = dict(order.metadata_ or {})
+            order_meta["underpaid"] = True
+            order_meta["underpaid_expected"] = str(order.amount_rub)
+            order_meta["underpaid_received"] = str(paid_amount_rub)
+            order_meta["manual_review"] = True
+            order_meta["manual_review_reason"] = "underpayment"
+            order.metadata_ = order_meta
+            await session.flush()
             return None
 
         order.status = "paid"
@@ -572,8 +600,6 @@ class OrderService:
             order_meta = dict(order.metadata_ or {})
             order_meta["revived_from_canceled"] = True
             order.metadata_ = order_meta
-        if external_id:
-            order.external_id = external_id
 
         # Settlement boundary: funnel guards (topup_blocked/financial_hold)
         # use stale ORM state and only cover creation. Money arriving here
