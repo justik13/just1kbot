@@ -8,7 +8,7 @@ import logging
 import math
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -301,6 +301,15 @@ class OrderService:
         final_duration = duration_days if duration_days is not None else 0
         final_desc = description or texts.CHECKOUT_DESCRIPTION_DEFAULT
 
+        # Lock user to serialize concurrent order creation (prevent double-clicks/races)
+        try:
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": -user_id},
+            )
+        except Exception:
+            pass
+
         # 1. Deduplication guard for pending external orders (prevent double-clicks)
         if payment_method != "wallet":
             cutoff = now_utc() - timedelta(minutes=15)
@@ -408,7 +417,7 @@ class OrderService:
         metadata: dict | None = None,
     ) -> Order:
         """Pay for an order immediately using internal wallet balance."""
-        user = await session.get(User, user_id)
+        user = await session.get(User, user_id, with_for_update=True)
         if user and getattr(user, "financial_hold", False):
             raise FinancialHoldBlockedError("Financial hold active on user")
 
@@ -563,6 +572,14 @@ class OrderService:
                 order.amount_rub,
                 paid_amount_rub,
             )
+            order_meta = dict(order.metadata_ or {})
+            order_meta["underpaid"] = True
+            order_meta["underpaid_expected"] = str(order.amount_rub)
+            order_meta["underpaid_received"] = str(paid_amount_rub)
+            order_meta["manual_review"] = True
+            order_meta["manual_review_reason"] = "underpayment"
+            order.metadata_ = order_meta
+            await session.flush()
             return None
 
         order.status = "paid"

@@ -3,6 +3,8 @@ import hashlib
 import ipaddress
 import json
 import logging
+import os
+from pathlib import Path
 import time
 import uuid
 
@@ -260,8 +262,35 @@ async def healthcheck_handler(
             _healthcheck_cache = (now, 503, "Unhealthy")
             return web.Response(status=503, text="Unhealthy")
 
+        # Проверка Workers Heartbeat (если файл настроен или существует)
+        content = await asyncio.to_thread(_read_worker_heartbeat)
+        if content is not None:
+            if content.startswith("STOPPED"):
+                logger.warning("Healthcheck Workers failed: reported STOPPED")
+                _healthcheck_cache = (now, 503, "Unhealthy (Workers Stopped)")
+                return web.Response(status=503, text="Unhealthy (Workers Stopped)")
+            try:
+                ts = int(content)
+                if now - ts > 180:
+                    logger.warning("Healthcheck Workers failed: stale heartbeat (age=%ss)", int(now - ts))
+                    _healthcheck_cache = (now, 503, "Unhealthy (Workers Stale)")
+                    return web.Response(status=503, text="Unhealthy (Workers Stale)")
+            except ValueError:
+                pass
+
         _healthcheck_cache = (now, 200, "OK")
         return web.Response(status=200, text="OK")
+
+
+def _read_worker_heartbeat() -> str | None:
+    heartbeat_path = os.environ.get("JUST1KBOT_HEARTBEAT_FILE", "/run/just1kbot/heartbeat")
+    heartbeat_file = Path(heartbeat_path)
+    if heartbeat_file.exists():
+        try:
+            return heartbeat_file.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            logger.warning("Healthcheck Workers heartbeat read error: %s", e)
+    return None
 
 
 def _get_healthcheck_redis():

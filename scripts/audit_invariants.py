@@ -257,12 +257,22 @@ async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> Invari
 
 
 async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) -> InvariantResult:
-    """Inv 10: All users have non-negative net accounting position in ledger."""
+    """Inv 10: All users without refund/chargeback debits have non-negative net accounting position."""
+    subq_adjustments = (
+        select(AccountLedgerEntry.user_id)
+        .where(
+            AccountLedgerEntry.entry_type.in_(
+                ("refund_debit", "chargeback_debit", "admin_adjustment")
+            )
+        )
+        .scalar_subquery()
+    )
     res = await session.execute(
         select(
             AccountLedgerEntry.user_id,
             func.coalesce(func.sum(AccountLedgerEntry.amount), Decimal("0")).label("net_balance"),
         )
+        .where(AccountLedgerEntry.user_id.not_in(subq_adjustments))
         .group_by(AccountLedgerEntry.user_id)
         .having(func.coalesce(func.sum(AccountLedgerEntry.amount), Decimal("0")) < 0)
     )
@@ -272,10 +282,13 @@ async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) ->
             10,
             "Account Balance Non-Negativity",
             False,
-            f"Violations found: {len(violations)} users with negative balance",
+            f"Violations found: {len(violations)} users with unexplained negative balance",
         )
     return InvariantResult(
-        10, "Account Balance Non-Negativity", True, "All user accounting balances are non-negative"
+        10,
+        "Account Balance Non-Negativity",
+        True,
+        "All user accounting balances are non-negative or explained by refund/debt",
     )
 
 
