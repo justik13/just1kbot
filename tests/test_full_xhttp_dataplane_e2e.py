@@ -54,21 +54,8 @@ from database.repositories.servers_repo import capacity_consuming_wl_condition
 from services.white_internet_service import WhiteInternetService
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-JUST1KNODE_SH = REPO_ROOT / "scripts" / "just1knode.sh"
 CADDYFILE = REPO_ROOT / "Caddyfile"
 CADDYFILE_CI = REPO_ROOT / "Caddyfile.ci"
-
-
-def _read_just1knode_content() -> str:
-    content = ""
-    just1knode_dir = REPO_ROOT / "just1knode"
-    if just1knode_dir.exists():
-        for p in sorted(just1knode_dir.glob("**/*")):
-            if p.is_file():
-                content += p.read_text(encoding="utf-8", errors="ignore") + "\n"
-    if JUST1KNODE_SH.exists():
-        content += JUST1KNODE_SH.read_text(encoding="utf-8", errors="ignore")
-    return content
 
 
 class DummySubscription:
@@ -95,7 +82,6 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
 
     def test_link_path_strictly_matches_nginx_location(self) -> None:
         """VLESS link path generated for standalone origin must match Nginx location ^~ block."""
-        sh_content = _read_just1knode_content()
         sub = DummySubscription()
 
         # 1. Standalone Origin (no relays attached)
@@ -115,12 +101,6 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertIn("path", params)
         link_path = params["path"][0]
         self.assertEqual(link_path, "/w_abcdef12/default")
-
-        # Nginx configuration template must define location ^~ ${secret_path}/default
-        if (REPO_ROOT / "just1knode").exists():
-            self.assertIn("location ^~ ${secret_path}/default", sh_content)
-            # Nginx default config must define client_max_body_size 0
-            self.assertIn("client_max_body_size 0;", sh_content)
 
     def test_relay_links_match_nginx_relay_locations(self) -> None:
         """When relays are present, links must match the per-relay Nginx locations."""
@@ -199,28 +179,6 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
         self.assertEqual(xhttp_settings.get("path"), "/w_custom/default")
         self.assertEqual(xhttp_settings.get("uplinkHTTPMethod"), "GET")
 
-        # just1knode template must also use queryInHeader
-        if (REPO_ROOT / "just1knode").exists():
-            sh_content = _read_just1knode_content()
-            self.assertIn("'xPaddingPlacement': 'queryInHeader'", sh_content)
-
-    def test_origin_routing_default_fallback_and_ru_split(self) -> None:
-        """On Origin node, default inbound routes to just1k-wl-direct (Russian IP egress), and RU domains route direct."""
-        if not (REPO_ROOT / "just1knode").exists():
-            self.skipTest("just1knode templates moved to dedicated repository")
-        sh_content = _read_just1knode_content()
-
-        # Default inbound always routes directly to just1k-wl-direct (Moscow IP egress)
-        self.assertIn("def_rule['outboundTag'] = 'just1k-wl-direct'", sh_content)
-        self.assertIn("r['outboundTag'] = 'just1k-wl-direct'", sh_content)
-
-        # Server-side split routing uses geosite:category-ru and geosite:tld-ru
-        self.assertIn("'geosite:category-ru'", sh_content)
-        self.assertIn("'geosite:tld-ru'", sh_content)
-        self.assertIn("'outboundTag': 'just1k-wl-direct'", sh_content)
-        # Verify relay outbound rule is inserted after dom_rule (direct Russian domains) and before IP rules to prevent foreign DNS leaks
-        self.assertIn("insert_idx = rules.index(dom_rule) + 1", sh_content)
-
     def test_client_dns_fakedns_and_routing_architecture(self) -> None:
         """Client routing and DNS must use FakeDNS, DoH via proxy, and no Yandex DNS leaks."""
         sub = DummySubscription()
@@ -254,29 +212,6 @@ class TestFullXHttpDataPlaneE2E(unittest.TestCase):
             None,
         )
         self.assertIsNotNone(doh_rule)
-
-    def test_nginx_zero_signature_and_buffers(self) -> None:
-        """Nginx must serve zero-signature 404 on / and define zero request buffering for streaming."""
-        if not (REPO_ROOT / "just1knode").exists():
-            self.skipTest("just1knode templates moved to dedicated repository")
-        sh_content = _read_just1knode_content()
-
-        # Zero-signature standard: 404 on location / without camouflage leaks
-        self.assertIn("location / {\n        default_type text/plain;\n        return 404 \"Not Found\\n\";\n    }", sh_content)
-
-        # /cdn-check endpoint returning 204
-        self.assertIn("location = /cdn-check", sh_content)
-        self.assertIn("return 204;", sh_content)
-
-        # Buffer limits (H12)
-        self.assertIn("client_max_body_size 0;", sh_content)
-        self.assertIn("large_client_header_buffers 8 64k;", sh_content)
-
-        # Certbot renewal deploy hook installed with execute permissions
-        self.assertIn("${LETSENCRYPT_DIR}/renewal-hooks/deploy/restart-xray-nginx.sh", sh_content)
-        self.assertIn("chmod +x \"${LETSENCRYPT_DIR}/renewal-hooks/deploy/restart-xray-nginx.sh\"", sh_content)
-        self.assertIn("systemctl reload nginx", sh_content)
-        self.assertIn("systemctl restart xray", sh_content)
 
     def test_caddyfile_dynamic_prefix_routing(self) -> None:
         """Caddyfile must match custom and dynamic subscription prefixes."""

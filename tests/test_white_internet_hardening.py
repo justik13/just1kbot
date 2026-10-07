@@ -648,66 +648,6 @@ class TestGroupLReconciliationWorkerConcurrency(unittest.TestCase):
         self.assertIsNot(lock1, lock3)
 
 
-class TestGroupMNodeAgentFailClosedTombstone(unittest.TestCase):
-    """Group M: Node Agent Fail-Closed Tombstone."""
-
-    def test_delete_client_source_contains_fail_closed_exception(self):
-        app_path = Path("scripts/xray_api/app.py")
-        if not app_path.exists():
-            self.skipTest("scripts/xray_api moved to dedicated repository")
-        content = app_path.read_text(encoding="utf-8")
-        self.assertIn("client_store.delete_client", content)
-        self.assertIn("HTTPException", content)
-        self.assertIn("500", content)
-        self.assertIn("Failed to persist client tombstone to disk", content)
-
-
-class TestGroupNNodeAgentInboundDiscovery(unittest.TestCase):
-    """Group N: Node Agent Inbound Discovery & Namespacing."""
-
-    def test_inbound_discovery_filters_just1k_namespace(self):
-        app_path = Path("scripts/xray_api/app.py")
-        if not app_path.exists():
-            self.skipTest("scripts/xray_api moved to dedicated repository")
-        content = app_path.read_text(encoding="utf-8")
-        self.assertIn("just1k-wl-", content)
-        self.assertIn("get_target_inbounds", content)
-
-
-class TestGroupONodeAgentDurableDirectoryFsync(unittest.TestCase):
-    """Group O: Node Agent Durable Directory Fsync."""
-
-    def test_save_client_entries_contains_directory_fsync(self):
-        cs_path = Path("scripts/xray_api/client_store.py")
-        if not cs_path.exists():
-            self.skipTest("scripts/xray_api moved to dedicated repository")
-        content = cs_path.read_text(encoding="utf-8")
-        self.assertIn("os.fsync", content)
-        self.assertIn("replace", content)
-        self.assertIn("parent", content)
-
-
-class TestGroupPHostProvisioningScriptSecurity(unittest.TestCase):
-    """Group P: Host Provisioning Script Security (just1knode)."""
-
-    def test_script_contains_security_elements(self):
-        just1knode_dir = Path("just1knode")
-        if not just1knode_dir.exists():
-            self.skipTest("just1knode moved to dedicated repository")
-        content = ""
-        for path in just1knode_dir.glob("**/*"):
-            if path.is_file():
-                content += path.read_text(encoding="utf-8", errors="ignore") + "\n"
-        wrapper = Path("scripts/just1knode.sh")
-        if wrapper.exists():
-            content += wrapper.read_text(encoding="utf-8", errors="ignore")
-
-        self.assertIn("xrayapi", content)
-        self.assertIn("8444", content)
-        self.assertIn("renewal-hooks/deploy", content)
-        self.assertIn("index.html", content)
-        self.assertIn("Zero-Collateral", content)
-
 
 class TestGroupQProtocolInvariantAndZeroSecrets(unittest.TestCase):
     """Group Q: Protocol Invariant & Secret Zero-Logging Guard."""
