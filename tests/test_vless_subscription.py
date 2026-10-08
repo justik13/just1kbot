@@ -319,3 +319,49 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("security=tls", links[0])
         self.assertIn("#🇩🇪 DE Server?serverDescription=", links[0])
         self.assertNotIn("%F0%9F", links[0])
+
+
+class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
+    """Test suite for connections screen prioritizing VLESS subscription."""
+
+    async def test_build_connections_screen_prioritizes_vless_sub(self):
+        from types import SimpleNamespace
+        from bot import texts
+        from bot.handlers.connection.common import _build_connections_screen
+
+        user = SimpleNamespace(id=1, telegram_id=123, subscription_end=None)
+        session = AsyncMock()
+
+        mock_server = SimpleNamespace(country_flag="🇳🇱", name="Netherlands")
+        profile = SimpleNamespace(
+            id=10,
+            user_id=1,
+            server_id=1,
+            device_name="Keenetic",
+            provisioning_status="active",
+            server=mock_server,
+            last_connected=None,
+            traffic_down=0,
+            traffic_up=0,
+        )
+
+        with (
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
+            patch("bot.handlers.connection.common._get_effective_device_limit", new=AsyncMock(return_value=5)),
+        ):
+            rendered, builder = await _build_connections_screen(user, session, [profile])
+
+            self.assertIn("(2/5)", rendered)
+            self.assertIn("Подключение по ссылке: <b>1</b>", rendered)
+            self.assertIn("Ручные профили: <b>1</b>", rendered)
+            self.assertIn("Ручные профили (роутеры/ПК):", rendered)
+            self.assertIn("Keenetic", rendered)
+
+            markup = builder.as_markup()
+            buttons = [btn for row in markup.inline_keyboard for btn in row]
+            self.assertGreaterEqual(len(buttons), 3)
+            self.assertEqual(buttons[0].text, texts.BTN_VLESS_SUB_INFO)
+            self.assertEqual(buttons[0].callback_data, "vless_sub_feed_info")
+            self.assertEqual(buttons[1].callback_data, "manage_device:10")
+            self.assertEqual(buttons[2].text, texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL)
+            self.assertEqual(buttons[2].callback_data, "add_device")

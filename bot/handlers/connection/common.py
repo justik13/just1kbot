@@ -123,19 +123,30 @@ async def _build_connections_screen(
             )
         else:
             rendered += texts.CONNECTION_EXPIRED_NO_GRACE
+    else:
+        breakdown = []
+        if vless_hwid_count > 0:
+            breakdown.append(texts.CONNECTION_DETAILS_VLESS_COUNT.format(count=vless_hwid_count))
+        if quota_profiles_count > 0:
+            breakdown.append(texts.CONNECTION_DETAILS_MANUAL_COUNT.format(count=quota_profiles_count))
+        if breakdown:
+            rendered += "\n" + "\n".join(breakdown) + "\n"
 
     builder = InlineKeyboardBuilder()
 
-    if not read_only and total_active_devices < device_limit:
+    # PRIMARY: Connect via subscription link (INCY)
+    if not read_only:
         builder.button(
-            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
-            callback_data="add_device",
+            text=texts.BTN_VLESS_SUB_INFO,
+            callback_data="vless_sub_feed_info",
             style="success",
         )
 
     if visible_profiles_count == 0:
-        rendered += texts.CONNECTION_EMPTY
+        if vless_hwid_count == 0:
+            rendered += texts.CONNECTION_EMPTY
     else:
+        rendered += "\n" + texts.CONNECTION_MANUAL_PROFILES_HEADER
         for profile in profiles:
             server = profile.server
 
@@ -179,10 +190,11 @@ async def _build_connections_screen(
 
         rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
 
-    if not read_only:
+    # SUPPLEMENTARY: Add manual profile for routers / PC
+    if not read_only and total_active_devices < device_limit:
         builder.button(
-            text=texts.BTN_VLESS_SUB_INFO,
-            callback_data="vless_sub_feed_info",
+            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
+            callback_data="add_device",
         )
 
     builder.button(

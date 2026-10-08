@@ -113,9 +113,15 @@ CONNECTION_CONFIG_ESTIMATED_TIME_HOURS = "{v0} дн. {v1} ч."
 
 CONNECTION_CONFIG_PROTOCOL_FORMAT = "{v0} ч. {v1} мин."
 
-CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "➕ Добавить устройство"
+CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "🛠 Настроить роутер или ПК вручную"
 
-CONNECTION_EMPTY = "<i>У вас пока нет подключённых устройств.</i>"
+CONNECTION_EMPTY = """<i>У вас пока нет активных подключений.</i>
+
+💡 <b>Рекомендуем:</b> подключитесь по единой ссылке выше — вы получите доступ сразу ко всем серверам в приложении INCY."""
+
+CONNECTION_DETAILS_VLESS_COUNT = "• 📱 Подключение по ссылке: <b>{count}</b>"
+CONNECTION_DETAILS_MANUAL_COUNT = "• 🛠 Ручные профили: <b>{count}</b>"
+CONNECTION_MANUAL_PROFILES_HEADER = "<b>Ручные профили (роутеры/ПК):</b>"
 
 CONNECTION_EXPIRED_NO_GRACE = """
 ⚠️ <b>Подписка истекла</b>
