@@ -11,6 +11,7 @@ import urllib.parse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot import texts
 from config.enums import ServerHealthState
 from database.models import Server, User, VlessSubscription, VPNProfile
 from database.repositories import vless_subscription_repo
@@ -48,7 +49,7 @@ class VlessSubscriptionService:
             label = f"{flag} {srv.name}".strip()
             # INCY renders vector flag when emoji is the first character after #
             # and displays serverDescription badge via ?serverDescription=base64(UTF-8)
-            badge_desc = extra.get("server_description") or "Прямой доступ"
+            badge_desc = extra.get("server_description") or texts.VLESS_DEFAULT_SERVER_DESCRIPTION
             b64_badge = base64.b64encode(badge_desc.encode("utf-8")).decode("utf-8")
             fragment = f"{label}?serverDescription={b64_badge}"
 

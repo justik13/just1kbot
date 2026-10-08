@@ -111,6 +111,7 @@ from bot.texts.connection.devices import (
     VLESS_SUB_SCREEN_TEXT,
     BTN_VLESS_RESET_HWID,
     VLESS_RESET_SUCCESS,
+    VLESS_DEFAULT_SERVER_DESCRIPTION,
 )
 
 __all__ = [
@@ -217,4 +218,5 @@ __all__ = [
     "VLESS_SUB_SCREEN_TEXT",
     "BTN_VLESS_RESET_HWID",
     "VLESS_RESET_SUCCESS",
+    "VLESS_DEFAULT_SERVER_DESCRIPTION",
 ]

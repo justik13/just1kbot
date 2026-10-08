@@ -166,3 +166,4 @@ VLESS_SUB_SCREEN_TEXT = """🔗 <b>Подключение по ссылке дл
 
 BTN_VLESS_RESET_HWID = "🔄 Сбросить привязку устройств"
 VLESS_RESET_SUCCESS = "✅ Привязка устройств по ссылке сброшена."
+VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
