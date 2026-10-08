@@ -312,18 +312,6 @@ async def _process_server_selection(
         new_profile = None
         try:
             db_user_id = user.id
-            effective_limit = await _get_effective_device_limit(session, user)
-            from database.repositories import vless_subscription_repo
-            from database.repositories.profiles_repo import PROFILE_QUOTA_EXCLUDED_STATUSES, get_user_profiles
-            vless_count = await vless_subscription_repo.get_active_hwid_count(session, db_user_id)
-            user_profiles = await get_user_profiles(session, db_user_id)
-            quota_profiles_count = len([
-                p for p in user_profiles
-                if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
-            ])
-            if (quota_profiles_count + vless_count) >= effective_limit:
-                raise DeviceLimitExceeded("Device limit reached")
-
             # Defensive commit: flush any prior pending session state before the creation transaction
             await session.commit()
             snapshot = await capture_server_peer_snapshot(server_id)
