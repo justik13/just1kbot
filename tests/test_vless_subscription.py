@@ -538,6 +538,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_session.add = MagicMock()
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=existing_sub)),
