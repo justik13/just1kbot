@@ -254,7 +254,7 @@ async def _build_amnezia_screen(
     action_buttons_count = 0
     if not read_only and total_active_devices < device_limit:
         builder.button(
-            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
+            text=texts.BTN_ADD_DEVICE,
             callback_data="add_device",
         )
         action_buttons_count += 1

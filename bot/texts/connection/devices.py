@@ -170,6 +170,7 @@ VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
 
 BTN_AMNEZIA_DEVICES = "🛡 Amnezia"
 BTN_BACK_TO_CONNECTION = "◀️ Назад к подключению"
+BTN_ADD_DEVICE = "➕ Добавить устройство"
 
 CONNECTION_HUB_ACTIVE_TEXT = """🌐 <b>Подключение</b>
 
@@ -186,7 +187,7 @@ CONNECTION_HUB_ACTIVE_TEXT = """🌐 <b>Подключение</b>
 <code>{sub_url}</code>
 <i>(нажмите на ссылку для копирования)</i>
 
-💡 <i>Для роутеров или приложений Amnezia перейдите в раздел ниже.</i>"""
+💡 <i>Подключение через Amnezia доступно в разделе ниже.</i>"""
 
 CONNECTION_HUB_EXPIRED_TEXT = """🌐 <b>Подключение</b>
 
@@ -196,7 +197,7 @@ CONNECTION_HUB_EXPIRED_TEXT = """🌐 <b>Подключение</b>
 
 AMNEZIA_SCREEN_TEXT = """🛡 <b>Устройства Amnezia</b>
 
-Ручная настройка и файлы конфигураций для приложений Amnezia или роутеров.
+Подключение и файлы конфигураций для приложений Amnezia.
 
 📱 <b>Занято устройств Amnezia:</b> {amnezia_count} из {limit}
 {profiles_block}
@@ -204,9 +205,10 @@ AMNEZIA_SCREEN_TEXT = """🛡 <b>Устройства Amnezia</b>
 
 AMNEZIA_SCREEN_EMPTY_TEXT = """🛡 <b>Устройства Amnezia</b>
 
-Ручная настройка и файлы конфигураций для приложений Amnezia или роутеров.
+Подключение и файлы конфигураций для приложений Amnezia.
 
 📱 <b>Занято устройств Amnezia:</b> 0 из {limit}
 
 <i>У вас пока нет добавленных устройств Amnezia. Нажмите кнопку ниже, чтобы создать первое устройство.</i>"""
+
 
