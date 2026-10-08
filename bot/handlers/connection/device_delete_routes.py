@@ -15,7 +15,7 @@ from services.device_service import DeviceService
 from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
 
-from .common import _render_connections
+from .common import _render_amnezia_devices
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -197,7 +197,7 @@ async def confirm_delete_device(
         )
 
         if user:
-            await _render_connections(callback.message, user, session)
+            await _render_amnezia_devices(callback.message, user, session)
     except Exception:
         logger.exception("Unexpected error in confirm_delete_device for profile_id=%s", profile_id)
         if not answered:

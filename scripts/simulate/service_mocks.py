@@ -200,6 +200,7 @@ async def mock_xray_sync_client(self, api_url: str, api_key: str, client_uuid: s
             "just1k-wl-default",
             "just1k-wl-inbound-de-relay-01",
             "just1k-wl-inbound-se-relay-01",
+            "just1k-vless-direct",
         ],
     )
 

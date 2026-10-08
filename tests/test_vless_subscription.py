@@ -326,8 +326,7 @@ class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
 
     async def test_build_connections_screen_prioritizes_vless_sub(self):
         from types import SimpleNamespace
-        from bot import texts
-        from bot.handlers.connection.common import _build_connections_screen
+        from bot.handlers.connection.common import _build_amnezia_screen, _build_connections_screen
 
         user = SimpleNamespace(id=1, telegram_id=123, subscription_end=None)
         session = AsyncMock()
@@ -344,24 +343,33 @@ class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
             traffic_down=0,
             traffic_up=0,
         )
+        mock_sub = SimpleNamespace(token="sim_token_12345678", uuid="some-uuid")
 
         with (
+            patch("database.repositories.vless_subscription_repo.get_or_create_subscription", new=AsyncMock(return_value=mock_sub)),
             patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
             patch("bot.handlers.connection.common._get_effective_device_limit", new=AsyncMock(return_value=5)),
         ):
+            # 1. Main connection hub screen
             rendered, builder = await _build_connections_screen(user, session, [profile])
 
-            self.assertIn("(2/5)", rendered)
-            self.assertIn("Подключение по ссылке: <b>1</b>", rendered)
-            self.assertIn("Ручные профили: <b>1</b>", rendered)
-            self.assertIn("Ручные профили (роутеры/ПК):", rendered)
-            self.assertIn("Keenetic", rendered)
+            self.assertIn("2 из 5", rendered)
+            self.assertIn("sim_token_12345678", rendered)
+            self.assertIn("по ссылке: 1", rendered)
+            self.assertIn("Amnezia: 1", rendered)
 
             markup = builder.as_markup()
             buttons = [btn for row in markup.inline_keyboard for btn in row]
-            self.assertGreaterEqual(len(buttons), 3)
-            self.assertEqual(buttons[0].text, texts.BTN_VLESS_SUB_INFO)
-            self.assertEqual(buttons[0].callback_data, "vless_sub_feed_info")
-            self.assertEqual(buttons[1].callback_data, "manage_device:10")
-            self.assertEqual(buttons[2].text, texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL)
-            self.assertEqual(buttons[2].callback_data, "add_device")
+            self.assertTrue(any(btn.callback_data == "amnezia_devices" for btn in buttons))
+            self.assertTrue(any(btn.callback_data == "vless_sub_feed_info" for btn in buttons))
+            self.assertTrue(any(btn.callback_data == "vless_sub_reset" for btn in buttons))
+
+            # 2. Amnezia devices screen
+            amnezia_rendered, amnezia_builder = await _build_amnezia_screen(user, session, [profile])
+            self.assertIn("Keenetic", amnezia_rendered)
+            amnezia_markup = amnezia_builder.as_markup()
+            amnezia_buttons = [btn for row in amnezia_markup.inline_keyboard for btn in row]
+            self.assertTrue(any(btn.callback_data == "manage_device:10" for btn in amnezia_buttons))
+            self.assertTrue(any(btn.callback_data == "add_device" for btn in amnezia_buttons))
+            self.assertTrue(any(btn.callback_data == "back_to_connections" for btn in amnezia_buttons))
+
