@@ -649,9 +649,10 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         ):
             # 1 AWG + 2 VLESS = 3 devices. Downgrading to 2 devices must raise ValueError
             with self.assertRaises(ValueError) as ctx:
-                await SubscriptionService.change_subscription(
+                await SubscriptionService.extend_subscription(
                     mock_session,
                     telegram_id=123,
+                    days=0,
                     new_device_limit=2,
                 )
             self.assertIn("Cannot downgrade: 3 devices > 2 limit", str(ctx.exception))
@@ -674,7 +675,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
             patch("services.vless_subscription_service.VlessSubscriptionService.deprovision_uuid_from_dual_nodes", new=AsyncMock()) as mock_deprov,
         ):
-            success, status = await BanService._ban_user(mock_session, 123, admin_id=999)
+            success, status = await BanService._ban_user(mock_session, admin_id=999, user=user, telegram_id=123)
             self.assertTrue(success)
             self.assertFalse(sub.is_active)
             mock_deprov.assert_awaited_once_with(mock_session, "test-uuid")
