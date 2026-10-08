@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.enums import ServerHealthState
 from database.models import Server, User, VlessSubscription, VPNProfile
 from database.repositories import vless_subscription_repo
-from database.repositories.profiles_repo import RESERVING_STATUSES
+from services.device_service import RESERVING_STATUSES
 from services.xray_node_client import XrayNodeClient
 
 logger = logging.getLogger(__name__)

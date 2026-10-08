@@ -13,7 +13,7 @@ from bot import texts
 from database.connection import session_scope
 from database.models import VPNProfile
 from database.repositories import users_repo, vless_subscription_repo
-from database.repositories.profiles_repo import RESERVING_STATUSES
+from services.device_service import RESERVING_STATUSES
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
 from utils.datetime_helpers import now_utc
