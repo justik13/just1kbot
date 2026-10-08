@@ -139,7 +139,7 @@ class VlessSubscriptionService:
         for srv in servers:
             caps = srv.capabilities or []
             proto = (srv.protocol or "").lower()
-            if proto in ("dual", "vless") or "dual" in caps or "xray_vless" in caps:
+            if "vless" in caps or "xray_vless" in caps or "dual" in caps or proto in ("dual", "vless"):
                 eligible.append(srv)
         return eligible
 

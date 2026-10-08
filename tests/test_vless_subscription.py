@@ -122,7 +122,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/vless/test-token-valid-length-12345678")
             self.assertEqual(resp.status, 403)
 
-    async def test_expired_subscription_returns_403(self):
+    async def test_expired_subscription_returns_notice_200(self):
         mock_session = AsyncMock()
 
         @asynccontextmanager
@@ -143,7 +143,14 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("database.repositories.users_repo.get_user_by_id", return_value=expired_user),
         ):
             resp = await self.client.get("/sub/vless/test-token-valid-length-12345678")
-            self.assertEqual(resp.status, 403)
+            self.assertEqual(resp.status, 200)
+            body = await resp.text()
+            decoded = base64.b64decode(body).decode("utf-8")
+            self.assertIn("Подписка закончилась", decoded)
+            self.assertIn("127.0.0.1:443", decoded)
+            title_b64 = resp.headers.get("Profile-Title", "").replace("base64:", "")
+            title = base64.b64decode(title_b64).decode("utf-8")
+            self.assertIn("Подписка закончилась", title)
 
     async def test_missing_hwid_returns_403_with_header(self):
         mock_session = AsyncMock()
@@ -238,7 +245,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.status, 503)
             self.assertEqual(resp.headers.get("Retry-After"), "60")
 
-    async def test_financial_hold_user_returns_403(self):
+    async def test_financial_hold_user_returns_notice_200(self):
         mock_session = AsyncMock()
 
         @asynccontextmanager
@@ -261,7 +268,11 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         ):
             headers = {"X-Hwid": "test-client-hwid-99"}
             resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
-            self.assertEqual(resp.status, 403)
+            self.assertEqual(resp.status, 200)
+            body = await resp.text()
+            decoded = base64.b64decode(body).decode("utf-8")
+            self.assertIn("Доступ приостановлен", decoded)
+            self.assertIn("127.0.0.1:443", decoded)
 
     async def test_grace_period_user_returns_200(self):
         mock_session = AsyncMock()
@@ -619,21 +630,48 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
     async def test_eligible_servers_excludes_relay(self):
         from database.models import Server
         from services.vless_subscription_service import VlessSubscriptionService
+        from database.repositories.servers_repo import is_server_allocatable
         from config.enums import ServerHealthState
+        from config.constants import AMNEZIA_PROTOCOL
 
         srv_relay = Server(
-            id=1, name="WI Relay", is_active=True, health_state=ServerHealthState.ONLINE, protocol="relay"
+            id=1, name="WI Relay", is_active=True, health_state=ServerHealthState.ONLINE, protocol="xray", capabilities=["relay"]
         )
-        srv_dual = Server(
-            id=2, name="Dual Node", is_active=True, health_state=ServerHealthState.ONLINE, protocol="dual"
+        srv_awg = Server(
+            id=2, name="Solo AWG", is_active=True, health_state=ServerHealthState.ONLINE, protocol="amneziawg2", capabilities=["awg"]
+        )
+        srv_vless = Server(
+            id=3, name="Solo VLESS", is_active=True, health_state=ServerHealthState.ONLINE, protocol="vless", capabilities=["vless"]
+        )
+        srv_both = Server(
+            id=4, name="Both AWG & VLESS", is_active=True, health_state=ServerHealthState.ONLINE, protocol="amneziawg2", capabilities=["awg", "vless"]
+        )
+        srv_origin = Server(
+            id=5, name="RF Origin", is_active=True, health_state=ServerHealthState.ONLINE, protocol="xray", capabilities=["origin"]
         )
 
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[srv_relay, srv_dual])))))
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[
+                srv_relay, srv_awg, srv_vless, srv_both, srv_origin
+            ]))))
+        )
 
+        # 1. VLESS sub eligibility: only srv_vless and srv_both
         eligible = await VlessSubscriptionService.get_eligible_vless_servers(mock_session)
-        self.assertEqual(len(eligible), 1)
-        self.assertEqual(eligible[0].name, "Dual Node")
+        eligible_names = [s.name for s in eligible]
+        self.assertNotIn("WI Relay", eligible_names)
+        self.assertNotIn("Solo AWG", eligible_names)
+        self.assertNotIn("RF Origin", eligible_names)
+        self.assertIn("Solo VLESS", eligible_names)
+        self.assertIn("Both AWG & VLESS", eligible_names)
+
+        # 2. AWG allocatability: only srv_awg and srv_both
+        self.assertTrue(is_server_allocatable(srv_awg, AMNEZIA_PROTOCOL))
+        self.assertTrue(is_server_allocatable(srv_both, AMNEZIA_PROTOCOL))
+        self.assertFalse(is_server_allocatable(srv_vless, AMNEZIA_PROTOCOL))
+        self.assertFalse(is_server_allocatable(srv_relay, AMNEZIA_PROTOCOL))
+        self.assertFalse(is_server_allocatable(srv_origin, AMNEZIA_PROTOCOL))
 
     async def test_tariff_downgrade_checks_combined_quota(self):
         from database.models import User

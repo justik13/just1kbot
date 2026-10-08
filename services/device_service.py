@@ -3,7 +3,7 @@ import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,7 +115,15 @@ class DeviceService:
         server = (
             await session.execute(
                 select(Server)
-                .where(Server.id == server_id, Server.protocol.in_(AMNEZIA_PROTOCOLS))
+                .where(
+                    Server.id == server_id,
+                    or_(
+                        Server.protocol.in_(AMNEZIA_PROTOCOLS),
+                        Server.capabilities.contains(["awg"]),
+                        Server.capabilities.contains(["amnezia"]),
+                        Server.capabilities.contains(["dual"]),
+                    ),
+                )
                 .with_for_update()
             )
         ).scalar_one_or_none()
@@ -391,7 +399,15 @@ class DeviceService:
         target_server = (
             await session.execute(
                 select(Server)
-                .where(Server.id == target_server_id, Server.protocol.in_(AMNEZIA_PROTOCOLS))
+                .where(
+                    Server.id == target_server_id,
+                    or_(
+                        Server.protocol.in_(AMNEZIA_PROTOCOLS),
+                        Server.capabilities.contains(["awg"]),
+                        Server.capabilities.contains(["amnezia"]),
+                        Server.capabilities.contains(["dual"]),
+                    ),
+                )
                 .with_for_update()
             )
         ).scalar_one_or_none()

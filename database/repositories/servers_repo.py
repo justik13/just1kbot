@@ -158,12 +158,13 @@ def is_server_allocatable(server: Server | None, protocol: str = AMNEZIA_PROTOCO
     """Return True if server is valid, active, matching protocol, and healthy for allocation/migration."""
     if not server:
         return False
+    caps = getattr(server, "capabilities", None) or []
     server_proto = getattr(server, "protocol", None)
     if server_proto is not None:
         if protocol in AMNEZIA_PROTOCOLS:
-            if server_proto not in AMNEZIA_PROTOCOLS:
+            if server_proto not in AMNEZIA_PROTOCOLS and not any(c in ("awg", "amnezia") for c in caps):
                 return False
-        elif server_proto != protocol:
+        elif server_proto != protocol and protocol not in caps:
             return False
     if getattr(server, "is_active", True) is False:
         return False
