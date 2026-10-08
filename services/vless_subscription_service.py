@@ -89,6 +89,19 @@ class VlessSubscriptionService:
 
         return asyncio.create_task(_run())
 
+    @classmethod
+    def deprovision_background(cls, old_uuid: str) -> asyncio.Task:
+        """Fire and forget node deprovisioning in a fresh session scope."""
+        async def _run() -> None:
+            from database.connection import session_scope
+            try:
+                async with session_scope() as session:
+                    await cls.deprovision_uuid_from_dual_nodes(session, old_uuid)
+            except Exception as e:
+                logger.warning("Background deprovision of VLESS UUID %s failed: %s", old_uuid, e)
+
+        return asyncio.create_task(_run())
+
     @staticmethod
     async def get_combined_quota(
         session: AsyncSession,
@@ -168,10 +181,11 @@ class VlessSubscriptionService:
                         api_key=api_key,
                         client_uuid=sub.uuid,
                         is_active=is_active,
+                        service="vless",
                     )
                     results[srv.id] = (
                         resp.result in ("applied", "already_newer")
-                        and (not resp.verified_inbounds or any("vless" in ib for ib in resp.verified_inbounds))
+                        and (not resp.verified_inbounds or any("vless" in ib.lower() for ib in resp.verified_inbounds))
                     )
             except Exception as exc:
                 logger.warning("Failed to sync VLESS user %s to server %s: %s", sub.uuid, srv.id, exc)
@@ -180,5 +194,49 @@ class VlessSubscriptionService:
         if any(results.values()):
             sub.last_synced_at = now_utc()
             await session.flush()
+
+        return results
+
+    @staticmethod
+    async def deprovision_uuid_from_dual_nodes(
+        session: AsyncSession,
+        client_uuid: str,
+    ) -> dict[int, bool]:
+        """Deprovision a revoked UUID across all eligible dual nodes."""
+        if not client_uuid:
+            return {}
+
+        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+        results: dict[int, bool] = {}
+
+        for srv in servers:
+            extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
+            api_url = extra.get("xray_api_url")
+            api_key = extra.get("xray_api_key")
+
+            if not api_url and srv.api_url:
+                parsed = urllib.parse.urlsplit(srv.api_url)
+                if parsed.hostname:
+                    port = parsed.port or 8443
+                    api_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:{port}"
+            if not api_key:
+                api_key = srv.api_key
+
+            if not api_url or not api_key:
+                continue
+
+            try:
+                async with XrayNodeClient(timeout=5.0) as client:
+                    resp = await client.sync_client(
+                        api_url=api_url,
+                        api_key=api_key,
+                        client_uuid=client_uuid,
+                        is_active=False,
+                        service="vless",
+                    )
+                    results[srv.id] = resp.result in ("applied", "already_newer")
+            except Exception as exc:
+                logger.warning("Failed to deprovision VLESS UUID %s from server %s: %s", client_uuid, srv.id, exc)
+                results[srv.id] = False
 
         return results

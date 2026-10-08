@@ -125,9 +125,9 @@ async def admin_user_devices(
     from services.vless_subscription_service import VlessSubscriptionService
 
     try:
-        vless_sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
     except Exception as e:
-        logger.debug("Failed to get/create VLESS subscription for admin devices: %s", e)
+        logger.debug("Failed to get VLESS subscription for admin devices: %s", e)
         vless_sub = None
 
     vless_sub_url: str | None = None
@@ -405,10 +405,14 @@ async def admin_vless_hwid_reset(
     from config.enums import AdminAuditAction
     from database.repositories import vless_subscription_repo
     from services.audit_service import AuditService
+    from services.vless_subscription_service import VlessSubscriptionService
 
     sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
     if sub:
-        await vless_subscription_repo.reset_hwids(session, sub.id)
+        old_uuid, _ = await vless_subscription_repo.reset_hwids(session, sub.id)
+        if old_uuid:
+            VlessSubscriptionService.deprovision_background(old_uuid)
+            VlessSubscriptionService.ensure_synced_background(user.id, is_active=True)
         await AuditService.log_action(
             session,
             admin_id=callback.from_user.id,
@@ -450,10 +454,14 @@ async def admin_vless_token_rotate(
     from config.enums import AdminAuditAction
     from database.repositories import vless_subscription_repo
     from services.audit_service import AuditService
+    from services.vless_subscription_service import VlessSubscriptionService
 
     sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
     if sub:
-        await vless_subscription_repo.rotate_token(session, sub.id)
+        _, old_uuid, _ = await vless_subscription_repo.rotate_token(session, sub.id)
+        if old_uuid:
+            VlessSubscriptionService.deprovision_background(old_uuid)
+            VlessSubscriptionService.ensure_synced_background(user.id, is_active=True)
         await AuditService.log_action(
             session,
             admin_id=callback.from_user.id,

@@ -663,10 +663,14 @@ async def vless_sub_reset(
         return
 
     from database.repositories import vless_subscription_repo
+    from services.vless_subscription_service import VlessSubscriptionService
 
     sub = await vless_subscription_repo.get_subscription_by_user_id(session, db_user.id)
     if sub:
-        await vless_subscription_repo.reset_hwids(session, sub.id)
+        old_uuid, _ = await vless_subscription_repo.reset_hwids(session, sub.id)
+        if old_uuid:
+            VlessSubscriptionService.deprovision_background(old_uuid)
+            VlessSubscriptionService.ensure_synced_background(db_user.id, is_active=True)
 
     try:
         await callback.answer(texts.VLESS_RESET_SUCCESS, show_alert=True)

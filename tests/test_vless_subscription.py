@@ -338,7 +338,20 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(allowed)
         self.assertEqual(count, 1)
 
-        # Existing device hwid-1 must be allowed and timestamp updated
+        # Effective limit is 0 (all slots taken by AWG) must reject even existing HWID
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="hwid-1",
+            effective_limit=0,
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(count, 0)
+
+        # Re-populate HWID for next check
+        sub.active_hwids = {"hwid-1": now.isoformat()}
+
+        # Existing device hwid-1 must be allowed and timestamp updated when quota available
         allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
             mock_session,
             subscription_id=sub.id,
@@ -361,8 +374,11 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
 
-        await vless_subscription_repo.reset_hwids(mock_session, sub.id)
+        old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(mock_session, sub.id)
         self.assertEqual(sub.active_hwids, {})
+        self.assertEqual(old_uuid, "abc-uuid")
+        self.assertNotEqual(new_uuid, "abc-uuid")
+        self.assertEqual(sub.uuid, new_uuid)
 
 
 class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
@@ -473,10 +489,13 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         mock_result.scalar_one_or_none.return_value = sub
         mock_session.execute.return_value = mock_result
 
-        new_token = await vless_subscription_repo.rotate_token(mock_session, 1)
+        new_token, old_uuid, new_uuid = await vless_subscription_repo.rotate_token(mock_session, 1)
 
         self.assertNotEqual(new_token, "old-token-1234567890")
         self.assertEqual(sub.token, new_token)
+        self.assertEqual(old_uuid, "11111111-2222-3333-4444-555555555555")
+        self.assertNotEqual(new_uuid, "11111111-2222-3333-4444-555555555555")
+        self.assertEqual(sub.uuid, new_uuid)
         self.assertEqual(sub.active_hwids, {})
 
     def test_user_card_vless_breakdown(self):
@@ -537,8 +556,13 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             active_hwids={},
         )
 
+        @asynccontextmanager
+        async def fake_nested():
+            yield
+
         mock_session = AsyncMock()
         mock_session.add = MagicMock()
+        mock_session.begin_nested = fake_nested
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=existing_sub)),
@@ -610,6 +634,50 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         eligible = await VlessSubscriptionService.get_eligible_vless_servers(mock_session)
         self.assertEqual(len(eligible), 1)
         self.assertEqual(eligible[0].name, "Dual Node")
+
+    async def test_tariff_downgrade_checks_combined_quota(self):
+        from database.models import User
+        from services.subscription import SubscriptionService
+
+        user = User(id=1, telegram_id=123, device_limit=3, subscription_end=datetime.now(timezone.utc) + timedelta(days=10))
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = user
+
+        with (
+            patch("services.subscription.get_user_profiles_count", new=AsyncMock(return_value=1)),
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=2)),
+        ):
+            # 1 AWG + 2 VLESS = 3 devices. Downgrading to 2 devices must raise ValueError
+            with self.assertRaises(ValueError) as ctx:
+                await SubscriptionService.change_subscription(
+                    mock_session,
+                    telegram_id=123,
+                    new_device_limit=2,
+                )
+            self.assertIn("Cannot downgrade: 3 devices > 2 limit", str(ctx.exception))
+
+    async def test_ban_user_deactivates_vless(self):
+        from database.models import User, VlessSubscription
+        from services.ban_service import BanService
+
+        user = User(id=1, telegram_id=123, is_banned=False, is_deleted=False)
+        sub = VlessSubscription(id=1, user_id=1, uuid="test-uuid", is_active=True)
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = user
+        mock_session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+        with (
+            patch("services.ban_service.update_user", new=AsyncMock()),
+            patch("services.profile_deletion_service.ProfileDeletionService.delete_profiles_for_user", new=AsyncMock(return_value=0)),
+            patch("services.white_internet_service.WhiteInternetService.deactivate_user_subscriptions", new=AsyncMock(return_value=[])),
+            patch("services.audit_service.AuditService.log_action", new=AsyncMock()),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.deprovision_uuid_from_dual_nodes", new=AsyncMock()) as mock_deprov,
+        ):
+            success, status = await BanService._ban_user(mock_session, 123, admin_id=999)
+            self.assertTrue(success)
+            self.assertFalse(sub.is_active)
+            mock_deprov.assert_awaited_once_with(mock_session, "test-uuid")
 
 
 

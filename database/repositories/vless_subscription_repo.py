@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import secrets
 import uuid
 
@@ -22,12 +22,20 @@ def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TT
     if not isinstance(current_hwids, dict):
         return {}
     now = now_utc()
-    cutoff = (now - timedelta(hours=ttl_hours)).isoformat()
-    return {
-        h: ts
-        for h, ts in current_hwids.items()
-        if isinstance(ts, str) and ts >= cutoff
-    }
+    cutoff = now - timedelta(hours=ttl_hours)
+    res = {}
+    for h, ts in current_hwids.items():
+        if not isinstance(ts, str):
+            continue
+        try:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if dt >= cutoff:
+                res[h] = ts
+        except Exception:
+            continue
+    return res
 
 
 async def get_or_create_subscription(
@@ -49,9 +57,10 @@ async def get_or_create_subscription(
         is_active=True,
         active_hwids={},
     )
-    session.add(sub)
     try:
-        await session.flush()
+        async with session.begin_nested():
+            session.add(sub)
+            await session.flush()
         return sub
     except IntegrityError:
         # Concurrent creation race: existing row won the race
@@ -137,7 +146,11 @@ async def register_hwid_atomic(
     if sub is None:
         return False, 0, max(0, effective_limit)
 
-    clean_hwid = str(hwid).strip()[:128]
+    # Lock User row to synchronize combined quota check across AWG and VLESS
+    from database.models import User
+    await session.execute(select(User.id).where(User.id == sub.user_id).with_for_update())
+
+    clean_hwid = str(hwid).strip().lower()[:128]
     if not clean_hwid:
         active = prune_stale_hwids(sub.active_hwids, ttl_hours=ttl_hours)
         return False, len(active), effective_limit
@@ -145,8 +158,13 @@ async def register_hwid_atomic(
     active_hwids = prune_stale_hwids(sub.active_hwids, ttl_hours=ttl_hours)
     now = now_utc()
 
+    if effective_limit <= 0:
+        sub.active_hwids = {}
+        await session.flush()
+        return False, 0, 0
+
     # If already exceeds effective limit, trim oldest
-    if effective_limit > 0 and len(active_hwids) > effective_limit:
+    if len(active_hwids) > effective_limit:
         sorted_hwids = sorted(active_hwids.items(), key=lambda item: item[1], reverse=True)
         active_hwids = dict(sorted_hwids[:effective_limit])
 
@@ -173,13 +191,22 @@ async def register_hwid_atomic(
 async def reset_hwids(
     session: AsyncSession,
     subscription_id: int,
-) -> None:
-    """Clear all registered HWIDs for subscription."""
+) -> tuple[str | None, str | None]:
+    """Clear all registered HWIDs and rotate client UUID to revoke access on old devices.
+
+    Returns:
+        tuple[old_uuid, new_uuid] or (None, None) if subscription not found.
+    """
     stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
     sub = (await session.execute(stmt)).scalar_one_or_none()
     if sub is not None:
+        old_uuid = sub.uuid
+        new_uuid = str(uuid.uuid4())
+        sub.uuid = new_uuid
         sub.active_hwids = {}
         await session.flush()
+        return old_uuid, new_uuid
+    return None, None
 
 
 async def rotate_token(
@@ -187,10 +214,11 @@ async def rotate_token(
     subscription_id: int,
     *,
     reset_hwids: bool = True,
-) -> str:
-    """Atomically regenerates the VLESS subscription token and clears active HWIDs under row-level lock.
+) -> tuple[str, str | None, str | None]:
+    """Atomically regenerates the VLESS subscription token, rotates UUID, and clears active HWIDs.
 
-    Returns the new token string.
+    Returns:
+        tuple[new_token, old_uuid, new_uuid]
     """
     stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
     sub = (await session.execute(stmt)).scalar_one_or_none()
@@ -198,9 +226,12 @@ async def rotate_token(
         raise ValueError(f"VlessSubscription {subscription_id} not found")
 
     token = secrets.token_urlsafe(32)
+    old_uuid = sub.uuid
+    new_uuid = str(uuid.uuid4())
     sub.token = token
+    sub.uuid = new_uuid
     if reset_hwids:
         sub.active_hwids = {}
     await session.flush()
-    return token
+    return token, old_uuid, new_uuid
 
