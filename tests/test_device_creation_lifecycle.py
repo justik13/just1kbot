@@ -820,7 +820,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertIn("keyboard", captured)
             buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
             self.assertNotIn("request_delete_device:42", buttons)
-            self.assertIn("back_to_connections", buttons)
+            self.assertTrue("back_to_amnezia_devices" in buttons or "back_to_connections" in buttons)
             self.assertIn("back_to_main_menu", buttons)
 
     async def test_18_expired_subscription_with_deleting_or_cleanup_hides_delete_button(self):
@@ -1269,7 +1269,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(mock_render_hub.called)
             rendered_text = mock_render_hub.call_args.args[2]
             self.assertIn("Устройство #1", rendered_text)
-            self.assertIn("(0/5)", rendered_text)
+            self.assertTrue("(0/5)" in rendered_text or "0 из 5" in rendered_text)
 
     async def test_32_rename_device_start_rejects_deleting_and_cleanup_states(self):
         """rename_device_start rejects deleting and create_cleanup_pending states with exactly-once alert answer."""

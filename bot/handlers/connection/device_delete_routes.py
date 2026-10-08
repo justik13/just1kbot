@@ -15,7 +15,7 @@ from services.device_service import DeviceService
 from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
 
-from .common import _render_amnezia_devices
+from .common import _render_amnezia_devices, _render_connections  # noqa: F401
 
 logger = logging.getLogger(__name__)
 router = Router()

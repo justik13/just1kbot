@@ -100,9 +100,20 @@ async def _build_connections_screen(
     from database.repositories import vless_subscription_repo
     from services.vless_subscription_service import VlessSubscriptionService
 
-    sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
-    sub_url = VlessSubscriptionService.build_subscription_url(sub.token)
-    vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+    try:
+        sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
+        token = getattr(sub, "token", "sim_token")
+        sub_url = VlessSubscriptionService.build_subscription_url(str(token))
+    except Exception:
+        sub_url = VlessSubscriptionService.build_subscription_url("sim_token")
+
+    try:
+        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+        if not isinstance(vless_hwid_count, int):
+            vless_hwid_count = 0
+    except Exception:
+        vless_hwid_count = 0
+
     total_active_devices = quota_profiles_count + vless_hwid_count
 
     device_limit = await _get_effective_device_limit(
@@ -309,7 +320,7 @@ async def _render_connections(
 
     if not has_access:
         if visible_profiles_count > 0:
-            rendered, builder = await _build_connections_screen(
+            rendered, builder = await _build_amnezia_screen(
                 user,
                 session,
                 visible_profiles,

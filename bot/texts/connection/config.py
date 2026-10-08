@@ -113,7 +113,7 @@ CONNECTION_CONFIG_ESTIMATED_TIME_HOURS = "{v0} дн. {v1} ч."
 
 CONNECTION_CONFIG_PROTOCOL_FORMAT = "{v0} ч. {v1} мин."
 
-CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "➕ Добавить устройство"
+CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "Неизвестный протокол"
 
 CONNECTION_EMPTY = """<i>У вас пока нет активных подключений.</i>
 
