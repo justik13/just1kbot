@@ -17,7 +17,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY = """1. Сохра�
 
 CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER = "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл .vpn / .conf для роутера или ПК? Нажмите кнопку ниже:</i>"
+CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл конфигурации (.vpn / .conf)? Нажмите кнопку ниже:</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
 <b>2. Откройте приложение:</b>

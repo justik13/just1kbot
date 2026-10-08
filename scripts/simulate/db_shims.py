@@ -6,7 +6,7 @@ import aiosqlite
 from sqlalchemy import DateTime, String
 from sqlalchemy.dialects.postgresql import ARRAY, BIGINT, JSONB
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.sql.elements import BinaryExpression
+from sqlalchemy.sql.elements import BinaryExpression, ReleaseSavepointClause
 from sqlalchemy.types import TypeDecorator
 
 # Register native SQLite UUID adapters to avoid ProgrammingError on UUID bind parameters
@@ -39,6 +39,15 @@ def _compile_binary_sqlite(expr, compiler, **kw):
         right = compiler.process(expr.right, **kw)
         return f"(json_type({left}, '$.' || {right}) IS NOT NULL)"
     return compiler.visit_binary(expr, **kw)
+
+@compiles(ReleaseSavepointClause, "sqlite")
+def _compile_release_savepoint_sqlite(element, compiler, **kw):
+    # In SQLite, RELEASE SAVEPOINT is optional upon commit. In simulation with StaticPool,
+    # concurrent commits clear active savepoints; turning RELEASE into a safe no-op prevents
+    # false-positive sqlite3.OperationalError: no such savepoint errors.
+    name = getattr(element, "name", None) or getattr(element, "target_identifier", "")
+    return f"SELECT 1 /* RELEASE SAVEPOINT {name} */"
+
 
 class SQLiteUUID(TypeDecorator):
     """UUID type for SQLite storage that stores UUIDs as CHAR(36) strings."""
@@ -85,6 +94,24 @@ def _custom_aiosqlite_connect(*args, **kwargs):
     return conn
 
 aiosqlite.connect = _custom_aiosqlite_connect
+
+# Intercept aiosqlite cursor execute to silently ignore harmless missing savepoint errors
+_orig_cursor_execute = aiosqlite.cursor.Cursor.execute
+
+async def _safe_cursor_execute(self, operation, parameters=None):
+    try:
+        if parameters is None:
+            return await _orig_cursor_execute(self, operation)
+        return await _orig_cursor_execute(self, operation, parameters)
+    except sqlite3.OperationalError as e:
+        op_str = str(operation).strip().upper()
+        if "no such savepoint" in str(e).lower() and (
+            op_str.startswith("RELEASE SAVEPOINT") or op_str.startswith("ROLLBACK TO SAVEPOINT")
+        ):
+            return None
+        raise
+
+aiosqlite.cursor.Cursor.execute = _safe_cursor_execute
 
 # Force SQLite datetimes to be loaded as timezone-aware UTC objects
 class UTCDateTime(TypeDecorator):
