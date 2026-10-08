@@ -99,13 +99,17 @@ async def _build_connections_screen(
         if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
     ])
 
+    from database.repositories import vless_subscription_repo
+    vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+    total_active_devices = quota_profiles_count + vless_hwid_count
+
     device_limit = await _get_effective_device_limit(
         session,
         user,
     )
 
     rendered = texts.CONNECTION_LIST_HEADER.format(
-        count=quota_profiles_count,
+        count=total_active_devices,
         limit=device_limit,
     )
 
@@ -122,7 +126,7 @@ async def _build_connections_screen(
 
     builder = InlineKeyboardBuilder()
 
-    if not read_only and quota_profiles_count < device_limit:
+    if not read_only and total_active_devices < device_limit:
         builder.button(
             text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
             callback_data="add_device",
@@ -174,6 +178,12 @@ async def _build_connections_screen(
                 rendered += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
 
         rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
+
+    if not read_only:
+        builder.button(
+            text=texts.BTN_VLESS_SUB_INFO,
+            callback_data="vless_sub_feed_info",
+        )
 
     builder.button(
         text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,

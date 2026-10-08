@@ -497,4 +497,14 @@ class SubscriptionService:
                     "protocol": server.protocol if server else None,
                 },
             )
+
+        from database.repositories import vless_subscription_repo
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if vless_sub and vless_sub.is_active != target_active:
+            vless_sub.is_active = target_active
+            session.add(vless_sub)
+            VlessSubscriptionService.ensure_synced_background(user.id, is_active=target_active)
+
         await session.flush()

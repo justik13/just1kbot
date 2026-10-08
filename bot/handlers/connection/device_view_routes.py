@@ -547,3 +547,120 @@ async def alt_connection(
                 except Exception:
                     pass
             raise root_exc
+
+
+async def render_vless_sub_screen(
+    bot,
+    chat_id: int,
+    user: User,
+    session: AsyncSession,
+) -> None:
+    from database.repositories import vless_subscription_repo
+    from services.vless_subscription_service import VlessSubscriptionService
+
+    sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
+    sub_url = VlessSubscriptionService.build_subscription_url(sub.token)
+
+    effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
+    total_active, _awg_active, vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
+
+    text = texts.VLESS_SUB_SCREEN_TEXT.format(
+        sub_url=sub_url,
+        active=total_active,
+        limit=effective_limit,
+    )
+
+    builder = InlineKeyboardBuilder()
+    if vless_active > 0:
+        builder.button(
+            text=texts.BTN_VLESS_RESET_HWID,
+            callback_data="vless_sub_reset",
+        )
+    builder.button(
+        text=texts.BTN_BACK_TO_DEVICES,
+        callback_data="back_to_connections",
+    )
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1)
+
+    await render_hub(
+        bot,
+        chat_id,
+        text,
+        builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "vless_sub_feed_info")
+async def vless_sub_feed_info(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+):
+    await callback.answer(show_alert=False)
+    await state.clear()
+
+    if not db_user:
+        try:
+            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
+    if not has_access:
+        try:
+            await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    from services.vless_subscription_service import VlessSubscriptionService
+
+    VlessSubscriptionService.ensure_synced_background(db_user.id, is_active=True)
+
+    await render_vless_sub_screen(
+        callback.bot,
+        callback.message.chat.id,
+        db_user,
+        session,
+    )
+
+
+@router.callback_query(F.data == "vless_sub_reset")
+async def vless_sub_reset(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+):
+    await state.clear()
+
+    if not db_user:
+        try:
+            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    from database.repositories import vless_subscription_repo
+
+    sub = await vless_subscription_repo.get_subscription_by_user_id(session, db_user.id)
+    if sub:
+        await vless_subscription_repo.reset_hwids(session, sub.id)
+
+    try:
+        await callback.answer(texts.VLESS_RESET_SUCCESS, show_alert=True)
+    except Exception:
+        pass
+
+    await render_vless_sub_screen(
+        callback.bot,
+        callback.message.chat.id,
+        db_user,
+        session,
+    )
