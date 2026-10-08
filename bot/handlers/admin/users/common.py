@@ -45,6 +45,7 @@ def format_user_card_text(
     white_internet_info: str | None = None,
     ban_reason: str | None = None,
     wi_sub: WhiteInternetSubscription | None = None,
+    vless_hwid_count: int = 0,
 ) -> str:
     from datetime import timezone
     from config.enums import WhiteInternetStatus
@@ -72,7 +73,9 @@ def format_user_card_text(
     if has_awg:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
-        devices_count = len(profiles)
+        amnezia_count = len(profiles)
+        total_dev = amnezia_count + vless_hwid_count
+        devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
         device_limit = user.device_limit or 0
     elif has_wi and wi_sub:
         valid_until_str = format_datetime(wi_sub.expires_at) if wi_sub.expires_at else "—"
@@ -82,7 +85,9 @@ def format_user_card_text(
     else:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
-        devices_count = len(profiles)
+        amnezia_count = len(profiles)
+        total_dev = amnezia_count + vless_hwid_count
+        devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
         device_limit = user.device_limit or 0
 
     awg_total = getattr(user, "total_traffic_bytes", 0) or 0
@@ -579,6 +584,14 @@ async def _render_user_card(
 
     current_time = now_utc()
 
+    from database.repositories import vless_subscription_repo
+    try:
+        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+        if not isinstance(vless_hwid_count, int):
+            vless_hwid_count = 0
+    except Exception:
+        vless_hwid_count = 0
+
     rendered = format_user_card_text(
         user,
         profiles,
@@ -591,6 +604,7 @@ async def _render_user_card(
         white_internet_info=wl_info,
         ban_reason=ban_reason,
         wi_sub=wi_sub,
+        vless_hwid_count=vless_hwid_count,
     )
 
     try:
@@ -628,6 +642,14 @@ async def _show_user_card_edit(
 
     current_time = now_utc()
 
+    from database.repositories import vless_subscription_repo
+    try:
+        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+        if not isinstance(vless_hwid_count, int):
+            vless_hwid_count = 0
+    except Exception:
+        vless_hwid_count = 0
+
     rendered = format_user_card_text(
         user,
         profiles,
@@ -640,6 +662,7 @@ async def _show_user_card_edit(
         white_internet_info=wl_info,
         ban_reason=ban_reason,
         wi_sub=wi_sub,
+        vless_hwid_count=vless_hwid_count,
     )
 
     if notice:

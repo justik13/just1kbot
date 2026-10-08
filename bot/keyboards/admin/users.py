@@ -532,6 +532,8 @@ def get_admin_user_devices_keyboard(
     telegram_id: int,
     profiles: list,
     has_wi_devices: bool = False,
+    vless_sub_url: str | None = None,
+    has_vless_hwids: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -547,6 +549,23 @@ def get_admin_user_devices_keyboard(
                 f"admin_delete_device:{telegram_id}:{profile.id}"
             ),
         )
+
+    if vless_sub_url:
+        builder.button(
+            text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+            copy_text=CopyTextButton(text=vless_sub_url),
+        )
+
+    if has_vless_hwids:
+        builder.button(
+            text=texts.ADMIN_BTN_VLESS_HWID_RESET,
+            callback_data=f"admin_vless_hwid_reset:{telegram_id}",
+        )
+
+    builder.button(
+        text=texts.ADMIN_BTN_VLESS_TOKEN_ROTATE,
+        callback_data=f"admin_vless_token_rotate:{telegram_id}",
+    )
 
     if has_wi_devices:
         builder.button(

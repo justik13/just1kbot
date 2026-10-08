@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -118,6 +119,67 @@ async def admin_user_devices(
             )
         text = "\n".join(lines)
 
+    # VLESS subscription & active HWIDs
+    from database.repositories import vless_subscription_repo
+    from database.repositories.vless_subscription_repo import VLESS_HWID_TTL_HOURS
+    from services.vless_subscription_service import VlessSubscriptionService
+
+    try:
+        vless_sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
+    except Exception as e:
+        logger.debug("Failed to get/create VLESS subscription for admin devices: %s", e)
+        vless_sub = None
+
+    vless_sub_url: str | None = None
+    raw_vless_hwids: dict = {}
+    if vless_sub:
+        vless_sub_url = VlessSubscriptionService.build_subscription_url(vless_sub.token)
+        raw_vless_hwids = getattr(vless_sub, "active_hwids", None) or {}
+
+    vless_cutoff = (now - timedelta(hours=VLESS_HWID_TTL_HOURS)).isoformat()
+    vless_active_count = len([
+        h for h, ts in raw_vless_hwids.items()
+        if isinstance(ts, str) and ts >= vless_cutoff
+    ])
+
+    if not raw_vless_hwids:
+        vless_devices_list = texts.ADMIN_VLESS_NO_DEVICES
+    else:
+        vless_lines = []
+        for hwid, ts in sorted(
+            raw_vless_hwids.items(),
+            key=lambda item: item[1] if isinstance(item[1], str) else "",
+            reverse=True,
+        ):
+            if isinstance(ts, str):
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    last_conn = format_datetime(dt)
+                except Exception:
+                    last_conn = ts
+                status = (
+                    texts.ADMIN_VLESS_DEVICE_STATUS_ACTIVE
+                    if ts >= vless_cutoff
+                    else texts.ADMIN_VLESS_DEVICE_STATUS_INACTIVE
+                )
+            else:
+                last_conn = texts.PLACEHOLDER_DASH
+                status = texts.ADMIN_VLESS_DEVICE_STATUS_INACTIVE
+            vless_lines.append(
+                texts.ADMIN_VLESS_DEVICE_ITEM.format(
+                    hwid=safe(hwid),
+                    last_conn=last_conn,
+                    status=status,
+                )
+            )
+        vless_devices_list = "\n".join(vless_lines)
+
+    vless_block = texts.ADMIN_VLESS_DEVICES_HEADER.format(
+        active=vless_active_count,
+        devices_list=vless_devices_list,
+    )
+    text = f"{text}\n\n{vless_block}"
+
     from database.repositories import white_internet_repo
     try:
         wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
@@ -133,6 +195,8 @@ async def admin_user_devices(
                 telegram_id,
                 profiles,
                 has_wi_devices=has_wi_devices,
+                vless_sub_url=vless_sub_url,
+                has_vless_hwids=bool(raw_vless_hwids),
             ),
             parse_mode="HTML",
         )
@@ -317,3 +381,94 @@ async def admin_delete_device_apply(
             texts.ADMIN_DELETE_DEVICE_ERROR,
             show_alert=True,
         )
+
+
+@router.callback_query(F.data.startswith("admin_vless_hwid_reset:"))
+async def admin_vless_hwid_reset(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    user = await _get_user_with_profiles(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    from config.enums import AdminAuditAction
+    from database.repositories import vless_subscription_repo
+    from services.audit_service import AuditService
+
+    sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+    if sub:
+        await vless_subscription_repo.reset_hwids(session, sub.id)
+        await AuditService.log_action(
+            session,
+            admin_id=callback.from_user.id,
+            action=AdminAuditAction.VLESS_HWID_RESET,
+            target_type="user",
+            target_id=user.id,
+            details={"telegram_id": telegram_id, "subscription_id": sub.id},
+        )
+        await session.commit()
+
+    await callback.answer(texts.ADMIN_ALERT_VLESS_HWID_RESET_SUCCESS, show_alert=True)
+    try:
+        updated_cb = callback.model_copy(update={"data": f"admin_user_devices:{telegram_id}"})
+    except Exception:
+        callback.data = f"admin_user_devices:{telegram_id}"
+        updated_cb = callback
+    await admin_user_devices(updated_cb, session)
+
+
+@router.callback_query(F.data.startswith("admin_vless_token_rotate:"))
+async def admin_vless_token_rotate(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    user = await _get_user_with_profiles(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    from config.enums import AdminAuditAction
+    from database.repositories import vless_subscription_repo
+    from services.audit_service import AuditService
+
+    sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
+    if sub:
+        await vless_subscription_repo.rotate_token(session, sub.id)
+        await AuditService.log_action(
+            session,
+            admin_id=callback.from_user.id,
+            action=AdminAuditAction.VLESS_TOKEN_RESET,
+            target_type="user",
+            target_id=user.id,
+            details={"telegram_id": telegram_id, "subscription_id": sub.id, "token_rotated": True},
+        )
+        await session.commit()
+
+    await callback.answer(texts.ADMIN_ALERT_VLESS_TOKEN_ROTATE_SUCCESS, show_alert=True)
+    try:
+        updated_cb = callback.model_copy(update={"data": f"admin_user_devices:{telegram_id}"})
+    except Exception:
+        callback.data = f"admin_user_devices:{telegram_id}"
+        updated_cb = callback
+    await admin_user_devices(updated_cb, session)
+

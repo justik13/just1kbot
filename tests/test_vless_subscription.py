@@ -373,3 +373,76 @@ class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any(btn.callback_data == "add_device" for btn in amnezia_buttons))
             self.assertTrue(any(btn.callback_data == "back_to_connections" for btn in amnezia_buttons))
 
+
+class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
+    """Test suite for Admin Panel VLESS management."""
+
+    async def test_rotate_token(self):
+        from database.models import VlessSubscription
+        from database.repositories import vless_subscription_repo
+
+        sub = VlessSubscription(
+            id=1,
+            user_id=10,
+            token="old-token-1234567890",
+            uuid="11111111-2222-3333-4444-555555555555",
+            is_active=True,
+            active_hwids={"hwid1": "2026-10-08T12:00:00"},
+        )
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = sub
+        mock_session.execute.return_value = mock_result
+
+        new_token = await vless_subscription_repo.rotate_token(mock_session, 1)
+
+        self.assertNotEqual(new_token, "old-token-1234567890")
+        self.assertEqual(sub.token, new_token)
+        self.assertEqual(sub.active_hwids, {})
+
+    def test_user_card_vless_breakdown(self):
+        from bot.handlers.admin.users.common import format_user_card_text
+        from database.models import User
+
+        now = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+        user = User(
+            id=1,
+            telegram_id=123456,
+            username="vless_user",
+            first_name="Vless",
+            device_limit=5,
+            subscription_end=now + timedelta(days=10),
+        )
+
+        card_text = format_user_card_text(
+            user=user,
+            profiles=["profile1"],
+            referrals=[],
+            now=now,
+            vless_hwid_count=2,
+        )
+
+        self.assertIn("<b>Устройств:</b> 3 (VLESS: 2, Amnezia: 1)/5", card_text)
+
+    def test_admin_user_devices_keyboard_with_vless(self):
+        from bot.keyboards.admin.users import get_admin_user_devices_keyboard
+
+        kb = get_admin_user_devices_keyboard(
+            telegram_id=123456,
+            profiles=[],
+            vless_sub_url="https://just1k.pro/sub/vless/mytoken",
+            has_vless_hwids=True,
+        )
+
+        buttons = [btn for row in kb.inline_keyboard for btn in row]
+        copy_btn = next((b for b in buttons if b.copy_text and b.copy_text.text == "https://just1k.pro/sub/vless/mytoken"), None)
+        self.assertIsNotNone(copy_btn)
+
+        hwid_reset_btn = next((b for b in buttons if b.callback_data == "admin_vless_hwid_reset:123456"), None)
+        self.assertIsNotNone(hwid_reset_btn)
+
+        token_rotate_btn = next((b for b in buttons if b.callback_data == "admin_vless_token_rotate:123456"), None)
+        self.assertIsNotNone(token_rotate_btn)
+
+

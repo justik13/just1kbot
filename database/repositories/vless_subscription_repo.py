@@ -172,3 +172,27 @@ async def reset_hwids(
     if sub is not None:
         sub.active_hwids = {}
         await session.flush()
+
+
+async def rotate_token(
+    session: AsyncSession,
+    subscription_id: int,
+    *,
+    reset_hwids: bool = True,
+) -> str:
+    """Atomically regenerates the VLESS subscription token and clears active HWIDs under row-level lock.
+
+    Returns the new token string.
+    """
+    stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
+    sub = (await session.execute(stmt)).scalar_one_or_none()
+    if sub is None:
+        raise ValueError(f"VlessSubscription {subscription_id} not found")
+
+    token = secrets.token_urlsafe(32)
+    sub.token = token
+    if reset_hwids:
+        sub.active_hwids = {}
+    await session.flush()
+    return token
+
