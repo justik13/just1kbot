@@ -237,7 +237,7 @@ VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. П�
 
 
 
-WL_VLESS_TAG = "⚪️ Белый Интернет (XHTTP)"
+WL_VLESS_TAG = "⚪️ Белый Интернет"
 WL_ORIGIN_VLESS_TAG = "🇷🇺 Россия"
 WL_COUNTRY_KEYWORD_FLAGS: dict[str, str] = {
     "германия": "🇩🇪",

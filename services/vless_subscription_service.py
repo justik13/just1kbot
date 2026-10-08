@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from config.enums import ServerHealthState
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, User, VlessSubscription, VPNProfile
 from database.repositories import vless_subscription_repo
 from services.device_service import RESERVING_STATUSES
@@ -33,7 +33,11 @@ class VlessSubscriptionService:
         """Generate VLESS TLS xtls-rprx-vision links for given servers."""
         links: list[str] = []
         for srv in servers:
-            if not srv.is_active or srv.health_state != ServerHealthState.ONLINE:
+            if (
+                not srv.is_active
+                or srv.health_state != ServerHealthState.ONLINE
+                or getattr(srv, "lifecycle_status", ServerLifecycleStatus.ACTIVE) != ServerLifecycleStatus.ACTIVE
+            ):
                 continue
 
             extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
@@ -131,6 +135,7 @@ class VlessSubscriptionService:
             .where(
                 Server.is_active.is_(True),
                 Server.health_state == ServerHealthState.ONLINE,
+                Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
             )
             .order_by(Server.id.asc())
         )

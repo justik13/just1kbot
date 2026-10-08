@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import secrets
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -130,13 +130,14 @@ async def register_hwid_atomic(
     session: AsyncSession,
     subscription_id: int,
     hwid: str,
-    effective_limit: int,
+    effective_limit: int | None = None,
     ttl_hours: int = VLESS_HWID_TTL_HOURS,
 ) -> tuple[bool, int, int]:
     """Atomically registers an HWID for a VlessSubscription under row-level lock.
 
     effective_limit is the maximum number of VLESS HWIDs permitted given any
-    existing AWG profiles already consuming quota.
+    existing AWG profiles already consuming quota. If None, it is dynamically
+    computed under User lock.
 
     Returns:
         tuple[allowed: bool, active_count: int, effective_limit: int]
@@ -144,11 +145,33 @@ async def register_hwid_atomic(
     stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
     sub = (await session.execute(stmt)).scalar_one_or_none()
     if sub is None:
-        return False, 0, max(0, effective_limit)
+        return False, 0, max(0, effective_limit or 0)
 
     # Lock User row to synchronize combined quota check across AWG and VLESS
     from database.models import User
-    await session.execute(select(User.id).where(User.id == sub.user_id).with_for_update())
+    user = (await session.execute(select(User).where(User.id == sub.user_id).with_for_update())).scalar_one_or_none()
+
+    if effective_limit is None:
+        from database.models import VPNProfile
+        from services.device_service import RESERVING_STATUSES
+        from services.subscription_service import SubscriptionService
+
+        awg_res = (
+            await session.execute(
+                select(func.count(VPNProfile.id)).where(
+                    VPNProfile.user_id == sub.user_id,
+                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+                )
+            )
+        ).scalar_one()
+        awg_count = awg_res if isinstance(awg_res, int) else 0
+
+        user_limit = (
+            await SubscriptionService.get_effective_device_limit(session, user)
+            if user
+            else 5
+        )
+        effective_limit = max(0, user_limit - awg_count)
 
     clean_hwid = str(hwid).strip().lower()[:128]
     if not clean_hwid:
@@ -159,9 +182,7 @@ async def register_hwid_atomic(
     now = now_utc()
 
     if effective_limit <= 0:
-        sub.active_hwids = {}
-        await session.flush()
-        return False, 0, 0
+        return False, len(active_hwids), 0
 
     # If already exceeds effective limit, trim oldest
     if len(active_hwids) > effective_limit:

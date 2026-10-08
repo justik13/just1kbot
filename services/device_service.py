@@ -101,7 +101,7 @@ class DeviceService:
         server_id: int,
         device_name: str | None = None,
         snapshot: ServerPeerSnapshot,
-        vless_count: int = 0,
+        vless_count: int | None = None,
     ) -> VPNProfile:
         if snapshot.server_id != server_id or datetime.now(
             timezone.utc
@@ -112,6 +112,9 @@ class DeviceService:
                 select(User).where(User.id == user_id).with_for_update()
             )
         ).scalar_one()
+        if vless_count is None:
+            from database.repositories import vless_subscription_repo
+            vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
         server = (
             await session.execute(
                 select(Server)

@@ -293,8 +293,16 @@ async def process_add_server(
             protocol_name = "xray"
             capabilities = []
             inbounds = (xray_data or {}).get("inbounds", [])
-            has_vless = any("vless" in ib.lower() for ib in inbounds)
-            has_wl = any("wl" in ib.lower() for ib in inbounds) or bool((xray_data or {}).get("relays"))
+            has_vless = any(
+                "vless" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
+                for ib in inbounds
+                if isinstance(ib, (str, dict))
+            )
+            has_wl = any(
+                "wl" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
+                for ib in inbounds
+                if isinstance(ib, (str, dict))
+            ) or bool((xray_data or {}).get("relays"))
             if has_vless:
                 capabilities.append("vless")
             if has_wl:

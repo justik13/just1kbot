@@ -82,7 +82,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/vless/nonexistent-token-12345678")
             self.assertEqual(resp.status, 404)
 
-    async def test_inactive_subscription_returns_404(self):
+    async def test_inactive_subscription_returns_notice_200(self):
         mock_session = AsyncMock()
 
         @asynccontextmanager
@@ -97,13 +97,24 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             is_active=False,
             active_hwids={},
         )
+        user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=5),
+        )
 
         with (
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=inactive_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=user),
         ):
             resp = await self.client.get("/sub/vless/inactive-token-12345678")
-            self.assertEqual(resp.status, 404)
+            self.assertEqual(resp.status, 200)
+            body = await resp.text()
+            decoded = base64.b64decode(body).decode("utf-8")
+            self.assertIn("Подписка закончилась", decoded)
 
     async def test_banned_user_returns_403(self):
         mock_session = AsyncMock()
@@ -349,7 +360,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(allowed)
         self.assertEqual(count, 1)
 
-        # Effective limit is 0 (all slots taken by AWG) must reject even existing HWID
+        # Effective limit is 0 (all slots taken by AWG) must reject even existing HWID without wiping active_hwids
         allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
             mock_session,
             subscription_id=sub.id,
@@ -357,10 +368,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
             effective_limit=0,
         )
         self.assertFalse(allowed)
-        self.assertEqual(count, 0)
-
-        # Re-populate HWID for next check
-        sub.active_hwids = {"hwid-1": now.isoformat()}
+        self.assertEqual(count, 1)
 
         # Existing device hwid-1 must be allowed and timestamp updated when quota available
         allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
