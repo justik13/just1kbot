@@ -405,14 +405,22 @@ async def admin_vless_hwid_reset(
     from config.enums import AdminAuditAction
     from database.repositories import vless_subscription_repo
     from services.audit_service import AuditService
+    from services.subscription import SubscriptionService
     from services.vless_subscription_service import VlessSubscriptionService
 
     sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
     if sub:
+        target_active = (
+            SubscriptionService.check_vpn_access(user)
+            and not getattr(user, "financial_hold", False)
+            and not getattr(user, "is_banned", False)
+        )
         old_uuid, _ = await vless_subscription_repo.reset_hwids(session, sub.id)
+        sub.is_active = target_active
+        session.add(sub)
         if old_uuid:
             VlessSubscriptionService.deprovision_background(old_uuid)
-            VlessSubscriptionService.ensure_synced_background(user.id, is_active=True)
+            VlessSubscriptionService.ensure_synced_background(user.id, is_active=target_active)
         await AuditService.log_action(
             session,
             admin_id=callback.from_user.id,
@@ -454,14 +462,22 @@ async def admin_vless_token_rotate(
     from config.enums import AdminAuditAction
     from database.repositories import vless_subscription_repo
     from services.audit_service import AuditService
+    from services.subscription import SubscriptionService
     from services.vless_subscription_service import VlessSubscriptionService
 
     sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
     if sub:
+        target_active = (
+            SubscriptionService.check_vpn_access(user)
+            and not getattr(user, "financial_hold", False)
+            and not getattr(user, "is_banned", False)
+        )
         _, old_uuid, _ = await vless_subscription_repo.rotate_token(session, sub.id)
+        sub.is_active = target_active
+        session.add(sub)
         if old_uuid:
             VlessSubscriptionService.deprovision_background(old_uuid)
-            VlessSubscriptionService.ensure_synced_background(user.id, is_active=True)
+            VlessSubscriptionService.ensure_synced_background(user.id, is_active=target_active)
         await AuditService.log_action(
             session,
             admin_id=callback.from_user.id,

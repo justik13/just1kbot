@@ -291,7 +291,16 @@ async def process_add_server(
             api_server_name = all_data["name"]
             api_max_peers = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
             protocol_name = "xray"
-            capabilities = ["xray_origin"]
+            capabilities = []
+            inbounds = (xray_data or {}).get("inbounds", [])
+            has_vless = any("vless" in ib.lower() for ib in inbounds)
+            has_wl = any("wl" in ib.lower() for ib in inbounds) or bool((xray_data or {}).get("relays"))
+            if has_vless:
+                capabilities.append("vless")
+            if has_wl:
+                capabilities.append("xray_origin")
+            if not capabilities:
+                capabilities = ["xray_origin"]
             server = await create_server(
                 session,
                 name=api_server_name,
@@ -327,15 +336,16 @@ async def process_add_server(
                 api_server_name,
             )
 
+            proto_label = texts.PROTOCOL_XRAY_ORIGIN if "xray_origin" in capabilities else texts.PROTOCOL_VLESS
             msg_text = texts.ADMIN_SERVER_ADDED.format(
                 flag=all_data["country_flag"],
                 name=safe(api_server_name),
-                protocol=texts.PROTOCOL_XRAY_ORIGIN,
+                protocol=proto_label,
                 max_clients=api_max_peers,
                 api_url=safe(all_data["api_url"]),
             )
             relays = (server.extra_data or {}).get("relays", [])
-            if not relays:
+            if "xray_origin" in capabilities and not relays:
                 msg_text += texts.ADMIN_SERVER_ADDED_NO_RELAYS_WARNING
 
             await render_hub(
