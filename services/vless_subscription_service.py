@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import urllib.parse
@@ -45,12 +46,16 @@ class VlessSubscriptionService:
             port = int(extra.get("vless_port", 443))
             flag = srv.country_flag or "🌐"
             label = f"{flag} {srv.name}".strip()
-            encoded_label = urllib.parse.quote(label)
+            # INCY renders vector flag when emoji is the first character after #
+            # and displays serverDescription badge via ?serverDescription=base64(UTF-8)
+            badge_desc = extra.get("server_description") or "Прямой доступ"
+            b64_badge = base64.b64encode(badge_desc.encode("utf-8")).decode("utf-8")
+            fragment = f"{label}?serverDescription={b64_badge}"
 
             link = (
                 f"vless://{subscription.uuid}@{domain}:{port}"
                 f"?encryption=none&security=tls&sni={domain}&alpn=h2%2Chttp%2F1.1"
-                f"&type=tcp&flow=xtls-rprx-vision#{encoded_label}"
+                f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
             )
             links.append(link)
         return links

@@ -208,8 +208,13 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             decoded = base64.b64decode(body).decode("utf-8")
             self.assertIn("vless://11111111-2222-3333-4444-555555555555@nl.example.com:443", decoded)
             self.assertIn("xtls-rprx-vision", decoded)
+            self.assertIn("#🇳🇱 NL-Dual-1?serverDescription=", decoded)
+            self.assertNotIn("%F0%9F", decoded)
             self.assertEqual(resp.headers.get("Device-Limit"), "3")
             self.assertEqual(resp.headers.get("Device-Active-Count"), "1")
+            self.assertEqual(resp.headers.get("Hide-Url"), "1")
+            self.assertEqual(resp.headers.get("No-Limit-Enabled"), "1")
+            self.assertIn("t.me/", resp.headers.get("Support-Url", ""))
 
 
 class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
@@ -312,3 +317,5 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(links[0].startswith("vless://12345678-1234-5678-1234-567812345678@de.example.com:443"))
         self.assertIn("flow=xtls-rprx-vision", links[0])
         self.assertIn("security=tls", links[0])
+        self.assertIn("#🇩🇪 DE Server?serverDescription=", links[0])
+        self.assertNotIn("%F0%9F", links[0])

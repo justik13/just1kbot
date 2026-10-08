@@ -141,6 +141,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         expire_ts = int(user.subscription_end.timestamp()) if user.subscription_end else 0
         profile_title = os.getenv("VLESS_PROFILE_TITLE", "Just1k Access")
         b64_title = base64.b64encode(profile_title.encode("utf-8")).decode("utf-8")
+        bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
 
         response_headers = {
             **common_headers,
@@ -150,6 +151,9 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "Device-Limit": str(effective_limit),
             "Device-Active-Count": str(total_active_devices),
             "Profile-Title": f"base64:{b64_title}",
+            "Hide-Url": "1",
+            "No-Limit-Enabled": "1",
+            "Support-Url": f"https://t.me/{bot_username}",
         }
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
