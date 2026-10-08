@@ -36,7 +36,7 @@ class VlessSubscriptionService:
             if (
                 not srv.is_active
                 or srv.health_state != ServerHealthState.ONLINE
-                or getattr(srv, "lifecycle_status", ServerLifecycleStatus.ACTIVE) != ServerLifecycleStatus.ACTIVE
+                or getattr(srv, "lifecycle_status", None) not in (None, ServerLifecycleStatus.ACTIVE)
             ):
                 continue
 
