@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from datetime import timedelta
 import secrets
 import uuid
@@ -17,7 +18,7 @@ VLESS_HWID_TTL_HOURS = 48
 
 def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TTL_HOURS) -> dict[str, str]:
     """Filter out HWIDs older than ttl_hours."""
-    if not current_hwids:
+    if not isinstance(current_hwids, dict):
         return {}
     now = now_utc()
     cutoff = (now - timedelta(hours=ttl_hours)).isoformat()
@@ -69,7 +70,19 @@ async def get_subscription_by_user_id(
 ) -> VlessSubscription | None:
     """Fetch VlessSubscription by internal user_id."""
     stmt = select(VlessSubscription).where(VlessSubscription.user_id == user_id)
-    return (await session.execute(stmt)).scalar_one_or_none()
+    try:
+        res = session.execute(stmt)
+        if inspect.isawaitable(res):
+            res = await res
+        scalar = getattr(res, "scalar_one_or_none", None)
+        if callable(scalar):
+            val = scalar()
+            if inspect.isawaitable(val):
+                val = await val
+            return val if isinstance(val, VlessSubscription) else None
+    except Exception:
+        pass
+    return None
 
 
 async def get_active_hwid_count(
@@ -79,7 +92,19 @@ async def get_active_hwid_count(
 ) -> int:
     """Return count of active non-stale HWIDs currently registered for user."""
     stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.user_id == user_id)
-    raw_hwids = (await session.execute(stmt)).scalar_one_or_none()
+    try:
+        res = session.execute(stmt)
+        if inspect.isawaitable(res):
+            res = await res
+        scalar = getattr(res, "scalar_one_or_none", None)
+        if callable(scalar):
+            raw_hwids = scalar()
+            if inspect.isawaitable(raw_hwids):
+                raw_hwids = await raw_hwids
+        else:
+            raw_hwids = None
+    except Exception:
+        raw_hwids = None
     active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
     return len(active)
 

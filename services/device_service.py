@@ -188,8 +188,11 @@ class DeviceService:
                 )
             )
         ).scalar_one()
-        from database.repositories import vless_subscription_repo
-        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+        vless_hwid_count = 0
+        vless_sub = getattr(user, "vless_subscription", None)
+        if vless_sub and isinstance(getattr(vless_sub, "active_hwids", None), dict):
+            from database.repositories.vless_subscription_repo import prune_stale_hwids
+            vless_hwid_count = len(prune_stale_hwids(vless_sub.active_hwids))
         if (user_count + vless_hwid_count) >= user.device_limit:
             raise DeviceLimitExceeded("Device limit reached")
         server_count = (
@@ -423,9 +426,7 @@ class DeviceService:
                 )
             )
         ).scalar_one()
-        from database.repositories import vless_subscription_repo
-        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-        if (user_count + vless_hwid_count) >= user.device_limit:
+        if user_count >= user.device_limit:
             raise DeviceLimitExceeded("Device limit reached")
 
         server_count = (
