@@ -271,7 +271,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.status, 200)
             body = await resp.text()
             decoded = base64.b64decode(body).decode("utf-8")
-            self.assertIn("Доступ приостановлен", decoded)
+            self.assertIn("Подписка закончилась", decoded)
             self.assertIn("127.0.0.1:443", decoded)
 
     async def test_grace_period_user_returns_200(self):

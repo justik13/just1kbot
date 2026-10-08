@@ -231,6 +231,9 @@ WL_WEB_DEVICE_LIMIT_EXCEEDED = "Лимит устройств ({active}/{limit})
 WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включите отправку HWID в приложении."
 WL_ANNOUNCE_MAINTENANCE = "⚠️ Сервер на техническом обслуживании. Связь скоро восстановится."
 
+VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
+VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"
+
 
 
 

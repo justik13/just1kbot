@@ -72,35 +72,18 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         if user is None or getattr(user, "is_deleted", False) is True:
             return web.Response(status=404, text="Not Found", headers=common_headers)
 
-        bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+        if getattr(user, "is_banned", False) is True:
+            return web.Response(status=403, text="Forbidden", headers=common_headers)
 
-        if getattr(user, "is_banned", False) is True or getattr(user, "financial_hold", False) is True:
-            notice_title = "⚠️ Доступ приостановлен"
+        if getattr(user, "financial_hold", False) is True or not SubscriptionService.check_vpn_access(user):
+            bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+            notice_text = texts.VLESS_FEED_EXPIRED_NOTICE.format(bot_username=bot_username)
             notice_link = (
                 f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
-                f"?encryption=none&security=none#⚠️ Доступ приостановлен. Обратитесь в поддержку: @{bot_username}"
+                f"?encryption=none&security=none#{notice_text}"
             )
             b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
-            b64_title = base64.b64encode(notice_title.encode("utf-8")).decode("utf-8")
-            response_headers = {
-                **common_headers,
-                "Content-Type": "text/plain; charset=utf-8",
-                "Profile-Update-Interval": "1",
-                "Profile-Title": f"base64:{b64_title}",
-                "Hide-Url": "1",
-                "No-Limit-Enabled": "1",
-                "Support-Url": f"https://t.me/{bot_username}",
-            }
-            return web.Response(status=200, text=b64_payload, headers=response_headers)
-
-        if not SubscriptionService.check_vpn_access(user):
-            notice_title = "⚠️ Подписка закончилась"
-            notice_link = (
-                f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
-                f"?encryption=none&security=none#⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"
-            )
-            b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
-            b64_title = base64.b64encode(notice_title.encode("utf-8")).decode("utf-8")
+            b64_title = base64.b64encode(texts.VLESS_FEED_EXPIRED_TITLE.encode("utf-8")).decode("utf-8")
             expire_ts = int(user.subscription_end.timestamp()) if user.subscription_end else 0
             response_headers = {
                 **common_headers,
