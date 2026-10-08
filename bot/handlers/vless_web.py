@@ -16,7 +16,6 @@ from database.repositories import users_repo, vless_subscription_repo
 from services.device_service import RESERVING_STATUSES
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
-from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
 logger = logging.getLogger(__name__)
@@ -58,7 +57,6 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             },
         )
 
-    now = now_utc()
     common_headers = {
         "Cache-Control": "no-store, private, no-cache, must-revalidate",
         "Pragma": "no-cache",
@@ -78,7 +76,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         ):
             return web.Response(status=403, text="Forbidden", headers=common_headers)
 
-        if not user.subscription_end or user.subscription_end <= now:
+        if not SubscriptionService.check_vpn_access(user):
             return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
 
         # Strict HWID enforcement
@@ -134,6 +132,9 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
         servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
         links = VlessSubscriptionService.generate_vless_links(sub, servers)
+        if not links:
+            retry_headers = {**common_headers, "Retry-After": "60"}
+            return web.Response(status=503, text="No servers available", headers=retry_headers)
 
         payload = "\n".join(links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")

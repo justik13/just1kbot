@@ -17,6 +17,7 @@ from database.models import Server, User, VlessSubscription, VPNProfile
 from database.repositories import vless_subscription_repo
 from services.device_service import RESERVING_STATUSES
 from services.xray_node_client import XrayNodeClient
+from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ class VlessSubscriptionService:
         for srv in servers:
             caps = srv.capabilities or []
             proto = (srv.protocol or "").lower()
-            if proto in ("dual", "relay", "vless") or "dual" in caps or "xray_vless" in caps:
+            if proto in ("dual", "vless") or "dual" in caps or "xray_vless" in caps:
                 eligible.append(srv)
         return eligible
 
@@ -148,11 +149,12 @@ class VlessSubscriptionService:
             api_url = extra.get("xray_api_url")
             api_key = extra.get("xray_api_key")
 
-            # Fallback to resolving from srv.api_url and port 8444
+            # Fallback to resolving from srv.api_url (which already has host:8443 on dual nodes)
             if not api_url and srv.api_url:
                 parsed = urllib.parse.urlsplit(srv.api_url)
                 if parsed.hostname:
-                    api_url = f"https://{parsed.hostname}:8444"
+                    port = parsed.port or 8443
+                    api_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:{port}"
             if not api_key:
                 api_key = srv.api_key
 
@@ -167,9 +169,16 @@ class VlessSubscriptionService:
                         client_uuid=sub.uuid,
                         is_active=is_active,
                     )
-                    results[srv.id] = (resp.result in ("applied", "already_newer"))
+                    results[srv.id] = (
+                        resp.result in ("applied", "already_newer")
+                        and (not resp.verified_inbounds or any("vless" in ib for ib in resp.verified_inbounds))
+                    )
             except Exception as exc:
                 logger.warning("Failed to sync VLESS user %s to server %s: %s", sub.uuid, srv.id, exc)
                 results[srv.id] = False
+
+        if any(results.values()):
+            sub.last_synced_at = now_utc()
+            await session.flush()
 
         return results

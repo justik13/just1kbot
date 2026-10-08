@@ -640,9 +640,24 @@ async def vless_sub_reset(
 ):
     await state.clear()
 
+    from services.maintenance import MaintenanceService
+    if not await MaintenanceService.can_user_perform_action(session, callback.from_user.id):
+        try:
+            await callback.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
+
     if not db_user:
         try:
             await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    if not SubscriptionService.check_vpn_access(db_user):
+        try:
+            await callback.answer(texts.ERROR_NO_SUBSCRIPTION, show_alert=True)
         except Exception:
             pass
         return

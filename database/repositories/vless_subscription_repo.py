@@ -8,6 +8,7 @@ import secrets
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import VlessSubscription
@@ -49,8 +50,15 @@ async def get_or_create_subscription(
         active_hwids={},
     )
     session.add(sub)
-    await session.flush()
-    return sub
+    try:
+        await session.flush()
+        return sub
+    except IntegrityError:
+        # Concurrent creation race: existing row won the race
+        existing = (await session.execute(stmt)).scalar_one_or_none()
+        if existing is not None:
+            return existing
+        raise
 
 
 async def get_subscription_by_token(

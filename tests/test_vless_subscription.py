@@ -216,6 +216,80 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.headers.get("No-Limit-Enabled"), "1")
             self.assertIn("t.me/", resp.headers.get("Support-Url", ""))
 
+    async def test_empty_servers_returns_503(self):
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[]),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-99"}
+            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 503)
+            self.assertEqual(resp.headers.get("Retry-After"), "60")
+
+    async def test_financial_hold_user_returns_403(self):
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        hold_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=True,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=5),
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=hold_user),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-99"}
+            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 403)
+
+    async def test_grace_period_user_returns_200(self):
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        grace_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+            device_limit=3,
+            subscription_end=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=grace_user),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-99"}
+            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
 
 class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
     """Test suite for atomic HWID registration and pruning in repository."""
@@ -444,5 +518,82 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
 
         token_rotate_btn = next((b for b in buttons if b.callback_data == "admin_vless_token_rotate:123456"), None)
         self.assertIsNotNone(token_rotate_btn)
+
+    async def test_get_or_create_subscription_race_condition(self):
+        from sqlalchemy.exc import IntegrityError
+        from database.models import VlessSubscription
+        from database.repositories import vless_subscription_repo
+
+        existing_sub = VlessSubscription(
+            id=5,
+            user_id=42,
+            token="winning-token-12345678",
+            uuid="winning-uuid-1234",
+            is_active=True,
+            active_hwids={},
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=existing_sub)),
+        ])
+        mock_session.flush = AsyncMock(side_effect=IntegrityError("duplicate key", params=None, orig=Exception()))
+
+        sub = await vless_subscription_repo.get_or_create_subscription(mock_session, 42)
+        self.assertEqual(sub.id, 5)
+        self.assertEqual(sub.token, "winning-token-12345678")
+
+    async def test_create_device_enforces_combined_quota(self):
+        from database.models import Server, User
+        from services.device_service import DeviceLimitExceeded, DeviceService
+
+        user = User(
+            id=1,
+            telegram_id=123,
+            device_limit=2,
+            is_deleted=False,
+            is_banned=False,
+            financial_hold=False,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=10),
+            device_creations_today=0,
+            last_creation_date=None,
+        )
+        server = Server(id=1, name="Test", is_active=True)
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=1)))
+
+        with (
+            patch("services.device_service.is_admin", return_value=False),
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
+        ):
+            with self.assertRaises(DeviceLimitExceeded):
+                await DeviceService.create_device(
+                    mock_session,
+                    user=user,
+                    server=server,
+                    device_name="New Device",
+                )
+
+    async def test_eligible_servers_excludes_relay(self):
+        from database.models import Server
+        from services.vless_subscription_service import VlessSubscriptionService
+        from config.enums import ServerHealthState
+
+        srv_relay = Server(
+            id=1, name="WI Relay", is_active=True, health_state=ServerHealthState.ONLINE, protocol="relay"
+        )
+        srv_dual = Server(
+            id=2, name="Dual Node", is_active=True, health_state=ServerHealthState.ONLINE, protocol="dual"
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[srv_relay, srv_dual])))))
+
+        eligible = await VlessSubscriptionService.get_eligible_vless_servers(mock_session)
+        self.assertEqual(len(eligible), 1)
+        self.assertEqual(eligible[0].name, "Dual Node")
+
 
 
