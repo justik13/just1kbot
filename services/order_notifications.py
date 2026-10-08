@@ -20,6 +20,7 @@ from database.models import Order
 LATE_NOTIFY_PENDING_KEY = "late_notify_pending"
 LATE_NOTIFY_ATTEMPTS_KEY = "late_notify_attempts"
 REFERRER_PENDING_KEY = "referrer_notify_pending"
+REFERRER_ATTEMPTS_KEY = "referrer_notify_attempts"
 
 
 def mark_notify_pending(order: Order) -> None:
@@ -46,4 +47,5 @@ def mark_referrer_notified(order: Order) -> None:
     """Clear the referrer-push debt after a confirmed delivery (no DB IO)."""
     meta = dict(order.metadata_ or {})
     meta.pop(REFERRER_PENDING_KEY, None)
+    meta.pop(REFERRER_ATTEMPTS_KEY, None)
     order.metadata_ = meta

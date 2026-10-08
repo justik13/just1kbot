@@ -173,40 +173,47 @@ class SubscriptionService:
                 )
 
             if ref_id is not None and user.referred_by is None:
-                from database.repositories.payments_repo import has_successful_topup
+                locked_user = await session.scalar(
+                    select(User).where(User.id == user.id).with_for_update()
+                )
+                if isinstance(locked_user, User):
+                    user = locked_user
+                if user.referred_by is None:
+                    from database.repositories.payments_repo import has_successful_topup
 
-                has_paid = await has_successful_topup(session, user_id=user.id)
-                if not has_paid:
-                    is_valid = await SubscriptionService._validate_referral(
-                        session,
-                        telegram_id,
-                        ref_id,
-                    )
-
-                    if is_valid:
-                        user.referred_by = ref_id
-                        changed = True
-
-                        from services.audit_service import AuditService
-                        await AuditService.log_action(
+                    has_paid = await has_successful_topup(session, user_id=user.id)
+                    if not has_paid:
+                        is_valid = await SubscriptionService._validate_referral(
                             session,
-                            admin_id=0,
-                            action=AdminAuditAction.REFERRAL_ATTACHED,
-                            target_type="user",
-                            target_id=user.id,
-                            details={"referrer_telegram_id": ref_id},
-                        )
-
-                        logger.info(
-                            "Late referral binding: user %s bound to referrer %s",
                             telegram_id,
                             ref_id,
                         )
-                else:
-                    logger.info(
-                        "Late referral binding rejected for user %s: already has top-up history",
-                        telegram_id,
-                    )
+
+                        if is_valid:
+                            user.referred_by = ref_id
+                            changed = True
+                            user.is_newly_referred = True
+
+                            from services.audit_service import AuditService
+                            await AuditService.log_action(
+                                session,
+                                admin_id=0,
+                                action=AdminAuditAction.REFERRAL_ATTACHED,
+                                target_type="user",
+                                target_id=user.id,
+                                details={"referrer_telegram_id": ref_id},
+                            )
+
+                            logger.info(
+                                "Late referral binding: user %s bound to referrer %s",
+                                telegram_id,
+                                ref_id,
+                            )
+                    else:
+                        logger.info(
+                            "Late referral binding rejected for user %s: already has top-up history",
+                            telegram_id,
+                        )
 
             if changed:
                 await session.flush()
@@ -272,6 +279,9 @@ class SubscriptionService:
                 )
 
         if created and user is not None:
+            if referred_by:
+                user.is_newly_referred = True
+
             from services.audit_service import AuditService
             await AuditService.log_action(
                 session,

@@ -110,6 +110,39 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
         message.delete.assert_awaited_once()
         state.clear.assert_awaited_once()
 
+    async def test_cmd_start_sends_onboarding_push_to_referrer(self):
+        message = MagicMock(spec=Message)
+        message.from_user = TelegramUser(id=12345, is_bot=False, first_name="Test", username="testuser")
+        message.chat = MagicMock(id=12345)
+        message.message_id = 777
+        message.bot = MagicMock()
+        message.delete = AsyncMock()
+
+        state = MagicMock(spec=FSMContext)
+        state.clear = AsyncMock()
+        command = MagicMock(args="ref_99999")
+        session = AsyncMock(info={})
+
+        dummy_user = User(id=1, telegram_id=12345, username="testuser", first_name="Test", referred_by=99999)
+        dummy_user.is_newly_referred = True
+
+        with patch("services.subscription.SubscriptionService.process_onboarding", AsyncMock(return_value=dummy_user)), \
+             patch("bot.handlers.start._update_user_profile_if_changed", AsyncMock(return_value=dummy_user)), \
+             patch("bot.handlers.start._ensure_bot_unblocked", AsyncMock()), \
+             patch("bot.handlers.start.render_hub", AsyncMock()), \
+             patch("utils.telegram.safe_send_message", AsyncMock()) as mock_send:
+            await cmd_start(message, state, command, session, is_new_user=True)
+
+            self.assertIn("post_commit_tasks", session.info)
+            self.assertEqual(len(session.info["post_commit_tasks"]), 1)
+            # Execute queued post-commit task to verify notification delivery
+            await session.info["post_commit_tasks"][0]()
+
+        mock_send.assert_awaited_once()
+        self.assertEqual(mock_send.await_args[0][1], 99999)
+        from bot import texts
+        self.assertEqual(mock_send.await_args[0][2], texts.REFERRAL_ONBOARDING_NOTIFICATION)
+
 
 class TestReferralIdParsing(unittest.TestCase):
     def test_valid_referral_ids(self):
@@ -145,6 +178,7 @@ class TestLateBindingPolicy(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(user.referred_by, 2000)
+        self.assertTrue(getattr(user, "is_newly_referred", False))
 
     async def test_late_binding_forbidden_if_user_already_has_successful_topup(self):
         session = AsyncMock()
@@ -163,6 +197,28 @@ class TestLateBindingPolicy(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIsNone(user.referred_by, "Late binding must be rejected if user has payment history")
+        self.assertFalse(getattr(user, "is_newly_referred", False))
+
+    async def test_late_binding_skipped_if_already_bound_in_concurrent_lock(self):
+        session = AsyncMock()
+        existing_user = User(id=10, telegram_id=1000, referred_by=None, is_deleted=False, is_bot_blocked=False)
+        already_locked_user = User(id=10, telegram_id=1000, referred_by=3000, is_deleted=False, is_bot_blocked=False)
+        session.scalar = AsyncMock(return_value=already_locked_user)
+
+        with patch("services.subscription.get_user_by_telegram_id_any", AsyncMock(return_value=existing_user)), \
+             patch("database.repositories.payments_repo.has_successful_topup", AsyncMock(return_value=False)), \
+             patch("services.subscription.SubscriptionService._validate_referral", AsyncMock(return_value=True)), \
+             patch("services.subscription.invalidate_user_cache"):
+            user = await SubscriptionService.process_onboarding(
+                session,
+                telegram_id=1000,
+                username="test",
+                first_name="Test",
+                ref_id=2000,
+            )
+
+        self.assertEqual(user.referred_by, 3000)
+        self.assertFalse(getattr(user, "is_newly_referred", False))
 
 
 class TestReferralCycleDetection(unittest.IsolatedAsyncioTestCase):

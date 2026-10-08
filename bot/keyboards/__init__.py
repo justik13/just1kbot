@@ -50,6 +50,10 @@ from .payment import (
     get_tariff_showcase_keyboard,
     get_topup_credit_keyboard,
 )
+from .notifications import (
+    get_referral_bonus_keyboard,
+    get_referral_onboarding_keyboard,
+)
 from .user import (
     get_history_keyboard,
     get_referral_keyboard,
@@ -58,6 +62,9 @@ from .user import (
 )
 
 __all__ = [
+    # notifications
+    "get_referral_bonus_keyboard",
+    "get_referral_onboarding_keyboard",
     # common
     "get_hub_keyboard",
     "get_back_button",

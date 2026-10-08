@@ -81,6 +81,10 @@ class ReferralBonusGrantResult:
     # re-querying; equality/hash intentionally cover amounts only.
     referrer_user_id: int | None = None
     referrer_telegram_id: int | None = None
+    bonus_rate_pct: int = 15
+    tier_upgraded: bool = False
+    new_tier_name: str | None = None
+    new_rate_pct: int | None = None
 
     def __iter__(self):
         yield self.referrer_bonus
@@ -280,6 +284,7 @@ async def grant_referral_bonus_for_topup(
             User.telegram_id == purchaser.referred_by,
             User.is_deleted.is_(False),
         )
+        .with_for_update()
     )
     if (
         referrer is None
@@ -381,11 +386,21 @@ async def grant_referral_bonus_for_topup(
     # 2. Purchaser welcome bonus is granted as a 25% checkout discount on first order
     purchaser_welcome_granted = Decimal(0)
     await session.flush()
+
+    new_tier_info = get_referral_tier(active_count)
+    tier_upgraded = bool(first_activation and current_qualifies and new_tier_info.rate > tier_info.rate)
+    new_tier_name = new_tier_info.name if tier_upgraded else None
+    new_rate_pct = int(new_tier_info.rate * 100) if tier_upgraded else None
+
     return ReferralBonusGrantResult(
         referrer_bonus=referrer_bonus_granted,
         purchaser_welcome_bonus=purchaser_welcome_granted,
         referrer_user_id=getattr(referrer, "id", None),
         referrer_telegram_id=getattr(referrer, "telegram_id", None),
+        bonus_rate_pct=int(tier_info.rate * 100),
+        tier_upgraded=tier_upgraded,
+        new_tier_name=new_tier_name,
+        new_rate_pct=new_rate_pct,
     )
 
 

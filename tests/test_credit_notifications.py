@@ -99,7 +99,16 @@ class TestSettlementCreatesDebt(unittest.IsolatedAsyncioTestCase):
 
         debt = order.metadata_.get("referrer_notify_pending")
         self.assertEqual(
-            debt, {"user_id": 7, "telegram_id": 777, "bonus": "15"}
+            debt,
+            {
+                "user_id": 7,
+                "telegram_id": 777,
+                "bonus": "15",
+                "bonus_rate_pct": 15,
+                "tier_upgraded": False,
+                "new_tier_name": None,
+                "new_rate_pct": None,
+            },
         )
 
     @patch("services.order_service.FulfillmentService")
@@ -509,6 +518,114 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("15", text)
         self.assertTrue(len(texts.REFERRAL_BONUS_ACCREDITED) > 0)
+
+    async def test_referrer_push_formats_detailed_amount_and_balance(self):
+        from services.workers import credit_notifications as worker
+
+        with patch.object(
+            worker, "safe_send_message", new=AsyncMock(return_value=99)
+        ) as mock_send:
+            self.assertTrue(
+                await worker._send_referrer_push(
+                    AsyncMock(),
+                    {
+                        "telegram_id": 555,
+                        "bonus": Decimal("15"),
+                        "bonus_rate_pct": 15,
+                        "bonus_balance": 45,
+                    },
+                )
+            )
+            text = mock_send.await_args[0][2]
+        self.assertIn("+15 ₽", text)
+        self.assertIn("15%", text)
+        self.assertIn("45 ₽", text)
+
+    async def test_referrer_push_sends_tier_upgrade(self):
+        from services.workers import credit_notifications as worker
+
+        with patch.object(
+            worker, "safe_send_message", new=AsyncMock(return_value=99)
+        ) as mock_send:
+            self.assertTrue(
+                await worker._send_referrer_push(
+                    AsyncMock(),
+                    {
+                        "telegram_id": 555,
+                        "bonus": Decimal("20"),
+                        "bonus_rate_pct": 20,
+                        "bonus_balance": 100,
+                        "tier_upgraded": True,
+                        "new_tier_name": "Silver",
+                        "new_rate_pct": 20,
+                    },
+                )
+            )
+            self.assertEqual(mock_send.await_count, 1)
+            text = mock_send.await_args[0][2]
+            self.assertIn("+20 ₽", text)
+            self.assertIn("Silver", text)
+            self.assertIn("20%", text)
+            self.assertIn("100 ₽", text)
+
+    async def test_referrer_failure_does_not_resurrect_cleared_owner_debt(self):
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order(
+            metadata_={
+                "late_notify_pending": True,
+                "referrer_notify_pending": {"user_id": 7, "telegram_id": 777, "bonus": "15"},
+            }
+        )
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(return_value=order)
+        with patch.object(worker, "session_scope", return_value=_scope_with(session)):
+            delivered = await worker._finalize_delivery(order.id, owner_ok=True, ref_ok=False)
+
+        self.assertTrue(delivered)
+        self.assertNotIn("late_notify_pending", order.metadata_)
+        self.assertIn("referrer_notify_pending", order.metadata_)
+        self.assertEqual(order.metadata_.get("referrer_notify_attempts"), 1)
+        self.assertNotIn("late_notify_attempts", order.metadata_)
+
+    async def test_owner_failure_does_not_clear_or_corrupt_referrer_debt(self):
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order(
+            metadata_={
+                "late_notify_pending": True,
+                "referrer_notify_pending": {"user_id": 7, "telegram_id": 777, "bonus": "15"},
+            }
+        )
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(return_value=order)
+        with patch.object(worker, "session_scope", return_value=_scope_with(session)):
+            delivered = await worker._finalize_delivery(order.id, owner_ok=False, ref_ok=True)
+
+        self.assertTrue(delivered)
+        self.assertTrue(order.metadata_.get("late_notify_pending"))
+        self.assertEqual(order.metadata_.get("late_notify_attempts"), 1)
+        self.assertNotIn("referrer_notify_pending", order.metadata_)
+        self.assertNotIn("referrer_notify_attempts", order.metadata_)
+
+    async def test_non_paid_order_drops_both_debts(self):
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order(
+            status="refunded",
+            metadata_={
+                "late_notify_pending": True,
+                "referrer_notify_pending": {"user_id": 7, "telegram_id": 777, "bonus": "15"},
+            },
+        )
+        session = AsyncMock(spec=AsyncSession)
+        session.get = AsyncMock(return_value=order)
+        with patch.object(worker, "session_scope", return_value=_scope_with(session)):
+            delivered = await worker._finalize_delivery(order.id, owner_ok=True, ref_ok=True)
+
+        self.assertFalse(delivered)
+        self.assertNotIn("late_notify_pending", order.metadata_)
+        self.assertNotIn("referrer_notify_pending", order.metadata_)
 
     async def test_batch_counts_deliveries(self):
         from services.workers import credit_notifications as worker

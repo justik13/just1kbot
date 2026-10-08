@@ -38,11 +38,12 @@ from database.repositories.account_ledger_repo import get_account_balance
 from services.order_notifications import (
     LATE_NOTIFY_ATTEMPTS_KEY,
     LATE_NOTIFY_PENDING_KEY,
+    REFERRER_ATTEMPTS_KEY,
     REFERRER_PENDING_KEY,
     mark_notified,
     mark_referrer_notified,
 )
-from utils.telegram import EFFECT_CONFETTI, safe_send_message
+from utils.telegram import EFFECT_CONFETTI, EFFECT_FIRE, safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -196,16 +197,46 @@ async def _send_late_push(
 async def _send_referrer_push(bot: Bot, referrer: dict) -> bool:
     """Proactive push for a referral bonus (no DB access)."""
     try:
-        text = texts.REFERRAL_BONUS_ACCREDITED.format(
-            bonus=int(referrer["bonus"])
-        )
+        bonus = int(referrer["bonus"])
+        rate_pct = referrer.get("bonus_rate_pct")
+        bonus_balance = referrer.get("bonus_balance")
+        tier_upgraded = bool(referrer.get("tier_upgraded"))
+        new_tier_name = referrer.get("new_tier_name")
+        new_rate_pct = referrer.get("new_rate_pct")
+
+        if (
+            tier_upgraded
+            and new_tier_name
+            and new_rate_pct is not None
+            and rate_pct is not None
+            and bonus_balance is not None
+        ):
+            text = texts.REFERRAL_BONUS_WITH_UPGRADE_NOTIFICATION.format(
+                bonus=bonus,
+                rate_pct=rate_pct,
+                bonus_balance=bonus_balance,
+                tier_name=new_tier_name,
+                new_rate_pct=new_rate_pct,
+            )
+        elif rate_pct is not None and bonus_balance is not None:
+            text = texts.REFERRAL_BONUS_ACCREDITED_DETAILED.format(
+                bonus=bonus,
+                rate_pct=rate_pct,
+                bonus_balance=bonus_balance,
+            )
+        else:
+            text = texts.REFERRAL_BONUS_ACCREDITED.format(
+                bonus=bonus
+            )
+
         sent_id = await safe_send_message(
             bot,
             referrer["telegram_id"],
             text,
             reply_markup=get_referral_bonus_keyboard(),
-            message_effect_id=EFFECT_CONFETTI,
+            message_effect_id=EFFECT_FIRE,
         )
+
         return sent_id is not None
     except Exception as exc:
         logger.warning("Credit-notify referrer send failed: %s", exc)
@@ -344,17 +375,24 @@ async def _snapshot(order_id) -> dict | None:
             except (InvalidOperation, TypeError, ValueError):
                 bonus = 0
             if (
-                ref_user is None
+                order.status != "paid"
+                or ref_user is None
                 or not ref_user.telegram_id
                 or ref_user.is_bot_blocked
                 or bonus <= 0
             ):
                 referrer = {"kind": "drop"}
             else:
+                ref_balance = await get_account_balance(session, user_id=ref_user.id)
                 referrer = {
                     "kind": "send",
                     "telegram_id": ref_user.telegram_id,
                     "bonus": bonus,
+                    "bonus_balance": int(ref_balance.bonus_available),
+                    "bonus_rate_pct": debt.get("bonus_rate_pct"),
+                    "tier_upgraded": bool(debt.get("tier_upgraded")),
+                    "new_tier_name": debt.get("new_tier_name"),
+                    "new_rate_pct": debt.get("new_rate_pct"),
                 }
 
         if owner is None and referrer is None:
@@ -371,41 +409,38 @@ async def _finalize_delivery(
         order = await session.get(Order, order_id, with_for_update=True)
         if order is None:
             return False
-        meta = dict(order.metadata_ or {})
 
-        if owner_ok is not None and meta.get(LATE_NOTIFY_PENDING_KEY):
-            if order.status != "paid":
-                mark_notified(order)
-                logger.info(
-                    "Credit-notify drops order %s: status is %s, not paid",
-                    order.id,
-                    order.status,
-                )
-            elif owner_ok:
+        if order.status != "paid":
+            mark_notified(order)
+            mark_referrer_notified(order)
+            logger.info(
+                "Credit-notify drops debts for order %s: status is %s, not paid",
+                order.id,
+                order.status,
+            )
+            return False
+
+        if owner_ok is not None and (order.metadata_ or {}).get(LATE_NOTIFY_PENDING_KEY):
+            if owner_ok:
                 mark_notified(order)
                 logger.info(
                     "Credit-notify delivered late push for order %s", order.id
                 )
                 delivered = True
-            elif _note_failed_attempt(order, meta) is None:
-                mark_referrer_notified(order)
+            elif _note_failed_owner_attempt(order) is None:
                 logger.warning(
                     "Credit-notify gives up on order %s", order.id
                 )
 
-        if ref_ok is not None and meta.get(REFERRER_PENDING_KEY):
-            if order.status != "paid":
-                mark_referrer_notified(order)
-            elif ref_ok:
+        if ref_ok is not None and (order.metadata_ or {}).get(REFERRER_PENDING_KEY):
+            if ref_ok:
                 mark_referrer_notified(order)
                 logger.info(
                     "Credit-notify delivered referrer push for order %s",
                     order.id,
                 )
                 delivered = True
-            elif _note_failed_attempt(order, meta) is None:
-                mark_notified(order)
-                mark_referrer_notified(order)
+            elif _note_failed_referrer_attempt(order) is None:
                 logger.warning(
                     "Credit-notify gives up on referrer push for order %s",
                     order.id,
@@ -432,21 +467,17 @@ async def _finalize_attempt(order_id) -> None:
         order = await session.get(Order, order_id, with_for_update=True)
         if order is None:
             return
-        meta = dict(order.metadata_ or {})
-        if not meta.get(LATE_NOTIFY_PENDING_KEY):
+        if not (order.metadata_ or {}).get(LATE_NOTIFY_PENDING_KEY):
             return
-        if _note_failed_attempt(order, meta) is None:
+        if _note_failed_owner_attempt(order) is None:
             logger.warning(
                 "Credit-notify gives up on anomalous order %s", order.id
             )
 
 
-def _note_failed_attempt(order: Order, meta: dict) -> int | None:
-    """Record one failed delivery attempt for a debted order.
-
-    Returns the attempt number, or None when the budget is exhausted (the
-    debt is dropped via mark_notified so the order stops being selected).
-    """
+def _note_failed_owner_attempt(order: Order) -> int | None:
+    """Record one failed owner delivery attempt on fresh order metadata."""
+    meta = dict(order.metadata_ or {})
     attempts = int(meta.get(LATE_NOTIFY_ATTEMPTS_KEY, 0) or 0) + 1
     if attempts >= MAX_NOTIFY_ATTEMPTS:
         mark_notified(order)
@@ -454,3 +485,20 @@ def _note_failed_attempt(order: Order, meta: dict) -> int | None:
     meta[LATE_NOTIFY_ATTEMPTS_KEY] = attempts
     order.metadata_ = meta
     return attempts
+
+
+def _note_failed_referrer_attempt(order: Order) -> int | None:
+    """Record one failed referrer delivery attempt on fresh order metadata."""
+    meta = dict(order.metadata_ or {})
+    attempts = int(meta.get(REFERRER_ATTEMPTS_KEY, 0) or 0) + 1
+    if attempts >= MAX_NOTIFY_ATTEMPTS:
+        mark_referrer_notified(order)
+        return None
+    meta[REFERRER_ATTEMPTS_KEY] = attempts
+    order.metadata_ = meta
+    return attempts
+
+
+def _note_failed_attempt(order: Order, meta: dict | None = None) -> int | None:
+    """Backward-compatible helper for legacy test suites."""
+    return _note_failed_owner_attempt(order)
