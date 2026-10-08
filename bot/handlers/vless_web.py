@@ -92,8 +92,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             headers["x-hwid-required"] = "true"
             return web.Response(status=403, text="HWID required", headers=headers)
 
-        # Count active AWG profiles
-        awg_count = (
+        awg_res = (
             await session.execute(
                 select(func.count(VPNProfile.id)).where(
                     VPNProfile.user_id == user.id,
@@ -101,6 +100,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 )
             )
         ).scalar_one()
+        awg_count = awg_res if isinstance(awg_res, int) else 0
 
         effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
         effective_vless_limit = max(0, effective_limit - awg_count)
