@@ -627,6 +627,8 @@ async def show_order_card(
         payment_method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
     elif order.payment_method == "wallet":
         payment_method_label = texts.ADMIN_PURCHASES_METHOD_WALLET
+    elif order.payment_method == "sbp":
+        payment_method_label = texts.ADMIN_PURCHASES_METHOD_SBP
     elif order.payment_method == "admin":
         payment_method_label = texts.ADMIN_PURCHASES_METHOD_ADMIN
     else:
@@ -656,6 +658,10 @@ async def show_order_card(
         builder.button(
             text=texts.ADMIN_CLIENT_CARD_BUTTON,
             callback_data=f"admin_user_card:{user_telegram_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_BTN_BACK_TO_USER_PAYMENTS,
+            callback_data=f"admin_payments_filter:user:{user_telegram_id}:1",
         )
     builder.button(
         text=texts.ADMIN_BTN_BACK_TO_PAYMENTS,

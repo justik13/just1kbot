@@ -428,9 +428,55 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_text.assert_called_once()
         rendered_text = callback.message.edit_text.call_args[0][0]
         self.assertIn("Заказ #", rendered_text)
+        self.assertIn("Способ оплаты:", rendered_text)
+        self.assertNotIn("Шлюз:", rendered_text)
         self.assertIn("Внутренний баланс", rendered_text)
         self.assertIn("150 ₽", rendered_text)
         self.assertIn("Базовый 30 дней", rendered_text)
+
+        reply_markup = callback.message.edit_text.call_args[1]["reply_markup"]
+        cb_datas = [btn.callback_data for row in reply_markup.inline_keyboard for btn in row]
+        self.assertIn("admin_user_card:555666", cb_datas)
+        self.assertIn("admin_payments_filter:user:555666:1", cb_datas)
+        self.assertIn("admin_payments", cb_datas)
+
+    async def test_show_order_card_displays_sbp_order(self):
+        import uuid
+        from bot.handlers.admin.payments import show_order_card
+        from database.models import Order, Tariff
+
+        session = AsyncMock()
+        test_uuid = uuid.uuid4()
+        user = User(id=21, telegram_id=777888, username="sbp_user")
+        tariff = Tariff(id=2, name="Премиум 30 дней")
+        order = Order(
+            id=test_uuid,
+            user_id=21,
+            service_type="awg",
+            amount_rub=Decimal("300.00"),
+            duration_days=30,
+            status="paid",
+            payment_method="sbp",
+            created_at=now_utc(),
+            paid_at=now_utc(),
+            user=user,
+            tariff=tariff,
+        )
+        session.scalar.return_value = order
+
+        callback = AsyncMock()
+        callback.data = f"admin_order_card:{test_uuid}"
+        callback.from_user.id = 12345
+        callback.message = AsyncMock()
+        state = AsyncMock()
+
+        with patch("bot.handlers.admin.payments.is_admin", return_value=True):
+            await show_order_card(callback, state, session)
+
+        callback.message.edit_text.assert_called_once()
+        rendered_text = callback.message.edit_text.call_args[0][0]
+        self.assertIn("Способ оплаты:", rendered_text)
+        self.assertIn("СБП", rendered_text)
 
     async def test_show_order_card_not_found_alert(self):
         import uuid
@@ -501,6 +547,15 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.admin.payments.is_admin", return_value=True), \
              patch("database.repositories.users_repo.get_user_by_telegram_id", return_value=user):
             await show_user_payments_list(callback, state, session)
+
+        # Verify that both count and order queries do not filter by payment_method
+        count_stmt = session.scalar.call_args_list[0][0][0]
+        compiled_count = str(count_stmt.compile(compile_kwargs={"literal_binds": True}))
+        self.assertNotIn("payment_method", compiled_count)
+
+        order_stmt = session.execute.call_args_list[0][0][0]
+        compiled_orders = str(order_stmt.compile(compile_kwargs={"literal_binds": True}))
+        self.assertNotIn("payment_method", compiled_orders)
 
         callback.message.edit_text.assert_called_once()
         rendered_text = callback.message.edit_text.call_args[0][0]

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 # --- Navigation buttons --------------------------------------------------
 ADMIN_BTN_BACK_TO_PAYMENTS = "← К списку платежей"
+ADMIN_BTN_BACK_TO_USER_PAYMENTS = "← К платежам пользователя"
 ADMIN_BTN_PAGINATION_NEXT = "➡️"
 ADMIN_BTN_PAGINATION_PREV = "⬅️"
 
@@ -87,7 +88,7 @@ ADMIN_ORDER_CARD_TEMPLATE = """🛠 Админка › 🧾 <b>Заказ #{shor
 💰 <b>Сумма:</b> <b>{amount_rub} ₽</b>
 📦 <b>Услуга:</b> {tariff_label} ({service_type})
 📊 <b>Статус:</b> {status_icon} {status_name} (<code>{status}</code>)
-💳 <b>Шлюз:</b> <code>{payment_method}</code>
+💳 <b>Способ оплаты:</b> <code>{payment_method}</code>
 🕒 <b>Создан:</b> {created_at}{paid_at_line}{refunded_at_line}{external_id_line}{payment_url_line}{description_line}{held_line}{diagnostics_line}"""
 ADMIN_ORDER_PAID_AT_LINE = "\n✅ <b>Оплачен:</b> {paid_at}"
 ADMIN_ORDER_HELD_LINE = "\n⛔ <b>Удержан:</b> {reason} — зачисление и выдача удержаны, требуется ручное решение"
@@ -103,6 +104,7 @@ ADMIN_ORDER_SERVICE_TOPUP = "Пополнение баланса"
 ADMIN_PURCHASES_ENTRY_PAYMENT_METHOD_LINE = """💳 <b>Способ оплаты:</b> {payment_method_label}
 """
 ADMIN_PURCHASES_METHOD_YOOKASSA = "Банковская карта (ЮKassa)"
+ADMIN_PURCHASES_METHOD_SBP = "СБП"
 ADMIN_PURCHASES_METHOD_WALLET = "Внутренний баланс"
 ADMIN_PURCHASES_METHOD_ADMIN = "Выдача администратором"
 ADMIN_PURCHASES_METHOD_OTHER = "Другой способ"
