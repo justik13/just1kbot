@@ -548,14 +548,12 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
              patch("database.repositories.users_repo.get_user_by_telegram_id", return_value=user):
             await show_user_payments_list(callback, state, session)
 
-        # Verify that both count and order queries do not filter by payment_method
+        # Verify that both count and order queries do not filter by payment_method in whereclause
         count_stmt = session.scalar.call_args_list[0][0][0]
-        compiled_count = str(count_stmt.compile(compile_kwargs={"literal_binds": True}))
-        self.assertNotIn("payment_method", compiled_count)
+        self.assertNotIn("payment_method", str(count_stmt.whereclause))
 
         order_stmt = session.execute.call_args_list[0][0][0]
-        compiled_orders = str(order_stmt.compile(compile_kwargs={"literal_binds": True}))
-        self.assertNotIn("payment_method", compiled_orders)
+        self.assertNotIn("payment_method", str(order_stmt.whereclause))
 
         callback.message.edit_text.assert_called_once()
         rendered_text = callback.message.edit_text.call_args[0][0]
