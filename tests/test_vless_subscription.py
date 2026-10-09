@@ -853,6 +853,8 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
 
         callback = MagicMock()
         callback.data = "admin_subscription:123"
+        callback.from_user.id = 123
+        callback.answer = AsyncMock()
         callback.message.edit_text = AsyncMock()
         user = User(
             id=1,
@@ -866,6 +868,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
 
         with (
+            patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True),
             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
             patch("bot.handlers.admin.users.subscription_menu_routes.get_user_profiles_count", new=AsyncMock(return_value=1)),
             patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=2)),
@@ -903,9 +906,8 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         )
         snapshot = ServerPeerSnapshot(
             server_id=1,
+            peer_ids=frozenset(),
             captured_at=datetime.now(timezone.utc),
-            peer_count=5,
-            capacity_limit=100,
         )
 
         mock_session = AsyncMock()
