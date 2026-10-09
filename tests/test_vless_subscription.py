@@ -317,70 +317,6 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-
-class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
-    """Test suite for atomic HWID registration and pruning in repository."""
-
-    def test_prune_stale_hwids(self):
-        now = datetime.now(timezone.utc)
-        recent_ts = (now - timedelta(hours=5)).isoformat()
-        stale_ts = (now - timedelta(hours=50)).isoformat()
-
-        hwids = {
-            "hwid-fresh": recent_ts,
-            "hwid-old": stale_ts,
-        }
-
-        pruned = vless_subscription_repo.prune_stale_hwids(hwids, ttl_hours=48)
-        self.assertIn("hwid-fresh", pruned)
-        self.assertNotIn("hwid-old", pruned)
-
-    async def test_register_hwid_atomic_quota_enforcement(self):
-        now = datetime.now(timezone.utc)
-        sub = VlessSubscription(
-            id=1,
-            user_id=100,
-            token="tok1234567890123456",
-            uuid="abc-uuid",
-            is_active=True,
-            active_hwids={
-                "hwid-1": now.isoformat(),
-            },
-        )
-
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
-
-        # Effective limit is 1, so registering a new hwid-2 must be rejected
-        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
-            mock_session,
-            subscription_id=sub.id,
-            hwid="hwid-2",
-            effective_limit=1,
-        )
-        self.assertFalse(allowed)
-        self.assertEqual(count, 1)
-
-        # Effective limit is 0 (all slots taken by AWG) must reject even existing HWID without wiping active_hwids
-        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
-            mock_session,
-            subscription_id=sub.id,
-            hwid="hwid-1",
-            effective_limit=0,
-        )
-        self.assertFalse(allowed)
-        self.assertEqual(count, 1)
-
-        # Existing device hwid-1 must be allowed and timestamp updated when quota available
-        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
-            mock_session,
-            subscription_id=sub.id,
-            hwid="hwid-1",
-            effective_limit=1,
-        )
-        self.assertTrue(allowed)
-        self.assertEqual(count, 1)
-
     async def test_feed_debounces_frequent_requests(self):
         now = now_utc()
         recent_sub = VlessSubscription(
@@ -457,6 +393,71 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(active_sub.is_active)
             self.assertEqual(active_sub.version, 2)
             mock_sync.assert_called_once_with(expired_user.id, is_active=False, session=mock_session)
+
+
+class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
+    """Test suite for atomic HWID registration and pruning in repository."""
+
+
+    def test_prune_stale_hwids(self):
+        now = datetime.now(timezone.utc)
+        recent_ts = (now - timedelta(hours=5)).isoformat()
+        stale_ts = (now - timedelta(hours=50)).isoformat()
+
+        hwids = {
+            "hwid-fresh": recent_ts,
+            "hwid-old": stale_ts,
+        }
+
+        pruned = vless_subscription_repo.prune_stale_hwids(hwids, ttl_hours=48)
+        self.assertIn("hwid-fresh", pruned)
+        self.assertNotIn("hwid-old", pruned)
+
+    async def test_register_hwid_atomic_quota_enforcement(self):
+        now = datetime.now(timezone.utc)
+        sub = VlessSubscription(
+            id=1,
+            user_id=100,
+            token="tok1234567890123456",
+            uuid="abc-uuid",
+            is_active=True,
+            active_hwids={
+                "hwid-1": now.isoformat(),
+            },
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
+
+        # Effective limit is 1, so registering a new hwid-2 must be rejected
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="hwid-2",
+            effective_limit=1,
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(count, 1)
+
+        # Effective limit is 0 (all slots taken by AWG) must reject even existing HWID without wiping active_hwids
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="hwid-1",
+            effective_limit=0,
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(count, 1)
+
+        # Existing device hwid-1 must be allowed and timestamp updated when quota available
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="hwid-1",
+            effective_limit=1,
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(count, 1)
 
     async def test_reset_hwids(self):
         now = datetime.now(timezone.utc)
