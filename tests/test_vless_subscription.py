@@ -381,6 +381,83 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(allowed)
         self.assertEqual(count, 1)
 
+    async def test_feed_debounces_frequent_requests(self):
+        now = now_utc()
+        recent_sub = VlessSubscription(
+            id=20,
+            user_id=42,
+            token="test-token-valid-length-12345678",
+            uuid="11111111-2222-3333-4444-555555555555",
+            is_active=True,
+            version=1,
+            active_hwids={},
+            pending_revoked_uuids=[],
+            last_synced_at=now - timedelta(seconds=10),
+        )
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=recent_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_sync,
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-99"}
+            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            mock_sync.assert_not_called()
+
+    async def test_feed_triggers_deactivation_when_access_expired(self):
+        now = now_utc()
+        active_sub = VlessSubscription(
+            id=30,
+            user_id=42,
+            token="test-token-valid-length-12345678",
+            uuid="11111111-2222-3333-4444-555555555555",
+            is_active=True,
+            version=1,
+            active_hwids={},
+            pending_revoked_uuids=[],
+        )
+        expired_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            device_limit=3,
+            subscription_end=now - timedelta(hours=5),
+        )
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=active_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=expired_user),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=False),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_sync,
+        ):
+            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678")
+            self.assertEqual(resp.status, 200)
+            self.assertFalse(active_sub.is_active)
+            self.assertEqual(active_sub.version, 2)
+            mock_sync.assert_called_once_with(expired_user.id, is_active=False, session=mock_session)
+
     async def test_reset_hwids(self):
         now = datetime.now(timezone.utc)
         sub = VlessSubscription(
@@ -399,6 +476,8 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(old_uuid, "abc-uuid")
         self.assertNotEqual(new_uuid, "abc-uuid")
         self.assertEqual(sub.uuid, new_uuid)
+        self.assertEqual(sub.version, 2)
+        self.assertEqual(sub.pending_revoked_uuids, ["abc-uuid"])
 
 
 class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
@@ -517,6 +596,8 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(new_uuid, "11111111-2222-3333-4444-555555555555")
         self.assertEqual(sub.uuid, new_uuid)
         self.assertEqual(sub.active_hwids, {})
+        self.assertEqual(sub.version, 2)
+        self.assertEqual(sub.pending_revoked_uuids, ["11111111-2222-3333-4444-555555555555"])
 
     def test_user_card_vless_breakdown(self):
         from bot.handlers.admin.users.common import format_user_card_text
@@ -728,7 +809,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             success, status = await BanService._ban_user(mock_session, admin_id=999, user=user, telegram_id=123)
             self.assertTrue(success)
             self.assertFalse(sub.is_active)
-            mock_deprov.assert_called_once_with("test-uuid", session=mock_session)
+            mock_deprov.assert_called_once_with("test-uuid", version=2, sub_id=1, session=mock_session)
 
     async def test_vless_sub_reset_handler_imports_maintenance_properly(self):
         from bot.handlers.connection.device_view_routes import vless_sub_reset
@@ -753,7 +834,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         from services.vless_subscription_service import VlessSubscriptionService
 
         user = User(id=1, telegram_id=123, is_banned=True, subscription_end=None)
-        sub = VlessSubscription(id=1, user_id=1, uuid="test-uuid", is_active=True)
+        sub = VlessSubscription(id=1, user_id=1, uuid="test-uuid", is_active=True, version=1)
         srv = Server(id=1, name="Exit", is_active=True, health_state=ServerHealthState.ONLINE, capabilities=["vless"], api_url="https://exit.com:8443", api_key="secret")
 
         mock_session = AsyncMock()
@@ -779,6 +860,8 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
                 api_key="secret",
                 client_uuid="test-uuid",
                 is_active=False,
+                version=1,
+                idempotency_key="vless:1:1:False",
                 service="vless",
             )
 
@@ -947,6 +1030,45 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
                 )
             mock_hwid.assert_called_once_with(mock_session, 1)
 
+    async def test_vless_cleanup_4h_grace_and_pending_revocation_sweep(self):
+        from database.models import Server
+        from config.enums import ServerHealthState
+        from services.workers.cleanup import _cleanup_expired_vless_network_grace, _sweep_vless_pending_revocations
 
+        user = User(id=77, telegram_id=888, subscription_end=now_utc() - timedelta(hours=5))
+        sub = VlessSubscription(id=77, user_id=77, is_active=True, version=1, pending_revoked_uuids=["old-rev-uuid"])
+        srv = Server(
+            id=1,
+            name="Exit",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            api_url="https://exit.com:8443",
+            api_key="secret",
+        )
 
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[(77,)])))
+        mock_session.get = AsyncMock(return_value=user)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("services.workers.cleanup.session_scope", fake_session_scope),
+            patch("services.subscription.SubscriptionService.sync_access_state", new=AsyncMock()) as mock_sync_access,
+        ):
+            await _cleanup_expired_vless_network_grace()
+            mock_sync_access.assert_called_once_with(mock_session, user)
+
+        with (
+            patch("services.workers.cleanup.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscriptions_with_pending_revocations", new=AsyncMock(return_value=[sub])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch("services.vless_subscription_service.VlessSubscriptionService._execute_deprovision_on_nodes", new=AsyncMock(return_value={1: True})),
+            patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
+        ):
+            await _sweep_vless_pending_revocations()
+            mock_pop.assert_called_once_with(mock_session, 77, "old-rev-uuid")
 

@@ -416,7 +416,9 @@ async def admin_vless_hwid_reset(
         sub.is_active = target_active
         session.add(sub)
         if old_uuid:
-            VlessSubscriptionService.deprovision_background(old_uuid, session=session)
+            VlessSubscriptionService.deprovision_background(
+                old_uuid, version=sub.version, sub_id=sub.id, session=session
+            )
             VlessSubscriptionService.ensure_synced_background(user.id, is_active=target_active, session=session)
         await AuditService.log_action(
             session,
@@ -473,7 +475,9 @@ async def admin_vless_token_rotate(
         sub.is_active = target_active
         session.add(sub)
         if old_uuid:
-            VlessSubscriptionService.deprovision_background(old_uuid, session=session)
+            VlessSubscriptionService.deprovision_background(
+                old_uuid, version=sub.version, sub_id=sub.id, session=session
+            )
             VlessSubscriptionService.ensure_synced_background(user.id, is_active=target_active, session=session)
         await AuditService.log_action(
             session,

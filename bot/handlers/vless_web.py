@@ -16,6 +16,7 @@ from database.repositories import users_repo, vless_subscription_repo
 from services.device_service import RESERVING_STATUSES
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
+from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,12 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             or getattr(user, "financial_hold", False) is True
             or not SubscriptionService.check_vpn_access(user)
         ):
+            if sub.is_active:
+                sub.is_active = False
+                sub.version = (getattr(sub, "version", 1) or 1) + 1
+                session.add(sub)
+                VlessSubscriptionService.ensure_synced_background(user.id, is_active=False, session=session)
+
             bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
             notice_text = texts.VLESS_FEED_EXPIRED_NOTICE.format(bot_username=bot_username)
             notice_link = (
@@ -147,8 +154,15 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             )
             return web.Response(status=403, text=limit_msg, headers=headers)
 
-        # Trigger background sync to dual nodes
-        VlessSubscriptionService.ensure_synced_background(user.id, is_active=True, session=session)
+        # Trigger background sync with debouncing (300s) unless pending revocations exist
+        now = now_utc()
+        needs_sync = (
+            sub.last_synced_at is None
+            or (now - sub.last_synced_at).total_seconds() > 300
+            or bool(getattr(sub, "pending_revoked_uuids", None))
+        )
+        if needs_sync:
+            VlessSubscriptionService.ensure_synced_background(user.id, is_active=True, session=session)
 
         servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
         links = VlessSubscriptionService.generate_vless_links(sub, servers)

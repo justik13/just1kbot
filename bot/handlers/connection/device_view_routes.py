@@ -669,7 +669,9 @@ async def vless_sub_reset(
     if sub:
         old_uuid, _ = await vless_subscription_repo.reset_hwids(session, sub.id)
         if old_uuid:
-            VlessSubscriptionService.deprovision_background(old_uuid, session=session)
+            VlessSubscriptionService.deprovision_background(
+                old_uuid, version=sub.version, sub_id=sub.id, session=session
+            )
             VlessSubscriptionService.ensure_synced_background(db_user.id, is_active=True, session=session)
 
     try:

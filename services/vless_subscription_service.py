@@ -102,6 +102,8 @@ class VlessSubscriptionService:
             try:
                 sub_uuid = None
                 sub_id = None
+                sub_version = 1
+                pending_revocations: list[str] = []
                 desired_active = False
                 targets = []
                 async with session_scope() as scoped_session:
@@ -109,6 +111,8 @@ class VlessSubscriptionService:
                     if sub is not None:
                         sub_uuid = sub.uuid
                         sub_id = sub.id
+                        sub_version = getattr(sub, "version", 1) or 1
+                        pending_revocations = list(getattr(sub, "pending_revoked_uuids", None) or [])
                         from services.subscription import SubscriptionService
                         user = await scoped_session.get(User, user_id)
                         desired_active = bool(
@@ -128,10 +132,18 @@ class VlessSubscriptionService:
                     return
 
                 results = await cls._execute_sync_to_nodes(
-                    targets, sub_uuid, desired_active, user_id=user_id, sub_id=sub_id
+                    targets, sub_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub_id
                 )
 
-                if any(results.values()):
+                # Retry deprovisioning for any pending revoked UUIDs
+                if pending_revocations and sub_id:
+                    for rev_uuid in pending_revocations:
+                        deprov_res = await cls._execute_deprovision_on_nodes(targets, rev_uuid, version=sub_version)
+                        if all(deprov_res.values()) and len(deprov_res) == len(targets):
+                            async with session_scope() as scoped_session:
+                                await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub_id, rev_uuid)
+
+                if all(results.values()) and len(results) == len(targets):
                     async with session_scope() as scoped_session:
                         current_sub = await vless_subscription_repo.get_subscription_by_user_id(scoped_session, user_id)
                         if current_sub:
@@ -151,7 +163,12 @@ class VlessSubscriptionService:
 
     @classmethod
     def deprovision_background(
-        cls, old_uuid: str, *, session: AsyncSession | None = None
+        cls,
+        old_uuid: str,
+        *,
+        version: int | None = None,
+        sub_id: int | None = None,
+        session: AsyncSession | None = None,
     ) -> asyncio.Task | None:
         """Deprovision user UUID from nodes with post-commit dispatch if session is active."""
         async def _run() -> None:
@@ -163,7 +180,10 @@ class VlessSubscriptionService:
                     targets = cls._extract_node_targets(servers)
 
                 if targets:
-                    await cls._execute_deprovision_on_nodes(targets, old_uuid)
+                    results = await cls._execute_deprovision_on_nodes(targets, old_uuid, version=version)
+                    if sub_id and all(results.values()) and len(results) == len(targets):
+                        async with session_scope() as scoped_session:
+                            await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub_id, old_uuid)
             except Exception as e:
                 masked_uuid = f"{old_uuid[:8]}***" if old_uuid else "unknown"
                 logger.warning("Background deprovision of VLESS UUID %s failed: %s", masked_uuid, e)
@@ -244,6 +264,7 @@ class VlessSubscriptionService:
         targets: list[tuple[int, str, str]],
         client_uuid: str,
         desired_active: bool,
+        version: int | None = None,
         user_id: int | None = None,
         sub_id: int | None = None,
     ) -> dict[int, bool]:
@@ -256,6 +277,8 @@ class VlessSubscriptionService:
                         api_key=api_key,
                         client_uuid=client_uuid,
                         is_active=desired_active,
+                        version=version,
+                        idempotency_key=f"vless:{sub_id or user_id or client_uuid[:8]}:{version}:{desired_active}",
                         service="vless",
                     )
                     verified = [
@@ -280,6 +303,7 @@ class VlessSubscriptionService:
     async def _execute_deprovision_on_nodes(
         targets: list[tuple[int, str, str]],
         client_uuid: str,
+        version: int | None = None,
     ) -> dict[int, bool]:
         results: dict[int, bool] = {}
         for srv_id, api_url, api_key in targets:
@@ -290,6 +314,8 @@ class VlessSubscriptionService:
                         api_key=api_key,
                         client_uuid=client_uuid,
                         is_active=False,
+                        version=version,
+                        idempotency_key=f"vless:deprov:{client_uuid[:8]}:{version}",
                         service="vless",
                     )
                     results[srv_id] = resp.result in ("applied", "already_newer")
@@ -332,11 +358,22 @@ class VlessSubscriptionService:
 
         servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
         targets = VlessSubscriptionService._extract_node_targets(servers)
+        sub_version = getattr(sub, "version", 1) or 1
         results = await VlessSubscriptionService._execute_sync_to_nodes(
-            targets, sub.uuid, desired_active, user_id=user_id, sub_id=sub.id
+            targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
         )
 
-        if any(results.values()):
+        # Retry deprovisioning for any pending revoked UUIDs
+        pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+        if pending:
+            for rev_uuid in pending:
+                deprov_res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                    targets, rev_uuid, version=sub_version
+                )
+                if all(deprov_res.values()) and len(deprov_res) == len(targets):
+                    await vless_subscription_repo.pop_pending_revoked_uuid(session, sub.id, rev_uuid)
+
+        if all(results.values()) and len(results) == len(targets):
             sub.last_synced_at = now_utc()
             await session.flush()
 
@@ -349,6 +386,7 @@ class VlessSubscriptionService:
     async def deprovision_uuid_from_nodes(
         session: AsyncSession,
         client_uuid: str,
+        version: int | None = None,
     ) -> dict[int, bool]:
         """Deprovision a revoked UUID across all eligible exit nodes."""
         if not client_uuid:
@@ -356,7 +394,7 @@ class VlessSubscriptionService:
 
         servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
         targets = VlessSubscriptionService._extract_node_targets(servers)
-        return await VlessSubscriptionService._execute_deprovision_on_nodes(targets, client_uuid)
+        return await VlessSubscriptionService._execute_deprovision_on_nodes(targets, client_uuid, version=version)
 
     # Backward compatibility alias
     deprovision_uuid_from_dual_nodes = deprovision_uuid_from_nodes

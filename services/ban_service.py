@@ -202,8 +202,14 @@ class BanService:
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, locked_user.id)
         if vless_sub and vless_sub.is_active:
             vless_sub.is_active = False
+            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
             session.add(vless_sub)
-            VlessSubscriptionService.deprovision_background(vless_sub.uuid, session=session)
+            VlessSubscriptionService.deprovision_background(
+                vless_sub.uuid,
+                version=vless_sub.version,
+                sub_id=vless_sub.id,
+                session=session,
+            )
 
         await AuditService.log_action(
             session,
@@ -268,6 +274,7 @@ class BanService:
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
         if vless_sub and SubscriptionService.check_vpn_access(locked_user):
             vless_sub.is_active = True
+            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
             session.add(vless_sub)
             VlessSubscriptionService.ensure_synced_background(user.id, is_active=True, session=session)
 

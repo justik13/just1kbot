@@ -67,7 +67,9 @@ async def get_or_create_subscription(
         token=token,
         uuid=client_uuid,
         is_active=True,
+        version=1,
         active_hwids={},
+        pending_revoked_uuids=[],
     )
     try:
         async with session.begin_nested():
@@ -251,7 +253,7 @@ async def reset_hwids(
     session: AsyncSession,
     subscription_id: int,
 ) -> tuple[str | None, str | None]:
-    """Clear all registered HWIDs and rotate client UUID to revoke access on old devices.
+    """Clear all registered HWIDs, increment monotonic version, and rotate client UUID to revoke access on old devices.
 
     Returns:
         tuple[old_uuid, new_uuid] or (None, None) if subscription not found.
@@ -262,7 +264,12 @@ async def reset_hwids(
         old_uuid = sub.uuid
         new_uuid = str(uuid.uuid4())
         sub.uuid = new_uuid
+        sub.version = (getattr(sub, "version", 1) or 1) + 1
         sub.active_hwids = {}
+        pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+        if old_uuid and old_uuid not in pending:
+            pending.append(old_uuid)
+        sub.pending_revoked_uuids = pending
         await session.flush()
         return old_uuid, new_uuid
     return None, None
@@ -274,7 +281,7 @@ async def rotate_token(
     *,
     reset_hwids: bool = True,
 ) -> tuple[str, str | None, str | None]:
-    """Atomically regenerates the VLESS subscription token, rotates UUID, and clears active HWIDs.
+    """Atomically regenerates the VLESS subscription token, increments version, rotates UUID, and records old UUID for durable revocation.
 
     Returns:
         tuple[new_token, old_uuid, new_uuid]
@@ -289,8 +296,43 @@ async def rotate_token(
     new_uuid = str(uuid.uuid4())
     sub.token = token
     sub.uuid = new_uuid
+    sub.version = (getattr(sub, "version", 1) or 1) + 1
     if reset_hwids:
         sub.active_hwids = {}
+    pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+    if old_uuid and old_uuid not in pending:
+        pending.append(old_uuid)
+    sub.pending_revoked_uuids = pending
     await session.flush()
     return token, old_uuid, new_uuid
+
+
+async def pop_pending_revoked_uuid(
+    session: AsyncSession,
+    subscription_id: int,
+    uuid_to_remove: str,
+) -> None:
+    """Removes a successfully deprovisioned UUID from pending_revoked_uuids under row lock."""
+    stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
+    sub = (await session.execute(stmt)).scalar_one_or_none()
+    if sub and sub.pending_revoked_uuids:
+        sub.pending_revoked_uuids = [u for u in sub.pending_revoked_uuids if u != uuid_to_remove]
+        await session.flush()
+
+
+async def get_subscriptions_with_pending_revocations(
+    session: AsyncSession,
+    limit: int = 50,
+) -> list[VlessSubscription]:
+    """Find subscriptions having pending revoked UUIDs requiring retry."""
+    stmt = (
+        select(VlessSubscription)
+        .where(
+            VlessSubscription.pending_revoked_uuids.is_not(None),
+            func.jsonb_array_length(VlessSubscription.pending_revoked_uuids) > 0,
+        )
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
 

@@ -510,6 +510,7 @@ class SubscriptionService:
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
         if vless_sub and vless_sub.is_active != target_active:
             vless_sub.is_active = target_active
+            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
             session.add(vless_sub)
             VlessSubscriptionService.ensure_synced_background(user.id, is_active=target_active, session=session)
 

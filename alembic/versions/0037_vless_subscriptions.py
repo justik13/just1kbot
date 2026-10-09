@@ -26,11 +26,18 @@ def upgrade() -> None:
         sa.Column("token", sa.String(length=64), nullable=False),
         sa.Column("uuid", sa.String(length=36), nullable=False),
         sa.Column("is_active", sa.Boolean(), server_default=sa.text("true"), nullable=False),
+        sa.Column("version", sa.Integer(), server_default=sa.text("1"), nullable=False),
         sa.Column(
             "active_hwids",
             postgresql.JSONB(astext_type=sa.Text()),
             server_default=sa.text("'{}'::jsonb"),
             nullable=True,
+        ),
+        sa.Column(
+            "pending_revoked_uuids",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'[]'::jsonb"),
+            nullable=False,
         ),
         sa.Column("last_synced_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(

@@ -1297,9 +1297,15 @@ class VlessSubscription(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
 
     active_hwids: Mapped[dict | None] = mapped_column(
         JSONB, nullable=True, default=dict, server_default=text("'{}'::jsonb")
+    )
+    pending_revoked_uuids: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
 
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
