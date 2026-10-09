@@ -315,10 +315,7 @@ async def show_user_payments_list(
     await state.clear()
     user_orders_count = (
         await session.scalar(
-            select(func.count(Order.id)).where(
-                Order.user_id == user.id,
-                Order.payment_method == "yookassa",
-            )
+            select(func.count(Order.id)).where(Order.user_id == user.id)
         )
         or 0
     )
@@ -337,7 +334,7 @@ async def show_user_payments_list(
 
     order_stmt = (
         select(Order)
-        .where(Order.user_id == user.id, Order.payment_method == "yookassa")
+        .where(Order.user_id == user.id)
         .options(selectinload(Order.user))
         .order_by(Order.created_at.desc())
         .limit(needed)
@@ -549,7 +546,7 @@ async def show_order_card(
     await state.clear()
     order = await session.scalar(
         select(Order)
-        .where(Order.id == order_uuid, Order.payment_method == "yookassa")
+        .where(Order.id == order_uuid)
         .options(selectinload(Order.user), selectinload(Order.tariff))
     )
     if not order:
@@ -626,11 +623,16 @@ async def show_order_card(
     if held_meta.get("payment_creation_ambiguous"):
         diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_AMBIGUOUS
 
-    payment_method_label = (
-        texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
-        if order.payment_method == "yookassa"
-        else safe(order.payment_method)
-    )
+    if order.payment_method == "yookassa":
+        payment_method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
+    elif order.payment_method == "wallet":
+        payment_method_label = texts.ADMIN_PURCHASES_METHOD_WALLET
+    elif order.payment_method == "sbp":
+        payment_method_label = texts.ADMIN_PURCHASES_METHOD_SBP
+    elif order.payment_method == "admin":
+        payment_method_label = texts.ADMIN_PURCHASES_METHOD_ADMIN
+    else:
+        payment_method_label = safe(order.payment_method) or texts.ADMIN_PURCHASES_METHOD_OTHER
 
     rendered = texts.ADMIN_ORDER_CARD_TEMPLATE.format(
         short_id=str(order.id)[:8],
@@ -656,6 +658,10 @@ async def show_order_card(
         builder.button(
             text=texts.ADMIN_CLIENT_CARD_BUTTON,
             callback_data=f"admin_user_card:{user_telegram_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_BTN_BACK_TO_USER_PAYMENTS,
+            callback_data=f"admin_payments_filter:user:{user_telegram_id}:1",
         )
     builder.button(
         text=texts.ADMIN_BTN_BACK_TO_PAYMENTS,
