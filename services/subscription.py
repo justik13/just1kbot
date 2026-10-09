@@ -511,6 +511,6 @@ class SubscriptionService:
         if vless_sub and vless_sub.is_active != target_active:
             vless_sub.is_active = target_active
             session.add(vless_sub)
-            VlessSubscriptionService.ensure_synced_background(user.id, is_active=target_active)
+            VlessSubscriptionService.ensure_synced_background(user.id, is_active=target_active, session=session)
 
         await session.flush()

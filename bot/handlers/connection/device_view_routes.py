@@ -611,7 +611,7 @@ async def vless_sub_feed_info(
             pass
         return
 
-    has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
+    has_access = SubscriptionService.check_vpn_access(db_user)
     if not has_access:
         try:
             await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
@@ -621,7 +621,7 @@ async def vless_sub_feed_info(
 
     from services.vless_subscription_service import VlessSubscriptionService
 
-    VlessSubscriptionService.ensure_synced_background(db_user.id, is_active=True)
+    VlessSubscriptionService.ensure_synced_background(db_user.id, is_active=True, session=session)
 
     await render_vless_sub_screen(
         callback.bot,
@@ -669,8 +669,8 @@ async def vless_sub_reset(
     if sub:
         old_uuid, _ = await vless_subscription_repo.reset_hwids(session, sub.id)
         if old_uuid:
-            VlessSubscriptionService.deprovision_background(old_uuid)
-            VlessSubscriptionService.ensure_synced_background(db_user.id, is_active=True)
+            VlessSubscriptionService.deprovision_background(old_uuid, session=session)
+            VlessSubscriptionService.ensure_synced_background(db_user.id, is_active=True, session=session)
 
     try:
         await callback.answer(texts.VLESS_RESET_SUCCESS, show_alert=True)

@@ -184,10 +184,22 @@ async def register_hwid_atomic(
     if sub is None:
         return False, 0, max(0, effective_limit or 0)
 
+    from services.subscription import SubscriptionService
+
+    if (
+        user is None
+        or getattr(user, "is_banned", False)
+        or getattr(user, "financial_hold", False)
+        or getattr(user, "is_deleted", False)
+        or not getattr(sub, "is_active", True)
+        or (hasattr(user, "subscription_end") and not SubscriptionService.check_vpn_access(user))
+    ):
+        active = prune_stale_hwids(sub.active_hwids, ttl_hours=ttl_hours)
+        return False, len(active), 0
+
     if effective_limit is None:
         from database.models import VPNProfile
         from services.device_service import RESERVING_STATUSES
-        from services.subscription import SubscriptionService
 
         awg_res = (
             await session.execute(

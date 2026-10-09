@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -136,11 +136,8 @@ async def admin_user_devices(
         vless_sub_url = VlessSubscriptionService.build_subscription_url(vless_sub.token)
         raw_vless_hwids = getattr(vless_sub, "active_hwids", None) or {}
 
-    vless_cutoff = (now - timedelta(hours=VLESS_HWID_TTL_HOURS)).isoformat()
-    vless_active_count = len([
-        h for h, ts in raw_vless_hwids.items()
-        if isinstance(ts, str) and ts >= vless_cutoff
-    ])
+    active_hwids = vless_subscription_repo.prune_stale_hwids(raw_vless_hwids, ttl_hours=VLESS_HWID_TTL_HOURS)
+    vless_active_count = len(active_hwids)
 
     if not raw_vless_hwids:
         vless_devices_list = texts.ADMIN_VLESS_NO_DEVICES
@@ -159,7 +156,7 @@ async def admin_user_devices(
                     last_conn = ts
                 status = (
                     texts.ADMIN_VLESS_DEVICE_STATUS_ACTIVE
-                    if ts >= vless_cutoff
+                    if hwid in active_hwids
                     else texts.ADMIN_VLESS_DEVICE_STATUS_INACTIVE
                 )
             else:

@@ -781,5 +781,71 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
                 service="vless",
             )
 
+    async def test_register_hwid_atomic_rejects_banned_user_under_lock(self):
+        from database.models import User, VlessSubscription
+        from database.repositories import vless_subscription_repo
+
+        user = User(id=1, telegram_id=123, is_banned=True, subscription_end=None)
+        sub = VlessSubscription(id=1, user_id=1, token="tok1234567890123456", uuid="abc-uuid", is_active=True, active_hwids={})
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            # 1. user_id
+            MagicMock(scalar_one_or_none=MagicMock(return_value=1)),
+            # 2. User FOR UPDATE
+            MagicMock(scalar_one_or_none=MagicMock(return_value=user)),
+            # 3. VlessSubscription FOR UPDATE
+            MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
+        ])
+
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="hwid-test",
+            effective_limit=2,
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(limit, 0)
+
+    async def test_post_commit_dispatch_enqueued_when_session_passed(self):
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        mock_session = MagicMock()
+        mock_session.info = {}
+
+        with patch("database.connection.queue_post_commit_task") as mock_queue:
+            task = VlessSubscriptionService.ensure_synced_background(10, is_active=True, session=mock_session)
+            self.assertIsNone(task)
+            mock_queue.assert_called_once()
+
+        with patch("database.connection.queue_post_commit_task") as mock_queue:
+            task = VlessSubscriptionService.deprovision_background("old-uuid", session=mock_session)
+            self.assertIsNone(task)
+            mock_queue.assert_called_once()
+
+    async def test_payment_hub_includes_vless_hwid_count(self):
+        from bot.handlers.payment.common import _show_hub
+        from database.models import User
+
+        callback = MagicMock()
+        callback.message.chat.id = 123
+        callback.bot = MagicMock()
+        user = User(id=1, telegram_id=123, device_limit=5, subscription_end=None)
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.payment.common.get_user_profiles", new=AsyncMock(return_value=[])),
+            patch("bot.handlers.payment.common._get_effective_device_limit", new=AsyncMock(return_value=5)),
+            patch("bot.handlers.payment.common.get_tariff_display_name", return_value="5 устройств"),
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=2)),
+            patch("bot.handlers.payment.common.render_hub", new=AsyncMock()) as mock_render,
+        ):
+            await _show_hub(callback, user, session)
+            mock_render.assert_called_once()
+            call_text = mock_render.call_args[0][2]
+            # Must show devices_count as 2 (0 Amnezia + 2 VLESS)
+            self.assertIn("2 из 5", call_text)
+
+
 
 

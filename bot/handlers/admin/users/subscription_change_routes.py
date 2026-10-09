@@ -69,7 +69,10 @@ async def admin_sub_change_tariff(
 
     groups = await _get_tariff_groups(session)
 
+    from database.repositories import vless_subscription_repo
     profiles_count = await get_user_profiles_count(session, user.id)
+    vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+    total_devices = profiles_count + vless_count
 
     current_tariff_name = texts.PLACEHOLDER_DASH
 
@@ -87,7 +90,7 @@ async def admin_sub_change_tariff(
     text = texts.ADMIN_SUB_CHANGE_TARIFF_HEADER.format(
         telegram_id=telegram_id,
         current_tariff=current_tariff_name,
-        devices_count=profiles_count,
+        devices_count=total_devices,
     )
 
     try:
@@ -159,14 +162,17 @@ async def admin_sub_select_group(
     tariffs = groups[device_limit]
     new_tariff = _get_representative_tariff(tariffs)
 
+    from database.repositories import vless_subscription_repo
     profiles_count = await get_user_profiles_count(session, user.id)
+    vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+    total_devices = profiles_count + vless_count
 
     new_limit = new_tariff.device_limit
 
-    if profiles_count > new_limit:
+    if total_devices > new_limit:
         text = texts.ADMIN_SUB_DOWNGRADE_BLOCKED.format(
             telegram_id=telegram_id,
-            devices_count=profiles_count,
+            devices_count=total_devices,
             new_limit=new_limit,
         )
 
@@ -318,12 +324,15 @@ async def admin_sub_apply_tariff(
             )
             return
 
+        from database.repositories import vless_subscription_repo
         profiles_count = await get_user_profiles_count(session, user.id)
+        vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+        total_devices = profiles_count + vless_count
 
-        if profiles_count > new_tariff.device_limit:
+        if total_devices > new_tariff.device_limit:
             text = texts.ADMIN_SUB_DOWNGRADE_BLOCKED.format(
                 telegram_id=telegram_id,
-                devices_count=profiles_count,
+                devices_count=total_devices,
                 new_limit=new_tariff.device_limit,
             )
 

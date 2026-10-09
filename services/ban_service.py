@@ -203,7 +203,7 @@ class BanService:
         if vless_sub and vless_sub.is_active:
             vless_sub.is_active = False
             session.add(vless_sub)
-            VlessSubscriptionService.deprovision_background(vless_sub.uuid)
+            VlessSubscriptionService.deprovision_background(vless_sub.uuid, session=session)
 
         await AuditService.log_action(
             session,
@@ -269,7 +269,7 @@ class BanService:
         if vless_sub and SubscriptionService.check_vpn_access(locked_user):
             vless_sub.is_active = True
             session.add(vless_sub)
-            VlessSubscriptionService.ensure_synced_background(user.id, is_active=True)
+            VlessSubscriptionService.ensure_synced_background(user.id, is_active=True, session=session)
 
         await AuditService.log_action(
             session,

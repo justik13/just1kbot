@@ -70,10 +70,15 @@ def format_user_card_text(
     else:
         ban_str = texts.STATUS_NOT_BANNED_BADGE
 
+    from database.repositories.profiles_repo import PROFILE_QUOTA_EXCLUDED_STATUSES
+    amnezia_count = len([
+        p for p in profiles
+        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
+    ])
+
     if has_awg:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
-        amnezia_count = len(profiles)
         total_dev = amnezia_count + vless_hwid_count
         devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
         device_limit = user.device_limit or 0
@@ -85,7 +90,6 @@ def format_user_card_text(
     else:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
-        amnezia_count = len(profiles)
         total_dev = amnezia_count + vless_hwid_count
         devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
         device_limit = user.device_limit or 0

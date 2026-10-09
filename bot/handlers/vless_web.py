@@ -148,7 +148,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             return web.Response(status=403, text=limit_msg, headers=headers)
 
         # Trigger background sync to dual nodes
-        VlessSubscriptionService.ensure_synced_background(user.id, is_active=True)
+        VlessSubscriptionService.ensure_synced_background(user.id, is_active=True, session=session)
 
         servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
         links = VlessSubscriptionService.generate_vless_links(sub, servers)
