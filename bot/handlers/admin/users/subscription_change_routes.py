@@ -218,7 +218,7 @@ async def admin_sub_select_group(
         telegram_id=telegram_id,
         old_tariff=old_tariff_name,
         new_tariff=new_tariff_name,
-        devices_count=profiles_count,
+        devices_count=total_devices,
     )
 
     try:

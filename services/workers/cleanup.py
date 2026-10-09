@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramForbiddenError
 from bot.keyboards.notifications import get_devices_deleted_keyboard
 from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from cachetools import TTLCache
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -25,6 +25,7 @@ from database.models import (
     Order,
     Server,
     User,
+    VlessSubscription,
     VPNProfile,
     WebhookInbox,
 )
@@ -135,6 +136,13 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                 User.is_deleted.is_(False),
                 User.subscription_end.is_not(None),
                 (User.subscription_end < threshold) | User.financial_hold,
+                or_(
+                    select(VPNProfile.id).where(VPNProfile.user_id == User.id).exists(),
+                    select(VlessSubscription.id).where(
+                        VlessSubscription.user_id == User.id,
+                        VlessSubscription.is_active.is_(True),
+                    ).exists(),
+                ),
             )
             .order_by(User.subscription_end.asc())
             .limit(50)

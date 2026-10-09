@@ -89,6 +89,9 @@ async def admin_subscription_menu(
 
     has_active = _is_subscription_active(user)
     profiles_count = await get_user_profiles_count(session, user.id)
+    from database.repositories import vless_subscription_repo
+    vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+    total_devices = profiles_count + vless_count
 
     tariff_name = texts.PLACEHOLDER_DASH
     device_limit = user.device_limit or 0
@@ -106,7 +109,7 @@ async def admin_subscription_menu(
             tariff_name=tariff_name,
             valid_until=format_datetime(user.subscription_end),
             time_left=_format_time_left(user.subscription_end),
-            devices_count=profiles_count,
+            devices_count=total_devices,
             device_limit=device_limit,
         )
     elif user.subscription_end:
@@ -116,7 +119,7 @@ async def admin_subscription_menu(
         )
     else:
         status_block = texts.ADMIN_SUB_STATUS_NONE.format(
-            devices_count=profiles_count,
+            devices_count=total_devices,
         )
 
     text = texts.ADMIN_SUBSCRIPTION_HEADER.format(

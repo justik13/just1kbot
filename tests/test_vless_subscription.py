@@ -14,6 +14,7 @@ from config.enums import ServerHealthState
 from database.models import Server, User, VlessSubscription
 from database.repositories import vless_subscription_repo
 from services.vless_subscription_service import VlessSubscriptionService
+from utils.datetime_helpers import now_msk, now_utc
 
 
 class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
@@ -845,6 +846,103 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             call_text = mock_render.call_args[0][2]
             # Must show devices_count as 2 (0 Amnezia + 2 VLESS)
             self.assertIn("2 / 5", call_text)
+
+    async def test_admin_sub_menu_includes_vless_hwid_count(self):
+        from bot.handlers.admin.users.subscription_menu_routes import admin_awg_submenu
+        from database.models import User
+
+        callback = MagicMock()
+        callback.data = "admin_awg_submenu:123"
+        callback.message.edit_text = AsyncMock()
+        user = User(
+            id=1,
+            telegram_id=123,
+            device_limit=5,
+            subscription_end=now_utc() + timedelta(days=10),
+            is_deleted=False,
+            is_banned=False,
+            current_tariff_id=None,
+        )
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
+            patch("bot.handlers.admin.users.subscription_menu_routes.get_user_profiles_count", new=AsyncMock(return_value=1)),
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=2)),
+            patch("bot.handlers.admin.users.subscription_menu_routes.get_admin_awg_subscription_keyboard", return_value=MagicMock()),
+        ):
+            await admin_awg_submenu(callback, session)
+            callback.message.edit_text.assert_called_once()
+            call_text = callback.message.edit_text.call_args[0][0]
+            # Must show 3 devices (1 AWG + 2 VLESS)
+            self.assertIn("3/5", call_text)
+
+    async def test_create_device_calculates_vless_count_under_lock(self):
+        from services.device_service import DeviceService
+        from database.models import User, Server, ServerPeerSnapshot
+        from datetime import timezone
+
+        user = User(
+            id=1,
+            telegram_id=123,
+            device_limit=2,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=10),
+            is_banned=False,
+            device_creations_today=0,
+            last_creation_date=now_msk().date(),
+        )
+        server = Server(
+            id=1,
+            protocol="awg",
+            capabilities=["awg"],
+            is_active=True,
+            health_state="healthy",
+            lifecycle_status="active",
+            max_clients=100,
+        )
+        snapshot = ServerPeerSnapshot(
+            server_id=1,
+            captured_at=datetime.now(timezone.utc),
+            peer_count=5,
+            capacity_limit=100,
+        )
+
+        mock_session = AsyncMock()
+        # Mock returns for user, server, duplicate check, user_count, server_count, bot_peer_ids
+        user_res = MagicMock(scalar_one=MagicMock(return_value=user))
+        server_res = MagicMock(scalar_one_or_none=MagicMock(return_value=server))
+        duplicate_res = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+        user_count_res = MagicMock(scalar_one=MagicMock(return_value=1))
+        server_count_res = MagicMock(scalar_one=MagicMock(return_value=5))
+        bot_peers_res = MagicMock(all=MagicMock(return_value=[]))
+
+        mock_session.execute.side_effect = [
+            user_res,
+            server_res,
+            duplicate_res,
+            user_count_res,
+            server_count_res,
+            bot_peers_res,
+        ]
+
+        with (
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)) as mock_hwid,
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", new=AsyncMock(return_value=2)),
+            patch("services.device_service.is_server_allocatable", return_value=True),
+            patch("services.device_service.is_admin", return_value=False),
+        ):
+            from services.device_service import DeviceLimitExceeded
+            # user_count (1) + vless_count (1) == limit (2) -> must raise DeviceLimitExceeded
+            with self.assertRaises(DeviceLimitExceeded):
+                await DeviceService.create_device(
+                    mock_session,
+                    user_id=1,
+                    server_id=1,
+                    device_name="Test",
+                    snapshot=snapshot,
+                    vless_count=None,
+                )
+            mock_hwid.assert_called_once_with(mock_session, 1)
 
 
 
