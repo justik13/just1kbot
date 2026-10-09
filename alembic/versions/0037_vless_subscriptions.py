@@ -47,9 +47,6 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("token"),
-        sa.UniqueConstraint("user_id"),
-        sa.UniqueConstraint("uuid"),
     )
     op.create_index(
         "ix_vless_subscriptions_user_id",

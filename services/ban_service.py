@@ -203,7 +203,7 @@ class BanService:
         if vless_sub and vless_sub.is_active:
             vless_sub.is_active = False
             session.add(vless_sub)
-            await VlessSubscriptionService.deprovision_uuid_from_dual_nodes(session, vless_sub.uuid)
+            VlessSubscriptionService.deprovision_background(vless_sub.uuid)
 
         await AuditService.log_action(
             session,

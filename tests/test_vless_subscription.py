@@ -625,7 +625,10 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             MagicMock(scalar_one=MagicMock(return_value=1)),
         ])
 
-        with patch("services.device_service.is_admin", return_value=False):
+        with (
+            patch("services.device_service.is_admin", return_value=False),
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
+        ):
             with self.assertRaises(DeviceLimitExceeded):
                 await DeviceService.create_device(
                     mock_session,
@@ -719,12 +722,12 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             patch("services.white_internet_service.WhiteInternetService.deactivate_user_subscriptions", new=AsyncMock(return_value=[])),
             patch("services.audit_service.AuditService.log_action", new=AsyncMock()),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
-            patch("services.vless_subscription_service.VlessSubscriptionService.deprovision_uuid_from_dual_nodes", new=AsyncMock()) as mock_deprov,
+            patch("services.vless_subscription_service.VlessSubscriptionService.deprovision_background") as mock_deprov,
         ):
             success, status = await BanService._ban_user(mock_session, admin_id=999, user=user, telegram_id=123)
             self.assertTrue(success)
             self.assertFalse(sub.is_active)
-            mock_deprov.assert_awaited_once_with(mock_session, "test-uuid")
+            mock_deprov.assert_called_once_with("test-uuid")
 
 
 

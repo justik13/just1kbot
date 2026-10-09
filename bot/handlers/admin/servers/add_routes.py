@@ -1,4 +1,5 @@
 import logging
+import urllib.parse
 
 from config.constants import (
     AMNEZIA_PROTOCOL,
@@ -333,6 +334,13 @@ async def process_add_server(
                     extra["cdn_domain"] = xray_data["cdn_domain"]
                 if "sub_path_prefix" in xray_data and xray_data["sub_path_prefix"]:
                     extra["sub_path_prefix"] = xray_data["sub_path_prefix"]
+                if has_vless:
+                    parsed_u = urllib.parse.urlsplit(all_data["api_url"])
+                    if parsed_u.hostname:
+                        extra.setdefault("domain", parsed_u.hostname)
+                    extra.setdefault("vless_port", 443)
+                    extra.setdefault("xray_api_url", all_data["api_url"])
+                    extra.setdefault("xray_api_key", api_key)
                 server.extra_data = extra
 
             await AuditService.log_action(
@@ -462,7 +470,6 @@ async def process_add_server(
         extra_info = None
         # Auto-detect Dual Node: check if Xray VLESS API is also available on this node
         try:
-            import urllib.parse
             from services.xray_node_client import XrayNodeClient
 
             async with XrayNodeClient(timeout=3.0) as xray_client:
