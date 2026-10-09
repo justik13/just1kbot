@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from datetime import datetime, timedelta, timezone
 import secrets
@@ -98,7 +99,14 @@ async def get_subscription_by_user_id(
 ) -> VlessSubscription | None:
     """Fetch VlessSubscription by internal user_id."""
     stmt = select(VlessSubscription).where(VlessSubscription.user_id == user_id)
-    return (await session.execute(stmt)).scalar_one_or_none()
+    res = await session.execute(stmt)
+    scalar = getattr(res, "scalar_one_or_none", None)
+    if callable(scalar):
+        val = scalar()
+        if inspect.isawaitable(val):
+            val = await val
+        return val if isinstance(val, VlessSubscription) else None
+    return None
 
 
 async def get_active_hwid_count(
@@ -108,7 +116,15 @@ async def get_active_hwid_count(
 ) -> int:
     """Return count of active non-stale HWIDs currently registered for user."""
     stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.user_id == user_id)
-    raw_hwids = (await session.execute(stmt)).scalar_one_or_none()
+    res = await session.execute(stmt)
+    scalar = getattr(res, "scalar_one_or_none", None)
+    if callable(scalar):
+        val = scalar()
+        if inspect.isawaitable(val):
+            val = await val
+        raw_hwids = val if isinstance(val, dict) else None
+    else:
+        raw_hwids = None
     active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
     return len(active)
 
