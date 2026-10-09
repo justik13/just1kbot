@@ -340,6 +340,7 @@ async def _process_server_selection(
                 server_id=server_id,
                 device_name=None,
                 snapshot=snapshot,
+                vless_count=None,
             )
             # Commit the creation transaction immediately so that background workers
             # claiming api_operations can see the durable create_peer task in PostgreSQL.

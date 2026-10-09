@@ -848,11 +848,11 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             self.assertIn("2 / 5", call_text)
 
     async def test_admin_sub_menu_includes_vless_hwid_count(self):
-        from bot.handlers.admin.users.subscription_menu_routes import admin_awg_submenu
+        from bot.handlers.admin.users.subscription_menu_routes import admin_subscription_menu
         from database.models import User
 
         callback = MagicMock()
-        callback.data = "admin_awg_submenu:123"
+        callback.data = "admin_subscription:123"
         callback.message.edit_text = AsyncMock()
         user = User(
             id=1,
@@ -871,7 +871,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=2)),
             patch("bot.handlers.admin.users.subscription_menu_routes.get_admin_awg_subscription_keyboard", return_value=MagicMock()),
         ):
-            await admin_awg_submenu(callback, session)
+            await admin_subscription_menu(callback, session)
             callback.message.edit_text.assert_called_once()
             call_text = callback.message.edit_text.call_args[0][0]
             # Must show 3 devices (1 AWG + 2 VLESS)
@@ -879,7 +879,8 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_device_calculates_vless_count_under_lock(self):
         from services.device_service import DeviceService
-        from database.models import User, Server, ServerPeerSnapshot
+        from database.models import User, Server
+        from services.slots_cache import ServerPeerSnapshot
         from datetime import timezone
 
         user = User(
