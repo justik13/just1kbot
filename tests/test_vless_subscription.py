@@ -625,10 +625,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             MagicMock(scalar_one=MagicMock(return_value=1)),
         ])
 
-        with (
-            patch("services.device_service.is_admin", return_value=False),
-            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
-        ):
+        with patch("services.device_service.is_admin", return_value=False):
             with self.assertRaises(DeviceLimitExceeded):
                 await DeviceService.create_device(
                     mock_session,
