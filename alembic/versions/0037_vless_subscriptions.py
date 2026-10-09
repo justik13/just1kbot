@@ -66,16 +66,9 @@ def upgrade() -> None:
         ["uuid"],
         unique=True,
     )
-    op.create_index(
-        "ix_vless_subscriptions_active_hwids",
-        "vless_subscriptions",
-        ["active_hwids"],
-        postgresql_using="gin",
-    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_vless_subscriptions_active_hwids", table_name="vless_subscriptions")
     op.drop_index("ix_vless_subscriptions_uuid", table_name="vless_subscriptions")
     op.drop_index("ix_vless_subscriptions_token", table_name="vless_subscriptions")
     op.drop_index("ix_vless_subscriptions_user_id", table_name="vless_subscriptions")

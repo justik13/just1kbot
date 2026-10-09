@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 from datetime import datetime, timedelta, timezone
 import secrets
@@ -99,19 +98,7 @@ async def get_subscription_by_user_id(
 ) -> VlessSubscription | None:
     """Fetch VlessSubscription by internal user_id."""
     stmt = select(VlessSubscription).where(VlessSubscription.user_id == user_id)
-    try:
-        res = session.execute(stmt)
-        if inspect.isawaitable(res):
-            res = await res
-        scalar = getattr(res, "scalar_one_or_none", None)
-        if callable(scalar):
-            val = scalar()
-            if inspect.isawaitable(val):
-                val = await val
-            return val if isinstance(val, VlessSubscription) else None
-    except Exception:
-        pass
-    return None
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def get_active_hwid_count(
@@ -121,20 +108,7 @@ async def get_active_hwid_count(
 ) -> int:
     """Return count of active non-stale HWIDs currently registered for user."""
     stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.user_id == user_id)
-    try:
-        res = session.execute(stmt)
-        if inspect.isawaitable(res):
-            res = await res
-        scalar = getattr(res, "scalar_one_or_none", None)
-        if callable(scalar):
-            raw_hwids = scalar()
-            if inspect.isawaitable(raw_hwids):
-                raw_hwids = await raw_hwids
-        else:
-            raw_hwids = None
-    except Exception as exc:
-        logger.error("Failed to query active HWID count for user %s: %s", user_id, exc)
-        raw_hwids = None
+    raw_hwids = (await session.execute(stmt)).scalar_one_or_none()
     active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
     return len(active)
 
@@ -155,14 +129,22 @@ async def register_hwid_atomic(
     Returns:
         tuple[allowed: bool, active_count: int, effective_limit: int]
     """
+    # Resolve user_id without lock to enforce strict global lock hierarchy: User -> VlessSubscription
+    user_id_stmt = select(VlessSubscription.user_id).where(VlessSubscription.id == subscription_id)
+    raw_sub_user_id = (await session.execute(user_id_stmt)).scalar_one_or_none()
+    if raw_sub_user_id is None:
+        return False, 0, max(0, effective_limit or 0)
+    sub_user_id = getattr(raw_sub_user_id, "user_id", raw_sub_user_id)
+
+    # 1. Lock User row FIRST
+    from database.models import User
+    user = (await session.execute(select(User).where(User.id == sub_user_id).with_for_update())).scalar_one_or_none()
+
+    # 2. Lock VlessSubscription row SECOND
     stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
     sub = (await session.execute(stmt)).scalar_one_or_none()
     if sub is None:
         return False, 0, max(0, effective_limit or 0)
-
-    # Lock User row to synchronize combined quota check across AWG and VLESS
-    from database.models import User
-    user = (await session.execute(select(User).where(User.id == sub.user_id).with_for_update())).scalar_one_or_none()
 
     if effective_limit is None:
         from database.models import VPNProfile

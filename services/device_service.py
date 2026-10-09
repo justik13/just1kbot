@@ -198,10 +198,13 @@ class DeviceService:
             )
         ).scalar_one()
 
+        from database.repositories import vless_subscription_repo
         from services.subscription import SubscriptionService
+
+        fresh_vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
         effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
 
-        if (user_count + vless_count) >= effective_limit:
+        if (user_count + fresh_vless_count) >= effective_limit:
             raise DeviceLimitExceeded("Device limit reached")
         server_count = (
             await session.execute(

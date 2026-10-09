@@ -180,6 +180,8 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                     )
                     continue
 
+                await SubscriptionService.sync_access_state(session, user)
+
                 profiles_stmt = select(VPNProfile).where(
                     VPNProfile.user_id == user.id,
                 )

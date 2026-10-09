@@ -1281,10 +1281,6 @@ class VlessSubscription(Base):
 
     __tablename__ = "vless_subscriptions"
 
-    __table_args__ = (
-        Index("ix_vless_subscriptions_active_hwids", "active_hwids", postgresql_using="gin"),
-    )
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     user_id: Mapped[int] = mapped_column(

@@ -340,7 +340,6 @@ async def process_add_server(
                         extra.setdefault("domain", parsed_u.hostname)
                     extra.setdefault("vless_port", 443)
                     extra.setdefault("xray_api_url", all_data["api_url"])
-                    extra.setdefault("xray_api_key", api_key)
                 server.extra_data = extra
 
             await AuditService.log_action(
@@ -475,14 +474,13 @@ async def process_add_server(
             async with XrayNodeClient(timeout=3.0) as xray_client:
                 x_ok, _, _ = await xray_client.check_health(all_data["api_url"], api_key)
                 if x_ok:
-                    capabilities = ["awg", "vless", "dual"]
+                    capabilities = ["awg", "vless"]
                     parsed = urllib.parse.urlsplit(all_data["api_url"])
                     domain = parsed.hostname or ""
                     extra_info = {
                         "domain": domain,
                         "vless_port": 443,
                         "xray_api_url": all_data["api_url"],
-                        "xray_api_key": api_key,
                     }
         except Exception:
             pass

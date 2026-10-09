@@ -102,10 +102,11 @@ async def _build_connections_screen(
 
     try:
         sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
-        token = getattr(sub, "token", "sim_token")
-        sub_url = VlessSubscriptionService.build_subscription_url(str(token))
-    except Exception:
-        sub_url = VlessSubscriptionService.build_subscription_url("sim_token")
+        token = getattr(sub, "token", None)
+        sub_url = VlessSubscriptionService.build_subscription_url(str(token)) if token else ""
+    except Exception as exc:
+        logger.warning("Failed to resolve VLESS subscription url for user %s: %s", user.id, exc)
+        sub_url = ""
 
     try:
         vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)

@@ -625,7 +625,10 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             MagicMock(scalar_one=MagicMock(return_value=1)),
         ])
 
-        with patch("services.device_service.is_admin", return_value=False):
+        with (
+            patch("services.device_service.is_admin", return_value=False),
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
+        ):
             with self.assertRaises(DeviceLimitExceeded):
                 await DeviceService.create_device(
                     mock_session,
@@ -725,6 +728,58 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(success)
             self.assertFalse(sub.is_active)
             mock_deprov.assert_called_once_with("test-uuid")
+
+    async def test_vless_sub_reset_handler_imports_maintenance_properly(self):
+        from bot.handlers.connection.device_view_routes import vless_sub_reset
+        from database.models import User
+
+        callback = MagicMock()
+        callback.from_user.id = 123
+        callback.answer = AsyncMock()
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=123, subscription_end=None)
+
+        with (
+            patch("services.maintenance_service.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=False)),
+        ):
+            await vless_sub_reset(callback, state, session, db_user=db_user)
+            callback.answer.assert_called_once()
+
+    async def test_sync_user_to_nodes_overrides_stale_active_if_banned(self):
+        from database.models import Server, User, VlessSubscription
+        from config.enums import ServerHealthState
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        user = User(id=1, telegram_id=123, is_banned=True, subscription_end=None)
+        sub = VlessSubscription(id=1, user_id=1, uuid="test-uuid", is_active=True)
+        srv = Server(id=1, name="Exit", is_active=True, health_state=ServerHealthState.ONLINE, capabilities=["vless"], api_url="https://exit.com:8443", api_key="secret")
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = user
+
+        with (
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch("services.vless_subscription_service.XrayNodeClient") as mock_client_cls,
+        ):
+            mock_client = AsyncMock()
+            mock_resp = MagicMock(result="applied", verified_inbounds=["vless"])
+            mock_client.sync_client = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client_cls.return_value = mock_client
+
+            results = await VlessSubscriptionService.sync_user_to_nodes(mock_session, user_id=1, is_active=True)
+            self.assertTrue(results.get(1))
+            # Must send is_active=False because user.is_banned is True!
+            mock_client.sync_client.assert_called_once_with(
+                api_url="https://exit.com:8443",
+                api_key="secret",
+                client_uuid="test-uuid",
+                is_active=False,
+                service="vless",
+            )
 
 
 

@@ -21,6 +21,8 @@ from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
 
 class VlessSubscriptionService:
     """Business logic for standard VLESS subscriptions."""
@@ -91,30 +93,51 @@ class VlessSubscriptionService:
         return f"https://{clean_domain}/sub/vless/{token}"
 
     @classmethod
-    def ensure_synced_background(cls, user_id: int, is_active: bool = True) -> asyncio.Task:
-        """Fire and forget node synchronization in a fresh session scope."""
+    def ensure_synced_background(
+        cls, user_id: int, is_active: bool = True, *, session: AsyncSession | None = None
+    ) -> asyncio.Task | None:
+        """Synchronize user on nodes with post-commit dispatch if session is active."""
         async def _run() -> None:
             from database.connection import session_scope
             try:
-                async with session_scope() as session:
-                    await cls.sync_user_to_dual_nodes(session, user_id, is_active=is_active)
+                async with session_scope() as scoped_session:
+                    await cls.sync_user_to_nodes(scoped_session, user_id, is_active=is_active)
             except Exception as e:
                 logger.warning("Background sync of VLESS user %s failed: %s", user_id, e)
 
-        return asyncio.create_task(_run())
+        if session is not None and hasattr(session, "info") and isinstance(session.info, dict):
+            from database.connection import queue_post_commit_task
+            queue_post_commit_task(session, _run)
+            return None
+
+        task = asyncio.create_task(_run())
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
+        return task
 
     @classmethod
-    def deprovision_background(cls, old_uuid: str) -> asyncio.Task:
-        """Fire and forget node deprovisioning in a fresh session scope."""
+    def deprovision_background(
+        cls, old_uuid: str, *, session: AsyncSession | None = None
+    ) -> asyncio.Task | None:
+        """Deprovision user UUID from nodes with post-commit dispatch if session is active."""
         async def _run() -> None:
             from database.connection import session_scope
             try:
-                async with session_scope() as session:
-                    await cls.deprovision_uuid_from_dual_nodes(session, old_uuid)
+                async with session_scope() as scoped_session:
+                    await cls.deprovision_uuid_from_nodes(scoped_session, old_uuid)
             except Exception as e:
-                logger.warning("Background deprovision of VLESS UUID %s failed: %s", old_uuid, e)
+                masked_uuid = f"{old_uuid[:8]}***" if old_uuid else "unknown"
+                logger.warning("Background deprovision of VLESS UUID %s failed: %s", masked_uuid, e)
 
-        return asyncio.create_task(_run())
+        if session is not None and hasattr(session, "info") and isinstance(session.info, dict):
+            from database.connection import queue_post_commit_task
+            queue_post_commit_task(session, _run)
+            return None
+
+        task = asyncio.create_task(_run())
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
+        return task
 
     @staticmethod
     async def get_combined_quota(
@@ -159,15 +182,30 @@ class VlessSubscriptionService:
         return eligible
 
     @staticmethod
-    async def sync_user_to_dual_nodes(
+    async def sync_user_to_nodes(
         session: AsyncSession,
         user_id: int,
-        is_active: bool = True,
+        is_active: bool | None = None,
     ) -> dict[int, bool]:
-        """Provision or disable user UUID on all eligible dual nodes via their Xray API."""
+        """Provision or disable user UUID on all eligible exit nodes via Xray API."""
         sub = await vless_subscription_repo.get_subscription_by_user_id(session, user_id)
         if sub is None:
             return {}
+
+        from services.subscription import SubscriptionService
+        user = await session.get(User, user_id)
+
+        # Database state is the ultimate source of truth
+        desired_active = bool(
+            sub.is_active
+            and user is not None
+            and not getattr(user, "is_banned", False)
+            and not getattr(user, "financial_hold", False)
+            and not getattr(user, "is_deleted", False)
+            and SubscriptionService.check_vpn_access(user)
+        )
+        if is_active is False:
+            desired_active = False
 
         servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
         results: dict[int, bool] = {}
@@ -175,16 +213,14 @@ class VlessSubscriptionService:
         for srv in servers:
             extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
             api_url = extra.get("xray_api_url")
-            api_key = extra.get("xray_api_key")
+            api_key = srv.api_key
 
-            # Fallback to resolving from srv.api_url (which already has host:8443 on dual nodes)
+            # Fallback to resolving from srv.api_url (which already has host:8443 on exit nodes)
             if not api_url and srv.api_url:
                 parsed = urllib.parse.urlsplit(srv.api_url)
                 if parsed.hostname:
                     port = parsed.port or 8443
                     api_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:{port}"
-            if not api_key:
-                api_key = srv.api_key
 
             if not api_url or not api_key:
                 continue
@@ -195,7 +231,7 @@ class VlessSubscriptionService:
                         api_url=api_url,
                         api_key=api_key,
                         client_uuid=sub.uuid,
-                        is_active=is_active,
+                        is_active=desired_active,
                         service="vless",
                     )
                     verified = [
@@ -206,7 +242,13 @@ class VlessSubscriptionService:
                         and any("vless" in ib for ib in verified)
                     )
             except Exception as exc:
-                logger.warning("Failed to sync VLESS user %s to server %s: %s", sub.uuid, srv.id, exc)
+                logger.warning(
+                    "Failed to sync VLESS user %s (sub %s) to server %s: %s",
+                    user_id,
+                    sub.id,
+                    srv.id,
+                    exc,
+                )
                 results[srv.id] = False
 
         if any(results.values()):
@@ -215,12 +257,15 @@ class VlessSubscriptionService:
 
         return results
 
+    # Backward compatibility alias
+    sync_user_to_dual_nodes = sync_user_to_nodes
+
     @staticmethod
-    async def deprovision_uuid_from_dual_nodes(
+    async def deprovision_uuid_from_nodes(
         session: AsyncSession,
         client_uuid: str,
     ) -> dict[int, bool]:
-        """Deprovision a revoked UUID across all eligible dual nodes."""
+        """Deprovision a revoked UUID across all eligible exit nodes."""
         if not client_uuid:
             return {}
 
@@ -230,15 +275,13 @@ class VlessSubscriptionService:
         for srv in servers:
             extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
             api_url = extra.get("xray_api_url")
-            api_key = extra.get("xray_api_key")
+            api_key = srv.api_key
 
             if not api_url and srv.api_url:
                 parsed = urllib.parse.urlsplit(srv.api_url)
                 if parsed.hostname:
                     port = parsed.port or 8443
                     api_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:{port}"
-            if not api_key:
-                api_key = srv.api_key
 
             if not api_url or not api_key:
                 continue
@@ -254,7 +297,16 @@ class VlessSubscriptionService:
                     )
                     results[srv.id] = resp.result in ("applied", "already_newer")
             except Exception as exc:
-                logger.warning("Failed to deprovision VLESS UUID %s from server %s: %s", client_uuid, srv.id, exc)
+                masked_uuid = f"{client_uuid[:8]}***" if client_uuid else "unknown"
+                logger.warning(
+                    "Failed to deprovision VLESS UUID %s from server %s: %s",
+                    masked_uuid,
+                    srv.id,
+                    exc,
+                )
                 results[srv.id] = False
 
         return results
+
+    # Backward compatibility alias
+    deprovision_uuid_from_dual_nodes = deprovision_uuid_from_nodes
