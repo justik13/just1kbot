@@ -49,7 +49,17 @@ class VlessSubscriptionService:
             if not domain:
                 continue
 
-            port = int(extra.get("vless_port", 443))
+            domain = str(domain).strip().lower()
+            if not domain or " " in domain or "/" in domain:
+                continue
+
+            raw_port = extra.get("vless_port", 443)
+            try:
+                port = int(raw_port) if raw_port is not None else 443
+                if not (1 <= port <= 65535):
+                    port = 443
+            except (ValueError, TypeError):
+                port = 443
             flag = srv.country_flag or "🌐"
             label = f"{flag} {srv.name}".strip()
             # INCY renders vector flag when emoji is the first character after #
@@ -188,9 +198,12 @@ class VlessSubscriptionService:
                         is_active=is_active,
                         service="vless",
                     )
+                    verified = [
+                        ib.lower() for ib in resp.verified_inbounds if isinstance(ib, str)
+                    ] if resp.verified_inbounds else []
                     results[srv.id] = (
                         resp.result in ("applied", "already_newer")
-                        and (not resp.verified_inbounds or any("vless" in ib.lower() for ib in resp.verified_inbounds))
+                        and any("vless" in ib for ib in verified)
                     )
             except Exception as exc:
                 logger.warning("Failed to sync VLESS user %s to server %s: %s", sub.uuid, srv.id, exc)

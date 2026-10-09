@@ -458,15 +458,47 @@ async def process_add_server(
 
         server_protocol = server_info.get_protocol()
 
+        capabilities = None
+        extra_info = None
+        # Auto-detect Dual Node: check if Xray VLESS API is also available on this node
+        try:
+            import urllib.parse
+            from services.xray_node_client import XrayNodeClient
+
+            async with XrayNodeClient(timeout=3.0) as xray_client:
+                x_ok, _, _ = await xray_client.check_health(all_data["api_url"], api_key)
+                if x_ok:
+                    capabilities = ["awg", "vless", "dual"]
+                    parsed = urllib.parse.urlsplit(all_data["api_url"])
+                    domain = parsed.hostname or ""
+                    extra_info = {
+                        "domain": domain,
+                        "vless_port": 443,
+                        "xray_api_url": all_data["api_url"],
+                        "xray_api_key": api_key,
+                    }
+        except Exception:
+            pass
+
+        create_kwargs = {
+            "name": api_server_name,
+            "country_flag": all_data["country_flag"],
+            "api_url": all_data["api_url"],
+            "api_key": api_key,
+            "protocol": server_protocol,
+            "max_clients": api_max_peers,
+        }
+        if capabilities:
+            create_kwargs["capabilities"] = capabilities
+
         server = await create_server(
             session,
-            name=api_server_name,
-            country_flag=all_data["country_flag"],
-            api_url=all_data["api_url"],
-            api_key=api_key,
-            protocol=server_protocol,
-            max_clients=api_max_peers,
+            **create_kwargs,
         )
+
+        if extra_info:
+            server.extra_data = {**(server.extra_data or {}), **extra_info}
+            await session.flush()
 
         await AuditService.log_action(
             session,

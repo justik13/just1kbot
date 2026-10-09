@@ -101,7 +101,7 @@ class DeviceService:
         server_id: int,
         device_name: str | None = None,
         snapshot: ServerPeerSnapshot,
-        vless_count: int = 0,
+        vless_count: int | None = None,
     ) -> VPNProfile:
         if snapshot.server_id != server_id or datetime.now(
             timezone.utc
@@ -198,7 +198,14 @@ class DeviceService:
             )
         ).scalar_one()
 
-        if (user_count + vless_count) >= user.device_limit:
+        if vless_count is None:
+            from database.repositories import vless_subscription_repo
+            vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+
+        from services.subscription import SubscriptionService
+        effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
+
+        if (user_count + vless_count) >= effective_limit:
             raise DeviceLimitExceeded("Device limit reached")
         server_count = (
             await session.execute(

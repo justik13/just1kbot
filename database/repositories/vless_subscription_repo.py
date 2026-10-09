@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from datetime import datetime, timedelta, timezone
 import secrets
 import uuid
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import VlessSubscription
 from utils.datetime_helpers import now_utc
 
+logger = logging.getLogger(__name__)
+
 VLESS_HWID_TTL_HOURS = 48
 
 
@@ -22,17 +25,26 @@ def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TT
     if not isinstance(current_hwids, dict):
         return {}
     now = now_utc()
-    cutoff = now - timedelta(hours=ttl_hours)
+    try:
+        ttl = int(ttl_hours)
+    except (ValueError, TypeError):
+        ttl = VLESS_HWID_TTL_HOURS
+    cutoff = now - timedelta(hours=ttl)
     res = {}
     for h, ts in current_hwids.items():
-        if not isinstance(ts, str):
-            continue
         try:
-            dt = datetime.fromisoformat(ts)
+            if isinstance(ts, datetime):
+                dt = ts
+            elif isinstance(ts, (int, float)):
+                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            elif isinstance(ts, str):
+                dt = datetime.fromisoformat(ts)
+            else:
+                continue
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             if dt >= cutoff:
-                res[h] = ts
+                res[h] = ts if isinstance(ts, str) else dt.isoformat()
         except Exception:
             continue
     return res
@@ -120,7 +132,8 @@ async def get_active_hwid_count(
                 raw_hwids = await raw_hwids
         else:
             raw_hwids = None
-    except Exception:
+    except Exception as exc:
+        logger.error("Failed to query active HWID count for user %s: %s", user_id, exc)
         raw_hwids = None
     active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
     return len(active)
@@ -154,7 +167,7 @@ async def register_hwid_atomic(
     if effective_limit is None:
         from database.models import VPNProfile
         from services.device_service import RESERVING_STATUSES
-        from services.subscription_service import SubscriptionService
+        from services.subscription import SubscriptionService
 
         awg_res = (
             await session.execute(
@@ -184,11 +197,6 @@ async def register_hwid_atomic(
     if effective_limit <= 0:
         return False, len(active_hwids), 0
 
-    # If already exceeds effective limit, trim oldest
-    if len(active_hwids) > effective_limit:
-        sorted_hwids = sorted(active_hwids.items(), key=lambda item: item[1], reverse=True)
-        active_hwids = dict(sorted_hwids[:effective_limit])
-
     if clean_hwid in active_hwids:
         # Existing device — refresh activity timestamp
         active_hwids[clean_hwid] = now.isoformat()
@@ -196,10 +204,8 @@ async def register_hwid_atomic(
         await session.flush()
         return True, len(active_hwids), effective_limit
 
-    # New device — check available quota
+    # New device — check available quota without evicting active devices on rejection
     if len(active_hwids) >= effective_limit:
-        sub.active_hwids = active_hwids
-        await session.flush()
         return False, len(active_hwids), effective_limit
 
     # Quota available — register
