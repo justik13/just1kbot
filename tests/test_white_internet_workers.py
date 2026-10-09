@@ -72,7 +72,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(synced, 1)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=True, version=2, expected_node_epoch="epoch-100", idempotency_key=ANY, service="white_internet"
+                    server.api_url, server.api_key, sub.uuid, is_active=True, version=2, expected_node_epoch="epoch-100", idempotency_key=ANY
                 )
                 self.assertEqual(sub.actual_version, 2)
                 self.assertEqual(sub.last_reconciled_node_epoch, "epoch-100")
@@ -148,7 +148,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sub.last_reconciled_node_epoch, "epoch-200")
                 self.assertEqual(sub.actual_version, 2)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=True, version=2, expected_node_epoch="epoch-200", idempotency_key=ANY, service="white_internet"
+                    server.api_url, server.api_key, sub.uuid, is_active=True, version=2, expected_node_epoch="epoch-200", idempotency_key=ANY
                 )
 
     async def test_reconciliation_inactive_sub_sets_synced_inactive(self):
@@ -208,7 +208,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(synced, 1)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=False, version=2, expected_node_epoch="epoch-100", idempotency_key=ANY, service="white_internet"
+                    server.api_url, server.api_key, sub.uuid, is_active=False, version=2, expected_node_epoch="epoch-100", idempotency_key=ANY
                 )
                 self.assertEqual(sub.actual_version, 2)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
@@ -276,7 +276,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(synced, 1)
                 mock_exp.assert_awaited_once_with(mock_session, sub.id)
                 mock_client.sync_client.assert_awaited_once_with(
-                    server.api_url, server.api_key, sub.uuid, is_active=False, version=4, expected_node_epoch="epoch-100", idempotency_key=ANY, service="white_internet"
+                    server.api_url, server.api_key, sub.uuid, is_active=False, version=4, expected_node_epoch="epoch-100", idempotency_key=ANY
                 )
                 self.assertEqual(sub.status, WhiteInternetStatus.EXPIRED)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)

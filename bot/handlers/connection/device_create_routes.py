@@ -334,12 +334,15 @@ async def _process_server_selection(
             # Defensive commit: flush any prior pending session state before the creation transaction
             await session.commit()
             snapshot = await capture_server_peer_snapshot(server_id)
+            from database.repositories import vless_subscription_repo
+            vless_count = await vless_subscription_repo.get_active_hwid_count(session, db_user_id)
             new_profile = await DeviceService.create_device(
                 session,
                 user_id=db_user_id,
                 server_id=server_id,
                 device_name=None,
                 snapshot=snapshot,
+                vless_count=vless_count,
             )
             # Commit the creation transaction immediately so that background workers
             # claiming api_operations can see the durable create_peer task in PostgreSQL.
