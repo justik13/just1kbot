@@ -220,7 +220,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             headers = {"X-Hwid": "test-client-hwid-99"}
             resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
-            mock_sync.assert_called_once_with(self.default_user.id, is_active=True)
+            mock_sync.assert_called_once_with(self.default_user.id, is_active=True, session=mock_session)
 
             body = await resp.text()
             decoded = base64.b64decode(body).decode("utf-8")
@@ -727,7 +727,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             success, status = await BanService._ban_user(mock_session, admin_id=999, user=user, telegram_id=123)
             self.assertTrue(success)
             self.assertFalse(sub.is_active)
-            mock_deprov.assert_called_once_with("test-uuid")
+            mock_deprov.assert_called_once_with("test-uuid", session=mock_session)
 
     async def test_vless_sub_reset_handler_imports_maintenance_properly(self):
         from bot.handlers.connection.device_view_routes import vless_sub_reset
@@ -844,7 +844,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             mock_render.assert_called_once()
             call_text = mock_render.call_args[0][2]
             # Must show devices_count as 2 (0 Amnezia + 2 VLESS)
-            self.assertIn("2 из 5", call_text)
+            self.assertIn("2 / 5", call_text)
 
 
 
