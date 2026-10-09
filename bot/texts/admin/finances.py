@@ -51,7 +51,7 @@ ADMIN_PAYMENTS_LIST_TITLE = """🛠 Админка › 💳 <b>Платежи ч
 """
 ADMIN_PAYMENTS_LIST_EMPTY = """<i>Платежей пока нет</i>
 """
-ADMIN_PAYMENTS_USER_TITLE = """🛠 Админка › 💳 <b>Платежи пользователя через ЮKassa</b> @{user_label}
+ADMIN_PAYMENTS_USER_TITLE = """🛠 Админка › 💳 <b>Платежи пользователя</b> @{user_label}
 Страница {page} из {total_pages} (всего: {total_count})"""
 ADMIN_PAYMENTS_USER_EMPTY = "<i>Платежи пользователя не найдены.</i>"
 ADMIN_PAYMENTS_ROW_ENTRY = "{status_icon} #{payment_id} · {user_label} · {amount_rub}₽"
@@ -81,7 +81,7 @@ ADMIN_PAYMENT_REFUNDABLE_LINE = """
 ADMIN_CLIENT_CARD_BUTTON = "👤 Карточка клиента"
 ADMIN_PAYMENT_NOT_FOUND_ALERT = "Платёж не найден"
 
-ADMIN_ORDER_CARD_TEMPLATE = """🛠 Админка › 💳 <b>Платёж ЮKassa (Заказ #{short_id})</b>
+ADMIN_ORDER_CARD_TEMPLATE = """🛠 Админка › 🧾 <b>Заказ #{short_id}</b>
 
 👤 <b>Пользователь:</b> {user_label}
 💰 <b>Сумма:</b> <b>{amount_rub} ₽</b>
