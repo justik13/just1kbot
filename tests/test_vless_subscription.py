@@ -843,7 +843,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
-            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv])),
             patch("services.vless_subscription_service.XrayNodeClient") as mock_client_cls,
         ):
             mock_client = AsyncMock()

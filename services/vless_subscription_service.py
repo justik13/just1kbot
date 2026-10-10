@@ -125,7 +125,7 @@ class VlessSubscriptionService:
                         )
                         if is_active is False:
                             desired_active = False
-                        servers = await cls.get_eligible_vless_servers(scoped_session)
+                        servers = await cls.get_configured_vless_servers(scoped_session)
                         targets = cls._extract_node_targets(servers)
 
                 if not targets or not sub_uuid:
@@ -176,7 +176,7 @@ class VlessSubscriptionService:
             try:
                 targets = []
                 async with session_scope() as scoped_session:
-                    servers = await cls.get_eligible_vless_servers(scoped_session)
+                    servers = await cls.get_configured_vless_servers(scoped_session)
                     targets = cls._extract_node_targets(servers)
 
                 if targets:
