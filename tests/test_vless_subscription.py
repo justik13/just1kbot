@@ -193,6 +193,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
             patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
             patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(False, 1, 0)),
         ):
             headers = {"X-Hwid": "device-overflow-hwid"}

@@ -38,12 +38,14 @@ class SyncResponse:
         error: str | None = None,
         verified_epoch: str | None = None,
         verified_inbounds: list[str] | None = None,
+        all_inbounds_verified: bool = False,
         raw_data: dict[str, Any] | None = None,
     ):
         self.result = result
         self.error = error
         self.verified_epoch = verified_epoch
         self.verified_inbounds = verified_inbounds or []
+        self.all_inbounds_verified = all_inbounds_verified
         self.raw_data = raw_data or {}
 
     def __iter__(self):
@@ -230,12 +232,14 @@ class XrayNodeClient:
             res_str = data.get("result", "applied")
             epoch = data.get("verified_epoch")
             inbounds = data.get("verified_inbounds") or data.get("inbounds") or []
+            all_verified = bool(data.get("all_inbounds_verified", False))
             if res_str == "already_newer":
                 return SyncResponse(
                     SyncResult.ALREADY_NEWER,
                     f"state={data.get('state', 'unknown')}",
                     verified_epoch=epoch,
                     verified_inbounds=inbounds,
+                    all_inbounds_verified=all_verified,
                     raw_data=data,
                 )
             if res_str == "fenced":
@@ -244,6 +248,7 @@ class XrayNodeClient:
                     "Request was fenced by node version",
                     verified_epoch=epoch,
                     verified_inbounds=inbounds,
+                    all_inbounds_verified=all_verified,
                     raw_data=data,
                 )
             return SyncResponse(
@@ -251,6 +256,7 @@ class XrayNodeClient:
                 None,
                 verified_epoch=epoch,
                 verified_inbounds=inbounds,
+                all_inbounds_verified=all_verified,
                 raw_data=data,
             )
         if status_code in (409, 412):
