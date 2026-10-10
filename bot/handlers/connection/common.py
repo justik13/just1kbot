@@ -160,11 +160,11 @@ async def _build_connections_screen(
 
         if has_copy_btn:
             builder.button(
-                text=texts.BTN_WL_COPY_LINK,
+                text=texts.BTN_SUB_COPY_LINK,
                 copy_text=CopyTextButton(text=sub_url),
             )
         builder.button(
-            text=texts.BTN_WL_INCY_INSTRUCTIONS,
+            text=texts.BTN_INCY_INSTRUCTIONS,
             callback_data="vless_sub_feed_info",
         )
         if vless_hwid_count > 0:
@@ -235,8 +235,16 @@ async def _build_amnezia_screen(
     builder = InlineKeyboardBuilder()
 
     if not profiles:
+        action_hint = (
+            texts.AMNEZIA_SCREEN_HINT_ADD
+            if (not read_only and total_active_devices < device_limit)
+            else (texts.AMNEZIA_SCREEN_HINT_LIMIT if not read_only else "")
+        )
         rendered = texts.AMNEZIA_SCREEN_EMPTY_TEXT.format(
+            active=total_active_devices,
             limit=device_limit,
+            vless_count=vless_hwid_count,
+            action_hint=action_hint,
         )
     else:
         profiles_block = "\n"
@@ -282,8 +290,10 @@ async def _build_amnezia_screen(
                 profiles_block += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
 
         rendered = texts.AMNEZIA_SCREEN_TEXT.format(
-            amnezia_count=quota_profiles_count,
+            active=total_active_devices,
             limit=device_limit,
+            vless_count=vless_hwid_count,
+            amnezia_count=quota_profiles_count,
             profiles_block=profiles_block,
         )
 

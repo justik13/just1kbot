@@ -196,11 +196,17 @@ CONNECTION_HUB_EXPIRED_TEXT = """🌐 <b>Подключение</b>
 {grace_notice}
 <i>Для возобновления доступа продлите подписку.</i>"""
 
+BTN_SUB_COPY_LINK = "📋 Скопировать ссылку подписки"
+BTN_INCY_INSTRUCTIONS = "📱 Инструкция по подключению в INCY"
+VLESS_WEB_TOO_MANY_REQUESTS = "Слишком много запросов. Пожалуйста, подождите минуту перед повторной попыткой."
+AMNEZIA_SCREEN_HINT_ADD = "\n\n<i>Нажмите кнопку ниже, чтобы создать первое устройство.</i>"
+AMNEZIA_SCREEN_HINT_LIMIT = "\n\n⚠️ <i>Общий лимит устройств исчерпан. Для добавления перейдите на тариф с большим количеством устройств или отключите неиспользуемые.</i>"
+
 AMNEZIA_SCREEN_TEXT = """🛡 <b>Устройства Amnezia</b>
 
 Подключение и файлы конфигураций для приложений Amnezia.
 
-📱 <b>Занято устройств Amnezia:</b> {amnezia_count} из {limit}
+📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: {amnezia_count})</i>
 {profiles_block}
 <i>Нажмите на устройство ниже для управления:</i>"""
 
@@ -208,9 +214,9 @@ AMNEZIA_SCREEN_EMPTY_TEXT = """🛡 <b>Устройства Amnezia</b>
 
 Подключение и файлы конфигураций для приложений Amnezia.
 
-📱 <b>Занято устройств Amnezia:</b> 0 из {limit}
+📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: 0)</i>
 
-<i>У вас пока нет добавленных устройств Amnezia. Нажмите кнопку ниже, чтобы создать первое устройство.</i>"""
+<i>У вас пока нет добавленных устройств Amnezia.</i>{action_hint}"""
 
 VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"

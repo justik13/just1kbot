@@ -52,7 +52,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
     if not allowed_ip:
         return web.Response(
             status=429,
-            text=texts.WL_WEB_TOO_MANY_REQUESTS,
+            text=texts.VLESS_WEB_TOO_MANY_REQUESTS,
             headers={
                 "Retry-After": str(retry_after_ip),
                 "Cache-Control": "no-store",
@@ -71,7 +71,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
     if not allowed_tok:
         return web.Response(
             status=429,
-            text=texts.WL_WEB_TOO_MANY_REQUESTS,
+            text=texts.VLESS_WEB_TOO_MANY_REQUESTS,
             headers={
                 "Retry-After": str(retry_after_tok),
                 "Cache-Control": "no-store",

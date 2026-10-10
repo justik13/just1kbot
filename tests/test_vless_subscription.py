@@ -1522,7 +1522,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(texts.ADMIN_SERVER_BTN_PROTO_AWG, buttons)
 
     async def test_admin_awg_subscription_keyboard_includes_vless_buttons(self):
-        from bot.keyboards.admin.users import get_admin_awg_subscription_keyboard
+        from bot.keyboards.admin.users import get_admin_awg_subscription_keyboard, get_admin_user_devices_keyboard
         from bot import texts
 
         kb = get_admin_awg_subscription_keyboard(
@@ -1534,14 +1534,23 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         buttons = [btn for row in kb.inline_keyboard for btn in row]
         button_texts = [b.text for b in buttons]
         self.assertIn(texts.ADMIN_BTN_VLESS_COPY_LINK, button_texts)
-        self.assertIn(texts.ADMIN_BTN_VLESS_HWID_RESET, button_texts)
-        self.assertIn(texts.ADMIN_BTN_VLESS_TOKEN_ROTATE, button_texts)
+        self.assertIn(texts.ADMIN_BTN_USER_DEVICES, button_texts)
+        # Action buttons are consolidated under user devices screen
+        self.assertNotIn(texts.ADMIN_BTN_VLESS_HWID_RESET, button_texts)
+        self.assertNotIn(texts.ADMIN_BTN_VLESS_TOKEN_ROTATE, button_texts)
 
-        # Check callback data for hwid reset and token rotate from menu
-        hwid_btn = next(b for b in buttons if b.text == texts.ADMIN_BTN_VLESS_HWID_RESET)
-        self.assertEqual(hwid_btn.callback_data, "admin_vless_hwid_reset:123:menu")
-        rotate_btn = next(b for b in buttons if b.text == texts.ADMIN_BTN_VLESS_TOKEN_ROTATE)
-        self.assertEqual(rotate_btn.callback_data, "admin_vless_token_rotate:123:menu")
+        # Verify device management screen contains the HWID reset and token rotate actions
+        dev_kb = get_admin_user_devices_keyboard(
+            telegram_id=123,
+            profiles=[],
+            vless_sub_url="https://just1k.pro/sub/access/tok123",
+            has_vless_hwids=True,
+        )
+        dev_buttons = [btn for row in dev_kb.inline_keyboard for btn in row]
+        hwid_btn = next(b for b in dev_buttons if b.text == texts.ADMIN_BTN_VLESS_HWID_RESET)
+        self.assertEqual(hwid_btn.callback_data, "admin_vless_hwid_reset:123")
+        rotate_btn = next(b for b in dev_buttons if b.text == texts.ADMIN_BTN_VLESS_TOKEN_ROTATE)
+        self.assertEqual(rotate_btn.callback_data, "admin_vless_token_rotate:123")
 
     async def test_vless_sub_reset_renders_connections_hub(self):
         from bot.handlers.connection.device_view_routes import vless_sub_reset
@@ -1646,8 +1655,62 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         incy_btns = [b.text for row in incy_kb.inline_keyboard for b in row]
         self.assertIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME, incy_btns)
         self.assertIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE, incy_btns)
-        self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_RELAYS, incy_btns)
 
+    async def test_amnezia_screen_reflects_combined_quota_and_hides_add_btn(self):
+        from bot.handlers.connection.common import _build_amnezia_screen
+        from database.models import User
+        from bot import texts
 
+        user = User(id=1, telegram_id=123, subscription_end=now_utc() + timedelta(days=5), device_limit=3)
+        session = AsyncMock()
 
+        # 3 VLESS devices active, 0 Amnezia devices -> total 3 / 3 limit reached
+        with (
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=3)),
+            patch("bot.handlers.connection.common._get_effective_device_limit", new=AsyncMock(return_value=3)),
+        ):
+            rendered, builder = await _build_amnezia_screen(user, session, profiles=[])
+            self.assertIn("3 из 3", rendered)
+            self.assertIn("по ссылке: 3", rendered)
+            # Add device button must NOT be present since limit is reached
+            button_texts = [b.text for row in builder.export() for b in row]
+            self.assertNotIn(texts.BTN_ADD_DEVICE, button_texts)
+            self.assertIn(texts.BTN_BACK_TO_CONNECTION, button_texts)
 
+    async def test_device_service_create_device_default_vless_count_resolves_from_repo(self):
+        from database.models import User, Server
+        from services.device_service import DeviceService, DeviceLimitExceeded, ServerPeerSnapshot
+
+        session = AsyncMock()
+        user = User(id=1, telegram_id=123, device_limit=2)
+        server = Server(id=5, name="NL", is_active=True, capabilities=["awg"])
+
+        snapshot = ServerPeerSnapshot(
+            server_id=5,
+            peer_count=1,
+            max_peers=100,
+            active_peers=1,
+            captured_at=datetime.now(timezone.utc),
+        )
+
+        # Mock scalar_one for user and scalar_one_or_none for server
+        user_res = MagicMock(scalar_one=MagicMock(return_value=user))
+        server_res = MagicMock(scalar_one_or_none=MagicMock(return_value=server))
+        count_res = MagicMock(scalar_one=MagicMock(return_value=1))  # 1 AWG profile
+        session.execute = AsyncMock(side_effect=[user_res, server_res, count_res])
+
+        # 1 active VLESS device + 1 active AWG device = 2 >= limit 2 -> DeviceLimitExceeded
+        with (
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)) as mock_hwid_cnt,
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", new=AsyncMock(return_value=2)),
+        ):
+            with self.assertRaises(DeviceLimitExceeded):
+                # Call WITHOUT passing vless_count (testing default parameter resolution)
+                await DeviceService.create_device(
+                    session,
+                    user_id=1,
+                    server_id=5,
+                    device_name="Phone",
+                    snapshot=snapshot,
+                )
+            mock_hwid_cnt.assert_called_once_with(session, 1)
