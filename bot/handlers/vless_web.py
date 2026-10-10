@@ -121,6 +121,12 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             headers["x-hwid-required"] = "true"
             return web.Response(status=403, text="HWID required", headers=headers)
 
+        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+        links = VlessSubscriptionService.generate_vless_links(sub, servers)
+        if not links:
+            retry_headers = {**common_headers, "Retry-After": "60"}
+            return web.Response(status=503, text="No servers available", headers=retry_headers)
+
         allowed_hwid, active_hwid_count, effective_vless_limit = (
             await vless_subscription_repo.register_hwid_atomic(session, sub.id, hwid)
         )
@@ -163,12 +169,6 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         )
         if needs_sync:
             VlessSubscriptionService.ensure_synced_background(user.id, is_active=True, session=session)
-
-        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
-        links = VlessSubscriptionService.generate_vless_links(sub, servers)
-        if not links:
-            retry_headers = {**common_headers, "Retry-After": "60"}
-            return web.Response(status=503, text="No servers available", headers=retry_headers)
 
         payload = "\n".join(links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")

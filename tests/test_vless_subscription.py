@@ -248,7 +248,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
             patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", new=AsyncMock()) as mock_register,
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[]),
         ):
@@ -256,6 +256,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 503)
             self.assertEqual(resp.headers.get("Retry-After"), "60")
+            mock_register.assert_not_called()
 
     async def test_financial_hold_user_returns_notice_200(self):
         mock_session = AsyncMock()
@@ -1121,11 +1122,12 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             )
             self.assertFalse(res[1])
 
-        # 2. When desired_active=False and node returns already_newer with state='disabled', must consider it success!
+        # 2. When desired_active=False and node returns already_newer with state='disabled' and all_inbounds_verified=True, must consider it success!
         resp_match = SyncResponse(
             result=SyncResult.ALREADY_NEWER,
             error="state=disabled",
             verified_inbounds=["just1k-vless-direct"],
+            all_inbounds_verified=True,
             raw_data={"result": "already_newer", "state": "disabled"},
         )
         with patch("services.xray_node_client.XrayNodeClient.sync_client", new=AsyncMock(return_value=resp_match)):
@@ -1136,6 +1138,23 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
                 version=1,
             )
             self.assertTrue(res[1])
+
+        # 3. When desired_active=False and node returns already_newer with state='disabled' but all_inbounds_verified=False, must NOT consider it success!
+        resp_unverified = SyncResponse(
+            result=SyncResult.ALREADY_NEWER,
+            error="state=disabled",
+            verified_inbounds=[],
+            all_inbounds_verified=False,
+            raw_data={"result": "already_newer", "state": "disabled"},
+        )
+        with patch("services.xray_node_client.XrayNodeClient.sync_client", new=AsyncMock(return_value=resp_unverified)):
+            res = await VlessSubscriptionService._execute_sync_to_nodes(
+                [(1, "https://node.com:8443", "key")],
+                client_uuid="uuid-1",
+                desired_active=False,
+                version=1,
+            )
+            self.assertFalse(res[1])
 
     async def test_sync_user_to_nodes_empty_targets_does_not_mark_synced(self):
         from database.models import User, VlessSubscription
@@ -1186,6 +1205,36 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
                 version=1,
             )
             self.assertTrue(res[1])
+
+        # 3. already_newer with disabled and all_inbounds_verified=True -> True
+        resp_deprov_match = SyncResponse(
+            result=SyncResult.ALREADY_NEWER,
+            verified_inbounds=["just1k-vless-direct"],
+            all_inbounds_verified=True,
+            raw_data={"result": "already_newer", "state": "disabled"},
+        )
+        with patch("services.xray_node_client.XrayNodeClient.sync_client", new=AsyncMock(return_value=resp_deprov_match)):
+            res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                [(1, "https://node.com:8443", "key")],
+                client_uuid="uuid-1",
+                version=1,
+            )
+            self.assertTrue(res[1])
+
+        # 4. already_newer with disabled but all_inbounds_verified=False -> False
+        resp_deprov_unverified = SyncResponse(
+            result=SyncResult.ALREADY_NEWER,
+            verified_inbounds=[],
+            all_inbounds_verified=False,
+            raw_data={"result": "already_newer", "state": "disabled"},
+        )
+        with patch("services.xray_node_client.XrayNodeClient.sync_client", new=AsyncMock(return_value=resp_deprov_unverified)):
+            res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                [(1, "https://node.com:8443", "key")],
+                client_uuid="uuid-1",
+                version=1,
+            )
+            self.assertFalse(res[1])
 
     async def test_tariff_downgrade_checks_total_devices_including_vless(self):
         from bot.handlers.payment.common import _check_tariff_change_allowed

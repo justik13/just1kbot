@@ -316,7 +316,11 @@ class VlessSubscriptionService:
                     elif resp.result == "already_newer":
                         expected_state = "active" if desired_active else "disabled"
                         actual_state = (resp.raw_data or {}).get("state")
-                        results[srv_id] = has_vless and (actual_state == expected_state)
+                        results[srv_id] = (
+                            has_vless
+                            and (actual_state == expected_state)
+                            and bool(resp.all_inbounds_verified)
+                        )
                     else:
                         results[srv_id] = False
             except Exception as exc:
@@ -357,7 +361,11 @@ class VlessSubscriptionService:
                         results[srv_id] = has_vless
                     elif resp.result == "already_newer":
                         actual_state = (resp.raw_data or {}).get("state")
-                        results[srv_id] = has_vless and (actual_state == "disabled")
+                        results[srv_id] = (
+                            has_vless
+                            and (actual_state == "disabled")
+                            and bool(resp.all_inbounds_verified)
+                        )
                     else:
                         results[srv_id] = False
             except Exception as exc:
