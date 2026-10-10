@@ -67,6 +67,18 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         "X-Content-Type-Options": "nosniff",
     }
 
+    raw_hwid = (
+        request.headers.get("X-Hwid")
+        or request.headers.get("X-HWID")
+        or request.headers.get("X-Device-Id")
+        or request.headers.get("X-Device-ID")
+        or ""
+    ).strip()
+    if raw_hwid and not HWID_PATTERN.match(raw_hwid):
+        headers = dict(common_headers)
+        headers["x-hwid-required"] = "true"
+        return web.Response(status=400, text="Invalid HWID format", headers=headers)
+
     async with session_scope() as session:
         sub = await vless_subscription_repo.get_subscription_by_token(session, token)
         if sub is None:
@@ -112,22 +124,10 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             return web.Response(status=200, text=b64_payload, headers=response_headers)
 
         # Strict HWID validation for active subscription requests
-        raw_hwid = (
-            request.headers.get("X-Hwid")
-            or request.headers.get("X-HWID")
-            or request.headers.get("X-Device-Id")
-            or request.headers.get("X-Device-ID")
-            or ""
-        ).strip()
         if not raw_hwid:
             headers = dict(common_headers)
             headers["x-hwid-required"] = "true"
             return web.Response(status=403, text="HWID required", headers=headers)
-
-        if not HWID_PATTERN.match(raw_hwid):
-            headers = dict(common_headers)
-            headers["x-hwid-required"] = "true"
-            return web.Response(status=400, text="Invalid HWID format", headers=headers)
 
         # Atomic HWID registration and state refresh under row locks (populate_existing=True)
         allowed_hwid, active_hwid_count, effective_vless_limit = (
@@ -173,13 +173,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
         # Trigger background sync with debouncing (300s) unless version is out of sync or pending revocations exist
         now = now_utc()
-        last_synced_version = getattr(sub, "last_synced_version", 0) or 0
+        last_synced_version = getattr(sub, "last_synced_version", None)
         current_version = getattr(sub, "version", 1) or 1
         needs_sync = (
             sub.last_synced_at is None
             or (now - sub.last_synced_at).total_seconds() > 300
             or bool(getattr(sub, "pending_revoked_uuids", None))
-            or (last_synced_version < current_version)
+            or (last_synced_version is not None and last_synced_version < current_version)
         )
         if needs_sync:
             VlessSubscriptionService.ensure_synced_background(user.id, session=session)
