@@ -1138,17 +1138,19 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(res[1])
 
     async def test_sync_user_to_nodes_empty_targets_does_not_mark_synced(self):
-        from database.models import VlessSubscription
+        from database.models import User, VlessSubscription
         from services.vless_subscription_service import VlessSubscriptionService
 
         session = AsyncMock()
-        sub = VlessSubscription(id=1, user_id=10, uuid="u-1", last_synced_at=None)
+        user = User(id=10, telegram_id=1010, subscription_end=now_utc() + timedelta(days=5))
+        session.get.return_value = user
+        sub = VlessSubscription(id=1, user_id=10, uuid="u-1", last_synced_at=None, is_active=True)
 
         with (
             patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[])),
         ):
-            res = await VlessSubscriptionService.sync_user_to_nodes(session, user_id=10, desired_active=True)
+            res = await VlessSubscriptionService.sync_user_to_nodes(session, user_id=10, is_active=True)
             self.assertEqual(res, {})
             self.assertIsNone(sub.last_synced_at)
             session.flush.assert_not_called()
@@ -1189,7 +1191,13 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         from bot.handlers.payment.common import _check_tariff_change_allowed
         from database.models import Tariff, User
 
-        db_user = User(id=5, telegram_id=555, device_limit=3)
+        db_user = User(
+            id=5,
+            telegram_id=555,
+            device_limit=3,
+            current_tariff_id=1,
+            subscription_end=now_utc() + timedelta(days=10),
+        )
         target_tariff = Tariff(id=1, name="1 dev", device_limit=1, price_rub=100)
         session = AsyncMock()
 
@@ -1203,6 +1211,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(res)
             self.assertIn("2", res)
             self.assertIn("1", res)
+
 
 
 
