@@ -11,7 +11,6 @@ import urllib.parse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot import texts
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, User, VlessSubscription, VPNProfile
 from database.repositories import vless_subscription_repo
@@ -62,13 +61,26 @@ class VlessSubscriptionService:
                     port = 443
             except (ValueError, TypeError):
                 port = 443
+            if extra.get("origin_hidden"):
+                continue
+
             flag = srv.country_flag or "🌐"
-            label = f"{flag} {srv.name}".strip()
+            raw_name = extra.get("origin_tag") or extra.get("vless_name") or srv.name
+            clean_name = str(raw_name).strip()
+            if flag and not clean_name.startswith(flag):
+                label = f"{flag} {clean_name}"
+            else:
+                label = clean_name
+
             # INCY renders vector flag when emoji is the first character after #
             # and displays serverDescription badge via ?serverDescription=base64(UTF-8)
-            badge_desc = extra.get("server_description") or texts.VLESS_DEFAULT_SERVER_DESCRIPTION
-            b64_badge = base64.b64encode(badge_desc.encode("utf-8")).decode("utf-8")
-            fragment = f"{label}?serverDescription={b64_badge}"
+            badge_raw = extra.get("origin_badge") if "origin_badge" in extra else extra.get("server_description")
+            if badge_raw and str(badge_raw).strip() and str(badge_raw).strip().lower() != "none":
+                clean_badge = str(badge_raw).strip()[:30]
+                b64_badge = base64.b64encode(clean_badge.encode("utf-8")).decode("utf-8")
+                fragment = f"{label}?serverDescription={b64_badge}"
+            else:
+                fragment = label
 
             link = (
                 f"vless://{subscription.uuid}@{domain}:{port}"

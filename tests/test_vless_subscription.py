@@ -233,7 +233,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             decoded = base64.b64decode(body).decode("utf-8")
             self.assertIn("vless://11111111-2222-3333-4444-555555555555@nl.example.com:443", decoded)
             self.assertIn("xtls-rprx-vision", decoded)
-            self.assertIn("#🇳🇱 NL-Node-1?serverDescription=", decoded)
+            self.assertIn("#🇳🇱 NL-Node-1", decoded)
+            self.assertNotIn("?serverDescription=", decoded)
             self.assertNotIn("%F0%9F", decoded)
             self.assertEqual(resp.headers.get("Device-Limit"), "3")
             self.assertEqual(resp.headers.get("Device-Active-Count"), "1")
@@ -734,7 +735,8 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("flow=xtls-rprx-vision", links[0])
         self.assertIn("security=tls", links[0])
         self.assertIn("alpn=http%2F1.1", links[0])
-        self.assertIn("#🇩🇪 DE Server?serverDescription=", links[0])
+        self.assertIn("#🇩🇪 DE Server", links[0])
+        self.assertNotIn("?serverDescription=", links[0])
         self.assertNotIn("%F0%9F", links[0])
 
 
@@ -1563,6 +1565,85 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             await vless_sub_reset(callback, state, session, db_user=db_user)
             callback.answer.assert_called_once()
             mock_render.assert_called_once_with(callback.message, db_user, session)
+
+    async def test_vless_links_custom_name_and_badge(self):
+        from database.models import Server, VlessSubscription
+        from config.enums import ServerHealthState
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        sub = VlessSubscription(id=1, user_id=1, uuid="11111111-2222-3333-4444-555555555555", token="tok", is_active=True)
+        srv = Server(
+            id=1,
+            name="DE Server",
+            country_flag="🇩🇪",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="awg",
+            capabilities=["awg", "vless"],
+            api_url="https://de.example.com:8443",
+            extra_data={"domain": "de.example.com", "vless_port": 443, "origin_tag": "Frankfurt Fast", "origin_badge": "Ultra"},
+        )
+        links = VlessSubscriptionService.generate_vless_links(sub, [srv])
+        self.assertEqual(len(links), 1)
+        self.assertIn("#🇩🇪 Frankfurt Fast?serverDescription=", links[0])
+        # b64 of 'Ultra'
+        b64_ultra = base64.b64encode("Ultra".encode("utf-8")).decode("utf-8")
+        self.assertIn(f"?serverDescription={b64_ultra}", links[0])
+
+    async def test_vless_links_badge_none_omits_badge(self):
+        from database.models import Server, VlessSubscription
+        from config.enums import ServerHealthState
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        sub = VlessSubscription(id=1, user_id=1, uuid="11111111-2222-3333-4444-555555555555", token="tok", is_active=True)
+        srv = Server(
+            id=1,
+            name="DE Server",
+            country_flag="🇩🇪",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="awg",
+            capabilities=["awg", "vless"],
+            api_url="https://de.example.com:8443",
+            extra_data={"domain": "de.example.com", "vless_port": 443, "origin_badge": "none"},
+        )
+        links = VlessSubscriptionService.generate_vless_links(sub, [srv])
+        self.assertEqual(len(links), 1)
+        self.assertIn("#🇩🇪 DE Server", links[0])
+        self.assertNotIn("?serverDescription=", links[0])
+
+    async def test_vless_links_origin_hidden_skips_server(self):
+        from database.models import Server, VlessSubscription
+        from config.enums import ServerHealthState
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        sub = VlessSubscription(id=1, user_id=1, uuid="11111111-2222-3333-4444-555555555555", token="tok", is_active=True)
+        srv = Server(
+            id=1,
+            name="DE Server",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            extra_data={"domain": "de.example.com", "vless_port": 443, "origin_hidden": True},
+        )
+        links = VlessSubscriptionService.generate_vless_links(sub, [srv])
+        self.assertEqual(len(links), 0)
+
+    async def test_server_card_and_incy_keyboards_for_vless(self):
+        from bot.keyboards.admin.servers import get_admin_server_card_keyboard, get_admin_server_incy_keyboard
+        from bot import texts
+
+        card_kb = get_admin_server_card_keyboard(
+            server_id=1, is_active=True, is_xray=False, has_vless=True
+        )
+        card_btns = [b.text for row in card_kb.inline_keyboard for b in row]
+        self.assertIn(texts.ADMIN_SERVER_BTN_INCY, card_btns)
+
+        incy_kb = get_admin_server_incy_keyboard(server_id=1, is_xray=False)
+        incy_btns = [b.text for row in incy_kb.inline_keyboard for b in row]
+        self.assertIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME, incy_btns)
+        self.assertIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE, incy_btns)
+        self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_RELAYS, incy_btns)
 
 
 

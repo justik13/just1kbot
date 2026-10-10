@@ -215,7 +215,29 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
 
         profile_title = os.getenv("VLESS_PROFILE_TITLE", "Just1k Access")
-        b64_title = base64.b64encode(profile_title.encode("utf-8")).decode("utf-8")
+        profile_desc = None
+        announce = None
+        announce_url = None
+        support_url = f"https://t.me/{bot_username}"
+        channel_url = None
+
+        if servers:
+            first_srv = servers[0]
+            first_extra = first_srv.extra_data if isinstance(first_srv.extra_data, dict) else {}
+            if first_extra.get("profile_title"):
+                profile_title = first_extra["profile_title"]
+            if first_extra.get("profile_description"):
+                profile_desc = first_extra["profile_description"]
+            if first_extra.get("announce"):
+                announce = first_extra["announce"]
+            if first_extra.get("announce_url"):
+                announce_url = first_extra["announce_url"]
+            if first_extra.get("support_url"):
+                support_url = first_extra["support_url"]
+            if first_extra.get("channel_url"):
+                channel_url = first_extra["channel_url"]
+
+        b64_title = base64.b64encode(str(profile_title).strip()[:25].encode("utf-8")).decode("ascii")
         response_headers = {
             **common_headers,
             "Content-Type": "text/plain; charset=utf-8",
@@ -226,8 +248,18 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "Profile-Title": f"base64:{b64_title}",
             "Hide-Url": "1",
             "No-Limit-Enabled": "1",
-            "Support-Url": f"https://t.me/{bot_username}",
+            "Support-Url": support_url,
         }
+        if profile_desc:
+            b64_desc = base64.b64encode(str(profile_desc).strip()[:100].encode("utf-8")).decode("ascii")
+            response_headers["Profile-Description"] = f"base64:{b64_desc}"
+        if channel_url:
+            response_headers["Channel-Url"] = channel_url
+        if announce:
+            b64_ann = base64.b64encode(str(announce).strip()[:200].encode("utf-8")).decode("ascii")
+            response_headers["Announce"] = f"base64:{b64_ann}"
+        if announce_url:
+            response_headers["Announce-Url"] = announce_url
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
 

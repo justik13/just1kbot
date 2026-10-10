@@ -213,6 +213,8 @@ async def _show_server_card(
     if ping_result:
         rendered += texts.COMMON_REZULTAT_PROVERKI_SVYAZI.format(ping_result=ping_result)
     is_xray = is_xray_server(server)
+    caps = getattr(server, "capabilities", None) or []
+    has_vless = "vless" in caps or "xray_vless" in caps
     try:
         await callback.message.edit_text(
             rendered,
@@ -222,6 +224,7 @@ async def _show_server_card(
                 used_clients=actual_peers,
                 max_clients=max_clients,
                 is_xray=is_xray,
+                has_vless=has_vless,
             ),
             parse_mode="HTML",
         )

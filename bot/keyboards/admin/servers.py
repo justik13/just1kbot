@@ -10,6 +10,7 @@ def get_admin_server_card_keyboard(
     used_clients: int | None = None,
     max_clients: int | None = None,
     is_xray: bool = False,
+    has_vless: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -23,6 +24,11 @@ def get_admin_server_card_keyboard(
             text=peers_btn_text,
             callback_data=f"admin_server_peers:{server_id}:1",
         )
+        if has_vless:
+            builder.button(
+                text=texts.ADMIN_SERVER_BTN_INCY,
+                callback_data=f"admin_server_incy:{server_id}",
+            )
     else:
         builder.button(
             text=texts.ADMIN_SERVER_BTN_INCY,
@@ -199,7 +205,9 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_admin_server_incy_keyboard(server_id: int, origin_hidden: bool = False) -> InlineKeyboardMarkup:
+def get_admin_server_incy_keyboard(
+    server_id: int, origin_hidden: bool = False, is_xray: bool = True
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.ADMIN_SERVER_INCY_BTN_TITLE,
@@ -230,10 +238,11 @@ def get_admin_server_incy_keyboard(server_id: int, origin_hidden: bool = False) 
         text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_TOGGLE.format(status=origin_status),
         callback_data=f"admin_server_incy_toggle_origin:{server_id}",
     )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_RELAYS,
-        callback_data=f"admin_server_incy_relays:{server_id}",
-    )
+    if is_xray:
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_RELAYS,
+            callback_data=f"admin_server_incy_relays:{server_id}",
+        )
     builder.button(
         text=texts.ADMIN_SERVER_INCY_BTN_RESET,
         callback_data=f"admin_server_incy_reset:{server_id}",
@@ -242,7 +251,10 @@ def get_admin_server_incy_keyboard(server_id: int, origin_hidden: bool = False) 
         text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
         callback_data=f"admin_server_card:{server_id}",
     )
-    builder.adjust(2, 2, 2, 1, 1, 1, 1)
+    if is_xray:
+        builder.adjust(2, 2, 2, 1, 1, 1, 1)
+    else:
+        builder.adjust(2, 2, 2, 1, 1, 1)
     return builder.as_markup()
 
 
