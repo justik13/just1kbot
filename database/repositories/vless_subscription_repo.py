@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -101,7 +102,16 @@ async def get_subscription_by_user_id(
 ) -> VlessSubscription | None:
     """Fetch VlessSubscription by internal user_id."""
     stmt = select(VlessSubscription).where(VlessSubscription.user_id == user_id)
-    return (await session.execute(stmt)).scalar_one_or_none()
+    res = session.execute(stmt)
+    if inspect.isawaitable(res):
+        res = await res
+    scalar = getattr(res, "scalar_one_or_none", None)
+    if callable(scalar):
+        val = scalar()
+        if inspect.isawaitable(val):
+            val = await val
+        return val if isinstance(val, VlessSubscription) else None
+    return None
 
 
 async def get_active_hwid_count(
@@ -111,8 +121,18 @@ async def get_active_hwid_count(
 ) -> int:
     """Return count of active non-stale HWIDs currently registered for user."""
     stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.user_id == user_id)
-    raw_hwids = (await session.execute(stmt)).scalar_one_or_none()
-    active = prune_stale_hwids(raw_hwids if isinstance(raw_hwids, dict) else None, ttl_hours=ttl_hours)
+    res = session.execute(stmt)
+    if inspect.isawaitable(res):
+        res = await res
+    scalar = getattr(res, "scalar_one_or_none", None)
+    if callable(scalar):
+        val = scalar()
+        if inspect.isawaitable(val):
+            val = await val
+        raw_hwids = val if isinstance(val, dict) else None
+    else:
+        raw_hwids = None
+    active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
     return len(active)
 
 
@@ -132,26 +152,33 @@ async def register_hwid_atomic(
     Returns:
         tuple[allowed: bool, active_count: int, effective_limit: int]
     """
-    if not hwid or not isinstance(hwid, str) or not re.match(r"^[a-zA-Z0-9_\-:]{8,128}$", hwid.strip()):
+    if not hwid or not isinstance(hwid, str) or not re.match(r"^[a-zA-Z0-9_\-:]{3,128}$", hwid.strip()):
         return False, 0, max(0, effective_limit or 0)
     hwid = hwid.strip()
 
     # Resolve user_id without lock to enforce strict global lock hierarchy: User -> VlessSubscription
     user_id_stmt = select(VlessSubscription.user_id).where(VlessSubscription.id == subscription_id)
-    sub_user_id = (await session.execute(user_id_stmt)).scalar_one_or_none()
-    if sub_user_id is None:
+    res = session.execute(user_id_stmt)
+    if inspect.isawaitable(res):
+        res = await res
+    scalar = getattr(res, "scalar_one_or_none", None)
+    raw_sub_user_id = scalar() if callable(scalar) else None
+    if inspect.isawaitable(raw_sub_user_id):
+        raw_sub_user_id = await raw_sub_user_id
+    if raw_sub_user_id is None:
         return False, 0, max(0, effective_limit or 0)
+    sub_user_id = getattr(raw_sub_user_id, "user_id", raw_sub_user_id)
 
     # 1. Lock User row FIRST (populate_existing=True guarantees fresh attributes in Identity Map)
     from database.models import User
-    user = (
-        await session.execute(
-            select(User)
-            .where(User.id == sub_user_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
+    user_stmt = select(User).where(User.id == sub_user_id).with_for_update().execution_options(populate_existing=True)
+    user_res = session.execute(user_stmt)
+    if inspect.isawaitable(user_res):
+        user_res = await user_res
+    user_scalar = getattr(user_res, "scalar_one_or_none", None)
+    user = user_scalar() if callable(user_scalar) else None
+    if inspect.isawaitable(user):
+        user = await user
 
     # 2. Lock VlessSubscription row SECOND (populate_existing=True guarantees fresh attributes)
     stmt = (
@@ -160,7 +187,13 @@ async def register_hwid_atomic(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    sub = (await session.execute(stmt)).scalar_one_or_none()
+    sub_res = session.execute(stmt)
+    if inspect.isawaitable(sub_res):
+        sub_res = await sub_res
+    sub_scalar = getattr(sub_res, "scalar_one_or_none", None)
+    sub = sub_scalar() if callable(sub_scalar) else None
+    if inspect.isawaitable(sub):
+        sub = await sub
     if sub is None:
         return False, 0, max(0, effective_limit or 0)
 
@@ -174,21 +207,24 @@ async def register_hwid_atomic(
         or not getattr(sub, "is_active", True)
         or (hasattr(user, "subscription_end") and not SubscriptionService.check_vpn_access(user))
     ):
-        active = prune_stale_hwids(sub.active_hwids, ttl_hours=ttl_hours)
+        active = prune_stale_hwids(getattr(sub, "active_hwids", None), ttl_hours=ttl_hours)
         return False, len(active), 0
 
     if effective_limit is None:
         from database.models import VPNProfile
         from services.device_service import RESERVING_STATUSES
 
-        awg_res = (
-            await session.execute(
-                select(func.count(VPNProfile.id)).where(
-                    VPNProfile.user_id == sub.user_id,
-                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
-                )
-            )
-        ).scalar_one()
+        awg_stmt = select(func.count(VPNProfile.id)).where(
+            VPNProfile.user_id == getattr(sub, "user_id", None),
+            VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
+        )
+        awg_res_raw = session.execute(awg_stmt)
+        if inspect.isawaitable(awg_res_raw):
+            awg_res_raw = await awg_res_raw
+        awg_scalar = getattr(awg_res_raw, "scalar_one", None) or getattr(awg_res_raw, "scalar", None)
+        awg_res = awg_scalar() if callable(awg_scalar) else 0
+        if inspect.isawaitable(awg_res):
+            awg_res = await awg_res
         awg_count = awg_res if isinstance(awg_res, int) else 0
 
         user_limit = (
@@ -196,14 +232,15 @@ async def register_hwid_atomic(
             if user
             else 5
         )
-        effective_limit = max(0, user_limit - awg_count)
+        user_limit_int = user_limit if isinstance(user_limit, int) else 5
+        effective_limit = max(0, user_limit_int - awg_count)
 
     clean_hwid = str(hwid).strip().lower()[:128]
     if not clean_hwid:
-        active = prune_stale_hwids(sub.active_hwids, ttl_hours=ttl_hours)
+        active = prune_stale_hwids(getattr(sub, "active_hwids", None), ttl_hours=ttl_hours)
         return False, len(active), effective_limit
 
-    active_hwids = prune_stale_hwids(sub.active_hwids, ttl_hours=ttl_hours)
+    active_hwids = prune_stale_hwids(getattr(sub, "active_hwids", None), ttl_hours=ttl_hours)
     now = now_utc()
 
     if effective_limit <= 0:
@@ -213,7 +250,9 @@ async def register_hwid_atomic(
         # Existing device — refresh activity timestamp
         active_hwids[clean_hwid] = now.isoformat()
         sub.active_hwids = active_hwids
-        await session.flush()
+        flush_res = session.flush()
+        if inspect.isawaitable(flush_res):
+            await flush_res
         return True, len(active_hwids), effective_limit
 
     # New device — check available quota without evicting active devices on rejection
@@ -223,7 +262,9 @@ async def register_hwid_atomic(
     # Quota available — register
     active_hwids[clean_hwid] = now.isoformat()
     sub.active_hwids = active_hwids
-    await session.flush()
+    flush_res = session.flush()
+    if inspect.isawaitable(flush_res):
+        await flush_res
     return True, len(active_hwids), effective_limit
 
 

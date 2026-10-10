@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 
-HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{8,128}$")
+HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
 
 
 async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
@@ -67,33 +67,10 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         "X-Content-Type-Options": "nosniff",
     }
 
-    # Strict HWID validation before database processing
-    raw_hwid = (
-        request.headers.get("X-Hwid")
-        or request.headers.get("X-HWID")
-        or request.headers.get("X-Device-Id")
-        or request.headers.get("X-Device-ID")
-        or ""
-    ).strip()
-    if not raw_hwid:
-        headers = dict(common_headers)
-        headers["x-hwid-required"] = "true"
-        return web.Response(status=403, text="HWID required", headers=headers)
-
-    if not HWID_PATTERN.match(raw_hwid):
-        headers = dict(common_headers)
-        headers["x-hwid-required"] = "true"
-        return web.Response(status=400, text="Invalid HWID format", headers=headers)
-
     async with session_scope() as session:
         sub = await vless_subscription_repo.get_subscription_by_token(session, token)
         if sub is None:
             return web.Response(status=404, text="Not Found", headers=common_headers)
-
-        # Atomic HWID registration and state refresh under row locks (populate_existing=True)
-        allowed_hwid, active_hwid_count, effective_vless_limit = (
-            await vless_subscription_repo.register_hwid_atomic(session, sub.id, raw_hwid)
-        )
 
         user = await users_repo.get_user_by_id(session, sub.user_id)
         if user is None or getattr(user, "is_deleted", False) is True:
@@ -121,7 +98,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             )
             b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
             b64_title = base64.b64encode(texts.VLESS_FEED_EXPIRED_TITLE.encode("utf-8")).decode("utf-8")
-            expire_ts = int(user.subscription_end.timestamp()) if user.subscription_end else 0
+            expire_ts = int(user.subscription_end.timestamp()) if getattr(user, "subscription_end", None) else 0
             response_headers = {
                 **common_headers,
                 "Content-Type": "text/plain; charset=utf-8",
@@ -134,6 +111,29 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             }
             return web.Response(status=200, text=b64_payload, headers=response_headers)
 
+        # Strict HWID validation for active subscription requests
+        raw_hwid = (
+            request.headers.get("X-Hwid")
+            or request.headers.get("X-HWID")
+            or request.headers.get("X-Device-Id")
+            or request.headers.get("X-Device-ID")
+            or ""
+        ).strip()
+        if not raw_hwid:
+            headers = dict(common_headers)
+            headers["x-hwid-required"] = "true"
+            return web.Response(status=403, text="HWID required", headers=headers)
+
+        if not HWID_PATTERN.match(raw_hwid):
+            headers = dict(common_headers)
+            headers["x-hwid-required"] = "true"
+            return web.Response(status=400, text="Invalid HWID format", headers=headers)
+
+        # Atomic HWID registration and state refresh under row locks (populate_existing=True)
+        allowed_hwid, active_hwid_count, effective_vless_limit = (
+            await vless_subscription_repo.register_hwid_atomic(session, sub.id, raw_hwid)
+        )
+
         awg_res = (
             await session.execute(
                 select(func.count(VPNProfile.id)).where(
@@ -145,20 +145,21 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         awg_count = awg_res if isinstance(awg_res, int) else 0
 
         effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
+        effective_limit_int = effective_limit if isinstance(effective_limit, int) else 5
         total_active_devices = awg_count + active_hwid_count
 
         if not allowed_hwid:
             headers = dict(common_headers)
             headers["Device-Limit-Exceeded"] = "1"
-            headers["Device-Limit"] = str(effective_limit)
+            headers["Device-Limit"] = str(effective_limit_int)
             headers["Device-Active-Count"] = str(total_active_devices)
             headers["x-hwid-max-devices-reached"] = "true"
-            headers["x-hwid-limit"] = str(effective_limit)
+            headers["x-hwid-limit"] = str(effective_limit_int)
             headers["x-hwid-active"] = str(total_active_devices)
             bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
             limit_msg = texts.WL_WEB_DEVICE_LIMIT_EXCEEDED.format(
                 active=total_active_devices,
-                limit=effective_limit,
+                limit=effective_limit_int,
                 bot_username=bot_username,
             )
             return web.Response(status=403, text=limit_msg, headers=headers)
@@ -172,11 +173,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
         # Trigger background sync with debouncing (300s) unless version is out of sync or pending revocations exist
         now = now_utc()
+        last_synced_version = getattr(sub, "last_synced_version", 0) or 0
+        current_version = getattr(sub, "version", 1) or 1
         needs_sync = (
             sub.last_synced_at is None
             or (now - sub.last_synced_at).total_seconds() > 300
             or bool(getattr(sub, "pending_revoked_uuids", None))
-            or (getattr(sub, "last_synced_version", 0) < getattr(sub, "version", 1))
+            or (last_synced_version < current_version)
         )
         if needs_sync:
             VlessSubscriptionService.ensure_synced_background(user.id, session=session)

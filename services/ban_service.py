@@ -200,7 +200,7 @@ class BanService:
         from database.repositories import vless_subscription_repo
         from services.vless_subscription_service import VlessSubscriptionService
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, locked_user.id)
-        if vless_sub and vless_sub.is_active:
+        if vless_sub and getattr(vless_sub, "is_active", False) is True:
             vless_sub.is_active = False
             vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
             session.add(vless_sub)
