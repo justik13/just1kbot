@@ -1,10 +1,11 @@
-"""HTTP subscription feed endpoint for standard VLESS access (/sub/vless/{token})."""
+"""HTTP subscription feed endpoint for standard access (/sub/access/{token} and /sub/vless/{token})."""
 
 from __future__ import annotations
 
 import base64
 import logging
 import os
+import re
 
 from aiohttp import web
 from sqlalchemy import func, select
@@ -23,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
+
+HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{8,128}$")
 
 
 async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
@@ -64,10 +67,33 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         "X-Content-Type-Options": "nosniff",
     }
 
+    # Strict HWID validation before database processing
+    raw_hwid = (
+        request.headers.get("X-Hwid")
+        or request.headers.get("X-HWID")
+        or request.headers.get("X-Device-Id")
+        or request.headers.get("X-Device-ID")
+        or ""
+    ).strip()
+    if not raw_hwid:
+        headers = dict(common_headers)
+        headers["x-hwid-required"] = "true"
+        return web.Response(status=403, text="HWID required", headers=headers)
+
+    if not HWID_PATTERN.match(raw_hwid):
+        headers = dict(common_headers)
+        headers["x-hwid-required"] = "true"
+        return web.Response(status=400, text="Invalid HWID format", headers=headers)
+
     async with session_scope() as session:
         sub = await vless_subscription_repo.get_subscription_by_token(session, token)
         if sub is None:
             return web.Response(status=404, text="Not Found", headers=common_headers)
+
+        # Atomic HWID registration and state refresh under row locks (populate_existing=True)
+        allowed_hwid, active_hwid_count, effective_vless_limit = (
+            await vless_subscription_repo.register_hwid_atomic(session, sub.id, raw_hwid)
+        )
 
         user = await users_repo.get_user_by_id(session, sub.user_id)
         if user is None or getattr(user, "is_deleted", False) is True:
@@ -85,7 +111,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 sub.is_active = False
                 sub.version = (getattr(sub, "version", 1) or 1) + 1
                 session.add(sub)
-                VlessSubscriptionService.ensure_synced_background(user.id, is_active=False, session=session)
+                VlessSubscriptionService.ensure_synced_background(user.id, session=session)
 
             bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
             notice_text = texts.VLESS_FEED_EXPIRED_NOTICE.format(bot_username=bot_username)
@@ -107,29 +133,6 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Support-Url": f"https://t.me/{bot_username}",
             }
             return web.Response(status=200, text=b64_payload, headers=response_headers)
-
-        # Strict HWID enforcement
-        hwid = (
-            request.headers.get("X-Hwid")
-            or request.headers.get("X-HWID")
-            or request.headers.get("X-Device-Id")
-            or request.headers.get("X-Device-ID")
-            or ""
-        ).strip()
-        if not hwid:
-            headers = dict(common_headers)
-            headers["x-hwid-required"] = "true"
-            return web.Response(status=403, text="HWID required", headers=headers)
-
-        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
-        links = VlessSubscriptionService.generate_vless_links(sub, servers)
-        if not links:
-            retry_headers = {**common_headers, "Retry-After": "60"}
-            return web.Response(status=503, text="No servers available", headers=retry_headers)
-
-        allowed_hwid, active_hwid_count, effective_vless_limit = (
-            await vless_subscription_repo.register_hwid_atomic(session, sub.id, hwid)
-        )
 
         awg_res = (
             await session.execute(
@@ -160,15 +163,23 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             )
             return web.Response(status=403, text=limit_msg, headers=headers)
 
-        # Trigger background sync with debouncing (300s) unless pending revocations exist
+        # Generate fresh server links strictly AFTER atomic lock & verification
+        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+        links = VlessSubscriptionService.generate_vless_links(sub, servers)
+        if not links:
+            retry_headers = {**common_headers, "Retry-After": "60"}
+            return web.Response(status=503, text="No servers available", headers=retry_headers)
+
+        # Trigger background sync with debouncing (300s) unless version is out of sync or pending revocations exist
         now = now_utc()
         needs_sync = (
             sub.last_synced_at is None
             or (now - sub.last_synced_at).total_seconds() > 300
             or bool(getattr(sub, "pending_revoked_uuids", None))
+            or (getattr(sub, "last_synced_version", 0) < getattr(sub, "version", 1))
         )
         if needs_sync:
-            VlessSubscriptionService.ensure_synced_background(user.id, is_active=True, session=session)
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
 
         payload = "\n".join(links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
@@ -195,4 +206,5 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
 def setup_vless_web_routes(app: web.Application) -> None:
     """Register HTTP subscription feed route for VLESS access."""
+    app.router.add_get("/sub/access/{token}", vless_subscription_feed_handler)
     app.router.add_get("/sub/vless/{token}", vless_subscription_feed_handler)

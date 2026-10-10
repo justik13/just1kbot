@@ -1,4 +1,4 @@
-"""Service for standard VLESS subscriptions, link generation, and dual-node synchronization."""
+"""Service for standard VLESS subscriptions, link generation, and node synchronization."""
 
 from __future__ import annotations
 
@@ -90,11 +90,11 @@ class VlessSubscriptionService:
         if not domain:
             domain = os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN") or "just1k.pro"
         clean_domain = domain.strip().replace("https://", "").replace("http://", "").rstrip("/")
-        return f"https://{clean_domain}/sub/vless/{token}"
+        return f"https://{clean_domain}/sub/access/{token}"
 
     @classmethod
     def ensure_synced_background(
-        cls, user_id: int, is_active: bool = True, *, session: AsyncSession | None = None
+        cls, user_id: int, is_active: bool | None = None, *, session: AsyncSession | None = None
     ) -> asyncio.Task | None:
         """Synchronize user on nodes with post-commit dispatch if session is active."""
         async def _run() -> None:
@@ -123,8 +123,6 @@ class VlessSubscriptionService:
                             and not getattr(user, "is_deleted", False)
                             and SubscriptionService.check_vpn_access(user)
                         )
-                        if is_active is False:
-                            desired_active = False
                         servers = await cls.get_configured_vless_servers(scoped_session)
                         targets = cls._extract_node_targets(servers)
 
@@ -148,6 +146,7 @@ class VlessSubscriptionService:
                         current_sub = await vless_subscription_repo.get_subscription_by_user_id(scoped_session, user_id)
                         if current_sub:
                             current_sub.last_synced_at = now_utc()
+                            current_sub.last_synced_version = sub_version
             except Exception as e:
                 logger.warning("Background sync of VLESS user %s failed: %s", user_id, e)
 
@@ -236,7 +235,7 @@ class VlessSubscriptionService:
         for srv in servers:
             caps = srv.capabilities or []
             proto = (srv.protocol or "").lower()
-            if "vless" in caps or "xray_vless" in caps or "dual" in caps or proto in ("dual", "vless"):
+            if "vless" in caps or "xray_vless" in caps or proto == "vless":
                 eligible.append(srv)
         return eligible
 
@@ -262,7 +261,7 @@ class VlessSubscriptionService:
         for srv in servers:
             caps = srv.capabilities or []
             proto = (srv.protocol or "").lower()
-            if "vless" in caps or "xray_vless" in caps or "dual" in caps or proto in ("dual", "vless"):
+            if "vless" in caps or "xray_vless" in caps or proto == "vless":
                 configured.append(srv)
         return configured
 
@@ -415,18 +414,9 @@ class VlessSubscriptionService:
             targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
         )
 
-        # Retry deprovisioning for any pending revoked UUIDs
-        pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
-        if pending:
-            for rev_uuid in pending:
-                deprov_res = await VlessSubscriptionService._execute_deprovision_on_nodes(
-                    targets, rev_uuid, version=sub_version
-                )
-                if all(deprov_res.values()) and len(deprov_res) == len(targets):
-                    await vless_subscription_repo.pop_pending_revoked_uuid(session, sub.id, rev_uuid)
-
         if targets and all(results.values()) and len(results) == len(targets):
             sub.last_synced_at = now_utc()
+            sub.last_synced_version = sub_version
             await session.flush()
 
         return results

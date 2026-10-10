@@ -41,6 +41,9 @@ def upgrade() -> None:
         ),
         sa.Column("last_synced_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
+            "last_synced_version", sa.Integer(), server_default=sa.text("0"), nullable=False
+        ),
+        sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
             server_default=sa.text("now()"),

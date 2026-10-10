@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
+from config.enums import ServerHealthState
+from database.models import Server
 from database.repositories.servers_repo import (
     create_server,
     get_server_by_api_url,
@@ -212,22 +214,14 @@ async def process_add_server(
         existing = await get_server_by_api_url(session, api_url)
 
         if existing:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_DUPLICATE_URL.format(
-                    api_url=safe(api_url),
-                ),
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-                trigger_message_id=trigger_msg_id,
+            # Allow updating/rediscovering existing server capabilities (e.g. adding VLESS)
+            await state.update_data(
+                api_url=api_url,
+                existing_server_id=existing.id,
+                step="api_key",
             )
-
-            await state.clear()
-
-            return
-
-        await state.update_data(api_url=api_url, step="api_key")
+        else:
+            await state.update_data(api_url=api_url, step="api_key")
 
         await render_hub(
             message.bot,
@@ -310,16 +304,37 @@ async def process_add_server(
                 capabilities.append("xray_origin")
             if not capabilities:
                 capabilities = ["xray_origin"]
-            server = await create_server(
-                session,
-                name=api_server_name,
-                country_flag=all_data["country_flag"],
-                api_url=all_data["api_url"],
-                api_key=api_key,
-                protocol=protocol_name,
-                max_clients=api_max_peers,
-                capabilities=capabilities,
-            )
+            existing_server_id = all_data.get("existing_server_id")
+            if existing_server_id:
+                server = await session.get(Server, existing_server_id)
+                if server:
+                    server.api_key = api_key
+                    existing_caps = set(server.capabilities or [])
+                    existing_caps.update(capabilities)
+                    server.capabilities = list(existing_caps)
+                    server.health_state = ServerHealthState.ONLINE
+                else:
+                    server = await create_server(
+                        session,
+                        name=api_server_name,
+                        country_flag=all_data["country_flag"],
+                        api_url=all_data["api_url"],
+                        api_key=api_key,
+                        protocol=protocol_name,
+                        max_clients=api_max_peers,
+                        capabilities=capabilities,
+                    )
+            else:
+                server = await create_server(
+                    session,
+                    name=api_server_name,
+                    country_flag=all_data["country_flag"],
+                    api_url=all_data["api_url"],
+                    api_key=api_key,
+                    protocol=protocol_name,
+                    max_clients=api_max_peers,
+                    capabilities=capabilities,
+                )
             if xray_epoch:
                 server.xray_instance_epoch = xray_epoch
             if xray_data:
@@ -335,12 +350,16 @@ async def process_add_server(
                 if "sub_path_prefix" in xray_data and xray_data["sub_path_prefix"]:
                     extra["sub_path_prefix"] = xray_data["sub_path_prefix"]
                 if has_vless:
-                    parsed_u = urllib.parse.urlsplit(all_data["api_url"])
-                    if parsed_u.hostname:
-                        extra.setdefault("domain", parsed_u.hostname)
+                    vless_domain = xray_data.get("vless_domain")
+                    if not vless_domain:
+                        parsed_u = urllib.parse.urlsplit(all_data["api_url"])
+                        vless_domain = parsed_u.hostname
+                    if vless_domain:
+                        extra["domain"] = vless_domain
                     extra.setdefault("vless_port", 443)
                     extra.setdefault("xray_api_url", all_data["api_url"])
                 server.extra_data = extra
+            await session.flush()
 
             await AuditService.log_action(
                 session,
@@ -443,12 +462,13 @@ async def process_add_server(
 
         api_server_name = (all_data.get("name") or server_info.name or "AmneziaWG")[:50]
 
+        existing_server_id = all_data.get("existing_server_id")
         existing = await get_server_by_api_url(
             session,
             all_data["api_url"],
         )
 
-        if existing:
+        if existing and not existing_server_id:
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -467,16 +487,19 @@ async def process_add_server(
 
         capabilities = None
         extra_info = None
-        # Auto-detect Dual Node: check if Xray VLESS API is also available on this node
+        # Modular node: check if Xray VLESS API is also available on this node
         try:
             from services.xray_node_client import XrayNodeClient
 
             async with XrayNodeClient(timeout=3.0) as xray_client:
-                x_ok, _, _ = await xray_client.check_health(all_data["api_url"], api_key)
+                x_ok, _, x_data = await xray_client.check_health(all_data["api_url"], api_key)
                 if x_ok:
                     capabilities = ["awg", "vless"]
-                    parsed = urllib.parse.urlsplit(all_data["api_url"])
-                    domain = parsed.hostname or ""
+                    # B8: Use vless_domain from node response if present
+                    domain = (x_data or {}).get("vless_domain")
+                    if not domain:
+                        parsed = urllib.parse.urlsplit(all_data["api_url"])
+                        domain = parsed.hostname or ""
                     extra_info = {
                         "domain": domain,
                         "vless_port": 443,
@@ -485,25 +508,38 @@ async def process_add_server(
         except Exception:
             pass
 
-        create_kwargs = {
-            "name": api_server_name,
-            "country_flag": all_data["country_flag"],
-            "api_url": all_data["api_url"],
-            "api_key": api_key,
-            "protocol": server_protocol,
-            "max_clients": api_max_peers,
-        }
-        if capabilities:
-            create_kwargs["capabilities"] = capabilities
+        if existing_server_id:
+            server = await session.get(Server, existing_server_id)
+            if server:
+                server.api_key = api_key
+                if capabilities:
+                    existing_caps = set(server.capabilities or ["awg"])
+                    existing_caps.update(capabilities)
+                    server.capabilities = list(existing_caps)
+                if extra_info:
+                    server.extra_data = {**(server.extra_data or {}), **extra_info}
+                server.health_state = ServerHealthState.ONLINE
+                await session.flush()
+        else:
+            create_kwargs = {
+                "name": api_server_name,
+                "country_flag": all_data["country_flag"],
+                "api_url": all_data["api_url"],
+                "api_key": api_key,
+                "protocol": server_protocol,
+                "max_clients": api_max_peers,
+            }
+            if capabilities:
+                create_kwargs["capabilities"] = capabilities
 
-        server = await create_server(
-            session,
-            **create_kwargs,
-        )
+            server = await create_server(
+                session,
+                **create_kwargs,
+            )
 
-        if extra_info:
-            server.extra_data = {**(server.extra_data or {}), **extra_info}
-            await session.flush()
+            if extra_info:
+                server.extra_data = {**(server.extra_data or {}), **extra_info}
+                await session.flush()
 
         await AuditService.log_action(
             session,

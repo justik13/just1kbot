@@ -345,8 +345,8 @@ async def _sweep_vless_pending_revocations() -> None:
                 select(VlessSubscription.user_id)
                 .where(
                     or_(
-                        VlessSubscription.last_synced_at.is_(None),
-                        VlessSubscription.last_synced_at < VlessSubscription.updated_at,
+                        VlessSubscription.last_synced_version.is_(None),
+                        VlessSubscription.last_synced_version < VlessSubscription.version,
                     )
                 )
                 .order_by(VlessSubscription.updated_at.asc())

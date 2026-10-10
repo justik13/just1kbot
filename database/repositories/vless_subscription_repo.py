@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 import secrets
 import uuid
@@ -101,16 +101,7 @@ async def get_subscription_by_user_id(
 ) -> VlessSubscription | None:
     """Fetch VlessSubscription by internal user_id."""
     stmt = select(VlessSubscription).where(VlessSubscription.user_id == user_id)
-    res = session.execute(stmt)
-    if inspect.isawaitable(res):
-        res = await res
-    scalar = getattr(res, "scalar_one_or_none", None)
-    if callable(scalar):
-        val = scalar()
-        if inspect.isawaitable(val):
-            val = await val
-        return val if isinstance(val, VlessSubscription) else None
-    return None
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def get_active_hwid_count(
@@ -120,18 +111,8 @@ async def get_active_hwid_count(
 ) -> int:
     """Return count of active non-stale HWIDs currently registered for user."""
     stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.user_id == user_id)
-    res = session.execute(stmt)
-    if inspect.isawaitable(res):
-        res = await res
-    scalar = getattr(res, "scalar_one_or_none", None)
-    if callable(scalar):
-        val = scalar()
-        if inspect.isawaitable(val):
-            val = await val
-        raw_hwids = val if isinstance(val, dict) else None
-    else:
-        raw_hwids = None
-    active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
+    raw_hwids = (await session.execute(stmt)).scalar_one_or_none()
+    active = prune_stale_hwids(raw_hwids if isinstance(raw_hwids, dict) else None, ttl_hours=ttl_hours)
     return len(active)
 
 
@@ -151,38 +132,35 @@ async def register_hwid_atomic(
     Returns:
         tuple[allowed: bool, active_count: int, effective_limit: int]
     """
+    if not hwid or not isinstance(hwid, str) or not re.match(r"^[a-zA-Z0-9_\-:]{8,128}$", hwid.strip()):
+        return False, 0, max(0, effective_limit or 0)
+    hwid = hwid.strip()
+
     # Resolve user_id without lock to enforce strict global lock hierarchy: User -> VlessSubscription
     user_id_stmt = select(VlessSubscription.user_id).where(VlessSubscription.id == subscription_id)
-    res = session.execute(user_id_stmt)
-    if inspect.isawaitable(res):
-        res = await res
-    scalar = getattr(res, "scalar_one_or_none", None)
-    raw_sub_user_id = scalar() if callable(scalar) else None
-    if inspect.isawaitable(raw_sub_user_id):
-        raw_sub_user_id = await raw_sub_user_id
-    if raw_sub_user_id is None:
+    sub_user_id = (await session.execute(user_id_stmt)).scalar_one_or_none()
+    if sub_user_id is None:
         return False, 0, max(0, effective_limit or 0)
-    sub_user_id = getattr(raw_sub_user_id, "user_id", raw_sub_user_id)
 
-    # 1. Lock User row FIRST
+    # 1. Lock User row FIRST (populate_existing=True guarantees fresh attributes in Identity Map)
     from database.models import User
-    user_res = session.execute(select(User).where(User.id == sub_user_id).with_for_update())
-    if inspect.isawaitable(user_res):
-        user_res = await user_res
-    user_scalar = getattr(user_res, "scalar_one_or_none", None)
-    user = user_scalar() if callable(user_scalar) else None
-    if inspect.isawaitable(user):
-        user = await user
+    user = (
+        await session.execute(
+            select(User)
+            .where(User.id == sub_user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
 
-    # 2. Lock VlessSubscription row SECOND
-    stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
-    sub_res = session.execute(stmt)
-    if inspect.isawaitable(sub_res):
-        sub_res = await sub_res
-    sub_scalar = getattr(sub_res, "scalar_one_or_none", None)
-    sub = sub_scalar() if callable(sub_scalar) else None
-    if inspect.isawaitable(sub):
-        sub = await sub
+    # 2. Lock VlessSubscription row SECOND (populate_existing=True guarantees fresh attributes)
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    sub = (await session.execute(stmt)).scalar_one_or_none()
     if sub is None:
         return False, 0, max(0, effective_limit or 0)
 

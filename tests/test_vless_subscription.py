@@ -45,11 +45,12 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         )
         self.default_server = Server(
             id=1,
-            name="NL-Dual-1",
+            name="NL-Node-1",
             country_flag="🇳🇱",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
-            protocol="dual",
+            protocol="awg",
+            capabilities=["awg", "vless"],
             api_url="https://nl.example.com:8443",
             extra_data={"domain": "nl.example.com", "vless_port": 443},
         )
@@ -220,15 +221,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
         ):
             headers = {"X-Hwid": "test-client-hwid-99"}
-            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
-            mock_sync.assert_called_once_with(self.default_user.id, is_active=True, session=mock_session)
+            mock_sync.assert_called_once_with(self.default_user.id, session=mock_session)
 
             body = await resp.text()
             decoded = base64.b64decode(body).decode("utf-8")
             self.assertIn("vless://11111111-2222-3333-4444-555555555555@nl.example.com:443", decoded)
             self.assertIn("xtls-rprx-vision", decoded)
-            self.assertIn("#🇳🇱 NL-Dual-1?serverDescription=", decoded)
+            self.assertIn("#🇳🇱 NL-Node-1?serverDescription=", decoded)
             self.assertNotIn("%F0%9F", decoded)
             self.assertEqual(resp.headers.get("Device-Limit"), "3")
             self.assertEqual(resp.headers.get("Device-Active-Count"), "1")
@@ -249,15 +250,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
             patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", new=AsyncMock()) as mock_register,
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)) as mock_register,
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[]),
         ):
             headers = {"X-Hwid": "test-client-hwid-99"}
-            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 503)
             self.assertEqual(resp.headers.get("Retry-After"), "60")
-            mock_register.assert_not_called()
+            mock_register.assert_called_once()
 
     async def test_financial_hold_user_returns_notice_200(self):
         mock_session = AsyncMock()
@@ -390,11 +391,17 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("services.subscription.SubscriptionService.check_vpn_access", return_value=False),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_sync,
         ):
-            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678")
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678")
             self.assertEqual(resp.status, 200)
             self.assertFalse(active_sub.is_active)
             self.assertEqual(active_sub.version, 2)
-            mock_sync.assert_called_once_with(expired_user.id, is_active=False, session=mock_session)
+            mock_sync.assert_called_once_with(expired_user.id, session=mock_session)
+
+    async def test_invalid_hwid_format_returns_400(self):
+        headers = {"X-Hwid": "bad$$$"}
+        resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+        self.assertEqual(resp.status, 400)
+        self.assertEqual(resp.headers.get("x-hwid-required"), "true")
 
 
 class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
@@ -488,7 +495,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
 
     def test_build_subscription_url(self):
         url = VlessSubscriptionService.build_subscription_url("my-token-123", domain="bot.example.com")
-        self.assertEqual(url, "https://bot.example.com/sub/vless/my-token-123")
+        self.assertEqual(url, "https://bot.example.com/sub/access/my-token-123")
 
     def test_generate_vless_links(self):
         sub = VlessSubscription(
@@ -504,7 +511,8 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
             country_flag="🇩🇪",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
-            protocol="dual",
+            protocol="vless",
+            capabilities=["vless"],
             api_url="https://de.example.com:8443",
             extra_data={"domain": "de.example.com", "vless_port": 443},
         )
@@ -632,12 +640,12 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         kb = get_admin_user_devices_keyboard(
             telegram_id=123456,
             profiles=[],
-            vless_sub_url="https://just1k.pro/sub/vless/mytoken",
+            vless_sub_url="https://just1k.pro/sub/access/mytoken",
             has_vless_hwids=True,
         )
 
         buttons = [btn for row in kb.inline_keyboard for btn in row]
-        copy_btn = next((b for b in buttons if b.copy_text and b.copy_text.text == "https://just1k.pro/sub/vless/mytoken"), None)
+        copy_btn = next((b for b in buttons if b.copy_text and b.copy_text.text == "https://just1k.pro/sub/access/mytoken"), None)
         self.assertIsNotNone(copy_btn)
 
         hwid_reset_btn = next((b for b in buttons if b.callback_data == "admin_vless_hwid_reset:123456"), None)
