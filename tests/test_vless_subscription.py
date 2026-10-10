@@ -652,6 +652,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
 
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=100)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=user_10h_expired)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
         ])
@@ -676,6 +677,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
             subscription_end=now - timedelta(hours=80),
         )
         mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=100)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=user_80h_expired)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
         ])
