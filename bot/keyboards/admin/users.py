@@ -15,7 +15,7 @@ def get_admin_user_card_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.ADMIN_SERVER_BTN_PROTO_AWG,
+        text=texts.ADMIN_BTN_SUB_STANDARD,
         callback_data=f"admin_sub_awg_menu:{user_id}",
     )
     builder.button(
@@ -132,6 +132,8 @@ def get_admin_user_balance_keyboard(
 def get_admin_awg_subscription_keyboard(
     telegram_id: int,
     has_active_sub: bool,
+    vless_sub_url: str | None = None,
+    has_vless_hwids: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -147,6 +149,24 @@ def get_admin_awg_subscription_keyboard(
         builder.button(
             text=texts.ADMIN_BTN_REDUCE_SUBSCRIPTION,
             callback_data=f"admin_sub_reduce:{telegram_id}",
+        )
+        if vless_sub_url:
+            builder.button(
+                text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+                copy_text=CopyTextButton(text=vless_sub_url),
+            )
+        if has_vless_hwids:
+            builder.button(
+                text=texts.ADMIN_BTN_VLESS_HWID_RESET,
+                callback_data=f"admin_vless_hwid_reset:{telegram_id}:menu",
+            )
+        builder.button(
+            text=texts.ADMIN_BTN_VLESS_TOKEN_ROTATE,
+            callback_data=f"admin_vless_token_rotate:{telegram_id}:menu",
+        )
+        builder.button(
+            text=texts.ADMIN_BTN_USER_DEVICES,
+            callback_data=f"admin_user_devices:{telegram_id}",
         )
     else:
         builder.button(

@@ -679,9 +679,8 @@ async def vless_sub_reset(
     except Exception:
         pass
 
-    await render_vless_sub_screen(
-        callback.bot,
-        callback.message.chat.id,
+    await _render_connections(
+        callback.message,
         db_user,
         session,
     )

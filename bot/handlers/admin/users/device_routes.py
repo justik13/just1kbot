@@ -448,12 +448,22 @@ async def admin_vless_hwid_reset(
         await session.commit()
 
     await callback.answer(texts.ADMIN_ALERT_VLESS_HWID_RESET_SUCCESS, show_alert=True)
-    try:
-        updated_cb = callback.model_copy(update={"data": f"admin_user_devices:{telegram_id}"})
-    except Exception:
-        callback.data = f"admin_user_devices:{telegram_id}"
-        updated_cb = callback
-    await admin_user_devices(updated_cb, session)
+    if callback.data.endswith(":menu"):
+        from .subscription_menu_routes import admin_subscription_menu
+
+        try:
+            updated_cb = callback.model_copy(update={"data": f"admin_sub_awg_menu:{telegram_id}"})
+        except Exception:
+            callback.data = f"admin_sub_awg_menu:{telegram_id}"
+            updated_cb = callback
+        await admin_subscription_menu(updated_cb, session)
+    else:
+        try:
+            updated_cb = callback.model_copy(update={"data": f"admin_user_devices:{telegram_id}"})
+        except Exception:
+            callback.data = f"admin_user_devices:{telegram_id}"
+            updated_cb = callback
+        await admin_user_devices(updated_cb, session)
 
 
 @router.callback_query(F.data.startswith("admin_vless_token_rotate:"))
@@ -507,10 +517,20 @@ async def admin_vless_token_rotate(
         await session.commit()
 
     await callback.answer(texts.ADMIN_ALERT_VLESS_TOKEN_ROTATE_SUCCESS, show_alert=True)
-    try:
-        updated_cb = callback.model_copy(update={"data": f"admin_user_devices:{telegram_id}"})
-    except Exception:
-        callback.data = f"admin_user_devices:{telegram_id}"
-        updated_cb = callback
-    await admin_user_devices(updated_cb, session)
+    if callback.data.endswith(":menu"):
+        from .subscription_menu_routes import admin_subscription_menu
+
+        try:
+            updated_cb = callback.model_copy(update={"data": f"admin_sub_awg_menu:{telegram_id}"})
+        except Exception:
+            callback.data = f"admin_sub_awg_menu:{telegram_id}"
+            updated_cb = callback
+        await admin_subscription_menu(updated_cb, session)
+    else:
+        try:
+            updated_cb = callback.model_copy(update={"data": f"admin_user_devices:{telegram_id}"})
+        except Exception:
+            callback.data = f"admin_user_devices:{telegram_id}"
+            updated_cb = callback
+        await admin_user_devices(updated_cb, session)
 

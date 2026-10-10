@@ -1507,6 +1507,63 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             self.assertIn("2", res)
             self.assertIn("1", res)
 
+    async def test_admin_user_card_keyboard_has_standard_button(self):
+        from bot.keyboards.admin.users import get_admin_user_card_keyboard
+        from bot import texts
+
+        kb = get_admin_user_card_keyboard(user_id=123, is_banned=False)
+        buttons = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertIn(texts.ADMIN_BTN_SUB_STANDARD, buttons)
+        self.assertNotIn(texts.ADMIN_SERVER_BTN_PROTO_AWG, buttons)
+
+    async def test_admin_awg_subscription_keyboard_includes_vless_buttons(self):
+        from bot.keyboards.admin.users import get_admin_awg_subscription_keyboard
+        from bot import texts
+
+        kb = get_admin_awg_subscription_keyboard(
+            telegram_id=123,
+            has_active_sub=True,
+            vless_sub_url="https://just1k.pro/sub/access/tok123",
+            has_vless_hwids=True,
+        )
+        buttons = [btn for row in kb.inline_keyboard for btn in row]
+        button_texts = [b.text for b in buttons]
+        self.assertIn(texts.ADMIN_BTN_VLESS_COPY_LINK, button_texts)
+        self.assertIn(texts.ADMIN_BTN_VLESS_HWID_RESET, button_texts)
+        self.assertIn(texts.ADMIN_BTN_VLESS_TOKEN_ROTATE, button_texts)
+
+        # Check callback data for hwid reset and token rotate from menu
+        hwid_btn = next(b for b in buttons if b.text == texts.ADMIN_BTN_VLESS_HWID_RESET)
+        self.assertEqual(hwid_btn.callback_data, "admin_vless_hwid_reset:123:menu")
+        rotate_btn = next(b for b in buttons if b.text == texts.ADMIN_BTN_VLESS_TOKEN_ROTATE)
+        self.assertEqual(rotate_btn.callback_data, "admin_vless_token_rotate:123:menu")
+
+    async def test_vless_sub_reset_renders_connections_hub(self):
+        from bot.handlers.connection.device_view_routes import vless_sub_reset
+        from database.models import User, VlessSubscription
+
+        callback = MagicMock()
+        callback.from_user.id = 123
+        callback.message = MagicMock()
+        callback.answer = AsyncMock()
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=123, subscription_end=now_utc() + timedelta(days=5))
+        sub = VlessSubscription(id=10, user_id=1, uuid="test-uuid", token="tok", active_hwids={"hw1": "ts"})
+
+        with (
+            patch("services.maintenance_service.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("database.repositories.vless_subscription_repo.reset_hwids", new=AsyncMock(return_value=("old-uuid", "new-uuid"))),
+            patch("services.vless_subscription_service.VlessSubscriptionService.deprovision_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("bot.handlers.connection.device_view_routes._render_connections", new=AsyncMock()) as mock_render,
+        ):
+            await vless_sub_reset(callback, state, session, db_user=db_user)
+            callback.answer.assert_called_once()
+            mock_render.assert_called_once_with(callback.message, db_user, session)
+
 
 
 
