@@ -1066,10 +1066,75 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         with (
             patch("services.workers.cleanup.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscriptions_with_pending_revocations", new=AsyncMock(return_value=[sub])),
-            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv])),
             patch("services.vless_subscription_service.VlessSubscriptionService._execute_deprovision_on_nodes", new=AsyncMock(return_value={1: True})),
             patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
+            patch("services.vless_subscription_service.VlessSubscriptionService.sync_user_to_nodes", new=AsyncMock()),
         ):
             await _sweep_vless_pending_revocations()
             mock_pop.assert_called_once_with(mock_session, 77, "old-rev-uuid")
+
+    async def test_sweep_does_not_pop_uuid_when_node_offline(self):
+        from database.models import Server
+        from services.workers.cleanup import _sweep_vless_pending_revocations
+
+        sub = VlessSubscription(id=77, user_id=77, is_active=True, version=1, pending_revoked_uuids=["old-rev-uuid"])
+        srv1 = Server(id=1, name="Node-1", is_active=True, capabilities=["vless"], api_url="https://n1.com:8443", api_key="k1")
+        srv2 = Server(id=2, name="Node-2", is_active=True, capabilities=["vless"], api_url="https://n2.com:8443", api_key="k2")
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("services.workers.cleanup.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscriptions_with_pending_revocations", new=AsyncMock(return_value=[sub])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv1, srv2])),
+            # Node 2 is offline/fails
+            patch("services.vless_subscription_service.VlessSubscriptionService._execute_deprovision_on_nodes", new=AsyncMock(return_value={1: True, 2: False})),
+            patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
+        ):
+            await _sweep_vless_pending_revocations()
+            # Must NOT pop when any configured node fails!
+            mock_pop.assert_not_called()
+
+    async def test_sync_validates_actual_state_on_already_newer_response(self):
+        from services.vless_subscription_service import VlessSubscriptionService
+        from services.xray_node_client import SyncResponse, SyncResult
+
+        # 1. When desired_active=False and node returns already_newer with state='active', must NOT consider it success!
+        resp_mismatch = SyncResponse(
+            result=SyncResult.ALREADY_NEWER,
+            error="state=active",
+            verified_inbounds=["just1k-vless-direct"],
+            raw_data={"result": "already_newer", "state": "active"},
+        )
+        with patch("services.xray_node_client.XrayNodeClient.sync_client", new=AsyncMock(return_value=resp_mismatch)):
+            res = await VlessSubscriptionService._execute_sync_to_nodes(
+                [(1, "https://node.com:8443", "key")],
+                client_uuid="uuid-1",
+                desired_active=False,
+                version=1,
+            )
+            self.assertFalse(res[1])
+
+        # 2. When desired_active=False and node returns already_newer with state='disabled', must consider it success!
+        resp_match = SyncResponse(
+            result=SyncResult.ALREADY_NEWER,
+            error="state=disabled",
+            verified_inbounds=["just1k-vless-direct"],
+            raw_data={"result": "already_newer", "state": "disabled"},
+        )
+        with patch("services.xray_node_client.XrayNodeClient.sync_client", new=AsyncMock(return_value=resp_match)):
+            res = await VlessSubscriptionService._execute_sync_to_nodes(
+                [(1, "https://node.com:8443", "key")],
+                client_uuid="uuid-1",
+                desired_active=False,
+                version=1,
+            )
+            self.assertTrue(res[1])
+
 

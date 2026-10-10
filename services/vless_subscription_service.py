@@ -241,6 +241,32 @@ class VlessSubscriptionService:
         return eligible
 
     @staticmethod
+    async def get_configured_vless_servers(
+        session: AsyncSession,
+    ) -> list[Server]:
+        """Fetch all configured active servers capable of serving VLESS TLS regardless of transient health state.
+
+        Used for synchronization and deprovisioning to guarantee that offline or degraded nodes
+        are not silently omitted from revocation/sync targets.
+        """
+        stmt = (
+            select(Server)
+            .where(
+                Server.is_active.is_(True),
+                Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+            )
+            .order_by(Server.id.asc())
+        )
+        servers = (await session.execute(stmt)).scalars().all()
+        configured: list[Server] = []
+        for srv in servers:
+            caps = srv.capabilities or []
+            proto = (srv.protocol or "").lower()
+            if "vless" in caps or "xray_vless" in caps or "dual" in caps or proto in ("dual", "vless"):
+                configured.append(srv)
+        return configured
+
+    @staticmethod
     def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str]]:
         targets: list[tuple[int, str, str]] = []
         for srv in servers:
@@ -284,10 +310,15 @@ class VlessSubscriptionService:
                     verified = [
                         ib.lower() for ib in resp.verified_inbounds if isinstance(ib, str)
                     ] if resp.verified_inbounds else []
-                    results[srv_id] = (
-                        resp.result in ("applied", "already_newer")
-                        and any("vless" in ib for ib in verified)
-                    )
+                    has_vless = any("vless" in ib for ib in verified)
+                    if resp.result == "applied":
+                        results[srv_id] = has_vless
+                    elif resp.result == "already_newer":
+                        expected_state = "active" if desired_active else "disabled"
+                        actual_state = (resp.raw_data or {}).get("state")
+                        results[srv_id] = has_vless and (actual_state == expected_state)
+                    else:
+                        results[srv_id] = False
             except Exception as exc:
                 logger.warning(
                     "Failed to sync VLESS user %s (sub %s) to server %s: %s",
@@ -318,7 +349,13 @@ class VlessSubscriptionService:
                         idempotency_key=f"vless:deprov:{client_uuid[:8]}:{version}",
                         service="vless",
                     )
-                    results[srv_id] = resp.result in ("applied", "already_newer")
+                    if resp.result == "applied":
+                        results[srv_id] = True
+                    elif resp.result == "already_newer":
+                        actual_state = (resp.raw_data or {}).get("state")
+                        results[srv_id] = actual_state == "disabled"
+                    else:
+                        results[srv_id] = False
             except Exception as exc:
                 masked_uuid = f"{client_uuid[:8]}***" if client_uuid else "unknown"
                 logger.warning(
@@ -336,7 +373,7 @@ class VlessSubscriptionService:
         user_id: int,
         is_active: bool | None = None,
     ) -> dict[int, bool]:
-        """Provision or disable user UUID on all eligible exit nodes via Xray API."""
+        """Provision or disable user UUID on all configured exit nodes via Xray API."""
         sub = await vless_subscription_repo.get_subscription_by_user_id(session, user_id)
         if sub is None:
             return {}
@@ -356,7 +393,7 @@ class VlessSubscriptionService:
         if is_active is False:
             desired_active = False
 
-        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+        servers = await VlessSubscriptionService.get_configured_vless_servers(session)
         targets = VlessSubscriptionService._extract_node_targets(servers)
         sub_version = getattr(sub, "version", 1) or 1
         results = await VlessSubscriptionService._execute_sync_to_nodes(
@@ -388,11 +425,11 @@ class VlessSubscriptionService:
         client_uuid: str,
         version: int | None = None,
     ) -> dict[int, bool]:
-        """Deprovision a revoked UUID across all eligible exit nodes."""
+        """Deprovision a revoked UUID across all configured exit nodes."""
         if not client_uuid:
             return {}
 
-        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+        servers = await VlessSubscriptionService.get_configured_vless_servers(session)
         targets = VlessSubscriptionService._extract_node_targets(servers)
         return await VlessSubscriptionService._execute_deprovision_on_nodes(targets, client_uuid, version=version)
 

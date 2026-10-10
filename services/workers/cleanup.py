@@ -309,16 +309,15 @@ async def _cleanup_expired_vless_network_grace() -> None:
 
 
 async def _sweep_vless_pending_revocations() -> None:
-    """Retry deprovisioning for any pending revoked VLESS UUIDs across nodes."""
+    """Retry deprovisioning for any pending revoked VLESS UUIDs and converge out-of-sync subscriptions."""
     from database.repositories import vless_subscription_repo
     from services.vless_subscription_service import VlessSubscriptionService
 
     try:
+        # 1. Retry deprovisioning of old revoked UUIDs
         async with session_scope() as session:
             subs = await vless_subscription_repo.get_subscriptions_with_pending_revocations(session, limit=20)
-            if not subs:
-                return
-            servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+            servers = await VlessSubscriptionService.get_configured_vless_servers(session)
             targets = VlessSubscriptionService._extract_node_targets(servers)
             if not targets:
                 return
@@ -326,7 +325,7 @@ async def _sweep_vless_pending_revocations() -> None:
             sub_items = [
                 (s.id, list(getattr(s, "pending_revoked_uuids", None) or []), getattr(s, "version", 1) or 1)
                 for s in subs
-            ]
+            ] if subs else []
 
         for sub_id, rev_uuids, ver in sub_items:
             for rev_uuid in rev_uuids:
@@ -339,6 +338,28 @@ async def _sweep_vless_pending_revocations() -> None:
                 except Exception as exc:
                     masked = f"{rev_uuid[:8]}***" if rev_uuid else "unknown"
                     logger.warning("Retry deprovision failed for sub_id=%s UUID %s: %s", sub_id, masked, exc)
+
+        # 2. Converge out-of-sync subscriptions (e.g. node was offline during ban or grace deactivation)
+        async with session_scope() as session:
+            out_of_sync_stmt = (
+                select(VlessSubscription.user_id)
+                .where(
+                    or_(
+                        VlessSubscription.last_synced_at.is_(None),
+                        VlessSubscription.last_synced_at < VlessSubscription.updated_at,
+                    )
+                )
+                .order_by(VlessSubscription.updated_at.asc())
+                .limit(20)
+            )
+            out_of_sync_users = list((await session.execute(out_of_sync_stmt)).scalars().all())
+
+        for uid in out_of_sync_users:
+            try:
+                async with session_scope() as session:
+                    await VlessSubscriptionService.sync_user_to_nodes(session, uid)
+            except Exception as e:
+                logger.warning("Out-of-sync VLESS reconciliation failed for user_id=%s: %s", uid, e)
     except Exception as e:
         logger.warning("Error in _sweep_vless_pending_revocations: %s", e)
 
