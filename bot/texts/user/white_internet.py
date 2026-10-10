@@ -231,12 +231,6 @@ WL_WEB_DEVICE_LIMIT_EXCEEDED = "Лимит устройств ({active}/{limit})
 WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включите отправку HWID в приложении."
 WL_ANNOUNCE_MAINTENANCE = "⚠️ Сервер на техническом обслуживании. Связь скоро восстановится."
 
-VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
-VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"
-VLESS_FEED_DEVICE_LIMIT_TITLE = "⚠️ Лимит устройств"
-VLESS_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Отключите старые в @{bot_username}"
-VLESS_FEED_EMERGENCY_TG_TITLE = "⚠️ Только Telegram"
-VLESS_FEED_EMERGENCY_TG_ANNOUNCE = "⚠️ Подписка закончилась. Доступен только Telegram. Продлите доступ: @{bot_username}"
 
 
 

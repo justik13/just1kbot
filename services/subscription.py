@@ -9,7 +9,6 @@ from config.constants import (
     AdminAuditAction,
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
-    VLESS_EMERGENCY_TG_HOURS,
     VPN_ACCESS_GRACE_HOURS,
 )
 from database.models import User
@@ -64,19 +63,6 @@ class SubscriptionService:
         if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
             return False
         return not is_vpn_access_expired(user.subscription_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
-
-    @staticmethod
-    def check_vless_access(user: User | None) -> bool:
-        if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
-            return False
-        return not is_vpn_access_expired(user.subscription_end, grace_hours=VLESS_EMERGENCY_TG_HOURS)
-
-    @staticmethod
-    def is_vless_emergency_tg(user: User | None) -> bool:
-        """Returns True if standard subscription expired but remains within emergency Telegram access window."""
-        if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
-            return False
-        return is_expired(user.subscription_end) and not is_vpn_access_expired(user.subscription_end, grace_hours=VLESS_EMERGENCY_TG_HOURS)
 
     @staticmethod
     async def check_access(session: AsyncSession, telegram_id: int) -> bool:
@@ -521,13 +507,7 @@ class SubscriptionService:
         from database.repositories import vless_subscription_repo
         from services.vless_subscription_service import VlessSubscriptionService
 
-        vless_target_active = bool(
-            user.subscription_end
-            and not is_vpn_access_expired(user.subscription_end, grace_hours=VLESS_EMERGENCY_TG_HOURS)
-            and not user.is_banned
-            and not user.financial_hold
-            and not user.is_deleted
-        )
+        vless_target_active = SubscriptionService.check_vpn_access(user)
 
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
         if vless_sub and vless_sub.is_active != vless_target_active:

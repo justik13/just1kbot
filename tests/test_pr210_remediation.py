@@ -579,11 +579,12 @@ class TestIntegrationsAndCleanupVerification(unittest.TestCase):
             content = caddyfile_path.read_text(encoding="utf-8")
             self.assertNotIn("/amnezia/open", content, f"{fname} contains /amnezia/open")
             self.assertNotIn("/subscription/", content, f"{fname} contains /subscription/")
-            # Allow /sub/wl/* and /sub/vless/*, but ensure no generic legacy /sub/* or /amnezia/
+            # Allow /sub/wl/*, /sub/vless/* and /sub/access/*, but ensure no generic legacy /sub/* or /amnezia/
             non_wl_content = (
                 content.replace("/sub/wl/*", "")
                 .replace("{$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/*", "")
                 .replace("/sub/vless/*", "")
+                .replace("/sub/access/*", "")
             )
             self.assertNotIn("/sub/", non_wl_content, f"{fname} contains legacy /sub/")
 

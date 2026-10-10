@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import os
 import re
 
 from aiohttp import web
-from sqlalchemy import func, select
 
 from bot import texts
 from database.connection import session_scope
-from database.models import VPNProfile
 from database.repositories import users_repo, vless_subscription_repo
-from services.device_service import RESERVING_STATUSES
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
 from utils.datetime_helpers import now_utc
@@ -112,13 +108,12 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         if getattr(user, "is_banned", False) is True:
             return web.Response(status=403, text="Forbidden", headers=common_headers)
 
-        is_emergency = SubscriptionService.is_vless_emergency_tg(user)
         is_active_access = SubscriptionService.check_vpn_access(user)
 
         if (
             not sub.is_active
             or getattr(user, "financial_hold", False) is True
-            or not (is_active_access or is_emergency)
+            or not is_active_access
         ):
             if sub.is_active:
                 sub.is_active = False
@@ -168,25 +163,11 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             )
         )
 
-        awg_res = (
-            await session.execute(
-                select(func.count(VPNProfile.id)).where(
-                    VPNProfile.user_id == user.id,
-                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
-                )
-            )
-        ).scalar_one()
-        awg_count = awg_res if isinstance(awg_res, int) else 0
-
-        effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
-        effective_limit_int = effective_limit if isinstance(effective_limit, int) else 5
-        total_active_devices = awg_count + active_hwid_count
-
         if not allowed_hwid:
             bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
             limit_msg = texts.VLESS_FEED_DEVICE_LIMIT_NOTICE.format(
-                active=total_active_devices,
-                limit=effective_limit_int,
+                active=active_hwid_count,
+                limit=effective_vless_limit,
                 bot_username=bot_username,
             )
             notice_link = (
@@ -203,11 +184,11 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
                 "Profile-Title": f"base64:{b64_title}",
                 "Device-Limit-Exceeded": "1",
-                "Device-Limit": str(effective_limit_int),
-                "Device-Active-Count": str(total_active_devices),
+                "Device-Limit": str(effective_vless_limit),
+                "Device-Active-Count": str(active_hwid_count),
                 "x-hwid-max-devices-reached": "true",
-                "x-hwid-limit": str(effective_limit_int),
-                "x-hwid-active": str(total_active_devices),
+                "x-hwid-limit": str(effective_vless_limit),
+                "x-hwid-active": str(active_hwid_count),
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
                 "Support-Url": f"https://t.me/{bot_username}",
@@ -233,57 +214,20 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         expire_ts = int(user.subscription_end.timestamp()) if user.subscription_end else 0
         bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
 
-        if is_emergency:
-            title_text = texts.VLESS_FEED_EMERGENCY_TG_TITLE
-            b64_title = base64.b64encode(title_text.encode("utf-8")).decode("utf-8")
-            announce_text = texts.VLESS_FEED_EMERGENCY_TG_ANNOUNCE.format(bot_username=bot_username)
-            b64_announce = base64.b64encode(announce_text.encode("utf-8")).decode("utf-8")
-            routing_spec = json.dumps({
-                "version": 1,
-                "rules": [
-                    {
-                        "domains": ["geosite:telegram", "t.me", "telegram.org", "telesco.pe"],
-                        "ips": ["geoip:telegram"],
-                        "outbound": "proxy",
-                    },
-                    {
-                        "domains": ["*"],
-                        "ips": ["0.0.0.0/0", "::/0"],
-                        "outbound": "direct",
-                    },
-                ],
-            })
-            b64_routing = base64.b64encode(routing_spec.encode("utf-8")).decode("utf-8")
-            response_headers = {
-                **common_headers,
-                "Content-Type": "text/plain; charset=utf-8",
-                "Profile-Update-Interval": "1",
-                "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
-                "Device-Limit": str(effective_limit),
-                "Device-Active-Count": str(total_active_devices),
-                "Profile-Title": f"base64:{b64_title}",
-                "Announce": f"base64:{b64_announce}",
-                "Announce-Url": f"https://t.me/{bot_username}",
-                "Routing": f"base64:{b64_routing}",
-                "Hide-Url": "1",
-                "No-Limit-Enabled": "1",
-                "Support-Url": f"https://t.me/{bot_username}",
-            }
-        else:
-            profile_title = os.getenv("VLESS_PROFILE_TITLE", "Just1k Access")
-            b64_title = base64.b64encode(profile_title.encode("utf-8")).decode("utf-8")
-            response_headers = {
-                **common_headers,
-                "Content-Type": "text/plain; charset=utf-8",
-                "Profile-Update-Interval": "1",
-                "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
-                "Device-Limit": str(effective_limit),
-                "Device-Active-Count": str(total_active_devices),
-                "Profile-Title": f"base64:{b64_title}",
-                "Hide-Url": "1",
-                "No-Limit-Enabled": "1",
-                "Support-Url": f"https://t.me/{bot_username}",
-            }
+        profile_title = os.getenv("VLESS_PROFILE_TITLE", "Just1k Access")
+        b64_title = base64.b64encode(profile_title.encode("utf-8")).decode("utf-8")
+        response_headers = {
+            **common_headers,
+            "Content-Type": "text/plain; charset=utf-8",
+            "Profile-Update-Interval": "1",
+            "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
+            "Device-Limit": str(effective_vless_limit),
+            "Device-Active-Count": str(active_hwid_count),
+            "Profile-Title": f"base64:{b64_title}",
+            "Hide-Url": "1",
+            "No-Limit-Enabled": "1",
+            "Support-Url": f"https://t.me/{bot_username}",
+        }
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
 

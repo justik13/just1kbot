@@ -15,7 +15,7 @@ from config.constants import (
     AMNEZIA_PROTOCOLS,
     AdminAuditAction,
     GRACE_PERIOD_HOURS,
-    VLESS_EMERGENCY_TG_HOURS,
+    VPN_ACCESS_GRACE_HOURS,
 )
 from database.connection import session_scope
 from database.models import (
@@ -273,9 +273,9 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
 
 
 async def _cleanup_expired_vless_network_grace() -> None:
-    """Deactivate VLESS access when emergency Telegram access window (72 hours) expires (before 24h retention delete)."""
+    """Deactivate VLESS access when network grace window (4 hours) expires (before 24h retention delete)."""
     current_time = now_utc()
-    threshold = current_time - timedelta(hours=VLESS_EMERGENCY_TG_HOURS)
+    threshold = current_time - timedelta(hours=VPN_ACCESS_GRACE_HOURS)
 
     async with session_scope() as session:
         stmt = (

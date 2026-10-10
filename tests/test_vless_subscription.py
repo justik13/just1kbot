@@ -3,7 +3,6 @@
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -395,7 +394,6 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=active_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=expired_user),
             patch("services.subscription.SubscriptionService.check_vpn_access", return_value=False),
-            patch("services.subscription.SubscriptionService.is_vless_emergency_tg", return_value=False),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_sync,
         ):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678")
@@ -404,7 +402,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(active_sub.version, 2)
             mock_sync.assert_called_once_with(expired_user.id, session=mock_session)
 
-    async def test_emergency_tg_access_within_72h_window(self):
+    async def test_grace_period_access_within_4h_window(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
 
@@ -412,19 +410,20 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        expired_tg_user = User(
+        expired_grace_user = User(
             id=42,
             telegram_id=999,
             is_banned=False,
             is_deleted=False,
+            financial_hold=False,
             device_limit=3,
-            subscription_end=datetime.now(timezone.utc) - timedelta(hours=10),
+            subscription_end=datetime.now(timezone.utc) - timedelta(hours=2),
         )
 
         with (
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
-            patch("database.repositories.users_repo.get_user_by_id", return_value=expired_tg_user),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=expired_grace_user),
             patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
             patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
@@ -438,25 +437,16 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Routing header must be present and base64-encoded JSON routing rules
-            self.assertIn("Routing", resp.headers)
-            raw_routing_hdr = resp.headers["Routing"]
-            b64_routing_val = raw_routing_hdr.removeprefix("base64:") if raw_routing_hdr.startswith("base64:") else raw_routing_hdr
-            routing_raw = base64.b64decode(b64_routing_val).decode("utf-8")
-            routing_json = json.loads(routing_raw)
-            self.assertEqual(routing_json["rules"][0]["outbound"], "proxy")
-            self.assertIn("geosite:telegram", routing_json["rules"][0]["domains"])
-            self.assertEqual(routing_json["rules"][1]["outbound"], "direct")
+            # Within grace window, user receives standard access feed without emergency headers
+            self.assertNotIn("Routing", resp.headers)
+            self.assertNotIn("Announce", resp.headers)
 
-            # Profile-Title must indicate emergency Telegram mode
+            # Profile-Title must indicate standard profile title
             self.assertIn("Profile-Title", resp.headers)
             raw_title_hdr = resp.headers["Profile-Title"]
             b64_title_val = raw_title_hdr.removeprefix("base64:") if raw_title_hdr.startswith("base64:") else raw_title_hdr
             profile_title = base64.b64decode(b64_title_val).decode("utf-8")
-            self.assertIn("Только Telegram", profile_title)
-
-            # Announce header must be present
-            self.assertIn("Announce", resp.headers)
+            self.assertEqual("Just1k Access", profile_title)
 
             # Server link must be present in body
             body = await resp.text()
@@ -631,7 +621,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(allowed)
         self.assertEqual(count, 1)
 
-    async def test_register_hwid_atomic_emergency_tg_window(self):
+    async def test_register_hwid_atomic_network_grace_window(self):
         now = datetime.now(timezone.utc)
         sub = VlessSubscription(
             id=1,
@@ -641,6 +631,33 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
             is_active=True,
             active_hwids={},
         )
+        user_2h_expired = User(
+            id=100,
+            telegram_id=888,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+            subscription_end=now - timedelta(hours=2),
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=100)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=user_2h_expired)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
+        ])
+
+        # User expired by 2 hours (< 4h grace window) must be allowed
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="grace-hwid",
+            effective_limit=2,
+        )
+        self.assertTrue(allowed)
+        self.assertIn("grace-hwid", sub.active_hwids)
+
+        # User expired by 10 hours (> 4h grace window) must be rejected
         user_10h_expired = User(
             id=100,
             telegram_id=888,
@@ -649,36 +666,9 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
             financial_hold=False,
             subscription_end=now - timedelta(hours=10),
         )
-
-        mock_session = AsyncMock()
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalar_one_or_none=MagicMock(return_value=100)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=user_10h_expired)),
-            MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
-        ])
-
-        # User expired by 10 hours (< 72h emergency window) must be allowed
-        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
-            mock_session,
-            subscription_id=sub.id,
-            hwid="emergency-hwid",
-            effective_limit=2,
-        )
-        self.assertTrue(allowed)
-        self.assertIn("emergency-hwid", sub.active_hwids)
-
-        # User expired by 80 hours (> 72h emergency window) must be rejected
-        user_80h_expired = User(
-            id=100,
-            telegram_id=888,
-            is_banned=False,
-            is_deleted=False,
-            financial_hold=False,
-            subscription_end=now - timedelta(hours=80),
-        )
-        mock_session.execute = AsyncMock(side_effect=[
-            MagicMock(scalar_one_or_none=MagicMock(return_value=100)),
-            MagicMock(scalar_one_or_none=MagicMock(return_value=user_80h_expired)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
         ])
         allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
@@ -743,6 +733,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(links[0].startswith("vless://12345678-1234-5678-1234-567812345678@de.example.com:443"))
         self.assertIn("flow=xtls-rprx-vision", links[0])
         self.assertIn("security=tls", links[0])
+        self.assertIn("alpn=http%2F1.1", links[0])
         self.assertIn("#🇩🇪 DE Server?serverDescription=", links[0])
         self.assertNotIn("%F0%9F", links[0])
 
@@ -789,6 +780,7 @@ class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any(btn.callback_data == "amnezia_devices" for btn in buttons))
             self.assertTrue(any(btn.callback_data == "vless_sub_feed_info" for btn in buttons))
             self.assertTrue(any(btn.callback_data == "vless_sub_reset" for btn in buttons))
+            self.assertTrue(any(btn.callback_data == "manage_device:10" for btn in buttons))
 
             # 2. Amnezia devices screen
             amnezia_rendered, amnezia_builder = await _build_amnezia_screen(user, session, [profile])

@@ -72,7 +72,7 @@ class VlessSubscriptionService:
 
             link = (
                 f"vless://{subscription.uuid}@{domain}:{port}"
-                f"?encryption=none&security=tls&sni={domain}&alpn=h2%2Chttp%2F1.1"
+                f"?encryption=none&security=tls&sni={domain}&alpn=http%2F1.1"
                 f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
             )
             links.append(link)
@@ -121,7 +121,7 @@ class VlessSubscriptionService:
                             and not getattr(user, "is_banned", False)
                             and not getattr(user, "financial_hold", False)
                             and not getattr(user, "is_deleted", False)
-                            and SubscriptionService.check_vless_access(user)
+                            and SubscriptionService.check_vpn_access(user)
                         )
                         if is_active is False:
                             desired_active = False
@@ -401,7 +401,7 @@ class VlessSubscriptionService:
             and not getattr(user, "is_banned", False)
             and not getattr(user, "financial_hold", False)
             and not getattr(user, "is_deleted", False)
-            and SubscriptionService.check_vless_access(user)
+            and SubscriptionService.check_vpn_access(user)
         )
         if is_active is False:
             desired_active = False
@@ -469,7 +469,7 @@ class VlessSubscriptionService:
                 rows = res.all()
 
             for sub, user in rows:
-                if not SubscriptionService.check_vless_access(user):
+                if not SubscriptionService.check_vpn_access(user):
                     continue
                 sub_ver = getattr(sub, "version", 1) or 1
                 try:

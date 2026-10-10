@@ -38,7 +38,7 @@ http:// {
 		}
 	}
 
-	@subscription_paths path {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/* /sub/vless/*
+	@subscription_paths path {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/* /sub/vless/* /sub/access/*
 	handle @subscription_paths {
 		log_skip
 		reverse_proxy bot:8080 {

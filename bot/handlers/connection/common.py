@@ -154,13 +154,15 @@ async def _build_connections_screen(
 
     builder = InlineKeyboardBuilder()
 
+    has_copy_btn = bool(sub_url and 1 <= len(sub_url) <= 256)
     if not read_only:
         from aiogram.types import CopyTextButton
 
-        builder.button(
-            text=texts.BTN_WL_COPY_LINK,
-            copy_text=CopyTextButton(text=sub_url),
-        )
+        if has_copy_btn:
+            builder.button(
+                text=texts.BTN_WL_COPY_LINK,
+                copy_text=CopyTextButton(text=sub_url),
+            )
         builder.button(
             text=texts.BTN_WL_INCY_INSTRUCTIONS,
             callback_data="vless_sub_feed_info",
@@ -169,6 +171,15 @@ async def _build_connections_screen(
             builder.button(
                 text=texts.BTN_VLESS_RESET_HWID,
                 callback_data="vless_sub_reset",
+            )
+        for profile in profiles:
+            server = profile.server
+            flag = server.country_flag if server else texts.EMOJI_GLOBE
+            raw_device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=1)
+            btn_text = f"{flag} {raw_device_name}"
+            builder.button(
+                text=btn_text,
+                callback_data=f"manage_device:{profile.id}",
             )
         builder.button(
             text=texts.BTN_AMNEZIA_DEVICES,
@@ -185,7 +196,18 @@ async def _build_connections_screen(
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1)
+    if not read_only:
+        device_count = len(profiles)
+        link_btn_count = (1 if has_copy_btn else 0) + 1 + (1 if vless_hwid_count > 0 else 0)
+        sizes: list[int] = [1] * link_btn_count
+        if device_count > 0:
+            sizes.extend([2] * (device_count // 2))
+            if device_count % 2 == 1:
+                sizes.append(1)
+        sizes.extend([1, 1, 1])
+        builder.adjust(*sizes)
+    else:
+        builder.adjust(1)
     return rendered, builder
 
 
