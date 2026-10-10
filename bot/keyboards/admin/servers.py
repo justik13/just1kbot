@@ -95,6 +95,8 @@ def get_admin_server_card_keyboard(
 
     if is_xray:
         builder.adjust(1, 2, 2, 2, 2, 2, 2, 1)
+    elif has_vless:
+        builder.adjust(2, 2, 2, 2, 2, 1, 1)
     else:
         builder.adjust(2, 2, 2, 2, 1, 2, 1)
     return builder.as_markup()
