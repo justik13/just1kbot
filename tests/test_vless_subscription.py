@@ -1140,6 +1140,29 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(task)
             mock_queue.assert_called_once()
 
+    async def test_ensure_synced_background_respects_is_active_false(self):
+        from services.vless_subscription_service import VlessSubscriptionService
+        from database.models import User, VlessSubscription
+
+        user = User(id=10, is_deleted=False, is_banned=False, financial_hold=False, subscription_end=None)
+        sub = VlessSubscription(id=1, user_id=10, uuid="u-1", version=1, is_active=True)
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=user)
+        with (
+            patch("database.connection.session_scope") as mock_scope,
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch.object(VlessSubscriptionService, "get_configured_vless_servers", new=AsyncMock(return_value=[])),
+            patch.object(VlessSubscriptionService, "_extract_node_targets", return_value=[{"url": "http://node", "key": "k"}]),
+            patch.object(VlessSubscriptionService, "_execute_sync_to_nodes", new=AsyncMock(return_value={"node": True})) as mock_exec,
+        ):
+            mock_scope.return_value.__aenter__.return_value = mock_session
+            task = VlessSubscriptionService.ensure_synced_background(10, is_active=False)
+            self.assertIsNotNone(task)
+            await task
+            mock_exec.assert_called_once()
+            self.assertFalse(mock_exec.call_args[0][2])
+
     async def test_payment_hub_includes_vless_hwid_count(self):
         from bot.handlers.payment.common import _show_hub
         from database.models import User

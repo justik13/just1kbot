@@ -123,6 +123,8 @@ class VlessSubscriptionService:
                             and not getattr(user, "is_deleted", False)
                             and SubscriptionService.check_vless_access(user)
                         )
+                        if is_active is False:
+                            desired_active = False
                         servers = await cls.get_configured_vless_servers(scoped_session)
                         targets = cls._extract_node_targets(servers)
 

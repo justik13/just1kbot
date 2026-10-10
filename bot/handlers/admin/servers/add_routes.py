@@ -573,4 +573,8 @@ async def process_add_server(
             f"Admin {message.from_user.id} added server: {server.id}"
         )
 
+        if capabilities and "vless" in capabilities:
+            from services.vless_subscription_service import VlessSubscriptionService
+            asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(server.id))
+
         await state.clear()
