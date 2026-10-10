@@ -121,7 +121,7 @@ class VlessSubscriptionService:
                             and not getattr(user, "is_banned", False)
                             and not getattr(user, "financial_hold", False)
                             and not getattr(user, "is_deleted", False)
-                            and SubscriptionService.check_vpn_access(user)
+                            and SubscriptionService.check_vless_access(user)
                         )
                         servers = await cls.get_configured_vless_servers(scoped_session)
                         targets = cls._extract_node_targets(servers)
@@ -399,7 +399,7 @@ class VlessSubscriptionService:
             and not getattr(user, "is_banned", False)
             and not getattr(user, "financial_hold", False)
             and not getattr(user, "is_deleted", False)
-            and SubscriptionService.check_vpn_access(user)
+            and SubscriptionService.check_vless_access(user)
         )
         if is_active is False:
             desired_active = False
@@ -436,3 +436,50 @@ class VlessSubscriptionService:
         if not targets:
             return {}
         return await VlessSubscriptionService._execute_deprovision_on_nodes(targets, client_uuid, version=version)
+
+    @classmethod
+    async def sync_all_active_to_server(cls, server_id: int) -> int:
+        """Provisions all active VLESS subscriptions onto a newly added/updated node."""
+        from database.connection import session_scope
+        from services.subscription import SubscriptionService
+
+        synced_count = 0
+        try:
+            async with session_scope() as session:
+                server = await session.get(Server, server_id)
+                if not server or not server.is_active or not (server.capabilities and "vless" in server.capabilities):
+                    return 0
+                target = cls._extract_node_targets([server])
+                if not target:
+                    return 0
+
+                stmt = (
+                    select(VlessSubscription, User)
+                    .join(User, User.id == VlessSubscription.user_id)
+                    .where(
+                        VlessSubscription.is_active.is_(True),
+                        User.is_deleted.is_(False),
+                        User.is_banned.is_(False),
+                        User.financial_hold.is_(False),
+                    )
+                )
+                res = await session.execute(stmt)
+                rows = res.all()
+
+            for sub, user in rows:
+                if not SubscriptionService.check_vless_access(user):
+                    continue
+                sub_ver = getattr(sub, "version", 1) or 1
+                try:
+                    res_map = await cls._execute_sync_to_nodes(
+                        target, sub.uuid, True, version=sub_ver, user_id=user.id, sub_id=sub.id
+                    )
+                    if any(res_map.values()):
+                        synced_count += 1
+                except Exception as e:
+                    logger.warning("Failed to provision sub_id=%s on new server %s: %s", sub.id, server_id, e)
+        except Exception as e:
+            logger.error("Error in sync_all_active_to_server for server %s: %s", server_id, e)
+
+        logger.info("Provisioned %d active VLESS subscriptions on new server %s", synced_count, server_id)
+        return synced_count

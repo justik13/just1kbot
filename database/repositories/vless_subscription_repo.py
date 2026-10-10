@@ -214,7 +214,7 @@ async def register_hwid_atomic(
         or getattr(user, "financial_hold", False)
         or getattr(user, "is_deleted", False)
         or not getattr(sub, "is_active", True)
-        or (hasattr(user, "subscription_end") and not SubscriptionService.check_vpn_access(user))
+        or (hasattr(user, "subscription_end") and not SubscriptionService.check_vless_access(user))
     ):
         active = prune_stale_hwids(getattr(sub, "active_hwids", None), ttl_hours=ttl_hours)
         return False, len(active), 0

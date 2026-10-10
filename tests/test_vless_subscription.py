@@ -263,7 +263,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 503)
             self.assertEqual(resp.headers.get("Retry-After"), "60")
-            mock_register.assert_called_once()
+            mock_register.assert_not_called()
+            self.assertEqual(self.default_sub.active_hwids, {})
 
     async def test_financial_hold_user_returns_notice_200(self):
         mock_session = AsyncMock()
@@ -629,6 +630,63 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(allowed)
         self.assertEqual(count, 1)
+
+    async def test_register_hwid_atomic_emergency_tg_window(self):
+        now = datetime.now(timezone.utc)
+        sub = VlessSubscription(
+            id=1,
+            user_id=100,
+            token="tok1234567890123456",
+            uuid="abc-uuid",
+            is_active=True,
+            active_hwids={},
+        )
+        user_10h_expired = User(
+            id=100,
+            telegram_id=888,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+            subscription_end=now - timedelta(hours=10),
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=user_10h_expired)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
+        ])
+
+        # User expired by 10 hours (< 72h emergency window) must be allowed
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="emergency-hwid",
+            effective_limit=2,
+        )
+        self.assertTrue(allowed)
+        self.assertIn("emergency-hwid", sub.active_hwids)
+
+        # User expired by 80 hours (> 72h emergency window) must be rejected
+        user_80h_expired = User(
+            id=100,
+            telegram_id=888,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+            subscription_end=now - timedelta(hours=80),
+        )
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=user_80h_expired)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
+        ])
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="too-late-hwid",
+            effective_limit=2,
+        )
+        self.assertFalse(allowed)
+        self.assertNotIn("too-late-hwid", sub.active_hwids)
 
     async def test_reset_hwids(self):
         now = datetime.now(timezone.utc)

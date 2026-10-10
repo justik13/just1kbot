@@ -153,6 +153,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             headers["x-hwid-required"] = "true"
             return web.Response(status=403, text="HWID required", headers=headers)
 
+        # Pre-flight check: ensure eligible VLESS servers exist before mutating HWID quota
+        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+        links = VlessSubscriptionService.generate_vless_links(sub, servers)
+        if not links:
+            retry_headers = {**common_headers, "Retry-After": "60"}
+            return web.Response(status=503, text="No servers available", headers=retry_headers)
+
         # Atomic HWID registration and state refresh under row locks (populate_existing=True)
         device_meta = _extract_device_metadata(request)
         allowed_hwid, active_hwid_count, effective_vless_limit = (
@@ -206,13 +213,6 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Support-Url": f"https://t.me/{bot_username}",
             })
             return web.Response(status=200, text=b64_payload, headers=headers)
-
-        # Generate fresh server links strictly AFTER atomic lock & verification
-        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
-        links = VlessSubscriptionService.generate_vless_links(sub, servers)
-        if not links:
-            retry_headers = {**common_headers, "Retry-After": "60"}
-            return web.Response(status=503, text="No servers available", headers=retry_headers)
 
         # Trigger background sync with debouncing (300s) unless version is out of sync or pending revocations exist
         now = now_utc()
