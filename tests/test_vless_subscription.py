@@ -148,7 +148,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             telegram_id=999,
             is_banned=False,
             is_deleted=False,
-            subscription_end=datetime.now(timezone.utc) - timedelta(days=1),
+            subscription_end=datetime.now(timezone.utc) - timedelta(days=5),
         )
 
         with (
@@ -439,7 +439,9 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
 
             # Routing header must be present and base64-encoded JSON routing rules
             self.assertIn("Routing", resp.headers)
-            routing_raw = base64.b64decode(resp.headers["Routing"]).decode("utf-8")
+            raw_routing_hdr = resp.headers["Routing"]
+            b64_routing_val = raw_routing_hdr.removeprefix("base64:") if raw_routing_hdr.startswith("base64:") else raw_routing_hdr
+            routing_raw = base64.b64decode(b64_routing_val).decode("utf-8")
             routing_json = json.loads(routing_raw)
             self.assertEqual(routing_json["rules"][0]["outbound"], "proxy")
             self.assertIn("geosite:telegram", routing_json["rules"][0]["domains"])
@@ -1206,7 +1208,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         from config.enums import ServerHealthState
         from services.workers.cleanup import _cleanup_expired_vless_network_grace, _sweep_vless_pending_revocations
 
-        user = User(id=77, telegram_id=888, subscription_end=now_utc() - timedelta(hours=5))
+        user = User(id=77, telegram_id=888, subscription_end=now_utc() - timedelta(hours=80))
         sub = VlessSubscription(id=77, user_id=77, is_active=True, version=1, pending_revoked_uuids=["old-rev-uuid"])
         srv = Server(
             id=1,
