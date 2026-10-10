@@ -122,9 +122,9 @@ async def admin_subscription_menu(
             device_limit=device_limit,
         )
         if vless_sub_url:
-            status_block += (
-                f"\n\n🌐 <b>VLESS (INCY):</b> {vless_count} устр.\n"
-                f"<code>{vless_sub_url}</code>"
+            status_block += texts.ADMIN_SUB_STATUS_VLESS_INFO.format(
+                vless_count=vless_count,
+                vless_sub_url=vless_sub_url,
             )
     elif user.subscription_end:
         status_block = texts.ADMIN_SUB_STATUS_INACTIVE.format(

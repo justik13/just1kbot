@@ -588,3 +588,4 @@ ADMIN_BTN_VLESS_TOKEN_ROTATE = "🔄 Перевыпустить ссылку VLE
 ADMIN_ALERT_VLESS_HWID_RESET_SUCCESS = "✅ Привязки HWID VLESS успешно сброшены"
 ADMIN_ALERT_VLESS_TOKEN_ROTATE_SUCCESS = "✅ Ссылка VLESS перевыпущена. Старая ссылка аннулирована"
 ADMIN_BTN_SUB_STANDARD = "⚡️ Стандартная (VLESS/AWG)"
+ADMIN_SUB_STATUS_VLESS_INFO = "\n\n🌐 <b>VLESS (INCY):</b> {vless_count} устр.\n<code>{vless_sub_url}</code>"
