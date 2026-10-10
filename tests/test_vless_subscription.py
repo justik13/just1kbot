@@ -3,6 +3,7 @@
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -181,7 +182,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.status, 403)
             self.assertEqual(resp.headers.get("x-hwid-required"), "true")
 
-    async def test_exceeded_device_limit_returns_403(self):
+    async def test_exceeded_device_limit_returns_notice_200(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=2)))
 
@@ -199,9 +200,13 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         ):
             headers = {"X-Hwid": "device-overflow-hwid"}
             resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
-            self.assertEqual(resp.status, 403)
+            self.assertEqual(resp.status, 200)
             self.assertEqual(resp.headers.get("Device-Limit-Exceeded"), "1")
             self.assertEqual(resp.headers.get("x-hwid-max-devices-reached"), "true")
+            body = await resp.text()
+            decoded = base64.b64decode(body).decode("utf-8")
+            self.assertIn("127.0.0.1:443", decoded)
+            self.assertIn("Превышен лимит устройств", decoded)
 
     async def test_valid_request_returns_200_base64_feed(self):
         mock_session = AsyncMock()
@@ -374,7 +379,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             is_banned=False,
             is_deleted=False,
             device_limit=3,
-            subscription_end=now - timedelta(hours=5),
+            subscription_end=now - timedelta(hours=80),
         )
 
         mock_session = AsyncMock()
@@ -389,6 +394,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=active_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=expired_user),
             patch("services.subscription.SubscriptionService.check_vpn_access", return_value=False),
+            patch("services.subscription.SubscriptionService.is_vless_emergency_tg", return_value=False),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_sync,
         ):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678")
@@ -396,6 +402,95 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertFalse(active_sub.is_active)
             self.assertEqual(active_sub.version, 2)
             mock_sync.assert_called_once_with(expired_user.id, session=mock_session)
+
+    async def test_emergency_tg_access_within_72h_window(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        expired_tg_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            device_limit=3,
+            subscription_end=datetime.now(timezone.utc) - timedelta(hours=10),
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=expired_tg_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {
+                "X-Hwid": "test-client-hwid-99",
+                "X-Device-Os": "iOS 17.4",
+                "X-Device-Model": "iPhone15,2",
+            }
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            # Routing header must be present and base64-encoded JSON routing rules
+            self.assertIn("Routing", resp.headers)
+            routing_raw = base64.b64decode(resp.headers["Routing"]).decode("utf-8")
+            routing_json = json.loads(routing_raw)
+            self.assertEqual(routing_json["rules"][0]["outbound"], "proxy")
+            self.assertIn("geosite:telegram", routing_json["rules"][0]["domains"])
+            self.assertEqual(routing_json["rules"][1]["outbound"], "direct")
+
+            # Profile-Title must indicate emergency Telegram mode
+            self.assertIn("Profile-Title", resp.headers)
+            raw_title_hdr = resp.headers["Profile-Title"]
+            b64_title_val = raw_title_hdr.removeprefix("base64:") if raw_title_hdr.startswith("base64:") else raw_title_hdr
+            profile_title = base64.b64decode(b64_title_val).decode("utf-8")
+            self.assertIn("Только Telegram", profile_title)
+
+            # Announce header must be present
+            self.assertIn("Announce", resp.headers)
+
+            # Server link must be present in body
+            body = await resp.text()
+            decoded_body = base64.b64decode(body).decode("utf-8")
+            self.assertIn("vless://11111111-2222-3333-4444-555555555555@nl.example.com:443", decoded_body)
+
+    async def test_device_metadata_extracted_from_headers(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)) as mock_register,
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {
+                "X-Hwid": "test-client-hwid-99",
+                "X-Device-Os": "Android 14",
+                "X-Device-Model": "Pixel 8 Pro",
+                "User-Agent": "IncyClient/2.1.0",
+            }
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            mock_register.assert_called_once()
+            _, kwargs = mock_register.call_args
+            self.assertEqual(
+                kwargs.get("device_info"),
+                {"os": "Android 14", "model": "Pixel 8 Pro", "ua": "IncyClient/2.1.0"},
+            )
 
     async def test_invalid_hwid_format_returns_400(self):
         headers = {"X-Hwid": "bad$$$"}
@@ -421,6 +516,71 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         pruned = vless_subscription_repo.prune_stale_hwids(hwids, ttl_hours=48)
         self.assertIn("hwid-fresh", pruned)
         self.assertNotIn("hwid-old", pruned)
+
+    def test_prune_stale_hwids_backward_compatibility(self):
+        now = datetime.now(timezone.utc)
+        recent_ts = (now - timedelta(hours=5)).isoformat()
+        stale_ts = (now - timedelta(hours=50)).isoformat()
+
+        hwids = {
+            "legacy-fresh": recent_ts,
+            "legacy-old": stale_ts,
+            "meta-fresh": {"last_seen": recent_ts, "os": "Android", "model": "Pixel 8"},
+            "meta-old": {"last_seen": stale_ts, "os": "iOS", "model": "iPhone 14"},
+        }
+
+        pruned = vless_subscription_repo.prune_stale_hwids(hwids, ttl_hours=48)
+        self.assertIn("legacy-fresh", pruned)
+        self.assertNotIn("legacy-old", pruned)
+        self.assertIn("meta-fresh", pruned)
+        self.assertNotIn("meta-old", pruned)
+        self.assertIsInstance(pruned["meta-fresh"], dict)
+        self.assertEqual(pruned["meta-fresh"]["model"], "Pixel 8")
+
+    async def test_register_hwid_atomic_with_device_metadata(self):
+        sub = VlessSubscription(
+            id=1,
+            user_id=100,
+            token="tok1234567890123456",
+            uuid="abc-uuid",
+            is_active=True,
+            active_hwids={},
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
+
+        device_info = {"os": "iOS 17.5", "model": "iPhone15,2", "ua": "IncyClient/1.2"}
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="hwid-ios-1",
+            effective_limit=2,
+            device_info=device_info,
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(count, 1)
+        self.assertIn("hwid-ios-1", sub.active_hwids)
+        entry = sub.active_hwids["hwid-ios-1"]
+        self.assertIsInstance(entry, dict)
+        self.assertEqual(entry["os"], "iOS 17.5")
+        self.assertEqual(entry["model"], "iPhone15,2")
+        self.assertEqual(entry["ua"], "IncyClient/1.2")
+        self.assertIn("last_seen", entry)
+
+        # Refresh with updated model
+        updated_info = {"os": "iOS 17.5", "model": "iPhone15,2-Updated"}
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="hwid-ios-1",
+            effective_limit=2,
+            device_info=updated_info,
+        )
+        self.assertTrue(allowed)
+        entry2 = sub.active_hwids["hwid-ios-1"]
+        self.assertEqual(entry2["model"], "iPhone15,2-Updated")
+        self.assertEqual(entry2["ua"], "IncyClient/1.2")
 
     async def test_register_hwid_atomic_quota_enforcement(self):
         now = datetime.now(timezone.utc)

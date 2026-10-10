@@ -7,6 +7,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 import secrets
+from typing import Any
 import uuid
 
 from sqlalchemy import func, select
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 VLESS_HWID_TTL_HOURS = 48
 
 
-def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TTL_HOURS) -> dict[str, str]:
-    """Filter out HWIDs older than ttl_hours."""
+def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TTL_HOURS) -> dict[str, Any]:
+    """Filter out HWIDs older than ttl_hours, supporting both ISO timestamp strings and enriched metadata dicts."""
     if not isinstance(current_hwids, dict):
         return {}
     now = now_utc()
@@ -31,21 +32,28 @@ def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TT
     except (ValueError, TypeError):
         ttl = VLESS_HWID_TTL_HOURS
     cutoff = now - timedelta(hours=ttl)
-    res = {}
-    for h, ts in current_hwids.items():
+    res: dict[str, Any] = {}
+    for h, val in current_hwids.items():
         try:
-            if isinstance(ts, datetime):
-                dt = ts
-            elif isinstance(ts, (int, float)):
-                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-            elif isinstance(ts, str):
-                dt = datetime.fromisoformat(ts)
+            if isinstance(val, dict):
+                raw_ts = val.get("last_seen")
+            else:
+                raw_ts = val
+            if isinstance(raw_ts, datetime):
+                dt = raw_ts
+            elif isinstance(raw_ts, (int, float)):
+                dt = datetime.fromtimestamp(raw_ts, tz=timezone.utc)
+            elif isinstance(raw_ts, str):
+                dt = datetime.fromisoformat(raw_ts)
             else:
                 continue
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             if dt >= cutoff:
-                res[h] = ts if isinstance(ts, str) else dt.isoformat()
+                if isinstance(val, dict):
+                    res[h] = val
+                else:
+                    res[h] = val if isinstance(val, str) else dt.isoformat()
         except Exception:
             continue
     return res
@@ -142,6 +150,7 @@ async def register_hwid_atomic(
     hwid: str,
     effective_limit: int | None = None,
     ttl_hours: int = VLESS_HWID_TTL_HOURS,
+    device_info: dict | None = None,
 ) -> tuple[bool, int, int]:
     """Atomically registers an HWID for a VlessSubscription under row-level lock.
 
@@ -246,10 +255,25 @@ async def register_hwid_atomic(
     if effective_limit <= 0:
         return False, len(active_hwids), 0
 
+    entry: dict[str, Any] = {"last_seen": now.isoformat()}
+    if device_info and isinstance(device_info, dict):
+        for k, v in device_info.items():
+            if isinstance(v, str) and v.strip():
+                entry[k] = v.strip()[:64]
+
     if clean_hwid in active_hwids:
-        # Existing device — refresh activity timestamp
-        active_hwids[clean_hwid] = now.isoformat()
-        sub.active_hwids = active_hwids
+        # Existing device — refresh activity timestamp and update metadata
+        prev = active_hwids[clean_hwid]
+        if isinstance(prev, dict):
+            updated_entry = {**prev, "last_seen": now.isoformat()}
+            if device_info and isinstance(device_info, dict):
+                for k, v in device_info.items():
+                    if isinstance(v, str) and v.strip():
+                        updated_entry[k] = v.strip()[:64]
+            active_hwids[clean_hwid] = updated_entry
+        else:
+            active_hwids[clean_hwid] = entry
+        sub.active_hwids = dict(active_hwids)
         flush_res = session.flush()
         if inspect.isawaitable(flush_res):
             await flush_res
@@ -260,8 +284,8 @@ async def register_hwid_atomic(
         return False, len(active_hwids), effective_limit
 
     # Quota available — register
-    active_hwids[clean_hwid] = now.isoformat()
-    sub.active_hwids = active_hwids
+    active_hwids[clean_hwid] = entry
+    sub.active_hwids = dict(active_hwids)
     flush_res = session.flush()
     if inspect.isawaitable(flush_res):
         await flush_res

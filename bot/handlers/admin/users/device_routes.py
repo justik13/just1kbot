@@ -143,17 +143,34 @@ async def admin_user_devices(
         vless_devices_list = texts.ADMIN_VLESS_NO_DEVICES
     else:
         vless_lines = []
-        for hwid, ts in sorted(
+        for hwid, meta_or_ts in sorted(
             raw_vless_hwids.items(),
-            key=lambda item: item[1] if isinstance(item[1], str) else "",
+            key=lambda item: (
+                item[1].get("last_seen", "")
+                if isinstance(item[1], dict)
+                else (item[1] if isinstance(item[1], str) else "")
+            ),
             reverse=True,
         ):
-            if isinstance(ts, str):
+            if isinstance(meta_or_ts, dict):
+                raw_ts = meta_or_ts.get("last_seen")
+                model = meta_or_ts.get("model")
+                os_name = meta_or_ts.get("os")
+                if model or os_name:
+                    info_parts = [p for p in (model, os_name) if p]
+                    hwid_display = f"📱 {' '.join(info_parts)} — {hwid[:8]}…"
+                else:
+                    hwid_display = hwid
+            else:
+                raw_ts = meta_or_ts
+                hwid_display = hwid
+
+            if isinstance(raw_ts, str):
                 try:
-                    dt = datetime.fromisoformat(ts)
+                    dt = datetime.fromisoformat(raw_ts)
                     last_conn = format_datetime(dt)
                 except Exception:
-                    last_conn = ts
+                    last_conn = raw_ts
                 status = (
                     texts.ADMIN_VLESS_DEVICE_STATUS_ACTIVE
                     if hwid in active_hwids
@@ -164,7 +181,7 @@ async def admin_user_devices(
                 status = texts.ADMIN_VLESS_DEVICE_STATUS_INACTIVE
             vless_lines.append(
                 texts.ADMIN_VLESS_DEVICE_ITEM.format(
-                    hwid=safe(hwid),
+                    hwid=safe(hwid_display),
                     last_conn=last_conn,
                     status=status,
                 )
