@@ -29,11 +29,6 @@ def get_admin_user_card_keyboard(
     )
 
     builder.button(
-        text=texts.ADMIN_BTN_USER_DEVICES,
-        callback_data=f"admin_user_devices:{user_id}",
-    )
-
-    builder.button(
         text=texts.ADMIN_BTN_USER_PAYMENTS,
         callback_data=f"admin_payments_filter:user:{user_id}:1",
     )
@@ -64,7 +59,7 @@ def get_admin_user_card_keyboard(
         callback_data=back_callback,
     )
 
-    builder.adjust(2, 2, 2, 1, 1, 1)
+    builder.adjust(2, 1, 2, 1, 1, 1)
 
     return builder.as_markup()
 
@@ -551,7 +546,6 @@ def get_admin_confirm_action_keyboard(
 def get_admin_user_devices_keyboard(
     telegram_id: int,
     profiles: list,
-    has_wi_devices: bool = False,
     vless_sub_url: str | None = None,
     has_vless_hwids: bool = False,
 ) -> InlineKeyboardMarkup:
@@ -587,15 +581,9 @@ def get_admin_user_devices_keyboard(
         callback_data=f"admin_vless_token_rotate:{telegram_id}",
     )
 
-    if has_wi_devices:
-        builder.button(
-            text=texts.ADMIN_BTN_SUB_WI,
-            callback_data=f"admin_wi_devices:{telegram_id}",
-        )
-
     builder.button(
-        text=texts.ADMIN_BTN_BACK_TO_CARD,
-        callback_data=f"admin_user_card:{telegram_id}",
+        text=texts.ADMIN_BTN_BACK_TO_SUB,
+        callback_data=f"admin_sub_awg_menu:{telegram_id}",
     )
 
     builder.adjust(1)

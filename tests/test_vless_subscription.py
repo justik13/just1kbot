@@ -870,6 +870,9 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         token_rotate_btn = next((b for b in buttons if b.callback_data == "admin_vless_token_rotate:123456"), None)
         self.assertIsNotNone(token_rotate_btn)
 
+        back_btn = next((b for b in buttons if b.callback_data == "admin_sub_awg_menu:123456"), None)
+        self.assertIsNotNone(back_btn)
+
     async def test_get_or_create_subscription_race_condition(self):
         from sqlalchemy.exc import IntegrityError
         from database.models import VlessSubscription
