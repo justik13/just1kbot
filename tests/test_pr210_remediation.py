@@ -578,6 +578,7 @@ class TestIntegrationsAndCleanupVerification(unittest.TestCase):
             caddyfile_path = Path(__file__).resolve().parent.parent / fname
             content = caddyfile_path.read_text(encoding="utf-8")
             self.assertNotIn("/amnezia/open", content, f"{fname} contains /amnezia/open")
+            self.assertNotIn("/subscription/", content, f"{fname} contains /subscription/")
             # Allow /sub/wl/* and /sub/vless/*, but ensure no generic legacy /sub/* or /amnezia/
             non_wl_content = (
                 content.replace("/sub/wl/*", "")

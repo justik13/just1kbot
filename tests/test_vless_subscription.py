@@ -1137,4 +1137,72 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(res[1])
 
+    async def test_sync_user_to_nodes_empty_targets_does_not_mark_synced(self):
+        from database.models import VlessSubscription
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        session = AsyncMock()
+        sub = VlessSubscription(id=1, user_id=10, uuid="u-1", last_synced_at=None)
+
+        with (
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[])),
+        ):
+            res = await VlessSubscriptionService.sync_user_to_nodes(session, user_id=10, desired_active=True)
+            self.assertEqual(res, {})
+            self.assertIsNone(sub.last_synced_at)
+            session.flush.assert_not_called()
+
+    async def test_deprovision_validates_vless_inbound(self):
+        from services.vless_subscription_service import VlessSubscriptionService
+        from services.xray_node_client import SyncResponse, SyncResult
+
+        # 1. Missing vless in verified_inbounds -> fail-closed (False)
+        resp_no_vless = SyncResponse(
+            result=SyncResult.APPLIED,
+            verified_inbounds=["white_internet"],
+            raw_data={"result": "applied"},
+        )
+        with patch("services.xray_node_client.XrayNodeClient.sync_client", new=AsyncMock(return_value=resp_no_vless)):
+            res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                [(1, "https://node.com:8443", "key")],
+                client_uuid="uuid-1",
+                version=1,
+            )
+            self.assertFalse(res[1])
+
+        # 2. Presence of vless in verified_inbounds -> True
+        resp_with_vless = SyncResponse(
+            result=SyncResult.APPLIED,
+            verified_inbounds=["just1k-vless-direct"],
+            raw_data={"result": "applied"},
+        )
+        with patch("services.xray_node_client.XrayNodeClient.sync_client", new=AsyncMock(return_value=resp_with_vless)):
+            res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                [(1, "https://node.com:8443", "key")],
+                client_uuid="uuid-1",
+                version=1,
+            )
+            self.assertTrue(res[1])
+
+    async def test_tariff_downgrade_checks_total_devices_including_vless(self):
+        from bot.handlers.payment.common import _check_tariff_change_allowed
+        from database.models import Tariff, User
+
+        db_user = User(id=5, telegram_id=555, device_limit=3)
+        target_tariff = Tariff(id=1, name="1 dev", device_limit=1, price_rub=100)
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.payment.common._get_effective_device_limit", new=AsyncMock(return_value=1)),
+            patch("bot.handlers.payment.common.get_user_profiles_count", new=AsyncMock(return_value=1)),
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
+        ):
+            # profiles_count (1) + vless_count (1) = 2 > new_limit (1) -> blocked
+            res = await _check_tariff_change_allowed(session, db_user, target_tariff)
+            self.assertIsNotNone(res)
+            self.assertIn("2", res)
+            self.assertIn("1", res)
+
+
 

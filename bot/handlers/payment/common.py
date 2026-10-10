@@ -61,10 +61,13 @@ async def _check_tariff_change_allowed(
         current_limit = await _get_effective_device_limit(session, db_user)
         if new_limit != current_limit:
             return texts.PAYMENT_CHANGE_TARIFF_TEMPORARILY_UNAVAILABLE
+        from database.repositories import vless_subscription_repo
         profiles_count = await get_user_profiles_count(session, db_user.id)
-        if profiles_count > new_limit:
+        vless_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
+        total_devices = profiles_count + vless_count
+        if total_devices > new_limit:
             return texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                profiles_count=profiles_count,
+                profiles_count=total_devices,
                 new_limit=new_limit,
             )
     return None

@@ -346,14 +346,18 @@ class VlessSubscriptionService:
                         client_uuid=client_uuid,
                         is_active=False,
                         version=version,
-                        idempotency_key=f"vless:deprov:{client_uuid[:8]}:{version}",
+                        idempotency_key=f"vless:deprov:{client_uuid}:{version}",
                         service="vless",
                     )
+                    verified = [
+                        ib.lower() for ib in resp.verified_inbounds if isinstance(ib, str)
+                    ] if resp.verified_inbounds else []
+                    has_vless = any("vless" in ib for ib in verified)
                     if resp.result == "applied":
-                        results[srv_id] = True
+                        results[srv_id] = has_vless
                     elif resp.result == "already_newer":
                         actual_state = (resp.raw_data or {}).get("state")
-                        results[srv_id] = actual_state == "disabled"
+                        results[srv_id] = has_vless and (actual_state == "disabled")
                     else:
                         results[srv_id] = False
             except Exception as exc:
@@ -395,6 +399,9 @@ class VlessSubscriptionService:
 
         servers = await VlessSubscriptionService.get_configured_vless_servers(session)
         targets = VlessSubscriptionService._extract_node_targets(servers)
+        if not targets:
+            return {}
+
         sub_version = getattr(sub, "version", 1) or 1
         results = await VlessSubscriptionService._execute_sync_to_nodes(
             targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
@@ -410,14 +417,11 @@ class VlessSubscriptionService:
                 if all(deprov_res.values()) and len(deprov_res) == len(targets):
                     await vless_subscription_repo.pop_pending_revoked_uuid(session, sub.id, rev_uuid)
 
-        if all(results.values()) and len(results) == len(targets):
+        if targets and all(results.values()) and len(results) == len(targets):
             sub.last_synced_at = now_utc()
             await session.flush()
 
         return results
-
-    # Backward compatibility alias
-    sync_user_to_dual_nodes = sync_user_to_nodes
 
     @staticmethod
     async def deprovision_uuid_from_nodes(
@@ -431,7 +435,6 @@ class VlessSubscriptionService:
 
         servers = await VlessSubscriptionService.get_configured_vless_servers(session)
         targets = VlessSubscriptionService._extract_node_targets(servers)
+        if not targets:
+            return {}
         return await VlessSubscriptionService._execute_deprovision_on_nodes(targets, client_uuid, version=version)
-
-    # Backward compatibility alias
-    deprovision_uuid_from_dual_nodes = deprovision_uuid_from_nodes
