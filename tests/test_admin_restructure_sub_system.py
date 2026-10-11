@@ -524,6 +524,21 @@ class TestAdminTariffsSplit(unittest.IsolatedAsyncioTestCase):
                 await tariffs_pagination(cb, self.state, self.mock_session)
                 mock_show.assert_awaited_once_with(cb, self.mock_session, page=2, service_type="white_internet")
 
+    async def test_show_tariffs_list_router_filters_support_standard(self):
+        from bot.handlers.admin.tariffs import router as tariffs_router
+        from types import SimpleNamespace
+
+        found = False
+        for handler in tariffs_router.callback_query.handlers:
+            if handler.callback == show_tariffs_list:
+                found = True
+                for val in ("admin_tariffs", "admin_tariffs:standard", "admin_tariffs:awg", "admin_tariffs:white_internet"):
+                    event = SimpleNamespace(data=val)
+                    for f in handler.filters:
+                        res = await f(event)
+                        self.assertTrue(res, f"Filter failed for {val}")
+        self.assertTrue(found, "show_tariffs_list not found on router")
+
     async def test_show_tariff_card_back_button(self):
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = self.admin_user

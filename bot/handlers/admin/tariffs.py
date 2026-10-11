@@ -144,7 +144,7 @@ async def _show_tariffs_list(
 
 
 
-@router.callback_query(F.data.in_(["admin_tariffs", "admin_tariffs:awg", "admin_tariffs:white_internet"]))
+@router.callback_query(F.data.in_(["admin_tariffs", "admin_tariffs:standard", "admin_tariffs:awg", "admin_tariffs:white_internet"]))
 async def show_tariffs_list(
     callback: CallbackQuery,
     state: FSMContext,
