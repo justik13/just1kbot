@@ -1682,7 +1682,13 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         from services.device_service import DeviceService, DeviceLimitExceeded, ServerPeerSnapshot
 
         session = AsyncMock()
-        user = User(id=1, telegram_id=123, device_limit=2)
+        user = User(
+            id=1,
+            telegram_id=123,
+            device_limit=2,
+            subscription_end=now_utc() + timedelta(days=5),
+            is_banned=False,
+        )
         server = Server(id=5, name="NL", is_active=True, capabilities=["awg"])
 
         snapshot = ServerPeerSnapshot(
@@ -1691,11 +1697,12 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             captured_at=datetime.now(timezone.utc),
         )
 
-        # Mock scalar_one for user and scalar_one_or_none for server
+        # Mock scalar_one for user, scalar_one_or_none for server, dup check, and AWG profile count
         user_res = MagicMock(scalar_one=MagicMock(return_value=user))
         server_res = MagicMock(scalar_one_or_none=MagicMock(return_value=server))
+        dup_res = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
         count_res = MagicMock(scalar_one=MagicMock(return_value=1))  # 1 AWG profile
-        session.execute = AsyncMock(side_effect=[user_res, server_res, count_res])
+        session.execute = AsyncMock(side_effect=[user_res, server_res, dup_res, count_res])
 
         # 1 active VLESS device + 1 active AWG device = 2 >= limit 2 -> DeviceLimitExceeded
         with (
@@ -1703,12 +1710,13 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             patch("services.subscription.SubscriptionService.get_effective_device_limit", new=AsyncMock(return_value=2)),
         ):
             with self.assertRaises(DeviceLimitExceeded):
-                # Call WITHOUT passing vless_count (testing default parameter resolution)
+                # Call passing vless_count=None to verify dynamic resolution from repo
                 await DeviceService.create_device(
                     session,
                     user_id=1,
                     server_id=5,
                     device_name="Phone",
                     snapshot=snapshot,
+                    vless_count=None,
                 )
             mock_hwid_cnt.assert_called_once_with(session, 1)

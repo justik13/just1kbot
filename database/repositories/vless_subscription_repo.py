@@ -59,14 +59,28 @@ def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TT
     return res
 
 
+async def _execute_scalar_one_or_none(session: AsyncSession, stmt: Any) -> Any:
+    """Safely execute statement on session, handling async/sync mock heterogeneity and extracting scalar."""
+    res = session.execute(stmt)
+    if inspect.isawaitable(res):
+        res = await res
+    scalar = getattr(res, "scalar_one_or_none", None)
+    if callable(scalar):
+        val = scalar()
+        if inspect.isawaitable(val):
+            val = await val
+        return val
+    return None
+
+
 async def get_or_create_subscription(
     session: AsyncSession,
     user_id: int,
 ) -> VlessSubscription:
     """Fetch existing VlessSubscription or create new unique credentials for user."""
     stmt = select(VlessSubscription).where(VlessSubscription.user_id == user_id)
-    sub = (await session.execute(stmt)).scalar_one_or_none()
-    if sub is not None:
+    sub = await _execute_scalar_one_or_none(session, stmt)
+    if isinstance(sub, VlessSubscription):
         return sub
 
     token = secrets.token_urlsafe(32)
@@ -87,8 +101,8 @@ async def get_or_create_subscription(
         return sub
     except IntegrityError:
         # Concurrent creation race: existing row won the race
-        existing = (await session.execute(stmt)).scalar_one_or_none()
-        if existing is not None:
+        existing = await _execute_scalar_one_or_none(session, stmt)
+        if isinstance(existing, VlessSubscription):
             return existing
         raise
 
@@ -101,7 +115,8 @@ async def get_subscription_by_token(
     if not token or len(token) < 16:
         return None
     stmt = select(VlessSubscription).where(VlessSubscription.token == token)
-    return (await session.execute(stmt)).scalar_one_or_none()
+    val = await _execute_scalar_one_or_none(session, stmt)
+    return val if isinstance(val, VlessSubscription) else None
 
 
 async def get_subscription_by_user_id(
@@ -110,11 +125,7 @@ async def get_subscription_by_user_id(
 ) -> VlessSubscription | None:
     """Fetch VlessSubscription by internal user_id."""
     stmt = select(VlessSubscription).where(VlessSubscription.user_id == user_id)
-    res = await session.execute(stmt)
-    scalar_fn = getattr(res, "scalar_one_or_none", None)
-    val = scalar_fn() if callable(scalar_fn) else None
-    if inspect.isawaitable(val):
-        val = await val
+    val = await _execute_scalar_one_or_none(session, stmt)
     return val if isinstance(val, VlessSubscription) else None
 
 
@@ -125,11 +136,7 @@ async def get_active_hwid_count(
 ) -> int:
     """Return count of active non-stale HWIDs currently registered for user."""
     stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.user_id == user_id)
-    res = await session.execute(stmt)
-    scalar_fn = getattr(res, "scalar_one_or_none", None)
-    val = scalar_fn() if callable(scalar_fn) else None
-    if inspect.isawaitable(val):
-        val = await val
+    val = await _execute_scalar_one_or_none(session, stmt)
     raw_hwids = val if isinstance(val, dict) else None
     active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
     return len(active)
@@ -158,11 +165,7 @@ async def register_hwid_atomic(
 
     # Resolve user_id without lock to enforce strict global lock hierarchy: User -> VlessSubscription
     user_id_stmt = select(VlessSubscription.user_id).where(VlessSubscription.id == subscription_id)
-    u_res = await session.execute(user_id_stmt)
-    u_scalar = getattr(u_res, "scalar_one_or_none", None)
-    raw_sub_user_id = u_scalar() if callable(u_scalar) else None
-    if inspect.isawaitable(raw_sub_user_id):
-        raw_sub_user_id = await raw_sub_user_id
+    raw_sub_user_id = await _execute_scalar_one_or_none(session, user_id_stmt)
     if raw_sub_user_id is None:
         return False, 0, max(0, effective_limit or 0)
     sub_user_id = getattr(raw_sub_user_id, "user_id", raw_sub_user_id)
@@ -170,11 +173,7 @@ async def register_hwid_atomic(
     # 1. Lock User row FIRST (populate_existing=True guarantees fresh attributes in Identity Map)
     from database.models import User
     user_stmt = select(User).where(User.id == sub_user_id).with_for_update().execution_options(populate_existing=True)
-    user_res = await session.execute(user_stmt)
-    usr_scalar = getattr(user_res, "scalar_one_or_none", None)
-    user = usr_scalar() if callable(usr_scalar) else None
-    if inspect.isawaitable(user):
-        user = await user
+    user = await _execute_scalar_one_or_none(session, user_stmt)
 
     # 2. Lock VlessSubscription row SECOND (populate_existing=True guarantees fresh attributes)
     stmt = (
@@ -183,11 +182,7 @@ async def register_hwid_atomic(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    s_res = await session.execute(stmt)
-    s_scalar = getattr(s_res, "scalar_one_or_none", None)
-    sub = s_scalar() if callable(s_scalar) else None
-    if inspect.isawaitable(sub):
-        sub = await sub
+    sub = await _execute_scalar_one_or_none(session, stmt)
     if sub is None:
         return False, 0, max(0, effective_limit or 0)
 
@@ -212,8 +207,10 @@ async def register_hwid_atomic(
             VPNProfile.user_id == getattr(sub, "user_id", None),
             VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
         )
-        awg_res = await session.execute(awg_stmt)
-        awg_scalar = getattr(awg_res, "scalar_one", None) or getattr(awg_res, "scalar", None)
+        awg_res = session.execute(awg_stmt)
+        if inspect.isawaitable(awg_res):
+            awg_res = await awg_res
+        awg_scalar = getattr(awg_res, "scalar_one", None) or getattr(awg_res, "scalar", None) or getattr(awg_res, "scalar_one_or_none", None)
         awg_val = awg_scalar() if callable(awg_scalar) else 0
         if inspect.isawaitable(awg_val):
             awg_val = await awg_val
@@ -281,8 +278,8 @@ async def reset_hwids(
         tuple[old_uuid, new_uuid] or (None, None) if subscription not found.
     """
     stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
-    sub = (await session.execute(stmt)).scalar_one_or_none()
-    if sub is not None:
+    sub = await _execute_scalar_one_or_none(session, stmt)
+    if isinstance(sub, VlessSubscription):
         old_uuid = sub.uuid
         new_uuid = str(uuid.uuid4())
         sub.uuid = new_uuid
@@ -309,8 +306,8 @@ async def rotate_token(
         tuple[new_token, old_uuid, new_uuid]
     """
     stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
-    sub = (await session.execute(stmt)).scalar_one_or_none()
-    if sub is None:
+    sub = await _execute_scalar_one_or_none(session, stmt)
+    if not isinstance(sub, VlessSubscription):
         raise ValueError(f"VlessSubscription {subscription_id} not found")
 
     token = secrets.token_urlsafe(32)
@@ -336,8 +333,8 @@ async def pop_pending_revoked_uuid(
 ) -> None:
     """Removes a successfully deprovisioned UUID from pending_revoked_uuids under row lock."""
     stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
-    sub = (await session.execute(stmt)).scalar_one_or_none()
-    if sub and sub.pending_revoked_uuids:
+    sub = await _execute_scalar_one_or_none(session, stmt)
+    if isinstance(sub, VlessSubscription) and sub.pending_revoked_uuids:
         sub.pending_revoked_uuids = [u for u in sub.pending_revoked_uuids if u != uuid_to_remove]
         await session.flush()
 
@@ -355,6 +352,15 @@ async def get_subscriptions_with_pending_revocations(
         )
         .limit(limit)
     )
-    return list((await session.execute(stmt)).scalars().all())
+    res = session.execute(stmt)
+    if inspect.isawaitable(res):
+        res = await res
+    scalars = getattr(res, "scalars", None)
+    if callable(scalars):
+        s = scalars()
+        all_fn = getattr(s, "all", None)
+        if callable(all_fn):
+            return list(all_fn())
+    return []
 
 
