@@ -100,6 +100,8 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
 async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
     title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
     desc = await get_system_setting(session, "vless_profile_description", None)
+    if desc is None:
+        desc = await get_system_setting(session, "vless_profile_desc", None)
     announce = await get_system_setting(session, "vless_announce", None)
     announce_url = await get_system_setting(session, "vless_announce_url", None)
 
@@ -183,6 +185,8 @@ async def start_edit_std_incy_param(
     field = callback.data.split(":")[1]
     title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
     desc = await get_system_setting(session, "vless_profile_description", None)
+    if desc is None:
+        desc = await get_system_setting(session, "vless_profile_desc", None)
     announce = await get_system_setting(session, "vless_announce", None)
     announce_url = await get_system_setting(session, "vless_announce_url", None)
 
@@ -234,7 +238,17 @@ async def process_std_incy_param_input(
         await state.clear()
         return
 
-    text = (message.text or "").strip()
+    if not message.text:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_TEXT_REQUIRED,
+            get_back_button("admin_std_incy"),
+            trigger_message_id=getattr(message, "message_id", None),
+        )
+        return
+
+    text = message.text.strip()
     if text.startswith("/"):
         await state.clear()
         card_text, reply_markup = await _build_std_sub_incy_card(session)
@@ -248,20 +262,28 @@ async def process_std_incy_param_input(
         )
         return
 
+    is_clear = text in ("-", "—", "–")
+    is_none = text.lower() == "none"
+
     if field == "title":
-        new_val = "✦ Just1k" if text == "-" else text[:25]
+        if is_clear or is_none or not text:
+            new_val = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
+        else:
+            new_val = text[:25]
         await set_system_setting(session, "vless_profile_title", new_val, updated_by=message.from_user.id)
     elif field == "desc":
-        new_val = None if text == "-" else text[:100]
+        new_val = None if (is_clear or is_none or not text) else text[:100]
         await set_system_setting(session, "vless_profile_description", new_val, updated_by=message.from_user.id)
     elif field == "announce":
-        new_val = None if text == "-" else text[:200]
+        new_val = None if (is_clear or is_none or not text) else text[:200]
         await set_system_setting(session, "vless_announce", new_val, updated_by=message.from_user.id)
     elif field == "announce_url":
-        if text == "-":
+        if is_clear or is_none or not text:
             new_val = None
         else:
-            if not (text.startswith("https://") or text.startswith("http://") or text.startswith("tg://")):
+            if any(c in text for c in (" ", "\n", "\r", "\t")) or not (
+                text.startswith("https://") or text.startswith("http://") or text.startswith("tg://")
+            ):
                 await render_hub(
                     message.bot,
                     message.chat.id,
@@ -298,8 +320,10 @@ async def reset_std_sub_incy_to_defaults(
         return
 
     await state.clear()
-    await set_system_setting(session, "vless_profile_title", "✦ Just1k", updated_by=callback.from_user.id)
+    default_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
+    await set_system_setting(session, "vless_profile_title", default_title, updated_by=callback.from_user.id)
     await set_system_setting(session, "vless_profile_description", None, updated_by=callback.from_user.id)
+    await set_system_setting(session, "vless_profile_desc", None, updated_by=callback.from_user.id)
     await set_system_setting(session, "vless_announce", None, updated_by=callback.from_user.id)
     await set_system_setting(session, "vless_announce_url", None, updated_by=callback.from_user.id)
     await session.commit()

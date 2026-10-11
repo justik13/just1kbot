@@ -511,6 +511,53 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             # Check Announce-Url
             self.assertEqual(resp.headers.get("Announce-Url"), "https://t.me/news_channel")
 
+    async def test_feed_system_settings_fallbacks_and_url_hygiene(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        settings_dict = {
+            "vless_profile_title": "   ",  # empty string -> must fall back to default
+            "vless_profile_desc": "Fallback Description Used",  # fallback key
+            "vless_announce": "Important News",
+            "vless_announce_url": "https://t.me/news channel with spaces",  # invalid url with space -> must be omitted
+        }
+
+        async def fake_get_setting(session, key, default=None):
+            return settings_dict.get(key, default)
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_setting),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-100"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            # Profile-Title should fall back to default "✦ Just1k"
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title = base64.b64decode(title_b64).decode("utf-8")
+            self.assertEqual(title, "✦ Just1k")
+
+            # Profile-Description should pick up fallback key
+            raw_desc = resp.headers.get("Profile-Description", "")
+            desc_b64 = raw_desc.removeprefix("base64:")
+            desc = base64.b64decode(desc_b64).decode("utf-8")
+            self.assertEqual(desc, "Fallback Description Used")
+
+            # Announce-Url with spaces must NOT be injected into headers
+            self.assertNotIn("Announce-Url", resp.headers)
+
     async def test_device_metadata_extracted_from_headers(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))

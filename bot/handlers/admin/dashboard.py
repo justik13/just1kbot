@@ -304,7 +304,7 @@ async def show_admin_cat_wi_sub(callback: CallbackQuery, state: FSMContext):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
     await state.clear()
-    header = format_admin_breadcrumbs(texts.ADMIN_BTN_SUB_WI)
+    header = format_admin_breadcrumbs(texts.BTN_WI_SUB)
     text = texts.ADMIN_DASHBOARD_SECTION_WI_SUB.format(header=header)
     try:
         await callback.message.edit_text(text, reply_markup=get_admin_cat_wi_sub_keyboard(), parse_mode="HTML")

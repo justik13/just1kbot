@@ -216,19 +216,23 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
 
         profile_title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
-        if not isinstance(profile_title, str):
-            profile_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k")
+        if not isinstance(profile_title, str) or not profile_title.strip():
+            profile_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
 
         profile_desc = await get_system_setting(session, "vless_profile_description", None)
-        if not isinstance(profile_desc, str):
+        if not isinstance(profile_desc, str) or not profile_desc.strip():
+            profile_desc = await get_system_setting(session, "vless_profile_desc", None)
+        if not isinstance(profile_desc, str) or not profile_desc.strip():
             profile_desc = None
 
         announce = await get_system_setting(session, "vless_announce", None)
-        if not isinstance(announce, str):
+        if not isinstance(announce, str) or not announce.strip():
             announce = None
 
         announce_url = await get_system_setting(session, "vless_announce_url", None)
-        if not isinstance(announce_url, str):
+        if not isinstance(announce_url, str) or not announce_url.strip():
+            announce_url = None
+        elif any(c in announce_url for c in (" ", "\n", "\r", "\t")):
             announce_url = None
         support_url = f"https://t.me/{bot_username}"
         channel_url = None

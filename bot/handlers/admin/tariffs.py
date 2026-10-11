@@ -499,12 +499,20 @@ async def process_edit_tariff_rub(
         await state.clear()
         return
 
+    data = await state.get_data()
+    tariff_id = data.get("tariff_id")
+    back_button = (
+        get_back_button(f"admin_tariff_card:{tariff_id}")
+        if tariff_id
+        else get_back_button("admin_tariffs")
+    )
+
     if not message.text:
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_POSITIVE_NUMBER,
-            get_back_button("admin_tariffs"),
+            back_button,
         )
         return
 
@@ -514,7 +522,7 @@ async def process_edit_tariff_rub(
             message.bot,
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
-            get_back_button("admin_tariffs"),
+            back_button,
         )
         return
 
@@ -525,7 +533,7 @@ async def process_edit_tariff_rub(
             message.bot,
             message.chat.id,
             texts.ERROR_POSITIVE_NUMBER,
-            get_back_button("admin_tariffs"),
+            back_button,
         )
         return
 
@@ -534,12 +542,13 @@ async def process_edit_tariff_rub(
             message.bot,
             message.chat.id,
             texts.ADMIN_TARIFF_ERR_PRICE_RANGE.format(max_price=MAX_TARIFF_PRICE),
-            get_back_button("admin_tariffs"),
+            back_button,
         )
         return
 
-    data = await state.get_data()
-    tariff_id = data["tariff_id"]
+    if not tariff_id:
+        await state.clear()
+        return
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if not tariff:

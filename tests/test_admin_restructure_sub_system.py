@@ -34,6 +34,10 @@ from bot.handlers.admin.dashboard import (
     show_admin_cat_std_sub,
     show_admin_cat_wi_sub,
 )
+from bot.handlers.admin.servers.add_routes import (
+    start_add_server,
+    select_add_server_protocol,
+)
 from bot.handlers.admin.servers.common import (
     _build_servers_list_text_and_kb,
 )
@@ -52,6 +56,7 @@ from bot.handlers.admin.tariffs import (
     show_tariffs_list,
     tariffs_pagination,
     _show_tariff_card,
+    process_edit_tariff_rub,
 )
 from bot.states import AdminStates
 from database.models import Tariff
@@ -73,6 +78,8 @@ class TestAdminMenuAndCategoryKeyboards(unittest.TestCase):
         self.assertEqual(len(kb.inline_keyboard[1]), 2)
         row1_cbs = [b.callback_data for b in kb.inline_keyboard[1]]
         self.assertEqual(row1_cbs, ["admin_cat_std_sub", "admin_cat_wi_sub"])
+        self.assertEqual(kb.inline_keyboard[1][0].text, texts.BTN_STD_SUB)
+        self.assertEqual(kb.inline_keyboard[1][1].text, texts.BTN_WI_SUB)
 
     def test_get_admin_cat_std_sub_keyboard(self):
         kb = get_admin_cat_std_sub_keyboard()
@@ -151,7 +158,7 @@ class TestAdminCategoryHandlers(unittest.IsolatedAsyncioTestCase):
             await show_admin_cat_wi_sub(cb, self.state)
             cb.message.edit_text.assert_awaited_once()
             call_text = cb.message.edit_text.call_args[0][0]
-            self.assertIn(texts.ADMIN_BTN_SUB_WI, call_text)
+            self.assertIn(texts.BTN_WI_SUB, call_text)
             cb.answer.assert_awaited_once_with(show_alert=False)
 
     async def test_show_admin_cat_handlers_unauthorized(self):
@@ -224,6 +231,61 @@ class TestAdminServersFiltering(unittest.IsolatedAsyncioTestCase):
             with patch("bot.handlers.admin.servers.list_routes._show_servers_list", new_callable=AsyncMock) as mock_show:
                 await servers_pagination(cb, self.state, self.mock_session)
                 mock_show.assert_awaited_once_with(cb, self.mock_session, page=2, filter_type="wi")
+
+    async def test_start_add_server_std(self):
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_server_add:std"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        with patch("bot.handlers.admin.servers.add_routes.is_admin", return_value=True):
+            await start_add_server(cb, self.state)
+            cb.message.edit_text.assert_awaited_once()
+            kb = cb.message.edit_text.call_args[1]["reply_markup"]
+            cbs = [b.callback_data for row in kb.inline_keyboard for b in row]
+            self.assertIn("admin_server_add_proto:amneziawg2:std", cbs)
+            self.assertIn("admin_server_add_proto:vless:std", cbs)
+            self.assertNotIn("admin_server_add_proto:xray:wi", cbs)
+            self.assertNotIn("admin_server_add_proto:xray", cbs)
+            self.assertEqual(kb.inline_keyboard[-1][0].callback_data, "admin_servers:std")
+
+    async def test_start_add_server_wi(self):
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_server_add:wi"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        with patch("bot.handlers.admin.servers.add_routes.is_admin", return_value=True):
+            await start_add_server(cb, self.state)
+            cb.message.edit_text.assert_awaited_once()
+            kb = cb.message.edit_text.call_args[1]["reply_markup"]
+            cbs = [b.callback_data for row in kb.inline_keyboard for b in row]
+            self.assertIn("admin_server_add_proto:xray:wi", cbs)
+            self.assertNotIn("admin_server_add_proto:amneziawg2:std", cbs)
+            self.assertNotIn("admin_server_add_proto:vless:std", cbs)
+            self.assertEqual(kb.inline_keyboard[-1][0].callback_data, "admin_servers:wi")
+
+    async def test_select_add_server_protocol(self):
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_server_add_proto:vless:std"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        with patch("bot.handlers.admin.servers.add_routes.is_admin", return_value=True):
+            await select_add_server_protocol(cb, self.state)
+            state = await self.state.get_state()
+            self.assertEqual(state, AdminStates.adding_server.state)
+            data = await self.state.get_data()
+            self.assertEqual(data.get("protocol"), "vless")
+            self.assertEqual(data.get("filter_type"), "std")
+            kb = cb.message.edit_text.call_args[1]["reply_markup"]
+            self.assertEqual(kb.inline_keyboard[0][0].callback_data, "admin_server_add:std")
 
 
 class TestAdminStandardIncySettings(unittest.IsolatedAsyncioTestCase):
@@ -321,6 +383,51 @@ class TestAdminStandardIncySettings(unittest.IsolatedAsyncioTestCase):
                 state = await self.state.get_state()
                 self.assertEqual(state, AdminStates.editing_std_incy_param.state)
 
+    async def test_process_std_incy_param_input_empty_message_rejected(self):
+        await self.state.set_state(AdminStates.editing_std_incy_param)
+        await self.state.update_data(field="title")
+
+        msg = self._create_msg("")
+        msg.text = None
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.set_system_setting", new_callable=AsyncMock) as mock_set:
+                await process_std_incy_param_input(msg, self.state, self.mock_session)
+                mock_set.assert_not_awaited()
+                self.mock_render_hub.assert_awaited_once()
+                err_text = self.mock_render_hub.call_args[0][2]
+                self.assertIn(texts.ERROR_TEXT_REQUIRED, err_text)
+                state = await self.state.get_state()
+                self.assertEqual(state, AdminStates.editing_std_incy_param.state)
+
+    async def test_process_std_incy_param_input_announce_url_spaces_rejected(self):
+        await self.state.set_state(AdminStates.editing_std_incy_param)
+        await self.state.update_data(field="announce_url")
+
+        msg = self._create_msg("https://example.com/bad url")
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.set_system_setting", new_callable=AsyncMock) as mock_set:
+                await process_std_incy_param_input(msg, self.state, self.mock_session)
+                mock_set.assert_not_awaited()
+                self.mock_render_hub.assert_awaited_once()
+                err_text = self.mock_render_hub.call_args[0][2]
+                self.assertIn(texts.ADMIN_SERVER_INCY_ERR_INVALID_URL, err_text)
+                state = await self.state.get_state()
+                self.assertEqual(state, AdminStates.editing_std_incy_param.state)
+
+    async def test_process_std_incy_param_input_dash_variants_reset(self):
+        for dash in ("-", "—", "–"):
+            await self.state.set_state(AdminStates.editing_std_incy_param)
+            await self.state.update_data(field="title")
+            msg = self._create_msg(dash)
+            with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+                with patch("bot.handlers.admin.servers.incy_routes.set_system_setting", new_callable=AsyncMock) as mock_set:
+                    await process_std_incy_param_input(msg, self.state, self.mock_session)
+                    mock_set.assert_awaited_once_with(
+                        self.mock_session, "vless_profile_title", "✦ Just1k", updated_by=111
+                    )
+
     async def test_reset_std_sub_incy_to_defaults(self):
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = self.admin_user
@@ -332,7 +439,7 @@ class TestAdminStandardIncySettings(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
             with patch("bot.handlers.admin.servers.incy_routes.set_system_setting", new_callable=AsyncMock) as mock_set:
                 await reset_std_sub_incy_to_defaults(cb, self.state, self.mock_session)
-                self.assertEqual(mock_set.await_count, 4)
+                self.assertEqual(mock_set.await_count, 5)
                 cb.answer.assert_awaited_once_with(texts.ADMIN_SERVER_INCY_RESET_SUCCESS, show_alert=False)
 
 
@@ -430,3 +537,41 @@ class TestAdminTariffsSplit(unittest.IsolatedAsyncioTestCase):
         kb = cb.message.edit_text.call_args[1]["reply_markup"]
         cbs = [b.callback_data for row in kb.inline_keyboard for b in row]
         self.assertIn("admin_tariffs:white_internet", cbs)
+
+    async def test_process_edit_tariff_rub_invalid_input_back_to_card(self):
+        await self.state.set_state(AdminStates.editing_tariff_rub)
+        await self.state.update_data(tariff_id=7)
+
+        msg = MagicMock(spec=Message)
+        msg.from_user = self.admin_user
+        msg.chat = MagicMock(id=111)
+        msg.bot = AsyncMock()
+        msg.text = "not-a-number"
+        msg.delete = AsyncMock()
+
+        with patch("bot.handlers.admin.tariffs.is_admin", return_value=True):
+            with patch("bot.handlers.admin.tariffs.render_hub", new_callable=AsyncMock) as mock_hub:
+                await process_edit_tariff_rub(msg, self.state, self.mock_session)
+                mock_hub.assert_awaited_once()
+                kb = mock_hub.call_args[0][3]
+                self.assertEqual(kb.inline_keyboard[0][0].callback_data, "admin_tariff_card:7")
+
+    async def test_process_edit_tariff_rub_cancel_back_to_card(self):
+        await self.state.set_state(AdminStates.editing_tariff_rub)
+        await self.state.update_data(tariff_id=7)
+
+        msg = MagicMock(spec=Message)
+        msg.from_user = self.admin_user
+        msg.chat = MagicMock(id=111)
+        msg.bot = AsyncMock()
+        msg.text = "/cancel"
+        msg.delete = AsyncMock()
+
+        with patch("bot.handlers.admin.tariffs.is_admin", return_value=True):
+            with patch("bot.handlers.admin.tariffs.render_hub", new_callable=AsyncMock) as mock_hub:
+                await process_edit_tariff_rub(msg, self.state, self.mock_session)
+                mock_hub.assert_awaited_once()
+                kb = mock_hub.call_args[0][3]
+                self.assertEqual(kb.inline_keyboard[0][0].callback_data, "admin_tariff_card:7")
+                state = await self.state.get_state()
+                self.assertIsNone(state)

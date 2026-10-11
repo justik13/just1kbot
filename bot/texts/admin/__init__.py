@@ -86,6 +86,7 @@ from bot.texts.admin.dashboard import (
     BTN_STD_SUB,
     BTN_STD_TARIFFS,
     BTN_WI_SERVERS,
+    BTN_WI_SUB,
     BTN_WI_TARIFFS,
     ADMIN_MAINTENANCE_DISABLED_ANSWER,
     ADMIN_MAINTENANCE_ENABLED_ANSWER,
@@ -1363,5 +1364,6 @@ __all__ = [
     "BTN_STD_SUB",
     "BTN_STD_TARIFFS",
     "BTN_WI_SERVERS",
+    "BTN_WI_SUB",
     "BTN_WI_TARIFFS",
 ]
