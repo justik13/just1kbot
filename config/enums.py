@@ -174,13 +174,7 @@ class AdminAuditAction(StrEnum):
 class ServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
-    AWG = "standard"  # backward compat alias
-
-    @classmethod
-    def _missing_(cls, value: object):
-        if value == "awg":
-            return cls.STANDARD
-        return super()._missing_(value)
+    AWG = "awg"
 
 
 class WhiteInternetStatus(StrEnum):
@@ -216,13 +210,7 @@ class OrderServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
     TOPUP = "topup"
-    AWG = "standard"  # backward compat alias
-
-    @classmethod
-    def _missing_(cls, value: object):
-        if value == "awg":
-            return cls.STANDARD
-        return super()._missing_(value)
+    AWG = "awg"
 
 
 __all__ = [

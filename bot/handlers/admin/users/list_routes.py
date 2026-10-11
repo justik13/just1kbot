@@ -109,7 +109,7 @@ async def show_extended_filter_menu(
         rows = (
             await session.scalars(
                 select(Tariff)
-                .where(Tariff.is_active.is_(True), Tariff.service_type.in_(("standard", "awg")))
+                .where(Tariff.is_active.is_(True), Tariff.service_type == "standard")
                 .order_by(Tariff.device_limit, Tariff.id)
             )
         ).all()

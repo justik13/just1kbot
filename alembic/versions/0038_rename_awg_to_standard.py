@@ -36,7 +36,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_orders_service_type",
         "orders",
-        "service_type IN ('standard', 'white_internet', 'topup')",
+        "service_type IN ('standard', 'white_internet', 'topup', 'awg')",
     )
 
 
