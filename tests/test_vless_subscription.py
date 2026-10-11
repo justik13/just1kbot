@@ -1429,7 +1429,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         with (
             patch("services.workers.cleanup.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscriptions_with_pending_revocations", new=AsyncMock(return_value=[sub])),
-            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_revocation_target_servers", new=AsyncMock(return_value=[srv])),
             patch("services.vless_subscription_service.VlessSubscriptionService._execute_deprovision_on_nodes", new=AsyncMock(return_value={1: True})),
             patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
             patch("services.vless_subscription_service.VlessSubscriptionService.sync_user_to_nodes", new=AsyncMock()),
@@ -1455,7 +1455,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         with (
             patch("services.workers.cleanup.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscriptions_with_pending_revocations", new=AsyncMock(return_value=[sub])),
-            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv1, srv2])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_revocation_target_servers", new=AsyncMock(return_value=[srv1, srv2])),
             # Node 2 is offline/fails
             patch("services.vless_subscription_service.VlessSubscriptionService._execute_deprovision_on_nodes", new=AsyncMock(return_value={1: True, 2: False})),
             patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
@@ -1554,10 +1554,11 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             )
             self.assertFalse(res[1])
 
-        # 2. Presence of vless in verified_inbounds -> True
+        # 2. Presence of vless in verified_inbounds and all_inbounds_verified -> True
         resp_with_vless = SyncResponse(
             result=SyncResult.APPLIED,
             verified_inbounds=["just1k-vless-direct"],
+            all_inbounds_verified=True,
             raw_data={"result": "applied"},
         )
         with patch("services.xray_node_client.XrayNodeClient.sync_client", new=AsyncMock(return_value=resp_with_vless)):
@@ -1999,16 +2000,16 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_sync_and_deprovision_strict_all_inbounds_verified(self):
         from services.vless_subscription_service import VlessSubscriptionService
-        from services.xray_node_client import SyncResponse
+        from services.xray_node_client import SyncResponse, SyncResult
 
         targets = [(10, "https://node1.example.com:8443", "key1")]
 
         # Case 1: result == "applied" but all_inbounds_verified is False -> results[10] must be False
         partial_resp = SyncResponse(
-            status="ok",
-            result="applied",
+            result=SyncResult.APPLIED,
             verified_inbounds=["just1k-vless-direct"],
             all_inbounds_verified=False,
+            raw_data={"result": "applied"},
         )
         with patch("services.vless_subscription_service.XrayNodeClient.sync_client", new=AsyncMock(return_value=partial_resp)):
             sync_res, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
@@ -2023,10 +2024,10 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
 
         # Case 2: result == "applied" and all_inbounds_verified is True -> results[10] must be True
         full_resp = SyncResponse(
-            status="ok",
-            result="applied",
+            result=SyncResult.APPLIED,
             verified_inbounds=["just1k-vless-direct"],
             all_inbounds_verified=True,
+            raw_data={"result": "applied"},
         )
         with patch("services.vless_subscription_service.XrayNodeClient.sync_client", new=AsyncMock(return_value=full_resp)):
             sync_res, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
