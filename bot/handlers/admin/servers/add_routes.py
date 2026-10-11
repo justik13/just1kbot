@@ -54,9 +54,10 @@ async def start_add_server(
 
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2")
+    builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_VLESS, callback_data="admin_server_add_proto:vless")
     builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray")
     builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data="admin_servers")
-    builder.adjust(1, 1, 1)
+    builder.adjust(1, 1, 1, 1)
 
     await callback.message.edit_text(
         texts.ADMIN_SERVER_SELECT_PROTO_PROMPT,
@@ -258,7 +259,7 @@ async def process_add_server(
 
         protocol = all_data.get("protocol", AMNEZIA_PROTOCOL)
 
-        if protocol == "xray":
+        if protocol in ("xray", "vless"):
             from services.xray_node_client import XrayNodeClient
 
             xray_ok = False
@@ -286,33 +287,50 @@ async def process_add_server(
             from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
             api_server_name = all_data["name"]
             api_max_peers = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
-            protocol_name = "xray"
             capabilities = []
+            reported_services = [s.lower() for s in (xray_data or {}).get("services", [])] if xray_data else []
+            reported_caps = [c.lower() for c in (xray_data or {}).get("capabilities", [])] if xray_data else []
             inbounds = (xray_data or {}).get("inbounds", [])
-            has_vless = any(
-                "vless" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
-                for ib in inbounds
-                if isinstance(ib, (str, dict))
+
+            has_vless = (
+                "vless" in reported_services
+                or "vless" in reported_caps
+                or any(
+                    "vless" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
+                    for ib in inbounds
+                    if isinstance(ib, (str, dict))
+                )
             )
-            has_wl = any(
-                "wl" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
-                for ib in inbounds
-                if isinstance(ib, (str, dict))
-            ) or bool((xray_data or {}).get("relays"))
+            has_wl = (
+                "white_internet" in reported_services
+                or "xray_origin" in reported_caps
+                or any(
+                    "wl" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
+                    for ib in inbounds
+                    if isinstance(ib, (str, dict))
+                )
+                or bool((xray_data or {}).get("relays"))
+            )
             if has_vless:
                 capabilities.append("vless")
             if has_wl:
                 capabilities.append("xray_origin")
             if not capabilities:
-                capabilities = ["xray_origin"]
+                capabilities = ["vless"] if protocol == "vless" else ["xray_origin"]
+
+            protocol_name = "vless" if ("vless" in capabilities and "xray_origin" not in capabilities) else "xray"
+
             existing_server_id = all_data.get("existing_server_id")
             if existing_server_id:
                 server = await session.get(Server, existing_server_id)
                 if server:
                     server.api_key = api_key
-                    existing_caps = set(server.capabilities or [])
-                    existing_caps.update(capabilities)
-                    server.capabilities = list(existing_caps)
+                    # Purge stale capabilities: keep existing only if verified or awg
+                    kept_caps = [c for c in (server.capabilities or []) if c not in ("vless", "xray_origin")]
+                    for cap in capabilities:
+                        if cap not in kept_caps:
+                            kept_caps.append(cap)
+                    server.capabilities = kept_caps
                     server.health_state = ServerHealthState.ONLINE
                 else:
                     server = await create_server(
@@ -371,7 +389,7 @@ async def process_add_server(
                 api_server_name,
             )
 
-            proto_label = texts.PROTOCOL_XRAY_ORIGIN if "xray_origin" in capabilities else texts.PROTOCOL_VLESS
+            proto_label = texts.PROTOCOL_VLESS if "vless" in capabilities and "xray_origin" not in capabilities else texts.PROTOCOL_XRAY_ORIGIN
             msg_text = texts.ADMIN_SERVER_ADDED.format(
                 flag=all_data["country_flag"],
                 name=safe(api_server_name),
@@ -490,7 +508,7 @@ async def process_add_server(
 
         server_protocol = server_info.get_protocol()
 
-        capabilities = None
+        capabilities = ["awg"]
         extra_info = None
         # Modular node: check if Xray VLESS API is also available on this node
         try:
@@ -498,18 +516,30 @@ async def process_add_server(
 
             async with XrayNodeClient(timeout=3.0) as xray_client:
                 x_ok, _, x_data = await xray_client.check_health(all_data["api_url"], api_key)
-                if x_ok:
-                    capabilities = ["awg", "vless"]
-                    # B8: Use vless_domain from node response if present
-                    domain = (x_data or {}).get("vless_domain")
-                    if not domain:
-                        parsed = urllib.parse.urlsplit(all_data["api_url"])
-                        domain = parsed.hostname or ""
-                    extra_info = {
-                        "domain": domain,
-                        "vless_port": 443,
-                        "xray_api_url": all_data["api_url"],
-                    }
+                if x_ok and x_data:
+                    reported_services = [s.lower() for s in x_data.get("services", [])]
+                    reported_caps = [c.lower() for c in x_data.get("capabilities", [])]
+                    inbounds = x_data.get("inbounds", [])
+                    has_vless = (
+                        "vless" in reported_services
+                        or "vless" in reported_caps
+                        or any(
+                            "vless" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
+                            for ib in inbounds
+                            if isinstance(ib, (str, dict))
+                        )
+                    )
+                    if has_vless:
+                        capabilities.append("vless")
+                        domain = x_data.get("vless_domain")
+                        if not domain:
+                            parsed = urllib.parse.urlsplit(all_data["api_url"])
+                            domain = parsed.hostname or ""
+                        extra_info = {
+                            "domain": domain,
+                            "vless_port": 443,
+                            "xray_api_url": all_data["api_url"],
+                        }
         except Exception:
             pass
 
@@ -517,10 +547,12 @@ async def process_add_server(
             server = await session.get(Server, existing_server_id)
             if server:
                 server.api_key = api_key
-                if capabilities:
-                    existing_caps = set(server.capabilities or ["awg"])
-                    existing_caps.update(capabilities)
-                    server.capabilities = list(existing_caps)
+                # Purge stale vless if no longer available on node
+                kept_caps = [c for c in (server.capabilities or []) if c not in ("awg", "vless")]
+                for cap in capabilities:
+                    if cap not in kept_caps:
+                        kept_caps.append(cap)
+                server.capabilities = kept_caps
                 if extra_info:
                     server.extra_data = {**(server.extra_data or {}), **extra_info}
                 server.health_state = ServerHealthState.ONLINE

@@ -1720,3 +1720,65 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
                     vless_count=None,
                 )
             mock_hwid_cnt.assert_called_once_with(session, 1)
+
+    async def test_sync_user_to_nodes_handles_version_conflict_by_bumping(self):
+        from database.models import User, Server, VlessSubscription
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        session = AsyncMock()
+        user = User(
+            id=10,
+            telegram_id=1010,
+            subscription_end=now_utc() + timedelta(days=5),
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+        )
+        sub = VlessSubscription(id=20, user_id=10, uuid="test-uuid", is_active=True, version=1)
+        srv = Server(id=1, api_url="https://node.com:8443", api_key="secret", capabilities=["vless"])
+
+        session.get = AsyncMock(return_value=user)
+
+        with (
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch.object(VlessSubscriptionService, "_execute_sync_to_nodes_with_status") as mock_sync_status,
+        ):
+            # First attempt triggers version bump; second attempt succeeds
+            mock_sync_status.side_effect = [
+                ({1: False}, True),
+                ({1: True}, False),
+            ]
+            res = await VlessSubscriptionService.sync_user_to_nodes(session, 10)
+            assert res == {1: True}
+            assert sub.version == 2
+            assert mock_sync_status.call_count == 2
+            assert sub.last_synced_version == 2
+
+    async def test_sweep_converges_unsynced_server_epochs(self):
+        from database.models import Server
+        from services.workers.cleanup import _sweep_vless_pending_revocations
+
+        srv = Server(
+            id=42,
+            is_active=True,
+            capabilities=["vless"],
+            xray_instance_epoch="new_epoch_999",
+            extra_data={"vless_synced_epoch": "old_epoch_111"},
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("services.workers.cleanup.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscriptions_with_pending_revocations", new=AsyncMock(return_value=[])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.sync_all_active_to_server", new=AsyncMock(return_value=5)) as mock_sync_server,
+        ):
+            await _sweep_vless_pending_revocations()
+            mock_sync_server.assert_called_once_with(42)

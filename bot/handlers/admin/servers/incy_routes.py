@@ -27,7 +27,12 @@ from config.constants import (
     WHITE_INTERNET_PROFILE_TITLE,
     WHITE_INTERNET_SUPPORT_URL,
 )
-from database.repositories.servers_repo import get_server_by_id, is_xray_server, update_server
+from database.repositories.servers_repo import (
+    get_server_by_id,
+    is_white_internet_origin_server,
+    is_xray_server,
+    update_server,
+)
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
@@ -42,18 +47,18 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
     bot_user = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
     default_bot_url = f"https://t.me/{bot_user}"
 
-    is_xray = is_xray_server(server)
+    is_origin = is_white_internet_origin_server(server)
     default_title = (
         WHITE_INTERNET_PROFILE_TITLE or texts.WL_PROFILE_NAME
-        if is_xray
+        if is_origin
         else os.getenv("VLESS_PROFILE_TITLE", "Just1k Access")
     )
     title = extra.get("profile_title") or default_title
-    description = extra.get("profile_description") or (WHITE_INTERNET_PROFILE_DESCRIPTION if is_xray else None)
+    description = extra.get("profile_description") or (WHITE_INTERNET_PROFILE_DESCRIPTION if is_origin else None)
     announce = extra.get("announce")
     announce_url = extra.get("announce_url")
 
-    default_origin_name = texts.WL_ORIGIN_VLESS_TAG if is_xray else (getattr(server, "name", None) or "Server")
+    default_origin_name = texts.WL_ORIGIN_VLESS_TAG if is_origin else (getattr(server, "name", None) or "Server")
     origin_name = extra.get("origin_tag") or extra.get("vless_name") or default_origin_name
     origin_badge_raw = extra.get("origin_badge") if "origin_badge" in extra else extra.get("server_description")
     if origin_badge_raw and origin_badge_raw.strip().lower() == "none":
@@ -64,8 +69,8 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
         origin_badge = texts.ADMIN_SERVER_INCY_VALUE_NONE
     origin_hidden = bool(extra.get("origin_hidden", False))
 
-    channel_url = extra.get("channel_url") or (WHITE_INTERNET_CHANNEL_URL if is_xray else None) or default_bot_url
-    support_url = extra.get("support_url") or (WHITE_INTERNET_SUPPORT_URL if is_xray else None) or default_bot_url
+    channel_url = extra.get("channel_url") or (WHITE_INTERNET_CHANNEL_URL if is_origin else None) or default_bot_url
+    support_url = extra.get("support_url") or (WHITE_INTERNET_SUPPORT_URL if is_origin else None) or default_bot_url
 
     origin_status = (
         texts.ADMIN_SERVER_INCY_STATUS_HIDDEN

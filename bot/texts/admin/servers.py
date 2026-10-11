@@ -6,6 +6,7 @@ ADMIN_SERVER_SELECT_PROTO_PROMPT = """🛠 Админка › ➕ <b>Добав�
 
 Выберите протокол узла:"""
 ADMIN_SERVER_BTN_PROTO_AWG = "🛡 AmneziaWG"
+ADMIN_SERVER_BTN_PROTO_VLESS = "⚡ VLESS Direct"
 ADMIN_SERVER_BTN_PROTO_XRAY = "⚡ Xray (Белый Интернет)"
 
 PROTOCOL_XRAY_ORIGIN = "Xray (Origin)"

@@ -11,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_admin_server_card_keyboard
+from config.constants import AMNEZIA_PROTOCOLS
 from database.repositories.servers_repo import (
-    is_xray_server,
     get_server_count,
     get_server_peer_counts,
     get_servers_paginated,
+    is_white_internet_origin_server,
+    is_xray_server,
 )
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
@@ -61,11 +63,20 @@ async def _build_servers_list_text_and_kb(
         for server in servers:
             flag = server.country_flag or texts.EMOJI_GLOBE
             status = texts.STATUS_ACTIVE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
-            proto_badge = (
-                "[Xray]"
-                if is_xray_server(server)
-                else "[AWG]"
-            )
+            caps = getattr(server, "capabilities", None) or []
+            proto = str(getattr(server, "protocol", "") or "").lower()
+            has_awg = proto in AMNEZIA_PROTOCOLS or "awg" in caps
+            has_vless = "vless" in caps or "xray_vless" in caps or proto == "vless"
+            has_wl = is_xray_server(server)
+
+            if has_awg and has_vless:
+                proto_badge = "[AWG+VLESS]"
+            elif has_vless and not has_wl:
+                proto_badge = "[VLESS]"
+            elif has_wl:
+                proto_badge = "[Xray]"
+            else:
+                proto_badge = "[AWG]"
             db_used = db_counts.get(server.id, 0)
             cached_used = get_cached_peer_count(server.id)
             total = server.max_clients or 240
@@ -212,9 +223,10 @@ async def _show_server_card(
 
     if ping_result:
         rendered += texts.COMMON_REZULTAT_PROVERKI_SVYAZI.format(ping_result=ping_result)
-    is_xray = is_xray_server(server)
     caps = getattr(server, "capabilities", None) or []
-    has_vless = "vless" in caps or "xray_vless" in caps
+    proto = str(getattr(server, "protocol", "") or "").lower()
+    has_vless = "vless" in caps or "xray_vless" in caps or proto == "vless"
+    is_origin = is_white_internet_origin_server(server)
     try:
         await callback.message.edit_text(
             rendered,
@@ -223,7 +235,7 @@ async def _show_server_card(
                 server.is_active,
                 used_clients=actual_peers,
                 max_clients=max_clients,
-                is_xray=is_xray,
+                is_xray=is_origin,
                 has_vless=has_vless,
             ),
             parse_mode="HTML",

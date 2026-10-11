@@ -112,55 +112,20 @@ class VlessSubscriptionService:
         async def _run() -> None:
             from database.connection import session_scope
             try:
-                sub_uuid = None
-                sub_id = None
-                sub_version = 1
-                pending_revocations: list[str] = []
-                desired_active = False
-                targets = []
                 async with session_scope() as scoped_session:
+                    await cls.sync_user_to_nodes(scoped_session, user_id, is_active=is_active)
+
+                    # Retry deprovisioning for any pending revoked UUIDs
                     sub = await vless_subscription_repo.get_subscription_by_user_id(scoped_session, user_id)
-                    if sub is not None:
-                        sub_uuid = sub.uuid
-                        sub_id = sub.id
-                        sub_version = getattr(sub, "version", 1) or 1
-                        pending_revocations = list(getattr(sub, "pending_revoked_uuids", None) or [])
-                        from services.subscription import SubscriptionService
-                        user = await scoped_session.get(User, user_id)
-                        desired_active = bool(
-                            sub.is_active
-                            and user is not None
-                            and not getattr(user, "is_banned", False)
-                            and not getattr(user, "financial_hold", False)
-                            and not getattr(user, "is_deleted", False)
-                            and SubscriptionService.check_vpn_access(user)
-                        )
-                        if is_active is False:
-                            desired_active = False
+                    if sub and sub.pending_revoked_uuids:
                         servers = await cls.get_configured_vless_servers(scoped_session)
                         targets = cls._extract_node_targets(servers)
-
-                if not targets or not sub_uuid:
-                    return
-
-                results = await cls._execute_sync_to_nodes(
-                    targets, sub_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub_id
-                )
-
-                # Retry deprovisioning for any pending revoked UUIDs
-                if pending_revocations and sub_id:
-                    for rev_uuid in pending_revocations:
-                        deprov_res = await cls._execute_deprovision_on_nodes(targets, rev_uuid, version=sub_version)
-                        if all(deprov_res.values()) and len(deprov_res) == len(targets):
-                            async with session_scope() as scoped_session:
-                                await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub_id, rev_uuid)
-
-                if all(results.values()) and len(results) == len(targets):
-                    async with session_scope() as scoped_session:
-                        current_sub = await vless_subscription_repo.get_subscription_by_user_id(scoped_session, user_id)
-                        if current_sub:
-                            current_sub.last_synced_at = now_utc()
-                            current_sub.last_synced_version = sub_version
+                        if targets:
+                            sub_ver = getattr(sub, "version", 1) or 1
+                            for rev_uuid in list(sub.pending_revoked_uuids):
+                                deprov_res = await cls._execute_deprovision_on_nodes(targets, rev_uuid, version=sub_ver)
+                                if all(deprov_res.values()) and len(deprov_res) == len(targets):
+                                    await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub.id, rev_uuid)
             except Exception as e:
                 logger.warning("Background sync of VLESS user %s failed: %s", user_id, e)
 
@@ -235,6 +200,8 @@ class VlessSubscriptionService:
         session: AsyncSession,
     ) -> list[Server]:
         """Fetch all online servers capable of serving VLESS TLS."""
+        from database.repositories.servers_repo import is_vless_capable_server
+
         stmt = (
             select(Server)
             .where(
@@ -245,13 +212,7 @@ class VlessSubscriptionService:
             .order_by(Server.id.asc())
         )
         servers = (await session.execute(stmt)).scalars().all()
-        eligible: list[Server] = []
-        for srv in servers:
-            caps = srv.capabilities or []
-            proto = (srv.protocol or "").lower()
-            if "vless" in caps or "xray_vless" in caps or proto == "vless":
-                eligible.append(srv)
-        return eligible
+        return [srv for srv in servers if is_vless_capable_server(srv)]
 
     @staticmethod
     async def get_configured_vless_servers(
@@ -262,6 +223,8 @@ class VlessSubscriptionService:
         Used for synchronization and deprovisioning to guarantee that offline or degraded nodes
         are not silently omitted from revocation/sync targets.
         """
+        from database.repositories.servers_repo import is_vless_capable_server
+
         stmt = (
             select(Server)
             .where(
@@ -271,13 +234,7 @@ class VlessSubscriptionService:
             .order_by(Server.id.asc())
         )
         servers = (await session.execute(stmt)).scalars().all()
-        configured: list[Server] = []
-        for srv in servers:
-            caps = srv.capabilities or []
-            proto = (srv.protocol or "").lower()
-            if "vless" in caps or "xray_vless" in caps or proto == "vless":
-                configured.append(srv)
-        return configured
+        return [srv for srv in servers if is_vless_capable_server(srv)]
 
     @staticmethod
     def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str]]:
@@ -307,7 +264,22 @@ class VlessSubscriptionService:
         user_id: int | None = None,
         sub_id: int | None = None,
     ) -> dict[int, bool]:
+        results, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+            targets, client_uuid, desired_active, version=version, user_id=user_id, sub_id=sub_id
+        )
+        return results
+
+    @staticmethod
+    async def _execute_sync_to_nodes_with_status(
+        targets: list[tuple[int, str, str]],
+        client_uuid: str,
+        desired_active: bool,
+        version: int | None = None,
+        user_id: int | None = None,
+        sub_id: int | None = None,
+    ) -> tuple[dict[int, bool], bool]:
         results: dict[int, bool] = {}
+        needs_version_bump = False
         for srv_id, api_url, api_key in targets:
             try:
                 async with XrayNodeClient(timeout=5.0) as client:
@@ -329,9 +301,12 @@ class VlessSubscriptionService:
                     elif resp.result == "already_newer":
                         expected_state = "active" if desired_active else "disabled"
                         actual_state = (resp.raw_data or {}).get("state")
+                        match = (actual_state == expected_state)
+                        if not match:
+                            needs_version_bump = True
                         results[srv_id] = (
                             has_vless
-                            and (actual_state == expected_state)
+                            and match
                             and bool(resp.all_inbounds_verified)
                         )
                     else:
@@ -345,7 +320,7 @@ class VlessSubscriptionService:
                     exc,
                 )
                 results[srv_id] = False
-        return results
+        return results, needs_version_bump
 
     @staticmethod
     async def _execute_deprovision_on_nodes(
@@ -424,9 +399,17 @@ class VlessSubscriptionService:
             return {}
 
         sub_version = getattr(sub, "version", 1) or 1
-        results = await VlessSubscriptionService._execute_sync_to_nodes(
+        results, needs_version_bump = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
             targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
         )
+
+        if needs_version_bump:
+            sub.version = sub_version + 1
+            await session.flush()
+            sub_version = sub.version
+            results, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+                targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
+            )
 
         if targets and all(results.values()) and len(results) == len(targets):
             sub.last_synced_at = now_utc()
@@ -492,6 +475,15 @@ class VlessSubscriptionService:
                         synced_count += 1
                 except Exception as e:
                     logger.warning("Failed to provision sub_id=%s on new server %s: %s", sub.id, server_id, e)
+
+            # Record synchronized epoch in server extra_data
+            async with session_scope() as session:
+                server = await session.get(Server, server_id)
+                if server and server.xray_instance_epoch:
+                    extra = dict(server.extra_data or {})
+                    extra["vless_synced_epoch"] = server.xray_instance_epoch
+                    server.extra_data = extra
+                    await session.flush()
         except Exception as e:
             logger.error("Error in sync_all_active_to_server for server %s: %s", server_id, e)
 

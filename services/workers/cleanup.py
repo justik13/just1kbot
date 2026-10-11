@@ -360,6 +360,20 @@ async def _sweep_vless_pending_revocations() -> None:
                     await VlessSubscriptionService.sync_user_to_nodes(session, uid)
             except Exception as e:
                 logger.warning("Out-of-sync VLESS reconciliation failed for user_id=%s: %s", uid, e)
+
+        # 3. Converge VLESS servers whose epoch drift occurred while monitor wasn't active
+        async with session_scope() as session:
+            vless_servers = await VlessSubscriptionService.get_configured_vless_servers(session)
+            unsynced_server_ids = [
+                s.id for s in vless_servers
+                if s.xray_instance_epoch and (s.extra_data or {}).get("vless_synced_epoch") != s.xray_instance_epoch
+            ]
+
+        for srv_id in unsynced_server_ids:
+            try:
+                await VlessSubscriptionService.sync_all_active_to_server(srv_id)
+            except Exception as e:
+                logger.warning("VLESS server epoch convergence failed for server %s: %s", srv_id, e)
     except Exception as e:
         logger.warning("Error in _sweep_vless_pending_revocations: %s", e)
 

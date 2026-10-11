@@ -130,6 +130,7 @@ class WhiteInternetReconciliationWorker:
                             version=target_version,
                             expected_node_epoch=target_epoch,
                             idempotency_key=f"reconcile:{sub_id}:{target_epoch}:{target_version}:{desired_active}",
+                            service="white_internet",
                         )
 
                         sync_result = resp.result if hasattr(resp, "result") else resp[0]
@@ -581,6 +582,7 @@ class WhiteInternetReconciliationWorker:
                             idempotency_key=(
                                 f"orphan:{row.id}:{row.client_uuid}:{row.desired_version}"
                             ),
+                            service="white_internet",
                         )
                     sync_result = resp.result if hasattr(resp, "result") else resp[0]
                     err_msg = resp.error if hasattr(resp, "error") else resp[1]
