@@ -142,6 +142,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
 
     async def test_expired_subscription_returns_notice_200(self):
         mock_session = AsyncMock()
+        mock_session.add = MagicMock()
 
         @asynccontextmanager
         async def fake_session_scope():
@@ -159,6 +160,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=expired_user),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
         ):
             resp = await self.client.get("/sub/vless/test-token-valid-length-12345678")
             self.assertEqual(resp.status, 200)
@@ -273,6 +275,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
 
     async def test_financial_hold_user_returns_notice_200(self):
         mock_session = AsyncMock()
+        mock_session.add = MagicMock()
 
         @asynccontextmanager
         async def fake_session_scope():
@@ -291,6 +294,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=hold_user),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
         ):
             headers = {"X-Hwid": "test-client-hwid-99"}
             resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
