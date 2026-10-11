@@ -282,7 +282,7 @@ class TestAdminServerAdd(unittest.IsolatedAsyncioTestCase):
         with (
             patch("bot.handlers.admin.servers.add_routes.is_admin", return_value=True),
             patch("bot.handlers.admin.servers.add_routes.render_hub", new_callable=AsyncMock) as mock_render,
-            patch("bot.handlers.admin.servers.add_routes.XrayNodeClient", fake_xray_client),
+            patch("services.xray_node_client.XrayNodeClient", fake_xray_client),
             patch("bot.handlers.admin.servers.add_routes.get_server_by_api_url", new_callable=AsyncMock, return_value=existing_srv),
             patch("bot.handlers.admin.servers.add_routes.create_server", new_callable=AsyncMock) as mock_create,
         ):

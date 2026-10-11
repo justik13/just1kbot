@@ -1993,6 +1993,6 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
                 mock_req.assert_called_once_with(
                     "POST",
                     "https://127.0.0.1:8443/v1/clients/inventory",
-                    {"X-API-Key": "test_key", "Content-Type": "application/json"},
+                    {"X-API-Key": "test_key", "Accept": "application/json", "Content-Type": "application/json"},
                     json_data={"client_ids": ["uuid-1"], "service": "white_internet"},
                 )
