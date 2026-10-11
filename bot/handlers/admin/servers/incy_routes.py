@@ -51,7 +51,7 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
     default_title = (
         WHITE_INTERNET_PROFILE_TITLE or texts.WL_PROFILE_NAME
         if is_origin
-        else os.getenv("VLESS_PROFILE_TITLE", "Just1k Access")
+        else os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k")
     )
     title = extra.get("profile_title") or default_title
     description = extra.get("profile_description") or (WHITE_INTERNET_PROFILE_DESCRIPTION if is_origin else None)
@@ -92,6 +92,31 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
     }
 
 
+def _build_server_incy_card(server: Any, details: dict[str, Any]) -> tuple[str, Any]:
+    """Build formatted text and keyboard for server INCY configuration card."""
+    flag = server.country_flag or texts.EMOJI_GLOBE
+    is_origin = is_white_internet_origin_server(server)
+    card_template = texts.ADMIN_SERVER_INCY_CARD if is_origin else texts.ADMIN_SERVER_INCY_STANDARD_CARD
+    card_text = card_template.format(
+        flag=flag,
+        name=safe(server.name),
+        title=safe(details["title"]),
+        description=safe(details["description"]),
+        announce=safe(details["announce"]),
+        announce_url=safe(details["announce_url"]),
+        origin_name=safe(details["origin_name"]),
+        origin_badge=safe(details["origin_badge"]),
+        origin_status=safe(details["origin_status"]),
+    )
+    keyboard = get_admin_server_incy_keyboard(
+        server.id,
+        origin_hidden=details["origin_hidden"],
+        is_xray=is_xray_server(server),
+        is_origin=is_origin,
+    )
+    return card_text, keyboard
+
+
 @router.callback_query(F.data.startswith("admin_server_incy:"))
 async def show_server_incy_card(
     callback: CallbackQuery,
@@ -116,27 +141,12 @@ async def show_server_incy_card(
         return
 
     details = _get_server_incy_details(server)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    card_text = texts.ADMIN_SERVER_INCY_CARD.format(
-        flag=flag,
-        name=safe(server.name),
-        title=safe(details["title"]),
-        description=safe(details["description"]),
-        announce=safe(details["announce"]),
-        announce_url=safe(details["announce_url"]),
-        origin_name=safe(details["origin_name"]),
-        origin_badge=safe(details["origin_badge"]),
-        origin_status=safe(details["origin_status"]),
-    )
+    card_text, reply_markup = _build_server_incy_card(server, details)
 
     try:
         await callback.message.edit_text(
             card_text,
-            reply_markup=get_admin_server_incy_keyboard(
-                server_id,
-                origin_hidden=details["origin_hidden"],
-                is_xray=is_xray_server(server),
-            ),
+            reply_markup=reply_markup,
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
@@ -174,13 +184,24 @@ async def start_edit_server_incy_param(
     await state.clear()
 
     details = _get_server_incy_details(server)
+    is_origin = is_white_internet_origin_server(server)
+    name_prompt = (
+        texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_NAME
+        if is_origin
+        else texts.ADMIN_SERVER_INCY_PROMPT_STANDARD_NAME
+    )
+    badge_prompt = (
+        texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_BADGE
+        if is_origin
+        else texts.ADMIN_SERVER_INCY_PROMPT_STANDARD_BADGE
+    )
     prompt_map = {
         "title": (texts.ADMIN_SERVER_INCY_PROMPT_TITLE, details["title"]),
         "desc": (texts.ADMIN_SERVER_INCY_PROMPT_DESC, details["description"]),
         "announce": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE, details["announce"]),
         "announce_url": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL, details["announce_url"]),
-        "origin_name": (texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_NAME, details["origin_name"]),
-        "origin_badge": (texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_BADGE, details["origin_badge"]),
+        "origin_name": (name_prompt, details["origin_name"]),
+        "origin_badge": (badge_prompt, details["origin_badge"]),
     }
 
     if param not in prompt_map:
@@ -301,28 +322,14 @@ async def process_server_incy_param_input(
     await session.refresh(server)
 
     details = _get_server_incy_details(server)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    card_text = f"{texts.ADMIN_SERVER_INCY_SAVED}\n\n" + texts.ADMIN_SERVER_INCY_CARD.format(
-        flag=flag,
-        name=safe(server.name),
-        title=safe(details["title"]),
-        description=safe(details["description"]),
-        announce=safe(details["announce"]),
-        announce_url=safe(details["announce_url"]),
-        origin_name=safe(details["origin_name"]),
-        origin_badge=safe(details["origin_badge"]),
-        origin_status=safe(details["origin_status"]),
-    )
+    card_text, reply_markup = _build_server_incy_card(server, details)
+    full_text = f"{texts.ADMIN_SERVER_INCY_SAVED}\n\n{card_text}"
 
     await render_hub(
         message.bot,
         message.chat.id,
-        card_text,
-        reply_markup=get_admin_server_incy_keyboard(
-            server_id,
-            origin_hidden=details["origin_hidden"],
-            is_xray=is_xray_server(server),
-        ),
+        full_text,
+        reply_markup=reply_markup,
         parse_mode="HTML",
         trigger_message_id=getattr(message, "message_id", None),
     )
@@ -355,27 +362,12 @@ async def toggle_server_incy_origin_visibility(
     await callback.answer(texts.ADMIN_SERVER_INCY_SAVED, show_alert=False)
 
     details = _get_server_incy_details(server)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    card_text = texts.ADMIN_SERVER_INCY_CARD.format(
-        flag=flag,
-        name=safe(server.name),
-        title=safe(details["title"]),
-        description=safe(details["description"]),
-        announce=safe(details["announce"]),
-        announce_url=safe(details["announce_url"]),
-        origin_name=safe(details["origin_name"]),
-        origin_badge=safe(details["origin_badge"]),
-        origin_status=safe(details["origin_status"]),
-    )
+    card_text, reply_markup = _build_server_incy_card(server, details)
 
     try:
         await callback.message.edit_text(
             card_text,
-            reply_markup=get_admin_server_incy_keyboard(
-                server_id,
-                origin_hidden=details["origin_hidden"],
-                is_xray=is_xray_server(server),
-            ),
+            reply_markup=reply_markup,
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
@@ -983,27 +975,12 @@ async def reset_server_incy_to_defaults(
     await callback.answer(texts.ADMIN_SERVER_INCY_RESET_SUCCESS, show_alert=True)
 
     details = _get_server_incy_details(server)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    card_text = texts.ADMIN_SERVER_INCY_CARD.format(
-        flag=flag,
-        name=safe(server.name),
-        title=safe(details["title"]),
-        description=safe(details["description"]),
-        announce=safe(details["announce"]),
-        announce_url=safe(details["announce_url"]),
-        origin_name=safe(details["origin_name"]),
-        origin_badge=safe(details["origin_badge"]),
-        origin_status=safe(details["origin_status"]),
-    )
+    card_text, reply_markup = _build_server_incy_card(server, details)
 
     try:
         await callback.message.edit_text(
             card_text,
-            reply_markup=get_admin_server_incy_keyboard(
-                server_id,
-                origin_hidden=details["origin_hidden"],
-                is_xray=is_xray_server(server),
-            ),
+            reply_markup=reply_markup,
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:

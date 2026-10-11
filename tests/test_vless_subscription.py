@@ -447,7 +447,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             raw_title_hdr = resp.headers["Profile-Title"]
             b64_title_val = raw_title_hdr.removeprefix("base64:") if raw_title_hdr.startswith("base64:") else raw_title_hdr
             profile_title = base64.b64decode(b64_title_val).decode("utf-8")
-            self.assertEqual("Just1k Access", profile_title)
+            self.assertEqual("✦ Just1k", profile_title)
 
             # Server link must be present in body
             body = await resp.text()
@@ -1651,10 +1651,17 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         card_btns = [b.text for row in card_kb.inline_keyboard for b in row]
         self.assertIn(texts.ADMIN_SERVER_BTN_INCY, card_btns)
 
-        incy_kb = get_admin_server_incy_keyboard(server_id=1, is_xray=False)
+        incy_kb = get_admin_server_incy_keyboard(server_id=1, is_xray=False, is_origin=False)
         incy_btns = [b.text for row in incy_kb.inline_keyboard for b in row]
-        self.assertIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME, incy_btns)
-        self.assertIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE, incy_btns)
+        self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_NAME, incy_btns)
+        self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_BADGE, incy_btns)
+        self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_RELAYS, incy_btns)
+
+        origin_kb = get_admin_server_incy_keyboard(server_id=1, is_xray=True, is_origin=True)
+        origin_btns = [b.text for row in origin_kb.inline_keyboard for b in row]
+        self.assertIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME, origin_btns)
+        self.assertIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE, origin_btns)
+        self.assertIn(texts.ADMIN_SERVER_INCY_BTN_RELAYS, origin_btns)
 
     async def test_amnezia_screen_reflects_combined_quota_and_hides_add_btn(self):
         from bot.handlers.connection.common import _build_amnezia_screen

@@ -208,7 +208,10 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
 
 
 def get_admin_server_incy_keyboard(
-    server_id: int, origin_hidden: bool = False, is_xray: bool = True
+    server_id: int,
+    origin_hidden: bool = False,
+    is_xray: bool = True,
+    is_origin: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -227,20 +230,37 @@ def get_admin_server_incy_keyboard(
         text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL,
         callback_data=f"admin_server_incy_edit:{server_id}:announce_url",
     )
+
+    name_btn_text = (
+        texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME
+        if is_origin
+        else texts.ADMIN_SERVER_INCY_BTN_NODE_NAME
+    )
+    badge_btn_text = (
+        texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE
+        if is_origin
+        else texts.ADMIN_SERVER_INCY_BTN_NODE_BADGE
+    )
+    toggle_tpl = (
+        texts.ADMIN_SERVER_INCY_BTN_ORIGIN_TOGGLE
+        if is_origin
+        else texts.ADMIN_SERVER_INCY_BTN_NODE_TOGGLE
+    )
+
     builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME,
+        text=name_btn_text,
         callback_data=f"admin_server_incy_edit:{server_id}:origin_name",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE,
+        text=badge_btn_text,
         callback_data=f"admin_server_incy_edit:{server_id}:origin_badge",
     )
     origin_status = texts.ADMIN_SERVER_INCY_STATUS_HIDDEN if origin_hidden else texts.ADMIN_SERVER_INCY_STATUS_ACTIVE
     builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_TOGGLE.format(status=origin_status),
+        text=toggle_tpl.format(status=origin_status),
         callback_data=f"admin_server_incy_toggle_origin:{server_id}",
     )
-    if is_xray:
+    if is_origin:
         builder.button(
             text=texts.ADMIN_SERVER_INCY_BTN_RELAYS,
             callback_data=f"admin_server_incy_relays:{server_id}",
@@ -253,7 +273,7 @@ def get_admin_server_incy_keyboard(
         text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
         callback_data=f"admin_server_card:{server_id}",
     )
-    if is_xray:
+    if is_origin:
         builder.adjust(2, 2, 2, 1, 1, 1, 1)
     else:
         builder.adjust(2, 2, 2, 1, 1, 1)

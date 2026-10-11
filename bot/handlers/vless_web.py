@@ -214,7 +214,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         expire_ts = int(user.subscription_end.timestamp()) if user.subscription_end else 0
         bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
 
-        profile_title = os.getenv("VLESS_PROFILE_TITLE", "Just1k Access")
+        profile_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k")
         profile_desc = None
         announce = None
         announce_url = None

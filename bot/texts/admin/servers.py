@@ -274,6 +274,20 @@ ADMIN_SERVER_INCY_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> �
 
 <i>Для изменения выберите нужный пункт ниже:</i>"""
 
+ADMIN_SERVER_INCY_STANDARD_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> › 🎨 <b>Оформление INCY</b>
+
+Настройки внешнего вида подписки для приложения INCY:
+
+• <b>Имя профиля:</b> <code>{title}</code>
+• <b>Подзаголовок:</b> <code>{description}</code> <i>(не отображается в проверенных мобильных версиях INCY)</i>
+• <b>Баннер (объявление):</b> <code>{announce}</code>
+• <b>Ссылка баннера:</b> <code>{announce_url}</code>
+• <b>Имя узла в клиенте:</b> <code>{origin_name}</code>
+• <b>Бейдж узла:</b> <code>{origin_badge}</code>
+• <b>Статус в подписке:</b> <code>{origin_status}</code>
+
+<i>Для изменения выберите нужный пункт ниже:</i>"""
+
 ADMIN_SERVER_INCY_PROMPT_TITLE = """🎨 <b>Изменение имени профиля в INCY</b>
 
 Текущее значение: <code>{current}</code>
@@ -314,11 +328,23 @@ ADMIN_SERVER_INCY_PROMPT_ORIGIN_NAME = """🎨 <b>Изменение имени 
 
 Отправьте отображаемое имя узла (до 30 символов, например <code>🇷🇺 Россия</code>) или дефис «-» для сброса:"""
 
+ADMIN_SERVER_INCY_PROMPT_STANDARD_NAME = """🎨 <b>Изменение имени узла в клиенте</b>
+
+Текущее имя: <code>{current}</code>
+
+Отправьте отображаемое имя узла (до 30 символов, например <code>🇩🇪 Германия</code>) или дефис «-» для сброса:"""
+
 ADMIN_SERVER_INCY_PROMPT_ORIGIN_BADGE = """🎨 <b>Изменение бейджа шлюза РФ (Origin)</b>
 
 Текущий бейдж: <code>{current}</code>
 
 Отправьте текст бейджа (до 30 символов, например <code>Прямой шлюз</code>), <code>none</code> для отключения или дефис «-» для сброса:"""
+
+ADMIN_SERVER_INCY_PROMPT_STANDARD_BADGE = """🎨 <b>Изменение бейджа узла в клиенте</b>
+
+Текущий бейдж: <code>{current}</code>
+
+Отправьте текст бейджа (до 30 символов, например <code>Скоростной</code>), <code>none</code> для отключения или дефис «-» для сброса:"""
 
 ADMIN_SERVER_INCY_PROMPT_RELAY_NAME = """🎨 <b>Изменение имени узла {relay_code}</b>
 
@@ -360,6 +386,9 @@ ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL = "🔗 Ссылка баннера"
 ADMIN_SERVER_INCY_BTN_ORIGIN_NAME = "🇷🇺 Имя шлюза РФ"
 ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE = "🏷️ Бейдж шлюза РФ"
 ADMIN_SERVER_INCY_BTN_ORIGIN_TOGGLE = "👁️ Шлюз РФ: {status}"
+ADMIN_SERVER_INCY_BTN_NODE_NAME = "✏️ Имя узла"
+ADMIN_SERVER_INCY_BTN_NODE_BADGE = "🏷️ Бейдж узла"
+ADMIN_SERVER_INCY_BTN_NODE_TOGGLE = "👁️ В подписке: {status}"
 ADMIN_SERVER_INCY_BTN_RELAYS = "🌐 Узлы (Релеи)"
 ADMIN_SERVER_INCY_BTN_RESET = "🔄 Сбросить к дефолтам"
 ADMIN_SERVER_INCY_BTN_BACK = "« Назад к оформлению"
