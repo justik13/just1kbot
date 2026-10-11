@@ -1996,3 +1996,190 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
                     {"X-API-Key": "test_key", "Accept": "application/json", "Content-Type": "application/json"},
                     json_data={"client_ids": ["uuid-1"], "service": "white_internet"},
                 )
+
+    async def test_execute_sync_and_deprovision_strict_all_inbounds_verified(self):
+        from services.vless_subscription_service import VlessSubscriptionService
+        from services.xray_node_client import SyncResponse
+
+        targets = [(10, "https://node1.example.com:8443", "key1")]
+
+        # Case 1: result == "applied" but all_inbounds_verified is False -> results[10] must be False
+        partial_resp = SyncResponse(
+            status="ok",
+            result="applied",
+            verified_inbounds=["just1k-vless-direct"],
+            all_inbounds_verified=False,
+        )
+        with patch("services.vless_subscription_service.XrayNodeClient.sync_client", new=AsyncMock(return_value=partial_resp)):
+            sync_res, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+                targets, "uuid-123", True, version=1
+            )
+            self.assertEqual(sync_res, {10: False})
+
+            deprov_res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                targets, "uuid-123", version=1
+            )
+            self.assertEqual(deprov_res, {10: False})
+
+        # Case 2: result == "applied" and all_inbounds_verified is True -> results[10] must be True
+        full_resp = SyncResponse(
+            status="ok",
+            result="applied",
+            verified_inbounds=["just1k-vless-direct"],
+            all_inbounds_verified=True,
+        )
+        with patch("services.vless_subscription_service.XrayNodeClient.sync_client", new=AsyncMock(return_value=full_resp)):
+            sync_res, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+                targets, "uuid-123", True, version=1
+            )
+            self.assertEqual(sync_res, {10: True})
+
+            deprov_res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                targets, "uuid-123", version=1
+            )
+            self.assertEqual(deprov_res, {10: True})
+
+    async def test_get_revocation_target_servers_includes_inactive_servers(self):
+        from config.enums import ServerLifecycleStatus
+        from database.models import Server
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        active_srv = Server(
+            id=1,
+            is_active=True,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["vless"],
+            api_url="https://s1.example.com:8443",
+            api_key="k1",
+        )
+        inactive_but_alive_srv = Server(
+            id=2,
+            is_active=False,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["vless"],
+            api_url="https://s2.example.com:8443",
+            api_key="k2",
+        )
+        non_vless_srv = Server(
+            id=3,
+            is_active=True,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["awg"],
+            api_url="https://s3.example.com:8443",
+            api_key="k3",
+        )
+        _decommissioned_srv = Server(
+            id=4,
+            is_active=False,
+            lifecycle_status=ServerLifecycleStatus.DECOMMISSIONED,
+            capabilities=["vless"],
+            api_url="https://s4.example.com:8443",
+            api_key="k4",
+        )
+
+        session = AsyncMock()
+        mock_res = MagicMock()
+        mock_res.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[active_srv, inactive_but_alive_srv, non_vless_srv])))
+        session.execute = AsyncMock(return_value=mock_res)
+
+        targets = await VlessSubscriptionService.get_revocation_target_servers(session)
+        target_ids = [s.id for s in targets]
+        self.assertIn(1, target_ids)
+        self.assertIn(2, target_ids)
+        self.assertNotIn(3, target_ids)
+        self.assertNotIn(4, target_ids)
+
+    async def test_bump_subscription_version_under_row_lock(self):
+        from database.models import VlessSubscription
+        from database.repositories import vless_subscription_repo
+
+        sub = VlessSubscription(id=99, user_id=1, uuid="test-uuid", version=3)
+        session = AsyncMock()
+        mock_res = MagicMock()
+        mock_res.scalar_one_or_none = MagicMock(return_value=sub)
+        session.execute = AsyncMock(return_value=mock_res)
+
+        updated = await vless_subscription_repo.bump_subscription_version(session, 99)
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.version, 4)
+        session.flush.assert_called_once()
+
+    def test_generate_vless_links_skips_invalid_domain_or_missing_fqdn(self):
+        from config.enums import ServerHealthState
+        from database.models import Server, VlessSubscription
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        sub = VlessSubscription(id=1, uuid="11111111-2222-3333-4444-555555555555", is_active=True)
+
+        srv_no_domain = Server(
+            id=1,
+            name="No Domain",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            api_url="https://192.168.1.1:8443",
+            extra_data={},
+        )
+        srv_invalid_domain = Server(
+            id=2,
+            name="Invalid Domain",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            api_url="https://node.example.com:8443",
+            extra_data={"domain": "localhost:8443"},
+        )
+        srv_no_dot = Server(
+            id=3,
+            name="No Dot Domain",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            api_url="https://node.example.com:8443",
+            extra_data={"domain": "nodomain"},
+        )
+        srv_valid = Server(
+            id=4,
+            name="Valid Domain",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            api_url="https://node.example.com:8443",
+            extra_data={"domain": "valid.example.com"},
+        )
+
+        links = VlessSubscriptionService.generate_vless_links(
+            sub, [srv_no_domain, srv_invalid_domain, srv_no_dot, srv_valid]
+        )
+        self.assertEqual(len(links), 1)
+        self.assertIn("@valid.example.com:443", links[0])
+
+    def test_generate_vless_links_sanitizes_special_characters_in_name(self):
+        from config.enums import ServerHealthState
+        from database.models import Server, VlessSubscription
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        sub = VlessSubscription(id=1, uuid="11111111-2222-3333-4444-555555555555", is_active=True)
+        srv = Server(
+            id=1,
+            name="NL #1 ?fast &secure",
+            country_flag="🇳🇱",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            extra_data={
+                "domain": "nl.example.com",
+                "origin_badge": "VIP",
+            },
+        )
+        links = VlessSubscriptionService.generate_vless_links(sub, [srv])
+        self.assertEqual(len(links), 1)
+        link = links[0]
+        base_part, fragment_part = link.split("#", 1)
+        label_part, badge_param = fragment_part.split("?serverDescription=", 1)
+        self.assertNotIn("#", label_part)
+        self.assertNotIn("?", label_part)
+        self.assertNotIn("&", label_part)
+        self.assertIn("NL  1  fast  secure", label_part)
+        b64_vip = base64.b64encode("VIP".encode("utf-8")).decode("utf-8")
+        self.assertEqual(badge_param, b64_vip)

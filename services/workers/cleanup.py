@@ -317,7 +317,7 @@ async def _sweep_vless_pending_revocations() -> None:
         # 1. Retry deprovisioning of old revoked UUIDs
         async with session_scope() as session:
             subs = await vless_subscription_repo.get_subscriptions_with_pending_revocations(session, limit=20)
-            servers = await VlessSubscriptionService.get_configured_vless_servers(session)
+            servers = await VlessSubscriptionService.get_revocation_target_servers(session)
             targets = VlessSubscriptionService._extract_node_targets(servers)
             sub_items = [
                 (s.id, list(getattr(s, "pending_revoked_uuids", None) or []), getattr(s, "version", 1) or 1)

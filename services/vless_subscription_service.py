@@ -45,15 +45,17 @@ class VlessSubscriptionService:
 
             extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
             domain = extra.get("domain")
-            if not domain and srv.api_url:
-                parsed = urllib.parse.urlsplit(srv.api_url)
-                domain = parsed.hostname
-
             if not domain:
+                logger.warning(
+                    "Skipping server %s (%s) in VLESS links: no public TLS client domain configured",
+                    srv.id,
+                    srv.name,
+                )
                 continue
 
             domain = str(domain).strip().lower()
-            if not domain or " " in domain or "/" in domain:
+            if not domain or " " in domain or "/" in domain or ":" in domain or "." not in domain:
+                logger.warning("Skipping server %s: invalid domain %s", srv.id, domain)
                 continue
 
             raw_port = extra.get("vless_port", 443)
@@ -68,7 +70,10 @@ class VlessSubscriptionService:
 
             flag = srv.country_flag or "🌐"
             raw_name = extra.get("origin_tag") or extra.get("vless_name") or srv.name
-            clean_name = str(raw_name).strip()
+            clean_name = str(raw_name)
+            for ch in ("#", "?", "&"):
+                clean_name = clean_name.replace(ch, " ")
+            clean_name = clean_name.strip()
             if flag and not clean_name.startswith(flag):
                 label = f"{flag} {clean_name}"
             else:
@@ -241,6 +246,26 @@ class VlessSubscriptionService:
         return [srv for srv in servers if is_vless_capable_server(srv)]
 
     @staticmethod
+    async def get_revocation_target_servers(
+        session: AsyncSession,
+    ) -> list[Server]:
+        """Fetch all servers that might still host VLESS credentials for revocation.
+        Includes servers where is_active=False, provided they are still active machines
+        (lifecycle_status == ServerLifecycleStatus.ACTIVE).
+        """
+        from database.repositories.servers_repo import is_vless_capable_server
+
+        stmt = (
+            select(Server)
+            .where(
+                Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+            )
+            .order_by(Server.id.asc())
+        )
+        servers = (await session.execute(stmt)).scalars().all()
+        return [srv for srv in servers if is_vless_capable_server(srv)]
+
+    @staticmethod
     def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str]]:
         targets: list[tuple[int, str, str]] = []
         for srv in servers:
@@ -301,7 +326,7 @@ class VlessSubscriptionService:
                     ] if resp.verified_inbounds else []
                     has_vless = any("vless" in ib for ib in verified)
                     if resp.result == "applied":
-                        results[srv_id] = has_vless
+                        results[srv_id] = has_vless and bool(resp.all_inbounds_verified)
                     elif resp.result == "already_newer":
                         expected_state = "active" if desired_active else "disabled"
                         actual_state = (resp.raw_data or {}).get("state")
@@ -350,7 +375,7 @@ class VlessSubscriptionService:
                     ] if resp.verified_inbounds else []
                     has_vless = any("vless" in ib for ib in verified)
                     if resp.result == "applied":
-                        results[srv_id] = has_vless
+                        results[srv_id] = has_vless and bool(resp.all_inbounds_verified)
                     elif resp.result == "already_newer":
                         actual_state = (resp.raw_data or {}).get("state")
                         results[srv_id] = (
@@ -417,9 +442,14 @@ class VlessSubscriptionService:
 
         # If node reported version conflict, bump version and retry once
         if needs_version_bump:
-            sub.version = sub_version + 1
-            await session.flush()
-            sub_version = sub.version
+            locked_sub = await vless_subscription_repo.bump_subscription_version(session, sub.id)
+            if locked_sub:
+                sub = locked_sub
+                sub_version = locked_sub.version
+            else:
+                sub.version = sub_version + 1
+                await session.flush()
+                sub_version = sub.version
             results, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
                 targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
             )
@@ -441,7 +471,7 @@ class VlessSubscriptionService:
         if not client_uuid:
             return {}
 
-        servers = await VlessSubscriptionService.get_configured_vless_servers(session)
+        servers = await VlessSubscriptionService.get_revocation_target_servers(session)
         targets = VlessSubscriptionService._extract_node_targets(servers)
         if not targets:
             return {}
@@ -488,7 +518,7 @@ class VlessSubscriptionService:
                     res_map = await cls._execute_sync_to_nodes(
                         target, sub.uuid, True, version=sub_ver, user_id=user.id, sub_id=sub.id
                     )
-                    if res_map.get(server_id) is True or (any(res_map.values()) and res_map.get(server_id) is not False):
+                    if res_map.get(server_id) is True:
                         synced_count += 1
                     else:
                         has_failures = True

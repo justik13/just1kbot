@@ -397,11 +397,16 @@ async def process_add_server(
                     extra["sub_path_prefix"] = xray_data["sub_path_prefix"]
                 if has_vless:
                     vless_domain = xray_data.get("vless_domain")
-                    if not vless_domain:
-                        parsed_u = urllib.parse.urlsplit(all_data["api_url"])
-                        vless_domain = parsed_u.hostname
                     if vless_domain:
-                        extra["domain"] = vless_domain
+                        vless_domain_str = str(vless_domain).strip().lower()
+                        if (
+                            vless_domain_str
+                            and "." in vless_domain_str
+                            and " " not in vless_domain_str
+                            and "/" not in vless_domain_str
+                            and ":" not in vless_domain_str
+                        ):
+                            extra["domain"] = vless_domain_str
                     extra.setdefault("vless_port", 443)
                     extra.setdefault("xray_api_url", all_data["api_url"])
                 server.extra_data = extra

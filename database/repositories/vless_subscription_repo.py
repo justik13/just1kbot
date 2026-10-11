@@ -364,3 +364,31 @@ async def get_subscriptions_with_pending_revocations(
     return []
 
 
+async def bump_subscription_version(
+    session: AsyncSession,
+    subscription_id: int,
+) -> VlessSubscription | None:
+    """Atomically bump subscription version under row lock."""
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+    )
+    res = session.execute(stmt)
+    if inspect.isawaitable(res):
+        res = await res
+    scalar = getattr(res, "scalar_one_or_none", None)
+    if callable(scalar):
+        val = scalar()
+        if inspect.isawaitable(val):
+            val = await val
+        sub = val if isinstance(val, VlessSubscription) else None
+    else:
+        sub = None
+    if sub:
+        sub.version = (sub.version or 1) + 1
+        await session.flush()
+    return sub
+
+
+
