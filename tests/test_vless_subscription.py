@@ -591,6 +591,62 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
                 {"os": "Android 14", "model": "Pixel 8 Pro", "ua": "IncyClient/2.1.0"},
             )
 
+    async def test_handle_vless_feed_generates_links_after_hwid_registration(self):
+        from database.repositories import vless_subscription_repo
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        initial_sub = VlessSubscription(
+            id=10,
+            user_id=42,
+            token="test-token-valid-length-12345678",
+            uuid="initial-uuid-1111",
+            is_active=True,
+            active_hwids={},
+        )
+        srv = Server(
+            id=1,
+            name="NL-Node",
+            country_flag="🇳🇱",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            extra_data={"domain": "nl.example.com", "vless_port": 443},
+        )
+
+        async def fake_register_hwid_atomic(session, sub_id, hwid, device_info=None):
+            initial_sub.uuid = "rotated-new-uuid-2222"
+            return True, 1, 3
+
+        async def fake_refresh(instance):
+            pass
+
+        mock_session.refresh = AsyncMock(side_effect=fake_refresh)
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=initial_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch.object(VlessSubscriptionService, "get_eligible_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch.object(vless_subscription_repo, "register_hwid_atomic", side_effect=fake_register_hwid_atomic),
+            patch.object(VlessSubscriptionService, "ensure_synced_background", return_value=None),
+        ):
+            resp = await self.client.get(
+                "/sub/access/test-token-valid-length-12345678",
+                headers={"X-Hwid": "hwid-test-device-123"},
+            )
+            self.assertEqual(resp.status, 200)
+            body = await resp.text()
+            decoded = base64.b64decode(body).decode("utf-8")
+            self.assertIn("rotated-new-uuid-2222", decoded)
+            self.assertNotIn("initial-uuid-1111", decoded)
+
     async def test_invalid_hwid_format_returns_400(self):
         headers = {"X-Hwid": "bad$$$"}
         resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
@@ -2294,61 +2350,6 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             await task
             mock_deprov.assert_called_once()
             mock_pop.assert_not_called()
-
-    async def test_handle_vless_feed_generates_links_after_hwid_registration(self):
-        from database.repositories import vless_subscription_repo
-        from services.vless_subscription_service import VlessSubscriptionService
-
-        mock_session = AsyncMock()
-
-        @asynccontextmanager
-        async def fake_session_scope():
-            yield mock_session
-
-        initial_sub = VlessSubscription(
-            id=10,
-            user_id=42,
-            token="test-token-valid-length-12345678",
-            uuid="initial-uuid-1111",
-            is_active=True,
-            active_hwids={},
-        )
-        srv = Server(
-            id=1,
-            name="NL-Node",
-            is_active=True,
-            health_state=ServerHealthState.ONLINE,
-            capabilities=["vless"],
-            extra_data={"domain": "nl.example.com", "vless_port": 443},
-        )
-
-        async def fake_register_hwid_atomic(session, sub_id, hwid, device_info=None):
-            initial_sub.uuid = "rotated-new-uuid-2222"
-            return True, 1, 3
-
-        async def fake_refresh(instance):
-            pass
-
-        mock_session.refresh = AsyncMock(side_effect=fake_refresh)
-
-        with (
-            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
-            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=initial_sub),
-            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
-            patch.object(VlessSubscriptionService, "get_eligible_vless_servers", new=AsyncMock(return_value=[srv])),
-            patch.object(vless_subscription_repo, "register_hwid_atomic", side_effect=fake_register_hwid_atomic),
-            patch.object(VlessSubscriptionService, "ensure_synced_background", return_value=None),
-        ):
-            resp = await self.client.get(
-                "/sub/vless/test-token-valid-length-12345678",
-                headers={"x-hwid": "hwid-test-device-123"},
-            )
-            self.assertEqual(resp.status, 200)
-            body = await resp.text()
-            decoded = base64.b64decode(body).decode("utf-8")
-            self.assertIn("rotated-new-uuid-2222", decoded)
-            self.assertNotIn("initial-uuid-1111", decoded)
 
     def test_generate_vless_links_fqdn_validation_rejects_invalid_domains(self):
         from database.models import Server, VlessSubscription
