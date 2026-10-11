@@ -274,14 +274,21 @@ ADMIN_SERVER_INCY_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> �
 
 <i>Для изменения выберите нужный пункт ниже:</i>"""
 
-ADMIN_SERVER_INCY_STANDARD_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> › 🎨 <b>Оформление INCY</b>
+ADMIN_STD_SUB_INCY_CONFIG_CARD = """🛠 Админка › 💎 <b>Стандартная подписка</b> › 🎨 <b>Оформление (INCY)</b>
 
-Настройки внешнего вида подписки для приложения INCY:
+Глобальные настройки оформления стандартной подписки для приложения INCY:
 
 • <b>Имя профиля:</b> <code>{title}</code>
-• <b>Подзаголовок:</b> <code>{description}</code> <i>(не отображается в проверенных мобильных версиях INCY)</i>
+• <b>Подзаголовок:</b> <code>{description}</code> <i>(не отображается в мобильных версиях INCY)</i>
 • <b>Баннер (объявление):</b> <code>{announce}</code>
 • <b>Ссылка баннера:</b> <code>{announce_url}</code>
+
+<i>Для изменения выберите нужный пункт ниже:</i>"""
+
+ADMIN_SERVER_INCY_STANDARD_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> › 🎨 <b>Оформление INCY</b>
+
+Настройки отображения узла для приложения INCY:
+
 • <b>Имя узла в клиенте:</b> <code>{origin_name}</code>
 • <b>Бейдж узла:</b> <code>{origin_badge}</code>
 • <b>Статус в подписке:</b> <code>{origin_status}</code>

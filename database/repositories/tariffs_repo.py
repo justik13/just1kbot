@@ -58,8 +58,13 @@ async def update_tariff(
     return tariff
 
 
-async def get_tariff_count(session: AsyncSession) -> int:
+async def get_tariff_count(
+    session: AsyncSession,
+    service_type: str | None = None,
+) -> int:
     stmt = select(func.count(Tariff.id))
+    if service_type is not None:
+        stmt = stmt.where(Tariff.service_type == service_type)
     result = await session.execute(stmt)
     return result.scalar_one()
 
@@ -68,16 +73,16 @@ async def get_tariffs_paginated(
     session: AsyncSession,
     page: int = 1,
     per_page: int = 10,
+    service_type: str | None = None,
 ) -> list[Tariff]:
     offset = (page - 1) * per_page
-    result = await session.execute(
-        select(Tariff)
-        .order_by(
-            Tariff.device_limit,
-            Tariff.sort_order,
-            Tariff.duration_days,
-        )
-        .offset(offset)
-        .limit(per_page)
-    )
+    stmt = select(Tariff)
+    if service_type is not None:
+        stmt = stmt.where(Tariff.service_type == service_type)
+    stmt = stmt.order_by(
+        Tariff.device_limit,
+        Tariff.sort_order,
+        Tariff.duration_days,
+    ).offset(offset).limit(per_page)
+    result = await session.execute(stmt)
     return result.scalars().all()

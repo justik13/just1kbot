@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 SAFE_DEFAULT_MAX_PEERS = 200
 
 
-@router.callback_query(F.data == "admin_server_add")
+@router.callback_query(F.data.in_(["admin_server_add", "admin_server_add:std", "admin_server_add:wi"]))
 async def start_add_server(
     callback: CallbackQuery,
     state: FSMContext,
@@ -52,12 +52,25 @@ async def start_add_server(
     await callback.answer(show_alert=False)
     await state.clear()
 
+    filter_type = callback.data.split(":", 1)[1] if ":" in callback.data else None
+    back_target = f"admin_servers:{filter_type}" if filter_type else "admin_servers"
+
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2")
-    builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_VLESS, callback_data="admin_server_add_proto:vless")
-    builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray")
-    builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data="admin_servers")
-    builder.adjust(1, 1, 1, 1)
+    if filter_type == "std":
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2:std")
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_VLESS, callback_data="admin_server_add_proto:vless:std")
+        builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data=back_target)
+        builder.adjust(1, 1, 1)
+    elif filter_type == "wi":
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray:wi")
+        builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data=back_target)
+        builder.adjust(1, 1)
+    else:
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2")
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_VLESS, callback_data="admin_server_add_proto:vless")
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray")
+        builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data=back_target)
+        builder.adjust(1, 1, 1, 1)
 
     await callback.message.edit_text(
         texts.ADMIN_SERVER_SELECT_PROTO_PROMPT,
@@ -75,14 +88,18 @@ async def select_add_server_protocol(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    protocol = callback.data.split(":")[1]
+    parts = callback.data.split(":")
+    protocol = parts[1]
+    filter_type = parts[2] if len(parts) > 2 else None
+
     await callback.answer(show_alert=False)
     await state.set_state(AdminStates.adding_server)
-    await state.update_data(protocol=protocol, step="name")
+    await state.update_data(protocol=protocol, step="name", filter_type=filter_type)
 
+    back_target = f"admin_server_add:{filter_type}" if filter_type else "admin_server_add"
     await callback.message.edit_text(
         texts.ADMIN_SERVER_NAME_PROMPT,
-        reply_markup=get_back_button("admin_server_add"),
+        reply_markup=get_back_button(back_target),
         parse_mode="HTML",
     )
 
@@ -103,13 +120,16 @@ async def process_add_server(
         return
 
     trigger_msg_id = getattr(message, "message_id", None)
+    data = await state.get_data()
+    filter_type = data.get("filter_type")
+    back_servers = f"admin_servers:{filter_type}" if filter_type else "admin_servers"
 
     if not message.text:
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
         return
@@ -121,12 +141,11 @@ async def process_add_server(
             message.bot,
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
         return
 
-    data = await state.get_data()
     step = data.get("step")
 
     if step == "name":
@@ -137,7 +156,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_NAME_TOO_LONG.format(max=50),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 trigger_message_id=trigger_msg_id,
             )
             return
@@ -148,7 +167,7 @@ async def process_add_server(
             message.bot,
             message.chat.id,
             texts.ADMIN_SERVER_FLAG_PROMPT,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
 
@@ -160,7 +179,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_FLAG_TOO_LONG,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 trigger_message_id=trigger_msg_id,
             )
             return
@@ -174,7 +193,7 @@ async def process_add_server(
             message.bot,
             message.chat.id,
             texts.ADMIN_SERVER_URL_PROMPT,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
 
@@ -186,7 +205,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_URL_TOO_LONG.format(max=500),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 trigger_message_id=trigger_msg_id,
             )
             return
@@ -196,7 +215,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_INVALID_URL,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
                 trigger_message_id=trigger_msg_id,
             )
@@ -207,7 +226,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_URL_FORBIDDEN,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
                 trigger_message_id=trigger_msg_id,
             )
@@ -229,7 +248,7 @@ async def process_add_server(
             message.bot,
             message.chat.id,
             texts.ADMIN_SERVER_KEY_PROMPT,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
 
@@ -241,7 +260,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_API_KEY_SHORT.format(min=8),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 trigger_message_id=trigger_msg_id,
             )
             return
@@ -252,7 +271,7 @@ async def process_add_server(
             message.bot,
             message.chat.id,
             texts.ADMIN_SERVER_CHECKING,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             parse_mode="HTML",
             trigger_message_id=trigger_msg_id,
         )
@@ -279,7 +298,7 @@ async def process_add_server(
                     message.bot,
                     message.chat.id,
                     texts.ERROR_SERVER_UNREACHABLE,
-                    get_back_button("admin_servers"),
+                    get_back_button(back_servers),
                     parse_mode="HTML",
                 )
                 await state.clear()
@@ -405,7 +424,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 msg_text,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
             logger.info(
@@ -428,7 +447,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
 
@@ -443,7 +462,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_SERVER_API_INFO_FAILED,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
 
@@ -462,7 +481,7 @@ async def process_add_server(
                         ", ".join(protocols) if protocols else texts.LABEL_UNKNOWN_LOWER
                     ),
                 ),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
 
@@ -498,7 +517,7 @@ async def process_add_server(
                 texts.ERROR_SERVER_DUPLICATE_URL.format(
                     api_url=safe(all_data["api_url"]),
                 ),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
 
@@ -597,7 +616,7 @@ async def process_add_server(
                 max_clients=api_max_peers,
                 api_url=safe(all_data["api_url"]),
             ),
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             parse_mode="HTML",
         )
 

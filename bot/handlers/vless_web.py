@@ -12,6 +12,7 @@ from aiohttp import web
 from bot import texts
 from database.connection import session_scope
 from database.repositories import users_repo, vless_subscription_repo
+from database.repositories.system_settings_repo import get_system_setting
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
 from utils.datetime_helpers import now_utc
@@ -214,24 +215,16 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         expire_ts = int(user.subscription_end.timestamp()) if user.subscription_end else 0
         bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
 
-        profile_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k")
-        profile_desc = None
-        announce = None
-        announce_url = None
+        profile_title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
+        profile_desc = await get_system_setting(session, "vless_profile_description", None)
+        announce = await get_system_setting(session, "vless_announce", None)
+        announce_url = await get_system_setting(session, "vless_announce_url", None)
         support_url = f"https://t.me/{bot_username}"
         channel_url = None
 
         if servers:
             first_srv = servers[0]
             first_extra = first_srv.extra_data if isinstance(first_srv.extra_data, dict) else {}
-            if first_extra.get("profile_title"):
-                profile_title = first_extra["profile_title"]
-            if first_extra.get("profile_description"):
-                profile_desc = first_extra["profile_description"]
-            if first_extra.get("announce"):
-                announce = first_extra["announce"]
-            if first_extra.get("announce_url"):
-                announce_url = first_extra["announce_url"]
             if first_extra.get("support_url"):
                 support_url = first_extra["support_url"]
             if first_extra.get("channel_url"):

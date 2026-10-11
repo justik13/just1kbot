@@ -14,8 +14,12 @@ def get_admin_menu(
         callback_data="admin_cat_users",
     )
     builder.button(
-        text=texts.BTN_SERVERS_AND_TARIFFS,
-        callback_data="admin_cat_infra",
+        text=texts.BTN_STD_SUB,
+        callback_data="admin_cat_std_sub",
+    )
+    builder.button(
+        text=texts.BTN_WI_SUB,
+        callback_data="admin_cat_wi_sub",
     )
 
     builder.button(
@@ -34,7 +38,26 @@ def get_admin_menu(
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(2, 2, 1)
+    builder.adjust(1, 2, 2, 1)
+    return builder.as_markup()
+
+
+def get_admin_cat_std_sub_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=texts.BTN_STD_SERVERS, callback_data="admin_servers:std")
+    builder.button(text=texts.BTN_STD_INCY_CONFIG, callback_data="admin_std_incy")
+    builder.button(text=texts.BTN_STD_TARIFFS, callback_data="admin_tariffs:awg")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_admin_cat_wi_sub_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=texts.BTN_WI_SERVERS, callback_data="admin_servers:wi")
+    builder.button(text=texts.BTN_WI_TARIFFS, callback_data="admin_tariffs:white_internet")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
+    builder.adjust(1)
     return builder.as_markup()
 
 

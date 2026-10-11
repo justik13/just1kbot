@@ -300,3 +300,30 @@ AUDIT_DETAIL_LABELS = {
     'devices_restored': 'Устройства восстановлены',
     'new_end': 'Новый срок',
 }
+
+BTN_STD_SUB = "💎 Стандартная подписка"
+BTN_WI_SUB = "🌐 Белый Интернет"
+
+BTN_STD_SERVERS = "🖥 Серверы и узлы"
+BTN_WI_SERVERS = "🇷🇺 Шлюзы Origin"
+BTN_STD_INCY_CONFIG = "🎨 Оформление подписки (INCY)"
+BTN_STD_TARIFFS = "📋 Тарифы подписки"
+BTN_WI_TARIFFS = "📋 Тарифы Белого Интернета"
+
+ADMIN_DASHBOARD_SECTION_STD_SUB = """{header}💎 <b>Стандартная подписка:</b>
+
+Управление стандартными подключениями:
+• Серверы AmneziaWG + VLESS TLS
+• Общее оформление подписки INCY
+• Тарифы подписки
+
+Выберите нужный раздел:"""
+
+ADMIN_DASHBOARD_SECTION_WI_SUB = """{header}🌐 <b>Белый Интернет:</b>
+
+Управление шлюзами и маршрутизацией:
+• Шлюзы Origin
+• Цепочки релеев
+• Тарифы Белого Интернета
+
+Выберите нужный раздел:"""

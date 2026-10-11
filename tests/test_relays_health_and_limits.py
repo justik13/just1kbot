@@ -381,8 +381,8 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
     async def test_admin_server_card_keyboard_2_column_layout(self):
         from bot.keyboards.admin.servers import get_admin_server_card_keyboard
 
-        # Xray server card layout
-        kb_xray = get_admin_server_card_keyboard(server_id=1, is_active=True, is_xray=True)
+        # Xray server card layout (origin)
+        kb_xray = get_admin_server_card_keyboard(server_id=1, is_active=True, is_xray=True, is_origin=True)
         rows_xray = kb_xray.inline_keyboard
         self.assertEqual(len(rows_xray), 8, f"Expected 8 rows for Xray server card, got {len(rows_xray)}")
         # Row 1: INCY (1 button, full width)
@@ -398,7 +398,7 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows_xray[6]), 2)
         # Row 8: Back to servers (1 button, full width)
         self.assertEqual(len(rows_xray[7]), 1)
-        self.assertEqual(rows_xray[7][0].callback_data, "admin_servers")
+        self.assertEqual(rows_xray[7][0].callback_data, "admin_servers:wi")
 
         # AWG server card layout
         kb_awg = get_admin_server_card_keyboard(server_id=2, is_active=True, used_clients=10, max_clients=200, is_xray=False)
@@ -413,6 +413,7 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows_awg[5]), 2)
         # Row 7: Back to servers (1 button)
         self.assertEqual(len(rows_awg[6]), 1)
+        self.assertEqual(rows_awg[6][0].callback_data, "admin_servers:std")
 
     async def test_white_internet_overview_keyboard_2_column_layout(self):
         from bot.handlers.white_internet import get_white_internet_overview_keyboard

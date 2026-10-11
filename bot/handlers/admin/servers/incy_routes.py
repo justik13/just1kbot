@@ -19,6 +19,7 @@ from bot.keyboards.admin.servers import (
     get_admin_server_incy_relay_actions_keyboard,
     get_admin_server_incy_relays_keyboard,
     get_admin_server_incy_reset_confirm_keyboard,
+    get_admin_std_sub_incy_keyboard,
 )
 from bot.states import AdminStates
 from config.constants import (
@@ -32,6 +33,10 @@ from database.repositories.servers_repo import (
     is_white_internet_origin_server,
     is_xray_server,
     update_server,
+)
+from database.repositories.system_settings_repo import (
+    get_system_setting,
+    set_system_setting,
 )
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
@@ -92,22 +97,46 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
     }
 
 
+async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
+    title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
+    desc = await get_system_setting(session, "vless_profile_description", None)
+    announce = await get_system_setting(session, "vless_announce", None)
+    announce_url = await get_system_setting(session, "vless_announce_url", None)
+
+    card_text = texts.ADMIN_STD_SUB_INCY_CONFIG_CARD.format(
+        title=safe(title or "✦ Just1k"),
+        description=safe(desc or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        announce=safe(announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        announce_url=safe(announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+    )
+    keyboard = get_admin_std_sub_incy_keyboard()
+    return card_text, keyboard
+
+
 def _build_server_incy_card(server: Any, details: dict[str, Any]) -> tuple[str, Any]:
     """Build formatted text and keyboard for server INCY configuration card."""
     flag = server.country_flag or texts.EMOJI_GLOBE
     is_origin = is_white_internet_origin_server(server)
-    card_template = texts.ADMIN_SERVER_INCY_CARD if is_origin else texts.ADMIN_SERVER_INCY_STANDARD_CARD
-    card_text = card_template.format(
-        flag=flag,
-        name=safe(server.name),
-        title=safe(details["title"]),
-        description=safe(details["description"]),
-        announce=safe(details["announce"]),
-        announce_url=safe(details["announce_url"]),
-        origin_name=safe(details["origin_name"]),
-        origin_badge=safe(details["origin_badge"]),
-        origin_status=safe(details["origin_status"]),
-    )
+    if is_origin:
+        card_text = texts.ADMIN_SERVER_INCY_CARD.format(
+            flag=flag,
+            name=safe(server.name),
+            title=safe(details["title"]),
+            description=safe(details["description"]),
+            announce=safe(details["announce"]),
+            announce_url=safe(details["announce_url"]),
+            origin_name=safe(details["origin_name"]),
+            origin_badge=safe(details["origin_badge"]),
+            origin_status=safe(details["origin_status"]),
+        )
+    else:
+        card_text = texts.ADMIN_SERVER_INCY_STANDARD_CARD.format(
+            flag=flag,
+            name=safe(server.name),
+            origin_name=safe(details["origin_name"]),
+            origin_badge=safe(details["origin_badge"]),
+            origin_status=safe(details["origin_status"]),
+        )
     keyboard = get_admin_server_incy_keyboard(
         server.id,
         origin_hidden=details["origin_hidden"],
@@ -115,6 +144,176 @@ def _build_server_incy_card(server: Any, details: dict[str, Any]) -> tuple[str, 
         is_origin=is_origin,
     )
     return card_text, keyboard
+
+
+@router.callback_query(F.data == "admin_std_incy")
+async def show_std_sub_incy_card(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    await callback.answer(show_alert=False)
+    await state.clear()
+
+    card_text, reply_markup = await _build_std_sub_incy_card(session)
+    try:
+        await callback.message.edit_text(
+            card_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"show_std_sub_incy_card edit_text failed: {e}")
+
+
+@router.callback_query(F.data.startswith("admin_std_incy_edit:"))
+async def start_edit_std_incy_param(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    field = callback.data.split(":")[1]
+    title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
+    desc = await get_system_setting(session, "vless_profile_description", None)
+    announce = await get_system_setting(session, "vless_announce", None)
+    announce_url = await get_system_setting(session, "vless_announce_url", None)
+
+    prompt_map = {
+        "title": (texts.ADMIN_SERVER_INCY_PROMPT_TITLE, title or "✦ Just1k"),
+        "desc": (texts.ADMIN_SERVER_INCY_PROMPT_DESC, desc or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        "announce": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE, announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        "announce_url": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL, announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+    }
+
+    if field not in prompt_map:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    prompt_tpl, cur_val = prompt_map[field]
+    prompt_text = prompt_tpl.format(current=safe(cur_val))
+
+    await state.update_data(field=field)
+    await state.set_state(AdminStates.editing_std_incy_param)
+
+    try:
+        await callback.message.edit_text(
+            prompt_text,
+            reply_markup=get_back_button("admin_std_incy"),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"start_edit_std_incy_param edit_text failed: {e}")
+
+
+@router.message(AdminStates.editing_std_incy_param)
+async def process_std_incy_param_input(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    field = data.get("field")
+    if not field:
+        await state.clear()
+        return
+
+    text = (message.text or "").strip()
+    if text.startswith("/"):
+        await state.clear()
+        card_text, reply_markup = await _build_std_sub_incy_card(session)
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            card_text,
+            reply_markup,
+            parse_mode="HTML",
+            trigger_message_id=getattr(message, "message_id", None),
+        )
+        return
+
+    if field == "title":
+        new_val = "✦ Just1k" if text == "-" else text[:25]
+        await set_system_setting(session, "vless_profile_title", new_val, updated_by=message.from_user.id)
+    elif field == "desc":
+        new_val = None if text == "-" else text[:100]
+        await set_system_setting(session, "vless_profile_description", new_val, updated_by=message.from_user.id)
+    elif field == "announce":
+        new_val = None if text == "-" else text[:200]
+        await set_system_setting(session, "vless_announce", new_val, updated_by=message.from_user.id)
+    elif field == "announce_url":
+        if text == "-":
+            new_val = None
+        else:
+            if not (text.startswith("https://") or text.startswith("http://") or text.startswith("tg://")):
+                await render_hub(
+                    message.bot,
+                    message.chat.id,
+                    texts.ADMIN_SERVER_INCY_ERR_INVALID_URL,
+                    get_back_button("admin_std_incy"),
+                    trigger_message_id=getattr(message, "message_id", None),
+                )
+                return
+            new_val = text
+        await set_system_setting(session, "vless_announce_url", new_val, updated_by=message.from_user.id)
+
+    await session.commit()
+    await state.clear()
+
+    card_text, reply_markup = await _build_std_sub_incy_card(session)
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        card_text,
+        reply_markup,
+        parse_mode="HTML",
+        trigger_message_id=getattr(message, "message_id", None),
+    )
+
+
+@router.callback_query(F.data == "admin_std_incy_reset")
+async def reset_std_sub_incy_to_defaults(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    await state.clear()
+    await set_system_setting(session, "vless_profile_title", "✦ Just1k", updated_by=callback.from_user.id)
+    await set_system_setting(session, "vless_profile_description", None, updated_by=callback.from_user.id)
+    await set_system_setting(session, "vless_announce", None, updated_by=callback.from_user.id)
+    await set_system_setting(session, "vless_announce_url", None, updated_by=callback.from_user.id)
+    await session.commit()
+
+    await callback.answer(texts.ADMIN_SERVER_INCY_RESET_SUCCESS, show_alert=False)
+    card_text, reply_markup = await _build_std_sub_incy_card(session)
+    try:
+        await callback.message.edit_text(
+            card_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"reset_std_sub_incy_to_defaults edit_text failed: {e}")
 
 
 @router.callback_query(F.data.startswith("admin_server_incy:"))

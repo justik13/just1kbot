@@ -621,16 +621,24 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                 call_args = cb.message.edit_text.call_args[0][0]
                 kb = cb.message.edit_text.call_args[1]["reply_markup"]
 
-                # Card text should have standard labels, NOT origin labels
+                # Card text should have standard labels, NOT origin labels or global incy profile settings
                 self.assertIn("Имя узла в клиенте", call_args)
                 self.assertIn("Бейдж узла", call_args)
                 self.assertIn("Статус в подписке", call_args)
                 self.assertNotIn("Шлюз РФ", call_args)
+                self.assertNotIn("Имя профиля", call_args)
+                self.assertNotIn("Подзаголовок", call_args)
+                self.assertNotIn("Баннер (объявление)", call_args)
+                self.assertNotIn("Ссылка баннера", call_args)
 
-                # Keyboard should have standard buttons, NOT origin or relays
+                # Keyboard should have standard buttons, NOT origin or relays or global incy settings
                 kb_btns = [b.text for row in kb.inline_keyboard for b in row]
                 self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_NAME, kb_btns)
                 self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_BADGE, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_RELAYS, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_TITLE, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_DESC, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, kb_btns)
 

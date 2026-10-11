@@ -7,15 +7,14 @@ from urllib.parse import urlsplit, urlunsplit
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_admin_server_card_keyboard
 from config.constants import AMNEZIA_PROTOCOLS
 from database.repositories.servers_repo import (
-    get_server_count,
     get_server_peer_counts,
-    get_servers_paginated,
     is_white_internet_origin_server,
     is_xray_server,
 )
@@ -49,7 +48,12 @@ def normalize_api_url(url: str) -> str:
 
 
 async def _build_servers_list_text_and_kb(
-    servers, page: int, total_pages: int, total: int, session: AsyncSession | None = None,
+    servers,
+    page: int,
+    total_pages: int,
+    total: int,
+    session: AsyncSession | None = None,
+    filter_type: str | None = None,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
         texts.ADMIN_SERVERS_COMMON.format(v0=page, v1=total_pages, v2=total)
@@ -91,22 +95,34 @@ async def _build_servers_list_text_and_kb(
                 callback_data=f"admin_server_card:{server.id}",
             )
     if page > 1:
+        prev_cb = f"admin_servers_page:{filter_type}:{page - 1}" if filter_type else f"admin_servers_page:{page - 1}"
         builder.button(
             text=texts.ADMIN_BTN_PAGINATION_PREV,
-            callback_data=f"admin_servers_page:{page - 1}",
+            callback_data=prev_cb,
         )
     if page < total_pages:
+        next_cb = f"admin_servers_page:{filter_type}:{page + 1}" if filter_type else f"admin_servers_page:{page + 1}"
         builder.button(
             text=texts.ADMIN_BTN_PAGINATION_NEXT,
-            callback_data=f"admin_servers_page:{page + 1}",
+            callback_data=next_cb,
         )
+    add_cb = f"admin_server_add:{filter_type}" if filter_type else "admin_server_add"
     builder.button(
         text=texts.ADMIN_BTN_ADD_SERVER,
-        callback_data="admin_server_add",
+        callback_data=add_cb,
     )
+    if filter_type == "std":
+        back_text = texts.BTN_BACK
+        back_cb = "admin_cat_std_sub"
+    elif filter_type == "wi":
+        back_text = texts.BTN_BACK
+        back_cb = "admin_cat_wi_sub"
+    else:
+        back_text = texts.BTN_ADMIN_MENU
+        back_cb = "admin_menu"
     builder.button(
-        text=texts.BTN_ADMIN_MENU,
-        callback_data="admin_menu",
+        text=back_text,
+        callback_data=back_cb,
     )
 
     item_count = len(servers) if servers else 0
@@ -121,16 +137,31 @@ async def _build_servers_list_text_and_kb(
 
 
 async def _show_servers_list(
-    callback: CallbackQuery, session: AsyncSession, page: int = 1,
+    callback: CallbackQuery,
+    session: AsyncSession,
+    page: int = 1,
+    filter_type: str | None = None,
 ):
-    total_servers = await get_server_count(session)
+    from database.models import Server
+
+    result = await session.execute(select(Server).order_by(Server.name))
+    all_servers = list(result.scalars().all())
+
+    if filter_type == "std":
+        servers = [s for s in all_servers if not is_white_internet_origin_server(s)]
+    elif filter_type == "wi":
+        servers = [s for s in all_servers if is_white_internet_origin_server(s)]
+    else:
+        servers = all_servers
+
+    total_servers = len(servers)
     total_pages = max(1, math.ceil(total_servers / SERVERS_PER_PAGE))
-    page = min(page, total_pages)
-    servers = await get_servers_paginated(
-        session, page=page, per_page=SERVERS_PER_PAGE,
-    )
+    page = max(1, min(page, total_pages))
+    start_idx = (page - 1) * SERVERS_PER_PAGE
+    page_servers = servers[start_idx : start_idx + SERVERS_PER_PAGE]
+
     rendered, kb = await _build_servers_list_text_and_kb(
-        servers, page, total_pages, total_servers, session
+        page_servers, page, total_pages, total_servers, session, filter_type=filter_type
     )
     try:
         await callback.message.edit_text(
@@ -183,7 +214,12 @@ async def _show_server_card(
     effective_capacity = max(cached_used, db_used) if cached_used is not None else db_used
     actual_peers = cached_used
     max_clients = server.max_clients or 240
-    header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}")
+    caps = getattr(server, "capabilities", None) or []
+    proto = str(getattr(server, "protocol", "") or "").lower()
+    has_vless = "vless" in caps or "xray_vless" in caps or proto == "vless"
+    is_origin = is_white_internet_origin_server(server)
+    section_crumb = texts.BTN_WI_SERVERS if is_origin else texts.BTN_STD_SERVERS
+    header = format_admin_breadcrumbs(section_crumb, f"{flag} {server.name}")
 
     if cached_used is not None and cached_used != db_used:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
@@ -223,10 +259,6 @@ async def _show_server_card(
 
     if ping_result:
         rendered += texts.COMMON_REZULTAT_PROVERKI_SVYAZI.format(ping_result=ping_result)
-    caps = getattr(server, "capabilities", None) or []
-    proto = str(getattr(server, "protocol", "") or "").lower()
-    has_vless = "vless" in caps or "xray_vless" in caps or proto == "vless"
-    is_origin = is_white_internet_origin_server(server)
     try:
         await callback.message.edit_text(
             rendered,
@@ -237,6 +269,7 @@ async def _show_server_card(
                 max_clients=max_clients,
                 is_xray=is_origin,
                 has_vless=has_vless,
+                is_origin=is_origin,
             ),
             parse_mode="HTML",
         )
