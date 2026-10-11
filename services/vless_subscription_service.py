@@ -102,7 +102,9 @@ class VlessSubscriptionService:
             except Exception:
                 domain = None
         if not domain:
-            domain = os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN") or "just1k.pro"
+            domain = os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
+        if not domain:
+            raise ValueError("No public DOMAIN configured for subscription URLs")
         clean_domain = domain.strip().replace("https://", "").replace("http://", "").rstrip("/")
         return f"https://{clean_domain}/sub/access/{token}"
 
@@ -449,13 +451,14 @@ class VlessSubscriptionService:
     async def sync_all_active_to_server(cls, server_id: int) -> int:
         """Provisions all active VLESS subscriptions onto a newly added/updated node."""
         from database.connection import session_scope
+        from database.repositories.servers_repo import is_vless_capable_server
         from services.subscription import SubscriptionService
 
         synced_count = 0
         try:
             async with session_scope() as session:
                 server = await session.get(Server, server_id)
-                if not server or not server.is_active or not (server.capabilities and "vless" in server.capabilities):
+                if not server or not server.is_active or not is_vless_capable_server(server):
                     return 0
                 target = cls._extract_node_targets([server])
                 if not target:
@@ -474,27 +477,42 @@ class VlessSubscriptionService:
                 res = await session.execute(stmt)
                 rows = res.all()
 
+            total_eligible = 0
+            has_failures = False
             for sub, user in rows:
                 if not SubscriptionService.check_vpn_access(user):
                     continue
+                total_eligible += 1
                 sub_ver = getattr(sub, "version", 1) or 1
                 try:
                     res_map = await cls._execute_sync_to_nodes(
                         target, sub.uuid, True, version=sub_ver, user_id=user.id, sub_id=sub.id
                     )
-                    if any(res_map.values()):
+                    if res_map.get(server_id) is True or (any(res_map.values()) and res_map.get(server_id) is not False):
                         synced_count += 1
+                    else:
+                        has_failures = True
                 except Exception as e:
+                    has_failures = True
                     logger.warning("Failed to provision sub_id=%s on new server %s: %s", sub.id, server_id, e)
 
-            # Record synchronized epoch in server extra_data
-            async with session_scope() as session:
-                server = await session.get(Server, server_id)
-                if server and server.xray_instance_epoch:
-                    extra = dict(server.extra_data or {})
-                    extra["vless_synced_epoch"] = server.xray_instance_epoch
-                    server.extra_data = extra
-                    await session.flush()
+            # Record synchronized epoch in server extra_data ONLY if all eligible subscriptions succeeded without failures
+            if not has_failures and synced_count == total_eligible:
+                async with session_scope() as session:
+                    server = await session.get(Server, server_id)
+                    if server and server.xray_instance_epoch:
+                        extra = dict(server.extra_data or {})
+                        extra["vless_synced_epoch"] = server.xray_instance_epoch
+                        server.extra_data = extra
+                        await session.flush()
+            else:
+                logger.warning(
+                    "Bootstrap partial for server %s: synced %d of %d eligible (failures=%s). Will retry on next sweep.",
+                    server_id,
+                    synced_count,
+                    total_eligible,
+                    has_failures,
+                )
         except Exception as e:
             logger.error("Error in sync_all_active_to_server for server %s: %s", server_id, e)
 

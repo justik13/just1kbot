@@ -1066,6 +1066,7 @@ class WhiteInternetService:
                         origin_node.api_url,
                         origin_node.api_key,
                         client_ids=[sub.uuid],
+                        service="white_internet",
                     )
                     observed = None
                     if inv_ok and inv_data and "inventory" in inv_data:

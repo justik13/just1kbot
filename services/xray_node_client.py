@@ -268,12 +268,18 @@ class XrayNodeClient:
         api_url: str,
         api_key: str,
         client_ids: list[str] | None = None,
+        service: str | None = None,
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
         """Query real observed runtime inventory from Xray memory."""
         url = f"{api_url.rstrip('/')}/v1/clients/inventory"
         headers = self._get_headers(api_key)
-        payload = {"client_ids": client_ids} if client_ids else None
-        status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
+        payload: dict[str, Any] = {}
+        if client_ids:
+            payload["client_ids"] = client_ids
+        if service:
+            payload["service"] = service
+        json_data = payload if payload else None
+        status_code, data, err = await self._make_request("POST", url, headers, json_data=json_data)
         if status_code == 200 and isinstance(data, dict):
             return True, data, None
         return False, None, err

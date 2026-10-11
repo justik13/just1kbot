@@ -350,19 +350,27 @@ async def process_add_server(
                         if cap not in kept_caps:
                             kept_caps.append(cap)
                     server.capabilities = kept_caps
+                    if "awg" not in kept_caps:
+                        server.protocol = protocol_name
                     server.health_state = ServerHealthState.ONLINE
                 else:
-                    server = await create_server(
-                        session,
-                        name=api_server_name,
-                        country_flag=all_data["country_flag"],
-                        api_url=all_data["api_url"],
-                        api_key=api_key,
-                        protocol=protocol_name,
-                        max_clients=api_max_peers,
-                        capabilities=capabilities,
+                    existing_server_id = None
+
+            if not existing_server_id:
+                existing_dup = await get_server_by_api_url(session, all_data["api_url"])
+                if existing_dup:
+                    await render_hub(
+                        message.bot,
+                        message.chat.id,
+                        texts.ERROR_SERVER_DUPLICATE_URL.format(
+                            api_url=safe(all_data["api_url"]),
+                        ),
+                        get_back_button(back_servers),
+                        parse_mode="HTML",
                     )
-            else:
+                    await state.clear()
+                    return
+
                 server = await create_server(
                     session,
                     name=api_server_name,
@@ -529,6 +537,7 @@ async def process_add_server(
 
         capabilities = ["awg"]
         extra_info = None
+        xray_check_failed = False
         # Modular node: check if Xray VLESS API is also available on this node
         try:
             from services.xray_node_client import XrayNodeClient
@@ -559,14 +568,19 @@ async def process_add_server(
                             "vless_port": 443,
                             "xray_api_url": all_data["api_url"],
                         }
+                elif not x_ok:
+                    xray_check_failed = True
         except Exception:
-            pass
+            xray_check_failed = True
 
         if existing_server_id:
             server = await session.get(Server, existing_server_id)
             if server:
                 server.api_key = api_key
-                # Purge stale vless if no longer available on node
+                # If Xray health check failed due to transient timeout/error, do not drop previously verified vless
+                if xray_check_failed and "vless" in (server.capabilities or []) and "vless" not in capabilities:
+                    capabilities.append("vless")
+                # Purge stale vless only if check succeeded and confirmed absence
                 kept_caps = [c for c in (server.capabilities or []) if c not in ("awg", "vless")]
                 for cap in capabilities:
                     if cap not in kept_caps:

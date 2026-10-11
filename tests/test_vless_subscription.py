@@ -3,6 +3,7 @@
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -813,6 +814,12 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
     def test_build_subscription_url(self):
         url = VlessSubscriptionService.build_subscription_url("my-token-123", domain="bot.example.com")
         self.assertEqual(url, "https://bot.example.com/sub/access/my-token-123")
+
+    def test_build_subscription_url_no_domain_raises(self):
+        with patch.dict(os.environ, {"DOMAIN": "", "BOT_DOMAIN": ""}, clear=True):
+            with patch("config.settings.get_settings", side_effect=Exception("No settings")):
+                with self.assertRaises(ValueError):
+                    VlessSubscriptionService.build_subscription_url("my-token-123")
 
     def test_generate_vless_links(self):
         sub = VlessSubscription(
@@ -1893,3 +1900,99 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         ):
             await _sweep_vless_pending_revocations()
             mock_sync_server.assert_called_once_with(42)
+
+    async def test_sync_all_active_to_server_partial_failure_does_not_record_epoch(self):
+        from database.models import Server, User
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        srv = Server(
+            id=55,
+            is_active=True,
+            capabilities=["vless"],
+            api_url="https://xray.example.com:8443",
+            api_key="secret",
+            xray_instance_epoch="epoch_new_55",
+            extra_data={"domain": "xray.example.com", "vless_port": 443},
+        )
+        user1 = User(id=1, is_deleted=False, is_banned=False, financial_hold=False, subscription_end=None)
+        sub1 = VlessSubscription(id=10, user_id=1, uuid="uuid-1", is_active=True, version=1)
+
+        user2 = User(id=2, is_deleted=False, is_banned=False, financial_hold=False, subscription_end=None)
+        sub2 = VlessSubscription(id=20, user_id=2, uuid="uuid-2", is_active=True, version=1)
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=srv)
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(all=MagicMock(return_value=[(sub1, user1), (sub2, user2)]))
+        )
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("database.connection.session_scope", fake_session_scope),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch.object(VlessSubscriptionService, "_execute_sync_to_nodes") as mock_exec,
+        ):
+            # First sub succeeds, second fails
+            mock_exec.side_effect = [{55: True}, {55: False}]
+            synced = await VlessSubscriptionService.sync_all_active_to_server(55)
+            self.assertEqual(synced, 1)
+            # Must NOT record vless_synced_epoch because of partial failure
+            self.assertNotIn("vless_synced_epoch", srv.extra_data)
+
+    async def test_sync_all_active_to_server_full_success_records_epoch(self):
+        from database.models import Server, User
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        srv = Server(
+            id=56,
+            is_active=True,
+            capabilities=["vless"],
+            api_url="https://xray.example.com:8443",
+            api_key="secret",
+            xray_instance_epoch="epoch_full_56",
+            extra_data={"domain": "xray.example.com", "vless_port": 443},
+        )
+        user = User(id=1, is_deleted=False, is_banned=False, financial_hold=False, subscription_end=None)
+        sub = VlessSubscription(id=10, user_id=1, uuid="uuid-1", is_active=True, version=1)
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=srv)
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(all=MagicMock(return_value=[(sub, user)]))
+        )
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("database.connection.session_scope", fake_session_scope),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch.object(VlessSubscriptionService, "_execute_sync_to_nodes", return_value={56: True}),
+        ):
+            synced = await VlessSubscriptionService.sync_all_active_to_server(56)
+            self.assertEqual(synced, 1)
+            # Full success records vless_synced_epoch
+            self.assertEqual(srv.extra_data.get("vless_synced_epoch"), "epoch_full_56")
+
+    async def test_xray_node_client_inventory_passes_service(self):
+        from services.xray_node_client import XrayNodeClient
+
+        async with XrayNodeClient() as client:
+            with patch.object(client, "_make_request", new=AsyncMock(return_value=(200, {"inventory": {}}, None))) as mock_req:
+                ok, data, err = await client.get_inventory(
+                    "https://127.0.0.1:8443",
+                    "test_key",
+                    client_ids=["uuid-1"],
+                    service="white_internet",
+                )
+                self.assertTrue(ok)
+                mock_req.assert_called_once_with(
+                    "POST",
+                    "https://127.0.0.1:8443/v1/clients/inventory",
+                    {"X-API-Key": "test_key", "Content-Type": "application/json"},
+                    json_data={"client_ids": ["uuid-1"], "service": "white_internet"},
+                )
