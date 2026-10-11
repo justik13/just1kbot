@@ -535,7 +535,7 @@ class TestAdminTariffsSplit(unittest.IsolatedAsyncioTestCase):
                 for val in ("admin_tariffs", "admin_tariffs:standard", "admin_tariffs:awg", "admin_tariffs:white_internet"):
                     event = SimpleNamespace(data=val)
                     for f in handler.filters:
-                        res = await f(event)
+                        res = await f.call(event) if hasattr(f, "call") else f(event)
                         self.assertTrue(res, f"Filter failed for {val}")
         self.assertTrue(found, "show_tariffs_list not found on router")
 
