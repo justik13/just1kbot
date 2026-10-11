@@ -273,9 +273,9 @@ async def check_node_resources_and_alerts(bot: Bot):
         st.last_check_monotonic = now_m
         caps = getattr(server, "capabilities", None) or []
         raw_proto = getattr(server, "protocol", None)
-        if not raw_proto:
+        if not isinstance(raw_proto, str) or not raw_proto.strip():
             raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
-        server_proto = str(raw_proto).lower()
+        server_proto = raw_proto.strip().lower()
 
         has_amnezia = server_proto in AMNEZIA_PROTOCOLS or "awg" in caps
         has_xray = (
