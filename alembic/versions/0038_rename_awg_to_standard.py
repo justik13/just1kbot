@@ -19,8 +19,8 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.drop_constraint("ck_orders_service_type", "orders", type_="check")
-    op.execute("UPDATE tariffs SET service_type = 'standard' WHERE service_type = 'awg'")
-    op.execute("UPDATE orders SET service_type = 'standard' WHERE service_type = 'awg'")
+    op.execute("UPDATE tariffs SET service_type = 'standard' WHERE TRIM(service_type) = 'awg'")
+    op.execute("UPDATE orders SET service_type = 'standard' WHERE TRIM(service_type) = 'awg'")
     op.alter_column(
         "tariffs",
         "service_type",
