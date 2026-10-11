@@ -710,7 +710,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
             if not (1 <= val <= MAX_INT32):
                 return stmt.where(false())
             matching_tariff_ids = select(Tariff.id).where(
-                Tariff.service_type == "awg",
+                Tariff.service_type.in_(("standard", "awg")),
                 Tariff.device_limit == val,
             )
             stmt = stmt.where(

@@ -275,7 +275,7 @@ async def get_purchase_logs_paginated(
         select(Order)
         .where(
             Order.status == "paid",
-            Order.service_type.in_(("awg", "white_internet")),
+            Order.service_type.in_(("standard", "awg", "white_internet")),
         )
         .options(selectinload(Order.user), selectinload(Order.tariff))
         .order_by(Order.paid_at.desc().nullslast(), Order.created_at.desc())
@@ -345,7 +345,7 @@ async def get_purchase_logs_paginated(
             await session.scalar(
                 select(func.count(Order.id)).where(
                     Order.status == "paid",
-                    Order.service_type.in_(("awg", "white_internet")),
+                    Order.service_type.in_(("standard", "awg", "white_internet")),
                 )
             )
         ) or 0
@@ -377,7 +377,7 @@ async def get_purchase_log_by_id(
             .where(
                 Order.id == order_uuid,
                 Order.status == "paid",
-                Order.service_type.in_(("awg", "white_internet")),
+                Order.service_type.in_(("standard", "awg", "white_internet")),
             )
             .options(selectinload(Order.user), selectinload(Order.tariff))
         )

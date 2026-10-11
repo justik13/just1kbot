@@ -38,10 +38,11 @@ VALID_PREFLIGHT_BASES = (
     "0034_drop_tariff_quotes",
     "0035_traffic_device_retention",
     "0036_unique_orders_external_id",
+    "0037_vless_subscriptions",
 )
 _BASES_LIST = ",".join(f"'{b}'" for b in VALID_PREFLIGHT_BASES)
-EXPECTED_BASE = "0036_unique_orders_external_id"
-EXPECTED_HEAD = "0037_vless_subscriptions"
+EXPECTED_BASE = "0037_vless_subscriptions"
+EXPECTED_HEAD = "0038_rename_awg_to_standard"
 
 DROPPED_TABLES = (
     "paid_value_ledger",
@@ -155,6 +156,7 @@ VALID_POSTFLIGHT_HEADS = (
     "0035_traffic_device_retention",
     "0036_unique_orders_external_id",
     "0037_vless_subscriptions",
+    "0038_rename_awg_to_standard",
 )
 _HEADS_LIST = ",".join(f"'{h}'" for h in VALID_POSTFLIGHT_HEADS)
 

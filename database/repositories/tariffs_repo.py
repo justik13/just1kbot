@@ -15,8 +15,10 @@ ALLOWED_TARIFF_UPDATE_FIELDS = {
 
 async def get_active_tariffs(
     session: AsyncSession,
-    service_type: str = "awg",
+    service_type: str = "standard",
 ) -> list[Tariff]:
+    if service_type == "awg":
+        service_type = "standard"
     stmt = (
         select(Tariff)
         .where(
@@ -62,6 +64,8 @@ async def get_tariff_count(
     session: AsyncSession,
     service_type: str | None = None,
 ) -> int:
+    if service_type == "awg":
+        service_type = "standard"
     stmt = select(func.count(Tariff.id))
     if service_type is not None:
         stmt = stmt.where(Tariff.service_type == service_type)
@@ -75,6 +79,8 @@ async def get_tariffs_paginated(
     per_page: int = 10,
     service_type: str | None = None,
 ) -> list[Tariff]:
+    if service_type == "awg":
+        service_type = "standard"
     offset = (page - 1) * per_page
     stmt = select(Tariff)
     if service_type is not None:

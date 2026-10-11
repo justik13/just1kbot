@@ -76,7 +76,7 @@ async def _build_tariffs_list_text_and_kb(
             callback_data=next_cb,
         )
 
-    if service_type == "awg":
+    if service_type in ("standard", "awg"):
         back_text = texts.BTN_BACK
         back_cb = "admin_cat_std_sub"
     elif service_type == "white_internet":
@@ -159,6 +159,8 @@ async def show_tariffs_list(
 
     await state.clear()
     service_type = callback.data.split(":", 1)[1] if ":" in callback.data else None
+    if service_type == "awg":
+        service_type = "standard"
     await _show_tariffs_list(callback, session, page=1, service_type=service_type)
     await callback.answer(show_alert=False)
 
@@ -186,12 +188,14 @@ async def tariffs_pagination(
             page = 1
     elif len(parts) >= 3:
         service_type = parts[1]
+        if service_type == "awg":
+            service_type = "standard"
         try:
             page = int(parts[2])
         except ValueError:
             page = 1
 
-    if service_type not in ("awg", "white_internet"):
+    if service_type not in ("standard", "white_internet"):
         service_type = None
 
     if page < 1:
@@ -245,11 +249,10 @@ async def _show_tariff_card(
             callback_data=f"admin_tariff_toggle:{tariff.id}",
         )
 
-    back_cb = (
-        f"admin_tariffs:{tariff.service_type}"
-        if getattr(tariff, "service_type", None)
-        else "admin_tariffs"
-    )
+    stype = getattr(tariff, "service_type", None)
+    if stype == "awg":
+        stype = "standard"
+    back_cb = f"admin_tariffs:{stype}" if stype else "admin_tariffs"
     builder.button(
         text=texts.ADMIN_TARIFF_BTN_BACK_TO_LIST,
         callback_data=back_cb,
@@ -578,11 +581,10 @@ async def process_edit_tariff_rub(
         texts.ADMIN_AUDIT_LOG_DETAILS_TARIFF_EDIT_RUB.format(old_value=old_value, new_value=new_value),
     )
 
-    back_cb = (
-        f"admin_tariffs:{tariff.service_type}"
-        if getattr(tariff, "service_type", None)
-        else "admin_tariffs"
-    )
+    stype = getattr(tariff, "service_type", None)
+    if stype == "awg":
+        stype = "standard"
+    back_cb = f"admin_tariffs:{stype}" if stype else "admin_tariffs"
     await render_hub(
         message.bot,
         message.chat.id,

@@ -78,7 +78,7 @@ async def handle_order_pay_wallet(
         order = await OrderService.pay_from_wallet(
             session,
             user_id=db_user_id,
-            service_type="awg",
+            service_type="standard",
             tariff_id=tariff.id,
         )
     except (AccountDebtBlockedError, InsufficientBalanceError):
@@ -185,7 +185,7 @@ async def handle_order_pay_card(
                 order = await OrderService.pay_from_wallet(
                     session,
                     user_id=db_user_id,
-                    service_type="awg",
+                    service_type="standard",
                     tariff_id=tariff.id,
                 )
             except FinancialHoldBlockedError:
@@ -231,7 +231,7 @@ async def handle_order_pay_card(
         order = await OrderService.create_order(
             session,
             user_id=db_user_id,
-            service_type="awg",
+            service_type="standard",
             tariff_id=tariff.id,
             payment_method="yookassa",
             bot_username=bot_username,

@@ -46,7 +46,7 @@ def get_admin_cat_std_sub_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_STD_SERVERS, callback_data="admin_servers:std")
     builder.button(text=texts.BTN_STD_INCY_CONFIG, callback_data="admin_std_incy")
-    builder.button(text=texts.BTN_STD_TARIFFS, callback_data="admin_tariffs:awg")
+    builder.button(text=texts.BTN_STD_TARIFFS, callback_data="admin_tariffs:standard")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()

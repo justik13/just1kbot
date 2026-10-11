@@ -110,12 +110,12 @@ async def _seed_default_data() -> None:
     async with session_scope() as session:
         # Seed tariffs
         result = await session.execute(
-            select(func.count(Tariff.id)).where(Tariff.service_type == "awg")
+            select(func.count(Tariff.id)).where(Tariff.service_type == "standard")
         )
         if result.scalar_one() == 0:
             for tariff in DEFAULT_TARIFFS_SEEDS:
                 tariff_data = {**tariff}
-                tariff_data.setdefault("service_type", "awg")
+                tariff_data.setdefault("service_type", "standard")
                 session.add(Tariff(**tariff_data, is_active=True))
             await session.commit()
             logger.info("Default tariffs seeded successfully.")

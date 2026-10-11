@@ -378,7 +378,7 @@ class Tariff(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     service_type: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="awg", server_default="awg"
+        String(30), nullable=False, default="standard", server_default="standard"
     )
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     device_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
@@ -583,7 +583,7 @@ class Order(Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     service_type: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="awg", server_default=text("'awg'")
+        String(30), nullable=False, default="standard", server_default=text("'standard'")
     )
     tariff_id: Mapped[int | None] = mapped_column(
         ForeignKey("tariffs.id", ondelete="SET NULL"), nullable=True

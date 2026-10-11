@@ -214,7 +214,7 @@ def _format_time_left(subscription_end) -> str:
 async def _get_active_tariffs(session: AsyncSession) -> list[Tariff]:
     result = await session.execute(
         select(Tariff)
-        .where(Tariff.is_active.is_(True), Tariff.service_type == "awg")
+        .where(Tariff.is_active.is_(True), Tariff.service_type.in_(("standard", "awg")))
         .order_by(Tariff.device_limit)
     )
 

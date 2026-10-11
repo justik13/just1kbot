@@ -87,7 +87,7 @@ class TestAdminMenuAndCategoryKeyboards(unittest.TestCase):
 
         self.assertIn("admin_servers:std", callbacks)
         self.assertIn("admin_std_incy", callbacks)
-        self.assertIn("admin_tariffs:awg", callbacks)
+        self.assertIn("admin_tariffs:standard", callbacks)
         self.assertIn("admin_menu", callbacks)
 
     def test_get_admin_cat_wi_sub_keyboard(self):
@@ -498,13 +498,20 @@ class TestAdminTariffsSplit(unittest.IsolatedAsyncioTestCase):
     async def test_show_tariffs_list_dispatches_service_type(self):
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = self.admin_user
-        cb.data = "admin_tariffs:awg"
+        cb.data = "admin_tariffs:standard"
         cb.answer = AsyncMock()
 
         with patch("bot.handlers.admin.tariffs.is_admin", return_value=True):
             with patch("bot.handlers.admin.tariffs._show_tariffs_list", new_callable=AsyncMock) as mock_show:
                 await show_tariffs_list(cb, self.state, self.mock_session)
-                mock_show.assert_awaited_once_with(cb, self.mock_session, page=1, service_type="awg")
+                mock_show.assert_awaited_once_with(cb, self.mock_session, page=1, service_type="standard")
+
+        # Also test legacy alias awg normalizes to standard
+        cb.data = "admin_tariffs:awg"
+        with patch("bot.handlers.admin.tariffs.is_admin", return_value=True):
+            with patch("bot.handlers.admin.tariffs._show_tariffs_list", new_callable=AsyncMock) as mock_show:
+                await show_tariffs_list(cb, self.state, self.mock_session)
+                mock_show.assert_awaited_once_with(cb, self.mock_session, page=1, service_type="standard")
 
     async def test_tariffs_pagination_parses_service_type_and_page(self):
         cb = MagicMock(spec=CallbackQuery)

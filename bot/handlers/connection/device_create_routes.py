@@ -179,7 +179,7 @@ async def start_add_device(
     device_limit = await _get_effective_device_limit(session, user)
     if (awg_count + vless_count) >= device_limit:
         from database.repositories.tariffs_repo import get_active_tariffs
-        active_tariffs = await get_active_tariffs(session, service_type="awg")
+        active_tariffs = await get_active_tariffs(session, service_type="standard")
         can_upgrade = any(getattr(t, "device_limit", 1) > device_limit for t in active_tariffs)
         await render_hub(
             callback.bot,
@@ -379,7 +379,7 @@ async def _process_server_selection(
                 pass
             limit = await _get_effective_device_limit(session, user)
             from database.repositories.tariffs_repo import get_active_tariffs
-            active_tariffs = await get_active_tariffs(session, service_type="awg")
+            active_tariffs = await get_active_tariffs(session, service_type="standard")
             can_upgrade = any(getattr(t, "device_limit", 1) > limit for t in active_tariffs)
             await render_hub(
                 callback.bot,
