@@ -319,25 +319,23 @@ async def _sweep_vless_pending_revocations() -> None:
             subs = await vless_subscription_repo.get_subscriptions_with_pending_revocations(session, limit=20)
             servers = await VlessSubscriptionService.get_configured_vless_servers(session)
             targets = VlessSubscriptionService._extract_node_targets(servers)
-            if not targets:
-                return
-
             sub_items = [
                 (s.id, list(getattr(s, "pending_revoked_uuids", None) or []), getattr(s, "version", 1) or 1)
                 for s in subs
             ] if subs else []
 
-        for sub_id, rev_uuids, ver in sub_items:
-            for rev_uuid in rev_uuids:
-                try:
-                    res = await VlessSubscriptionService._execute_deprovision_on_nodes(targets, rev_uuid, version=ver)
-                    if all(res.values()) and len(res) == len(targets):
-                        async with session_scope() as session:
-                            await vless_subscription_repo.pop_pending_revoked_uuid(session, sub_id, rev_uuid)
-                            logger.info("Durable deprovision cleared revoked UUID for sub_id=%s", sub_id)
-                except Exception as exc:
-                    masked = f"{rev_uuid[:8]}***" if rev_uuid else "unknown"
-                    logger.warning("Retry deprovision failed for sub_id=%s UUID %s: %s", sub_id, masked, exc)
+        if targets:
+            for sub_id, rev_uuids, ver in sub_items:
+                for rev_uuid in rev_uuids:
+                    try:
+                        res = await VlessSubscriptionService._execute_deprovision_on_nodes(targets, rev_uuid, version=ver)
+                        if all(res.values()) and len(res) == len(targets):
+                            async with session_scope() as session:
+                                await vless_subscription_repo.pop_pending_revoked_uuid(session, sub_id, rev_uuid)
+                                logger.info("Durable deprovision cleared revoked UUID for sub_id=%s", sub_id)
+                    except Exception as exc:
+                        masked = f"{rev_uuid[:8]}***" if rev_uuid else "unknown"
+                        logger.warning("Retry deprovision failed for sub_id=%s UUID %s: %s", sub_id, masked, exc)
 
         # 2. Converge out-of-sync subscriptions (e.g. node was offline during ban or grace deactivation)
         async with session_scope() as session:

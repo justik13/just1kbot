@@ -28,6 +28,7 @@ from bot.texts.runtime.alerts import (
     ALERT_SERVER_RESTORED,
 )
 from config.constants import (
+    AMNEZIA_PROTOCOL,
     AMNEZIA_PROTOCOLS,
     ServerHealthState,
     WHITE_INTERNET_SUB_PATH_PREFIX,
@@ -271,14 +272,17 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         st.last_check_monotonic = now_m
         caps = getattr(server, "capabilities", None) or []
-        server_proto = str(getattr(server, "protocol", "") or "").lower()
+        raw_proto = getattr(server, "protocol", None)
+        if not raw_proto:
+            raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
+        server_proto = str(raw_proto).lower()
 
         has_amnezia = server_proto in AMNEZIA_PROTOCOLS or "awg" in caps
         has_xray = (
             server_proto in (XRAY_PROTOCOL, "vless")
             or "vless" in caps
-            or "xray_origin" in caps
             or "xray_vless" in caps
+            or (server_proto not in AMNEZIA_PROTOCOLS and "xray_origin" in caps)
         )
 
         if not has_amnezia and not has_xray:
