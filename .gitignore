@@ -75,3 +75,4 @@ log.txt
 log-failed.txt
 wget-log
 wget-log.*
+.heartbeat_sim

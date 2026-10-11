@@ -13,6 +13,7 @@ ADMIN_BAN_SUCCESS = """✅ Пользователь успешно забане�
 ADMIN_BONUS_REASON_LINE_FORMAT = "Причина: <i>{safe_reason}</i>"
 
 ADMIN_BTN_BACK_TO_CARD = "← К карточке"
+ADMIN_BTN_BACK_TO_SUB = "← К подписке"
 ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN = (
     "\n• <b>AWG (за месяц):</b> {monthly_awg}"
     "\n• <b>Белый Интернет (за месяц):</b> {monthly_wi}"
@@ -573,3 +574,19 @@ ADMIN_BAN_PROMPT = """🚫 <b>Блокировка пользователя</b> 
 ADMIN_BALANCE_OP_ALREADY_PROCESSED = "⚠️ Операция уже была выполнена (защита от повторного списания)"
 ADMIN_BALANCE_DEDUCT_FAILED = "❌ Ошибка списания: {error}"
 ADMIN_BALANCE_ADJUSTED_SUCCESS = "✅ Баланс успешно изменен на {amount} ₽"
+
+ADMIN_VLESS_DEVICES_HEADER = """🌐 <b>VLESS (INCY) Подключение:</b>
+• Активных устройств (HWID): <b>{active}</b>
+{devices_list}"""
+ADMIN_VLESS_NO_DEVICES = "<i>Нет активных HWID (устройства еще не подключались по ссылке).</i>"
+ADMIN_VLESS_DEVICE_ITEM = "• <code>{hwid}</code> — активность: <i>{last_conn}</i> ({status})"
+ADMIN_VLESS_DEVICE_STATUS_ACTIVE = "активно (VLESS)"
+ADMIN_VLESS_DEVICE_STATUS_INACTIVE = "неактивно (VLESS)"
+
+ADMIN_BTN_VLESS_COPY_LINK = "📋 Ссылка VLESS"
+ADMIN_BTN_VLESS_HWID_RESET = "🔄 Сбросить VLESS HWID"
+ADMIN_BTN_VLESS_TOKEN_ROTATE = "🔄 Перевыпустить ссылку VLESS"
+ADMIN_ALERT_VLESS_HWID_RESET_SUCCESS = "✅ Привязки HWID VLESS успешно сброшены"
+ADMIN_ALERT_VLESS_TOKEN_ROTATE_SUCCESS = "✅ Ссылка VLESS перевыпущена. Старая ссылка аннулирована"
+ADMIN_BTN_SUB_STANDARD = "⚡️ Стандартная (VLESS/AWG)"
+ADMIN_SUB_STATUS_VLESS_INFO = "\n\n🌐 <b>VLESS (INCY):</b> {vless_count} устр.\n<code>{vless_sub_url}</code>"

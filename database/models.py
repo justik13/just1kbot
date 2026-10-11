@@ -208,6 +208,13 @@ class User(Base):
         foreign_keys=[current_tariff_id],
     )
 
+    vless_subscription = relationship(
+        "VlessSubscription",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
 
 class VPNProfile(Base):
     __tablename__ = "vpn_profiles"
@@ -1267,3 +1274,54 @@ class AdminOperationIdempotency(Base):
         server_default=func.now(),
         index=True,
     )
+
+
+class VlessSubscription(Base):
+    """VLESS TLS subscription for standard access with INCY HWID device quota tracking."""
+
+    __tablename__ = "vless_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True)
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+
+    active_hwids: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, default=dict, server_default=text("'{}'::jsonb")
+    )
+    pending_revoked_uuids: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_synced_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=now_utc,
+        onupdate=now_utc,
+        server_default=text("now()"),
+    )
+
+    user = relationship("User", back_populates="vless_subscription")

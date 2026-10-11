@@ -73,13 +73,26 @@ def generate_mock_amnezia_vpn_uri(
     data = {
         "containers": [
             {
+                "container": "amnezia-awg2",
                 "awg": {
                     "last_config": json.dumps(last_cfg, ensure_ascii=False),
                     "protocol_version": "2",
-                }
+                    "port": 51820,
+                    "Jc": 4,
+                    "Jmin": 40,
+                    "Jmax": 70,
+                    "S1": 15,
+                    "S2": 30,
+                    "S3": 10,
+                    "S4": 20,
+                    "H1": 1,
+                    "H2": 2,
+                    "H3": 3,
+                    "H4": 4,
+                },
             }
         ],
-        "defaultContainer": "awg",
+        "defaultContainer": "amnezia-awg2",
         "description": f"just1k VPN - {client_name}",
         "dns1": "1.1.1.1",
         "dns2": "8.8.8.8",
@@ -200,6 +213,7 @@ async def mock_xray_sync_client(self, api_url: str, api_key: str, client_uuid: s
             "just1k-wl-default",
             "just1k-wl-inbound-de-relay-01",
             "just1k-wl-inbound-se-relay-01",
+            "just1k-vless-direct",
         ],
     )
 

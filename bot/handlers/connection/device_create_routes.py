@@ -170,6 +170,25 @@ async def start_add_device(
     await callback.answer(show_alert=False)
     await state.clear()
 
+    from database.repositories.profiles_repo import PROFILE_QUOTA_EXCLUDED_STATUSES, get_user_profiles
+    from database.repositories import vless_subscription_repo
+
+    profiles = await get_user_profiles(session, user.id)
+    awg_count = len([p for p in profiles if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES])
+    vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+    device_limit = await _get_effective_device_limit(session, user)
+    if (awg_count + vless_count) >= device_limit:
+        from database.repositories.tariffs_repo import get_active_tariffs
+        active_tariffs = await get_active_tariffs(session, service_type="awg")
+        can_upgrade = any(getattr(t, "device_limit", 1) > device_limit for t in active_tariffs)
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=device_limit),
+            _get_device_limit_keyboard(can_upgrade=can_upgrade),
+        )
+        return
+
     servers = await get_available_servers(session)
 
     if not servers:
@@ -321,6 +340,7 @@ async def _process_server_selection(
                 server_id=server_id,
                 device_name=None,
                 snapshot=snapshot,
+                vless_count=None,
             )
             # Commit the creation transaction immediately so that background workers
             # claiming api_operations can see the durable create_peer task in PostgreSQL.

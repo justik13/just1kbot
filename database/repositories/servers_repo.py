@@ -39,6 +39,23 @@ def is_xray_server(server) -> bool:
     return XRAY_ORIGIN_CAPABILITY in (getattr(server, "capabilities", None) or [])
 
 
+def is_vless_capable_server(server) -> bool:
+    """Whether a server can serve direct VLESS TLS clients.
+
+    True if 'vless' or 'xray_vless' capability is present, or protocol is 'vless'.
+    """
+    caps = getattr(server, "capabilities", None) or []
+    proto = str(getattr(server, "protocol", "") or "").lower()
+    return "vless" in caps or "xray_vless" in caps or proto == "vless"
+
+
+def is_white_internet_origin_server(server) -> bool:
+    """Whether a server is an origin server for White Internet contour."""
+    caps = getattr(server, "capabilities", None) or []
+    proto = str(getattr(server, "protocol", "") or "").lower()
+    return XRAY_ORIGIN_CAPABILITY in caps or (proto == XRAY_PROTOCOL and "vless" not in caps)
+
+
 def _capacity_consuming_profiles_condition():
     """A profile consumes server capacity if an active peer is assigned (peer_id is not None),
     or if it is in an explicit capacity-consuming lifecycle state."""
@@ -158,12 +175,13 @@ def is_server_allocatable(server: Server | None, protocol: str = AMNEZIA_PROTOCO
     """Return True if server is valid, active, matching protocol, and healthy for allocation/migration."""
     if not server:
         return False
+    caps = getattr(server, "capabilities", None) or []
     server_proto = getattr(server, "protocol", None)
     if server_proto is not None:
         if protocol in AMNEZIA_PROTOCOLS:
-            if server_proto not in AMNEZIA_PROTOCOLS:
+            if server_proto not in AMNEZIA_PROTOCOLS and not any(c in ("awg", "amnezia") for c in caps):
                 return False
-        elif server_proto != protocol:
+        elif server_proto != protocol and protocol not in caps:
             return False
     if getattr(server, "is_active", True) is False:
         return False

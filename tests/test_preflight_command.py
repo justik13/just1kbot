@@ -37,10 +37,11 @@ VALID_PREFLIGHT_BASES = (
     "0033_drop_legacy_financial_tables",
     "0034_drop_tariff_quotes",
     "0035_traffic_device_retention",
+    "0036_unique_orders_external_id",
 )
 _BASES_LIST = ",".join(f"'{b}'" for b in VALID_PREFLIGHT_BASES)
-EXPECTED_BASE = "0035_traffic_device_retention"
-EXPECTED_HEAD = "0036_unique_orders_external_id"
+EXPECTED_BASE = "0036_unique_orders_external_id"
+EXPECTED_HEAD = "0037_vless_subscriptions"
 
 DROPPED_TABLES = (
     "paid_value_ledger",
@@ -153,6 +154,7 @@ PREFLIGHT_STATEMENTS: tuple[tuple[str, str], ...] = (
 VALID_POSTFLIGHT_HEADS = (
     "0035_traffic_device_retention",
     "0036_unique_orders_external_id",
+    "0037_vless_subscriptions",
 )
 _HEADS_LIST = ",".join(f"'{h}'" for h in VALID_POSTFLIGHT_HEADS)
 

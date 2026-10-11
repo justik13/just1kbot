@@ -89,6 +89,7 @@ async def _deprovision_old_node_safe(
                 client_uuid=client_uuid,
                 is_active=False,
                 version=version,
+                service="white_internet",
             )
     except Exception as exc:
         logger.warning("Failed to deprovision old origin node %s: %s", _sanitize_url(api_url), exc)
@@ -1045,6 +1046,7 @@ class WhiteInternetService:
                     version=target_version,
                     expected_node_epoch=origin_node.xray_instance_epoch,
                     idempotency_key=idempotency_key,
+                    service="white_internet",
                 )
                 sync_res = resp.result if hasattr(resp, "result") else resp[0]
                 verified_epoch = (

@@ -330,3 +330,7 @@ def setup_webhook_routes(app: web.Application):
     # Register White Internet subscription feed routes
     from bot.handlers.white_internet_web import setup_white_internet_web_routes
     setup_white_internet_web_routes(app)
+
+    # Register standard VLESS subscription feed routes
+    from bot.handlers.vless_web import setup_vless_web_routes
+    setup_vless_web_routes(app)

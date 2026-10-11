@@ -1,9 +1,8 @@
-import inspect
 import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,6 +100,7 @@ class DeviceService:
         server_id: int,
         device_name: str | None = None,
         snapshot: ServerPeerSnapshot,
+        vless_count: int | None = 0,
     ) -> VPNProfile:
         if snapshot.server_id != server_id or datetime.now(
             timezone.utc
@@ -111,10 +111,20 @@ class DeviceService:
                 select(User).where(User.id == user_id).with_for_update()
             )
         ).scalar_one()
+        if vless_count is None:
+            from database.repositories import vless_subscription_repo
+            vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
         server = (
             await session.execute(
                 select(Server)
-                .where(Server.id == server_id, Server.protocol.in_(AMNEZIA_PROTOCOLS))
+                .where(
+                    Server.id == server_id,
+                    or_(
+                        Server.protocol.in_(AMNEZIA_PROTOCOLS),
+                        Server.capabilities.contains(["awg"]),
+                        Server.capabilities.contains(["amnezia"]),
+                    ),
+                )
                 .with_for_update()
             )
         ).scalar_one_or_none()
@@ -188,7 +198,11 @@ class DeviceService:
                 )
             )
         ).scalar_one()
-        if user_count >= user.device_limit:
+
+        from services.subscription import SubscriptionService
+        effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
+
+        if (user_count + (vless_count or 0)) >= effective_limit:
             raise DeviceLimitExceeded("Device limit reached")
         server_count = (
             await session.execute(
@@ -308,18 +322,8 @@ class DeviceService:
             )
             .limit(1)
         )
-        res = await session.execute(query)
-        if inspect.isawaitable(res):
-            res = await res
-        scalar_fn = getattr(res, "scalar_one_or_none", None)
-        if scalar_fn is None:
-            return False
-        val = scalar_fn()
-        if inspect.isawaitable(val):
-            val = await val
-        if isinstance(val, (int, str)) and not isinstance(val, bool):
-            return True
-        return False
+        val = (await session.execute(query)).scalar_one_or_none()
+        return isinstance(val, (int, str)) and not isinstance(val, bool)
 
     @staticmethod
     async def get_last_migration_time(session: AsyncSession, profile_id: int) -> datetime | None:
@@ -335,18 +339,8 @@ class DeviceService:
             .order_by(APIOperation.id.desc())
             .limit(1)
         )
-        res = await session.execute(query)
-        if inspect.isawaitable(res):
-            res = await res
-        scalar_fn = getattr(res, "scalar_one_or_none", None)
-        if scalar_fn is None:
-            return None
-        val = scalar_fn()
-        if inspect.isawaitable(val):
-            val = await val
-        if isinstance(val, datetime):
-            return val
-        return None
+        val = (await session.execute(query)).scalar_one_or_none()
+        return val if isinstance(val, datetime) else None
 
     @staticmethod
     async def migrate_device(
@@ -389,7 +383,14 @@ class DeviceService:
         target_server = (
             await session.execute(
                 select(Server)
-                .where(Server.id == target_server_id, Server.protocol.in_(AMNEZIA_PROTOCOLS))
+                .where(
+                    Server.id == target_server_id,
+                    or_(
+                        Server.protocol.in_(AMNEZIA_PROTOCOLS),
+                        Server.capabilities.contains(["awg"]),
+                        Server.capabilities.contains(["amnezia"]),
+                    ),
+                )
                 .with_for_update()
             )
         ).scalar_one_or_none()

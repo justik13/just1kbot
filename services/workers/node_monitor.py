@@ -271,36 +271,59 @@ async def check_node_resources_and_alerts(bot: Bot):
         expected_consecutive_successes = st.consecutive_successes
 
         st.last_check_monotonic = now_m
-        server_proto = getattr(server, "protocol", None)
-        if not isinstance(server_proto, str):
-            caps = getattr(server, "capabilities", None) or []
-            server_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
+        caps = getattr(server, "capabilities", None) or []
+        raw_proto = getattr(server, "protocol", None)
+        if not isinstance(raw_proto, str) or not raw_proto.strip():
+            raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
+        server_proto = raw_proto.strip().lower()
 
-        is_xray_node = server_proto == XRAY_PROTOCOL
-        is_amnezia_node = server_proto in AMNEZIA_PROTOCOLS
+        has_amnezia = server_proto in AMNEZIA_PROTOCOLS or "awg" in caps
+        has_xray = (
+            server_proto in (XRAY_PROTOCOL, "vless")
+            or "vless" in caps
+            or "xray_vless" in caps
+            or (server_proto not in AMNEZIA_PROTOCOLS and "xray_origin" in caps)
+        )
 
-        if not is_xray_node and not is_amnezia_node:
+        if not has_amnezia and not has_xray:
             logger.warning(
                 "Server %s (%s) has unsupported or unassigned protocol '%s', skipping healthcheck",
                 server.id, server.name, server.protocol,
             )
             return
 
+        is_xray_node = has_xray
+        is_amnezia_node = has_amnezia
+
         # 4a. Исполнение проверки Core Node API с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
         xray_epoch = None
         xray_data = None
         client = None
+
+        awg_ok = True
+        xray_ok = True
+
         try:
-            if is_xray_node:
-                from services.xray_node_client import XrayNodeClient
-                async with XrayNodeClient(timeout=10.0) as xray_client:
-                    is_healthy, xray_epoch, xray_data = await xray_client.check_health(
-                        server.api_url, server.api_key
-                    )
-            elif is_amnezia_node:
+            if has_amnezia:
                 client = AmneziaClient(server.api_url, server.api_key)
-                is_healthy = await client.healthcheck()
+                awg_ok = await client.healthcheck()
+
+            if has_xray:
+                from services.xray_node_client import XrayNodeClient
+                extra = getattr(server, "extra_data", None) or {}
+                xray_url = extra.get("xray_api_url") or server.api_url
+                async with XrayNodeClient(timeout=10.0) as xray_client:
+                    xray_ok, xray_epoch, xray_data = await xray_client.check_health(
+                        xray_url, server.api_key
+                    )
+
+            if has_amnezia and has_xray:
+                is_healthy = awg_ok and xray_ok
+            elif has_amnezia:
+                is_healthy = awg_ok
+            elif has_xray:
+                is_healthy = xray_ok
         except Exception as exc:
             logger.warning("Healthcheck exception for server %s (%s): %s", server.id, server.name, exc)
             is_healthy = False
@@ -785,6 +808,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                             updated_srv.extra_data = extra
                             server.extra_data = extra
                             await session.flush()
+
+                    # Trigger VLESS re-provisioning if epoch changed on a VLESS capable server
+                    caps = updated_srv.capabilities or []
+                    if "vless" in caps or getattr(updated_srv, "protocol", None) == "vless":
+                        from services.vless_subscription_service import VlessSubscriptionService
+                        asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(updated_srv.id))
 
             db_server, applied = await update_server_health_snapshot(
                 session,

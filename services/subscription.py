@@ -329,10 +329,13 @@ class SubscriptionService:
 
         if new_device_limit is not None:
             profiles_count = await get_user_profiles_count(session, user.id)
+            from database.repositories import vless_subscription_repo
+            vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+            total_count = profiles_count + vless_count
 
-            if profiles_count > new_device_limit:
+            if total_count > new_device_limit:
                 raise ValueError(
-                    f"Cannot downgrade: {profiles_count} devices > "
+                    f"Cannot downgrade: {total_count} devices > "
                     f"{new_device_limit} limit. User must delete devices first."
                 )
 
@@ -415,9 +418,12 @@ class SubscriptionService:
         if subscription_end <= now_utc():
             raise ValueError("converted subscription must remain active")
         profiles_count = await get_user_profiles_count(session, user.id)
-        if profiles_count > device_limit:
+        from database.repositories import vless_subscription_repo
+        vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+        total_count = profiles_count + vless_count
+        if total_count > device_limit:
             raise ValueError(
-                f"Cannot downgrade: {profiles_count} devices > "
+                f"Cannot downgrade: {total_count} devices > "
                 f"{device_limit} limit. User must delete devices first."
             )
         user.subscription_end = subscription_end
@@ -497,4 +503,17 @@ class SubscriptionService:
                     "protocol": server.protocol if server else None,
                 },
             )
+
+        from database.repositories import vless_subscription_repo
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        vless_target_active = SubscriptionService.check_vpn_access(user)
+
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if vless_sub and vless_sub.is_active != vless_target_active:
+            vless_sub.is_active = vless_target_active
+            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+            session.add(vless_sub)
+            VlessSubscriptionService.ensure_synced_background(user.id, is_active=vless_target_active, session=session)
+
         await session.flush()

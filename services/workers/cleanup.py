@@ -9,12 +9,13 @@ from aiogram.exceptions import TelegramForbiddenError
 from bot.keyboards.notifications import get_devices_deleted_keyboard
 from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from cachetools import TTLCache
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
     AMNEZIA_PROTOCOLS,
     AdminAuditAction,
     GRACE_PERIOD_HOURS,
+    VPN_ACCESS_GRACE_HOURS,
 )
 from database.connection import session_scope
 from database.models import (
@@ -25,6 +26,7 @@ from database.models import (
     Order,
     Server,
     User,
+    VlessSubscription,
     VPNProfile,
     WebhookInbox,
 )
@@ -93,6 +95,8 @@ async def cleanup_dangling_peers_loop(
             if now - _last_heavy_cleanup >= CLEANUP_LOOP_INTERVAL:
                 await _cleanup_stuck_profiles()
                 await _cleanup_expired_profiles_grace(bot)
+                await _cleanup_expired_vless_network_grace()
+                await _sweep_vless_pending_revocations()
                 await _cleanup_dangling_peers()
                 _last_heavy_cleanup = now
 
@@ -135,6 +139,13 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                 User.is_deleted.is_(False),
                 User.subscription_end.is_not(None),
                 (User.subscription_end < threshold) | User.financial_hold,
+                or_(
+                    select(VPNProfile.id).where(VPNProfile.user_id == User.id).exists(),
+                    select(VlessSubscription.id).where(
+                        VlessSubscription.user_id == User.id,
+                        VlessSubscription.is_active.is_(True),
+                    ).exists(),
+                ),
             )
             .order_by(User.subscription_end.asc())
             .limit(50)
@@ -179,6 +190,8 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                         _safe_log_value(user.id),
                     )
                     continue
+
+                await SubscriptionService.sync_access_state(session, user)
 
                 profiles_stmt = select(VPNProfile).where(
                     VPNProfile.user_id == user.id,
@@ -257,6 +270,110 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
             deleted_users_count,
             deleted_profiles_count,
         )
+
+
+async def _cleanup_expired_vless_network_grace() -> None:
+    """Deactivate VLESS access when network grace window (4 hours) expires (before 24h retention delete)."""
+    current_time = now_utc()
+    threshold = current_time - timedelta(hours=VPN_ACCESS_GRACE_HOURS)
+
+    async with session_scope() as session:
+        stmt = (
+            select(User.id)
+            .join(VlessSubscription, VlessSubscription.user_id == User.id)
+            .where(
+                User.is_deleted.is_(False),
+                User.subscription_end.is_not(None),
+                User.subscription_end < threshold,
+                VlessSubscription.is_active.is_(True),
+            )
+            .order_by(User.subscription_end.asc())
+            .limit(50)
+        )
+        result = await session.execute(stmt)
+        user_ids = [row[0] for row in result.all()]
+
+    for user_id in user_ids:
+        try:
+            async with session_scope() as session:
+                user = await session.get(User, user_id, with_for_update=True)
+                if user and user.subscription_end and user.subscription_end < threshold:
+                    from utils.datetime_helpers import is_permanent_subscription
+
+                    if is_permanent_subscription(user.subscription_end):
+                        continue
+                    await SubscriptionService.sync_access_state(session, user)
+                    logger.info("VLESS 4h network grace deactivation applied for user_id=%s", user_id)
+        except Exception as e:
+            logger.warning("VLESS network grace deactivation failed for user_id=%s: %s", user_id, e)
+
+
+async def _sweep_vless_pending_revocations() -> None:
+    """Retry deprovisioning for any pending revoked VLESS UUIDs and converge out-of-sync subscriptions."""
+    from database.repositories import vless_subscription_repo
+    from services.vless_subscription_service import VlessSubscriptionService
+
+    try:
+        # 1. Retry deprovisioning of old revoked UUIDs
+        async with session_scope() as session:
+            subs = await vless_subscription_repo.get_subscriptions_with_pending_revocations(session, limit=20)
+            servers = await VlessSubscriptionService.get_configured_vless_servers(session)
+            targets = VlessSubscriptionService._extract_node_targets(servers)
+            sub_items = [
+                (s.id, list(getattr(s, "pending_revoked_uuids", None) or []), getattr(s, "version", 1) or 1)
+                for s in subs
+            ] if subs else []
+
+        if targets:
+            for sub_id, rev_uuids, ver in sub_items:
+                for rev_uuid in rev_uuids:
+                    try:
+                        res = await VlessSubscriptionService._execute_deprovision_on_nodes(targets, rev_uuid, version=ver)
+                        if all(res.values()) and len(res) == len(targets):
+                            async with session_scope() as session:
+                                await vless_subscription_repo.pop_pending_revoked_uuid(session, sub_id, rev_uuid)
+                                logger.info("Durable deprovision cleared revoked UUID for sub_id=%s", sub_id)
+                    except Exception as exc:
+                        masked = f"{rev_uuid[:8]}***" if rev_uuid else "unknown"
+                        logger.warning("Retry deprovision failed for sub_id=%s UUID %s: %s", sub_id, masked, exc)
+
+        # 2. Converge out-of-sync subscriptions (e.g. node was offline during ban or grace deactivation)
+        async with session_scope() as session:
+            out_of_sync_stmt = (
+                select(VlessSubscription.user_id)
+                .where(
+                    or_(
+                        VlessSubscription.last_synced_version.is_(None),
+                        VlessSubscription.last_synced_version < VlessSubscription.version,
+                    )
+                )
+                .order_by(VlessSubscription.updated_at.asc())
+                .limit(20)
+            )
+            out_of_sync_users = list((await session.execute(out_of_sync_stmt)).scalars().all())
+
+        for uid in out_of_sync_users:
+            try:
+                async with session_scope() as session:
+                    await VlessSubscriptionService.sync_user_to_nodes(session, uid)
+            except Exception as e:
+                logger.warning("Out-of-sync VLESS reconciliation failed for user_id=%s: %s", uid, e)
+
+        # 3. Converge VLESS servers whose epoch drift occurred while monitor wasn't active
+        async with session_scope() as session:
+            vless_servers = await VlessSubscriptionService.get_configured_vless_servers(session)
+            unsynced_server_ids = [
+                s.id for s in vless_servers
+                if s.xray_instance_epoch and (s.extra_data or {}).get("vless_synced_epoch") != s.xray_instance_epoch
+            ]
+
+        for srv_id in unsynced_server_ids:
+            try:
+                await VlessSubscriptionService.sync_all_active_to_server(srv_id)
+            except Exception as e:
+                logger.warning("VLESS server epoch convergence failed for server %s: %s", srv_id, e)
+    except Exception as e:
+        logger.warning("Error in _sweep_vless_pending_revocations: %s", e)
 
 
 async def _cleanup_stuck_profiles():

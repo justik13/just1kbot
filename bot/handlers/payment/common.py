@@ -61,10 +61,13 @@ async def _check_tariff_change_allowed(
         current_limit = await _get_effective_device_limit(session, db_user)
         if new_limit != current_limit:
             return texts.PAYMENT_CHANGE_TARIFF_TEMPORARILY_UNAVAILABLE
+        from database.repositories import vless_subscription_repo
         profiles_count = await get_user_profiles_count(session, db_user.id)
-        if profiles_count > new_limit:
+        vless_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
+        total_devices = profiles_count + vless_count
+        if total_devices > new_limit:
             return texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                profiles_count=profiles_count,
+                profiles_count=total_devices,
                 new_limit=new_limit,
             )
     return None
@@ -108,14 +111,23 @@ async def _show_showcase(
 async def _show_hub(
     callback: CallbackQuery, user, session: AsyncSession
 ) -> None:
+    from database.repositories import vless_subscription_repo
+    from database.repositories.profiles_repo import PROFILE_QUOTA_EXCLUDED_STATUSES
+
     profiles = await get_user_profiles(session, user.id)
+    quota_profiles = len([
+        p for p in profiles
+        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
+    ])
+    vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+    total_devices = quota_profiles + vless_hwid_count
     device_limit = await _get_effective_device_limit(session, user)
     tariff_name = get_tariff_display_name(device_limit)
     text = texts.PAYMENT_HUB_HEADER.format(
         valid_until=format_subscription_date(user.subscription_end),
         days_left=format_days_left(user.subscription_end),
         tariff_name=tariff_name,
-        devices_count=len(profiles),
+        devices_count=total_devices,
         device_limit=device_limit,
     )
 

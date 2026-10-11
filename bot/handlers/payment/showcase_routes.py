@@ -201,13 +201,16 @@ async def select_tariff(
     device_limit = getattr(tariff, "device_limit", 2)
 
     if source == "change":
+        from database.repositories import vless_subscription_repo
         profiles_count = await get_user_profiles_count(session, db_user.id)
-        if profiles_count > device_limit:
+        vless_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
+        total_devices = profiles_count + vless_count
+        if total_devices > device_limit:
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
                 texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                    profiles_count=format_plural(profiles_count, texts.NOUN_DEVICES),
+                    profiles_count=format_plural(total_devices, texts.NOUN_DEVICES),
                     new_limit=format_plural(device_limit, texts.NOUN_DEVICES),
                 ),
                 get_back_button(back_to),
@@ -548,16 +551,19 @@ async def render_tariff_duration_selection(
         return
 
     if db_user:
+        from database.repositories import vless_subscription_repo
         profiles_count = await get_user_profiles_count(
             session, db_user.id
         )
+        vless_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
+        total_devices = profiles_count + vless_count
 
-        if profiles_count > device_limit:
+        if total_devices > device_limit:
             await render_hub(
                 bot,
                 chat_id,
                 texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                    profiles_count=format_plural(profiles_count, texts.NOUN_DEVICES),
+                    profiles_count=format_plural(total_devices, texts.NOUN_DEVICES),
                     new_limit=format_plural(device_limit, texts.NOUN_DEVICES),
                 ),
                 get_back_button(back_to),
