@@ -37,6 +37,8 @@ class FulfillmentService:
                 meta["previous_subscription_end"] = user.subscription_end.isoformat()
             if user.current_tariff_id:
                 meta["previous_tariff_id"] = user.current_tariff_id
+            if getattr(user, "device_limit", None) is not None:
+                meta["previous_device_limit"] = user.device_limit
             order.metadata_ = meta
 
             is_tariff_change = bool(meta.get("is_tariff_change"))
@@ -140,6 +142,11 @@ class FulfillmentService:
                     prev_tariff = meta.get("previous_tariff_id")
                     if prev_tariff:
                         user.current_tariff_id = prev_tariff
+                    if "previous_device_limit" in meta:
+                        try:
+                            user.device_limit = int(meta["previous_device_limit"])
+                        except (ValueError, TypeError):
+                            pass
                 except Exception as exc:
                     logger.warning("Failed parsing previous_subscription_end on order %s: %s", order.id, exc)
             elif order.duration_days > 0 and user.subscription_end:

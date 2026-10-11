@@ -174,6 +174,11 @@ class VlessSubscriptionService:
                     if sub_id and all(results.values()) and len(results) == len(targets):
                         async with session_scope() as scoped_session:
                             await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub_id, old_uuid)
+                            sub = await scoped_session.get(VlessSubscription, sub_id)
+                            if sub and not sub.is_active and version is not None:
+                                sub.last_synced_at = now_utc()
+                                sub.last_synced_version = max(getattr(sub, "last_synced_version", 0) or 0, version)
+                                await scoped_session.flush()
             except Exception as e:
                 masked_uuid = f"{old_uuid[:8]}***" if old_uuid else "unknown"
                 logger.warning("Background deprovision of VLESS UUID %s failed: %s", masked_uuid, e)
@@ -276,11 +281,15 @@ class VlessSubscriptionService:
             api_url = extra.get("xray_api_url")
             api_key = srv.api_key
 
-            # Fallback to resolving from srv.api_url (which already has host:8443 on exit nodes)
+            # Fallback to resolving from srv.api_url (8443 on dual/AWG nodes, 8444 on standalone VLESS)
             if not api_url and srv.api_url:
                 parsed = urllib.parse.urlsplit(srv.api_url)
                 if parsed.hostname:
-                    port = parsed.port or 8443
+                    caps = getattr(srv, "capabilities", None) or []
+                    proto = getattr(srv, "protocol", None) or ""
+                    is_awg = "awg" in caps or "amnezia" in caps or proto in ("awg", "amneziawg2")
+                    default_port = 8443 if is_awg else 8444
+                    port = parsed.port or default_port
                     api_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:{port}"
 
             if api_url and api_key:

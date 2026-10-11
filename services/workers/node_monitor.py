@@ -778,6 +778,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         async with session_scope() as session:
             # Monotonic CAS update for Xray generation
             if is_healthy and is_xray_node and xray_epoch:
+                prev_epoch = server.xray_instance_epoch
                 boot_id = xray_data.get("boot_id") if xray_data else None
                 starttime = xray_data.get("starttime") if xray_data else None
                 cas_ok, updated_srv = await update_server_xray_epoch_cas(
@@ -809,11 +810,13 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server.extra_data = extra
                             await session.flush()
 
-                    # Trigger VLESS re-provisioning if epoch changed on a VLESS capable server
-                    caps = updated_srv.capabilities or []
-                    if "vless" in caps or getattr(updated_srv, "protocol", None) == "vless":
-                        from services.vless_subscription_service import VlessSubscriptionService
-                        asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(updated_srv.id))
+                    # Trigger VLESS re-provisioning only if epoch changed or is unsynced on a VLESS capable server
+                    from database.repositories.servers_repo import is_vless_capable_server
+                    if is_vless_capable_server(updated_srv):
+                        cur_synced = (dict(updated_srv.extra_data or {})).get("vless_synced_epoch")
+                        if prev_epoch != updated_srv.xray_instance_epoch or cur_synced != updated_srv.xray_instance_epoch:
+                            from services.vless_subscription_service import VlessSubscriptionService
+                            asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(updated_srv.id))
 
             db_server, applied = await update_server_health_snapshot(
                 session,

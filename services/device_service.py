@@ -422,7 +422,9 @@ class DeviceService:
                 )
             )
         ).scalar_one()
-        if user_count >= user.device_limit:
+        from services.subscription import SubscriptionService
+        effective_limit = await SubscriptionService.get_effective_device_limit(session, user) or user.device_limit
+        if user_count >= effective_limit:
             raise DeviceLimitExceeded("Device limit reached")
 
         server_count = (

@@ -150,10 +150,8 @@ async def admin_user_devices(
         vless_lines = []
         for hwid, meta_or_ts in sorted(
             raw_vless_hwids.items(),
-            key=lambda item: (
-                item[1].get("last_seen", "")
-                if isinstance(item[1], dict)
-                else (item[1] if isinstance(item[1], str) else "")
+            key=lambda item: str(
+                (item[1].get("last_seen") if isinstance(item[1], dict) else item[1]) or ""
             ),
             reverse=True,
         ):

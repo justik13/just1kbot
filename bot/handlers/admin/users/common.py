@@ -46,6 +46,7 @@ def format_user_card_text(
     ban_reason: str | None = None,
     wi_sub: WhiteInternetSubscription | None = None,
     vless_hwid_count: int = 0,
+    effective_device_limit: int | None = None,
 ) -> str:
     from datetime import timezone
     from config.enums import WhiteInternetStatus
@@ -76,12 +77,14 @@ def format_user_card_text(
         if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
     ])
 
+    resolved_limit = effective_device_limit if effective_device_limit is not None else (user.device_limit or 0)
+
     if has_awg:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
         total_dev = amnezia_count + vless_hwid_count
         devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
-        device_limit = user.device_limit or 0
+        device_limit = resolved_limit
     elif has_wi and wi_sub:
         valid_until_str = format_datetime(wi_sub.expires_at) if wi_sub.expires_at else "—"
         days_left_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
@@ -92,7 +95,7 @@ def format_user_card_text(
         days_left_str = format_days_left(user.subscription_end)
         total_dev = amnezia_count + vless_hwid_count
         devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
-        device_limit = user.device_limit or 0
+        device_limit = resolved_limit
 
     awg_total = getattr(user, "total_traffic_bytes", 0) or 0
     wi_total = getattr(user, "total_wi_traffic_bytes", 0) or 0
@@ -589,12 +592,15 @@ async def _render_user_card(
     current_time = now_utc()
 
     from database.repositories import vless_subscription_repo
+    from services.subscription import SubscriptionService
     try:
         vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
         if not isinstance(vless_hwid_count, int):
             vless_hwid_count = 0
     except Exception:
         vless_hwid_count = 0
+
+    effective_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
 
     rendered = format_user_card_text(
         user,
@@ -609,6 +615,7 @@ async def _render_user_card(
         ban_reason=ban_reason,
         wi_sub=wi_sub,
         vless_hwid_count=vless_hwid_count,
+        effective_device_limit=effective_device_limit,
     )
 
     try:
@@ -647,12 +654,15 @@ async def _show_user_card_edit(
     current_time = now_utc()
 
     from database.repositories import vless_subscription_repo
+    from services.subscription import SubscriptionService
     try:
         vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
         if not isinstance(vless_hwid_count, int):
             vless_hwid_count = 0
     except Exception:
         vless_hwid_count = 0
+
+    effective_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
 
     rendered = format_user_card_text(
         user,
@@ -667,6 +677,7 @@ async def _show_user_card_edit(
         ban_reason=ban_reason,
         wi_sub=wi_sub,
         vless_hwid_count=vless_hwid_count,
+        effective_device_limit=effective_device_limit,
     )
 
     if notice:

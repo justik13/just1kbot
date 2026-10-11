@@ -110,7 +110,7 @@ async def _seed_default_data() -> None:
     async with session_scope() as session:
         # Seed tariffs
         result = await session.execute(
-            select(func.count(Tariff.id)).where(Tariff.service_type == "standard")
+            select(func.count(Tariff.id)).where(Tariff.service_type.in_(("standard", "awg")))
         )
         if result.scalar_one() == 0:
             for tariff in DEFAULT_TARIFFS_SEEDS:

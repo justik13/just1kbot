@@ -29,9 +29,10 @@ FORBIDDEN_USER_WORDING = (
 
 def _effective_user_text_values() -> list[str]:
     from bot.texts import connection, payment, user
+    from bot.texts.runtime import notifications
 
     values: list[str] = []
-    for mod in (user, connection, payment):
+    for mod in (user, connection, payment, notifications):
         for name in dir(mod):
             if name.isupper() and not name.startswith("_"):
                 value = getattr(mod, name)
@@ -51,6 +52,12 @@ class TestUserTextAudit(unittest.TestCase):
         clean_text = effective_text.replace(".vpn", "").replace("vpn://", "")
         assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_text) is None
         assert "ВПН" not in effective_text.upper()
+
+    def test_protocol_terms_are_not_exposed_to_users(self):
+        effective_text = "\n".join(_effective_user_text_values())
+        clean_text = re.sub(r"\{[a-zA-Z0-9_]+\}", "", effective_text).lower()
+        assert "vless" not in clean_text
+        assert "wireguard" not in clean_text
 
     def test_technical_connection_identifiers_are_preserved(self):
         faq = texts.FAQ_TEXT

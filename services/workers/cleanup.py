@@ -366,9 +366,22 @@ async def _sweep_vless_pending_revocations() -> None:
         for uid in out_of_sync_users:
             try:
                 async with session_scope() as session:
-                    await VlessSubscriptionService.sync_user_to_nodes(session, uid)
+                    res = await VlessSubscriptionService.sync_user_to_nodes(session, uid)
+                    if not (res and all(res.values())):
+                        sub = await vless_subscription_repo.get_subscription_by_user_id(session, uid)
+                        if sub:
+                            sub.updated_at = now_utc()
+                            await session.flush()
             except Exception as e:
                 logger.warning("Out-of-sync VLESS reconciliation failed for user_id=%s: %s", uid, e)
+                try:
+                    async with session_scope() as session:
+                        sub = await vless_subscription_repo.get_subscription_by_user_id(session, uid)
+                        if sub:
+                            sub.updated_at = now_utc()
+                            await session.flush()
+                except Exception:
+                    pass
 
         # 3. Converge VLESS servers whose epoch drift occurred while monitor wasn't active
         async with session_scope() as session:

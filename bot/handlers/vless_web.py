@@ -267,6 +267,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             b64_desc = base64.b64encode(str(profile_desc).strip()[:100].encode("utf-8")).decode("ascii")
             response_headers["Profile-Description"] = f"base64:{b64_desc}"
         if channel_url:
+            response_headers["Profile-Web-Page-Url"] = channel_url
             response_headers["Channel-Url"] = channel_url
         if announce:
             b64_ann = base64.b64encode(str(announce).strip()[:200].encode("utf-8")).decode("ascii")

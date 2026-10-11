@@ -203,6 +203,10 @@ class BanService:
         if vless_sub and getattr(vless_sub, "is_active", False) is True:
             vless_sub.is_active = False
             vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+            pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
+            if vless_sub.uuid and vless_sub.uuid not in pending:
+                pending.append(vless_sub.uuid)
+            vless_sub.pending_revoked_uuids = pending
             session.add(vless_sub)
             VlessSubscriptionService.deprovision_background(
                 vless_sub.uuid,
