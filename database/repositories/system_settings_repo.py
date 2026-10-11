@@ -24,6 +24,8 @@ async def get_system_setting(
     stmt = select(SystemSetting.value).where(SystemSetting.key == key)
     result = await session.execute(stmt)
     val = result.scalar_one_or_none()
+    if val is not None and not isinstance(val, str):
+        val = None
 
     _SETTINGS_CACHE[key] = (val, now)
     return val if val is not None else default

@@ -25,6 +25,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         from bot.handlers import vless_web
         vless_web._ip_rate_limiter.buckets.clear()
         vless_web._token_rate_limiter.buckets.clear()
+        from database.repositories import system_settings_repo
+        system_settings_repo._SETTINGS_CACHE.clear()
 
         now = datetime.now(timezone.utc)
         self.default_user = User(
@@ -59,6 +61,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         from bot.handlers import vless_web
         vless_web._ip_rate_limiter.buckets.clear()
         vless_web._token_rate_limiter.buckets.clear()
+        from database.repositories import system_settings_repo
+        system_settings_repo._SETTINGS_CACHE.clear()
         super().tearDown()
 
     async def get_application(self):
