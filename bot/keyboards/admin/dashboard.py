@@ -18,7 +18,7 @@ def get_admin_menu(
         callback_data="admin_cat_std_sub",
     )
     builder.button(
-        text=texts.BTN_WI_SUB,
+        text=texts.ADMIN_BTN_SUB_WI,
         callback_data="admin_cat_wi_sub",
     )
 

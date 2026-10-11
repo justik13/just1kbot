@@ -302,7 +302,6 @@ AUDIT_DETAIL_LABELS = {
 }
 
 BTN_STD_SUB = "💎 Стандартная подписка"
-BTN_WI_SUB = "🌐 Белый Интернет"
 
 BTN_STD_SERVERS = "🖥 Серверы и узлы"
 BTN_WI_SERVERS = "🇷🇺 Шлюзы Origin"

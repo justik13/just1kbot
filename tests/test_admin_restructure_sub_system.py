@@ -12,14 +12,9 @@ Covers:
 
 from __future__ import annotations
 
-import base64
-from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiohttp import web
-from aiohttp.test_utils import AioHTTPTestCase
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.base import StorageKey
@@ -58,9 +53,8 @@ from bot.handlers.admin.tariffs import (
     tariffs_pagination,
     _show_tariff_card,
 )
-from bot.handlers.vless_web import setup_vless_web_routes
 from bot.states import AdminStates
-from database.models import Server, Tariff, User, VlessSubscription
+from database.models import Tariff
 
 
 class TestAdminMenuAndCategoryKeyboards(unittest.TestCase):
@@ -157,7 +151,7 @@ class TestAdminCategoryHandlers(unittest.IsolatedAsyncioTestCase):
             await show_admin_cat_wi_sub(cb, self.state)
             cb.message.edit_text.assert_awaited_once()
             call_text = cb.message.edit_text.call_args[0][0]
-            self.assertIn(texts.BTN_WI_SUB, call_text)
+            self.assertIn(texts.ADMIN_BTN_SUB_WI, call_text)
             cb.answer.assert_awaited_once_with(show_alert=False)
 
     async def test_show_admin_cat_handlers_unauthorized(self):
@@ -436,105 +430,3 @@ class TestAdminTariffsSplit(unittest.IsolatedAsyncioTestCase):
         kb = cb.message.edit_text.call_args[1]["reply_markup"]
         cbs = [b.callback_data for row in kb.inline_keyboard for b in row]
         self.assertIn("admin_tariffs:white_internet", cbs)
-
-
-class TestVlessWebFeedGlobalSettings(AioHTTPTestCase):
-    """Test vless_web reading profile title, description, and announce from SystemSetting."""
-
-    def setUp(self):
-        super().setUp()
-        from bot.handlers import vless_web
-        vless_web._ip_rate_limiter.buckets.clear()
-        vless_web._token_rate_limiter.buckets.clear()
-
-        now = datetime.now(timezone.utc)
-        self.default_user = User(
-            id=42,
-            telegram_id=999,
-            is_banned=False,
-            is_deleted=False,
-            device_limit=3,
-            subscription_end=now + timedelta(days=30),
-        )
-        self.default_sub = VlessSubscription(
-            id=10,
-            user_id=42,
-            token="test-feed-token-12345678",
-            uuid="11111111-2222-3333-4444-555555555555",
-            is_active=True,
-            active_hwids={},
-        )
-        self.default_server = Server(
-            id=1,
-            name="NL-Node-1",
-            country_flag="🇳🇱",
-            is_active=True,
-            protocol="awg",
-            capabilities=["awg", "vless"],
-            api_url="https://nl.example.com:8443",
-            extra_data={"domain": "nl.example.com", "vless_port": 443},
-        )
-
-    def tearDown(self):
-        from bot.handlers import vless_web
-        vless_web._ip_rate_limiter.buckets.clear()
-        vless_web._token_rate_limiter.buckets.clear()
-        super().tearDown()
-
-    async def get_application(self):
-        app = web.Application()
-        setup_vless_web_routes(app)
-        return app
-
-    async def test_feed_includes_global_system_settings_in_headers(self):
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
-
-        @asynccontextmanager
-        async def fake_session_scope():
-            yield mock_session
-
-        settings_dict = {
-            "vless_profile_title": "✦ MySpecialVPN",
-            "vless_profile_description": "High-Speed Encrypted",
-            "vless_announce": "Maintenance scheduled tonight",
-            "vless_announce_url": "https://t.me/news_channel",
-        }
-
-        async def fake_get_setting(session, key, default=None):
-            return settings_dict.get(key, default)
-
-        with (
-            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
-            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
-            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
-            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
-            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
-            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_setting),
-        ):
-            headers = {"X-Hwid": "client-hwid-abc"}
-            resp = await self.client.get("/sub/access/test-feed-token-12345678", headers=headers)
-            self.assertEqual(resp.status, 200)
-
-            # Check Profile-Title
-            raw_title = resp.headers.get("Profile-Title", "")
-            title_b64 = raw_title.removeprefix("base64:")
-            title = base64.b64decode(title_b64).decode("utf-8")
-            self.assertEqual(title, "✦ MySpecialVPN")
-
-            # Check Profile-Description
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "High-Speed Encrypted")
-
-            # Check Announce
-            raw_ann = resp.headers.get("Announce", "")
-            ann_b64 = raw_ann.removeprefix("base64:")
-            ann = base64.b64decode(ann_b64).decode("utf-8")
-            self.assertEqual(ann, "Maintenance scheduled tonight")
-
-            # Check Announce-Url
-            self.assertEqual(resp.headers.get("Announce-Url"), "https://t.me/news_channel")

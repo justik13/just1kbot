@@ -211,11 +211,11 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
 
 def get_admin_std_sub_incy_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="✏️ Имя профиля", callback_data="admin_std_incy_edit:title")
-    builder.button(text="✏️ Подзаголовок", callback_data="admin_std_incy_edit:desc")
-    builder.button(text="📢 Баннер (объявление)", callback_data="admin_std_incy_edit:announce")
-    builder.button(text="🔗 Ссылка баннера", callback_data="admin_std_incy_edit:announce_url")
-    builder.button(text="🔄 Сбросить к дефолтам", callback_data="admin_std_incy_reset")
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_TITLE, callback_data="admin_std_incy_edit:title")
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_DESC, callback_data="admin_std_incy_edit:desc")
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, callback_data="admin_std_incy_edit:announce")
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, callback_data="admin_std_incy_edit:announce_url")
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_RESET, callback_data="admin_std_incy_reset")
     builder.button(text=texts.BTN_BACK, callback_data="admin_cat_std_sub")
     builder.adjust(2, 2, 1, 1)
     return builder.as_markup()

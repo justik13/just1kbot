@@ -454,6 +454,59 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             decoded_body = base64.b64decode(body).decode("utf-8")
             self.assertIn("vless://11111111-2222-3333-4444-555555555555@nl.example.com:443", decoded_body)
 
+    async def test_feed_includes_global_system_settings_in_headers(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        settings_dict = {
+            "vless_profile_title": "✦ MySpecialVPN",
+            "vless_profile_description": "High-Speed Encrypted",
+            "vless_announce": "Maintenance scheduled tonight",
+            "vless_announce_url": "https://t.me/news_channel",
+        }
+
+        async def fake_get_setting(session, key, default=None):
+            return settings_dict.get(key, default)
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_setting),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-99"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            # Check Profile-Title
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title = base64.b64decode(title_b64).decode("utf-8")
+            self.assertEqual(title, "✦ MySpecialVPN")
+
+            # Check Profile-Description
+            raw_desc = resp.headers.get("Profile-Description", "")
+            desc_b64 = raw_desc.removeprefix("base64:")
+            desc = base64.b64decode(desc_b64).decode("utf-8")
+            self.assertEqual(desc, "High-Speed Encrypted")
+
+            # Check Announce
+            raw_ann = resp.headers.get("Announce", "")
+            ann_b64 = raw_ann.removeprefix("base64:")
+            ann = base64.b64decode(ann_b64).decode("utf-8")
+            self.assertEqual(ann, "Maintenance scheduled tonight")
+
+            # Check Announce-Url
+            self.assertEqual(resp.headers.get("Announce-Url"), "https://t.me/news_channel")
+
     async def test_device_metadata_extracted_from_headers(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
