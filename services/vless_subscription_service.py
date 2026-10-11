@@ -163,7 +163,7 @@ class VlessSubscriptionService:
             try:
                 targets = []
                 async with session_scope() as scoped_session:
-                    servers = await cls.get_configured_vless_servers(scoped_session)
+                    servers = await cls.get_revocation_target_servers(scoped_session)
                     targets = cls._extract_node_targets(servers)
 
                 if targets:

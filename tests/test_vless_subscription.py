@@ -1858,9 +1858,14 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
 
         session.get = AsyncMock(return_value=user)
 
+        def do_bump(s, sid):
+            sub.version = sub.version + 1
+            return sub
+
         with (
             patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch("database.repositories.vless_subscription_repo.bump_subscription_version", new=AsyncMock(side_effect=do_bump)) as mock_bump,
             patch.object(VlessSubscriptionService, "_execute_sync_to_nodes_with_status") as mock_sync_status,
         ):
             # First attempt triggers version bump; second attempt succeeds
@@ -1870,6 +1875,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             ]
             res = await VlessSubscriptionService.sync_user_to_nodes(session, 10)
             assert res == {1: True}
+            mock_bump.assert_called_once_with(session, 20)
             assert sub.version == 2
             assert mock_sync_status.call_count == 2
             assert sub.last_synced_version == 2
@@ -2184,3 +2190,38 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         self.assertIn("NL  1  fast  secure", label_part)
         b64_vip = base64.b64encode("VIP".encode("utf-8")).decode("utf-8")
         self.assertEqual(badge_param, b64_vip)
+ 
+    async def test_deprovision_background_targets_revocation_servers_including_inactive(self):
+        from config.enums import ServerLifecycleStatus
+        from database.models import Server
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        inactive_srv = Server(
+            id=2,
+            is_active=False,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["vless"],
+            api_url="https://s2.example.com:8443",
+            api_key="k2",
+        )
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("database.connection.session_scope", fake_session_scope),
+            patch.object(VlessSubscriptionService, "get_revocation_target_servers", new=AsyncMock(return_value=[inactive_srv])) as mock_get_targets,
+            patch.object(VlessSubscriptionService, "_execute_deprovision_on_nodes", new=AsyncMock(return_value={2: True})) as mock_exec,
+            patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
+        ):
+            task = VlessSubscriptionService.deprovision_background("old-rev-uuid", version=2, sub_id=99)
+            self.assertIsNotNone(task)
+            await task
+            mock_get_targets.assert_called_once_with(mock_session)
+            mock_exec.assert_called_once_with([(2, "https://s2.example.com:8443", "k2")], "old-rev-uuid", version=2)
+            mock_pop.assert_called_once_with(mock_session, 99, "old-rev-uuid")
+
+
