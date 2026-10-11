@@ -1687,9 +1687,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
 
         snapshot = ServerPeerSnapshot(
             server_id=5,
-            peer_count=1,
-            max_peers=100,
-            active_peers=1,
+            peer_ids=frozenset(["peer-1"]),
             captured_at=datetime.now(timezone.utc),
         )
 

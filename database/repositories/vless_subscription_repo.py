@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -109,7 +110,12 @@ async def get_subscription_by_user_id(
 ) -> VlessSubscription | None:
     """Fetch VlessSubscription by internal user_id."""
     stmt = select(VlessSubscription).where(VlessSubscription.user_id == user_id)
-    return (await session.execute(stmt)).scalar_one_or_none()
+    res = await session.execute(stmt)
+    scalar_fn = getattr(res, "scalar_one_or_none", None)
+    val = scalar_fn() if callable(scalar_fn) else None
+    if inspect.isawaitable(val):
+        val = await val
+    return val if isinstance(val, VlessSubscription) else None
 
 
 async def get_active_hwid_count(
@@ -119,8 +125,13 @@ async def get_active_hwid_count(
 ) -> int:
     """Return count of active non-stale HWIDs currently registered for user."""
     stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.user_id == user_id)
-    raw_hwids = (await session.execute(stmt)).scalar_one_or_none()
-    active = prune_stale_hwids(raw_hwids if isinstance(raw_hwids, dict) else None, ttl_hours=ttl_hours)
+    res = await session.execute(stmt)
+    scalar_fn = getattr(res, "scalar_one_or_none", None)
+    val = scalar_fn() if callable(scalar_fn) else None
+    if inspect.isawaitable(val):
+        val = await val
+    raw_hwids = val if isinstance(val, dict) else None
+    active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
     return len(active)
 
 
@@ -147,7 +158,11 @@ async def register_hwid_atomic(
 
     # Resolve user_id without lock to enforce strict global lock hierarchy: User -> VlessSubscription
     user_id_stmt = select(VlessSubscription.user_id).where(VlessSubscription.id == subscription_id)
-    raw_sub_user_id = (await session.execute(user_id_stmt)).scalar_one_or_none()
+    u_res = await session.execute(user_id_stmt)
+    u_scalar = getattr(u_res, "scalar_one_or_none", None)
+    raw_sub_user_id = u_scalar() if callable(u_scalar) else None
+    if inspect.isawaitable(raw_sub_user_id):
+        raw_sub_user_id = await raw_sub_user_id
     if raw_sub_user_id is None:
         return False, 0, max(0, effective_limit or 0)
     sub_user_id = getattr(raw_sub_user_id, "user_id", raw_sub_user_id)
@@ -155,7 +170,11 @@ async def register_hwid_atomic(
     # 1. Lock User row FIRST (populate_existing=True guarantees fresh attributes in Identity Map)
     from database.models import User
     user_stmt = select(User).where(User.id == sub_user_id).with_for_update().execution_options(populate_existing=True)
-    user = (await session.execute(user_stmt)).scalar_one_or_none()
+    user_res = await session.execute(user_stmt)
+    usr_scalar = getattr(user_res, "scalar_one_or_none", None)
+    user = usr_scalar() if callable(usr_scalar) else None
+    if inspect.isawaitable(user):
+        user = await user
 
     # 2. Lock VlessSubscription row SECOND (populate_existing=True guarantees fresh attributes)
     stmt = (
@@ -164,7 +183,11 @@ async def register_hwid_atomic(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    sub = (await session.execute(stmt)).scalar_one_or_none()
+    s_res = await session.execute(stmt)
+    s_scalar = getattr(s_res, "scalar_one_or_none", None)
+    sub = s_scalar() if callable(s_scalar) else None
+    if inspect.isawaitable(sub):
+        sub = await sub
     if sub is None:
         return False, 0, max(0, effective_limit or 0)
 
@@ -189,7 +212,12 @@ async def register_hwid_atomic(
             VPNProfile.user_id == getattr(sub, "user_id", None),
             VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
         )
-        awg_count = (await session.execute(awg_stmt)).scalar_one_or_none() or 0
+        awg_res = await session.execute(awg_stmt)
+        awg_scalar = getattr(awg_res, "scalar_one", None) or getattr(awg_res, "scalar", None)
+        awg_val = awg_scalar() if callable(awg_scalar) else 0
+        if inspect.isawaitable(awg_val):
+            awg_val = await awg_val
+        awg_count = awg_val if isinstance(awg_val, int) else 0
 
         user_limit = (
             await SubscriptionService.get_effective_device_limit(session, user)
