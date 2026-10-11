@@ -6,9 +6,8 @@ import asyncio
 import base64
 import logging
 import os
+import re
 import urllib.parse
-
-from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +22,10 @@ from utils.datetime_helpers import now_utc
 logger = logging.getLogger(__name__)
 
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+_FQDN_REGEX = re.compile(
+    r"^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$"
+)
 
 
 class VlessSubscriptionService:
@@ -54,8 +57,8 @@ class VlessSubscriptionService:
                 continue
 
             domain = str(domain).strip().lower()
-            if not domain or " " in domain or "/" in domain or ":" in domain or "." not in domain:
-                logger.warning("Skipping server %s: invalid domain %s", srv.id, domain)
+            if not domain or not _FQDN_REGEX.match(domain):
+                logger.warning("Skipping server %s: invalid FQDN domain '%s'", srv.id, domain)
                 continue
 
             raw_port = extra.get("vless_port", 443)
@@ -127,7 +130,7 @@ class VlessSubscriptionService:
                     # Retry deprovisioning for any pending revoked UUIDs
                     sub = await vless_subscription_repo.get_subscription_by_user_id(scoped_session, user_id)
                     if sub and sub.pending_revoked_uuids:
-                        servers = await cls.get_configured_vless_servers(scoped_session)
+                        servers = await cls.get_revocation_target_servers(scoped_session)
                         targets = cls._extract_node_targets(servers)
                         if targets:
                             sub_ver = getattr(sub, "version", 1) or 1
@@ -422,23 +425,18 @@ class VlessSubscriptionService:
         if is_active is False:
             desired_active = False
 
-        servers = await VlessSubscriptionService.get_configured_vless_servers(session)
+        if desired_active:
+            servers = await VlessSubscriptionService.get_configured_vless_servers(session)
+        else:
+            servers = await VlessSubscriptionService.get_revocation_target_servers(session)
         targets = VlessSubscriptionService._extract_node_targets(servers)
         if not targets:
             return {}
 
         sub_version = getattr(sub, "version", 1) or 1
-        # Check if _execute_sync_to_nodes is patched by a test mock
-        mock_target = getattr(VlessSubscriptionService, "_execute_sync_to_nodes", None)
-        if isinstance(mock_target, MagicMock | AsyncMock):
-            results = await VlessSubscriptionService._execute_sync_to_nodes(
-                targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
-            )
-            needs_version_bump = False
-        else:
-            results, needs_version_bump = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-                targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
-            )
+        results, needs_version_bump = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+            targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
+        )
 
         # If node reported version conflict, bump version and retry once
         if needs_version_bump:

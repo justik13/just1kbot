@@ -151,8 +151,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
         # Pre-flight check: ensure eligible VLESS servers exist before mutating HWID quota
         servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
-        links = VlessSubscriptionService.generate_vless_links(sub, servers)
-        if not links:
+        if not servers:
             retry_headers = {**common_headers, "Retry-After": "60"}
             return web.Response(status=503, text="No servers available", headers=retry_headers)
 
@@ -195,6 +194,12 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Support-Url": f"https://t.me/{bot_username}",
             })
             return web.Response(status=200, text=b64_payload, headers=headers)
+
+        await session.refresh(sub)
+        links = VlessSubscriptionService.generate_vless_links(sub, servers)
+        if not links:
+            retry_headers = {**common_headers, "Retry-After": "60"}
+            return web.Response(status=503, text="No servers available", headers=retry_headers)
 
         # Trigger background sync with debouncing (300s) unless version is out of sync or pending revocations exist
         now = now_utc()

@@ -350,6 +350,7 @@ async def get_subscriptions_with_pending_revocations(
             VlessSubscription.pending_revoked_uuids.is_not(None),
             func.jsonb_array_length(VlessSubscription.pending_revoked_uuids) > 0,
         )
+        .order_by(VlessSubscription.updated_at.asc(), VlessSubscription.id.asc())
         .limit(limit)
     )
     res = session.execute(stmt)

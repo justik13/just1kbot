@@ -326,16 +326,27 @@ async def _sweep_vless_pending_revocations() -> None:
 
         if targets:
             for sub_id, rev_uuids, ver in sub_items:
+                all_cleared = True
                 for rev_uuid in rev_uuids:
+                    cleared_this = False
                     try:
                         res = await VlessSubscriptionService._execute_deprovision_on_nodes(targets, rev_uuid, version=ver)
                         if all(res.values()) and len(res) == len(targets):
                             async with session_scope() as session:
                                 await vless_subscription_repo.pop_pending_revoked_uuid(session, sub_id, rev_uuid)
                                 logger.info("Durable deprovision cleared revoked UUID for sub_id=%s", sub_id)
+                            cleared_this = True
                     except Exception as exc:
                         masked = f"{rev_uuid[:8]}***" if rev_uuid else "unknown"
                         logger.warning("Retry deprovision failed for sub_id=%s UUID %s: %s", sub_id, masked, exc)
+                    if not cleared_this:
+                        all_cleared = False
+                if not all_cleared:
+                    async with session_scope() as session:
+                        sub_to_touch = await session.get(VlessSubscription, sub_id)
+                        if sub_to_touch:
+                            sub_to_touch.updated_at = now_utc()
+                            await session.flush()
 
         # 2. Converge out-of-sync subscriptions (e.g. node was offline during ban or grace deactivation)
         async with session_scope() as session:
