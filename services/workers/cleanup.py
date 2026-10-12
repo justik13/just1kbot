@@ -860,6 +860,12 @@ async def _reconcile_stale_pending_orders() -> None:
                             order.id,
                             order.amount_rub,
                         )
+                    else:
+                        _pending_order_backoff_cache[order_id] = time.monotonic()
+                        logger.info(
+                            "Reconciliation deferred stale pending order %s (withheld or underpaid)",
+                            order.id,
+                        )
                 elif status_res.is_canceled:
                     OrderService.mark_order_canceled(
                         order,
@@ -891,7 +897,7 @@ async def _reconcile_stale_pending_orders() -> None:
                     or_(
                         Order.created_at < window_start,
                         and_(
-                            Order.external_id.is_(None),
+                            or_(Order.external_id.is_(None), Order.external_id == ""),
                             Order.created_at < ambiguous_threshold,
                         ),
                     ),

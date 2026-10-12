@@ -103,10 +103,15 @@ class YooKassaGateway(BasePaymentGateway):
                 f"YooKassa payment creation error: {result.error_kind or 'unknown'}"
             )
 
-        data = result.value
-        external_id = data.get("id", "")
-        confirmation = data.get("confirmation", {})
-        confirmation_url = confirmation.get("confirmation_url", "")
+        data = result.value or {}
+        external_id = (data.get("id") or "").strip()
+        confirmation = data.get("confirmation") or {}
+        confirmation_url = (confirmation.get("confirmation_url") or "").strip()
+
+        if not external_id or not confirmation_url:
+            raise PaymentCreationAmbiguousError(
+                f"YooKassa payment response missing required id or confirmation_url: external_id={external_id!r}, url={confirmation_url!r}"
+            )
 
         return PaymentInvoice(
             payment_url=confirmation_url,

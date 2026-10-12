@@ -495,7 +495,10 @@ class OrderService:
         """Idempotent, atomic order settlement with row-level locking."""
         order_uuid = uuid.UUID(str(order_id)) if not isinstance(order_id, uuid.UUID) else order_id
         order = await session.scalar(
-            select(Order).where(Order.id == order_uuid).with_for_update()
+            select(Order)
+            .where(Order.id == order_uuid)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if not order:
             logger.warning("mark_order_paid: Order %s not found", order_id)
@@ -508,11 +511,12 @@ class OrderService:
                     session, order.user_id
                 )
                 if release_user is not None:
-                    still_hold = bool(getattr(release_user, "financial_hold", False))
-                    still_block = bool(getattr(release_user, "topup_blocked", False))
-                    if still_hold or (order.service_type == "topup" and still_block):
+                    still_banned = bool(release_user.is_banned)
+                    still_hold = bool(release_user.financial_hold)
+                    still_block = bool(release_user.topup_blocked)
+                    if still_banned or still_hold or (order.service_type == "topup" and still_block):
                         logger.info(
-                            "Order %s remains in settlement_held: user %s still under hold/block",
+                            "Order %s remains in settlement_held: user %s still under ban/hold/block",
                             order.id,
                             order.user_id,
                         )
@@ -582,13 +586,12 @@ class OrderService:
             session, order.user_id
         )
         if settlement_user is not None:
-            is_banned = bool(getattr(settlement_user, "is_banned", False))
-            is_hold = bool(getattr(settlement_user, "financial_hold", False))
-            is_topup_block = bool(getattr(settlement_user, "topup_blocked", False))
-            blocked_banned = is_banned
+            is_banned = bool(settlement_user.is_banned)
+            is_hold = bool(settlement_user.financial_hold)
+            is_topup_block = bool(settlement_user.topup_blocked)
             blocked_topup = order.service_type == "topup" and (is_hold or is_topup_block)
             blocked_tariff = order.service_type != "topup" and is_hold
-            if blocked_banned or blocked_topup or blocked_tariff:
+            if is_banned or blocked_topup or blocked_tariff:
                 held_meta = dict(order.metadata_ or {})
                 held_meta["settlement_held"] = True
                 held_meta["settlement_hold_reason"] = (
@@ -726,7 +729,8 @@ class OrderService:
                     order.id,
                     order.status,
                 )
-                return None
+                order._retry_deferred = True
+                return order
 
             if result.amount_rub is None or result.amount_rub != order.amount_rub:
                 logger.warning(
