@@ -113,12 +113,7 @@ class BanService:
         telegram_id: int,
         reason: str | None = None,
     ) -> tuple:
-        # Global lock order Payment -> advisory -> User, same as the ledger
-        # (credit_succeeded_topup) and checkout paths. Taking the advisory
-        # lock before Payment would deadlock against a concurrent credit that
-        # holds Payment and waits for the advisory lock of the same user.
-        # Новый платёж не сможет появиться между чтением платежей и баном,
-        # т.к. fulfillment берёт те же локи в том же порядке.
+        # Global lock order Payment -> advisory -> User for transactional consistency.
         payment_ids = list(
             (
                 await session.scalars(

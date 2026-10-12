@@ -30,8 +30,14 @@ async def has_successful_topup(
         select(func.count(Order.id))
         .where(
             Order.user_id == user_id,
-            Order.service_type == "topup",
-            Order.status == "paid",
+            or_(
+                Order.status.in_(["paid", "refunded"]),
+                Order.paid_at.is_not(None),
+            ),
+            or_(
+                Order.service_type == "topup",
+                Order.payment_method != "wallet",
+            ),
         )
     )
     order_count = await session.scalar(order_stmt)
@@ -43,16 +49,42 @@ async def has_successful_topup(
 
 async def get_user_payments(
     session: AsyncSession, user_id: int, limit: int | None = None
-) -> list[Payment]:
-    stmt = (
+) -> list:
+    from datetime import datetime, timezone
+    from database.models import Order
+
+    order_stmt = (
+        select(Order)
+        .where(Order.user_id == user_id, Order.service_type == "topup")
+        .order_by(Order.created_at.desc())
+    )
+    payment_stmt = (
         select(Payment)
         .where(Payment.user_id == user_id)
         .order_by(Payment.created_at.desc())
     )
     if limit is not None:
-        stmt = stmt.limit(limit)
-    result = await session.execute(stmt)
-    return result.scalars().all()
+        order_stmt = order_stmt.limit(limit)
+        payment_stmt = payment_stmt.limit(limit)
+    orders = list((await session.scalars(order_stmt)).all())
+    legacy_payments = list((await session.scalars(payment_stmt)).all())
+
+    def _item_dt(item):
+        dt = getattr(item, "created_at", None)
+        if dt is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    combined = sorted(
+        [*orders, *legacy_payments],
+        key=_item_dt,
+        reverse=True,
+    )
+    if limit is not None:
+        return combined[:limit]
+    return combined
 
 
 async def get_payment_by_id(
@@ -80,7 +112,7 @@ async def get_pending_payments_count_for_tariff(
         await session.scalar(
             select(func.count(Order.id)).where(
                 Order.tariff_id == tariff_id,
-                Order.payment_method == "wallet",
+                Order.payment_method != "wallet",
                 Order.status == "pending",
                 or_(
                     Order.expires_at.is_(None),

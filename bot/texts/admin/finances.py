@@ -67,7 +67,6 @@ ADMIN_PAYMENT_SERVICE_WI_TRIAL = "Белый Интернет (Триал)"
 ADMIN_PAYMENT_SERVICE_WI_DEFAULT = "Белый Интернет"
 ADMIN_PAYMENT_SERVICE_RENEW_FMT = "{name} (Продление)"
 ADMIN_PAYMENT_SERVICE_CHANGE_FMT = "{name} (Смена тарифа)"
-ADMIN_PAYMENT_PARTIAL_REFUND_NOTE = " (возврат {refunded_rub} ₽)"
 ADMIN_PAYMENT_STATUS_NOTE = " ({status_name})"
 ADMIN_PAYMENT_METHOD_BTN_ADMIN = "Админ"
 ADMIN_PURCHASES_ROW_BUTTON_TEMPLATE = "🛒 #{numeric_id} | {user_label} | {amount}"
@@ -85,11 +84,9 @@ ADMIN_PAYMENT_CARD_TEMPLATE = """🛠 Админка › 💳 Платежи ›
 <b>Исполнение:</b> {fulfillment_status}
 <b>Создан:</b> {created_at}
 <b>Оплачен:</b> {paid_at}
-<b>External ID:</b> <code>{external_id}</code>{refundable_line}{reason_line}"""
+<b>External ID:</b> <code>{external_id}</code>{reason_line}"""
 ADMIN_PAYMENT_MANUAL_REVIEW_LINE = """
 <b>Причина:</b> {reason}"""
-ADMIN_PAYMENT_REFUNDABLE_LINE = """
-<b>Можно вернуть:</b> {amount_rub} RUB"""
 
 ADMIN_CLIENT_CARD_BUTTON = "👤 Карточка клиента"
 ADMIN_PAYMENT_NOT_FOUND_ALERT = "Платёж не найден"

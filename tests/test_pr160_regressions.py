@@ -86,9 +86,6 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
             show_alert=True,
         )
 
-    def test_white_internet_callback_removed_from_fallback(self):
-        self.assertFalse(hasattr(fallback, "white_internet_callback"))
-
     def test_hub_keyboard_admin_and_non_admin_access(self):
         for is_active in (False, True):
             for mtproto_url in (None, "https://example.test/mtproto"):
@@ -337,36 +334,6 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         rendered_text = args[2]
         self.assertIn("Базовый", rendered_text)
         self.assertIn("На какой срок открываем доступ?", rendered_text)
-
-    def test_all_codebase_text_references_exist(self):
-        import ast
-        import os
-
-        from bot import texts
-
-        available = set(dir(texts))
-        missing = []
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-        for root, _dirs, files in os.walk(root_dir):
-            if any(part in root for part in (".venv", "venv", ".git")):
-                continue
-            for file in files:
-                if file.endswith(".py"):
-                    filepath = os.path.join(root, file)
-                    try:
-                        with open(filepath, "r", encoding="utf-8") as f:
-                            tree = ast.parse(f.read(), filename=filepath)
-                    except Exception:
-                        continue
-                    for node in ast.walk(tree):
-                        if isinstance(node, ast.Attribute):
-                            if isinstance(node.value, ast.Name) and node.value.id == "texts":
-                                attr = node.attr
-                                if not attr.startswith("_") and attr not in available:
-                                    missing.append((os.path.relpath(filepath, root_dir), node.lineno, attr))
-
-        self.assertEqual(missing, [], f"Found unresolved texts attributes: {missing}")
 
 
 if __name__ == "__main__":

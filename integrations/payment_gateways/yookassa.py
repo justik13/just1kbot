@@ -96,13 +96,8 @@ class YooKassaGateway(BasePaymentGateway):
                 result.ambiguous,
             )
             if result.ambiguous:
-                # Timeout / 5xx / unreadable response: YooKassa may have
-                # created the payment anyway. Report it as unknown so the
-                # caller keeps the order and can still be settled by webhook.
-                # Machine-readable token (no prose): full diagnostics are in
-                # the log line above, and user wording lives in bot/texts.
                 raise PaymentCreationAmbiguousError(
-                    f"payment_creation_ambiguous:{result.error_kind or 'unknown'}"
+                    f"YooKassa payment creation ambiguous: {result.error_kind or 'unknown'}"
                 )
             raise RuntimeError(
                 f"YooKassa payment creation error: {result.error_kind or 'unknown'}"
@@ -229,7 +224,7 @@ class YooKassaGateway(BasePaymentGateway):
         )
         return PaymentStatusResult(
             is_paid=(status == "succeeded" and amount_rub is not None and amount_rub > 0),
-            is_refunded=(status == "refunded"),
+            is_refunded=False,
             is_canceled=(status == "canceled"),
             status_str=status,
             amount_rub=amount_rub,

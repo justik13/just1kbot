@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 import logging
 import math
 import uuid
@@ -20,7 +19,6 @@ from config.enums import (
     PaymentProviderStatus,
     PaymentReconciliationStatus,
 )
-from database.repositories.account_ledger_repo import get_payment_refundable_amount
 from database.repositories.payments_repo import get_payment_by_id
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
@@ -384,25 +382,12 @@ async def show_user_payments_list(
                 meta = item.metadata_ if isinstance(item.metadata_, dict) else {}
                 op = meta.get("operation")
 
-                refunded_rub = 0
-                refunded_raw = meta.get("refunded_amount_rub")
-                if refunded_raw is not None:
-                    try:
-                        refunded_rub = int(Decimal(str(refunded_raw)))
-                    except (InvalidOperation, ValueError, TypeError):
-                        refunded_rub = 0
-
                 if display_status == "completed":
                     if amount == 0:
                         sign = ""
                     else:
                         sign = "+" if item.service_type == "topup" else "-"
-                    if 0 < refunded_rub < amount:
-                        status_note = texts.ADMIN_PAYMENT_PARTIAL_REFUND_NOTE.format(
-                            refunded_rub=refunded_rub
-                        )
-                    else:
-                        status_note = ""
+                    status_note = ""
                 else:
                     sign = ""
                     status_note = texts.ADMIN_PAYMENT_STATUS_NOTE.format(
@@ -647,15 +632,6 @@ async def show_payment_card(
             texts.ADMIN_PAYMENT_MANUAL_REVIEW_LINE.format(reason=safe(payment.manual_review_reason))
         )
 
-    refundable_line = ""
-    if payment.provider_status == "succeeded" and payment.currency == "RUB":
-        refundable = await get_payment_refundable_amount(
-            session,
-            payment_id=payment.id,
-        )
-        if refundable > 0:
-            refundable_line = texts.ADMIN_PAYMENT_REFUNDABLE_LINE.format(amount_rub=int(refundable))
-
     rendered = (
         texts.ADMIN_PAYMENT_CARD_TEMPLATE.format(
             payment_id=payment.id,
@@ -669,7 +645,6 @@ async def show_payment_card(
             created_at=format_datetime(payment.created_at),
             paid_at=format_datetime(payment.paid_at),
             external_id=safe(payment.external_id or texts.PLACEHOLDER_DASH),
-            refundable_line=refundable_line,
             reason_line=reason_line,
         )
     )
@@ -764,14 +739,10 @@ async def show_order_card(
         if order.description
         else ""
     )
-    held_meta = order.metadata_ or {}
-    held_line = (
-        texts.ADMIN_ORDER_HELD_LINE.format(
-            reason=safe(str(held_meta.get("settlement_hold_reason", "hold")))
-        )
-        if held_meta.get("settlement_held")
-        else ""
-    )
+    held_line = ""
+    if (order.metadata_ or {}).get("settlement_held"):
+        reason = (order.metadata_ or {}).get("settlement_hold_reason") or "hold"
+        held_line = texts.ADMIN_ORDER_HELD_LINE.format(reason=safe(reason))
     payment_url_line = (
         texts.ADMIN_ORDER_PAYMENT_URL_LINE.format(payment_url=safe(order.payment_url))
         if (order.payment_url and order.status == "pending")
@@ -782,7 +753,7 @@ async def show_order_card(
     if order.status == "pending":
         if order.created_at and (now - _normalize_dt(order.created_at)).total_seconds() > 900:
             diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_PENDING
-    if held_meta.get("payment_creation_ambiguous"):
+    if (order.metadata_ or {}).get("payment_creation_ambiguous"):
         diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_AMBIGUOUS
 
     if order.payment_method == "yookassa":

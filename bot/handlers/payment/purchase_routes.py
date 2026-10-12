@@ -144,9 +144,7 @@ async def handle_order_pay_card(
     ):
         await _render_maintenance(callback, session, back_to="payment_showcase")
         return
-    # Mirror select_tariff(): old order_pay_card buttons must not bypass it.
-    # Authoritative enforcement lives at settlement (mark_order_paid);
-    # this is an early UX reject on (possibly stale) middleware state.
+
     if getattr(db_user, "financial_hold", False):
         await safe_callback_answer(callback, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
         return
@@ -298,12 +296,12 @@ async def handle_order_check(
         await safe_callback_answer(callback, texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
         return
 
+    if order.status == "refunded":
+        await safe_callback_answer(callback, texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
+        return
+
     if order.status == "paid":
         if (order.metadata_ or {}).get("settlement_held"):
-            # Benefits were withheld at settlement (hold/block). Route the
-            # repeat check through settlement: if the hold was lifted this
-            # releases credit/fulfillment, otherwise it stays withheld.
-            # Never present withheld benefits as credited/granted.
             paid_order = await OrderService.mark_order_paid(session, order.id)
             if not paid_order or (paid_order.metadata_ or {}).get("settlement_held"):
                 await safe_callback_answer(
@@ -313,6 +311,7 @@ async def handle_order_check(
                 )
                 return
             order = paid_order
+
         if order.service_type == "topup":
             from .balance_routes import _render_balance
             from bot.keyboards.payment import get_topup_credit_keyboard
@@ -367,13 +366,11 @@ async def handle_order_check(
                 external_id=order.external_id,
                 paid_amount_rub=status_res.amount_rub,
             )
-            if not paid_order:
+            if not paid_order or paid_order.status != "paid":
                 await safe_callback_answer(callback, texts.ERROR_PAYMENT_SERVICE, show_alert=True)
                 return
 
             if (paid_order.metadata_ or {}).get("settlement_held"):
-                # Credit/fulfillment were withheld (hold/block at settlement):
-                # never show a success/credited card for withheld benefits.
                 await safe_callback_answer(
                     callback,
                     texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
@@ -426,18 +423,6 @@ async def handle_order_check(
             OrderService.mark_order_canceled(
                 order,
                 reason=status_res.cancellation_reason or "gateway_canceled",
-            )
-            await session.flush()
-            await safe_callback_answer(
-                callback,
-                texts.PAYMENT_ORDER_PAYMENT_CANCELLED,
-                show_alert=True,
-            )
-            return
-        elif getattr(status_res, "is_refunded", False):
-            OrderService.mark_order_canceled(
-                order,
-                reason="gateway_refunded",
             )
             await session.flush()
             await safe_callback_answer(

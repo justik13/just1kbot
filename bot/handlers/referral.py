@@ -31,7 +31,11 @@ logger = logging.getLogger(__name__)
 
 
 def payment_display_status(payment: object) -> str:
-    status = (getattr(payment, "status", None) or "pending").lower()
+    status = (
+        getattr(payment, "status", None)
+        or getattr(payment, "provider_status", None)
+        or "pending"
+    ).lower()
     if status in {"succeeded", "success", "paid"}:
         return "succeeded"
     if status in {"canceled", "cancelled"}:
@@ -92,11 +96,16 @@ async def show_history(
                 display_status,
                 texts.PAYMENT_STATUS_PENDING_ICON,
             )
-            date = format_datetime(payment.paid_at or payment.created_at)
+            date = format_datetime(getattr(payment, "paid_at", None) or getattr(payment, "created_at", None))
             currency = texts.CURRENCY_RUB_SYMBOL
+            amount = (
+                int(payment.amount_rub)
+                if hasattr(payment, "amount_rub")
+                else int(getattr(payment, "amount", 0))
+            )
             rendered += (
                 f"{status_icon} {date} | "
-                f"{payment.amount} {currency}\n"
+                f"{amount} {currency}\n"
             )
 
         if len(payments) > 10:

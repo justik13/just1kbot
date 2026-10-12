@@ -17,10 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import (
     AccountLedgerAllocation,
     AccountLedgerEntry,
-    Payment,
     User,
 )
-from utils.datetime_helpers import now_utc
 
 ZERO = Decimal(0)
 
@@ -390,60 +388,6 @@ async def create_order_refund_debit(
     )
 
 
-async def credit_succeeded_topup(
-    session: AsyncSession,
-    *,
-    payment_id: int | None = None,
-    locked_payment: Payment | None = None,
-    metadata: dict | None = None,
-) -> tuple[AccountLedgerEntry, bool]:
-    if locked_payment is None and payment_id is None:
-        raise ValueError("payment_id or locked_payment is required")
-
-    payment = locked_payment or await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
-    if payment is None:
-        raise LookupError("topup_payment_not_found")
-    user = await lock_account_user(session, payment.user_id)
-    # Provider and webhook finalizers already own the Payment lock. Keep their
-    # documented Payment -> User order so concurrent confirmations serialize.
-    if payment.user_id != user.id:
-        raise AccountLedgerConflictError("topup_owner_changed")
-    if (
-        payment.fulfillment_status in ("manual_review", "reversed")
-        or payment.reconciliation_status in ("manual_review", "mismatch")
-    ):
-        raise AccountLedgerConflictError("topup_in_manual_review_cannot_be_credited")
-    if payment.provider_status != "succeeded":
-        raise AccountLedgerConflictError("topup_provider_not_succeeded")
-    if payment.currency != "RUB":
-        raise AccountLedgerConflictError("topup_currency_mismatch")
-    amount = whole_rubles(payment.amount)
-    values = {
-        "user_id": user.id,
-        "entry_type": "payment_credit",
-        "amount": amount,
-        "currency": "RUB",
-        "payment_id": payment.id,
-        "quote_id": None,
-        "reversal_of_id": None,
-        "idempotency_key": f"payment-credit:{payment.id}",
-        "metadata_": metadata or {},
-    }
-    entry, created = await _insert_or_get_entry(
-        session,
-        values=values,
-        economic_lookup=(
-            (AccountLedgerEntry.entry_type == "payment_credit")
-            & (AccountLedgerEntry.payment_id == payment.id)
-        ),
-    )
-    if created:
-        payment.credited_at = payment.credited_at or now_utc()
-    return entry, created
-
-
 async def create_admin_adjustment(
     session: AsyncSession,
     *,
@@ -575,13 +519,6 @@ async def _batch_credit_capacities(
     return capacities
 
 
-async def _credit_capacity(
-    session: AsyncSession, credit: AccountLedgerEntry
-) -> Decimal:
-    res = await _batch_credit_capacities(session, [credit])
-    return max(ZERO, res.get(credit.id, ZERO))
-
-
 async def _allocate_fifo(
     session: AsyncSession,
     *,
@@ -639,31 +576,6 @@ async def _allocate_fifo(
     if remaining:
         raise AccountLedgerInvariantError("available_balance_has_no_credit_lots")
     return created
-
-
-async def get_payment_refundable_amount(
-    session: AsyncSession,
-    *,
-    payment_id: int,
-    for_update: bool = False,
-) -> Decimal:
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment_id)
-    )
-    if payment is None:
-        raise LookupError("topup_payment_not_found")
-    if for_update:
-        await lock_account_user(session, payment.user_id)
-    credit = await session.scalar(
-        select(AccountLedgerEntry).where(
-            AccountLedgerEntry.entry_type == "payment_credit",
-            AccountLedgerEntry.payment_id == payment.id,
-        )
-    )
-    if credit is None:
-        return ZERO
-    capacity = await _credit_capacity(session, credit)
-    return max(ZERO, capacity)
 
 
 async def get_account_history(
