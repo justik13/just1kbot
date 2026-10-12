@@ -721,6 +721,25 @@ class OrderService:
                 )
                 return None
 
+            if result.amount_rub is None or result.amount_rub != order.amount_rub:
+                logger.warning(
+                    "Refund amount mismatch or missing for order %s: expected %s, got %s (ext_id=%s)",
+                    order.id,
+                    order.amount_rub,
+                    result.amount_rub,
+                    result.external_id,
+                )
+                order_meta = dict(order.metadata_ or {})
+                order_meta["requires_manual_review"] = True
+                order_meta["refund_amount_mismatch"] = (
+                    str(result.amount_rub) if result.amount_rub is not None else "missing"
+                )
+                if result.external_id:
+                    order_meta["refund_external_id"] = result.external_id
+                order.metadata_ = order_meta
+                await session.flush()
+                return order
+
             order.status = "refunded"
             order.refunded_at = now_utc()
             if result.external_id:

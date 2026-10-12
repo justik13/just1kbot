@@ -390,7 +390,7 @@ async def choose_topup_amount(
     ):
         await _render_maintenance(callback, session, back_to="menu_balance")
         return
-    if getattr(db_user, "topup_blocked", False):
+    if db_user.topup_blocked:
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -399,7 +399,7 @@ async def choose_topup_amount(
         )
         return
 
-    if getattr(db_user, "financial_hold", False):
+    if db_user.financial_hold:
         await render_hub(
             callback.bot,
             callback.message.chat.id,

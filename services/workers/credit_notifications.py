@@ -309,21 +309,23 @@ async def _snapshot(order_id) -> dict | None:
             if order.status != "paid":
                 owner = {"kind": "drop"}
             else:
-                # Never notify without an actual credit in the ledger.
-                has_credit = await session.scalar(
-                    select(func.count(AccountLedgerEntry.id)).where(
-                        AccountLedgerEntry.order_id == order.id,
-                        AccountLedgerEntry.entry_type == "payment_credit",
+                if order.service_type == "topup":
+                    # Never notify topup without an actual credit in the ledger.
+                    has_credit = await session.scalar(
+                        select(func.count(AccountLedgerEntry.id)).where(
+                            AccountLedgerEntry.order_id == order.id,
+                            AccountLedgerEntry.entry_type == "payment_credit",
+                        )
                     )
-                )
-                if not has_credit:
-                    logger.warning(
-                        "Credit-notify skips order %s: paid but no "
-                        "payment_credit (pre-flight 3B owns this anomaly)",
-                        order.id,
-                    )
-                    owner = {"kind": "anomaly"}
-                else:
+                    if not has_credit:
+                        logger.warning(
+                            "Credit-notify skips order %s: paid topup but no "
+                            "payment_credit (pre-flight 3B owns this anomaly)",
+                            order.id,
+                        )
+                        owner = {"kind": "anomaly"}
+
+                if owner is None:
                     user = await session.get(User, order.user_id)
                     # Already synced as blocked by another path (broadcast,
                     # WI traffic, expiry notifications): do not burn attempts

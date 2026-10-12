@@ -408,9 +408,6 @@ async def reverse_referral_bonus_for_topup(
     *,
     payment_id: int | None = None,
     order_id: str | uuid.UUID | None = None,
-    refund_amount: Decimal | None = None,
-    original_topup_amount: Decimal | None = None,
-    total_refunded_amount: Decimal | None = None,
     refund_id: str | None = None,
 ) -> Decimal:
     """Debit/reverse the referral bonus previously credited for a top-up if the top-up is refunded."""
