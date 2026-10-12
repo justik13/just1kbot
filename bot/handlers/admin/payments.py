@@ -74,13 +74,6 @@ def payment_display_status(payment) -> str:
     return "failed"
 
 
-def _format_rub_decimal(val: Decimal) -> str:
-    quantized = val.quantize(Decimal("0.01"))
-    if quantized == quantized.to_integral_value():
-        return str(int(quantized))
-    return f"{quantized:.2f}"
-
-
 def order_display_status(order: Order) -> str:
     if order.status == "refunded":
         return "refunded"
@@ -387,27 +380,26 @@ async def show_user_payments_list(
                     display_status,
                     display_status,
                 )
-                order_amount_dec = Decimal(str(item.amount_rub or 0))
-                amount = _format_rub_decimal(order_amount_dec)
+                amount = int(item.amount_rub)
                 meta = item.metadata_ if isinstance(item.metadata_, dict) else {}
                 op = meta.get("operation")
 
-                refunded_dec = Decimal("0")
+                refunded_rub = 0
                 refunded_raw = meta.get("refunded_amount_rub")
                 if refunded_raw is not None:
                     try:
-                        refunded_dec = Decimal(str(refunded_raw))
+                        refunded_rub = int(Decimal(str(refunded_raw)))
                     except (InvalidOperation, ValueError, TypeError):
-                        refunded_dec = Decimal("0")
+                        refunded_rub = 0
 
                 if display_status == "completed":
-                    if order_amount_dec == 0:
+                    if amount == 0:
                         sign = ""
                     else:
                         sign = "+" if item.service_type == "topup" else "-"
-                    if Decimal("0") < refunded_dec < order_amount_dec:
+                    if 0 < refunded_rub < amount:
                         status_note = texts.ADMIN_PAYMENT_PARTIAL_REFUND_NOTE.format(
-                            refunded_rub=_format_rub_decimal(refunded_dec)
+                            refunded_rub=refunded_rub
                         )
                     else:
                         status_note = ""
