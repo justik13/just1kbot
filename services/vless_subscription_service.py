@@ -319,9 +319,11 @@ class VlessSubscriptionService:
         user_id: int | None = None,
         sub_id: int | None = None,
     ) -> tuple[dict[int, bool], bool]:
-        results: dict[int, bool] = {}
-        needs_version_bump = False
-        for srv_id, api_url, api_key in targets:
+        if not targets:
+            return {}, False
+
+        async def _sync_one(srv_id: int, api_url: str, api_key: str) -> tuple[int, bool, bool]:
+            needs_bump = False
             try:
                 async with XrayNodeClient(timeout=5.0) as client:
                     resp = await client.sync_client(
@@ -338,20 +340,22 @@ class VlessSubscriptionService:
                     ] if resp.verified_inbounds else []
                     has_vless = any("vless" in ib for ib in verified)
                     if resp.result == "applied":
-                        results[srv_id] = has_vless and bool(resp.all_inbounds_verified)
+                        ok = has_vless and bool(resp.all_inbounds_verified)
+                        return srv_id, ok, False
                     elif resp.result == "already_newer":
                         expected_state = "active" if desired_active else "disabled"
                         actual_state = (resp.raw_data or {}).get("state")
                         match = (actual_state == expected_state)
                         if not match:
-                            needs_version_bump = True
-                        results[srv_id] = (
+                            needs_bump = True
+                        ok = (
                             has_vless
                             and match
                             and bool(resp.all_inbounds_verified)
                         )
+                        return srv_id, ok, needs_bump
                     else:
-                        results[srv_id] = False
+                        return srv_id, False, False
             except Exception as exc:
                 logger.warning(
                     "Failed to sync VLESS user %s (sub %s) to server %s: %s",
@@ -360,7 +364,18 @@ class VlessSubscriptionService:
                     srv_id,
                     exc,
                 )
-                results[srv_id] = False
+                return srv_id, False, False
+
+        tasks = [_sync_one(srv_id, api_url, api_key) for srv_id, api_url, api_key in targets]
+        res_list = await asyncio.gather(*tasks)
+
+        results: dict[int, bool] = {}
+        needs_version_bump = False
+        for srv_id, ok, bump in res_list:
+            results[srv_id] = ok
+            if bump:
+                needs_version_bump = True
+
         return results, needs_version_bump
 
     @staticmethod
@@ -369,8 +384,10 @@ class VlessSubscriptionService:
         client_uuid: str,
         version: int | None = None,
     ) -> dict[int, bool]:
-        results: dict[int, bool] = {}
-        for srv_id, api_url, api_key in targets:
+        if not targets:
+            return {}
+
+        async def _deprov_one(srv_id: int, api_url: str, api_key: str) -> tuple[int, bool]:
             try:
                 async with XrayNodeClient(timeout=5.0) as client:
                     resp = await client.sync_client(
@@ -387,16 +404,16 @@ class VlessSubscriptionService:
                     ] if resp.verified_inbounds else []
                     has_vless = any("vless" in ib for ib in verified)
                     if resp.result == "applied":
-                        results[srv_id] = has_vless and bool(resp.all_inbounds_verified)
+                        return srv_id, has_vless and bool(resp.all_inbounds_verified)
                     elif resp.result == "already_newer":
                         actual_state = (resp.raw_data or {}).get("state")
-                        results[srv_id] = (
+                        return srv_id, (
                             has_vless
                             and (actual_state == "disabled")
                             and bool(resp.all_inbounds_verified)
                         )
                     else:
-                        results[srv_id] = False
+                        return srv_id, False
             except Exception as exc:
                 masked_uuid = f"{client_uuid[:8]}***" if client_uuid else "unknown"
                 logger.warning(
@@ -405,8 +422,11 @@ class VlessSubscriptionService:
                     srv_id,
                     exc,
                 )
-                results[srv_id] = False
-        return results
+                return srv_id, False
+
+        tasks = [_deprov_one(srv_id, api_url, api_key) for srv_id, api_url, api_key in targets]
+        res_list = await asyncio.gather(*tasks)
+        return dict(res_list)
 
     @staticmethod
     async def sync_user_to_nodes(

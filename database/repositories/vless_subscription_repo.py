@@ -242,9 +242,27 @@ async def register_hwid_atomic(
                 entry[k] = v.strip()[:64]
 
     if clean_hwid in active_hwids:
-        # Existing device — refresh activity timestamp and update metadata
+        # Existing device — refresh activity timestamp and update metadata (throttled to 15m)
         prev = active_hwids[clean_hwid]
         if isinstance(prev, dict):
+            prev_last_seen_str = prev.get("last_seen")
+            should_update = True
+            if prev_last_seen_str:
+                try:
+                    prev_dt = datetime.fromisoformat(prev_last_seen_str)
+                    if (now - prev_dt).total_seconds() < 900:
+                        should_update = False
+                except Exception:
+                    should_update = True
+            if device_info and isinstance(device_info, dict):
+                for k, v in device_info.items():
+                    if isinstance(v, str) and v.strip() and prev.get(k) != v.strip()[:64]:
+                        should_update = True
+                        break
+
+            if not should_update:
+                return True, len(active_hwids), effective_limit
+
             updated_entry = {**prev, "last_seen": now.isoformat()}
             if device_info and isinstance(device_info, dict):
                 for k, v in device_info.items():

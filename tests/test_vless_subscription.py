@@ -741,6 +741,40 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry2["model"], "iPhone15,2-Updated")
         self.assertEqual(entry2["ua"], "IncyClient/1.2")
 
+    async def test_register_hwid_atomic_throttles_last_seen_for_unchanged_device(self):
+        recent_dt = datetime.now(timezone.utc) - timedelta(minutes=5)
+        sub = VlessSubscription(
+            id=1,
+            user_id=100,
+            token="tok1234567890123456",
+            uuid="abc-uuid",
+            is_active=True,
+            active_hwids={
+                "hwid-ios-1": {
+                    "last_seen": recent_dt.isoformat(),
+                    "os": "iOS 17.5",
+                    "model": "iPhone15,2",
+                }
+            },
+        )
+
+        mock_session = AsyncMock()
+        mock_session.flush = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
+
+        device_info = {"os": "iOS 17.5", "model": "iPhone15,2"}
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=sub.id,
+            hwid="hwid-ios-1",
+            effective_limit=2,
+            device_info=device_info,
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(count, 1)
+        mock_session.flush.assert_not_called()
+        self.assertEqual(sub.active_hwids["hwid-ios-1"]["last_seen"], recent_dt.isoformat())
+
     async def test_register_hwid_atomic_quota_enforcement(self):
         now = datetime.now(timezone.utc)
         sub = VlessSubscription(

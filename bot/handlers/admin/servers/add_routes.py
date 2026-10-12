@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import urllib.parse
 
 from config.constants import (
@@ -565,15 +566,22 @@ async def process_add_server(
                     )
                     if has_vless:
                         capabilities.append("vless")
-                        domain = x_data.get("vless_domain")
+                        domain = x_data.get("vless_domain") or all_data.get("vless_domain")
                         if not domain:
                             parsed = urllib.parse.urlsplit(all_data["api_url"])
-                            domain = parsed.hostname or ""
+                            cand = parsed.hostname or ""
+                            if cand and not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", cand):
+                                domain = cand
+                            else:
+                                domain = None
                         extra_info = {
-                            "domain": domain,
                             "vless_port": 443,
                             "xray_api_url": all_data["api_url"],
                         }
+                        if domain and isinstance(domain, str):
+                            domain_clean = domain.strip().lower()
+                            if "." in domain_clean and not any(c in domain_clean for c in (" ", "/", ":")):
+                                extra_info["domain"] = domain_clean
                 elif not x_ok:
                     xray_check_failed = True
         except Exception:

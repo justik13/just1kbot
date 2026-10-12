@@ -46,6 +46,11 @@ def _extract_device_metadata(request: web.Request) -> dict[str, str]:
     return meta
 
 
+def _get_vless_update_interval() -> str:
+    val = os.getenv("VLESS_PROFILE_UPDATE_INTERVAL", "6").strip()
+    return val if val.isdigit() and int(val) > 0 else "6"
+
+
 async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
     """Serve Base64 subscription feed for standard VLESS access with HWID device accounting."""
     client_ip = get_trusted_client_ip(request)
@@ -134,7 +139,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             response_headers = {
                 **common_headers,
                 "Content-Type": "text/plain; charset=utf-8",
-                "Profile-Update-Interval": "1",
+                "Profile-Update-Interval": _get_vless_update_interval(),
                 "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
                 "Profile-Title": f"base64:{b64_title}",
                 "Hide-Url": "1",
@@ -180,7 +185,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             headers = dict(common_headers)
             headers.update({
                 "Content-Type": "text/plain; charset=utf-8",
-                "Profile-Update-Interval": "1",
+                "Profile-Update-Interval": _get_vless_update_interval(),
                 "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
                 "Profile-Title": f"base64:{b64_title}",
                 "Device-Limit-Exceeded": "1",
@@ -254,7 +259,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         response_headers = {
             **common_headers,
             "Content-Type": "text/plain; charset=utf-8",
-            "Profile-Update-Interval": "1",
+            "Profile-Update-Interval": _get_vless_update_interval(),
             "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
             "Device-Limit": str(effective_vless_limit),
             "Device-Active-Count": str(active_hwid_count),
