@@ -30,7 +30,10 @@ async def has_successful_topup(
         select(func.count(Order.id))
         .where(
             Order.user_id == user_id,
-            Order.status == "paid",
+            or_(
+                Order.status.in_(["paid", "refunded"]),
+                Order.paid_at.is_not(None),
+            ),
             or_(
                 Order.service_type == "topup",
                 Order.payment_method != "wallet",

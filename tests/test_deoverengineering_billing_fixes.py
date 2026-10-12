@@ -57,7 +57,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[1], legacy_pay)
 
     async def test_has_successful_topup_recognizes_external_gateway_orders(self):
-        """has_successful_topup returns True for paid gateway orders (sbp, yookassa, topup)."""
+        """has_successful_topup returns True for paid gateway orders (sbp, yookassa, topup) and refunded orders."""
         session = AsyncMock()
         session.scalar = AsyncMock(side_effect=[0, 1])
 
@@ -69,6 +69,18 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         stmt = str(call_args.args[0].compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("orders.payment_method != 'wallet'", stmt)
         self.assertIn("orders.service_type = 'topup'", stmt)
+        self.assertTrue(
+            "refunded" in stmt or "orders.status IN ('paid', 'refunded')" in stmt
+        )
+        self.assertIn("orders.paid_at IS NOT NULL", stmt)
+
+    async def test_has_successful_topup_includes_refunded_order(self):
+        """has_successful_topup returns True if user previously paid even if refunded."""
+        session = AsyncMock()
+        session.scalar = AsyncMock(side_effect=[0, 1])
+
+        has_paid = await has_successful_topup(session, user_id=99)
+        self.assertTrue(has_paid)
 
     async def test_get_pending_payments_count_excludes_wallet(self):
         """get_pending_payments_count_for_tariff filters Order.payment_method != 'wallet'."""
@@ -352,8 +364,8 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             status="paid",
             metadata_={"settlement_held": True, "settlement_hold_reason": "hold"},
         )
-        session.scalar = AsyncMock(return_value=held_order)
-        session.get = AsyncMock(return_value=User(id=22, financial_hold=False, topup_blocked=False))
+        user = User(id=22, financial_hold=False, topup_blocked=False)
+        session.scalar = AsyncMock(side_effect=[held_order, user])
 
         with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
             res = await OrderService.mark_order_paid(session, order_uuid)
@@ -375,8 +387,8 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             status="paid",
             metadata_={"settlement_held": True, "settlement_hold_reason": "hold"},
         )
-        session.scalar = AsyncMock(return_value=held_order)
-        session.get = AsyncMock(return_value=User(id=22, financial_hold=True))
+        user = User(id=22, financial_hold=True)
+        session.scalar = AsyncMock(side_effect=[held_order, user])
 
         with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
             res = await OrderService.mark_order_paid(session, order_uuid)
@@ -396,8 +408,8 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             amount_rub=Decimal("200.00"),
             status="pending",
         )
-        session.scalar = AsyncMock(return_value=fresh_order)
-        session.get = AsyncMock(return_value=User(id=33, financial_hold=True))
+        user = User(id=33, financial_hold=True)
+        session.scalar = AsyncMock(side_effect=[fresh_order, user])
 
         with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
             res = await OrderService.mark_order_paid(session, order_uuid)
@@ -413,7 +425,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         """pay_from_wallet raises FinancialHoldBlockedError if user.financial_hold is True."""
         session = AsyncMock()
         user = User(id=5, telegram_id=555, financial_hold=True)
-        session.get = AsyncMock(return_value=user)
+        session.scalar = AsyncMock(return_value=user)
 
         with self.assertRaises(FinancialHoldBlockedError):
             await OrderService.pay_from_wallet(session, user_id=5)
@@ -666,6 +678,10 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
     async def test_notify_referrer_bonus_populates_bonus_balance(self):
         """notify_referrer_bonus fetches bonus_balance from ledger before sending push."""
         session = AsyncMock()
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__.return_value = mock_nested
+        mock_nested.__aexit__.return_value = None
+        session.begin_nested = MagicMock(return_value=mock_nested)
         order_uuid = uuid.uuid4()
         order = Order(
             id=order_uuid,
@@ -700,6 +716,10 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
     async def test_notify_referrer_bonus_survives_db_error(self):
         """notify_referrer_bonus catches DB exceptions safely and returns False without raising."""
         session = AsyncMock()
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__.return_value = mock_nested
+        mock_nested.__aexit__.return_value = None
+        session.begin_nested = MagicMock(return_value=mock_nested)
         order_uuid = uuid.uuid4()
         order = Order(
             id=order_uuid,

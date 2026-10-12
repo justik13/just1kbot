@@ -56,27 +56,12 @@ class OrderService:
         session: AsyncSession, user_id: int
     ) -> User | None:
         """Authoritative user read with row lock for the settlement boundary."""
-        res = await session.scalar(
+        return await session.scalar(
             select(User)
             .where(User.id == user_id)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if isinstance(res, User):
-            return res
-        get_fn = getattr(session, "get", None)
-        if callable(get_fn):
-            try:
-                fallback = get_fn(User, user_id)
-                if hasattr(fallback, "__await__"):
-                    fallback_user = await fallback
-                else:
-                    fallback_user = fallback
-                if isinstance(fallback_user, User):
-                    return fallback_user
-            except Exception:
-                pass
-        return res if isinstance(res, User) else None
 
     @staticmethod
     async def _settle_benefits(
@@ -434,7 +419,7 @@ class OrderService:
             )
         except Exception:
             pass
-        user = await session.get(User, user_id, with_for_update=True)
+        user = await OrderService._load_settlement_user(session, user_id)
         if user and getattr(user, "financial_hold", False):
             raise FinancialHoldBlockedError("Financial hold active on user")
 
