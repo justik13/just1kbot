@@ -52,6 +52,30 @@ class FinancialHoldBlockedError(Exception):
 
 class OrderService:
     @staticmethod
+    async def _load_settlement_user(
+        session: AsyncSession, user_id: int
+    ) -> User | None:
+        """Authoritative user read with row lock for the settlement boundary."""
+        res = await session.scalar(
+            select(User).where(User.id == user_id).with_for_update()
+        )
+        if isinstance(res, User):
+            return res
+        get_fn = getattr(session, "get", None)
+        if callable(get_fn):
+            try:
+                fallback = get_fn(User, user_id)
+                if hasattr(fallback, "__await__"):
+                    fallback_user = await fallback
+                else:
+                    fallback_user = fallback
+                if isinstance(fallback_user, User):
+                    return fallback_user
+            except Exception:
+                pass
+        return res if isinstance(res, User) else None
+
+    @staticmethod
     async def _settle_benefits(
         session: AsyncSession, order: Order, *, was_canceled: bool
     ) -> None:
@@ -63,52 +87,48 @@ class OrderService:
         mark_notify_pending(order)
         # Ledger records: ONLY topup credits user's bot wallet
         if order.service_type == "topup":
-            credit_meta = {"source": f"{order.payment_method}_topup"}
-            if was_canceled:
-                credit_meta["revived"] = True
-            await create_order_credit(
-                session,
-                user_id=order.user_id,
-                amount_rub=order.amount_rub,
-                order_id=order.id,
-                metadata=credit_meta,
+            refunded_so_far = Decimal(
+                str((order.metadata_ or {}).get("refunded_amount_rub", "0"))
             )
+            net_topup = max(Decimal("0.00"), order.amount_rub - refunded_so_far)
+            if net_topup > 0:
+                credit_meta = {"source": f"{order.payment_method}_topup"}
+                if was_canceled:
+                    credit_meta["revived"] = True
+                await create_order_credit(
+                    session,
+                    user_id=order.user_id,
+                    amount_rub=net_topup,
+                    order_id=order.id,
+                    metadata=credit_meta,
+                )
 
-        # Referral bonus accrues ONLY on balance top-ups: direct tariff
-        # purchases (external gateway or wallet) must not mint referrer
-        # bonuses, otherwise refunds of non-topup orders would leave
-        # unreversed bonuses behind (reversal covers top-ups only).
-        if order.service_type == "topup":
-            from services.referral_bonus import grant_referral_bonus_for_topup
+                from services.referral_bonus import grant_referral_bonus_for_topup
 
-            grant_result = await grant_referral_bonus_for_topup(
-                session,
-                purchaser_user_id=order.user_id,
-                order_id=str(order.id),
-                topup_amount=order.amount_rub,
-            )
-            # Referrer push debt: the bonus money moved now, but the referrer
-            # is not looking at any screen. Armed only for genuinely new
-            # grants (never for historical orders, so no backfill spam);
-            # cleared by the credit-notify worker after delivery.
-            if (
-                grant_result.referrer_bonus > 0
-                and grant_result.referrer_user_id is not None
-            ):
-                referrer_meta = dict(order.metadata_ or {})
-                referrer_meta["referrer_notify_pending"] = {
-                    "user_id": grant_result.referrer_user_id,
-                    "telegram_id": grant_result.referrer_telegram_id,
-                    "bonus": str(grant_result.referrer_bonus),
-                    "bonus_rate_pct": grant_result.bonus_rate_pct,
-                    "tier_upgraded": grant_result.tier_upgraded,
-                    "new_tier_name": grant_result.new_tier_name,
-                    "new_rate_pct": grant_result.new_rate_pct,
-                }
-                order.metadata_ = referrer_meta
-
-        # Fulfill benefits linearly
-        await FulfillmentService.fulfill_order(session, order)
+                grant_result = await grant_referral_bonus_for_topup(
+                    session,
+                    purchaser_user_id=order.user_id,
+                    order_id=str(order.id),
+                    topup_amount=net_topup,
+                )
+                if (
+                    grant_result.referrer_bonus > 0
+                    and grant_result.referrer_user_id is not None
+                ):
+                    referrer_meta = dict(order.metadata_ or {})
+                    referrer_meta["referrer_notify_pending"] = {
+                        "user_id": grant_result.referrer_user_id,
+                        "telegram_id": grant_result.referrer_telegram_id,
+                        "bonus": str(grant_result.referrer_bonus),
+                        "bonus_rate_pct": grant_result.bonus_rate_pct,
+                        "tier_upgraded": grant_result.tier_upgraded,
+                        "new_tier_name": grant_result.new_tier_name,
+                        "new_rate_pct": grant_result.new_rate_pct,
+                    }
+                    order.metadata_ = referrer_meta
+        else:
+            if order.status != "refunded":
+                await FulfillmentService.fulfill_order(session, order)
         await session.flush()
     @staticmethod
     def calculate_tariff_change(
@@ -500,7 +520,9 @@ class OrderService:
         if order.status == "paid":
             order._newly_paid = False
             if (order.metadata_ or {}).get("settlement_held"):
-                release_user = await session.get(User, order.user_id)
+                release_user = await OrderService._load_settlement_user(
+                    session, order.user_id
+                )
                 if release_user is not None:
                     still_hold = bool(getattr(release_user, "financial_hold", False))
                     still_block = bool(getattr(release_user, "topup_blocked", False))
@@ -572,7 +594,9 @@ class OrderService:
             order_meta["revived_from_canceled"] = True
             order.metadata_ = order_meta
 
-        settlement_user = await session.get(User, order.user_id)
+        settlement_user = await OrderService._load_settlement_user(
+            session, order.user_id
+        )
         if settlement_user is not None:
             is_hold = bool(getattr(settlement_user, "financial_hold", False))
             is_topup_block = bool(getattr(settlement_user, "topup_blocked", False))
@@ -801,13 +825,19 @@ class OrderService:
 
             is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")
             if is_fully_refunded:
-                await FulfillmentService.revoke_order(session, order)
-                logger.info(
-                    "Order %s fully refunded (total %s / %s) and revoked",
-                    order.id,
-                    new_total_refunded,
-                    order.amount_rub,
-                )
+                if not (order.metadata_ or {}).get("settlement_held"):
+                    await FulfillmentService.revoke_order(session, order)
+                    logger.info(
+                        "Order %s fully refunded (total %s / %s) and revoked",
+                        order.id,
+                        new_total_refunded,
+                        order.amount_rub,
+                    )
+                else:
+                    logger.info(
+                        "Order %s fully refunded but benefits were withheld (settlement_held); skipping revocation",
+                        order.id,
+                    )
             else:
                 logger.info(
                     "Order %s partially refunded %s RUB (total %s / %s), revocation deferred until full refund",

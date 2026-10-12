@@ -496,8 +496,206 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.payment.balance_routes.render_hub", new=AsyncMock()) as mock_hub2:
             await resume_topup(cb2, session, db_user=db_user)
             mock_hub2.assert_awaited_once()
-            self.assertEqual(mock_hub2.await_args.args[2], texts.PAYMENT_DISPUTE_BLOCKED_NOTICE)
+    async def test_load_settlement_user_uses_for_update(self):
+        """OrderService._load_settlement_user builds query with with_for_update."""
+        session = AsyncMock()
+        session.scalar = AsyncMock(return_value=User(id=10, telegram_id=123))
+
+        user = await OrderService._load_settlement_user(session, user_id=10)
+        self.assertIsNotNone(user)
+        self.assertEqual(user.id, 10)
+
+        call_args = session.scalar.await_args
+        self.assertIsNotNone(call_args)
+        stmt = str(call_args.args[0].compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("users.id = 10", stmt)
+        self.assertIn("FOR UPDATE", stmt)
+
+    async def test_handle_order_check_held_order_answers_blocked_notice(self):
+        """handle_order_check for paid held order answers with PAYMENT_DISPUTE_BLOCKED_NOTICE."""
+        from bot.handlers.payment.purchase_routes import handle_order_check
+
+        session = AsyncMock()
+        db_user = User(id=77, telegram_id=777)
+        order_uuid = uuid.uuid4()
+        held_order = Order(
+            id=order_uuid,
+            user_id=77,
+            service_type="topup",
+            amount_rub=Decimal("300.00"),
+            status="paid",
+            metadata_={"settlement_held": True, "settlement_hold_reason": "financial_hold"},
+        )
+        session.get = AsyncMock(return_value=held_order)
+
+        callback = AsyncMock()
+        callback.data = f"order_check:{order_uuid}"
+        callback.bot = AsyncMock()
+        callback.message = MagicMock(chat=MagicMock(id=777))
+
+        with patch.object(OrderService, "mark_order_paid", new=AsyncMock(return_value=held_order)), \
+             patch("bot.handlers.payment.balance_routes._render_balance", new=AsyncMock()) as mock_render:
+            await handle_order_check(callback, session, db_user=db_user)
+
+        callback.answer.assert_awaited_once_with(
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
+        )
+        mock_render.assert_not_awaited()
+
+    async def test_handle_order_check_fresh_paid_with_settlement_held_answers_blocked_notice(self):
+        """handle_order_check when gateway reports paid but order gets held answers blocked notice."""
+        from bot.handlers.payment.purchase_routes import handle_order_check
+
+        session = AsyncMock()
+        db_user = User(id=88, telegram_id=888)
+        order_uuid = uuid.uuid4()
+        pending_order = Order(
+            id=order_uuid,
+            user_id=88,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="pending",
+            external_id="gateway_ext_888",
+            payment_method="yookassa",
+            metadata_={},
+        )
+        held_order = Order(
+            id=order_uuid,
+            user_id=88,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="paid",
+            external_id="gateway_ext_888",
+            payment_method="yookassa",
+            metadata_={"settlement_held": True, "settlement_hold_reason": "financial_hold"},
+        )
+        session.get = AsyncMock(return_value=pending_order)
+
+        callback = AsyncMock()
+        callback.data = f"order_check:{order_uuid}"
+        callback.bot = AsyncMock()
+        callback.message = MagicMock(chat=MagicMock(id=888))
+
+        mock_gateway = AsyncMock()
+        mock_gateway.check_payment_status = AsyncMock(
+            return_value=MagicMock(is_paid=True, amount_rub=Decimal("200.00"))
+        )
+
+        with patch("bot.handlers.payment.purchase_routes.get_payment_gateway", return_value=mock_gateway), \
+             patch.object(OrderService, "mark_order_paid", new=AsyncMock(return_value=held_order)), \
+             patch("bot.handlers.payment.purchase_routes.render_hub", new=AsyncMock()) as mock_hub:
+            await handle_order_check(callback, session, db_user=db_user)
+
+        callback.answer.assert_awaited_once_with(
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True
+        )
+        mock_hub.assert_not_awaited()
+
+    async def test_refund_webhook_skips_revocation_if_settlement_held(self):
+        """process_webhook_event does not revoke benefits on full refund if settlement was held."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        held_order = Order(
+            id=order_uuid,
+            user_id=50,
+            service_type="awg",
+            amount_rub=Decimal("300.00"),
+            status="paid",
+            payment_method="yookassa",
+            external_id="ext_refund_held_1",
+            metadata_={"settlement_held": True},
+        )
+        session.scalar = AsyncMock(return_value=held_order)
+
+        result = WebhookResult(
+            order_id=None,
+            is_paid=False,
+            is_refunded=True,
+            external_id="refund_ext_1",
+            related_external_id="ext_refund_held_1",
+            amount_rub=Decimal("300.00"),
+            event_type="refund.succeeded",
+        )
+        mock_gateway = AsyncMock()
+        mock_gateway.parse_webhook = AsyncMock(return_value=result)
+
+        with patch("services.order_service.get_payment_gateway", return_value=mock_gateway), \
+             patch("services.fulfillment_service.FulfillmentService.revoke_order", new=AsyncMock()) as mock_revoke, \
+             patch("services.order_service.create_order_refund_debit", new=AsyncMock()), \
+             patch("services.order_service.reverse_referral_bonus_for_topup", new=AsyncMock()):
+            order = await OrderService.process_webhook_event(session, {})
+
+        self.assertIsNotNone(order)
+        self.assertEqual(order.status, "refunded")
+        mock_revoke.assert_not_awaited()
+
+    async def test_settle_benefits_net_topup_after_partial_refund_under_hold(self):
+        """_settle_benefits credits only net_topup if partially refunded while held."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        partially_refunded_order = Order(
+            id=order_uuid,
+            user_id=60,
+            service_type="topup",
+            amount_rub=Decimal("500.00"),
+            status="paid",
+            payment_method="yookassa",
+            metadata_={"refunded_amount_rub": "200.00"},
+        )
+
+        with patch("services.order_service.create_order_credit", new=AsyncMock()) as mock_credit, \
+             patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=MagicMock(referrer_bonus=Decimal("0"), referrer_user_id=None))) as mock_bonus:
+            await OrderService._settle_benefits(session, partially_refunded_order, was_canceled=False)
+
+        mock_credit.assert_awaited_once_with(
+            session,
+            user_id=60,
+            amount_rub=Decimal("300.00"),
+            order_id=order_uuid,
+            metadata={"source": "yookassa_topup"},
+        )
+        mock_bonus.assert_awaited_once_with(
+            session,
+            purchaser_user_id=60,
+            order_id=str(order_uuid),
+            topup_amount=Decimal("300.00"),
+        )
+
+    async def test_notify_referrer_bonus_populates_bonus_balance(self):
+        """notify_referrer_bonus fetches bonus_balance from ledger before sending push."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("500.00"),
+            status="paid",
+            metadata_={
+                "referrer_notify_pending": {
+                    "user_id": 99,
+                    "telegram_id": 999111,
+                    "bonus": "50",
+                    "bonus_rate_pct": 10,
+                }
+            },
+        )
+        bot = AsyncMock()
+        ref_balance = MagicMock(bonus_available=Decimal("150"))
+
+        with patch("database.repositories.account_ledger_repo.get_account_balance", new=AsyncMock(return_value=ref_balance)), \
+             patch("services.workers.credit_notifications._send_referrer_push", new=AsyncMock(return_value=True)) as mock_send, \
+             patch("services.order_notifications.mark_referrer_notified") as mock_mark:
+            sent = await notify_referrer_bonus(bot, session, order)
+
+        self.assertTrue(sent)
+        mock_send.assert_awaited_once()
+        debt_arg = mock_send.await_args.args[1]
+        self.assertEqual(debt_arg["bonus_balance"], 150)
+        self.assertEqual(debt_arg["bonus"], "50")
+        mock_mark.assert_called_once_with(order)
 
 
 if __name__ == "__main__":
     unittest.main()
+

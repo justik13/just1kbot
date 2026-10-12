@@ -297,6 +297,17 @@ async def handle_order_check(
         return
 
     if order.status == "paid":
+        if (order.metadata_ or {}).get("settlement_held"):
+            paid_order = await OrderService.mark_order_paid(session, order.id)
+            if not paid_order or (paid_order.metadata_ or {}).get("settlement_held"):
+                await safe_callback_answer(
+                    callback,
+                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+                    show_alert=True,
+                )
+                return
+            order = paid_order
+
         if order.service_type == "topup":
             from .balance_routes import _render_balance
             from bot.keyboards.payment import get_topup_credit_keyboard
@@ -355,6 +366,14 @@ async def handle_order_check(
             )
             if not paid_order:
                 await safe_callback_answer(callback, texts.ERROR_PAYMENT_SERVICE, show_alert=True)
+                return
+
+            if (paid_order.metadata_ or {}).get("settlement_held"):
+                await safe_callback_answer(
+                    callback,
+                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+                    show_alert=True,
+                )
                 return
 
             if paid_order.service_type == "topup":

@@ -54,11 +54,18 @@ async def notify_referrer_bonus(
     order: Order,
 ) -> bool:
     """Send immediate notification to referrer if referrer_notify_pending is present."""
+    from database.repositories.account_ledger_repo import get_account_balance
     from services.order_notifications import mark_referrer_notified
     from services.workers.credit_notifications import _send_referrer_push
-    debt = (order.metadata_ or {}).get("referrer_notify_pending")
-    if not isinstance(debt, dict) or not debt.get("telegram_id"):
+
+    raw_debt = (order.metadata_ or {}).get("referrer_notify_pending")
+    if not isinstance(raw_debt, dict) or not raw_debt.get("telegram_id"):
         return False
+    debt = dict(raw_debt)
+    if "bonus_balance" not in debt and debt.get("user_id"):
+        ref_balance = await get_account_balance(session, user_id=debt["user_id"])
+        debt["bonus_balance"] = int(ref_balance.bonus_available)
+
     try:
         sent = await _send_referrer_push(bot, debt)
         if sent:
