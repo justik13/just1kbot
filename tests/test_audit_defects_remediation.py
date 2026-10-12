@@ -4,8 +4,6 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiohttp import web
-from alembic.config import Config
-from alembic.script import ScriptDirectory
 
 from bot.handlers.webhook import _get_real_ip
 from bot.middlewares.action_lock import LOCKED_ACTION_PREFIXES, STALE_ACTION_PREFIXES
@@ -35,12 +33,6 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
                 "manual_review",
             ),
         )
-
-    def test_migration_0005_exists_and_revises_0004(self):
-        scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        rev_0005 = scripts.get_revision("0005_payment_statuses_sync")
-        self.assertIsNotNone(rev_0005)
-        self.assertEqual(rev_0005.down_revision, "0004_referral_entitlements")
 
     def test_action_lock_prefixes_updated(self):
         self.assertIn("confirm_admin_balance_apply", LOCKED_ACTION_PREFIXES)

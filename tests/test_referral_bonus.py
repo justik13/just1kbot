@@ -1060,8 +1060,8 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         self.assertEqual(total_reversed, Decimal("0"))
         self.assertEqual(len(reversal_entries), 0)
 
-    def test_get_referral_bonus_balance_with_partial_refund(self):
-        """Verify get_referral_bonus_balance subtracts partial reversals rather than zeroing the whole credit."""
+    def test_get_referral_bonus_balance_with_reversals(self):
+        """Verify get_referral_bonus_balance correctly accounts for ledger reversal adjustments."""
         import asyncio
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
         from services.referral_bonus import get_referral_bonus_balance
@@ -1077,7 +1077,6 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         )
         with patch("services.referral_bonus.get_account_balance", return_value=balance_snap):
             bonus = asyncio.run(get_referral_bonus_balance(session, user_id=10))
-            # 40 - 16 = 24 RUB
             self.assertEqual(bonus, Decimal("24.00"))
 
 

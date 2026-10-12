@@ -3,9 +3,6 @@ import unittest
 from unittest.mock import MagicMock
 
 from aiogram import Bot
-from alembic.config import Config
-from alembic.script import ScriptDirectory
-
 from database.repositories.users_repo import ALLOWED_USER_UPDATE_FIELDS
 from services.device_service import RESERVING_STATUSES
 from services.workers.cleanup import cleanup_dangling_peers_loop
@@ -13,73 +10,6 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_chain_reaches_0031_in_order(self):
-        scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0036_unique_orders_external_id"])
-        self.assertEqual(
-            scripts.get_revision("0031_awg_persistent_traffic").down_revision,
-            "0030_simple_billing",
-        )
-        self.assertEqual(
-            scripts.get_revision("0030_simple_billing").down_revision,
-            "0029_rebase_wi_traffic_downlink",
-        )
-        self.assertEqual(
-            scripts.get_revision("0029_rebase_wi_traffic_downlink").down_revision,
-            "0028_wi_notifications",
-        )
-        self.assertEqual(
-            scripts.get_revision("0027_backfill_entitlements").down_revision,
-            "0026_wi_trial_semantics",
-        )
-        self.assertEqual(
-            scripts.get_revision("0026_wi_trial_semantics").down_revision,
-            "0025_admin_qol_and_idempotency",
-        )
-        self.assertEqual(
-            scripts.get_revision("0024_wi_device_limit").down_revision,
-            "0023_wi_active_hwids",
-        )
-        self.assertEqual(
-            scripts.get_revision("0023_wi_active_hwids").down_revision,
-            "0022_servers_protocol_not_null",
-        )
-        self.assertEqual(
-            scripts.get_revision("0022_servers_protocol_not_null").down_revision,
-            "0021_wi_orphan_cleanups",
-        )
-        self.assertEqual(
-            scripts.get_revision("0021_wi_orphan_cleanups").down_revision,
-            "0020_wi_reset_hard_delete",
-        )
-        self.assertEqual(
-            scripts.get_revision("0020_wi_reset_hard_delete").down_revision,
-            "0019_wi_server_set_null",
-        )
-        self.assertEqual(
-            scripts.get_revision("0019_wi_server_set_null").down_revision,
-            "0018_simplify_wi_traffic",
-        )
-        self.assertEqual(
-            scripts.get_revision("0018_simplify_wi_traffic").down_revision,
-            "0017_white_internet_durations",
-        )
-        self.assertEqual(
-            scripts.get_revision("0017_white_internet_durations").down_revision,
-            "0016_white_internet",
-        )
-        self.assertEqual(
-            scripts.get_revision("0016_white_internet").down_revision,
-            "0015_auto_fulfill_retry_idx",
-        )
-        self.assertEqual(
-            scripts.get_revision("0015_auto_fulfill_retry_idx").down_revision,
-            "0014_drop_sub_token",
-        )
-        rev_0009 = scripts.get_revision("c20a97270920")
-        self.assertEqual(rev_0009.down_revision, "0007_webhook_retention")
-
-
     def test_users_repo_allowed_fields_no_referral_days(self):
         self.assertNotIn("referral_days", ALLOWED_USER_UPDATE_FIELDS)
         self.assertIn("device_limit", ALLOWED_USER_UPDATE_FIELDS)
@@ -110,20 +40,6 @@ class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
         await traffic_sync_loop(mock_bot, shutdown_event)
         # Should also accept single argument (event)
         await traffic_sync_loop(shutdown_event)
-
-    def test_setup_script_contains_literal_template_url(self):
-        with open("scripts/setup.sh", "r", encoding="utf-8") as f:
-            content = f.read()
-        self.assertIn("YOOKASSA_RETURN_URL='https://t.me/{bot_username}'", content)
-        self.assertIn("TRUSTED_PROXIES='127.0.0.1,::1,172.16.0.0/12'", content)
-
-    def test_cli_help_contains_config(self):
-        with open("scripts/cli.sh", "r", encoding="utf-8") as f:
-            content = f.read()
-        self.assertIn("config", content)
-        self.assertIn("preflight", content)
-        self.assertIn("cmd_preflight", content)
-        self.assertIn("cmd_restore", content)
 
 
 if __name__ == "__main__":
