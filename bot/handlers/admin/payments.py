@@ -770,6 +770,8 @@ async def show_order_card(
     if order.status == "pending":
         if order.created_at and (now - _normalize_dt(order.created_at)).total_seconds() > 900:
             diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_PENDING
+    if (order.metadata_ or {}).get("payment_creation_ambiguous"):
+        diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_AMBIGUOUS
 
     if order.payment_method == "yookassa":
         payment_method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA

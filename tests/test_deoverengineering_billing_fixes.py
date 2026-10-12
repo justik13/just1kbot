@@ -384,6 +384,43 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
 
         cb.answer.assert_awaited_once_with(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
 
+    async def test_show_order_card_displays_ambiguous_diagnostics(self):
+        """show_order_card renders ADMIN_ORDER_DIAGNOSTICS_AMBIGUOUS when order is ambiguous."""
+        from bot.handlers.admin.payments import show_order_card
+
+        session = AsyncMock()
+        test_uuid = uuid.uuid4()
+        user = User(id=30, telegram_id=777888, username="ambiguous_buyer")
+        order = Order(
+            id=test_uuid,
+            user_id=30,
+            service_type="topup",
+            amount_rub=Decimal("300.00"),
+            duration_days=0,
+            status="pending",
+            payment_method="yookassa",
+            payment_url=None,
+            created_at=datetime.now(timezone.utc),
+            user=user,
+            tariff=None,
+            metadata_={"payment_creation_ambiguous": True},
+        )
+        session.scalar = AsyncMock(return_value=order)
+
+        callback = AsyncMock()
+        callback.data = f"admin_order_card:{test_uuid}"
+        callback.from_user = MagicMock(id=1)
+        callback.message = AsyncMock()
+        callback.message.edit_text = AsyncMock()
+        state = AsyncMock()
+
+        with patch("bot.handlers.admin.payments.is_admin", return_value=True):
+            await show_order_card(callback, state, session)
+
+        callback.message.edit_text.assert_awaited_once()
+        text = callback.message.edit_text.await_args.args[0]
+        self.assertIn("Тайм-аут шлюза при создании", text)
+
 
 if __name__ == "__main__":
     unittest.main()
