@@ -2762,7 +2762,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(inbox.status, WebhookInboxStatus.SUCCEEDED.value)
 
     async def test_handle_order_check_locks_order_with_for_update(self):
-        """Verify handle_order_check locks order with with_for_update=True."""
+        """Verify handle_order_check reads order without holding row lock before external HTTP."""
         from bot.handlers.payment.purchase_routes import handle_order_check
 
         session = AsyncMock(spec=AsyncSession)
@@ -2777,7 +2777,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
 
         await handle_order_check(callback, session, db_user=user)
 
-        session.get.assert_called_with(Order, order_uuid, with_for_update=True)
+        session.get.assert_called_with(Order, order_uuid)
 
     async def test_handle_order_cancel_locks_with_for_update_and_preserves_paid_order(self):
         """Verify handle_order_cancel locks with with_for_update and does not overwrite paid order."""

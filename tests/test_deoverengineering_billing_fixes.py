@@ -724,7 +724,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
 
     async def test_cleanup_expires_ambiguous_orders_over_30m(self):
         """Cleanup worker cancels pending orders without external_id older than 30m."""
-        from services.workers.cleanup import _reconcile_pending_orders_batch
+        from services.workers.cleanup import _reconcile_stale_pending_orders
         from contextlib import asynccontextmanager
 
         mock_session = AsyncMock()
@@ -748,7 +748,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             yield mock_session
 
         with patch("services.workers.cleanup.session_scope", fake_session_scope):
-            await _reconcile_pending_orders_batch()
+            await _reconcile_stale_pending_orders()
 
         self.assertEqual(old_ambiguous_order.status, "canceled")
         self.assertEqual((old_ambiguous_order.metadata_ or {}).get("cancellation_reason"), "ambiguous_creation_timeout")
