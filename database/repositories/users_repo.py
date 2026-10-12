@@ -527,7 +527,20 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
         )
         return (await session.execute(stmt)).scalar_one_or_none()
 
-    # 5. Payment ID (external_id)
+    # 5. Order external_id or Payment ID (external_id)
+    order_user_id = await session.scalar(
+        select(Order.user_id)
+        .where(Order.external_id == query_str)
+        .limit(1)
+    )
+    if order_user_id:
+        stmt = (
+            select(User)
+            .where(User.id == order_user_id, User.is_deleted.is_(False))
+            .options(selectinload(User.profiles))
+        )
+        return (await session.execute(stmt)).scalar_one_or_none()
+
     payment_user_id = await session.scalar(
         select(Payment.user_id)
         .where(Payment.external_id == query_str)

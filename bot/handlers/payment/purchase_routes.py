@@ -18,14 +18,12 @@ from bot.keyboards import (
 from database.models import Order, User
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.tariffs_repo import get_tariff_by_id
-from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.maintenance_service import MaintenanceService
 from services.order_notifications import mark_notified
-from .credit_notify import build_tariff_success_card
+from .credit_notify import build_tariff_success_card, notify_referrer_bonus
 from services.order_service import (
     AccountDebtBlockedError,
-    FinancialHoldBlockedError,
     InsufficientBalanceError,
     OrderService,
 )
@@ -84,9 +82,6 @@ async def handle_order_pay_wallet(
     except (AccountDebtBlockedError, InsufficientBalanceError):
         await safe_callback_answer(callback, texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
         return
-    except FinancialHoldBlockedError:
-        await safe_callback_answer(callback, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
-        return
     except Exception as exc:
         # pay_from_wallet() may have flushed a partial paid order before
         # failing (debit/fulfill). Roll back instead of committing it:
@@ -144,12 +139,6 @@ async def handle_order_pay_card(
     ):
         await _render_maintenance(callback, session, back_to="payment_showcase")
         return
-    # Mirror select_tariff(): old order_pay_card buttons must not bypass it.
-    # Authoritative enforcement lives at settlement (mark_order_paid);
-    # this is an early UX reject on (possibly stale) middleware state.
-    if getattr(db_user, "financial_hold", False):
-        await safe_callback_answer(callback, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
-        return
 
     try:
         tariff_id = int(callback.data.split(":")[1])
@@ -188,9 +177,6 @@ async def handle_order_pay_card(
                     service_type="awg",
                     tariff_id=tariff.id,
                 )
-            except FinancialHoldBlockedError:
-                await callback.answer(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
-                return
             except (AccountDebtBlockedError, InsufficientBalanceError):
                 await callback.answer(texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
                 return
@@ -236,14 +222,6 @@ async def handle_order_pay_card(
             payment_method="yookassa",
             bot_username=bot_username,
         )
-    except PaymentCreationAmbiguousError:
-        # The provider may still create the payment; the order is kept so a
-        # webhook can settle it. Tell the user to wait instead of claiming
-        # the purchase failed.
-        await safe_callback_answer(
-            callback, texts.PAYMENT_CREATION_STATUS_UNKNOWN, show_alert=True
-        )
-        return
     except Exception as exc:
         logger.exception(
             "Failed to create YooKassa order for user %s: %s", db_user_id, exc
@@ -299,20 +277,6 @@ async def handle_order_check(
         return
 
     if order.status == "paid":
-        if (order.metadata_ or {}).get("settlement_held"):
-            # Benefits were withheld at settlement (hold/block). Route the
-            # repeat check through settlement: if the hold was lifted this
-            # releases credit/fulfillment, otherwise it stays withheld.
-            # Never present withheld benefits as credited/granted.
-            paid_order = await OrderService.mark_order_paid(session, order.id)
-            if not paid_order or (paid_order.metadata_ or {}).get("settlement_held"):
-                await safe_callback_answer(
-                    callback,
-                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-                    show_alert=True,
-                )
-                return
-            order = paid_order
         if order.service_type == "topup":
             from .balance_routes import _render_balance
             from bot.keyboards.payment import get_topup_credit_keyboard
@@ -340,6 +304,8 @@ async def handle_order_check(
             # Push delivered straight to the user looking at the screen:
             # clear the debt so the credit-notify worker does not duplicate it.
             mark_notified(order)
+            if (order.metadata_ or {}).get("referrer_notify_pending"):
+                await notify_referrer_bonus(callback.bot, session, order)
             await safe_callback_answer(callback)
             return
 
@@ -371,16 +337,6 @@ async def handle_order_check(
                 await safe_callback_answer(callback, texts.ERROR_PAYMENT_SERVICE, show_alert=True)
                 return
 
-            if (paid_order.metadata_ or {}).get("settlement_held"):
-                # Credit/fulfillment were withheld (hold/block at settlement):
-                # never show a success/credited card for withheld benefits.
-                await safe_callback_answer(
-                    callback,
-                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-                    show_alert=True,
-                )
-                return
-
             if paid_order.service_type == "topup":
                 from .balance_routes import _render_balance
                 from bot.keyboards.payment import get_topup_credit_keyboard
@@ -406,6 +362,8 @@ async def handle_order_check(
                     custom_keyboard=kb,
                 )
                 mark_notified(paid_order)
+                if (paid_order.metadata_ or {}).get("referrer_notify_pending"):
+                    await notify_referrer_bonus(callback.bot, session, paid_order)
                 await safe_callback_answer(callback)
                 return
 
@@ -426,18 +384,6 @@ async def handle_order_check(
             OrderService.mark_order_canceled(
                 order,
                 reason=status_res.cancellation_reason or "gateway_canceled",
-            )
-            await session.flush()
-            await safe_callback_answer(
-                callback,
-                texts.PAYMENT_ORDER_PAYMENT_CANCELLED,
-                show_alert=True,
-            )
-            return
-        elif getattr(status_res, "is_refunded", False):
-            OrderService.mark_order_canceled(
-                order,
-                reason="gateway_refunded",
             )
             await session.flush()
             await safe_callback_answer(

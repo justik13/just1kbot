@@ -48,6 +48,27 @@ def build_tariff_success_card(order: Order, balance):
     )
 
 
+async def notify_referrer_bonus(
+    bot,
+    session: AsyncSession,
+    order: Order,
+) -> bool:
+    """Send immediate notification to referrer if referrer_notify_pending is present."""
+    from services.order_notifications import mark_referrer_notified
+    from services.workers.credit_notifications import _send_referrer_push
+    debt = (order.metadata_ or {}).get("referrer_notify_pending")
+    if not isinstance(debt, dict) or not debt.get("telegram_id"):
+        return False
+    try:
+        sent = await _send_referrer_push(bot, debt)
+        if sent:
+            mark_referrer_notified(order)
+            return True
+    except Exception as exc:
+        logger.warning("Could not send immediate referrer push for order %s: %s", order.id, exc)
+    return False
+
+
 async def notify_order_credited(
     bot,
     session: AsyncSession,
@@ -80,6 +101,8 @@ async def notify_order_credited(
                 force_new=True,
                 custom_keyboard=kb,
             )
+            if (order.metadata_ or {}).get("referrer_notify_pending"):
+                await notify_referrer_bonus(bot, session, order)
         else:
             from database.repositories.account_ledger_repo import get_account_balance
             from utils.telegram import render_hub

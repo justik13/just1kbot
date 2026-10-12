@@ -1472,45 +1472,6 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
     @patch("services.order_service.FulfillmentService.revoke_order")
     @patch("services.order_service.create_order_refund_debit")
     @patch("services.order_service.get_payment_gateway")
-    async def test_process_webhook_event_refund_skips_ledger_debit_when_settlement_held(
-        self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
-    ):
-        """When topup order was settlement_held (uncredited), refund must not create negative wallet debit."""
-        mock_gw = AsyncMock()
-        order_uuid = uuid.uuid4()
-        mock_gw.parse_webhook.return_value = WebhookResult(
-            order_id=str(order_uuid),
-            is_paid=False,
-            is_refunded=True,
-            amount_rub=Decimal("200.00"),
-            external_id="ext-pay-held",
-        )
-        mock_gw_factory.return_value = mock_gw
-
-        session = AsyncMock(spec=AsyncSession)
-        order = Order(
-            id=order_uuid,
-            user_id=10,
-            service_type="topup",
-            amount_rub=Decimal("200.00"),
-            status="paid",
-            metadata_={"settlement_held": True},
-        )
-        session.scalar.side_effect = [order, 0]
-        session.get.return_value = order
-
-        success = await OrderService.process_webhook_event(session, {"some": "payload"})
-
-        self.assertTrue(success)
-        self.assertEqual(order.status, "refunded")
-        mock_refund_debit.assert_not_called()
-        mock_rev_bonus.assert_not_called()
-        mock_revoke.assert_called_once_with(session, order)
-
-    @patch("services.order_service.reverse_referral_bonus_for_topup")
-    @patch("services.order_service.FulfillmentService.revoke_order")
-    @patch("services.order_service.create_order_refund_debit")
-    @patch("services.order_service.get_payment_gateway")
     async def test_process_webhook_event_refund_without_amount_defers(
         self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
     ):
@@ -2721,34 +2682,6 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             mock_credit.assert_called_once()
             mock_grant.assert_called_once()
             mock_fulfill.assert_called_once()
-
-    async def test_mark_order_paid_withholds_credit_under_financial_hold(self):
-        """Settlement boundary: paid fact is kept but credit/bonus/fulfill are withheld."""
-        session = AsyncMock(spec=AsyncSession)
-        order_uuid = uuid.uuid4()
-        order = Order(
-            id=order_uuid,
-            user_id=11,
-            service_type="topup",
-            amount_rub=Decimal("100.00"),
-            status="pending",
-            metadata_={},
-        )
-        session.scalar.side_effect = [
-            order,
-            User(id=11, telegram_id=10011, financial_hold=True, topup_blocked=False),
-        ]
-
-        with patch("services.order_service.create_order_credit") as mock_credit, \
-             patch("services.referral_bonus.grant_referral_bonus_for_topup") as mock_grant, \
-             patch("services.order_service.FulfillmentService.fulfill_order") as mock_fulfill:
-            paid_order = await OrderService.mark_order_paid(session, order_uuid)
-            self.assertIsNotNone(paid_order)
-            self.assertEqual(paid_order.status, "paid")
-            self.assertTrue(paid_order.metadata_.get("settlement_held"))
-            mock_credit.assert_not_called()
-            mock_grant.assert_not_called()
-            mock_fulfill.assert_not_called()
 
     async def test_revoke_order_locks_user_row_with_for_update(self):
         """Verify FulfillmentService.revoke_order locks User row with with_for_update=True."""

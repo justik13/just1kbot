@@ -19,7 +19,6 @@ from config.constants import (
 from config.enums import AdminAuditAction
 from database.models import AccountLedgerEntry, User
 from database.repositories.account_ledger_repo import (
-    _credit_capacity,  # noqa: F401
     get_account_balance,
 )
 

@@ -20,7 +20,6 @@ from config.enums import (
     PaymentProviderStatus,
     PaymentReconciliationStatus,
 )
-from database.repositories.account_ledger_repo import get_payment_refundable_amount
 from database.repositories.payments_repo import get_payment_by_id
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
@@ -77,8 +76,6 @@ def payment_display_status(payment) -> str:
 def order_display_status(order: Order) -> str:
     if order.status == "refunded":
         return "refunded"
-    if (order.metadata_ or {}).get("settlement_held"):
-        return "requires_manual_review"
     if order.status == "paid":
         return "completed"
     if order.status == "canceled":
@@ -648,13 +645,6 @@ async def show_payment_card(
         )
 
     refundable_line = ""
-    if payment.provider_status == "succeeded" and payment.currency == "RUB":
-        refundable = await get_payment_refundable_amount(
-            session,
-            payment_id=payment.id,
-        )
-        if refundable > 0:
-            refundable_line = texts.ADMIN_PAYMENT_REFUNDABLE_LINE.format(amount_rub=int(refundable))
 
     rendered = (
         texts.ADMIN_PAYMENT_CARD_TEMPLATE.format(
@@ -764,14 +754,7 @@ async def show_order_card(
         if order.description
         else ""
     )
-    held_meta = order.metadata_ or {}
-    held_line = (
-        texts.ADMIN_ORDER_HELD_LINE.format(
-            reason=safe(str(held_meta.get("settlement_hold_reason", "hold")))
-        )
-        if held_meta.get("settlement_held")
-        else ""
-    )
+    held_line = ""
     payment_url_line = (
         texts.ADMIN_ORDER_PAYMENT_URL_LINE.format(payment_url=safe(order.payment_url))
         if (order.payment_url and order.status == "pending")
@@ -782,8 +765,6 @@ async def show_order_card(
     if order.status == "pending":
         if order.created_at and (now - _normalize_dt(order.created_at)).total_seconds() > 900:
             diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_PENDING
-    if held_meta.get("payment_creation_ambiguous"):
-        diagnostics_line += texts.ADMIN_ORDER_DIAGNOSTICS_AMBIGUOUS
 
     if order.payment_method == "yookassa":
         payment_method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA

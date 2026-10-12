@@ -248,26 +248,6 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
             mock_send.assert_awaited_once()
         self.assertNotIn("late_notify_pending", order.metadata_)
 
-    async def test_skips_still_held_without_consuming_attempts(self):
-        from services.workers import credit_notifications as worker
-
-        order = _topup_order(
-            metadata_={"late_notify_pending": True, "settlement_held": True}
-        )
-        session = self._session(order, _user())
-        with (
-            patch.object(
-                worker, "session_scope", return_value=_scope_with(session)
-            ),
-            patch.object(
-                worker, "_send_late_push", new=AsyncMock(return_value=True)
-            ) as mock_send,
-        ):
-            self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
-            mock_send.assert_not_called()
-        self.assertTrue(order.metadata_.get("late_notify_pending"))
-        self.assertNotIn("late_notify_attempts", order.metadata_)
-
     async def test_skips_uncredited_order_with_bounded_attempts(self):
         from services.workers import credit_notifications as worker
 

@@ -828,11 +828,7 @@ async def _reconcile_stale_pending_orders() -> None:
             gateway = get_payment_gateway(payment_method)
             status_res = await gateway.check_payment_status(external_id)
 
-            if not (
-                status_res.is_paid
-                or status_res.is_canceled
-                or getattr(status_res, "is_refunded", False)
-            ):
+            if not (status_res.is_paid or status_res.is_canceled):
                 _pending_order_backoff_cache[order_id] = time.monotonic()
                 if status_res.status_str == "not_found":
                     logger.warning(
@@ -874,16 +870,6 @@ async def _reconcile_stale_pending_orders() -> None:
                         "Reconciliation canceled stale pending order %s (reason=%s)",
                         order.id,
                         status_res.cancellation_reason,
-                    )
-                elif getattr(status_res, "is_refunded", False):
-                    OrderService.mark_order_canceled(
-                        order,
-                        reason="gateway_refunded",
-                    )
-                    _pending_order_backoff_cache.pop(order_id, None)
-                    logger.info(
-                        "Reconciliation canceled stale pending order %s (refunded in gateway)",
-                        order.id,
                     )
         except Exception as exc:
             _pending_order_backoff_cache[order_id] = time.monotonic()

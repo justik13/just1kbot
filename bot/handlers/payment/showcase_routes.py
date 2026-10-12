@@ -155,16 +155,6 @@ async def select_tariff(
         await _render_maintenance(callback, session, back_to=back_to)
         return
 
-    if getattr(db_user, "has_financial_hold", False) or getattr(db_user, "financial_hold", False):
-        await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-            get_back_button(back_to),
-        )
-        await callback.answer(show_alert=False)
-        return
-
     balance_snapshot = await get_account_balance(session, user_id=db_user.id)
     if balance_snapshot.debt > 0 or balance_snapshot.real_available < 0:
         await render_hub(

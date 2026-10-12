@@ -1,0 +1,246 @@
+import unittest
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from database.models import Order, Payment, User
+from database.repositories.payments_repo import (
+    get_pending_payments_count_for_tariff,
+    get_user_payments,
+)
+from database.repositories.users_repo import search_user_flexible
+from bot.handlers.referral import payment_display_status, show_history
+from bot.handlers.payment.credit_notify import notify_referrer_bonus
+from services.order_service import OrderService
+from integrations.payment_gateways.base import WebhookResult
+
+
+class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
+    async def test_get_user_payments_combines_orders_and_legacy_payments(self):
+        """get_user_payments returns topup Orders and legacy Payments sorted desc."""
+        session = AsyncMock()
+
+        order1 = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("400.00"),
+            status="paid",
+            created_at=datetime(2026, 10, 11, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        legacy_pay = Payment(
+            id=101,
+            user_id=10,
+            amount=Decimal("200.00"),
+            provider_status="succeeded",
+            created_at=datetime(2026, 10, 10, 10, 0, 0, tzinfo=timezone.utc),
+        )
+
+        mock_scalars = MagicMock()
+        mock_scalars.all.side_effect = [
+            [order1],       # Orders query
+            [legacy_pay],   # Payments query
+        ]
+        session.scalars.return_value = mock_scalars
+
+        results = await get_user_payments(session, user_id=10, limit=5)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0], order1)
+        self.assertEqual(results[1], legacy_pay)
+
+    async def test_get_pending_payments_count_excludes_wallet(self):
+        """get_pending_payments_count_for_tariff filters Order.payment_method != 'wallet'."""
+        session = AsyncMock()
+        session.scalar = AsyncMock(return_value=1)
+
+        count = await get_pending_payments_count_for_tariff(session, tariff_id=5)
+        self.assertEqual(count, 1)
+
+        # Check statement generated
+        call_args = session.scalar.await_args
+        self.assertIsNotNone(call_args)
+        stmt = str(call_args.args[0].compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("orders.payment_method != 'wallet'", stmt)
+
+    async def test_search_user_flexible_finds_user_by_order_external_id(self):
+        """search_user_flexible finds user via Order.external_id."""
+        session = AsyncMock()
+        user = User(id=42, telegram_id=999888, username="test_client")
+
+        # scalar side-effects: username (None), telegram_id (None),
+        # Payment.external_id (None), Order.external_id (user)
+        session.scalar = AsyncMock(side_effect=[None, None, None, user])
+
+        found = await search_user_flexible(session, "226ea600-6c00-4bbc-bd77-0773e306357a")
+        self.assertIsNotNone(found)
+        self.assertEqual(found.id, 42)
+
+    def test_payment_display_status_handles_order_and_payment(self):
+        """payment_display_status works for both Order and Payment objects."""
+        paid_order = Order(
+            id=uuid.uuid4(),
+            user_id=1,
+            service_type="topup",
+            amount_rub=Decimal("300"),
+            status="paid",
+        )
+        self.assertEqual(payment_display_status(paid_order), "succeeded")
+
+        canceled_order = Order(
+            id=uuid.uuid4(),
+            user_id=1,
+            service_type="topup",
+            amount_rub=Decimal("300"),
+            status="canceled",
+        )
+        self.assertEqual(payment_display_status(canceled_order), "canceled")
+
+        legacy_pay = Payment(
+            id=5,
+            user_id=1,
+            amount=Decimal("150"),
+            provider_status="pending",
+        )
+        self.assertEqual(payment_display_status(legacy_pay), "pending")
+
+    async def test_show_history_renders_orders_and_payments(self):
+        """show_history correctly formats amounts from Order.amount_rub and Payment.amount."""
+        callback = AsyncMock()
+        callback.data = "referral:history:1"
+        callback.from_user = MagicMock(id=1001)
+        callback.message = MagicMock()
+        callback.message.edit_text = AsyncMock()
+        callback.answer = AsyncMock()
+
+        user = User(id=7, telegram_id=1001)
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=7,
+            service_type="topup",
+            amount_rub=Decimal("500.00"),
+            status="paid",
+            created_at=datetime(2026, 10, 12, 8, 0, tzinfo=timezone.utc),
+        )
+        payment = Payment(
+            id=12,
+            user_id=7,
+            amount=Decimal("250.00"),
+            provider_status="succeeded",
+            created_at=datetime(2026, 10, 11, 8, 0, tzinfo=timezone.utc),
+        )
+
+        session = AsyncMock()
+        with (
+            patch("bot.handlers.referral.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
+            patch("bot.handlers.referral.get_user_payments", new=AsyncMock(return_value=[order, payment])),
+        ):
+            await show_history(callback, session)
+
+        callback.message.edit_text.assert_awaited_once()
+        text = callback.message.edit_text.await_args.args[0]
+        self.assertIn("500", text)
+        self.assertIn("250", text)
+
+    async def test_notify_referrer_bonus_sends_instant_push(self):
+        """notify_referrer_bonus delivers immediate push notification to referrer."""
+        bot = AsyncMock()
+        session = AsyncMock()
+
+        referrer = User(id=88, telegram_id=777777, is_bot_blocked=False)
+        ref_order = Order(
+            id=uuid.uuid4(),
+            user_id=99,
+            service_type="topup",
+            amount_rub=Decimal("1000.00"),
+            status="paid",
+            metadata_={
+                "referrer_pending": {
+                    "user_id": 88,
+                    "bonus": "100",
+                    "bonus_rate_pct": "10",
+                    "bonus_balance": "250",
+                    "tier_upgraded": False,
+                }
+            },
+        )
+        session.get = AsyncMock(return_value=referrer)
+
+        with patch("bot.handlers.payment.credit_notify.safe_send_message", new=AsyncMock(return_value=12345)) as mock_send:
+            await notify_referrer_bonus(bot, session, ref_order)
+
+        mock_send.assert_awaited_once()
+        self.assertEqual(mock_send.await_args.args[1], 777777)
+        self.assertTrue((ref_order.metadata_ or {}).get("referrer_notified"))
+
+    async def test_order_service_create_order_failure_rolls_back_and_raises(self):
+        """OrderService.create_order rolls back transaction and re-raises on gateway error."""
+        session = AsyncMock()
+        session.rollback = AsyncMock()
+
+        with patch("services.order_service.get_payment_gateway") as mock_gw:
+            gateway = AsyncMock()
+            gateway.create_payment_url.side_effect = RuntimeError("YooKassa gateway offline")
+            mock_gw.return_value = gateway
+
+            with self.assertRaises(RuntimeError):
+                await OrderService.create_order(
+                    session,
+                    user_id=1,
+                    service_type="topup",
+                    amount_rub=Decimal("300"),
+                    payment_method="yookassa",
+                )
+
+        session.rollback.assert_awaited_once()
+
+    async def test_order_service_process_webhook_refund_immediate_transition(self):
+        """Refund webhook immediately sets status='refunded' and debits whole rubles."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        topup_order = Order(
+            id=order_uuid,
+            user_id=15,
+            service_type="topup",
+            amount_rub=Decimal("400.00"),
+            status="paid",
+            metadata_={},
+        )
+        session.scalar = AsyncMock(return_value=topup_order)
+        session.get = AsyncMock(return_value=topup_order)
+
+        webhook_res = WebhookResult(
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            amount_rub=Decimal("400.00"),
+            external_id="rf-12345",
+        )
+
+        with (
+            patch("services.order_service.get_payment_gateway") as mock_gw,
+            patch("services.order_service.create_order_refund_debit", new=AsyncMock()) as mock_debit,
+            patch("services.order_service.reverse_referral_bonus_for_topup", new=AsyncMock()) as mock_rev_bonus,
+        ):
+            gw = AsyncMock()
+            gw.parse_webhook.return_value = webhook_res
+            mock_gw.return_value = gw
+
+            success = await OrderService.process_webhook_event(session, {"event": "refund.succeeded"})
+
+        self.assertTrue(success)
+        self.assertEqual(topup_order.status, "refunded")
+        self.assertIsNotNone(topup_order.refunded_at)
+        mock_debit.assert_awaited_once_with(
+            session,
+            user_id=15,
+            amount_rub=Decimal("400.00"),
+            order_id=order_uuid,
+            refund_id="rf-12345",
+            metadata={"source": "yookassa_refund"},
+        )
+        mock_rev_bonus.assert_awaited_once()
+
+
+if __name__ == "__main__":
+    unittest.main()

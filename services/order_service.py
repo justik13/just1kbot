@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN
 import logging
 import math
 import uuid
@@ -24,7 +24,6 @@ from database.repositories.account_ledger_repo import (
     get_account_balance,
 )
 from services.order_notifications import mark_notify_pending
-from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.fulfillment_service import FulfillmentService
 from services.referral_bonus import reverse_referral_bonus_for_topup
@@ -42,33 +41,11 @@ class InsufficientBalanceError(Exception):
         self.available = available
 
 
-class FinancialHoldBlockedError(Exception):
-    pass
-
-
 class AccountDebtBlockedError(Exception):
     pass
 
 
 class OrderService:
-    @staticmethod
-    async def _load_settlement_user(
-        session: AsyncSession, user_id: int
-    ) -> User | None:
-        """Authoritative user read for the settlement boundary.
-
-        Never use session.get() here: it may return the identity-map
-        cached instance without SQL (and without any row lock), so a hold
-        set concurrently (e.g. between UserContextMiddleware load and an
-        order_check press) would be invisible. An explicit SELECT ...
-        FOR UPDATE always hits the database and locks the row.
-        Same lock order as FulfillmentService (Order -> User), so no new
-        deadlock class is introduced.
-        """
-        return await session.scalar(
-            select(User).where(User.id == user_id).with_for_update()
-        )
-
     @staticmethod
     async def _settle_benefits(
         session: AsyncSession, order: Order, *, was_canceled: bool
@@ -372,28 +349,6 @@ class OrderService:
                 logger.exception(
                     "Gateway failed to create payment for order %s: %s", order_id, exc
                 )
-                if isinstance(exc, PaymentCreationAmbiguousError):
-                    # The provider may have created the payment (timeout, 5xx,
-                    # unreadable response). Rolling back would destroy the
-                    # order together with the only reference to it, and the
-                    # incoming `payment.succeeded` webhook would then find
-                    # nothing and be retried by YooKassa for 24h. Keep the
-                    # order so the webhook can still settle it, and flag it
-                    # for operators: no payment_url means it stays invisible
-                    # in the funnel and the user simply retries the purchase.
-                    held_meta = dict(order.metadata_ or {})
-                    held_meta["payment_creation_ambiguous"] = True
-                    order.metadata_ = held_meta
-                    await session.flush()
-                    # Commit here, not at the end of the request: the caller
-                    # now performs Telegram I/O inside the same transaction,
-                    # and any failure there would roll the order back and
-                    # reintroduce exactly the money-loss this branch prevents.
-                    # The order is the only row this request has written, and
-                    # the external side effect may already exist, so making it
-                    # durable immediately is the correct boundary.
-                    await session.commit()
-                    raise
                 # NOTE: rollback() expires EVERY ORM object of this session
                 # (including the caller's User). Callers must capture
                 # user_id/telegram_id as plain ints BEFORE calling
@@ -429,8 +384,6 @@ class OrderService:
         except Exception:
             pass
         user = await session.get(User, user_id, with_for_update=True)
-        if user and getattr(user, "financial_hold", False):
-            raise FinancialHoldBlockedError("Financial hold active on user")
 
         order_meta: dict = dict(metadata) if metadata else {}
         amount_rub, duration_days, device_limit, description = (
@@ -524,38 +477,6 @@ class OrderService:
 
         if order.status == "paid":
             order._newly_paid = False
-            if (order.metadata_ or {}).get("settlement_held"):
-                # Release path: a repeat settlement attempt (e.g. order_check
-                # after the hold was lifted) completes withheld benefits.
-                # Credit/bonus inserts are idempotent; the flag is cleared
-                # first so a second release is a no-op early return.
-                release_user = await OrderService._load_settlement_user(
-                    session, order.user_id
-                )
-                if release_user is not None:
-                    still_hold = bool(
-                        getattr(release_user, "financial_hold", False)
-                    )
-                    still_block = bool(
-                        getattr(release_user, "topup_blocked", False)
-                    )
-                    still_blocked = still_hold or (
-                        order.service_type == "topup" and still_block
-                    )
-                    if still_blocked:
-                        return order
-                cleared_meta = dict(order.metadata_ or {})
-                cleared_meta.pop("settlement_held", None)
-                cleared_meta.pop("settlement_hold_reason", None)
-                order.metadata_ = cleared_meta
-                order._newly_paid = True
-                await OrderService._settle_benefits(
-                    session, order, was_canceled=False
-                )
-                logger.info(
-                    "Order %s released from settlement hold and fulfilled",
-                    order.id,
-                )
             return order
 
         if order.status == "refunded":
@@ -604,40 +525,6 @@ class OrderService:
             order_meta = dict(order.metadata_ or {})
             order_meta["revived_from_canceled"] = True
             order.metadata_ = order_meta
-
-        # Settlement boundary: funnel guards (topup_blocked/financial_hold)
-        # use stale ORM state and only cover creation. Money arriving here
-        # (webhook or manual order_check) must not credit/fulfill a blocked
-        # user. Mark paid (money fact) but hold benefits for manual review.
-        # No new status (migration-free): flag in metadata_.
-        settlement_user = await OrderService._load_settlement_user(
-            session, order.user_id
-        )
-        if settlement_user is not None:
-            is_hold = bool(getattr(settlement_user, "financial_hold", False))
-            is_topup_block = bool(getattr(settlement_user, "topup_blocked", False))
-            blocked_topup = order.service_type == "topup" and (is_hold or is_topup_block)
-            blocked_tariff = order.service_type != "topup" and is_hold
-            if blocked_topup or blocked_tariff:
-                held_meta = dict(order.metadata_ or {})
-                held_meta["settlement_held"] = True
-                held_meta["settlement_hold_reason"] = (
-                    "financial_hold" if is_hold else "topup_blocked"
-                )
-                order.metadata_ = held_meta
-                # Not a fresh settlement for UX purposes: suppress the
-                # "credited" notification in the webhook handler, which keys
-                # off status == paid and _newly_paid.
-                order._newly_paid = False
-                await session.flush()
-                logger.warning(
-                    "Order %s paid under hold/block (user %s, service=%s): "
-                    "credited/fulfillment withheld for manual review",
-                    order.id,
-                    order.user_id,
-                    order.service_type,
-                )
-                return order
 
         await OrderService._settle_benefits(session, order, was_canceled=was_canceled)
         logger.info("Order %s marked paid and fulfilled successfully", order.id)
@@ -750,28 +637,16 @@ class OrderService:
                 return None
 
             order_meta = dict(order.metadata_ or {})
-            refunded_so_far = Decimal(str(order_meta.get("refunded_amount_rub", "0")))
             processed_refund_ids = list(order_meta.get("processed_refund_ids", []))
 
-            if result.amount_rub is not None:
-                refund_amount = result.amount_rub
+            if result.amount_rub is not None and result.amount_rub > 0:
+                refund_amount = Decimal(int(result.amount_rub))
             else:
-                # The gateway payload carries no amount (amount.value missing).
-                # YooKassa always sends amount on refund.succeeded, so this is
-                # a malformed event: fail closed (defer to retry/manual
-                # review) instead of assuming any amount. Assuming the
-                # remainder would always exactly close the order and could
-                # wrongly revoke service on untrusted data.
                 logger.error(
-                    "Refund %s for order %s has no amount in payload "
-                    "(refunded so far %s of %s): "
-                    "deferring to retry/manual review",
+                    "Refund %s for order %s has no amount in payload: deferring to retry",
                     result.external_id,
                     order.id,
-                    refunded_so_far,
-                    order.amount_rub,
                 )
-                order_meta = dict(order.metadata_ or {})
                 order_meta["refund_amount_missing"] = str(
                     result.external_id or "unknown"
                 )
@@ -779,8 +654,10 @@ class OrderService:
                 await session.flush()
                 return None
 
-            # Deduplication for the exact same refund event
-            if result.external_id and result.external_id in processed_refund_ids:
+            if (
+                (result.external_id and result.external_id in processed_refund_ids)
+                or order.status == "refunded"
+            ):
                 logger.info(
                     "Refund %s for order %s already processed, ignoring duplicate webhook",
                     result.external_id,
@@ -788,25 +665,16 @@ class OrderService:
                 )
                 return order
 
-            if order.status == "refunded" and refunded_so_far >= order.amount_rub:
-                logger.info(
-                    "Order %s already marked fully refunded, ignoring duplicate webhook",
-                    order.id,
-                )
-                return order
-
-            new_total_refunded = refunded_so_far + refund_amount
-            order_meta["refunded_amount_rub"] = str(new_total_refunded)
+            order_meta["refunded_amount_rub"] = str(refund_amount)
             if result.external_id:
                 processed_refund_ids.append(result.external_id)
             order_meta["processed_refund_ids"] = processed_refund_ids
             order.metadata_ = order_meta
 
-            if new_total_refunded >= order.amount_rub:
-                order.status = "refunded"
+            order.status = "refunded"
             order.refunded_at = now_utc()
 
-            if order.service_type == "topup":
+            if order.service_type == "topup" and refund_amount > 0:
                 has_credit = bool(
                     await session.scalar(
                         select(func.count(AccountLedgerEntry.id)).where(
@@ -815,60 +683,34 @@ class OrderService:
                         )
                     )
                 )
-
                 if has_credit:
                     refund_ref = (
                         (result.external_id or "").strip()
-                        or f"refund_{len(processed_refund_ids)}"
+                        or f"refund_{len(processed_refund_ids) or 1}"
                     )
-                    target_cumulative = new_total_refunded.quantize(
-                        Decimal("1"), rounding=ROUND_HALF_UP
+                    await create_order_refund_debit(
+                        session,
+                        user_id=order.user_id,
+                        amount_rub=refund_amount,
+                        order_id=order.id,
+                        refund_id=refund_ref,
+                        metadata={"source": "yookassa_refund"},
                     )
-                    prev_cumulative = refunded_so_far.quantize(
-                        Decimal("1"), rounding=ROUND_HALF_UP
-                    )
-                    ledger_delta = target_cumulative - prev_cumulative
-
-                    if ledger_delta > 0:
-                        await create_order_refund_debit(
-                            session,
-                            user_id=order.user_id,
-                            amount_rub=ledger_delta,
-                            order_id=order.id,
-                            refund_id=refund_ref,
-                            metadata={"source": "yookassa_refund"},
-                        )
                     await reverse_referral_bonus_for_topup(
                         session,
                         order_id=order.id,
                         refund_amount=refund_amount,
                         original_topup_amount=order.amount_rub,
-                        total_refunded_amount=new_total_refunded,
+                        total_refunded_amount=refund_amount,
                         refund_id=refund_ref,
                     )
-                else:
-                    logger.info(
-                        "Order %s topup has no payment_credit in ledger (held or uncredited); skipping refund debit",
-                        order.id,
-                    )
 
-            is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")
-            if is_fully_refunded:
-                await FulfillmentService.revoke_order(session, order)
-                logger.info(
-                    "Order %s fully refunded (total %s / %s) and revoked",
-                    order.id,
-                    new_total_refunded,
-                    order.amount_rub,
-                )
-            else:
-                logger.info(
-                    "Order %s partially refunded %s RUB (total %s / %s), revocation deferred until full refund",
-                    order.id,
-                    refund_amount,
-                    new_total_refunded,
-                    order.amount_rub,
-                )
+            await FulfillmentService.revoke_order(session, order)
+            logger.info(
+                "Order %s refunded (%s RUB) and revoked",
+                order.id,
+                refund_amount,
+            )
             await session.flush()
             return order
         logger.info(

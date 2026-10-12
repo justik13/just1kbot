@@ -217,13 +217,9 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         session.add = fake_add
         session.flush = AsyncMock()
 
-        with patch(
-            "services.referral_bonus._credit_capacity",
-            AsyncMock(return_value=Decimal(50)),
-        ):
-            total_reversed = await reverse_referral_bonus_for_topup(
-                session, payment_id=55
-            )
+        total_reversed = await reverse_referral_bonus_for_topup(
+            session, payment_id=55
+        )
 
         self.assertEqual(total_reversed, Decimal(50))
         self.assertGreaterEqual(len(added_entries), 1)

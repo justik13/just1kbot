@@ -263,8 +263,6 @@ async def _deliver_one(bot: Bot, order_id) -> bool:
     owner, ref = snap["owner"], snap["referrer"]
     if owner is None and ref is None:
         return False
-    if owner is not None and owner["kind"] == "wait":
-        return False
     if owner is not None and owner["kind"] == "anomaly":
         await _finalize_attempt(order_id)
         return False
@@ -310,10 +308,6 @@ async def _snapshot(order_id) -> dict | None:
             # early drop here avoids wasting a send on a refunded order.
             if order.status != "paid":
                 owner = {"kind": "drop"}
-            elif meta.get("settlement_held"):
-                # Still held (no release yet): money has not moved, stay
-                # silent and do not consume attempts — the release re-arms.
-                owner = {"kind": "wait"}
             else:
                 # Never notify without an actual credit in the ledger.
                 has_credit = await session.scalar(

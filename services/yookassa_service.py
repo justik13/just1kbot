@@ -68,7 +68,6 @@ class YooKassaErrorKind(str, Enum):
     NETWORK_ERROR = "network_error"
     TIMEOUT = "timeout"
     INVALID_RESPONSE = "invalid_response"
-    IDEMPOTENCY_WINDOW_EXPIRED = "create_idempotency_window_expired"
     UNKNOWN = "unknown"
 
 
