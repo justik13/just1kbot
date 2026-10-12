@@ -5,14 +5,87 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Подключение к сервису</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-        body { background: #0b0f19; color: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
-        .card { width: 100%; max-width: 440px; background: #151d30; border: 1px solid #334155; border-radius: 20px; padding: 32px 24px; text-align: center; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }
-        .icon { font-size: 48px; margin-bottom: 16px; }
-        h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
-        p { font-size: 14px; color: #94a3b8; margin-bottom: 24px; line-height: 1.5; }
-        .btn { display: flex; align-items: center; justify-content: center; width: 100%; padding: 14px 18px; border-radius: 12px; font-size: 16px; font-weight: 600; text-decoration: none; cursor: pointer; background: #2563eb; color: #fff; transition: background 0.2s; }
-        .btn:hover { background: #1d4ed8; }
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: #151d30;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        body {
+            background: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .card {
+            width: 100%;
+            max-width: 440px;
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 32px 24px;
+            text-align: center;
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--border-subtle);
+            animation: cardEnter 280ms var(--ease-out) both;
+        }
+        @keyframes cardEnter {
+            from {
+                opacity: 0;
+                transform: translateY(8px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+        .icon { font-size: 48px; margin-bottom: 16px; line-height: 1; }
+        h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; }
+        p { font-size: 14px; color: var(--text-sub); margin-bottom: 24px; line-height: 1.5; }
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 14px 18px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            background: var(--accent);
+            color: #fff;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+            transition: transform 160ms var(--ease-out), background-color 150ms ease;
+        }
+        .btn:active {
+            transform: scale(0.97);
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .btn:hover { background: var(--accent-hover); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-delay: 0ms !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
     </style>
 </head>
 <body>

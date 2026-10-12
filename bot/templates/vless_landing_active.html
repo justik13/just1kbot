@@ -13,11 +13,20 @@
             --accent: #2563eb;
             --accent-hover: #1d4ed8;
             --btn-sec-bg: #1e293b;
-            --btn-sec-border: #334155;
+            --btn-sec-border: rgba(255, 255, 255, 0.08);
             --btn-sec-hover: #293548;
             --success: #10b981;
+            --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+            --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
         body {
             background-color: var(--bg-color);
             color: var(--text-main);
@@ -31,14 +40,38 @@
             width: 100%;
             max-width: 440px;
             background-color: var(--card-bg);
-            border: 1px solid var(--btn-sec-border);
             border-radius: 20px;
             padding: 28px 24px;
             text-align: center;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--btn-sec-border);
+            animation: cardEnter 280ms var(--ease-out) both;
         }
-        .icon { font-size: 48px; margin-bottom: 16px; }
-        h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+        @keyframes cardEnter {
+            from {
+                opacity: 0;
+                transform: translateY(8px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+        @keyframes itemEnter {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .stagger-1 { animation: itemEnter 260ms var(--ease-out) 40ms both; }
+        .stagger-2 { animation: itemEnter 260ms var(--ease-out) 80ms both; }
+        .stagger-3 { animation: itemEnter 260ms var(--ease-out) 120ms both; }
+        .stagger-4 { animation: itemEnter 260ms var(--ease-out) 160ms both; }
+        .icon { font-size: 48px; margin-bottom: 16px; line-height: 1; }
+        h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; }
         p.subtitle { font-size: 14px; color: var(--text-sub); margin-bottom: 24px; line-height: 1.5; }
         .btn {
             display: flex;
@@ -52,22 +85,47 @@
             font-weight: 600;
             text-decoration: none;
             cursor: pointer;
-            transition: all 0.2s ease;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: transform 160ms var(--ease-out), background-color 150ms ease, border-color 150ms ease, color 150ms ease;
             margin-bottom: 12px;
             border: none;
         }
-        .btn-primary { background-color: var(--accent); color: #ffffff; }
-        .btn-primary:hover { background-color: var(--accent-hover); }
-        .btn-secondary { background-color: var(--btn-sec-bg); color: var(--text-main); border: 1px solid var(--btn-sec-border); }
-        .btn-secondary:hover { background-color: var(--btn-sec-hover); }
-        .divider { height: 1px; background-color: var(--btn-sec-border); margin: 24px 0; }
-        .section-title { font-size: 13px; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+        .btn:active, .store-btn:active {
+            transform: scale(0.97);
+        }
+        .btn-primary {
+            background-color: var(--accent);
+            color: #ffffff;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+        }
+        .btn-secondary {
+            background-color: var(--btn-sec-bg);
+            color: var(--text-main);
+            border: 1px solid var(--btn-sec-border);
+            margin-bottom: 4px;
+        }
+        .btn-secondary.copied {
+            border-color: rgba(16, 185, 129, 0.45);
+            color: var(--success);
+        }
+        #copyBtnText {
+            display: inline-block;
+            transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out), filter 150ms var(--ease-out);
+        }
+        #copyBtnText.morphing {
+            opacity: 0;
+            transform: scale(0.96);
+            filter: blur(2px);
+        }
+        .divider { height: 1px; background-color: var(--btn-sec-border); margin: 18px 0 22px; }
+        .section-title { font-size: 12px; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
         .store-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
         .store-btn {
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 10px;
+            padding: 11px 10px;
             border-radius: 10px;
             background-color: var(--btn-sec-bg);
             border: 1px solid var(--btn-sec-border);
@@ -75,49 +133,83 @@
             text-decoration: none;
             font-size: 13px;
             font-weight: 500;
-            transition: background-color 0.2s;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: transform 160ms var(--ease-out), background-color 150ms ease, border-color 150ms ease;
         }
-        .store-btn:hover { background-color: var(--btn-sec-hover); }
+        @media (hover: hover) and (pointer: fine) {
+            .btn-primary:hover { background-color: var(--accent-hover); }
+            .btn-secondary:hover { background-color: var(--btn-sec-hover); }
+            .store-btn:hover { background-color: var(--btn-sec-hover); }
+        }
         .steps {
             text-align: left;
-            background-color: rgba(0, 0, 0, 0.2);
+            background-color: rgba(0, 0, 0, 0.22);
+            border: 1px solid rgba(255, 255, 255, 0.04);
             border-radius: 12px;
             padding: 14px 16px;
             font-size: 13px;
             color: var(--text-sub);
             line-height: 1.6;
         }
-        .steps ol { padding-left: 18px; }
+        .steps ol { padding-left: 18px; margin-top: 4px; }
         .steps li { margin-bottom: 4px; }
         .steps strong { color: var(--text-main); }
-        .copy-toast { display: none; margin-top: 8px; font-size: 13px; color: var(--success); font-weight: 500; }
+        .copy-toast {
+            min-height: 20px;
+            margin-top: 6px;
+            font-size: 13px;
+            color: var(--success);
+            font-weight: 500;
+            opacity: 0;
+            transform: translateY(-4px) scale(0.96);
+            pointer-events: none;
+            transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+        }
+        .copy-toast.visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-delay: 0ms !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="card">
-        <div class="icon">⚡️</div>
-        <h1>Подключение к сервису</h1>
-        <p class="subtitle">Открытие приложения для автоматической настройки доступа.</p>
-
-        <a id="deepLinkBtn" href="#" class="btn btn-primary">
-            <span>🚀 Открыть в приложении INCY</span>
-        </a>
-
-        <button id="copyBtn" class="btn btn-secondary" onclick="copyLink()">
-            <span>📋 Скопировать ссылку</span>
-        </button>
-        <div id="copyToast" class="copy-toast">Ссылка скопирована в буфер!</div>
-
-        <div class="divider"></div>
-
-        <div class="section-title">Приложение еще не установлено?</div>
-        <div class="store-buttons">
-            <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener" class="store-btn">🍏 App Store</a>
-            <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="store-btn">🤖 Google Play</a>
+        <div class="stagger-1">
+            <div class="icon">⚡️</div>
+            <h1>Подключение к сервису</h1>
+            <p class="subtitle">Открытие приложения для автоматической настройки доступа.</p>
         </div>
-        <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn" style="margin-bottom: 16px;">💻 Скачать для ПК / APK (GitHub)</a>
 
-        <div class="steps">
+        <div class="stagger-2">
+            <a id="deepLinkBtn" href="#" class="btn btn-primary">
+                <span>🚀 Открыть в приложении INCY</span>
+            </a>
+
+            <button id="copyBtn" class="btn btn-secondary" onclick="copyLink()">
+                <span id="copyBtnText">📋 Скопировать ссылку</span>
+            </button>
+            <div id="copyToast" class="copy-toast" aria-live="polite">Ссылка скопирована в буфер!</div>
+        </div>
+
+        <div class="divider stagger-3"></div>
+
+        <div class="stagger-3">
+            <div class="section-title">Приложение еще не установлено?</div>
+            <div class="store-buttons">
+                <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener" class="store-btn">🍏 App Store</a>
+                <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="store-btn">🤖 Google Play</a>
+            </div>
+            <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn" style="margin-bottom: 16px;">💻 Скачать для ПК / APK (GitHub)</a>
+        </div>
+
+        <div class="steps stagger-4">
             <strong>Как подключить:</strong>
             <ol>
                 <li>Установите приложение <strong>INCY</strong> по ссылкам выше.</li>
@@ -139,19 +231,41 @@
             window.location.href = deepLink;
         } catch (e) {}
 
+        let copyResetTimer = null;
+        function setCopyButtonLabel(newText, isCopied) {
+            const copyBtn = document.getElementById("copyBtn");
+            const copyBtnText = document.getElementById("copyBtnText");
+            if (!copyBtn || !copyBtnText) return;
+            copyBtnText.classList.add("morphing");
+            setTimeout(function() {
+                copyBtnText.textContent = newText;
+                if (isCopied) {
+                    copyBtn.classList.add("copied");
+                } else {
+                    copyBtn.classList.remove("copied");
+                }
+                copyBtnText.classList.remove("morphing");
+            }, 130);
+        }
+
         function copyLink() {
             navigator.clipboard.writeText(subUrl).then(function() {
                 const toast = document.getElementById("copyToast");
+                setCopyButtonLabel("✓ Ссылка скопирована", true);
                 if (toast) {
                     toast.textContent = "Ссылка скопирована в буфер!";
-                    toast.style.display = "block";
-                    setTimeout(function() { toast.style.display = "none"; }, 2500);
+                    toast.classList.add("visible");
                 }
+                if (copyResetTimer) clearTimeout(copyResetTimer);
+                copyResetTimer = setTimeout(function() {
+                    if (toast) toast.classList.remove("visible");
+                    setCopyButtonLabel("📋 Скопировать ссылку", false);
+                }, 2200);
             }).catch(function() {
                 const toast = document.getElementById("copyToast");
                 if (toast) {
                     toast.textContent = "Не удалось скопировать";
-                    toast.style.display = "block";
+                    toast.classList.add("visible");
                 }
             });
         }
