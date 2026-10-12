@@ -37,12 +37,11 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             created_at=datetime(2026, 10, 10, 10, 0, 0, tzinfo=timezone.utc),
         )
 
-        mock_scalars = MagicMock()
-        mock_scalars.all.side_effect = [
-            [order1],       # Orders query
-            [legacy_pay],   # Payments query
-        ]
-        session.scalars.return_value = mock_scalars
+        mock_scalars1 = MagicMock()
+        mock_scalars1.all.return_value = [order1]
+        mock_scalars2 = MagicMock()
+        mock_scalars2.all.return_value = [legacy_pay]
+        session.scalars = AsyncMock(side_effect=[mock_scalars1, mock_scalars2])
 
         results = await get_user_payments(session, user_id=10, limit=5)
         self.assertEqual(len(results), 2)
@@ -134,12 +133,18 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             created_at=datetime(2026, 10, 11, 8, 0, tzinfo=timezone.utc),
         )
 
+        callback.bot = AsyncMock()
+        callback.message.chat = MagicMock()
+        callback.message.chat.id = 12345
+        callback.message.message_id = 999
+
         session = AsyncMock()
-        with patch("bot.handlers.referral.get_user_payments", new=AsyncMock(return_value=[order, payment])):
+        with patch("bot.handlers.referral.get_user_payments", new=AsyncMock(return_value=[order, payment])), \
+             patch("bot.handlers.referral.render_hub", new=AsyncMock()) as mock_hub:
             await show_history(callback, state, session, db_user=user)
 
-        callback.message.edit_text.assert_awaited_once()
-        text = callback.message.edit_text.await_args.args[0]
+        mock_hub.assert_awaited_once()
+        text = mock_hub.await_args.args[2]
         self.assertIn("500", text)
         self.assertIn("250", text)
 
@@ -148,7 +153,6 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         bot = AsyncMock()
         session = AsyncMock()
 
-        referrer = User(id=88, telegram_id=777777, is_bot_blocked=False)
         ref_order = Order(
             id=uuid.uuid4(),
             user_id=99,
@@ -156,23 +160,23 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             amount_rub=Decimal("1000.00"),
             status="paid",
             metadata_={
-                "referrer_pending": {
-                    "user_id": 88,
-                    "bonus": "100",
-                    "bonus_rate_pct": "10",
-                    "bonus_balance": "250",
+                "referrer_notify_pending": {
+                    "telegram_id": 777777,
+                    "bonus": 100,
                     "tier_upgraded": False,
                 }
             },
         )
-        session.get = AsyncMock(return_value=referrer)
 
-        with patch("bot.handlers.payment.credit_notify.safe_send_message", new=AsyncMock(return_value=12345)) as mock_send:
-            await notify_referrer_bonus(bot, session, ref_order)
+        with patch("services.workers.credit_notifications._send_referrer_push", new=AsyncMock(return_value=True)) as mock_push:
+            sent = await notify_referrer_bonus(bot, session, ref_order)
 
-        mock_send.assert_awaited_once()
-        self.assertEqual(mock_send.await_args.args[1], 777777)
-        self.assertTrue((ref_order.metadata_ or {}).get("referrer_notified"))
+        self.assertTrue(sent)
+        mock_push.assert_awaited_once_with(
+            bot,
+            {"telegram_id": 777777, "bonus": 100, "tier_upgraded": False},
+        )
+        self.assertNotIn("referrer_notify_pending", ref_order.metadata_ or {})
 
     async def test_order_service_create_order_failure_rolls_back_and_raises(self):
         """OrderService.create_order rolls back transaction and re-raises on gateway error."""

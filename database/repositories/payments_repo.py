@@ -60,8 +60,8 @@ async def get_user_payments(
     if limit is not None:
         order_stmt = order_stmt.limit(limit)
         payment_stmt = payment_stmt.limit(limit)
-    orders = list((await session.execute(order_stmt)).scalars().all())
-    legacy_payments = list((await session.execute(payment_stmt)).scalars().all())
+    orders = list((await session.scalars(order_stmt)).all())
+    legacy_payments = list((await session.scalars(payment_stmt)).all())
 
     def _item_dt(item):
         dt = getattr(item, "created_at", None)
