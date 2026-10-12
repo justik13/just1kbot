@@ -618,7 +618,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
                 payment_method="yookassa",
                 created_at=base_dt - timedelta(minutes=2),
                 user=user,
-                metadata_={"refunded_amount_rub": "150.00"},
+                metadata_={"refunded_amount_rub": "150.50"},
             ),
             Order(
                 id=uuid.uuid4(),
@@ -629,7 +629,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
                 payment_method="yookassa",
                 created_at=base_dt - timedelta(minutes=3),
                 user=user,
-                metadata_={"refunded_amount_rub": "300.00"},
+                metadata_={"settlement_held": True, "refunded_amount_rub": "300.00"},
             ),
             Order(
                 id=uuid.uuid4(),
@@ -658,11 +658,38 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
             Order(
                 id=uuid.uuid4(),
                 user_id=25,
+                service_type="white_internet",
+                amount_rub=Decimal("0.00"),
+                status="paid",
+                payment_method="wallet",
+                created_at=base_dt - timedelta(minutes=6),
+                user=user,
+                tariff=wi_tariff,
+                metadata_={"operation": "trial"},
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="white_internet",
+                amount_rub=Decimal("100.00"),
+                status="paid",
+                payment_method="wallet",
+                device_limit=3,
+                traffic_bytes=0,
+                duration_days=0,
+                created_at=base_dt - timedelta(minutes=7),
+                user=user,
+                tariff=wi_tariff,
+                metadata_={"operation": "topup_or_device_slot"},
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
                 service_type="awg",
                 amount_rub=Decimal("150.00"),
                 status="paid",
                 payment_method="wallet",
-                created_at=base_dt - timedelta(minutes=6),
+                created_at=base_dt - timedelta(minutes=8),
                 user=user,
                 tariff=awg_tariff,
                 metadata_={"operation": "renew", "is_renewal": True},
@@ -694,11 +721,16 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("-450 ₽", rendered_text)
         self.assertIn("<b>300 ₽</b> (Возврат)", rendered_text)
         self.assertNotIn("+300 ₽", rendered_text)
-        # Partial refund on paid order shows both sign and refunded amount note
-        self.assertIn("<b>+500 ₽</b> (возврат 150 ₽)", rendered_text)
+        # Zero-cost paid orders must NOT show -0 ₽
+        self.assertIn("<b>0 ₽</b>", rendered_text)
+        self.assertNotIn("-0 ₽", rendered_text)
+        # Partial refund on paid order preserves kopecks when non-integer
+        self.assertIn("<b>+500 ₽</b> (возврат 150.50 ₽)", rendered_text)
         # Service labels prioritize operation even when tariff is attached
         self.assertIn("Белый Интернет (Продление)", rendered_text)
         self.assertIn("Белый Интернет (Докупка трафика)", rendered_text)
+        self.assertIn("Белый Интернет (Триал)", rendered_text)
+        self.assertIn("Белый Интернет (+1 слот)", rendered_text)
         self.assertIn("Базовый 30 дней (Продление)", rendered_text)
 
 

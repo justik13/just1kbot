@@ -643,8 +643,54 @@ class AdminHeldCardTests(unittest.IsolatedAsyncioTestCase):
 
         held = MagicMock(status="paid", metadata_={"settlement_held": True})
         self.assertEqual(order_display_status(held), "requires_manual_review")
+        refunded_held = MagicMock(status="refunded", metadata_={"settlement_held": True})
+        self.assertEqual(order_display_status(refunded_held), "refunded")
         clean = MagicMock(status="paid", metadata_={})
         self.assertEqual(order_display_status(clean), "completed")
+
+    async def test_refund_of_held_order_skips_revoke_order(self):
+        from services.order_service import OrderService
+
+        order_id = uuid4()
+        order = MagicMock()
+        order.id = order_id
+        order.user_id = 5
+        order.service_type = "awg"
+        order.status = "paid"
+        order.amount_rub = Decimal("300.00")
+        order.duration_days = 30
+        order.external_id = "pay-ext-held"
+        order.metadata_ = {
+            "settlement_held": True,
+            "settlement_hold_reason": "financial_hold",
+        }
+
+        session = AsyncMock()
+        session.scalar = AsyncMock(return_value=order)
+
+        gateway_result = MagicMock(
+            order_id=str(order_id),
+            external_id="refund-ext-1",
+            related_external_id="pay-ext-held",
+            payment_id="pay-ext-held",
+            is_paid=False,
+            is_canceled=False,
+            is_refunded=True,
+            amount_rub=Decimal("300.00"),
+            event_type="refund.succeeded",
+        )
+        gateway = MagicMock()
+        gateway.parse_webhook = AsyncMock(return_value=gateway_result)
+
+        with (
+            patch("services.order_service.get_payment_gateway", return_value=gateway),
+            patch("services.order_service.FulfillmentService.revoke_order", new=AsyncMock()) as mock_revoke,
+        ):
+            updated = await OrderService.process_webhook_event(session, {"event": "refund.succeeded"})
+
+        self.assertIs(updated, order)
+        self.assertEqual(order.status, "refunded")
+        mock_revoke.assert_not_awaited()
 
     async def test_held_order_card_shows_reason(self):
         from bot.handlers.admin import payments as admin_payments

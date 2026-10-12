@@ -854,13 +854,21 @@ class OrderService:
 
             is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")
             if is_fully_refunded:
-                await FulfillmentService.revoke_order(session, order)
-                logger.info(
-                    "Order %s fully refunded (total %s / %s) and revoked",
-                    order.id,
-                    new_total_refunded,
-                    order.amount_rub,
-                )
+                if order_meta.get("settlement_held"):
+                    logger.info(
+                        "Order %s fully refunded (total %s / %s) while settlement_held; skipping benefit revocation",
+                        order.id,
+                        new_total_refunded,
+                        order.amount_rub,
+                    )
+                else:
+                    await FulfillmentService.revoke_order(session, order)
+                    logger.info(
+                        "Order %s fully refunded (total %s / %s) and revoked",
+                        order.id,
+                        new_total_refunded,
+                        order.amount_rub,
+                    )
             else:
                 logger.info(
                     "Order %s partially refunded %s RUB (total %s / %s), revocation deferred until full refund",

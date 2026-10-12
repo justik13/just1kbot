@@ -74,15 +74,22 @@ def payment_display_status(payment) -> str:
     return "failed"
 
 
+def _format_rub_decimal(val: Decimal) -> str:
+    quantized = val.quantize(Decimal("0.01"))
+    if quantized == quantized.to_integral_value():
+        return str(int(quantized))
+    return f"{quantized:.2f}"
+
+
 def order_display_status(order: Order) -> str:
+    if order.status == "refunded":
+        return "refunded"
     if (order.metadata_ or {}).get("settlement_held"):
         return "requires_manual_review"
     if order.status == "paid":
         return "completed"
     if order.status == "canceled":
         return "cancelled"
-    if order.status == "refunded":
-        return "refunded"
     if order.status == "pending":
         return "pending"
     return "failed"
@@ -380,23 +387,27 @@ async def show_user_payments_list(
                     display_status,
                     display_status,
                 )
-                amount = int(item.amount_rub)
+                order_amount_dec = Decimal(str(item.amount_rub or 0))
+                amount = _format_rub_decimal(order_amount_dec)
                 meta = item.metadata_ if isinstance(item.metadata_, dict) else {}
                 op = meta.get("operation")
 
-                refunded_rub = 0
+                refunded_dec = Decimal("0")
                 refunded_raw = meta.get("refunded_amount_rub")
                 if refunded_raw is not None:
                     try:
-                        refunded_rub = int(Decimal(str(refunded_raw)))
+                        refunded_dec = Decimal(str(refunded_raw))
                     except (InvalidOperation, ValueError, TypeError):
-                        refunded_rub = 0
+                        refunded_dec = Decimal("0")
 
                 if display_status == "completed":
-                    sign = "+" if item.service_type == "topup" else "-"
-                    if 0 < refunded_rub < amount:
+                    if order_amount_dec == 0:
+                        sign = ""
+                    else:
+                        sign = "+" if item.service_type == "topup" else "-"
+                    if Decimal("0") < refunded_dec < order_amount_dec:
                         status_note = texts.ADMIN_PAYMENT_PARTIAL_REFUND_NOTE.format(
-                            refunded_rub=refunded_rub
+                            refunded_rub=_format_rub_decimal(refunded_dec)
                         )
                     else:
                         status_note = ""
@@ -409,12 +420,33 @@ async def show_user_payments_list(
                 if item.service_type == "topup":
                     service_label = texts.ADMIN_ORDER_SERVICE_TOPUP
                 elif item.service_type == "white_internet":
-                    if op == "add_device_slot":
+                    t_bytes = (
+                        item.traffic_bytes
+                        if isinstance(getattr(item, "traffic_bytes", None), (int, float))
+                        else 0
+                    )
+                    d_days = (
+                        item.duration_days
+                        if isinstance(getattr(item, "duration_days", None), (int, float))
+                        else 0
+                    )
+                    d_limit = (
+                        item.device_limit
+                        if isinstance(getattr(item, "device_limit", None), (int, float))
+                        else 0
+                    )
+                    if op == "add_device_slot" or (
+                        op == "topup_or_device_slot" and d_limit and not t_bytes and d_days == 0
+                    ):
                         service_label = texts.ADMIN_PAYMENT_SERVICE_WI_SLOT
-                    elif op in ("topup", "topup_quota"):
+                    elif op in ("topup", "topup_quota") or (
+                        op == "topup_or_device_slot" and t_bytes > 0 and d_days == 0
+                    ):
                         service_label = texts.ADMIN_PAYMENT_SERVICE_WI_QUOTA
                     elif op == "renew":
                         service_label = texts.ADMIN_PAYMENT_SERVICE_WI_RENEW
+                    elif op == "trial":
+                        service_label = texts.ADMIN_PAYMENT_SERVICE_WI_TRIAL
                     else:
                         service_label = texts.ADMIN_PAYMENT_SERVICE_WI_DEFAULT
                 else:
