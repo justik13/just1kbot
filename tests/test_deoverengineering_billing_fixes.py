@@ -12,7 +12,6 @@ from database.repositories.payments_repo import (
 )
 from database.repositories.users_repo import search_user_flexible
 from bot import texts
-from bot.handlers.payment.credit_notify import notify_referrer_bonus
 from bot.handlers.payment.purchase_routes import handle_order_pay_card
 from bot.handlers.referral import payment_display_status, show_history
 from integrations.payment_gateways.base import (
@@ -204,35 +203,29 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertIn("500", text)
         self.assertIn("250", text)
 
-    async def test_notify_referrer_bonus_sends_instant_push(self):
-        """notify_referrer_bonus delivers immediate push notification to referrer."""
-        bot = AsyncMock()
+    async def test_handle_order_check_rejects_refunded_order(self):
+        """handle_order_check rejects check callback immediately if order.status is refunded."""
         session = AsyncMock()
-
-        ref_order = Order(
-            id=uuid.uuid4(),
-            user_id=99,
-            service_type="topup",
-            amount_rub=Decimal("1000.00"),
-            status="paid",
-            metadata_={
-                "referrer_notify_pending": {
-                    "telegram_id": 777777,
-                    "bonus": 100,
-                    "tier_upgraded": False,
-                }
-            },
+        db_user = User(id=88, telegram_id=888)
+        order_uuid = uuid.uuid4()
+        refunded_order = Order(
+            id=order_uuid,
+            user_id=88,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="refunded",
         )
+        session.get = AsyncMock(return_value=refunded_order)
 
-        with patch("services.workers.credit_notifications._send_referrer_push", new=AsyncMock(return_value=True)) as mock_push:
-            sent = await notify_referrer_bonus(bot, session, ref_order)
+        callback = AsyncMock()
+        callback.data = f"order_check:{order_uuid}"
 
-        self.assertTrue(sent)
-        mock_push.assert_awaited_once_with(
-            bot,
-            {"telegram_id": 777777, "bonus": 100, "tier_upgraded": False},
+        from bot.handlers.payment.purchase_routes import handle_order_check
+        await handle_order_check(callback, session, db_user=db_user)
+
+        callback.answer.assert_awaited_once_with(
+            texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True
         )
-        self.assertNotIn("referrer_notify_pending", ref_order.metadata_ or {})
 
     async def test_order_service_create_order_failure_rolls_back_and_raises(self):
         """OrderService.create_order rolls back transaction and re-raises on gateway error."""
@@ -674,73 +667,6 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             order_id=str(order_uuid),
             topup_amount=Decimal("349"),
         )
-
-    async def test_notify_referrer_bonus_populates_bonus_balance(self):
-        """notify_referrer_bonus fetches bonus_balance from ledger before sending push."""
-        session = AsyncMock()
-        mock_nested = AsyncMock()
-        mock_nested.__aenter__.return_value = mock_nested
-        mock_nested.__aexit__.return_value = None
-        session.begin_nested = MagicMock(return_value=mock_nested)
-        order_uuid = uuid.uuid4()
-        order = Order(
-            id=order_uuid,
-            user_id=10,
-            service_type="topup",
-            amount_rub=Decimal("500.00"),
-            status="paid",
-            metadata_={
-                "referrer_notify_pending": {
-                    "user_id": 99,
-                    "telegram_id": 999111,
-                    "bonus": "50",
-                    "bonus_rate_pct": 10,
-                }
-            },
-        )
-        bot = AsyncMock()
-        ref_balance = MagicMock(bonus_available=Decimal("150"))
-
-        with patch("database.repositories.account_ledger_repo.get_account_balance", new=AsyncMock(return_value=ref_balance)), \
-             patch("services.workers.credit_notifications._send_referrer_push", new=AsyncMock(return_value=True)) as mock_send, \
-             patch("services.order_notifications.mark_referrer_notified") as mock_mark:
-            sent = await notify_referrer_bonus(bot, session, order)
-
-        self.assertTrue(sent)
-        mock_send.assert_awaited_once()
-        debt_arg = mock_send.await_args.args[1]
-        self.assertEqual(debt_arg["bonus_balance"], 150)
-        self.assertEqual(debt_arg["bonus"], "50")
-        mock_mark.assert_called_once_with(order)
-
-    async def test_notify_referrer_bonus_survives_db_error(self):
-        """notify_referrer_bonus catches DB exceptions safely and returns False without raising."""
-        session = AsyncMock()
-        mock_nested = AsyncMock()
-        mock_nested.__aenter__.return_value = mock_nested
-        mock_nested.__aexit__.return_value = None
-        session.begin_nested = MagicMock(return_value=mock_nested)
-        order_uuid = uuid.uuid4()
-        order = Order(
-            id=order_uuid,
-            user_id=10,
-            service_type="topup",
-            amount_rub=Decimal("500.00"),
-            status="paid",
-            metadata_={
-                "referrer_notify_pending": {
-                    "user_id": 99,
-                    "telegram_id": 999111,
-                    "bonus": "50",
-                }
-            },
-        )
-        bot = AsyncMock()
-
-        with patch("database.repositories.account_ledger_repo.get_account_balance", new=AsyncMock(side_effect=RuntimeError("DB query timeout"))):
-            sent = await notify_referrer_bonus(bot, session, order)
-
-        self.assertFalse(sent)
 
 
 if __name__ == "__main__":

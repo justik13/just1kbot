@@ -296,6 +296,10 @@ async def handle_order_check(
         await safe_callback_answer(callback, texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
         return
 
+    if order.status == "refunded":
+        await safe_callback_answer(callback, texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
+        return
+
     if order.status == "paid":
         if (order.metadata_ or {}).get("settlement_held"):
             paid_order = await OrderService.mark_order_paid(session, order.id)
@@ -362,7 +366,7 @@ async def handle_order_check(
                 external_id=order.external_id,
                 paid_amount_rub=status_res.amount_rub,
             )
-            if not paid_order:
+            if not paid_order or paid_order.status != "paid":
                 await safe_callback_answer(callback, texts.ERROR_PAYMENT_SERVICE, show_alert=True)
                 return
 

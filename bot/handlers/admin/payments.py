@@ -646,8 +646,6 @@ async def show_payment_card(
             texts.ADMIN_PAYMENT_MANUAL_REVIEW_LINE.format(reason=safe(payment.manual_review_reason))
         )
 
-    refundable_line = ""
-
     rendered = (
         texts.ADMIN_PAYMENT_CARD_TEMPLATE.format(
             payment_id=payment.id,
@@ -661,7 +659,6 @@ async def show_payment_card(
             created_at=format_datetime(payment.created_at),
             paid_at=format_datetime(payment.paid_at),
             external_id=safe(payment.external_id or texts.PLACEHOLDER_DASH),
-            refundable_line=refundable_line,
             reason_line=reason_line,
         )
     )

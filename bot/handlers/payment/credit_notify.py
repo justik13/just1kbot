@@ -48,44 +48,6 @@ def build_tariff_success_card(order: Order, balance):
     )
 
 
-async def notify_referrer_bonus(
-    bot,
-    session: AsyncSession,
-    order: Order,
-) -> bool:
-    """Send immediate notification to referrer if referrer_notify_pending is present."""
-    from database.repositories.account_ledger_repo import get_account_balance
-    from services.order_notifications import mark_referrer_notified
-    from services.workers.credit_notifications import _send_referrer_push
-
-    raw_debt = (order.metadata_ or {}).get("referrer_notify_pending")
-    if not isinstance(raw_debt, dict) or not raw_debt.get("telegram_id"):
-        return False
-    try:
-        debt = dict(raw_debt)
-        if "bonus_balance" not in debt and debt.get("user_id"):
-            try:
-                async with session.begin_nested():
-                    ref_balance = await get_account_balance(
-                        session, user_id=debt["user_id"]
-                    )
-                    debt["bonus_balance"] = int(ref_balance.bonus_available)
-            except Exception as exc:
-                logger.warning(
-                    "Could not load referrer balance for order %s: %s",
-                    order.id,
-                    exc,
-                )
-
-        sent = await _send_referrer_push(bot, debt)
-        if sent:
-            mark_referrer_notified(order)
-            return True
-    except Exception as exc:
-        logger.warning("Could not send immediate referrer push for order %s: %s", order.id, exc)
-    return False
-
-
 async def notify_order_credited(
     bot,
     session: AsyncSession,

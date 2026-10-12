@@ -85,11 +85,9 @@ ADMIN_PAYMENT_CARD_TEMPLATE = """🛠 Админка › 💳 Платежи ›
 <b>Исполнение:</b> {fulfillment_status}
 <b>Создан:</b> {created_at}
 <b>Оплачен:</b> {paid_at}
-<b>External ID:</b> <code>{external_id}</code>{refundable_line}{reason_line}"""
+<b>External ID:</b> <code>{external_id}</code>{reason_line}"""
 ADMIN_PAYMENT_MANUAL_REVIEW_LINE = """
 <b>Причина:</b> {reason}"""
-ADMIN_PAYMENT_REFUNDABLE_LINE = """
-<b>Можно вернуть:</b> {amount_rub} RUB"""
 
 ADMIN_CLIENT_CARD_BUTTON = "👤 Карточка клиента"
 ADMIN_PAYMENT_NOT_FOUND_ALERT = "Платёж не найден"
