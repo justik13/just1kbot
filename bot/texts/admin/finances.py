@@ -61,6 +61,13 @@ ADMIN_PAYMENTS_USER_REGISTRY_ROW = "• {status_icon} <b>{sign}{amount_rub} ₽<
 ADMIN_PAYMENTS_ROW_ENTRY = "{status_icon} #{payment_id} · {user_label} · {amount_rub}₽"
 ADMIN_PAYMENT_STATUS_FALLBACK_ICON = "❓"
 ADMIN_PAYMENTS_GATEWAY_YOOKASSA = "ЮKassa"
+ADMIN_PAYMENT_SERVICE_WI_SLOT = "Белый Интернет (+1 слот)"
+ADMIN_PAYMENT_SERVICE_WI_RENEW = "Белый Интернет (Продление)"
+ADMIN_PAYMENT_SERVICE_WI_DEFAULT = "Белый Интернет"
+ADMIN_PAYMENT_METHOD_BTN_YOOKASSA = "ЮKassa"
+ADMIN_PAYMENT_METHOD_BTN_WALLET = "Баланс"
+ADMIN_PAYMENT_METHOD_BTN_SBP = "СБП"
+ADMIN_PAYMENT_METHOD_BTN_ADMIN = "Админ"
 ADMIN_PURCHASES_ROW_BUTTON_TEMPLATE = "🛒 #{numeric_id} | {user_label} | {amount}"
 
 # --- Payment card ----------------------------------------------------------

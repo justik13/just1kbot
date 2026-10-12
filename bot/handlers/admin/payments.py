@@ -398,11 +398,11 @@ async def show_user_payments_list(
                         service_label = item.tariff.name
                     elif item.service_type == "white_internet":
                         if op == "add_device_slot":
-                            service_label = "Белый Интернет (+1 слот)"
+                            service_label = texts.ADMIN_PAYMENT_SERVICE_WI_SLOT
                         elif op == "renew":
-                            service_label = "Белый Интернет (Продление)"
+                            service_label = texts.ADMIN_PAYMENT_SERVICE_WI_RENEW
                         else:
-                            service_label = "Белый Интернет"
+                            service_label = texts.ADMIN_PAYMENT_SERVICE_WI_DEFAULT
                     elif item.service_type in ("standard", "awg"):
                         service_label = "AWG"
                     elif item.service_type == "vless":
@@ -412,19 +412,19 @@ async def show_user_payments_list(
 
                 if item.payment_method == "yookassa":
                     method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
-                    method_btn = "ЮKassa"
+                    method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_YOOKASSA
                     method_icon = "💳"
                 elif item.payment_method == "wallet":
                     method_label = texts.ADMIN_PURCHASES_METHOD_WALLET
-                    method_btn = "Баланс"
+                    method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_WALLET
                     method_icon = "👛"
                 elif item.payment_method == "sbp":
                     method_label = texts.ADMIN_PURCHASES_METHOD_SBP
-                    method_btn = "СБП"
+                    method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_SBP
                     method_icon = "⚡"
                 elif item.payment_method in ("admin", "manual"):
                     method_label = texts.ADMIN_PURCHASES_METHOD_ADMIN
-                    method_btn = "Админ"
+                    method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_ADMIN
                     method_icon = "👤"
                 else:
                     method_label = item.payment_method or texts.ADMIN_PURCHASES_METHOD_OTHER
@@ -459,7 +459,7 @@ async def show_user_payments_list(
                 amount = int(item.amount)
                 sign = "+"
                 method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
-                method_btn = "ЮKassa"
+                method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_YOOKASSA
                 method_icon = "💳"
                 service_label = texts.ADMIN_ORDER_SERVICE_TOPUP
                 dt_str = format_datetime(item.created_at)
