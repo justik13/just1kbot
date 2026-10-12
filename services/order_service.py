@@ -125,10 +125,9 @@ class OrderService:
                         "new_tier_name": grant_result.new_tier_name,
                         "new_rate_pct": grant_result.new_rate_pct,
                     }
-                    order.metadata_ = referrer_meta
-        else:
-            if order.status != "refunded":
-                await FulfillmentService.fulfill_order(session, order)
+        # Fulfill benefits linearly
+        if order.status != "refunded":
+            await FulfillmentService.fulfill_order(session, order)
         await session.flush()
     @staticmethod
     def calculate_tariff_change(

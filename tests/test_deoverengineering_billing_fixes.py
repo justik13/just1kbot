@@ -644,6 +644,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("services.order_service.create_order_credit", new=AsyncMock()) as mock_credit, \
+             patch("services.order_service.FulfillmentService.fulfill_order", new=AsyncMock()), \
              patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=MagicMock(referrer_bonus=Decimal("0"), referrer_user_id=None))) as mock_bonus:
             await OrderService._settle_benefits(session, partially_refunded_order, was_canceled=False)
 
