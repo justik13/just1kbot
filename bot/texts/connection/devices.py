@@ -166,6 +166,7 @@ VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение п�
 
 BTN_VLESS_RESET_HWID = "🔄 Сбросить привязку устройств"
 VLESS_RESET_SUCCESS = "✅ Привязка устройств по ссылке сброшена."
+VLESS_RESET_EMPTY = "ℹ️ У вас нет привязанных устройств по ссылке."
 VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
 
 BTN_AMNEZIA_DEVICES = "🛡 Amnezia"

@@ -20,6 +20,7 @@ class CallbackValidationTests(unittest.TestCase):
     def test_add_device_is_locked_action(self):
         from bot.middlewares.action_lock import _is_locked_action
         self.assertTrue(_is_locked_action("add_device"))
+        self.assertTrue(_is_locked_action("vless_sub_reset"))
 
 
 if __name__ == "__main__":

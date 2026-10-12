@@ -925,6 +925,25 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sub.version, 2)
         self.assertEqual(sub.pending_revoked_uuids, ["abc-uuid"])
 
+    async def test_reset_hwids_empty_noop(self):
+        sub = VlessSubscription(
+            id=1,
+            user_id=100,
+            token="tok1234567890123456",
+            uuid="abc-uuid",
+            is_active=True,
+            version=1,
+            active_hwids={},
+        )
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
+
+        old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(mock_session, sub.id)
+        self.assertIsNone(old_uuid)
+        self.assertIsNone(new_uuid)
+        self.assertEqual(sub.uuid, "abc-uuid")
+        self.assertEqual(sub.version, 1)
+
 
 class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
     """Test suite for VlessSubscriptionService methods."""
@@ -1830,6 +1849,36 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             await vless_sub_reset(callback, state, session, db_user=db_user)
             callback.answer.assert_called_once()
             mock_render.assert_called_once_with(callback.message, db_user, session)
+
+    async def test_vless_sub_reset_when_empty_noop(self):
+        from bot import texts
+        from bot.handlers.connection.device_view_routes import vless_sub_reset
+        from database.models import User, VlessSubscription
+
+        callback = MagicMock()
+        callback.from_user.id = 123
+        callback.message = MagicMock()
+        callback.answer = AsyncMock()
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=123, subscription_end=now_utc() + timedelta(days=5))
+        sub = VlessSubscription(id=10, user_id=1, uuid="test-uuid", token="tok", active_hwids={})
+
+        with (
+            patch("services.maintenance_service.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("database.repositories.vless_subscription_repo.reset_hwids", new=AsyncMock()) as mock_reset,
+            patch("services.vless_subscription_service.VlessSubscriptionService.deprovision_background") as mock_deprovision,
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_ensure,
+            patch("bot.handlers.connection.device_view_routes._render_connections", new=AsyncMock()) as mock_render,
+        ):
+            await vless_sub_reset(callback, state, session, db_user=db_user)
+            callback.answer.assert_called_once_with(texts.VLESS_RESET_EMPTY, show_alert=True)
+            mock_reset.assert_not_called()
+            mock_deprovision.assert_not_called()
+            mock_ensure.assert_not_called()
+            mock_render.assert_not_called()
 
     async def test_vless_links_custom_name_and_badge(self):
         from database.models import Server, VlessSubscription

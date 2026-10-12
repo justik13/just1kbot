@@ -170,9 +170,9 @@ async def register_hwid_atomic(
         return False, 0, max(0, effective_limit or 0)
     sub_user_id = getattr(raw_sub_user_id, "user_id", raw_sub_user_id)
 
-    # 1. Lock User row FIRST (populate_existing=True guarantees fresh attributes in Identity Map)
+    # 1. Fetch User row (populate_existing=True guarantees fresh attributes in Identity Map)
     from database.models import User
-    user_stmt = select(User).where(User.id == sub_user_id).with_for_update().execution_options(populate_existing=True)
+    user_stmt = select(User).where(User.id == sub_user_id).execution_options(populate_existing=True)
     user = await _execute_scalar_one_or_none(session, user_stmt)
 
     # 2. Lock VlessSubscription row SECOND (populate_existing=True guarantees fresh attributes)
@@ -298,6 +298,8 @@ async def reset_hwids(
     stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
     sub = await _execute_scalar_one_or_none(session, stmt)
     if isinstance(sub, VlessSubscription):
+        if not sub.active_hwids:
+            return None, None
         old_uuid = sub.uuid
         new_uuid = str(uuid.uuid4())
         sub.uuid = new_uuid
