@@ -370,7 +370,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
             created_at=old_created,
             user=user,
             tariff=None,
-            metadata_={"payment_creation_ambiguous": True},
+            metadata_={},
         )
         session.scalar.return_value = order
 
@@ -389,7 +389,6 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Заказ #", rendered_text)
         self.assertIn("Пополнение баланса (topup)", rendered_text)
         self.assertIn("Ожидает завершения оплаты клиентом", rendered_text)
-        self.assertIn("Тайм-аут шлюза при создании", rendered_text)
         self.assertIn("https://yookassa.ru/checkout/12345", rendered_text)
 
     async def test_show_order_card_displays_wallet_order(self):

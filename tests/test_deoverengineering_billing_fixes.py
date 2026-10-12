@@ -69,8 +69,11 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         user = User(id=42, telegram_id=999888, username="test_client")
 
         # scalar side-effects: username (None), telegram_id (None),
-        # Payment.external_id (None), Order.external_id (user)
-        session.scalar = AsyncMock(side_effect=[None, None, None, user])
+        # Payment.external_id (None), Order.external_id (42)
+        session.scalar = AsyncMock(side_effect=[None, None, None, 42])
+        res_mock = MagicMock()
+        res_mock.scalar_one_or_none.return_value = user
+        session.execute = AsyncMock(return_value=res_mock)
 
         found = await search_user_flexible(session, "226ea600-6c00-4bbc-bd77-0773e306357a")
         self.assertIsNotNone(found)
@@ -112,6 +115,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         callback.message = MagicMock()
         callback.message.edit_text = AsyncMock()
         callback.answer = AsyncMock()
+        state = AsyncMock()
 
         user = User(id=7, telegram_id=1001)
         order = Order(
@@ -131,11 +135,8 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        with (
-            patch("bot.handlers.referral.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
-            patch("bot.handlers.referral.get_user_payments", new=AsyncMock(return_value=[order, payment])),
-        ):
-            await show_history(callback, session)
+        with patch("bot.handlers.referral.get_user_payments", new=AsyncMock(return_value=[order, payment])):
+            await show_history(callback, state, session, db_user=user)
 
         callback.message.edit_text.assert_awaited_once()
         text = callback.message.edit_text.await_args.args[0]
@@ -177,6 +178,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         """OrderService.create_order rolls back transaction and re-raises on gateway error."""
         session = AsyncMock()
         session.rollback = AsyncMock()
+        session.scalar = AsyncMock(return_value=None)
 
         with patch("services.order_service.get_payment_gateway") as mock_gw:
             gateway = AsyncMock()
