@@ -498,7 +498,7 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
     if user:
         return user
 
-    # 3. Canonical client UUID (36 chars: 8-4-4-4-12)
+    # 3. Canonical client UUID or Order UUID (36 chars: 8-4-4-4-12)
     if len(query_str) == 36 and query_str.count("-") == 4:
         sub_user_id = await session.scalar(
             select(WhiteInternetSubscription.user_id)
@@ -512,6 +512,24 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
                 .options(selectinload(User.profiles))
             )
             return (await session.execute(stmt)).scalar_one_or_none()
+
+        try:
+            import uuid
+            order_uuid = uuid.UUID(query_str)
+            order_user_id = await session.scalar(
+                select(Order.user_id)
+                .where(Order.id == order_uuid)
+                .limit(1)
+            )
+            if order_user_id:
+                stmt = (
+                    select(User)
+                    .where(User.id == order_user_id, User.is_deleted.is_(False))
+                    .options(selectinload(User.profiles))
+                )
+                return (await session.execute(stmt)).scalar_one_or_none()
+        except (ValueError, TypeError):
+            pass
 
     # 4. Peer ID (AmneziaWG)
     peer_user_id = await session.scalar(

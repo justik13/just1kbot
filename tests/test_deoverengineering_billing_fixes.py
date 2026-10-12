@@ -8,6 +8,7 @@ from database.models import Order, Payment, User
 from database.repositories.payments_repo import (
     get_pending_payments_count_for_tariff,
     get_user_payments,
+    has_successful_topup,
 )
 from database.repositories.users_repo import search_user_flexible
 from bot.handlers.referral import payment_display_status, show_history
@@ -48,6 +49,20 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0], order1)
         self.assertEqual(results[1], legacy_pay)
 
+    async def test_has_successful_topup_recognizes_external_gateway_orders(self):
+        """has_successful_topup returns True for paid gateway orders (sbp, yookassa, topup)."""
+        session = AsyncMock()
+        session.scalar = AsyncMock(side_effect=[0, 1])
+
+        has_paid = await has_successful_topup(session, user_id=42)
+        self.assertTrue(has_paid)
+
+        call_args = session.scalar.await_args
+        self.assertIsNotNone(call_args)
+        stmt = str(call_args.args[0].compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("orders.payment_method != 'wallet'", stmt)
+        self.assertIn("orders.service_type = 'topup'", stmt)
+
     async def test_get_pending_payments_count_excludes_wallet(self):
         """get_pending_payments_count_for_tariff filters Order.payment_method != 'wallet'."""
         session = AsyncMock()
@@ -62,19 +77,41 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         stmt = str(call_args.args[0].compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("orders.payment_method != 'wallet'", stmt)
 
+    async def test_search_user_flexible_finds_user_by_order_uuid(self):
+        """search_user_flexible finds user via Order.id UUID."""
+        session = AsyncMock()
+        user = User(id=42, telegram_id=999888, username="test_client")
+
+        # get_user_by_username execute -> None
+        exec_mock_user = MagicMock()
+        exec_mock_user.scalar_one_or_none.return_value = None
+        # WhiteInternetSubscription scalar -> None, Order.id scalar -> 42
+        session.scalar = AsyncMock(side_effect=[None, 42])
+
+        exec_mock_found = MagicMock()
+        exec_mock_found.scalar_one_or_none.return_value = user
+        session.execute = AsyncMock(side_effect=[exec_mock_user, exec_mock_found])
+
+        found = await search_user_flexible(session, "226ea600-6c00-4bbc-bd77-0773e306357a")
+        self.assertIsNotNone(found)
+        self.assertEqual(found.id, 42)
+
     async def test_search_user_flexible_finds_user_by_order_external_id(self):
         """search_user_flexible finds user via Order.external_id."""
         session = AsyncMock()
         user = User(id=42, telegram_id=999888, username="test_client")
 
-        # scalar side-effects: username (None), telegram_id (None),
-        # Payment.external_id (None), Order.external_id (42)
-        session.scalar = AsyncMock(side_effect=[None, None, None, 42])
-        res_mock = MagicMock()
-        res_mock.scalar_one_or_none.return_value = user
-        session.execute = AsyncMock(return_value=res_mock)
+        # get_user_by_username execute -> None
+        exec_mock_user = MagicMock()
+        exec_mock_user.scalar_one_or_none.return_value = None
+        # Peer ID -> None, Order.external_id -> 42
+        session.scalar = AsyncMock(side_effect=[None, 42])
 
-        found = await search_user_flexible(session, "226ea600-6c00-4bbc-bd77-0773e306357a")
+        exec_mock_found = MagicMock()
+        exec_mock_found.scalar_one_or_none.return_value = user
+        session.execute = AsyncMock(side_effect=[exec_mock_user, exec_mock_found])
+
+        found = await search_user_flexible(session, "yookassa_payment_ext_id_12345")
         self.assertIsNotNone(found)
         self.assertEqual(found.id, 42)
 
