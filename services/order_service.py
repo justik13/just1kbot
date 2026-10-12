@@ -500,6 +500,17 @@ class OrderService:
         if order.status == "paid":
             order._newly_paid = False
             if (order.metadata_ or {}).get("settlement_held"):
+                release_user = await session.get(User, order.user_id)
+                if release_user is not None:
+                    still_hold = bool(getattr(release_user, "financial_hold", False))
+                    still_block = bool(getattr(release_user, "topup_blocked", False))
+                    if still_hold or (order.service_type == "topup" and still_block):
+                        logger.info(
+                            "Order %s remains in settlement_held: user %s still under hold/block",
+                            order.id,
+                            order.user_id,
+                        )
+                        return order
                 cleared_meta = dict(order.metadata_ or {})
                 cleared_meta.pop("settlement_held", None)
                 cleared_meta.pop("settlement_hold_reason", None)
@@ -560,6 +571,30 @@ class OrderService:
             order_meta = dict(order.metadata_ or {})
             order_meta["revived_from_canceled"] = True
             order.metadata_ = order_meta
+
+        settlement_user = await session.get(User, order.user_id)
+        if settlement_user is not None:
+            is_hold = bool(getattr(settlement_user, "financial_hold", False))
+            is_topup_block = bool(getattr(settlement_user, "topup_blocked", False))
+            blocked_topup = order.service_type == "topup" and (is_hold or is_topup_block)
+            blocked_tariff = order.service_type != "topup" and is_hold
+            if blocked_topup or blocked_tariff:
+                held_meta = dict(order.metadata_ or {})
+                held_meta["settlement_held"] = True
+                held_meta["settlement_hold_reason"] = (
+                    "financial_hold" if is_hold else "topup_blocked"
+                )
+                order.metadata_ = held_meta
+                order._newly_paid = False
+                await session.flush()
+                logger.warning(
+                    "Order %s paid under hold/block (user %s, service=%s): "
+                    "benefits withheld for manual review",
+                    order.id,
+                    order.user_id,
+                    order.service_type,
+                )
+                return order
 
         await OrderService._settle_benefits(session, order, was_canceled=was_canceled)
         logger.info("Order %s marked paid and fulfilled successfully", order.id)

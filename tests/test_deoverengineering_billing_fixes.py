@@ -353,6 +353,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             metadata_={"settlement_held": True, "settlement_hold_reason": "hold"},
         )
         session.scalar = AsyncMock(return_value=held_order)
+        session.get = AsyncMock(return_value=User(id=22, financial_hold=False, topup_blocked=False))
 
         with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
             res = await OrderService.mark_order_paid(session, order_uuid)
@@ -361,6 +362,52 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("settlement_held", res.metadata_ or {})
         mock_settle.assert_awaited_once_with(session, held_order, was_canceled=False)
         self.assertTrue(res._newly_paid)
+
+    async def test_mark_order_paid_keeps_settlement_held_if_user_still_under_hold(self):
+        """mark_order_paid keeps settlement_held if user is still under financial_hold."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        held_order = Order(
+            id=order_uuid,
+            user_id=22,
+            service_type="awg",
+            amount_rub=Decimal("180.00"),
+            status="paid",
+            metadata_={"settlement_held": True, "settlement_hold_reason": "hold"},
+        )
+        session.scalar = AsyncMock(return_value=held_order)
+        session.get = AsyncMock(return_value=User(id=22, financial_hold=True))
+
+        with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
+            res = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertIsNotNone(res)
+        self.assertTrue((res.metadata_ or {}).get("settlement_held"))
+        mock_settle.assert_not_awaited()
+
+    async def test_mark_order_paid_withholds_new_settlement_under_financial_hold(self):
+        """mark_order_paid sets settlement_held and skips fulfillment if fresh payment arrives under hold."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        fresh_order = Order(
+            id=order_uuid,
+            user_id=33,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="pending",
+        )
+        session.scalar = AsyncMock(return_value=fresh_order)
+        session.get = AsyncMock(return_value=User(id=33, financial_hold=True))
+
+        with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
+            res = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertIsNotNone(res)
+        self.assertEqual(res.status, "paid")
+        self.assertTrue((res.metadata_ or {}).get("settlement_held"))
+        self.assertEqual((res.metadata_ or {}).get("settlement_hold_reason"), "financial_hold")
+        self.assertFalse(res._newly_paid)
+        mock_settle.assert_not_awaited()
 
     async def test_pay_from_wallet_blocks_financial_hold(self):
         """pay_from_wallet raises FinancialHoldBlockedError if user.financial_hold is True."""
@@ -420,6 +467,36 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_text.assert_awaited_once()
         text = callback.message.edit_text.await_args.args[0]
         self.assertIn("Тайм-аут шлюза при создании", text)
+
+    async def test_balance_routes_blocks_financial_hold(self):
+        """choose_topup_amount and resume_topup render PAYMENT_DISPUTE_BLOCKED_NOTICE if financial_hold."""
+        from bot.handlers.payment.balance_routes import (
+            choose_topup_amount,
+            resume_topup,
+        )
+
+        session = AsyncMock()
+        db_user = User(id=40, telegram_id=888999, financial_hold=True)
+
+        cb1 = AsyncMock()
+        cb1.from_user = MagicMock(id=888999)
+        cb1.message = MagicMock(chat=MagicMock(id=888999))
+        state = AsyncMock()
+
+        with patch("bot.handlers.payment.balance_routes.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)), \
+             patch("bot.handlers.payment.balance_routes.render_hub", new=AsyncMock()) as mock_hub:
+            await choose_topup_amount(cb1, state, session, db_user=db_user)
+            mock_hub.assert_awaited_once()
+            self.assertEqual(mock_hub.await_args.args[2], texts.PAYMENT_DISPUTE_BLOCKED_NOTICE)
+
+        cb2 = AsyncMock()
+        cb2.from_user = MagicMock(id=888999)
+        cb2.message = MagicMock(chat=MagicMock(id=888999))
+
+        with patch("bot.handlers.payment.balance_routes.render_hub", new=AsyncMock()) as mock_hub2:
+            await resume_topup(cb2, session, db_user=db_user)
+            mock_hub2.assert_awaited_once()
+            self.assertEqual(mock_hub2.await_args.args[2], texts.PAYMENT_DISPUTE_BLOCKED_NOTICE)
 
 
 if __name__ == "__main__":

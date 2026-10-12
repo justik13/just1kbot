@@ -242,6 +242,15 @@ async def _create_and_render_topup(
         )
         return
 
+    if getattr(user, "financial_hold", False):
+        await render_hub(
+            bot,
+            chat_id,
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+            get_back_button(back_to),
+        )
+        return
+
     pending_count = await _count_pending_topup_orders(session, user_id)
     if pending_count >= get_settings().BALANCE_MAX_UNFINISHED_TOPUPS:
         await render_hub(
@@ -386,6 +395,15 @@ async def choose_topup_amount(
             callback.bot,
             callback.message.chat.id,
             _topup_errors()["topup_blocked"],
+            get_back_button("menu_balance"),
+        )
+        return
+
+    if getattr(db_user, "financial_hold", False):
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
             get_back_button("menu_balance"),
         )
         return
@@ -632,6 +650,15 @@ async def resume_topup(
             callback.bot,
             callback.message.chat.id,
             _topup_errors()["topup_blocked"],
+            get_back_button("menu_balance"),
+        )
+        return
+
+    if getattr(db_user, "financial_hold", False):
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
             get_back_button("menu_balance"),
         )
         return
