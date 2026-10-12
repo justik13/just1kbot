@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramForbiddenError
 from bot.keyboards.notifications import get_devices_deleted_keyboard
 from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from cachetools import TTLCache
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -879,14 +879,22 @@ async def _reconcile_stale_pending_orders() -> None:
                 exc,
             )
 
-    # 3. Expire ancient pending orders (> 24 hours old) in a bounded transaction
+    # 3. Expire orphaned pending orders without external_id (> 30 min old)
+    # and ancient pending orders (> 24 hours old) in a bounded transaction
     try:
+        ambiguous_threshold = now - timedelta(minutes=30)
         async with session_scope() as session:
             expired_stmt = (
                 select(Order)
                 .where(
                     Order.status == "pending",
-                    Order.created_at < window_start,
+                    or_(
+                        Order.created_at < window_start,
+                        and_(
+                            Order.external_id.is_(None),
+                            Order.created_at < ambiguous_threshold,
+                        ),
+                    ),
                 )
                 .order_by(Order.created_at.asc())
                 .limit(50)
@@ -895,10 +903,12 @@ async def _reconcile_stale_pending_orders() -> None:
             expired_res = await session.execute(expired_stmt)
             expired_orders = list(expired_res.scalars().all())
             for exp_order in expired_orders:
-                OrderService.mark_order_canceled(exp_order, reason="order_expired_24h")
+                reason = "ambiguous_creation_timeout" if exp_order.external_id is None else "order_expired_24h"
+                OrderService.mark_order_canceled(exp_order, reason=reason)
                 logger.info(
-                    "Reconciliation expired ancient pending order %s",
+                    "Reconciliation expired pending order %s (reason=%s)",
                     exp_order.id,
+                    reason,
                 )
     except Exception as exc:
         logger.error("Error expiring ancient pending orders: %s", exc)

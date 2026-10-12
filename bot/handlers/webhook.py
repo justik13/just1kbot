@@ -147,11 +147,13 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 return web.Response(status=200, text="OK")
 
             order = await OrderService.process_webhook_event(session, payload)
-            inbox_status = (
-                WebhookInboxStatus.SUCCEEDED.value
-                if order
-                else WebhookInboxStatus.PENDING.value
-            )
+            if not order:
+                if existing_event:
+                    inbox_status = WebhookInboxStatus.FAILED.value
+                else:
+                    inbox_status = WebhookInboxStatus.PENDING.value
+            else:
+                inbox_status = WebhookInboxStatus.SUCCEEDED.value
 
             if order and order.status == "paid" and getattr(order, "_newly_paid", False):
                 bot = request.app.get("bot")
@@ -207,7 +209,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     except Exception:
         logger.exception("[%s] webhook inbox commit failed", request_id)
         return web.Response(status=500, text="Database unavailable")
-    if not order:
+    if not order and inbox_status == WebhookInboxStatus.PENDING.value:
         return web.Response(status=503, text="order_pending_retry")
     return web.Response(status=200, text="OK")
 

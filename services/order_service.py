@@ -582,21 +582,25 @@ class OrderService:
             session, order.user_id
         )
         if settlement_user is not None:
+            is_banned = bool(getattr(settlement_user, "is_banned", False))
             is_hold = bool(getattr(settlement_user, "financial_hold", False))
             is_topup_block = bool(getattr(settlement_user, "topup_blocked", False))
+            blocked_banned = is_banned
             blocked_topup = order.service_type == "topup" and (is_hold or is_topup_block)
             blocked_tariff = order.service_type != "topup" and is_hold
-            if blocked_topup or blocked_tariff:
+            if blocked_banned or blocked_topup or blocked_tariff:
                 held_meta = dict(order.metadata_ or {})
                 held_meta["settlement_held"] = True
                 held_meta["settlement_hold_reason"] = (
-                    "financial_hold" if is_hold else "topup_blocked"
+                    "user_banned"
+                    if is_banned
+                    else ("financial_hold" if is_hold else "topup_blocked")
                 )
                 order.metadata_ = held_meta
                 order._newly_paid = False
                 await session.flush()
                 logger.warning(
-                    "Order %s paid under hold/block (user %s, service=%s): "
+                    "Order %s paid under hold/block/ban (user %s, service=%s): "
                     "benefits withheld for manual review",
                     order.id,
                     order.user_id,
@@ -690,6 +694,9 @@ class OrderService:
                     order.metadata_ = order_meta
                     order._newly_paid = False
                     await session.flush()
+                    return order
+                if (order.metadata_ or {}).get("underpaid"):
+                    order._newly_paid = False
                     return order
                 return None
             return paid_order

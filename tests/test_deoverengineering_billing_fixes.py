@@ -1,6 +1,6 @@
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -414,6 +414,30 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res._newly_paid)
         mock_settle.assert_not_awaited()
 
+    async def test_mark_order_paid_withholds_settlement_if_user_banned(self):
+        """mark_order_paid sets settlement_held and user_banned if user is banned."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        fresh_order = Order(
+            id=order_uuid,
+            user_id=44,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="pending",
+        )
+        user = User(id=44, is_banned=True)
+        session.scalar = AsyncMock(side_effect=[fresh_order, user])
+
+        with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
+            res = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertIsNotNone(res)
+        self.assertEqual(res.status, "paid")
+        self.assertTrue((res.metadata_ or {}).get("settlement_held"))
+        self.assertEqual((res.metadata_ or {}).get("settlement_hold_reason"), "user_banned")
+        self.assertFalse(res._newly_paid)
+        mock_settle.assert_not_awaited()
+
     async def test_pay_from_wallet_blocks_financial_hold(self):
         """pay_from_wallet raises FinancialHoldBlockedError if user.financial_hold is True."""
         session = AsyncMock()
@@ -667,6 +691,67 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             order_id=str(order_uuid),
             topup_amount=Decimal("500.00"),
         )
+
+    async def test_process_webhook_event_underpaid_returns_order_with_not_newly_paid(self):
+        """process_webhook_event returns order with _newly_paid=False on underpayment so webhook returns 200 OK."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=70,
+            service_type="awg",
+            amount_rub=Decimal("300.00"),
+            status="pending",
+            external_id="pay_under_1",
+        )
+        session.scalar = AsyncMock(return_value=order)
+
+        payload = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay_under_1",
+                "status": "succeeded",
+                "amount": {"value": "150.00", "currency": "RUB"},
+                "metadata": {"order_id": str(order_uuid)},
+            },
+        }
+
+        res = await OrderService.process_webhook_event(session, payload)
+        self.assertIsNotNone(res)
+        self.assertFalse(getattr(res, "_newly_paid", True))
+        self.assertTrue((res.metadata_ or {}).get("underpaid"))
+        self.assertTrue((res.metadata_ or {}).get("manual_review"))
+
+    async def test_cleanup_expires_ambiguous_orders_over_30m(self):
+        """Cleanup worker cancels pending orders without external_id older than 30m."""
+        from services.workers.cleanup import _reconcile_pending_orders_batch
+        from contextlib import asynccontextmanager
+
+        mock_session = AsyncMock()
+        old_ambiguous_order = Order(
+            id=uuid.uuid4(),
+            user_id=80,
+            status="pending",
+            external_id=None,
+            created_at=datetime.now(timezone.utc) - timedelta(minutes=45),
+            metadata_={"payment_creation_ambiguous": True},
+        )
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [old_ambiguous_order]
+        exec_mock = MagicMock()
+        exec_mock.scalars.return_value = scalars_mock
+        exec_mock.all.return_value = []
+        mock_session.execute = AsyncMock(return_value=exec_mock)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("services.workers.cleanup.session_scope", fake_session_scope):
+            await _reconcile_pending_orders_batch()
+
+        self.assertEqual(old_ambiguous_order.status, "canceled")
+        self.assertEqual((old_ambiguous_order.metadata_ or {}).get("cancellation_reason"), "ambiguous_creation_timeout")
 
 
 if __name__ == "__main__":
